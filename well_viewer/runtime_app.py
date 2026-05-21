@@ -683,14 +683,10 @@ class WellViewerApp(QWidget):
         self._app_state = AppState()
         self._event_bus = EventBus()
 
-        # Data state
-        self._data_dir:   Optional[Path]        = None
-        self._in_dir:     Optional[Path]        = None
-        self._tmp_dir:    Optional[Path]        = None
-        self._well_paths: Dict[str, Path]       = {}
-        self._cache:      Dict[str, pd.DataFrame] = {}
-        self._all_timepoints_cache: List[float] = []
-        self._all_fovs_cache: List[str] = []
+        # Dataset state — data dir, well paths, row cache, timepoint / FOV
+        # caches, pipeline_info, persistence doc — lives in
+        # ``self._app_state.dataset`` (well_viewer/state/dataset.py); the
+        # legacy names remain as @property shims further down.
         self._sidebar_map_refresh_pending: bool = False
 
         # Active fluorescent channel, ratio catalogue, and threshold range
@@ -704,9 +700,6 @@ class WellViewerApp(QWidget):
         self._heatmap_layouts: List = []
         self._active_heatmap_layout_name: Optional[str] = None
 
-        # persistence.json cache (populated lazily by persistence._doc.read).
-        # Cleared when the data dir changes so the next read reloads.
-        self._persistence_doc = None
         # Per-tab view-state values waiting to apply on first tab visit
         # (populated by view_state.load_from_data_dir, drained by
         # _on_tab_change → view_state.apply_pending_tab_state).
@@ -762,7 +755,6 @@ class WellViewerApp(QWidget):
         # live in ``self._app_state.selection`` (well_viewer/state/selection.py).
         # ``_selections`` / ``_selected_wells`` / ``_active_solo_wells`` etc.
         # remain as @property shims further down.
-        self._well_labels:       Dict[str, str]    = {}
         self._rep_quick_pair_dir   = "row"
         self._rep_quick_iter_order = "row"
         self._bar_quick_pair_dir   = "row"
@@ -774,11 +766,8 @@ class WellViewerApp(QWidget):
         # Plate-map well selection, the commit-coalescing flag, and the
         # plotting-tab solo-well overrides all live in
         # ``self._app_state.selection`` (see the shims below).
-        self._tok_to_label:   Dict[str, str] = {}
 
         # Preview state
-        self._fov_tp_extractor = None
-        self._pipeline_info: Dict[str, object] = {}
         self._preview_selected_well: Optional[str] = None
         self._preview_fov_cb = None
         self._montage_photos: List[object] = []
@@ -918,6 +907,19 @@ class WellViewerApp(QWidget):
     _selections_v2_writes_disabled = _app_state_shim(
         "selection", "v2_writes_disabled")
     _plate_commit_pending = _app_state_shim("selection", "plate_commit_pending")
+
+    _data_dir = _app_state_shim("dataset", "data_dir")
+    _in_dir = _app_state_shim("dataset", "in_dir")
+    _tmp_dir = _app_state_shim("dataset", "tmp_dir")
+    _well_paths = _app_state_shim("dataset", "well_paths")
+    _cache = _app_state_shim("dataset", "cache")
+    _all_timepoints_cache = _app_state_shim("dataset", "all_timepoints_cache")
+    _all_fovs_cache = _app_state_shim("dataset", "all_fovs_cache")
+    _pipeline_info = _app_state_shim("dataset", "pipeline_info")
+    _tok_to_label = _app_state_shim("dataset", "tok_to_label")
+    _well_labels = _app_state_shim("dataset", "well_labels")
+    _fov_tp_extractor = _app_state_shim("dataset", "fov_tp_extractor")
+    _persistence_doc = _app_state_shim("dataset", "persistence_doc")
 
     del _app_state_shim
 
@@ -3154,69 +3156,12 @@ class WellViewerApp(QWidget):
         _load_build_tok_to_label(self)
 
     def _rebuild_all_timepoints_cache(self) -> None:
-        """Cache global numeric timepoints for all plot/menu population.
-
-        Sources are merged in this single function so every tab that reads
-        ``_all_timepoints_cache`` gets the same canonical timepoint list:
-          1) loaded CSV rows (timepoint_hours / parsed timepoint strings)
-          2) pipeline_info.json ``available_timepoints`` when present
-        """
-        all_tps: set[float] = set()
-        for df in self._cache.values():
-            if df is None or df.empty:
-                continue
-            if "timepoint_hours" in df.columns:
-                tp_num = pd.to_numeric(df["timepoint_hours"], errors="coerce")
-                all_tps.update(float(t) for t in tp_num.dropna().unique())
-                missing = tp_num.isna()
-            else:
-                missing = pd.Series(True, index=df.index)
-            if "timepoint" in df.columns and missing.any():
-                for s in df.loc[missing, "timepoint"].fillna("").astype(str).unique():
-                    parsed = parse_timepoint_hours(s)
-                    if parsed is not None:
-                        all_tps.add(parsed)
-        pipeline_info = getattr(self, "_pipeline_info", {}) or {}
-        for tp in pipeline_info.get("available_timepoints", []) or []:
-            parsed = parse_timepoint_hours(str(tp))
-            if parsed is not None:
-                all_tps.add(parsed)
-        self._all_timepoints_cache = sorted(all_tps)
+        """Recompute the canonical timepoint list (delegates to DatasetState)."""
+        self._app_state.dataset.rebuild_timepoints()
 
     def _rebuild_all_fovs_cache(self) -> None:
-        """Cache global FOV labels once per dataset load (no per-refresh rebuilding)."""
-        def _norm_fov(value: object) -> str:
-            raw = str(value or "").strip()
-            if not raw:
-                return ""
-            try:
-                return f"{float(raw):g}"
-            except Exception:
-                return raw
-
-        all_fovs: set[str] = set()
-        for df in self._cache.values():
-            if df is None or df.empty or "fov" not in df.columns:
-                continue
-            for raw in df["fov"].fillna("").astype(str).unique():
-                fov = _norm_fov(raw)
-                if fov:
-                    all_fovs.add(fov)
-        pipeline_info = getattr(self, "_pipeline_info", {}) or {}
-        for fov in pipeline_info.get("available_fovs", []) or []:
-            fov_norm = _norm_fov(fov)
-            if fov_norm:
-                all_fovs.add(fov_norm)
-        if not all_fovs and self._well_paths:
-            all_fovs.add("1")
-
-        def _fov_sort_key(token: str) -> tuple[int, float, str]:
-            try:
-                return (0, float(token), token)
-            except ValueError:
-                return (1, 0.0, token)
-
-        self._all_fovs_cache = sorted(all_fovs, key=_fov_sort_key)
+        """Recompute the canonical FOV list (delegates to DatasetState)."""
+        self._app_state.dataset.rebuild_fovs()
 
     @staticmethod
     def _mute_color(hex_color: str, factor: float = 0.5) -> str:

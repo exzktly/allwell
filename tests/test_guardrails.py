@@ -6,9 +6,9 @@ parallel state implementation, trips a guardrail.
 
 Per the teardown plan the budgets are **warn-only through Phases 1-8** (a breach
 emits a warning but the test still passes) and **hard-fail from Phase 9** — flip
-``_HARD_FAIL`` then. The line budget rose slightly in Phase 1 because the
-ChannelState ``@property`` shims are transitional; deleting them in later phases
-brings it back down well below the Phase 0 baseline of 7028.
+``_HARD_FAIL`` then. The budgets dip and recover as phases land (transitional
+``@property`` shims add lines; extracted method bodies remove them); by Phase 3
+the file is already below its Phase 0 baseline of 7028 lines.
 """
 
 from __future__ import annotations
@@ -27,8 +27,10 @@ STATE_DIR = REPO_ROOT / "well_viewer" / "state"
 _HARD_FAIL = False
 
 # Ratcheting ceilings. Re-measured and lowered as the teardown proceeds.
-RUNTIME_APP_LINE_BUDGET = 7060   # Phase 0 baseline 7028; +32 for Phase 1 shims
-RUNTIME_APP_ATTR_BUDGET = 160    # Phase 0 baseline 166 (Phase 1: 162)
+# Phase 0 baseline: 7028 lines / 166 attrs. Phase 3 dropped below baseline as
+# the DatasetState rebuild methods left the file.
+RUNTIME_APP_LINE_BUDGET = 7005
+RUNTIME_APP_ATTR_BUDGET = 151
 
 
 def _enforce(ok: bool, message: str) -> None:

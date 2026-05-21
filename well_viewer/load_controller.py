@@ -77,12 +77,9 @@ def load_directory(app, d: Path, label=None) -> None:
             app._view_state_save_to_data_dir()
         except Exception:
             logging.getLogger("well_viewer").exception("view_state save on switch failed")
-    app._data_dir = d
-    # Clear the cached persistence.json so the next read pulls from the new
-    # dataset's data directory (or migrates its legacy sidecars).
-    app._persistence_doc = None
-    app._well_paths.clear()
-    app._cache.clear()
+    # DatasetState resets the per-dataset caches (data dir, well paths, row
+    # cache, persistence doc) for the switch to the new data directory.
+    app._app_state.dataset.begin_load(d)
     app._selected_wells.clear()
     app._last_sel = None
     app._prev_sel = set()
@@ -227,6 +224,9 @@ def load_directory(app, d: Path, label=None) -> None:
         smfish_sync_from_app(app)
     except Exception:
         logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
+    # Announce on the bus. Additive — every refresh above already ran; bus
+    # subscribers replace the explicit calls as tabs migrate in later phases.
+    app._event_bus.dataset_loaded.emit(app._app_state.dataset)
 
 
 def _kick_off_gating_after_load(app) -> None:

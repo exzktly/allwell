@@ -191,37 +191,49 @@ layers:
 │  persistence/  ← JSON file I/O (one module per file)            │
 └─────────────────────────────────────────────────────────────────┘
 
-runtime_app.WellViewerApp  ← composes all four layers together
+state/  ← typed runtime state: AppState, EventBus, WidgetRegistry,
+          ViewerContext — import-safe, injected via ViewerContext (§5.9)
+
+runtime_app.WellViewerApp  ← composition root that wires it all together
 ```
 
 ### 5.1 `runtime_app.WellViewerApp`
 
-The `WellViewerApp(QWidget)` class is the central god-object. It is large
-(roughly 6.7 k lines, ~400 methods) **on purpose** — every centre tab and
-sidebar panel writes attributes onto it (e.g. `app._line_fig`,
-`app._chan_cb_bar`, `app._selected_wells`) so that controllers can reach
-state from anywhere without circular imports. Think of it as a typed
-namespace.
+The `WellViewerApp(QWidget)` class is the application's **composition root**.
 
-What lives directly on `WellViewerApp`:
+Historically it was a deliberate god-object: every centre tab and sidebar
+panel wrote loose attributes onto it (`app._line_fig`, `app._selected_wells`,
+…) so controllers could reach state from anywhere without circular imports. An
+in-progress teardown (see §5.9) is replacing that pattern — the loose `self._*`
+state has moved into typed domain-state objects, and `WellViewerApp` is
+shrinking toward a thin root that owns the `ViewerContext` and wires the UI
+together.
 
-- **State:** loaded wells (`_well_paths`), the per-well row cache
-  (`_cache`), the current selection (`_selected_wells`), the active
-  channel / metric / threshold, the saved-selections list (`_selections`).
-- **Widget handles:** every centre figure / canvas / dock the tab views
-  produce gets stashed here (e.g. `_line_fig`, `_bar_canvas`,
-  `_heatmap_export_dock`).
-- **One-shot helpers:** legacy or back-compat wrappers, dialog launchers,
-  small UI utilities (`make_fluor_thumb`, `ask_name_dialog`, …).
-- **Method aliases:** a long list of `def _foo(self, …): return
-  controller.foo(self, …)` shims. These are deliberate — they let
-  controllers stay GUI-free pure functions while the rest of the app
-  continues to call `self._foo(…)`. When you see `self._redraw_bars()`
-  on `WellViewerApp`, follow it into `well_viewer/barplot_controller.py`.
+What lives on `WellViewerApp` today:
 
-When you add behaviour, prefer to write a new free function in a
-`*_controller.py` module and add a one-line wrapper on `WellViewerApp`
-rather than putting logic directly on the class.
+- **`self._app_state`** — an `AppState` aggregate of the typed domain-state
+  objects (`channel`, `selection`, `dataset`, `plot`, `stats`, `review_image`,
+  `preview`). This is the single source of truth for runtime state.
+- **`self._event_bus` / `self._widget_registry` / `self._ctx`** — the
+  `EventBus`, the widget-handle store, and the `ViewerContext` that bundles all
+  three for injection (see §5.9).
+- **Transitional `@property` shims** — the legacy names (`app._selected_wells`,
+  `app._active_channel`, …) survive as properties that delegate to
+  `self._app_state`, so existing call sites are untouched. They are deleted as
+  call sites migrate to read the state objects directly.
+- **Widget handles** — figures / canvases / docks the tab builders produce.
+  These move into `self._widget_registry`; a transitional `__getattr__`
+  forwarder resolves legacy `app._<widget>` reads against it.
+- **Behaviour** — the remaining `_build_*` / `_on_*` / `_redraw_*` methods and
+  the controller-delegating shims. Still the bulk of the file; extraction into
+  `views/` and controllers is ongoing.
+
+When you add behaviour: put state on the relevant domain object in
+`well_viewer/state/`, put logic in a `*_controller.py` module, and have it take
+a `ViewerContext` (or the specific state object) rather than reaching into
+`WellViewerApp`. Do **not** add a new loose `self._*` attribute — a CI
+guardrail (`tests/test_guardrails.py`) budgets the count and it only ratchets
+down.
 
 ### 5.2 The page stack: `views/centre_view.py`
 
@@ -306,10 +318,16 @@ on the active tab.
 Every non-trivial behaviour lives in a `*_controller.py` module at the
 top of `well_viewer/`. The convention is:
 
-- Pure functions (`def foo(app, …)`) that take the `WellViewerApp` and any
-  extra args.
-- No `WellViewerApp` import in the controller — that would be circular —
-  use the dynamic attributes on the object.
+- Functions (`def foo(app, …)`) that take the `WellViewerApp` — or, as the
+  teardown proceeds, a `ViewerContext` — plus any extra args.
+- Read and mutate runtime state through the typed domain-state objects:
+  `app._app_state.channel`, `app._app_state.selection`, … (or
+  `ctx.state.<domain>`). The `well_viewer/state/` package is import-safe — it
+  imports no `runtime_app` / `views` / `tabs`, so a controller **can** import
+  it directly with no circular dependency (a guardrail test enforces that
+  boundary). Prefer that to reaching for loose attributes.
+- Don't import `WellViewerApp` itself — that would be circular. The remaining
+  un-extracted behaviour is reached via the `app` argument.
 - One module per *behaviour domain*: `lineplot_controller.py`, not
   `line_tab_controller.py`. The behaviour outlives the tab name.
 
@@ -426,6 +444,58 @@ redraw path ends with a call to
 `figure_export_editor.apply_export_style_to_current(app, fig, canvas)` so the
 sidebar's toggles (grid on/off, axis label size, log-scale, …) survive a
 re-render.
+
+### 5.9 Typed state, the event bus, and the DI context
+
+The `runtime_app` god-object teardown introduced four pieces that, together,
+let controllers and tabs depend on typed seams instead of the loose
+`WellViewerApp` namespace. All of `well_viewer/state/` is **import-safe**: it
+imports only stdlib, numpy/pandas, the Qt-free domain models (`ratio_models`,
+`selections_model`, `batch_models`, `data_loading`) and — for the bus only —
+`PySide6.QtCore`. It never imports `runtime_app`, `views`, or `tabs`, so any
+controller can import it with no circular dependency. `tests/test_guardrails.py`
+enforces that boundary.
+
+**`well_viewer/state/` — typed domain-state objects.** One `@dataclass` per
+behaviour domain, each owning its own invariants (behaviour lives *in* the
+type, not just data):
+
+| Object | Owns |
+|--------|------|
+| `ChannelState` | active channel / metric / ratio catalogue / threshold range — `set_active_channel` keeps `active_val_col` consistent |
+| `SelectionState` | plate selection + the saved-selections ("v2") model; composes `selections_model` |
+| `DatasetState` | data dir, well paths, row cache, canonical timepoint / FOV lists, `pipeline_info` |
+| `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization |
+| `StatsState` | Statistics-tab comparison groups + result cache |
+| `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview/montage image maps |
+
+`AppState` (`state/app_state.py`) is a plain aggregate of all of the above —
+*not* a mega-dataclass with behaviour. `WellViewerApp` builds one as
+`self._app_state`.
+
+**`EventBus` (`state/event_bus.py`).** A `QObject` carrying a small, capped
+catalogue of cross-cutting signals (`channel_changed`, `selection_changed`,
+`dataset_loaded`, `plot_options_changed`, …). Signal payloads are the relevant
+*state object*, never `app`. Cross-cutting mutations emit on it; subscriber
+wiring is migrated incrementally.
+
+**`WidgetRegistry` (`views/widget_registry.py`).** A name-keyed store for Qt
+widget handles (figures, canvases, axes). Tab builders call
+`ctx.widgets.register("_line_fig", fig)`; a transitional
+`WellViewerApp.__getattr__` forwards a legacy `app._line_fig` read to the
+registry so reader call sites are untouched while writers migrate.
+
+**`ViewerContext` (`viewer_context.py`).** A frozen dataclass bundling
+`state` / `bus` / `widgets` (plus a transitional `app` escape hatch) — the
+single typed handle injected into tab builders and controllers in place of the
+god-object. `WellViewerApp` builds `self._ctx`; tab builders take `ctx`.
+
+**Migration status.** The state extraction (phases above) is complete; the
+loose attributes survive as delegating `@property` shims, deleted as readers
+migrate. The remaining teardown work is mechanical: migrate the reader call
+sites off the shims, move `_build_*` methods into `views/` and `_on_*` /
+`_redraw_*` into controllers, then `runtime_app.py` collapses toward a thin
+composition root.
 
 ---
 
@@ -944,18 +1014,20 @@ calls inside its domain; off by default.
 ### 11.1 Add a new plotting tab
 
 1. Create `well_viewer/tabs/<name>_tab_view.py` with a
-   `build_<name>_tab(app, parent)` function. Model it on
+   `build_<name>_tab(ctx, parent)` function. Model it on
    `line_graphs_tab_view.py`. The minimum:
    - `make_plot_with_right_dock(parent)` for the export dock.
    - A controls row with `btn_secondary("Properties", …,
      icon="sliders-horizontal")` as the rightmost widget.
    - A `PlotCard` that hosts your figure(s).
-   - Stash `app._<name>_fig`, `app._<name>_canvas`,
-     `app._<name>_export_dock`, `app._<name>_card` for the rest of the
-     code to find.
-2. Add a controller `well_viewer/<name>_controller.py` with a `redraw(app)`
-   pure function. Don't import `WellViewerApp`; read state off the `app`
-   argument.
+   - Register the figure / canvas / dock / card in the widget registry:
+     `ctx.widgets.register("_<name>_fig", fig)`, etc. (the legacy
+     `app._<name>_fig` read still resolves via `WellViewerApp.__getattr__`).
+     Do **not** assign new loose `app._*` attributes.
+2. Add a controller `well_viewer/<name>_controller.py` with a `redraw` pure
+   function. Read state from the typed objects (`ctx.state.plot`,
+   `ctx.state.dataset`, …); import `well_viewer.state` freely — it is
+   import-safe. Don't import `WellViewerApp`.
 3. Wire the controller's `redraw` into the redraw pipeline. Either:
    - Add a branch to `plot_orchestrator.redraw` (if it should redraw on every
      selection change); or

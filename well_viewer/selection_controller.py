@@ -106,10 +106,10 @@ def _is_plotting_tab(app) -> bool:
 
 
 def select_row(app, row: str) -> None:
-    if app._selections:  # rep-mode
+    if app._app_state.selection.selections:  # rep-mode
         crossing = [
-            s for s in app._selections
-            if any(_well_rc(app, w)[0] == row and w in app._well_paths
+            s for s in app._app_state.selection.selections
+            if any(_well_rc(app, w)[0] == row and w in app._app_state.dataset.well_paths
                    for w in (s.get("wells") or []))
         ]
         # In rep-mode (plotting and non-plotting tabs alike), a row click
@@ -119,48 +119,48 @@ def select_row(app, row: str) -> None:
             _set_groups_hidden(app, crossing)
         return
     else:
-        row_labels = [lbl for lbl in app._well_paths if _well_rc(app, lbl)[0] == row]
+        row_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(app, lbl)[0] == row]
         if not row_labels:
             return
-        if any(lbl not in app._selected_wells for lbl in row_labels):
-            app._selected_wells.update(row_labels)
+        if any(lbl not in app._app_state.selection.selected_wells for lbl in row_labels):
+            app._app_state.selection.selected_wells.update(row_labels)
         else:
-            app._selected_wells.difference_update(row_labels)
+            app._app_state.selection.selected_wells.difference_update(row_labels)
         app._on_plate_sel_change()
 
 
 def select_col(app, col: str) -> None:
-    if app._selections:
+    if app._app_state.selection.selections:
         crossing = [
-            s for s in app._selections
-            if any(_well_rc(app, w)[1] == col and w in app._well_paths
+            s for s in app._app_state.selection.selections
+            if any(_well_rc(app, w)[1] == col and w in app._app_state.dataset.well_paths
                    for w in (s.get("wells") or []))
         ]
         if crossing:
             _set_groups_hidden(app, crossing)
         return
     else:
-        col_labels = [lbl for lbl in app._well_paths if _well_rc(app, lbl)[1] == col]
+        col_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(app, lbl)[1] == col]
         if not col_labels:
             return
-        if any(lbl not in app._selected_wells for lbl in col_labels):
-            app._selected_wells.update(col_labels)
+        if any(lbl not in app._app_state.selection.selected_wells for lbl in col_labels):
+            app._app_state.selection.selected_wells.update(col_labels)
         else:
-            app._selected_wells.difference_update(col_labels)
+            app._app_state.selection.selected_wells.difference_update(col_labels)
         app._on_plate_sel_change()
 
 
 def select_all(app) -> None:
-    if app._selections:  # rep-mode: show every group
-        _set_groups_hidden(app, app._selections, target=False)
+    if app._app_state.selection.selections:  # rep-mode: show every group
+        _set_groups_hidden(app, app._app_state.selection.selections, target=False)
     else:
-        app._app_state.selection.select_wells(app._well_paths.keys())
+        app._app_state.selection.select_wells(app._app_state.dataset.well_paths.keys())
         _refresh_after_selection_change(app)
 
 
 def select_none(app) -> None:
-    if app._selections:  # rep-mode: hide every group
-        _set_groups_hidden(app, app._selections, target=True)
+    if app._app_state.selection.selections:  # rep-mode: hide every group
+        _set_groups_hidden(app, app._app_state.selection.selections, target=True)
     else:
         app._app_state.selection.clear_selection()
         _refresh_after_selection_change(app)

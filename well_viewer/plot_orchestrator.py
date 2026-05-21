@@ -50,7 +50,7 @@ def redraw(
 
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
     metric_label = METRIC_KEY_TO_LABEL.get(
-        getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity"
+        app._app_state.channel.active_metric, "Mean Intensity"
     )
 
     # 1. Line plot — always present (eager-built); the entry point that
@@ -84,7 +84,7 @@ def redraw(
 def save_matplotlib_fig(app, fig, default_name: str, *, plot_bg: str) -> None:
     import matplotlib as _mpl
 
-    initial_dir = str(app._data_dir) if app._data_dir else ""
+    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
     initial_path = str(Path(initial_dir) / default_name) if initial_dir else default_name
     filter_str = _qt_file_filter_from_filetypes(app._FIG_FILETYPES)
 

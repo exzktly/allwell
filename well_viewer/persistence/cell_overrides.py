@@ -33,8 +33,8 @@ _SCHEMA_VERSION = 2
 
 
 def path_for(app) -> Optional[Path]:
-    if app._data_dir:
-        return app._data_dir / "cell_overrides.json"
+    if app._app_state.dataset.data_dir:
+        return app._app_state.dataset.data_dir / "cell_overrides.json"
     return None
 
 
@@ -45,7 +45,7 @@ def _well_zip_fingerprints(app) -> Dict[str, str]:
     time (compared against the file on disk).
     """
     out: Dict[str, str] = {}
-    data_dir = getattr(app, "_data_dir", None)
+    data_dir = app._app_state.dataset.data_dir
     if not data_dir:
         return out
     for zip_path in Path(data_dir).glob("*_out.zip"):
@@ -156,7 +156,7 @@ def load_from_data_dir(app) -> None:
         return
     app._review_included_overrides.clear()
     app._review_included_overrides.update(new_map)
-    app._review_image_override_version += 1
+    app._app_state.review_image.override_version += 1
 
 
 def schedule_save(app) -> None:

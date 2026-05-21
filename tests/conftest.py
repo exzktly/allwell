@@ -161,6 +161,32 @@ class MockApp:
         return "mean_intensity"
 
     @property
+    def _app_state(self):
+        """A real ``AppState`` mirroring this MockApp's current fields.
+
+        Controllers read state from ``app._app_state.<domain>`` after the shim
+        migration. Rebuilt on every access (cheap — small dataclasses) so a
+        test that mutates a MockApp field after construction (e.g.
+        ``fc_vs_control_on``) is reflected the next time a controller reads it.
+        """
+        from well_viewer.state import AppState
+        st = AppState()
+        st.channel.active_channel = "gfp"
+        st.channel.active_val_col = "gfp_mean_intensity"
+        st.channel.active_metric = "mean_intensity"
+        st.selection.selections = self.selections
+        st.selection.selected_wells = set(self.per_well_pts)
+        st.dataset.well_paths = {w: w for w in self.per_well_pts}
+        st.plot.use_sem = True
+        st.plot.fc_vs_control_on = self.fc_vs_control_on
+        st.plot.fc_control_label = self.fc_control_label
+        st.plot.fc_vs_t0_on = self.fc_vs_t0_on
+        st.plot.bar_order = getattr(self, "_bar_order", None)
+        st.plot.line_order_rsets = getattr(self, "_line_order_rsets", [])
+        st.plot.line_order_wells = getattr(self, "_line_order_wells", [])
+        return st
+
+    @property
     def _selected_wells(self):
         return set(self.per_well_pts)
 

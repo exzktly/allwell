@@ -48,7 +48,7 @@ def recalculate_threshold(app) -> None:
     Replaces ``WellViewerApp._recalculate_threshold``.
     """
     sample_df = next(
-        (app._get_rows(lbl) for lbl in app._well_paths),
+        (app._get_rows(lbl) for lbl in app._app_state.dataset.well_paths),
         pd.DataFrame(),
     )
     detected = detect_fluor_channels(sample_df)
@@ -56,28 +56,28 @@ def recalculate_threshold(app) -> None:
     pipeline_fluor_raw = [
         str(tok).strip().lower()
         for tok in (
-            app._pipeline_info.get("fluor_tokens", [])
-            if isinstance(app._pipeline_info, dict) else []
+            app._app_state.dataset.pipeline_info.get("fluor_tokens", [])
+            if isinstance(app._app_state.dataset.pipeline_info, dict) else []
         )
         if str(tok).strip()
     ]
     pipeline_fluor = normalize_channel_tokens(pipeline_fluor_raw)
     detected = normalize_channel_tokens(detected)
     seg_tok = ""
-    if isinstance(app._pipeline_info, dict):
-        seg_tok = str(app._pipeline_info.get("nuclear_token", "") or "").strip().lower()
+    if isinstance(app._app_state.dataset.pipeline_info, dict):
+        seg_tok = str(app._app_state.dataset.pipeline_info.get("nuclear_token", "") or "").strip().lower()
     if not seg_tok:
         seg_tok = detect_nuclear_channel_token(sample_df)
     fluor_channels = merge_fluor_channels(pipeline_fluor, detected, seg_tok)
     if fluor_channels:
-        app._fluor_channels = fluor_channels
-        if not app._active_channel:
-            app._active_channel = fluor_channels[0]
-        if not app._active_image_channel:
-            app._active_image_channel = fluor_channels[0]
+        app._app_state.channel.fluor_channels = fluor_channels
+        if not app._app_state.channel.active_channel:
+            app._app_state.channel.active_channel = fluor_channels[0]
+        if not app._app_state.channel.active_image_channel:
+            app._app_state.channel.active_image_channel = fluor_channels[0]
     app._seg_channel_token = seg_tok
-    app._review_image_channels = detect_review_image_channels(
-        sample_df, app._fluor_channels, seg_tok,
+    app._app_state.channel.review_image_channels = detect_review_image_channels(
+        sample_df, app._app_state.channel.fluor_channels, seg_tok,
     )
     app._update_channel_selector()
 
@@ -124,7 +124,7 @@ def recalculate_threshold(app) -> None:
     if cached is None:
         chunks = [
             _all_fluor_values(app._get_rows(lbl), val_col=val_col)
-            for lbl in app._well_paths
+            for lbl in app._app_state.dataset.well_paths
         ]
         all_vals = np.concatenate(chunks) if chunks else np.empty(0)
         if all_vals.size == 0:
@@ -250,7 +250,7 @@ def refresh_metric_combo_for_channel(app) -> None:
         channel_label = app._active_channel_label()
     except Exception:
         channel_label = ""
-    smfish_chan = app._active_channel
+    smfish_chan = app._app_state.channel.active_channel
     for attr in ("_plotting_metric_cb", "_metric_cb", "_metric_cb_bar"):
         app._populate_metric_combo(
             getattr(app, attr, None),
@@ -269,21 +269,21 @@ def update_channel_selector(app) -> None:
 
     Replaces ``WellViewerApp._update_channel_selector``.
     """
-    real_labels = [ch.upper() for ch in app._fluor_channels]
+    real_labels = [ch.upper() for ch in app._app_state.channel.fluor_channels]
     ratio_labels = app._ratio_dropdown_labels()
     labels = (real_labels + ratio_labels) or ["—"]
     # Map the uppercase dropdown label back to the underlying channel key
     # used by set_active_channel.
-    app._label_to_channel_key = {ch.upper(): ch for ch in app._fluor_channels}
-    for r in app._ratio_metrics:
+    app._label_to_channel_key = {ch.upper(): ch for ch in app._app_state.channel.fluor_channels}
+    for r in app._app_state.channel.ratio_metrics:
         app._label_to_channel_key[app._ratio_label_for(r)] = r.key()
     # Montage/preview includes the segmentation channel token.
     seg_tok = getattr(app, "_seg_channel_token", "")
-    montage_chans = list(app._fluor_channels)
+    montage_chans = list(app._app_state.channel.fluor_channels)
     if seg_tok and seg_tok not in montage_chans:
         montage_chans.append(seg_tok)
     montage_labels = [ch.upper() for ch in montage_chans] or ["—"]
-    review_labels = [ch.upper() for ch in (app._review_image_channels or app._fluor_channels)] or ["—"]
+    review_labels = [ch.upper() for ch in (app._app_state.channel.review_image_channels or app._app_state.channel.fluor_channels)] or ["—"]
     for attr in ("_chan_cb_line", "_chan_cb_bar", "_chan_cb_distribution",
                  "_chan_cb_heatmap", "_plotting_channel_cb"):
         if hasattr(app, attr):
@@ -308,7 +308,7 @@ def update_channel_selector(app) -> None:
     app._plot_chan_var.setCurrentText(plot_label)
 
     # Image tabs: each validates against its own channel universe.
-    active_image_label = app._active_image_channel.upper()
+    active_image_label = app._app_state.channel.active_image_channel.upper()
     montage_var = getattr(app, "_montage_chan_var", None)
     if montage_var is not None:
         montage_label = _pick_valid(montage_var.currentText(), montage_labels, active_image_label)
@@ -334,7 +334,7 @@ def update_channel_selector(app) -> None:
             app._set_active_channel(app._channel_key_for_label(plot_label))
         else:
             # No valid plot channel — clear active state explicitly.
-            app._active_channel = ""
+            app._app_state.channel.active_channel = ""
 
     # Force the visible global ctxbar combo to track the (now-valid)
     # active label.
@@ -367,7 +367,7 @@ def update_channel_selector(app) -> None:
     # currentText when valid, but if _active_image_channel has drifted,
     # the dropdown would disagree with the image actually drawn. Snap
     # the currentIndex so the first user click triggers the redraw.
-    active_image_label_final = (app._active_image_channel or "").upper()
+    active_image_label_final = (app._app_state.channel.active_image_channel or "").upper()
     for _attr in ("_review_image_chan_cb", "_chan_cb_preview"):
         cb = getattr(app, _attr, None)
         if cb is None or not hasattr(cb, "findText"):

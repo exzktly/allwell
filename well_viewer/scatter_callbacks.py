@@ -302,9 +302,9 @@ class ScatterCellViewer(QDialog):
             return
         self._debug(f"parsed_nuclear_id={nuclear_id}")
 
-        if self.well_label not in getattr(self.app, "_well_paths", {}):
+        if self.well_label not in self.app._app_state.dataset.well_paths:
             self._img_label.setText(f"Well {self.well_label} is no longer loaded")
-            self._debug(f"well_label not in app._well_paths: {self.well_label!r}")
+            self._debug(f"well_label not in app._app_state.dataset.well_paths: {self.well_label!r}")
             return
 
         rows = self.app._get_rows(self.well_label)
@@ -322,7 +322,7 @@ class ScatterCellViewer(QDialog):
         self._row_timepoint = str(row.get("timepoint") or "").strip()
         self._debug(f"csv.channel={self._nuclear_token!r}")
         self._debug(f"csv.fov={self._row_fov!r}  csv.timepoint={self._row_timepoint!r}")
-        self._debug(f"fluor channels to probe={sorted(self.app._fluor_channels)!r}")
+        self._debug(f"fluor channels to probe={sorted(self.app._app_state.channel.fluor_channels)!r}")
 
         mask_arr, mask_path = self._load_output_image_by_filename("mask")
         # Mask-content sanity: log shape, label cardinality, and whether
@@ -363,7 +363,7 @@ class ScatterCellViewer(QDialog):
             self._cell_outline_mask = None
             self._debug(f"failed to compute cell outline mask: {e!r}")
 
-        for ch in sorted(self.app._fluor_channels):
+        for ch in sorted(self.app._app_state.channel.fluor_channels):
             self._debug(f"loading fluor channel {ch!r}...")
             arr = self._load_and_crop_channel(ch)
             if arr is not None:
@@ -389,7 +389,7 @@ class ScatterCellViewer(QDialog):
         else:
             self._debug("  -> mask unavailable")
 
-        available_channels = [ch for ch in sorted(self.app._fluor_channels) if self._cell_images.get(ch) is not None]
+        available_channels = [ch for ch in sorted(self.app._app_state.channel.fluor_channels) if self._cell_images.get(ch) is not None]
         if nuc_key in self._cell_images and nuc_key not in available_channels:
             available_channels.append(nuc_key)
         if "nuclear" in self._cell_images:
@@ -425,7 +425,7 @@ class ScatterCellViewer(QDialog):
                 open_imgref_as_array,
             )
 
-            pipeline_info = getattr(self.app, "_pipeline_info", None)
+            pipeline_info = self.app._app_state.dataset.pipeline_info
             candidates = resolve_filename_candidates(
                 self.filename,
                 pipeline_info=pipeline_info,
@@ -442,8 +442,8 @@ class ScatterCellViewer(QDialog):
             if well_token is None:
                 return None, f"could not extract well_token from {self.well_label!r}"
 
-            data_dir = self.app._data_dir
-            in_dir = self.app._in_dir
+            data_dir = self.app._app_state.dataset.data_dir
+            in_dir = self.app._app_state.dataset.in_dir
             zips: list = []
             if data_dir and data_dir.is_dir():
                 zips = find_out_well_zips_in_dir(data_dir, well_token)
@@ -632,8 +632,8 @@ class ScatterCellViewer(QDialog):
                 self._debug(f"could not parse well token from {self.well_label!r} for nuclear image load")
                 return None
 
-            in_dir = self.app._in_dir
-            data_dir = self.app._data_dir
+            in_dir = self.app._app_state.dataset.in_dir
+            data_dir = self.app._app_state.dataset.data_dir
 
             zips: list = []
             if in_dir and in_dir.is_dir():
@@ -642,7 +642,7 @@ class ScatterCellViewer(QDialog):
                 zips = find_well_zips_in_dir(data_dir, well_token)
             self._debug(f"nuclear image zip search target={self.filename!r}, zips={[str(z) for z in zips]!r}")
 
-            pipeline_info = getattr(self.app, "_pipeline_info", None)
+            pipeline_info = self.app._app_state.dataset.pipeline_info
             target_names = resolve_filename_candidates(
                 self.filename,
                 pipeline_info=pipeline_info,
@@ -709,7 +709,7 @@ class ScatterCellViewer(QDialog):
                 open_imgref_as_array,
             )
 
-            pipeline_info = getattr(self.app, "_pipeline_info", None)
+            pipeline_info = self.app._app_state.dataset.pipeline_info
             target_names = resolve_filename_candidates(
                 self.filename,
                 pipeline_info=pipeline_info,
@@ -725,8 +725,8 @@ class ScatterCellViewer(QDialog):
                 self._debug(f"channel={channel_token}: could not parse well token from {self.well_label!r}")
                 return None
 
-            in_dir = self.app._in_dir
-            data_dir = self.app._data_dir
+            in_dir = self.app._app_state.dataset.in_dir
+            data_dir = self.app._app_state.dataset.data_dir
 
             zips: list = []
             if in_dir and in_dir.is_dir():

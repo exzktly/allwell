@@ -52,7 +52,7 @@ def active_layout(app) -> HeatmapLayout:
                 return lay
     if layouts:
         return layouts[0]
-    return make_plate_layout((getattr(app, "_well_paths", {}) or {}).keys())
+    return make_plate_layout((app._app_state.dataset.well_paths or {}).keys())
 
 
 def _selected_metric(app) -> str:
@@ -183,7 +183,7 @@ def _cell_value(
 ) -> float:
     """Compute the heatmap cell value by pooling rows across *wells*."""
     expanded = _expand_repset_wells(app, wells)
-    valid_wells = [w for w in expanded if w in app._well_paths]
+    valid_wells = [w for w in expanded if w in app._app_state.dataset.well_paths]
     if not valid_wells:
         return float("nan")
 
@@ -379,11 +379,11 @@ def redraw_heatmap(app) -> None:
         return
 
     metric = _selected_metric(app)
-    val_col = app._active_val_col
-    threshold = app._get_thresh_frac_on(app._active_channel)
+    val_col = app._app_state.channel.active_val_col
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
     cmap_name = _selected_cmap(app)
 
     arr = np.full((layout.rows, layout.cols), np.nan, dtype=float)
@@ -514,7 +514,7 @@ def redraw_heatmap(app) -> None:
         )
 
     # Selection rectangles.
-    selected = set(getattr(app, "_selected_wells", set()) or set())
+    selected = set(app._app_state.selection.selected_wells or set())
     for (r, c), wells in cell_well_index.items():
         if any(w in selected for w in wells):
             rect = mpatches.Rectangle(
@@ -561,7 +561,7 @@ def redraw_heatmap(app) -> None:
             app._heatmap_colorbar = None
 
     title = (
-        f"{app._active_channel_label() if hasattr(app, '_active_channel_label') else app._active_channel.upper()}"
+        f"{app._active_channel_label() if hasattr(app, '_active_channel_label') else app._app_state.channel.active_channel.upper()}"
         f" — {metric} — t = {tp:g} h"
     )
     # ``pad`` lifts the title away from the heatmap rows so the descenders
@@ -597,7 +597,7 @@ def _format_cell_value(v: float, metric: str) -> str:
 def _metric_axis_label(metric: str, app) -> str:
     label = app._active_channel_label() if hasattr(app, "_active_channel_label") else ""
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
-    prop_label = _MLB.get(getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity")
+    prop_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     if metric == METRIC_COUNT:
         return "Cell count"
     if metric == METRIC_FRACTION:
@@ -633,7 +633,7 @@ def on_heatmap_click(app, event) -> None:
     if not wells_here:
         return
 
-    selected = set(getattr(app, "_selected_wells", set()) or set())
+    selected = set(app._app_state.selection.selected_wells or set())
     modifiers = 0
     try:
         # Matplotlib events expose the GUI event for modifier inspection.
@@ -661,7 +661,7 @@ def on_heatmap_click(app, event) -> None:
     if hasattr(app, "_set_selected_wells"):
         app._set_selected_wells(selected)
     else:
-        app._selected_wells = selected
+        app._app_state.selection.selected_wells = selected
         if hasattr(app, "_redraw"):
             app._redraw()
 

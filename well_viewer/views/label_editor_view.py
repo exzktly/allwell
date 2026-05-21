@@ -55,7 +55,7 @@ def label_panel_refresh(app) -> None:
             w.setParent(None)
             w.deleteLater()
 
-    wells = sorted(app._well_paths.keys(), key=lambda l: app._parse_rc(l))
+    wells = sorted(app._app_state.dataset.well_paths.keys(), key=lambda l: app._parse_rc(l))
     if not wells:
         empty = QLabel("No wells loaded yet.", inner)
         empty.setObjectName("Muted")
@@ -108,15 +108,15 @@ def label_panel_refresh(app) -> None:
         row_l.addWidget(tok_lbl)
 
         entry = QLineEdit(row)
-        entry.setText(app._well_labels.get(lbl, ""))
+        entry.setText(app._app_state.dataset.well_labels.get(lbl, ""))
         row_l.addWidget(entry, 1)
 
         def _on_change(text: str, t=lbl):
             val = (text or "").strip()
             if val:
-                app._well_labels[t] = val
+                app._app_state.dataset.well_labels[t] = val
             else:
-                app._well_labels.pop(t, None)
+                app._app_state.dataset.well_labels.pop(t, None)
             if hasattr(app, "_invalidate_stats_cache"):
                 app._invalidate_stats_cache()
 

@@ -13,11 +13,12 @@ from typing import List
 import pytest
 
 from well_viewer.fold_change_scopes import (
-    FoldChangeScope, _DIRTY_ATTR,
+    FoldChangeScope,
     current_scope_name, flush_dirty_scopes,
     redraw_scopes_or_defer, register_fold_change_scope,
     registered_scopes,
 )
+from well_viewer.state import AppState
 
 
 @dataclass
@@ -29,6 +30,7 @@ class _TabbedApp:
     """
     current_tab: str = "Bar Plots"
     redraws: List[str] = field(default_factory=list)
+    _app_state: AppState = field(default_factory=AppState)
 
     def _current_centre_tab(self) -> str:
         return self.current_tab
@@ -66,7 +68,7 @@ def test_redraw_scopes_or_defer_only_visible_runs():
     redraw_scopes_or_defer(app)
     assert app.redraws == ["bar"]
     # Line scope was marked dirty.
-    assert getattr(app, _DIRTY_ATTR) == {"line"}
+    assert app._app_state.plot.fc_dirty_scopes == {"line"}
 
 
 def test_redraw_scopes_or_defer_no_visible_marks_all_dirty():
@@ -75,7 +77,7 @@ def test_redraw_scopes_or_defer_no_visible_marks_all_dirty():
     app = _TabbedApp(current_tab="Batch Export")
     redraw_scopes_or_defer(app)
     assert app.redraws == []
-    assert getattr(app, _DIRTY_ATTR) == {"bar", "line"}
+    assert app._app_state.plot.fc_dirty_scopes == {"bar", "line"}
 
 
 def test_flush_dirty_scopes_redraws_on_tab_entry():
@@ -87,7 +89,7 @@ def test_flush_dirty_scopes_redraws_on_tab_entry():
     app.current_tab = "Line Graphs"
     flush_dirty_scopes(app)
     assert app.redraws == ["bar", "line"]
-    assert getattr(app, _DIRTY_ATTR) == set()
+    assert app._app_state.plot.fc_dirty_scopes == set()
 
 
 def test_flush_dirty_scopes_idempotent_when_clean():

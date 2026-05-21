@@ -73,15 +73,10 @@ register_fold_change_scope(FoldChangeScope(
 
 # ── Dirty-tab management ────────────────────────────────────────────────────
 
-_DIRTY_ATTR = "_fc_dirty_scopes"
-
 
 def _dirty_set(app) -> "set[str]":
-    s = getattr(app, _DIRTY_ATTR, None)
-    if s is None:
-        s = set()
-        setattr(app, _DIRTY_ATTR, s)
-    return s
+    """The set of scope names awaiting a deferred redraw — owned by PlotState."""
+    return app._app_state.plot.fc_dirty_scopes
 
 
 def current_scope_name(app) -> "str | None":

@@ -57,7 +57,7 @@ def wrap_with_empty_state(
 
     The stack registers itself on ``app._plot_empty_stacks`` and
     ``app._refresh_plot_empty_states()`` flips every registered stack based
-    on whether ``app._well_paths`` is non-empty. Tab redraws should call
+    on whether ``app._app_state.dataset.well_paths`` is non-empty. Tab redraws should call
     that helper before they paint.
     """
     from widgets.empty_state import EmptyState  # local — widget module is heavy
@@ -78,7 +78,7 @@ def refresh_plot_empty_states(app: Any) -> None:
     dataset is currently loaded. Safe to call before any stacks have been
     registered (no-ops)."""
     stacks = getattr(app, "_plot_empty_stacks", None) or []
-    has_data = bool(getattr(app, "_well_paths", None))
+    has_data = bool(app._app_state.dataset.well_paths)
     target = 1 if has_data else 0
     for stack in stacks:
         try:
@@ -381,7 +381,7 @@ def make_band_controls(app: Any, parent: QWidget, *, with_fov: bool = False) -> 
     eb_lbl = QLabel("Error Band", w)
     eb_lbl.setObjectName("Muted")
     h.addWidget(eb_lbl)
-    initial = bool(getattr(app, "_use_sem", False))
+    initial = bool(app._app_state.plot.use_sem)
     sem_btn = QPushButton("SEM" if initial else "SD", w)
     sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
     sem_btn.clicked.connect(lambda _=False: app._toggle_sem())

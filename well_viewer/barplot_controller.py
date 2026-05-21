@@ -144,9 +144,9 @@ def collect_bar_items(
     renderer); the items themselves carry display labels and colours so
     callers don't need to re-resolve them.
     """
-    use_sem = app._use_sem
+    use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    threshold = app._get_thresh_frac_on(app._active_channel)
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     active_rsets = app._rep_sets_active()
     use_groups = bool(active_rsets)
 
@@ -165,7 +165,7 @@ def collect_bar_items(
     if fc_vs_ctrl and fc_ctrl_lbl:
         ctrl_stats = _fc.control_stats_at_for_bar(
             app, fc_ctrl_lbl, target_t,
-            threshold=threshold, val_col=app._active_val_col,
+            threshold=threshold, val_col=app._app_state.channel.active_val_col,
             use_sem=use_sem, per_fov_spread=per_fov_spread,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
@@ -210,7 +210,7 @@ def collect_bar_items(
             if fc_vs_t0:
                 stats = _fc.member_first_tp_stats(
                     app, rset.name,
-                    threshold=threshold, val_col=app._active_val_col,
+                    threshold=threshold, val_col=app._app_state.channel.active_val_col,
                     use_sem=use_sem, per_fov_spread=per_fov_spread,
                     cell_area_threshold=cell_area_threshold,
                     fluor_gates=fluor_gates,
@@ -243,13 +243,13 @@ def collect_bar_items(
 
     # Per-well branch — iterate the same drag order, look up cell data.
     for label in ordered_keys:
-        if label not in app._well_paths:
+        if label not in app._app_state.dataset.well_paths:
             continue
         color = app._rank_color_well(label)
         display = app._bar_well_display_label(label)
         pts = app._aggregate_well(
             label, threshold=threshold, use_sem=use_sem,
-            val_col=app._active_val_col,
+            val_col=app._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
@@ -378,12 +378,12 @@ def collect_bar_items_for_group(
     items: List[BarItem] = []
     members: List[Tuple[str, str, list[str]]] = []  # (key, display, wells)
     for rset in group.members:
-        valid = [w for w in rset.wells if w in app._well_paths]
+        valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
         if not valid:
             continue
         members.append((rset.name, rset.name, valid))
     for w in group.solo_wells:
-        if w not in app._well_paths:
+        if w not in app._app_state.dataset.well_paths:
             continue
         members.append((w, w, [w]))
 
@@ -469,12 +469,12 @@ def ordered_bar_keys(app) -> list:
         keys = [r.name for r in active_rsets]
     else:
         keys = sorted(
-            (lbl for lbl in app._selected_wells if lbl in app._well_paths),
+            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
-    if app._bar_order is None:
+    if app._app_state.plot.bar_order is None:
         return keys
-    ordered = [k for k in app._bar_order if k in keys]
+    ordered = [k for k in app._app_state.plot.bar_order if k in keys]
     seen = set(ordered)
     ordered.extend(k for k in keys if k not in seen)
     return ordered
@@ -617,7 +617,7 @@ def apply_bar_ylims(app, ax_mean, ax_frac, *, ax_n=None) -> None:
 #
 # Lightweight helpers that drive the bar drag interaction. The view (matplotlib
 # canvas + axes) is owned by ``WellViewerApp``; these helpers only mutate
-# ``app._bar_drag_state`` / ``app._bar_order`` and trigger a redraw.
+# ``app._bar_drag_state`` / ``app._app_state.plot.bar_order`` and trigger a redraw.
 
 def bar_event_xdata(app, event) -> Optional[float]:
     """Return data-x for a matplotlib MouseEvent over any bar axis."""
@@ -636,7 +636,7 @@ def bar_idx_at_x(xdata: float, n: int) -> int:
 
 
 def bar_reset_order(app) -> None:
-    app._bar_order = None
+    app._app_state.plot.bar_order = None
     app._bar_reset_order_btn.setProperty("variant", "toggle_muted")
     app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
     app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)
@@ -718,7 +718,7 @@ def on_bar_drag_release(app, event) -> None:
 
     item = keys.pop(src)
     keys.insert(tgt, item)
-    app._bar_order = keys
+    app._app_state.plot.bar_order = keys
     app._bar_reset_order_btn.setProperty("variant", "toggle_accent")
     app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
     app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)

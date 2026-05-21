@@ -4,11 +4,11 @@ These ratchet the god-object's decline. Each phase re-measures and tightens the
 budgets; a phase that regrows ``runtime_app.py`` past its ceiling, or adds a
 parallel state implementation, trips a guardrail.
 
-Per the teardown plan the budgets are **warn-only through Phases 1-8** (a breach
-emits a warning but the test still passes) and **hard-fail from Phase 9** — flip
-``_HARD_FAIL`` then. The budgets dip and recover as phases land (transitional
-``@property`` shims add lines; extracted method bodies remove them); by Phase 3
-the file is already below its Phase 0 baseline of 7028 lines.
+Per the teardown plan the budgets were warn-only through Phases 1-8 and
+**hard-fail from Phase 9** — ``_HARD_FAIL`` is now ``True``. A change that
+regrows ``runtime_app.py`` past its budgeted ceiling, or adds a parallel state
+implementation, now fails the suite. Lower the budgets when a change legitimately
+shrinks the file; never raise them.
 """
 
 from __future__ import annotations
@@ -23,15 +23,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_APP = REPO_ROOT / "well_viewer" / "runtime_app.py"
 STATE_DIR = REPO_ROOT / "well_viewer" / "state"
 
-# Flip to True at Phase 9 so the budgets hard-fail instead of warning.
-_HARD_FAIL = False
+# Budgets hard-fail (Phase 9 onward).
+_HARD_FAIL = True
 
-# Ratcheting ceilings. Re-measured each phase as the teardown proceeds.
-# Phase 0 baseline: 7028 lines / 166 attrs. Line count fluctuates around the
-# baseline as transitional shims are added and method bodies extracted; the
-# attr count is the truer signal. Phase 6 added the ViewerContext (+1 attr).
-RUNTIME_APP_LINE_BUDGET = 7018
-RUNTIME_APP_ATTR_BUDGET = 131
+# Ratcheting ceilings. Re-measured as the teardown proceeds; lowered as each
+# shim-migration domain deletes its property shims. Phase 0 baseline:
+# 7028 lines / 166 attrs.
+RUNTIME_APP_LINE_BUDGET = 6909
+RUNTIME_APP_ATTR_BUDGET = 97
 
 
 def _enforce(ok: bool, message: str) -> None:

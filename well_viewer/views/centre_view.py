@@ -294,7 +294,7 @@ def build_centre(app, parent: QWidget) -> None:
         app._plotting_channel_chip = app._plotting_channel_cb
 
         # Global Property (intensity-column) combo — mirrors the channel
-        # combo styling. Drives ``app._active_metric`` so every plot, stat,
+        # combo styling. Drives ``app._app_state.channel.active_metric`` so every plot, stat,
         # and CSV export tracks the user's chosen intensity property.
         from well_viewer.metric_labels import METRIC_ORDER as _METRIC_ORDER
         prop_lbl = QLabel("Property")
@@ -388,7 +388,7 @@ def build_centre(app, parent: QWidget) -> None:
         def _refresh_channel_chip(title: str) -> None:
             """Re-populate the global ctxbar channel combo on sub-tab switch.
 
-            Reads from the canonical channel list (``app._fluor_channels`` +
+            Reads from the canonical channel list (``app._app_state.channel.fluor_channels`` +
             ratios) rather than mirroring a per-renderer combo's items.
             The per-renderer combos can lag the canonical list — they're
             seeded with a ``["GFP"]`` placeholder and are only refreshed
@@ -422,7 +422,7 @@ def build_centre(app, parent: QWidget) -> None:
             if global_cb is None:
                 return
             real_labels = [str(ch).upper() for ch in
-                           (getattr(app, "_fluor_channels", []) or [])]
+                           (app._app_state.channel.fluor_channels or [])]
             ratio_labels = list(getattr(app, "_ratio_dropdown_labels",
                                         lambda: [])() or [])
             labels = (real_labels + ratio_labels) or ["—"]

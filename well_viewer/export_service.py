@@ -14,12 +14,12 @@ _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
 
 def _well_labels_map(app) -> dict:
     """Snapshot of the Sample Definitions well-label map (token → name)."""
-    return dict(getattr(app, "_well_labels", None) or {})
+    return dict(app._app_state.dataset.well_labels or {})
 
 
 def _well_paths_keys(app) -> set:
     """Set of valid well tokens for the loaded project."""
-    paths = getattr(app, "_well_paths", None) or {}
+    paths = app._app_state.dataset.well_paths or {}
     return set(paths)
 
 
@@ -61,7 +61,7 @@ def well_names_joined(tokens, well_labels: dict, *,
 
 
 def _ask_save_csv(app, title: str, default_name: str) -> str:
-    initial_dir = str(app._data_dir) if app._data_dir else ""
+    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
     initial_path = str(Path(initial_dir) / default_name) if initial_dir else default_name
     out, _ = QFileDialog.getSaveFileName(app, title, initial_path, _CSV_FILTER)
     return out or ""
@@ -275,17 +275,17 @@ def export_plot_data(app) -> None:
         seen: set = set()
         for rset in (app._rep_sets_active() or []):
             for w in rset.wells:
-                if w in app._well_paths and w not in seen:
+                if w in app._app_state.dataset.well_paths and w not in seen:
                     seen.add(w)
                     selected.append(w)
                     well_to_repset[w] = getattr(rset, "name", "")
     if not selected:
         _warn(app, "Export", "No wells selected. Select wells in the picker, or define a replicate set.")
         return
-    ch = app._active_channel
-    metric = app._active_metric
+    ch = app._app_state.channel.active_channel
+    metric = app._app_state.channel.active_metric
     threshold = app._get_thresh_frac_on(ch)
-    use_sem = bool(app._use_sem)
+    use_sem = bool(app._app_state.plot.use_sem)
     band_lbl = "SEM" if use_sem else "SD"
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
@@ -298,7 +298,7 @@ def export_plot_data(app) -> None:
         fc_control_means = _fc.pts_to_mean_by_t(
             _fc.control_pts_for_line(
                 app, fc_ctrl_lbl, threshold=threshold,
-                val_col=app._active_val_col,
+                val_col=app._app_state.channel.active_val_col,
                 cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
@@ -309,7 +309,7 @@ def export_plot_data(app) -> None:
     for label in selected:
         pts = app._aggregate_well(
             label, threshold=threshold, use_sem=use_sem,
-            val_col=app._active_val_col,
+            val_col=app._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
@@ -390,8 +390,8 @@ def export_bar_plot_data(app) -> None:
         fc_by_key = {it.key: it for it in items_fc}
     else:
         fc_by_key = {}
-    ch = app._active_channel
-    metric = app._active_metric
+    ch = app._app_state.channel.active_channel
+    metric = app._app_state.channel.active_metric
     threshold = app._get_thresh_frac_on(ch)
     well_labels = _well_labels_map(app)
     well_paths = _well_paths_keys(app)
@@ -467,7 +467,7 @@ def export_bar_plot_data(app) -> None:
 
 
 def export_raw_data_csv(app) -> None:
-    if not app._well_paths:
+    if not app._app_state.dataset.well_paths:
         _warn(app, "Export", "Load data before exporting raw CSV.")
         return
 
@@ -476,17 +476,17 @@ def export_raw_data_csv(app) -> None:
     from well_viewer.data_loading import df_included_mask
 
     cell_area_threshold = app._get_cell_area_threshold()
-    fluor_gate_threshold = app._get_fluor_gate(app._active_channel)
+    fluor_gate_threshold = app._get_fluor_gate(app._app_state.channel.active_channel)
     well_labels = _well_labels_map(app)
     # Gating semantics stay on mean fluorescence intensity even when the
     # global Property selector points at a different column — the gate
     # values entered in the Cell Gating tab are MFI thresholds. The raw
     # dump itself still includes every column from the source CSV, so the
     # selected property is preserved in the output.
-    gate_col = f"{app._active_channel}_mean_intensity"
+    gate_col = f"{app._app_state.channel.active_channel}_mean_intensity"
 
     frames = []
-    for label in sorted(app._well_paths):
+    for label in sorted(app._app_state.dataset.well_paths):
         df = app._get_rows(label)
         if df is None or df.empty or "area_px" not in df.columns or gate_col not in df.columns:
             continue
@@ -539,7 +539,7 @@ def save_montage_figure(app) -> None:
         _warn(app, "Nothing to save", "Load a well in the Preview tab first.")
         return
     fov = app._preview_fov_cb.currentText()
-    well = _extract_well_token(app._preview_selected_well or "") or "well"
+    well = _extract_well_token(app._app_state.preview.selected_well or "") or "well"
     n = len(app._montage_fluor_arrays)
     try:
         lo = float(app._mon_lmin_edit.text())
@@ -562,7 +562,7 @@ def save_montage_figure(app) -> None:
     tophat_on = getattr(app, "_mon_tophat_cb", None) is not None and app._mon_tophat_cb.isChecked()
     use_display = tophat_on and hasattr(app, "_montage_fluor_display_arrays") and len(app._montage_fluor_display_arrays) == len(app._montage_fluor_arrays)
     fluor_source = app._montage_fluor_display_arrays if use_display else app._montage_fluor_arrays
-    tp_list = [(tp, ref) for (f, tp), ref in sorted(app._preview_fluor.items()) if f == fov]
+    tp_list = [(tp, ref) for (f, tp), ref in sorted(app._app_state.preview.fluor.items()) if f == fov]
     crop = getattr(app, "_montage_crop", None)
 
     def _apply_crop(a):
@@ -596,7 +596,7 @@ def save_montage_figure(app) -> None:
         ax_g.set_title(tp, fontsize=6, color=TXT_PRI)
         ax_g.axis("off")
         if ci == 0:
-            ax_g.set_ylabel(app._active_channel.upper(), fontsize=7, color=TXT_PRI)
+            ax_g.set_ylabel(app._app_state.channel.active_channel.upper(), fontsize=7, color=TXT_PRI)
         if ov_arr is not None and True:
             arr = _np.asarray(_apply_crop(ov_arr))
             if arr.ndim == 2:
@@ -816,7 +816,7 @@ def export_heatmap_data(app) -> None:
     if slider is not None and tp_values:
         idx = max(0, min(slider.value(), len(tp_values) - 1))
         tp = tp_values[idx]
-    ch = getattr(app, "_active_channel", "channel")
+    ch = app._app_state.channel.active_channel
     metric_cb = getattr(app, "_heatmap_metric_cb", None)
     metric = str(metric_cb.currentText()) if metric_cb else "metric"
     col_name = f"{ch}_{metric.lower().replace(' ', '_')}"
@@ -861,10 +861,10 @@ def export_distribution_data(app) -> None:
     from well_viewer.data_loading import _all_fluor_values_filtered, iter_plot_groups
     import math as _math
 
-    val_col = getattr(app, "_active_val_col", "value")
+    val_col = app._app_state.channel.active_val_col
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
 
     tp_var = getattr(app, "_distribution_tp_var", None)
     tp_str = tp_var.currentText() if tp_var is not None else ""
@@ -874,7 +874,7 @@ def export_distribution_data(app) -> None:
         tp_h = float("nan")
     tp_filter = tp_h if _math.isfinite(tp_h) else None
 
-    ch = getattr(app, "_active_channel", "channel")
+    ch = app._app_state.channel.active_channel
     well_labels = _well_labels_map(app)
     well_paths = _well_paths_keys(app)
     import pandas as pd

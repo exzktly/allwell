@@ -62,7 +62,7 @@ class ExportStyleSidebar(QWidget):
         self._fig = fig
         self._canvas = canvas
         self._default_name = default_name
-        self._base_dir = Path(app._data_dir) if getattr(app, "_data_dir", None) else Path.cwd()
+        self._base_dir = Path(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else Path.cwd()
         self._prefs = _ensure_export_style_prefs(app)
         self._updating = False
         self._getters: dict[str, Callable[[], object]] = {}
@@ -282,7 +282,7 @@ class ExportStyleSidebar(QWidget):
             self._stats_preview.setText(f"{err.upper()} · {acr}")
 
         # Error bars: SEM / SD wire through; None / 95% CI are placeholders.
-        _err_init = "sem" if bool(getattr(self._app, "_use_sem", True)) else "sd"
+        _err_init = "sem" if bool(self._app._app_state.plot.use_sem) else "sd"
         err_sc = _seg(
             [("None", "none"), ("SEM", "sem"), ("SD", "sd"), ("95% CI", "ci95")],
             current=_err_init,
@@ -295,7 +295,7 @@ class ExportStyleSidebar(QWidget):
                 _stats_state["err"] = v
                 _update_stats_preview()
                 want_sem = (v == "sem")
-                if v in ("sem", "sd") and bool(getattr(self._app, "_use_sem", True)) != want_sem:
+                if v in ("sem", "sd") and bool(self._app._app_state.plot.use_sem) != want_sem:
                     try:
                         self._app._toggle_sem()
                     except Exception:
@@ -988,10 +988,10 @@ class ExportStyleSidebar(QWidget):
 
         if (self._line_order_rsets_section is not None
                 and self._line_order_rsets_section.isVisible()):
-            app._line_order_rsets = _ids(self._line_order_rsets_list)
+            app._app_state.plot.line_order_rsets = _ids(self._line_order_rsets_list)
         if (self._line_order_wells_section is not None
                 and self._line_order_wells_section.isVisible()):
-            app._line_order_wells = _ids(self._line_order_wells_list)
+            app._app_state.plot.line_order_wells = _ids(self._line_order_wells_list)
         if hasattr(app, "_line_order_schedule_save"):
             try:
                 app._line_order_schedule_save()
@@ -1045,7 +1045,7 @@ class ExportStyleSidebar(QWidget):
             self._line_order_rsets_list.blockSignals(True)
             self._line_order_rsets_list.clear()
             names = [getattr(rs, "name", "") for rs in active_rsets if getattr(rs, "name", "")]
-            saved = list(getattr(app, "_line_order_rsets", []) or [])
+            saved = list(app._app_state.plot.line_order_rsets or [])
             ordered_names = [n for n in saved if n in names] + [n for n in names if n not in saved]
             display_fn = getattr(app, "_replicate_display_label", None)
             by_name = {getattr(rs, "name", ""): rs for rs in active_rsets}
@@ -1067,10 +1067,10 @@ class ExportStyleSidebar(QWidget):
             self._line_order_wells_list.blockSignals(True)
             self._line_order_wells_list.clear()
             # Per-well code paths in line/bar/scatter all derive from
-            # ``app._selected_wells`` sorted by ``_parse_rc``; mirror that
+            # ``app._app_state.selection.selected_wells`` sorted by ``_parse_rc``; mirror that
             # exactly so the order list matches the plot.
             try:
-                raw = getattr(app, "_selected_wells", set()) or set()
+                raw = app._app_state.selection.selected_wells or set()
                 parse_rc = getattr(app, "_parse_rc", None)
                 if callable(parse_rc):
                     selected = sorted(raw, key=parse_rc)
@@ -1078,7 +1078,7 @@ class ExportStyleSidebar(QWidget):
                     selected = sorted(raw)
             except Exception:
                 selected = []
-            saved = list(getattr(app, "_line_order_wells", []) or [])
+            saved = list(app._app_state.plot.line_order_wells or [])
             ordered = [w for w in saved if w in selected] + [w for w in selected if w not in saved]
             label_fn = getattr(app, "_well_display_label", None)
             for w in ordered:

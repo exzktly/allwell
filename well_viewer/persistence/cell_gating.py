@@ -13,7 +13,7 @@ def save_to_pipeline_info(app) -> None:
     Called from the Cell Gating tab whenever the user edits a value. Silently
     no-ops when no data directory is loaded or the sidecar is missing.
     """
-    if not app._data_dir:
+    if not app._app_state.dataset.data_dir:
         return
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):
         return
@@ -25,7 +25,7 @@ def save_to_pipeline_info(app) -> None:
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     # Persist every key that has a Cell Gating row, including ratio entries
-    # (keyed by ``ratio:<name>``). Iterating only ``app._fluor_channels``
+    # (keyed by ``ratio:<name>``). Iterating only ``app._app_state.channel.fluor_channels``
     # silently dropped ratio thresholds and forced the default on next load.
     thresh_frac_on = {
         key: cell_gating_get_thresh_frac_on(app, key)
@@ -34,7 +34,7 @@ def save_to_pipeline_info(app) -> None:
     block = build_gating_block(
         cell_area_threshold, fluor_gates, thresh_frac_on,
     )
-    save_gating_to_pipeline_info(app._data_dir, block)
+    save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
 
 
 def load_from_pipeline_info(app) -> bool:
@@ -44,10 +44,10 @@ def load_from_pipeline_info(app) -> bool:
     built lazily, so when the sidecar has persisted thresholds we force-build
     the tab here so its QLineEdits exist before we try to set them.
     """
-    if not app._data_dir:
+    if not app._app_state.dataset.data_dir:
         return False
     from well_viewer.gating_state import read_gating_params
-    block = read_gating_params(app._data_dir)
+    block = read_gating_params(app._app_state.dataset.data_dir)
     if not block:
         return False
 

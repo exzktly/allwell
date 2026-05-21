@@ -52,16 +52,16 @@ def collect_group_values(
     statistic: str = "mean",
 ) -> List[float]:
     """Return one summary value per well (or per-FOV when the group has 1 well)."""
-    val_col = val_col or app._active_val_col
+    val_col = val_col or app._app_state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(app._get_thresh_frac_on(app._active_channel))
+            threshold = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
         except Exception:
-            threshold = float(getattr(app, "_threshold", 0.0))
+            threshold = float(app._app_state.channel.threshold)
     threshold = float(threshold)
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
 
-    wells = [w for w in grp.wells if w in app._well_paths]
+    wells = [w for w in grp.wells if w in app._app_state.dataset.well_paths]
     if not wells:
         return []
     aggregate_per_fov = (len(wells) == 1)
@@ -107,17 +107,17 @@ def collect_group_per_cell_values(
     threshold: Optional[float] = None,
 ) -> List[float]:
     """Return per-cell values above threshold for KS-test (distribution comparison)."""
-    val_col = val_col or app._active_val_col
+    val_col = val_col or app._app_state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(app._get_thresh_frac_on(app._active_channel))
+            threshold = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
         except Exception:
-            threshold = float(getattr(app, "_threshold", 0.0))
+            threshold = float(app._app_state.channel.threshold)
     threshold = float(threshold)
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
     chunks: List[np.ndarray] = []
     for lbl in grp.wells:
-        if lbl not in app._well_paths:
+        if lbl not in app._app_state.dataset.well_paths:
             continue
         df = app._get_rows(lbl)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
@@ -161,7 +161,7 @@ def draw_ks_cdf(app, group_vals: List[Tuple[str, List[float]]], tp_str: str, wel
     try:
         val_col = app._stats_active_val_col()
     except Exception:
-        val_col = getattr(app, "_active_val_col", "")
+        val_col = app._app_state.channel.active_val_col
     for (name, vals), color in zip(group_vals, colors):
         if not vals:
             continue
@@ -195,7 +195,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         app._stats_write_result("Invalid timepoint.")
         return
 
-    groups = [g for g in app._stats_groups if g.wells]
+    groups = [g for g in app._app_state.stats.groups if g.wells]
     if len(groups) < 2:
         app._stats_write_result("Define at least 2 non-empty groups to run a test.")
         return
@@ -218,11 +218,11 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     try:
         threshold = float(app._stats_active_threshold())
     except Exception:
-        threshold = float(getattr(app, "_threshold", 0.0))
+        threshold = float(app._app_state.channel.threshold)
     try:
         val_col = app._stats_active_val_col()
     except Exception:
-        val_col = getattr(app, "_active_val_col", "")
+        val_col = app._app_state.channel.active_val_col
     try:
         statistic = app._stats_active_statistic()
     except Exception:
@@ -242,7 +242,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             )
         else:
             vals = collect_group_values_fn(g, target_t)
-            n_wells = len([w for w in g.wells if w in app._well_paths])
+            n_wells = len([w for w in g.wells if w in app._app_state.dataset.well_paths])
             if n_wells == 1:
                 empty_msg = (
                     f"Group '{g.name}' (1 well, FOV-aggregated) has no "
@@ -270,7 +270,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     # of replication.
     solo_groups = [
         g.name for g in groups
-        if len([w for w in g.wells if w in app._well_paths]) == 1
+        if len([w for w in g.wells if w in app._app_state.dataset.well_paths]) == 1
     ]
     if is_ks:
         sample_units = "per-cell values"
@@ -412,22 +412,22 @@ def stats_active_group(app):
 
 
 def stats_apply_drag(app, tok: str) -> None:
-    if tok in app._stats_drag_visited:
+    if tok in app._app_state.stats.drag_visited:
         return
-    app._stats_drag_visited.add(tok)
+    app._app_state.stats.drag_visited.add(tok)
     grp = stats_active_group(app)
-    if grp is None or tok not in app._well_paths:
+    if grp is None or tok not in app._app_state.dataset.well_paths:
         return
     rset = next((r for r in app._rep_sets_loaded() if tok in r.wells), None)
     if rset is not None:
-        if app._stats_drag_adding:
+        if app._app_state.stats.drag_adding:
             if rset not in grp.members:
                 grp.members.append(rset)
         else:
             if rset in grp.members:
                 grp.members.remove(rset)
     else:
-        if app._stats_drag_adding:
+        if app._app_state.stats.drag_adding:
             if tok not in grp.solo_wells:
                 grp.solo_wells.append(tok)
         else:
@@ -443,18 +443,18 @@ def stats_refresh_map(app) -> None:
     plate = getattr(app, "_stats_map_plate", None)
     if plate is None:
         return
-    avail = list(app._well_paths.keys())
+    avail = list(app._app_state.dataset.well_paths.keys())
     plate.setEnabledWells(avail)
     tok_color: dict = {}
-    for grp in app._stats_groups:
+    for grp in app._app_state.stats.groups:
         c = app._rank_color_rset(grp)  # decision #1: colour by well-position rank
         for w in grp.wells:
-            if w in app._well_paths:
+            if w in app._app_state.dataset.well_paths:
                 tok_color[w] = c   # last group wins — matches the other plates
     plate.clearWellColors()
     plate.setWellColors(tok_color)
     grp = stats_active_group(app)
-    active = [w for w in grp.wells if w in app._well_paths] if grp else []
+    active = [w for w in grp.wells if w in app._app_state.dataset.well_paths] if grp else []
     plate.setSelectedWellIds(active)
 
 
@@ -466,14 +466,14 @@ def stats_refresh_group_list(app) -> None:
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
     _clear_layout(layout)
-    if not app._stats_groups:
+    if not app._app_state.stats.groups:
         lbl = QLabel("No groups.  Click + Add to create one.")
         lbl.setObjectName("Muted")
         layout.addWidget(lbl)
         stats_refresh_map(app)
         return
-    for gi, grp in enumerate(app._stats_groups):
-        is_sel = (gi == app._stats_active_grp)
+    for gi, grp in enumerate(app._app_state.stats.groups):
+        is_sel = (gi == app._app_state.stats.active_grp)
         color = app._rank_color_rset(grp)  # decision #1: colour by well-position rank
         card = QFrame()
         card.setObjectName("StatsGroupCard")

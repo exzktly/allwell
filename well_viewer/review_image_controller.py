@@ -56,12 +56,12 @@ def on_review_image_click(app, event, logger) -> None:
     fov = fov_menu.currentText().strip() if fov_menu is not None else ""
     tp_cb = getattr(app, "_review_image_tp_cb", None)
     tp = tp_cb.currentText().strip() if tp_cb is not None else ""
-    if getattr(app, "_review_image_include_edit_mode", False):
+    if app._app_state.review_image.include_edit_mode:
         app._set_review_cell_included(fov, tp, str(nid), "0")
         app._set_status(f"Set Included=0 for nucleus {nid} at FOV {fov}, TP {tp}.")
         return
-    app._review_image_selected_nucleus = nid
-    app._review_image_preserve_view_on_refresh = True
+    app._app_state.review_image.selected_nucleus = nid
+    app._app_state.review_image.preserve_view_on_refresh = True
     app._refresh_review_image()
     app._select_review_csv_row_for_cell(fov, tp, str(nid))
 
@@ -90,7 +90,7 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
     try:
         fov_n, tp_n, nucleus_n = app._review_row_keys({"fov": fov, "tp": tp, "nucleus_id": nucleus_id})
         app._review_csv_lookup_context = {
-            "well": str(app._preview_selected_well or ""),
+            "well": str(app._app_state.preview.selected_well or ""),
             "fov": str(fov_n),
             "tp": str(tp_n),
             "nucleus_id": str(nucleus_n),
@@ -104,26 +104,26 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
         )
         logger.info(
             "Review-image click -> Review CSV lookup: well=%s fov=%s tp=%s nucleus_id=%s",
-            app._preview_selected_well, fov, tp, nucleus_id,
+            app._app_state.preview.selected_well, fov, tp, nucleus_id,
         )
         # Ensure the previewed well is in the sidebar selection so the tab-switch
         # refresh loads its CSV rows — Review Image's preview well is independent
         # of _selected_wells, and _refresh_review_csv reads only _selected_wells.
-        preview_well = app._preview_selected_well
+        preview_well = app._app_state.preview.selected_well
         if (
             preview_well
-            and preview_well in getattr(app, "_well_paths", {})
-            and preview_well not in app._selected_wells
+            and preview_well in app._app_state.dataset.well_paths
+            and preview_well not in app._app_state.selection.selected_wells
         ):
             # Go through the single mutation helper so _prev_sel is
             # snapshotted properly. commit=False because we're about to
             # switch tabs anyway — the tab-change handler will trigger
             # the redraw.
             if hasattr(app, "_set_selected_wells"):
-                new_sel = set(app._selected_wells) | {preview_well}
+                new_sel = set(app._app_state.selection.selected_wells) | {preview_well}
                 app._set_selected_wells(new_sel, commit=False)
             else:
-                app._selected_wells.add(preview_well)
+                app._app_state.selection.selected_wells.add(preview_well)
                 if hasattr(app, "_refresh_sidebar_map"):
                     app._refresh_sidebar_map()
         # If the Review CSV tab is already built, pre-point its FOV/TP combos
@@ -236,9 +236,9 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
     row = _table_row_dict(table, row_idx)
     fov, tp, nid = app._review_row_keys(row)
     well_tok = str(row.get("well", "")).strip()
-    key = well_tok if well_tok in app._well_paths else None
-    if key is None and app._selected_wells:
-        key = sorted(app._selected_wells, key=app._parse_rc)[0]
+    key = well_tok if well_tok in app._app_state.dataset.well_paths else None
+    if key is None and app._app_state.selection.selected_wells:
+        key = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)[0]
     if key is None:
         return
 
@@ -259,11 +259,11 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
     # already draw the yellow highlight.
     if nid:
         try:
-            app._review_image_selected_nucleus = int(float(nid))
+            app._app_state.review_image.selected_nucleus = int(float(nid))
         except Exception:
-            app._review_image_selected_nucleus = None
+            app._app_state.review_image.selected_nucleus = None
 
-    app._preview_selected_well = key
+    app._app_state.preview.selected_well = key
     app._update_preview(key)
 
     # _preview_fov_var drives _refresh_review_image; force the target FOV

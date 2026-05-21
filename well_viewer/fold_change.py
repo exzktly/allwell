@@ -275,9 +275,9 @@ def fold_change_state(app) -> Tuple[bool, str, bool]:
     plot and the export stay in sync.
     """
     return (
-        bool(getattr(app, "_fc_vs_control_on", False)),
-        str(getattr(app, "_fc_control_label", "") or ""),
-        bool(getattr(app, "_fc_vs_t0_on", False)),
+        bool(app._app_state.plot.fc_vs_control_on),
+        str(app._app_state.plot.fc_control_label or ""),
+        bool(app._app_state.plot.fc_vs_t0_on),
     )
 
 
@@ -323,15 +323,15 @@ def resolve_control_wells(app, control_label: str) -> List[str]:
         return []
     if label.endswith(_WELL_DISAMBIG_SUFFIX):
         bare = label[: -len(_WELL_DISAMBIG_SUFFIX)]
-        if bare in (getattr(app, "_well_paths", None) or {}):
+        if bare in (app._app_state.dataset.well_paths or {}):
             return [bare]
         return []
-    for s in (getattr(app, "_selections", []) or []):
+    for s in (app._app_state.selection.selections or []):
         if s.get("name") == label:
-            wells = [w for w in (s.get("wells") or []) if w in app._well_paths]
+            wells = [w for w in (s.get("wells") or []) if w in app._app_state.dataset.well_paths]
             if wells:
                 return wells
-    if label in (getattr(app, "_well_paths", None) or {}):
+    if label in (app._app_state.dataset.well_paths or {}):
         return [label]
     return []
 
@@ -386,10 +386,10 @@ def _label_to_replicate_set(app, label: str):
     """
     if not label:
         return None
-    for s in (getattr(app, "_selections", []) or []):
+    for s in (app._app_state.selection.selections or []):
         if s.get("name") == label:
             wells = [w for w in (s.get("wells") or [])
-                     if w in app._well_paths]
+                     if w in app._app_state.dataset.well_paths]
             if not wells:
                 return None
             from well_viewer.batch_models import ReplicateSet
@@ -453,7 +453,7 @@ def member_mean_series(
                 out[t] = float(gm)
         return out
     # Bare well token.
-    if label in (getattr(app, "_well_paths", None) or {}):
+    if label in (app._app_state.dataset.well_paths or {}):
         pts = app._aggregate_well(
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
@@ -624,7 +624,7 @@ def member_stats_series(
                 ) else 0.0
                 out[t] = (float(gm), spread)
         return out
-    if label in (getattr(app, "_well_paths", None) or {}):
+    if label in (app._app_state.dataset.well_paths or {}):
         pts = app._aggregate_well(
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,

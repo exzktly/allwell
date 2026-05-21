@@ -809,115 +809,6 @@ class WellViewerApp(QWidget):
         if data_path is not None:
             QTimer.singleShot(100, lambda: self._load_path(data_path))
 
-    # ── Domain-state shims (runtime_app teardown) ────────────────────────────
-    # Channel/ratio/threshold (Phase 1), plate selection (Phase 2), dataset
-    # (Phase 3), plot options (Phase 4), statistics (Phase 7) and the
-    # review-image / preview state (Phase 8) moved into ``self._app_state`` —
-    # typed ChannelState / SelectionState / DatasetState / PlotState /
-    # StatsState / ReviewImageState / PreviewState. These properties forward
-    # the legacy ``self._*`` names so existing call sites are untouched; the
-    # state objects are the single source of truth — no duplicated storage.
-    # Generated from one factory rather than ~79 hand-copied property pairs.
-    # Deleted once call sites read the state objects directly.
-
-    def _app_state_shim(_domain: str, _field: str) -> property:
-        def _get(self):
-            return getattr(getattr(self._app_state, _domain), _field)
-
-        def _set(self, value) -> None:
-            setattr(getattr(self._app_state, _domain), _field, value)
-
-        return property(_get, _set)
-
-    _fluor_channels = _app_state_shim("channel", "fluor_channels")
-    _review_image_channels = _app_state_shim("channel", "review_image_channels")
-    _smfish_channels = _app_state_shim("channel", "smfish_channels")
-    _active_channel = _app_state_shim("channel", "active_channel")
-    _active_image_channel = _app_state_shim("channel", "active_image_channel")
-    _active_metric = _app_state_shim("channel", "active_metric")
-    _active_val_col = _app_state_shim("channel", "active_val_col")
-    _ratio_metrics = _app_state_shim("channel", "ratio_metrics")
-    _ratio_index = _app_state_shim("channel", "ratio_index")
-    _threshold_min = _app_state_shim("channel", "threshold_min")
-    _threshold_max = _app_state_shim("channel", "threshold_max")
-    _threshold = _app_state_shim("channel", "threshold")
-    _threshold_range_cache = _app_state_shim("channel", "threshold_range_cache")
-
-    _selected_wells = _app_state_shim("selection", "selected_wells")
-    _last_sel = _app_state_shim("selection", "last_sel")
-    _prev_sel = _app_state_shim("selection", "prev_sel")
-    _active_solo_wells = _app_state_shim("selection", "active_solo_wells")
-    _selections = _app_state_shim("selection", "selections")
-    _current_selection_id = _app_state_shim("selection", "current_selection_id")
-    _selections_v2_writes_disabled = _app_state_shim(
-        "selection", "v2_writes_disabled")
-    _plate_commit_pending = _app_state_shim("selection", "plate_commit_pending")
-
-    _data_dir = _app_state_shim("dataset", "data_dir")
-    _in_dir = _app_state_shim("dataset", "in_dir")
-    _tmp_dir = _app_state_shim("dataset", "tmp_dir")
-    _well_paths = _app_state_shim("dataset", "well_paths")
-    _cache = _app_state_shim("dataset", "cache")
-    _all_timepoints_cache = _app_state_shim("dataset", "all_timepoints_cache")
-    _all_fovs_cache = _app_state_shim("dataset", "all_fovs_cache")
-    _pipeline_info = _app_state_shim("dataset", "pipeline_info")
-    _tok_to_label = _app_state_shim("dataset", "tok_to_label")
-    _well_labels = _app_state_shim("dataset", "well_labels")
-    _fov_tp_extractor = _app_state_shim("dataset", "fov_tp_extractor")
-    _persistence_doc = _app_state_shim("dataset", "persistence_doc")
-
-    _use_sem = _app_state_shim("plot", "use_sem")
-    _use_fov_replicates = _app_state_shim("plot", "use_fov_replicates")
-    _legend_visible = _app_state_shim("plot", "legend_visible")
-    _bar_order = _app_state_shim("plot", "bar_order")
-    _line_order_rsets = _app_state_shim("plot", "line_order_rsets")
-    _line_order_wells = _app_state_shim("plot", "line_order_wells")
-    _fc_vs_control_on = _app_state_shim("plot", "fc_vs_control_on")
-    _fc_control_label = _app_state_shim("plot", "fc_control_label")
-    _fc_vs_t0_on = _app_state_shim("plot", "fc_vs_t0_on")
-    _fc_dirty_scopes = _app_state_shim("plot", "fc_dirty_scopes")
-
-    _stats_groups = _app_state_shim("stats", "groups")
-    _stats_active_grp = _app_state_shim("stats", "active_grp")
-    _stats_cache = _app_state_shim("stats", "cache")
-    _stats_drag_adding = _app_state_shim("stats", "drag_adding")
-    _stats_drag_visited = _app_state_shim("stats", "drag_visited")
-
-    _review_image_selected_nucleus = _app_state_shim("review_image", "selected_nucleus")
-    _review_image_nucleus_to_iid = _app_state_shim("review_image", "nucleus_to_iid")
-    _review_image_include_edit_mode = _app_state_shim("review_image", "include_edit_mode")
-    _review_image_box_anchor = _app_state_shim("review_image", "box_anchor")
-    _review_image_box_active = _app_state_shim("review_image", "box_active")
-    _review_image_zoom = _app_state_shim("review_image", "zoom")
-    _review_image_pan_x = _app_state_shim("review_image", "pan_x")
-    _review_image_pan_y = _app_state_shim("review_image", "pan_y")
-    _review_image_preserve_view_on_refresh = _app_state_shim("review_image", "preserve_view_on_refresh")
-    _review_image_dragging = _app_state_shim("review_image", "dragging")
-    _review_image_drag_moved = _app_state_shim("review_image", "drag_moved")
-    _review_image_drag_last_xy = _app_state_shim("review_image", "drag_last_xy")
-    _review_image_base_pil = _app_state_shim("review_image", "base_pil")
-    _review_image_is_tif = _app_state_shim("review_image", "is_tif")
-    _review_image_last_fluor_arr = _app_state_shim("review_image", "last_fluor_arr")
-    _review_image_lut_by_channel = _app_state_shim("review_image", "lut_by_channel")
-    _review_image_frame_cache = _app_state_shim("review_image", "frame_cache")
-    _review_image_include_cache = _app_state_shim("review_image", "include_cache")
-    _review_image_threshold_map_cache = _app_state_shim("review_image", "threshold_map_cache")
-    _review_image_override_version = _app_state_shim("review_image", "override_version")
-    _review_image_show_raw = _app_state_shim("review_image", "show_raw")
-    _review_image_binary_mask = _app_state_shim("review_image", "binary_mask")
-    _review_image_show_outline = _app_state_shim("review_image", "show_outline")
-    _review_image_boundary_color = _app_state_shim("review_image", "boundary_color")
-    _review_image_selected_color = _app_state_shim("review_image", "selected_color")
-    _review_image_tint_color = _app_state_shim("review_image", "tint_color")
-
-    _preview_selected_well = _app_state_shim("preview", "selected_well")
-    _preview_fluor = _app_state_shim("preview", "fluor")
-    _preview_overlay = _app_state_shim("preview", "overlay")
-    _preview_mask = _app_state_shim("preview", "mask")
-    _montage_photos = _app_state_shim("preview", "montage_photos")
-
-    del _app_state_shim
-
     def __getattr__(self, name: str) -> object:
         """Forward a legacy ``app._<widget>`` read to the WidgetRegistry.
 
@@ -972,18 +863,18 @@ class WellViewerApp(QWidget):
         Used by aggregate_with_threshold_df to apply consistent gating across all channels.
         """
         gates = {}
-        for channel in self._fluor_channels:
+        for channel in self._app_state.channel.fluor_channels:
             gates[channel] = self._get_fluor_gate(channel)
         return gates
 
     def _get_thresh_frac_on(self, channel: Optional[str] = None) -> float:
         """Get ThreshFracOn threshold. Uses active channel if not specified."""
         if channel is None:
-            channel = self._active_channel
+            channel = self._app_state.channel.active_channel
         # _redraw can fire before the cell-gating tab is built (e.g. from
         # sidebar releases during early load); fall back to the default.
         if not hasattr(self, "_cell_gating_thresh_frac_edits"):
-            return self._threshold
+            return self._app_state.channel.threshold
         from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_thresh_frac_on
         return cell_gating_get_thresh_frac_on(self, channel)
 
@@ -1388,7 +1279,7 @@ class WellViewerApp(QWidget):
     def _stats_update_tp_menu(self) -> None:
         """Populate the timepoint, channel, and statistic dropdowns."""
         all_tps: set = set()
-        for label in self._well_paths:
+        for label in self._app_state.dataset.well_paths:
             df = self._get_rows(label)
             if df is None or "timepoint_hours" not in df.columns:
                 continue
@@ -1403,11 +1294,11 @@ class WellViewerApp(QWidget):
         # Channel dropdown — list every measurement column so the user can pick
         # any value to compare. Mirrors the scatter-tab dropdown construction
         # so labels and the _col_for_scatter_entry mapping are reused.
-        channels = list(self._fluor_channels) if self._fluor_channels else []
+        channels = list(self._app_state.channel.fluor_channels) if self._app_state.channel.fluor_channels else []
         ch_options: List[str] = []
         for ch in channels:
             ch_options.append(ch)
-            if ch in self._smfish_channels:
+            if ch in self._app_state.channel.smfish_channels:
                 ch_options.append(f"{ch} (spots)")
         ch_options.extend(self._ratio_dropdown_labels())
         if not ch_options:
@@ -1420,7 +1311,7 @@ class WellViewerApp(QWidget):
             else:
                 # Default to the active channel when possible to match the
                 # bar/line plots' current selection.
-                active = self._active_channel if self._active_channel in ch_options else ch_options[0]
+                active = self._app_state.channel.active_channel if self._app_state.channel.active_channel in ch_options else ch_options[0]
                 self._stats_channel_cb.setCurrentText(active)
         # Channel may now resolve to a ratio key — refresh the Property
         # combo's item set accordingly.
@@ -1467,19 +1358,19 @@ class WellViewerApp(QWidget):
     def _stats_active_channel_entry(self) -> str:
         cb = getattr(self, "_stats_channel_cb", None)
         if cb is None:
-            return self._active_channel or ""
+            return self._app_state.channel.active_channel or ""
         text = cb.currentText().strip()
-        return text if text and text != "—" else (self._active_channel or "")
+        return text if text and text != "—" else (self._app_state.channel.active_channel or "")
 
     def _stats_active_val_col(self) -> str:
         """Resolve the selected channel-dropdown entry to a value-column key."""
         entry = self._stats_active_channel_entry()
         if not entry:
-            return self._active_val_col
+            return self._app_state.channel.active_val_col
         try:
             return self._col_for_scatter_entry(entry)
         except Exception:
-            return self._active_val_col
+            return self._app_state.channel.active_val_col
 
     def _stats_active_threshold(self) -> float:
         """Use the per-channel ThreshFracOn from the Cell Gating tab.
@@ -1489,12 +1380,12 @@ class WellViewerApp(QWidget):
         """
         val_col = self._stats_active_val_col()
         if is_ratio_key(val_col):
-            return float(self._threshold)
+            return float(self._app_state.channel.threshold)
         # val_col is "<channel>_mean_intensity" or "<channel>_smfish_count".
         if "_" in val_col:
             channel = val_col.split("_", 1)[0]
             return float(self._get_thresh_frac_on(channel))
-        return float(self._get_thresh_frac_on(self._active_channel))
+        return float(self._get_thresh_frac_on(self._app_state.channel.active_channel))
 
     def _stats_active_statistic(self) -> str:
         cb = getattr(self, "_stats_statistic_cb", None)
@@ -1761,8 +1652,8 @@ class WellViewerApp(QWidget):
             # built by ``build_replicate_groups_centre`` updates via
             # ``_groups_centre_refresh``.
             if name == "Groups":
-                if getattr(self, "_current_selection_id", None) is not None:
-                    self._current_selection_id = None
+                if self._app_state.selection.current_selection_id is not None:
+                    self._app_state.selection.current_selection_id = None
                     self._groups_centre_refresh()
                     self._refresh_sidebar_map()
                 if hasattr(self, "_rep_active_group_lbl"):
@@ -1788,7 +1679,7 @@ class WellViewerApp(QWidget):
                 cell_gating_load_threshold_frac_on,
             )
             build_cell_gating_tab(self._ctx, frame)
-            if self._well_paths:
+            if self._app_state.dataset.well_paths:
                 try:
                     cell_gating_load_cell_areas(self)
                     self._load_gating_from_pipeline_info()
@@ -1818,17 +1709,17 @@ class WellViewerApp(QWidget):
         plate = getattr(self, "_rep_map_plate", None)
         if plate is None:
             return
-        plate.setEnabledWells(list(self._well_paths.keys()))
+        plate.setEnabledWells(list(self._app_state.dataset.well_paths.keys()))
         colors: Dict[str, str] = {}
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             c = self._sel_color(s)
             for tok in (s.get("wells") or []):
-                if tok in self._well_paths:
+                if tok in self._app_state.dataset.well_paths:
                     colors[tok] = c
         plate.clearWellColors()
         plate.setWellColors(colors)
-        cur = self._sel_by_id(getattr(self, "_current_selection_id", None))
-        cur_wells = [w for w in (cur.get("wells") or []) if w in self._well_paths] if cur else []
+        cur = self._sel_by_id(self._app_state.selection.current_selection_id)
+        cur_wells = [w for w in (cur.get("wells") or []) if w in self._app_state.dataset.well_paths] if cur else []
         plate.setSelectedWellIds(cur_wells)
 
     def _rep_panel_refresh(self) -> None:
@@ -1838,7 +1729,7 @@ class WellViewerApp(QWidget):
 
     def _rep_select(self, idx: int) -> None:
         # Legacy bridge: select the idx-th rep_set-source selection.
-        sels = [s for s in self._selections if s.get("source") == "rep_set"]
+        sels = [s for s in self._app_state.selection.selections if s.get("source") == "rep_set"]
         if 0 <= idx < len(sels):
             self._sel_select(sels[idx].get("id"))
 
@@ -1849,10 +1740,10 @@ class WellViewerApp(QWidget):
         dlg.setModal(True)
         v = QVBoxLayout(dlg)
         v.addWidget(QLabel("Name:"))
-        name_edit = QLineEdit(f"Rep {len(self._selections)+1}")
+        name_edit = QLineEdit(f"Rep {len(self._app_state.selection.selections)+1}")
         v.addWidget(name_edit)
         v.addWidget(QLabel("Select wells:"))
-        available = sorted(self._well_paths.keys(),
+        available = sorted(self._app_state.dataset.well_paths.keys(),
                            key=lambda l: self._parse_rc(l))
         lb = _wells_multiselect_listbox(dlg, available)
         v.addWidget(lb, 1)
@@ -1870,7 +1761,7 @@ class WellViewerApp(QWidget):
             if not sel:
                 QMessageBox.warning(dlg, "No wells", "Select at least one well.")
                 return
-            name = name_edit.text().strip() or f"Rep {len(self._selections) + 1}"
+            name = name_edit.text().strip() or f"Rep {len(self._app_state.selection.selections) + 1}"
             dlg.accept()
             # _sel_add enforces well-exclusivity (the new group takes the wells).
             self._sel_add(name, list(sel), replicates=[list(sel)], source="rep_set")
@@ -1880,11 +1771,11 @@ class WellViewerApp(QWidget):
         dlg.exec()
 
     def _rep_clear_all(self) -> None:
-        if not self._selections:
+        if not self._app_state.selection.selections:
             return
         resp = QMessageBox.question(
             self, "Clear all groups?",
-            f"Remove all {len(self._selections)} group(s)?",
+            f"Remove all {len(self._app_state.selection.selections)} group(s)?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if resp == QMessageBox.Yes:
@@ -1909,8 +1800,8 @@ class WellViewerApp(QWidget):
         _v(self)
 
     def _labels_clear_all(self) -> None:
-        if self._well_labels:
-            self._well_labels.clear()
+        if self._app_state.dataset.well_labels:
+            self._app_state.dataset.well_labels.clear()
             self._label_panel_refresh()
             self._invalidate_stats_cache()
 
@@ -1934,7 +1825,7 @@ class WellViewerApp(QWidget):
         if grid_sel:
             selected = sorted(grid_sel, key=self._parse_rc)
         else:
-            selected = sorted(self._selected_wells, key=self._parse_rc)
+            selected = sorted(self._app_state.selection.selected_wells, key=self._parse_rc)
         if not selected:
             self._set_status(
                 f"Add {where.title()}: no wells selected — click a row/column "
@@ -1952,12 +1843,12 @@ class WellViewerApp(QWidget):
             return
 
         for tok in selected:
-            current = self._well_labels.get(tok, "")
+            current = self._app_state.dataset.well_labels.get(tok, "")
             new = (text + current) if where == "prefix" else (current + text)
             if new:
-                self._well_labels[tok] = new
+                self._app_state.dataset.well_labels[tok] = new
             else:
-                self._well_labels.pop(tok, None)
+                self._app_state.dataset.well_labels.pop(tok, None)
 
         self._invalidate_stats_cache()
         self._label_panel_refresh()
@@ -1971,22 +1862,22 @@ class WellViewerApp(QWidget):
     def _labels_add_suffix(self) -> None:
         self._labels_apply_affix(where="suffix")
 
-    # ── unified-model (app._selections) — the in-memory source of truth ──────
+    # ── unified-model (app._app_state.selection.selections) — the in-memory source of truth ──────
 
     def _sel_by_id(self, sid):
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s.get("id") == sid:
                 return s
         return None
 
     def _sel_index_of(self, sid) -> int:
-        for i, s in enumerate(self._selections):
+        for i, s in enumerate(self._app_state.selection.selections):
             if s.get("id") == sid:
                 return i
         return -1
 
     def _sel_id_for_well(self, tok):
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if tok in (s.get("wells") or []):
                 return s.get("id")
         return None
@@ -1994,7 +1885,7 @@ class WellViewerApp(QWidget):
     def _sel_strip_wells(self, wells, *, keep_id=None) -> None:
         """A well belongs to ≤1 group: remove ``wells`` from every selection but
         ``keep_id``, pruning their replicates to the survivors. Also drop the
-        same wells from ``self._selected_wells`` so the plotting tabs don't
+        same wells from ``self._app_state.selection.selected_wells`` so the plotting tabs don't
         keep treating them as solo wells once they've joined a group (the
         sidebar plate becomes passive in rep_mode and the user can't update
         the set themselves)."""
@@ -2002,28 +1893,28 @@ class WellViewerApp(QWidget):
         wset = set(wells or [])
         if not wset:
             return
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s.get("id") == keep_id:
                 continue
             nw = [w for w in (s.get("wells") or []) if w not in wset]
             if nw != s.get("wells"):
                 s["wells"] = nw
                 s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(nw))
-        if wset & self._selected_wells:
-            self._selected_wells = self._selected_wells - wset
+        if wset & self._app_state.selection.selected_wells:
+            self._app_state.selection.selected_wells = self._app_state.selection.selected_wells - wset
 
     def _sel_add(self, name=None, wells=None, replicates=None, source="user",
                  *, make_current=True):
         from well_viewer.selections_model import make_selection
-        used_names = {s.get("name") for s in self._selections}
-        used_ids = {s.get("id") for s in self._selections}
+        used_names = {s.get("name") for s in self._app_state.selection.selections}
+        used_ids = {s.get("id") for s in self._app_state.selection.selections}
         sel = make_selection(name=name, wells=wells, replicates=replicates,
                              source=source, used_names=used_names, used_ids=used_ids,
-                             fallback_color_idx=len(self._selections))
+                             fallback_color_idx=len(self._app_state.selection.selections))
         self._sel_strip_wells(sel["wells"], keep_id=sel["id"])
-        self._selections.append(sel)
+        self._app_state.selection.selections.append(sel)
         if make_current:
-            self._current_selection_id = sel["id"]
+            self._app_state.selection.current_selection_id = sel["id"]
         self._rebuild_all()
         return sel["id"]
 
@@ -2032,7 +1923,7 @@ class WellViewerApp(QWidget):
         s = self._sel_by_id(sid)
         if s is None:
             return
-        new = _uq(name, {x.get("name") for x in self._selections if x.get("id") != sid})
+        new = _uq(name, {x.get("name") for x in self._app_state.selection.selections if x.get("id") != sid})
         if new == s.get("name"):
             return
         s["name"] = new
@@ -2042,11 +1933,11 @@ class WellViewerApp(QWidget):
         i = self._sel_index_of(sid)
         if i < 0:
             return
-        self._selections.pop(i)
-        if self._current_selection_id == sid:
-            self._current_selection_id = (
-                self._selections[min(i, len(self._selections) - 1)].get("id")
-                if self._selections else None)
+        self._app_state.selection.selections.pop(i)
+        if self._app_state.selection.current_selection_id == sid:
+            self._app_state.selection.current_selection_id = (
+                self._app_state.selection.selections[min(i, len(self._app_state.selection.selections) - 1)].get("id")
+                if self._app_state.selection.selections else None)
         self._rebuild_all()
 
     def _sel_set_hidden(self, sid, hidden, *, light=False) -> None:
@@ -2122,27 +2013,27 @@ class WellViewerApp(QWidget):
         self._rebuild_all()
 
     def _sel_select(self, sid) -> None:
-        if sid not in {s.get("id") for s in self._selections}:
+        if sid not in {s.get("id") for s in self._app_state.selection.selections}:
             return
-        if sid == getattr(self, "_current_selection_id", None):
+        if sid == self._app_state.selection.current_selection_id:
             return
-        self._current_selection_id = sid
+        self._app_state.selection.current_selection_id = sid
         self._groups_centre_refresh()
         self._refresh_sidebar_map()
 
     def _sel_reorder(self, ids) -> None:
-        by_id = {s.get("id"): s for s in self._selections}
+        by_id = {s.get("id"): s for s in self._app_state.selection.selections}
         new = [by_id[i] for i in ids if i in by_id]
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s not in new:
                 new.append(s)
-        if new != self._selections:
-            self._selections = new
+        if new != self._app_state.selection.selections:
+            self._app_state.selection.selections = new
             self._rebuild_all()
 
     def _sel_clear_all(self) -> None:
-        self._selections = []
-        self._current_selection_id = None
+        self._app_state.selection.selections = []
+        self._app_state.selection.current_selection_id = None
         self._rebuild_all()
 
     def _sel_duplicate(self, sid):
@@ -2158,7 +2049,7 @@ class WellViewerApp(QWidget):
         helpers already enforce this (edited group wins); this is a safety net
         and cleans up pre-existing overlaps from old saved data."""
         seen: set = set()
-        for s in getattr(self, "_selections", []):
+        for s in self._app_state.selection.selections:
             if not isinstance(s, dict):
                 continue
             kept = []
@@ -2203,7 +2094,7 @@ class WellViewerApp(QWidget):
         lbl = getattr(self, "_rep_active_group_lbl", None)
         if lbl is None:
             return
-        sid = getattr(self, "_current_selection_id", None)
+        sid = self._app_state.selection.current_selection_id
         sel = self._sel_by_id(sid) if sid else None
         try:
             import theme as _theme
@@ -2220,7 +2111,7 @@ class WellViewerApp(QWidget):
                 )
             return
         name = str(sel.get("name") or "(unnamed)")
-        n_wells = sum(1 for w in (sel.get("wells") or []) if w in self._well_paths)
+        n_wells = sum(1 for w in (sel.get("wells") or []) if w in self._app_state.dataset.well_paths)
         lbl.setText(f"{name}  ·  {n_wells} well(s)")
         if _theme is not None:
             lbl.setStyleSheet(
@@ -2421,7 +2312,7 @@ class WellViewerApp(QWidget):
 
     def _import_selections_from_json(self) -> None:
         """Import a selections JSON file (the same schema used by Save) and
-        merge it into ``self._selections``. Existing names get a ``_v2``
+        merge it into ``self._app_state.selection.selections``. Existing names get a ``_v2``
         suffix on collision so nothing already loaded is overwritten."""
         import json
         from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -2511,7 +2402,7 @@ class WellViewerApp(QWidget):
         rank colour of its lowest well."""
         name = getattr(rset, "name", None)
         if name:
-            for s in self._selections:
+            for s in self._app_state.selection.selections:
                 if s.get("name") == name:
                     return self._sel_color(s)
         return self._rank_color_wells(getattr(rset, "wells", None))
@@ -2519,7 +2410,7 @@ class WellViewerApp(QWidget):
     def _rep_color_for(self, lbl: str) -> Optional[str]:
         """Return the colour for the selection that owns *lbl*, or None if the
         well is not in any selection."""
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if lbl in (s.get("wells") or []):
                 return self._sel_color(s)
         return None
@@ -2594,7 +2485,7 @@ class WellViewerApp(QWidget):
 
         # Clear previous content
         _clear_layout(self._montage_inner.layout())
-        self._montage_photos.clear()
+        self._app_state.preview.montage_photos.clear()
         self._montage_fluor_arrays         = []
         self._montage_overlay_arrays     = []
         self._montage_fluor_display_arrays = []   # cleared on new load
@@ -2602,7 +2493,7 @@ class WellViewerApp(QWidget):
         self._montage_th_overlay_lbls    = []
         self._montage_th_cancel          = True   # no thread running initially
 
-        well = self._preview_selected_well
+        well = self._app_state.preview.selected_well
         if well is None:
             self._montage_status.setText("Select a well in the left panel.")
             return
@@ -2620,7 +2511,7 @@ class WellViewerApp(QWidget):
         # Filter refs to this FOV. Prefer pre-generated tophat frames from the
         # out directory for each timepoint, with raw fluor as fallback.
         raw_by_tp = {
-            tp: ref for (f, tp), ref in sorted(self._preview_fluor.items())
+            tp: ref for (f, tp), ref in sorted(self._app_state.preview.fluor.items())
             if f == fov
         }
         tophat_refs = getattr(self, "_preview_tophat_fluor", {})
@@ -2636,7 +2527,7 @@ class WellViewerApp(QWidget):
         fluor_refs = [(tp, ref) for tp, ref in fluor_refs if ref is not None]
         _used_tophat_as_primary = bool(fluor_refs) and all(tp in tophat_by_tp for tp, _ in fluor_refs)
 
-        overlay_refs = [(tp, ref) for (f, tp), ref in sorted(self._preview_overlay.items())
+        overlay_refs = [(tp, ref) for (f, tp), ref in sorted(self._app_state.preview.overlay.items())
                         if f == fov]
         # Align by timepoint (use all TPs from GFP; overlay may be subset)
         ov_map = dict(overlay_refs)
@@ -2711,7 +2602,7 @@ class WellViewerApp(QWidget):
     def _draw_montage_thumbs(self, tp_list: list) -> None:
         """Render fluorescence + overlay thumbnail pairs, one column per timepoint."""
         _clear_layout(self._montage_inner.layout())
-        self._montage_photos.clear()
+        self._app_state.preview.montage_photos.clear()
         # Overlay label refs must be rebuilt each time since all widgets are destroyed
         self._montage_th_overlay_lbls = []
 
@@ -2784,7 +2675,7 @@ class WellViewerApp(QWidget):
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(len(tp_list) + 1, 1)
 
-        channel_row_lbl = QLabel(self._active_image_channel.upper())
+        channel_row_lbl = QLabel(self._app_state.channel.active_image_channel.upper())
         channel_row_lbl.setObjectName("Muted")
         channel_row_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         grid.addWidget(channel_row_lbl, 1, 0)
@@ -2878,7 +2769,7 @@ class WellViewerApp(QWidget):
                 painter.end()
                 pix_fluor = pm
             if pix_fluor:
-                self._montage_photos.append(pix_fluor)
+                self._app_state.preview.montage_photos.append(pix_fluor)
                 lbl_fluor = QLabel()
                 lbl_fluor.setPixmap(pix_fluor)
                 lbl_fluor.setCursor(Qt.CrossCursor)
@@ -2894,7 +2785,7 @@ class WellViewerApp(QWidget):
                 fluor_cell_layout.addWidget(lbl_fluor)
                 _install_montage_events(lbl_fluor, is_fluor=True)
             else:
-                miss = QLabel(f"{self._active_image_channel.upper()}\nunavail")
+                miss = QLabel(f"{self._app_state.channel.active_image_channel.upper()}\nunavail")
                 miss.setObjectName("Muted")
                 miss.setAlignment(Qt.AlignCenter)
                 fluor_cell_layout.addWidget(miss)
@@ -2947,7 +2838,7 @@ class WellViewerApp(QWidget):
                 painter.end()
                 pix_ov = pm
             if pix_ov:
-                self._montage_photos.append(pix_ov)
+                self._app_state.preview.montage_photos.append(pix_ov)
                 lbl_ov = QLabel()
                 lbl_ov.setPixmap(pix_ov)
                 ov_cell_layout.addWidget(lbl_ov)
@@ -3148,9 +3039,9 @@ class WellViewerApp(QWidget):
         return _extract_well_token(label)
 
     def _cleanup_tmp(self) -> None:
-        if self._tmp_dir and self._tmp_dir.exists():
-            shutil.rmtree(self._tmp_dir, ignore_errors=True)
-        self._tmp_dir = None
+        if self._app_state.dataset.tmp_dir and self._app_state.dataset.tmp_dir.exists():
+            shutil.rmtree(self._app_state.dataset.tmp_dir, ignore_errors=True)
+        self._app_state.dataset.tmp_dir = None
 
     def _on_close(self) -> None:
         self._cleanup_tmp()
@@ -3227,19 +3118,19 @@ class WellViewerApp(QWidget):
         except Exception:
             tab_name = ""
         per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        rep_mode = bool(self._selections) and not per_well_tab
+        rep_mode = bool(self._app_state.selection.selections) and not per_well_tab
 
         colors: Dict[str, object] = {}
         if rep_mode:
-            for s in self._selections:
+            for s in self._app_state.selection.selections:
                 full_c = self._sel_color(s)
                 shade = self._mute_color(full_c) if s.get("hidden") else full_c
                 for tok in (s.get("wells") or []):
-                    if tok in self._well_paths:
+                    if tok in self._app_state.dataset.well_paths:
                         colors[tok] = shade
         else:
-            for tok in self._selected_wells:
-                if tok in self._well_paths:
+            for tok in self._app_state.selection.selected_wells:
+                if tok in self._app_state.dataset.well_paths:
                     colors[tok] = self._rank_color_well(tok)
 
         # smFISH suppresses row/col header selection and forces single-well.
@@ -3256,7 +3147,7 @@ class WellViewerApp(QWidget):
             except Exception:
                 smfish = False
 
-        plate.setEnabledWells(list(self._well_paths.keys()))
+        plate.setEnabledWells(list(self._app_state.dataset.well_paths.keys()))
         plate.setSelectionMode("passive" if rep_mode else "select")
         plate.setRowColumnSelectable(not smfish)
         plate.setSingleSelectionMode(smfish and not rep_mode)
@@ -3278,20 +3169,20 @@ class WellViewerApp(QWidget):
             # filter stay in lock-step. Solo wells (not in any group) live
             # in ``_active_solo_wells``.
             visible_wells = {
-                w for s in self._selections if not s.get("hidden")
-                for w in (s.get("wells") or []) if w in self._well_paths
+                w for s in self._app_state.selection.selections if not s.get("hidden")
+                for w in (s.get("wells") or []) if w in self._app_state.dataset.well_paths
             }
             visible_wells |= {
-                w for w in (getattr(self, "_active_solo_wells", set()) or set())
-                if w in self._well_paths
+                w for w in (self._app_state.selection.active_solo_wells or set())
+                if w in self._app_state.dataset.well_paths
             }
             plate.setSelectedWellIds(list(visible_wells))
         else:
-            plate.setSelectedWellIds(list(self._selected_wells))
+            plate.setSelectedWellIds(list(self._app_state.selection.selected_wells))
 
         # Count label / hint
         loaded  = self._rep_sets_loaded() if rep_mode else []
-        n_vis   = len(self._rep_sets_active()) if rep_mode else len(self._selected_wells)
+        n_vis   = len(self._rep_sets_active()) if rep_mode else len(self._app_state.selection.selected_wells)
         n_loaded = len(loaded)
         if hasattr(self, "_sel_count_lbl"):
             if rep_mode:
@@ -3302,20 +3193,20 @@ class WellViewerApp(QWidget):
                 self._sel_count_lbl.setText((f"{n_vis} well{'s' if n_vis != 1 else ''} selected"
                           if n_vis else "No wells selected"))
         if hasattr(self, "_sel_count_chip"):
-            total = len(self._well_paths) if hasattr(self, "_well_paths") else 96
+            total = len(self._app_state.dataset.well_paths) if True else 96
             if rep_mode:
                 # Count *wells* across every visible group + active solo
                 # well, not groups. Earlier we showed group count here,
                 # which read as "1 / 96" for a group with 4 members.
                 active_wells: set = set()
-                for s in self._selections:
+                for s in self._app_state.selection.selections:
                     if s.get("hidden"):
                         continue
                     for w in (s.get("wells") or []):
-                        if w in self._well_paths:
+                        if w in self._app_state.dataset.well_paths:
                             active_wells.add(w)
-                for w in (getattr(self, "_active_solo_wells", set()) or set()):
-                    if w in self._well_paths:
+                for w in (self._app_state.selection.active_solo_wells or set()):
+                    if w in self._app_state.dataset.well_paths:
                         active_wells.add(w)
                 self._sel_count_chip.setText(f"{len(active_wells)} / {total or 96}")
             else:
@@ -3330,7 +3221,7 @@ class WellViewerApp(QWidget):
 
     # ── v2 plate-widget bridge (WellPlateSelector ↔ WellViewerApp state) ──────
     # The left-rail plate is now a single ``widgets.WellPlateSelector`` instead
-    # of an ``app._sidebar_btns`` grid of ``WellButton``s. ``app._selected_wells``
+    # of an ``app._sidebar_btns`` grid of ``WellButton``s. ``app._app_state.selection.selected_wells``
     # stays the source of truth; ``_refresh_sidebar_map_now`` pushes appearance /
     # selection onto the widget, and the handlers below take user actions back.
 
@@ -3351,14 +3242,14 @@ class WellViewerApp(QWidget):
         except Exception:
             tab_name = ""
         per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        if self._selections and not per_well_tab:
+        if self._app_state.selection.selections and not per_well_tab:
             return  # rep-set mode: the plate is passive; its selection is unused
         # Keep the invariant ``_selected_wells ⊆ _well_paths`` — downstream
         # code (e.g. redraw_line_plots → _get_rows) assumes it.
-        new_set = {w for w in ids if w in self._well_paths}
-        if new_set == self._selected_wells:
+        new_set = {w for w in ids if w in self._app_state.dataset.well_paths}
+        if new_set == self._app_state.selection.selected_wells:
             return
-        self._selected_wells = new_set
+        self._app_state.selection.selected_wells = new_set
         self._refresh_sidebar_map()
         # Coalesce the commit. A drag through 96 cells fires this handler
         # 96 times in one event-loop tick; without coalescing each one
@@ -3368,17 +3259,17 @@ class WellViewerApp(QWidget):
         # `_on_sidebar_plate_drag_finished` already commits at drag end
         # too, so this matters mostly for single-click mode (smFISH /
         # Segmentation tabs) where no drag_finished signal fires.
-        if not self._plate_commit_pending:
-            self._plate_commit_pending = True
+        if not self._app_state.selection.plate_commit_pending:
+            self._app_state.selection.plate_commit_pending = True
             QTimer.singleShot(0, self._plate_commit_deferred)
 
     def _plate_commit_deferred(self) -> None:
         """Run the deferred commit scheduled by a paint event. No-op if
         a drag_finished handler already cleared the pending flag (which
         means it already committed in the same tick)."""
-        if not self._plate_commit_pending:
+        if not self._app_state.selection.plate_commit_pending:
             return
-        self._plate_commit_pending = False
+        self._app_state.selection.plate_commit_pending = False
         self._on_plate_sel_change()
 
     def _set_selected_wells(self, new_set, *, commit: bool = True) -> None:
@@ -3391,12 +3282,12 @@ class WellViewerApp(QWidget):
         additions / removals across tabs. Funnel everything through here.
         """
         new_set = set(new_set or [])
-        if new_set == self._selected_wells:
+        if new_set == self._app_state.selection.selected_wells:
             return
         # Snapshot the previous selection so on_plate_sel_change can
         # compute an accurate diff if it runs after this.
-        self._prev_sel = set(self._selected_wells)
-        self._selected_wells = new_set
+        self._app_state.selection.prev_sel = set(self._app_state.selection.selected_wells)
+        self._app_state.selection.selected_wells = new_set
         if hasattr(self, "_refresh_sidebar_map"):
             self._refresh_sidebar_map()
         if commit and hasattr(self, "_on_plate_sel_change"):
@@ -3408,11 +3299,11 @@ class WellViewerApp(QWidget):
         except Exception:
             tab_name = ""
         per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        if self._selections and not per_well_tab:
+        if self._app_state.selection.selections and not per_well_tab:
             return
         # Cancel any pending deferred commit from the paint events that
         # led here — we're committing right now.
-        self._plate_commit_pending = False
+        self._app_state.selection.plate_commit_pending = False
         self._on_plate_sel_change()
 
     _PLOTTING_TABS = frozenset({
@@ -3426,7 +3317,7 @@ class WellViewerApp(QWidget):
         # the plate's three-state painter promotes those wells to the raised
         # + bright (``_paint_lit``) look and the plot refocuses. Other groups
         # stay in the recessed-with-tint state.
-        if well_id not in self._well_paths:
+        if well_id not in self._app_state.dataset.well_paths:
             return
         try:
             tab = self._current_centre_tab()
@@ -3441,19 +3332,19 @@ class WellViewerApp(QWidget):
             if sid is not None:
                 self._sel_toggle_hidden(sid)
                 return
-            if not hasattr(self, "_active_solo_wells"):
-                self._active_solo_wells = set()
-            if well_id in self._active_solo_wells:
-                self._active_solo_wells.discard(well_id)
+            if not True:
+                self._app_state.selection.active_solo_wells = set()
+            if well_id in self._app_state.selection.active_solo_wells:
+                self._app_state.selection.active_solo_wells.discard(well_id)
             else:
-                self._active_solo_wells.add(well_id)
+                self._app_state.selection.active_solo_wells.add(well_id)
             self._refresh_sidebar_map()
             self._on_plate_sel_change()
             return
         # Legacy fallback for non-plotting tabs that still receive
         # wellActivated in rep-set mode (Image Table / smFISH / etc):
         # toggle the clicked group's visibility.
-        if not self._selections:
+        if not self._app_state.selection.selections:
             return
         sid = self._sel_id_for_well(well_id)
         if sid is None:
@@ -3461,7 +3352,7 @@ class WellViewerApp(QWidget):
         self._sel_toggle_hidden(sid)
 
     def _on_sidebar_plate_row_activated(self, row: str) -> None:
-        if self._selections:
+        if self._app_state.selection.selections:
             self._select_row(row)            # rep-set-aware toggle + refresh
         else:
             # The widget already toggled the row and synced ``_selected_wells``
@@ -3469,7 +3360,7 @@ class WellViewerApp(QWidget):
             self._on_plate_sel_change()
 
     def _on_sidebar_plate_col_activated(self, col: str) -> None:
-        if self._selections:
+        if self._app_state.selection.selections:
             self._select_col(col)
         else:
             self._on_plate_sel_change()
@@ -3517,13 +3408,13 @@ class WellViewerApp(QWidget):
         Disambiguates by appending ``[name]`` if two ratios share a label.
         """
         base = ratio.display_label()
-        same_base = [r for r in self._ratio_metrics if r.display_label() == base]
+        same_base = [r for r in self._app_state.channel.ratio_metrics if r.display_label() == base]
         if len(same_base) > 1:
             return f"{base} [{ratio.name}]"
         return base
 
     def _ratio_dropdown_labels(self) -> List[str]:
-        return [self._ratio_label_for(r) for r in self._ratio_metrics]
+        return [self._ratio_label_for(r) for r in self._app_state.channel.ratio_metrics]
 
     def _channel_key_for_label(self, label: str) -> str:
         """Map a dropdown label back to the ``_set_active_channel`` argument.
@@ -3540,23 +3431,23 @@ class WellViewerApp(QWidget):
 
     def _active_channel_label(self) -> str:
         """Return the dropdown label corresponding to the active channel."""
-        if is_ratio_key(self._active_val_col):
-            ratio_name = ratio_name_from_key(self._active_val_col)
-            for r in self._ratio_metrics:
+        if is_ratio_key(self._app_state.channel.active_val_col):
+            ratio_name = ratio_name_from_key(self._app_state.channel.active_val_col)
+            for r in self._app_state.channel.ratio_metrics:
                 if r.name == ratio_name:
                     return self._ratio_label_for(r)
             return ratio_name.upper()
-        return self._active_channel.upper()
+        return self._app_state.channel.active_channel.upper()
 
     def _rebuild_ratio_index(self) -> None:
         """Refresh the resolver-friendly ratio index and any dependent UI."""
-        self._ratio_index = build_ratio_index(self._ratio_metrics)
+        self._app_state.channel.ratio_index = build_ratio_index(self._app_state.channel.ratio_metrics)
         # If the active val_col references a deleted ratio, fall back to the
         # first real fluorescence channel so plots stay valid.
-        if is_ratio_key(self._active_val_col) and self._active_val_col not in self._ratio_index:
-            fallback = (self._fluor_channels or ["gfp"])[0]
-            self._active_channel = fallback
-            self._active_val_col = f"{fallback}_{self._active_metric}"
+        if is_ratio_key(self._app_state.channel.active_val_col) and self._app_state.channel.active_val_col not in self._app_state.channel.ratio_index:
+            fallback = (self._app_state.channel.fluor_channels or ["gfp"])[0]
+            self._app_state.channel.active_channel = fallback
+            self._app_state.channel.active_val_col = f"{fallback}_{self._app_state.channel.active_metric}"
         if hasattr(self, "_update_channel_selector"):
             self._update_channel_selector()
         self._invalidate_stats_cache()
@@ -3568,7 +3459,7 @@ class WellViewerApp(QWidget):
 
     def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None:
         """Replace the ratio list and rebuild the index + UI."""
-        self._ratio_metrics = list(ratios)
+        self._app_state.channel.ratio_metrics = list(ratios)
         self._rebuild_ratio_index()
         panel = getattr(self, "_ratio_panel", None)
         if panel is not None:
@@ -3611,25 +3502,25 @@ class WellViewerApp(QWidget):
             _logger.debug(
                 "[RI-CHSW step 3] set_active_image_channel requested=%r current=%r preserve_review_view=%s",
                 channel,
-                getattr(self, "_active_image_channel", ""),
+                self._app_state.channel.active_image_channel,
                 preserve_review_view,
             )
         if not channel or channel == "—":
             return
-        if channel == self._active_image_channel:
+        if channel == self._app_state.channel.active_image_channel:
             if preserve_review_view:
-                self._review_image_preserve_view_on_refresh = True
-                if self._preview_selected_well:
+                self._app_state.review_image.preserve_view_on_refresh = True
+                if self._app_state.preview.selected_well:
                     self._refresh_review_image()
             if channel_switch_debug:
                 _logger.debug(
                     "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
-                    self._active_image_channel,
+                    self._app_state.channel.active_image_channel,
                     preserve_review_view,
                 )
             return
-        prev_channel = self._active_image_channel
-        self._active_image_channel = channel
+        prev_channel = self._app_state.channel.active_image_channel
+        self._app_state.channel.active_image_channel = channel
         ch_upper = channel.upper()
         if hasattr(self, "_montage_chan_var"):
             self._montage_chan_var.setCurrentText(ch_upper)
@@ -3639,24 +3530,24 @@ class WellViewerApp(QWidget):
             self._mon_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
         if hasattr(self, "_review_lut_chan_lbl"):
             self._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
-        saved_review_lut = self._review_image_lut_by_channel.get(channel)
+        saved_review_lut = self._app_state.review_image.lut_by_channel.get(channel)
         if saved_review_lut and hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             self._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
             self._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
         if preserve_review_view:
-            self._review_image_preserve_view_on_refresh = True
-        if self._preview_selected_well:
+            self._app_state.review_image.preserve_view_on_refresh = True
+        if self._app_state.preview.selected_well:
             if channel_switch_debug:
                 _logger.debug(
                     "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
-                    self._preview_selected_well,
+                    self._app_state.preview.selected_well,
                 )
-            self._update_preview(self._preview_selected_well)
+            self._update_preview(self._app_state.preview.selected_well)
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
                 prev_channel,
-                self._active_image_channel,
+                self._app_state.channel.active_image_channel,
             )
 
     def _on_review_image_channel_selected(self, _e=None) -> None:
@@ -3672,7 +3563,7 @@ class WellViewerApp(QWidget):
             _logger.debug(
                 "[RI-CHSW step 2] review_image_channel_selected ui_value=%r active_before=%r",
                 selected_ui_value,
-                getattr(self, "_active_image_channel", ""),
+                self._app_state.channel.active_image_channel,
             )
         self._set_active_image_channel(selected_ui_value.lower(), preserve_review_view=True)
 
@@ -3721,7 +3612,7 @@ class WellViewerApp(QWidget):
             _logger.debug(
                 "preview_channel_selected ui_value=%r active_before=%r",
                 selected_ui_value,
-                getattr(self, "_active_image_channel", ""),
+                self._app_state.channel.active_image_channel,
             )
         self._set_active_image_channel(selected_ui_value.lower())
 
@@ -3743,7 +3634,7 @@ class WellViewerApp(QWidget):
         # smFISH count only makes sense on smfish channels; gracefully fall
         # back to mean intensity so the user sees a redraw instead of an
         # empty plot.
-        if metric == "smfish_count" and self._active_channel not in self._smfish_channels:
+        if metric == "smfish_count" and self._app_state.channel.active_channel not in self._app_state.channel.smfish_channels:
             metric = "mean_intensity"
         self._set_active_metric(metric)
 
@@ -3754,19 +3645,19 @@ class WellViewerApp(QWidget):
         if cb is None:
             return
         metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
-        if metric == "smfish_count" and self._active_channel not in self._smfish_channels:
+        if metric == "smfish_count" and self._app_state.channel.active_channel not in self._app_state.channel.smfish_channels:
             metric = "mean_intensity"
         self._set_active_metric(metric)
         # Stats display refreshes on its own when run; nothing to redraw here.
 
     def _set_active_metric(self, metric: str) -> None:
         """Switch the active intensity property and redraw."""
-        if metric == self._active_metric:
+        if metric == self._app_state.channel.active_metric:
             return
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
-        self._active_metric = metric
-        if not is_ratio_key(self._active_val_col):
-            self._active_val_col = f"{self._active_channel}_{self._active_metric}"
+        self._app_state.channel.active_metric = metric
+        if not is_ratio_key(self._app_state.channel.active_val_col):
+            self._app_state.channel.active_val_col = f"{self._app_state.channel.active_channel}_{self._app_state.channel.active_metric}"
         label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
         # Sync every metric combo (per-tab hidden legacy combos + the
         # global ctxbar combo + the stats per-tab Property combo) without
@@ -3813,7 +3704,7 @@ class WellViewerApp(QWidget):
         from well_viewer.heatmap_controller import (
             METRIC_MEAN, METRIC_FRACTION,
         )
-        is_mfi = self._active_metric == "mean_intensity"
+        is_mfi = self._app_state.channel.active_metric == "mean_intensity"
         model = cb.model()
         if model is None:
             return
@@ -3886,7 +3777,7 @@ class WellViewerApp(QWidget):
                 cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
-                    getattr(self, "_active_metric", "mean_intensity"), "Mean Intensity"
+                    self._app_state.channel.active_metric, "Mean Intensity"
                 )
                 idx = cb.findText(fallback)
                 if idx >= 0:
@@ -3898,7 +3789,7 @@ class WellViewerApp(QWidget):
                 if item is not None:
                     smf_ok = (
                         smfish_channel is not None
-                        and smfish_channel in self._smfish_channels
+                        and smfish_channel in self._app_state.channel.smfish_channels
                     )
                     item.setEnabled(smf_ok)
         finally:
@@ -3920,7 +3811,7 @@ class WellViewerApp(QWidget):
             return
         channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
         # Strip the " (spots)" suffix so smfish-enable matching works.
-        smf_base = channel.split(" ")[0] if channel else self._active_channel
+        smf_base = channel.split(" ")[0] if channel else self._app_state.channel.active_channel
         self._populate_metric_combo(
             m_cb, channel_entry=channel, smfish_channel=smf_base,
         )
@@ -3963,7 +3854,7 @@ class WellViewerApp(QWidget):
 
     def _use_fov_spread_active(self) -> bool:
         """Effective state of the per-FOV-replicates toggle for plotting."""
-        return bool(self._use_fov_replicates)
+        return bool(self._app_state.plot.use_fov_replicates)
 
     def _toggle_fov_replicates(self) -> None:
         self._app_state.plot.toggle_fov_replicates()
@@ -3975,7 +3866,7 @@ class WellViewerApp(QWidget):
 
     def _refresh_fov_btn_state(self) -> None:
         """Sync every per-FOV toggle button's text/variant state."""
-        is_on = bool(self._use_fov_replicates)
+        is_on = bool(self._app_state.plot.use_fov_replicates)
         text = "FOV ✓" if is_on else "FOV"
         variant = "toggle_active" if is_on else "toggle"
         tooltip = (
@@ -4012,11 +3903,11 @@ class WellViewerApp(QWidget):
         """Phase 13 (B7): flip the current selection — every loaded well that
         was selected becomes unselected, and vice versa. Only wells with data
         (``_well_paths``) participate."""
-        if not hasattr(self, "_well_paths"):
+        if not True:
             return
-        cur = set(self._selected_wells)
-        new = {w for w in self._well_paths.keys() if w not in cur}
-        self._selected_wells = new
+        cur = set(self._app_state.selection.selected_wells)
+        new = {w for w in self._app_state.dataset.well_paths.keys() if w not in cur}
+        self._app_state.selection.selected_wells = new
         # Re-use the standard refresh path the click handlers go through.
         self._refresh_sidebar_map()
         if hasattr(self, "_on_plate_sel_change"):
@@ -4024,12 +3915,12 @@ class WellViewerApp(QWidget):
 
     def _selected_labels(self) -> List[str]:
         """Return labels in a stable order (sorted) for consistent plot colours."""
-        return sorted(self._selected_wells, key=lambda lbl: self._parse_rc(lbl))
+        return sorted(self._app_state.selection.selected_wells, key=lambda lbl: self._parse_rc(lbl))
 
     def _get_rows(self, label: str) -> pd.DataFrame:
-        if label not in self._cache:
-            self._cache[label] = load_well_csv(self._well_paths[label])
-        return self._cache[label]
+        if label not in self._app_state.dataset.cache:
+            self._app_state.dataset.cache[label] = load_well_csv(self._app_state.dataset.well_paths[label])
+        return self._app_state.dataset.cache[label]
 
     def _aggregate_well(
         self,
@@ -4052,7 +3943,7 @@ class WellViewerApp(QWidget):
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates or {},
             per_fov_spread=per_fov_spread,
-            ratios=self._ratio_index,
+            ratios=self._app_state.channel.ratio_index,
         )
 
     def _aggregate_group(
@@ -4067,7 +3958,7 @@ class WellViewerApp(QWidget):
         tp_col: str = "timepoint_hours",
     ):
         """Aggregate a list of wells via the vectorized path (concatenated when len>1)."""
-        valid = [w for w in wells if w in self._well_paths]
+        valid = [w for w in wells if w in self._app_state.dataset.well_paths]
         if not valid:
             return []
         if len(valid) == 1:
@@ -4100,7 +3991,7 @@ class WellViewerApp(QWidget):
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates or {},
             per_fov_spread=per_fov_spread,
-            ratios=self._ratio_index,
+            ratios=self._app_state.channel.ratio_index,
         )
 
     # ── Preview panel ─────────────────────────────────────────────────────────
@@ -4207,7 +4098,7 @@ class WellViewerApp(QWidget):
         tp_values = sorted(
             {
                 self._norm_timepoint(tp)
-                for (f, tp) in self._preview_fluor.keys()
+                for (f, tp) in self._app_state.preview.fluor.keys()
                 if _norm(f) == fov and self._norm_timepoint(tp)
             },
             key=self._review_tp_sort_key,
@@ -4215,7 +4106,7 @@ class WellViewerApp(QWidget):
         pipeline_tp_values = sorted(
             {
                 self._norm_timepoint(tp)
-                for tp in (getattr(self, "_pipeline_info", {}) or {}).get("available_timepoints", [])
+                for tp in (self._app_state.dataset.pipeline_info or {}).get("available_timepoints", [])
                 if self._norm_timepoint(tp)
             },
             key=self._review_tp_sort_key,
@@ -4234,9 +4125,9 @@ class WellViewerApp(QWidget):
         than failing keeps Review Image usable on datasets that only ship
         one of the two image kinds for a given FOV/timepoint.
         """
-        raw_first = bool(getattr(self, "_review_image_show_raw", False))
+        raw_first = bool(self._app_state.review_image.show_raw)
         tophat_map = getattr(self, "_preview_tophat_fluor", {})
-        raw_map = self._preview_fluor
+        raw_map = self._app_state.preview.fluor
         if raw_first:
             primary, fallback = raw_map, tophat_map
         else:
@@ -4251,22 +4142,22 @@ class WellViewerApp(QWidget):
                 norm_timepoint=self._norm_timepoint,
             )
         mask_ref = _resolve_ref_by_fov_tp(
-            self._preview_mask, fov_raw=fov_raw, tp_raw=tp_raw,
+            self._app_state.preview.mask, fov_raw=fov_raw, tp_raw=tp_raw,
             norm_timepoint=self._norm_timepoint,
         )
         return fluor_ref, mask_ref
 
     def _toggle_review_image_source(self) -> None:
         """Flip raw vs top-hat preference for the Review Image fluorescence channel."""
-        self._review_image_show_raw = not bool(getattr(self, "_review_image_show_raw", False))
+        self._app_state.review_image.show_raw = not bool(self._app_state.review_image.show_raw)
         # The LUT range for raw vs top-hat differs significantly, so drop the
         # cached LUT for the active channel so the new image gets a fresh
         # auto-fit instead of a stale clip.
-        chan = str(getattr(self, "_active_image_channel", "") or "").lower()
-        if chan in self._review_image_lut_by_channel:
-            del self._review_image_lut_by_channel[chan]
+        chan = str(self._app_state.channel.active_image_channel or "").lower()
+        if chan in self._app_state.review_image.lut_by_channel:
+            del self._app_state.review_image.lut_by_channel[chan]
         self._refresh_review_image_source_btn()
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _refresh_review_image_source_btn(self) -> None:
@@ -4274,7 +4165,7 @@ class WellViewerApp(QWidget):
         btn = getattr(self, "_review_image_raw_btn", None)
         if btn is None:
             return
-        on = bool(getattr(self, "_review_image_show_raw", False))
+        on = bool(self._app_state.review_image.show_raw)
         btn.setChecked(on)
         btn.setText("Raw" if on else "Top-hat")
         btn.setProperty("variant", "toggle")
@@ -4305,7 +4196,7 @@ class WellViewerApp(QWidget):
         rgb_clamped = tuple(max(0, min(255, int(c))) for c in rgb)
         setattr(self, attr, rgb_clamped)
         self._review_image_refresh_color_swatch(which)
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _review_image_refresh_color_swatch(self, which: str) -> None:
@@ -4358,25 +4249,25 @@ class WellViewerApp(QWidget):
         for which, default in self._REVIEW_IMAGE_COLOR_DEFAULTS.items():
             setattr(self, f"_review_image_{which}_color", tuple(default))
             self._review_image_refresh_color_swatch(which)
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     # ── Binary mask toggle ────────────────────────────────────────────────
 
     def _toggle_review_image_binary_mask(self) -> None:
         """Flip the binary-mask overlay on/off and refresh the canvas."""
-        self._review_image_binary_mask = not bool(
-            getattr(self, "_review_image_binary_mask", False)
+        self._app_state.review_image.binary_mask = not bool(
+            self._app_state.review_image.binary_mask
         )
         self._refresh_review_image_binary_btn()
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _refresh_review_image_binary_btn(self) -> None:
         btn = getattr(self, "_review_image_binary_btn", None)
         if btn is None:
             return
-        on = bool(getattr(self, "_review_image_binary_mask", False))
+        on = bool(self._app_state.review_image.binary_mask)
         btn.setChecked(on)
         btn.setText("Binary: On" if on else "Binary: Off")
         btn.setToolTip(
@@ -4390,18 +4281,18 @@ class WellViewerApp(QWidget):
 
     def _toggle_review_image_outline(self) -> None:
         """Flip the cell-outline overlay on/off and refresh the canvas."""
-        self._review_image_show_outline = not bool(
-            getattr(self, "_review_image_show_outline", True)
+        self._app_state.review_image.show_outline = not bool(
+            self._app_state.review_image.show_outline
         )
         self._refresh_review_image_outline_btn()
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _refresh_review_image_outline_btn(self) -> None:
         btn = getattr(self, "_review_image_outline_btn", None)
         if btn is None:
             return
-        on = bool(getattr(self, "_review_image_show_outline", True))
+        on = bool(self._app_state.review_image.show_outline)
         btn.setChecked(on)
         btn.setText("Outline: On" if on else "Outline: Off")
         btn.style().unpolish(btn)
@@ -4460,8 +4351,8 @@ class WellViewerApp(QWidget):
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         threshold = self._get_thresh_frac_on()
-        val_col = self._active_val_col
-        ratios = getattr(self, "_ratio_index", None)
+        val_col = self._app_state.channel.active_val_col
+        ratios = self._app_state.channel.ratio_index
         above_by_nid: Dict[int, bool] = {
             int(nid): False for nid in _np.unique(center) if int(nid) > 0
         }
@@ -4525,28 +4416,28 @@ class WellViewerApp(QWidget):
         render_review_image_display(self, pan_only=pan_only)
 
     def _review_image_resolve_lut(self, arr) -> Tuple[float, float]:
-        chan = str(self._active_image_channel or "").lower()
+        chan = str(self._app_state.channel.active_image_channel or "").lower()
         if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             try:
                 lo = float(self._review_lmin_entry.text().strip())
                 hi = float(self._review_lmax_entry.text().strip())
                 if hi > lo:
-                    self._review_image_lut_by_channel[chan] = (lo, hi)
+                    self._app_state.review_image.lut_by_channel[chan] = (lo, hi)
                     return lo, hi
             except Exception:
                 pass
-        saved = self._review_image_lut_by_channel.get(chan)
+        saved = self._app_state.review_image.lut_by_channel.get(chan)
         if saved is not None and saved[1] > saved[0]:
             return saved
         lo = float(arr.min())
         hi = float(arr.max())
         if hi <= lo:
             hi = lo + 1.0
-        self._review_image_lut_by_channel[chan] = (lo, hi)
+        self._app_state.review_image.lut_by_channel[chan] = (lo, hi)
         return lo, hi
 
     def _review_image_auto_lut(self) -> None:
-        arr = getattr(self, "_review_image_last_fluor_arr", None)
+        arr = self._app_state.review_image.last_fluor_arr
         if arr is None or not _NP_AVAILABLE:
             return
         arr_np = _np.asarray(arr, dtype=_np.float32)
@@ -4554,36 +4445,36 @@ class WellViewerApp(QWidget):
         hi = float(arr_np.max())
         if hi <= lo:
             hi = lo + 1.0
-        self._review_image_lut_by_channel[str(self._active_image_channel or "").lower()] = (lo, hi)
+        self._app_state.review_image.lut_by_channel[str(self._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
         if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             self._review_lmin_entry.setText(f"{lo:.0f}")
             self._review_lmax_entry.setText(f"{hi:.0f}")
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _review_image_commit_lut(self) -> None:
-        arr = getattr(self, "_review_image_last_fluor_arr", None)
+        arr = self._app_state.review_image.last_fluor_arr
         if arr is None:
             return
         lo, hi = self._review_image_resolve_lut(_np.asarray(arr, dtype=_np.float32))
         if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             self._review_lmin_entry.setText(f"{lo:.0f}")
             self._review_lmax_entry.setText(f"{hi:.0f}")
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _review_image_zoom_step(self, direction: int) -> None:
         steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-        cur = getattr(self, "_review_image_zoom", 1.0)
+        cur = self._app_state.review_image.zoom
         idx = min(range(len(steps)), key=lambda i: abs(steps[i] - cur))
         idx = max(0, min(len(steps) - 1, idx + direction))
-        self._review_image_zoom = steps[idx]
+        self._app_state.review_image.zoom = steps[idx]
         self._render_review_image_display()
 
     def _review_image_zoom_fit(self) -> None:
-        self._review_image_zoom = 1.0
-        self._review_image_pan_x = 0.0
-        self._review_image_pan_y = 0.0
+        self._app_state.review_image.zoom = 1.0
+        self._app_state.review_image.pan_x = 0.0
+        self._app_state.review_image.pan_y = 0.0
         self._render_review_image_display()
 
     def _on_review_image_wheel(self, event) -> None:
@@ -4600,11 +4491,11 @@ class WellViewerApp(QWidget):
         # bulk delete instead of panning. We record the anchor in label-local
         # pixels (event.position()) so it is invariant to window position
         # and scrollbar state.
-        if getattr(self, "_review_image_include_edit_mode", False):
+        if self._app_state.review_image.include_edit_mode:
             pos = event.position()
             ax, ay = float(pos.x()), float(pos.y())
-            self._review_image_box_anchor = (ax, ay)
-            self._review_image_box_active = True
+            self._app_state.review_image.box_anchor = (ax, ay)
+            self._app_state.review_image.box_active = True
             label = getattr(self, "_review_image_label", None)
             if label is not None:
                 rb = self._review_image_rubber_band
@@ -4614,15 +4505,15 @@ class WellViewerApp(QWidget):
                 rb.setGeometry(QRect(int(ax), int(ay), 1, 1))
                 rb.show()
             return
-        self._review_image_dragging = True
-        self._review_image_drag_moved = False
+        self._app_state.review_image.dragging = True
+        self._app_state.review_image.drag_moved = False
         gp = event.globalPosition().toPoint()
-        self._review_image_drag_last_xy = (int(gp.x()), int(gp.y()))
+        self._app_state.review_image.drag_last_xy = (int(gp.x()), int(gp.y()))
 
     def _on_review_image_drag(self, event) -> None:
         # Rubber-band update path: stay anchored in label-local pixels.
-        if getattr(self, "_review_image_box_active", False):
-            anchor = self._review_image_box_anchor
+        if self._app_state.review_image.box_active:
+            anchor = self._app_state.review_image.box_anchor
             rb = self._review_image_rubber_band
             if anchor is None or rb is None:
                 return
@@ -4635,18 +4526,18 @@ class WellViewerApp(QWidget):
             h = max(1, int(abs(cy - ay)))
             rb.setGeometry(QRect(x0, y0, w, h))
             return
-        if not getattr(self, "_review_image_dragging", False):
+        if not self._app_state.review_image.dragging:
             return
         gp = event.globalPosition().toPoint()
         gx, gy = int(gp.x()), int(gp.y())
-        lx, ly = self._review_image_drag_last_xy
+        lx, ly = self._app_state.review_image.drag_last_xy
         dx = gx - lx
         dy = gy - ly
         if dx or dy:
-            self._review_image_drag_moved = True
-        self._review_image_pan_x = float(getattr(self, "_review_image_pan_x", 0.0) + dx)
-        self._review_image_pan_y = float(getattr(self, "_review_image_pan_y", 0.0) + dy)
-        self._review_image_drag_last_xy = (gx, gy)
+            self._app_state.review_image.drag_moved = True
+        self._app_state.review_image.pan_x = float(self._app_state.review_image.pan_x + dx)
+        self._app_state.review_image.pan_y = float(self._app_state.review_image.pan_y + dy)
+        self._app_state.review_image.drag_last_xy = (gx, gy)
         # Pan reuses the existing pixmap; only the scrollbars need to move.
         self._render_review_image_display(pan_only=True)
 
@@ -4655,11 +4546,11 @@ class WellViewerApp(QWidget):
         # pixels in either axis falls through to the existing single-cell
         # click handler, so quick taps in edit mode still toggle one cell.
         _CLICK_PX_THRESH = 3
-        if getattr(self, "_review_image_box_active", False):
-            anchor = self._review_image_box_anchor
+        if self._app_state.review_image.box_active:
+            anchor = self._app_state.review_image.box_anchor
             rb = self._review_image_rubber_band
-            self._review_image_box_active = False
-            self._review_image_box_anchor = None
+            self._app_state.review_image.box_active = False
+            self._app_state.review_image.box_anchor = None
             if rb is not None:
                 rb.hide()
             if anchor is None:
@@ -4682,10 +4573,10 @@ class WellViewerApp(QWidget):
             my0, my1 = int((ay - off_y) / scale), int((ry - off_y) / scale)
             self._apply_box_delete(mx0, my0, mx1, my1)
             return
-        was_dragging = getattr(self, "_review_image_dragging", False)
-        moved = getattr(self, "_review_image_drag_moved", False)
-        self._review_image_dragging = False
-        self._review_image_drag_moved = False
+        was_dragging = self._app_state.review_image.dragging
+        moved = self._app_state.review_image.drag_moved
+        self._app_state.review_image.dragging = False
+        self._app_state.review_image.drag_moved = False
         if was_dragging and not moved:
             self._on_review_image_click(event)
 
@@ -4709,7 +4600,7 @@ class WellViewerApp(QWidget):
         _show_image_pixel_tooltip_controller(
             self,
             event,
-            f"{self._active_image_channel.upper()}",
+            f"{self._app_state.channel.active_image_channel.upper()}",
             label=self._review_image_label,
         )
 
@@ -4724,7 +4615,7 @@ class WellViewerApp(QWidget):
         to both the label and the scroll viewport so it does not flicker
         back to the arrow over scrollbar gutters or padding.
         """
-        enabled = bool(getattr(self, "_review_image_include_edit_mode", False))
+        enabled = bool(self._app_state.review_image.include_edit_mode)
         cursor = Qt.CrossCursor if enabled else Qt.PointingHandCursor
         if hasattr(self, "_review_image_label"):
             self._review_image_label.setCursor(cursor)
@@ -4739,7 +4630,7 @@ class WellViewerApp(QWidget):
         _select_review_csv_row_for_cell_controller(self, fov, tp, nucleus_id, _logger)
 
     def _set_review_image_include_mode(self, enabled: bool) -> None:
-        self._review_image_include_edit_mode = bool(enabled)
+        self._app_state.review_image.include_edit_mode = bool(enabled)
         self._apply_review_image_cursor()
         btn = getattr(self, "_review_image_delete_btn", None)
         if btn is not None:
@@ -4752,20 +4643,20 @@ class WellViewerApp(QWidget):
             self._set_status("Delete mode OFF.")
 
     def _toggle_selected_review_cell(self) -> None:
-        self._set_review_image_include_mode(not getattr(self, "_review_image_include_edit_mode", False))
+        self._set_review_image_include_mode(not self._app_state.review_image.include_edit_mode)
 
     def _set_review_cell_included(self, fov: str, tp: str, nid: str, included: str) -> None:
-        if self._preview_selected_well is None:
+        if self._app_state.preview.selected_well is None:
             return
         fov_n, tp_n, nid_n = self._review_row_keys({"fov": fov, "tp": tp, "nucleus_id": nid})
         if not (fov_n and tp_n and nid_n):
             return
-        key = (self._preview_selected_well, fov_n, tp_n, nid_n)
+        key = (self._app_state.preview.selected_well, fov_n, tp_n, nid_n)
         self._review_included_overrides[key] = str(included).strip() or "1"
         # Project the override onto the cached row immediately so other tabs
         # (Bar/Line/Distribution/Stats/Heatmap) honor it without waiting for
         # the next gating recompute, then invalidate the stats cache.
-        self._apply_review_overrides_to_cache(self._preview_selected_well)
+        self._apply_review_overrides_to_cache(self._app_state.preview.selected_well)
         if hasattr(self, "_invalidate_stats_cache"):
             try:
                 self._invalidate_stats_cache()
@@ -4776,19 +4667,19 @@ class WellViewerApp(QWidget):
         # Bump the override version so the include-map cache is bypassed
         # on the next refresh; the frame cache (decoded image + boundary)
         # remains valid because the underlying mask label image is unchanged.
-        self._review_image_override_version += 1
-        prev_zoom = float(getattr(self, "_review_image_zoom", 1.0))
-        prev_pan_x = float(getattr(self, "_review_image_pan_x", 0.0))
-        prev_pan_y = float(getattr(self, "_review_image_pan_y", 0.0))
+        self._app_state.review_image.override_version += 1
+        prev_zoom = float(self._app_state.review_image.zoom)
+        prev_pan_x = float(self._app_state.review_image.pan_x)
+        prev_pan_y = float(self._app_state.review_image.pan_y)
         # Skip a full Review CSV table rebuild here — the user is on the
         # Review Image tab and rebuilding tens of thousands of QTableWidgetItems
         # per click was the dominant memory leak. The table reads the effective
         # Included via override on the next refresh (combobox change / Refresh
         # button / well-selection change), so the value is never lost.
         self._refresh_review_image()
-        self._review_image_zoom = prev_zoom
-        self._review_image_pan_x = prev_pan_x
-        self._review_image_pan_y = prev_pan_y
+        self._app_state.review_image.zoom = prev_zoom
+        self._app_state.review_image.pan_x = prev_pan_x
+        self._app_state.review_image.pan_y = prev_pan_y
         self._render_review_image_display()
 
     def _set_review_cells_included_batch(
@@ -4800,9 +4691,9 @@ class WellViewerApp(QWidget):
         cache-projection, stats invalidation, save-schedule, and image
         refresh — otherwise a 100-cell box delete would redraw 100 times.
         """
-        if self._preview_selected_well is None or not items:
+        if self._app_state.preview.selected_well is None or not items:
             return
-        well = self._preview_selected_well
+        well = self._app_state.preview.selected_well
         any_changed = False
         for fov, tp, nid, included in items:
             fov_n, tp_n, nid_n = self._review_row_keys(
@@ -4823,14 +4714,14 @@ class WellViewerApp(QWidget):
             except Exception:
                 pass
         self._cell_overrides_schedule_save()
-        self._review_image_override_version += 1
-        prev_zoom = float(getattr(self, "_review_image_zoom", 1.0))
-        prev_pan_x = float(getattr(self, "_review_image_pan_x", 0.0))
-        prev_pan_y = float(getattr(self, "_review_image_pan_y", 0.0))
+        self._app_state.review_image.override_version += 1
+        prev_zoom = float(self._app_state.review_image.zoom)
+        prev_pan_x = float(self._app_state.review_image.pan_x)
+        prev_pan_y = float(self._app_state.review_image.pan_y)
         self._refresh_review_image()
-        self._review_image_zoom = prev_zoom
-        self._review_image_pan_x = prev_pan_x
-        self._review_image_pan_y = prev_pan_y
+        self._app_state.review_image.zoom = prev_zoom
+        self._app_state.review_image.pan_x = prev_pan_x
+        self._app_state.review_image.pan_y = prev_pan_y
         self._render_review_image_display()
 
     def _apply_box_delete(self, x0: int, y0: int, x1: int, y1: int) -> None:
@@ -4843,7 +4734,7 @@ class WellViewerApp(QWidget):
         """
         label = getattr(self, "_review_image_label", None)
         mask = getattr(label, "_mask_arr", None) if label is not None else None
-        if mask is None or self._preview_selected_well is None:
+        if mask is None or self._app_state.preview.selected_well is None:
             return
         h, w = int(mask.shape[0]), int(mask.shape[1])
         xa, xb = sorted((max(0, min(w, int(x0))), max(0, min(w, int(x1)))))
@@ -4871,7 +4762,7 @@ class WellViewerApp(QWidget):
     def _zoom_review_image_to_selected_nucleus(self, zoom: float = 3.0) -> None:
         if not hasattr(self, "_review_image_label") or not hasattr(self, "_review_image_canvas"):
             return
-        nid = self._review_image_selected_nucleus
+        nid = self._app_state.review_image.selected_nucleus
         mask_arr = getattr(self._review_image_label, "_mask_arr", None)
         if nid is None or mask_arr is None:
             return
@@ -4880,12 +4771,12 @@ class WellViewerApp(QWidget):
             return
         cx = float(xs.mean())
         cy = float(ys.mean())
-        self._review_image_zoom = float(max(1.0, zoom))
+        self._app_state.review_image.zoom = float(max(1.0, zoom))
         rgb = getattr(self, "_review_image_base_rgb", None)
         if rgb is not None:
             ih, iw = rgb.shape[:2]
         else:
-            img = self._review_image_base_pil
+            img = self._app_state.review_image.base_pil
             if img is None:
                 return
             iw, ih = img.size
@@ -4893,7 +4784,7 @@ class WellViewerApp(QWidget):
         cw = max(1, vp.width())
         ch = max(1, vp.height())
         fit = min(cw / max(iw, 1), ch / max(ih, 1))
-        scale = max(0.05, fit * max(0.1, float(self._review_image_zoom)))
+        scale = max(0.05, fit * max(0.1, float(self._app_state.review_image.zoom)))
         nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
         # The renderer derives the scrollbar value as
         #     scroll = max(0, (max(nw, cw) - cw) // 2) - int(pan)
@@ -4903,8 +4794,8 @@ class WellViewerApp(QWidget):
         # The old `cw/2 - base_x - cx*scale` form mis-offset the pan by
         # roughly (nw - cw)/2 px once you zoomed in, which is why the
         # yellow nucleus ended up off-screen.
-        self._review_image_pan_x = (nw / 2.0) - (cx * scale)
-        self._review_image_pan_y = (nh / 2.0) - (cy * scale)
+        self._app_state.review_image.pan_x = (nw / 2.0) - (cx * scale)
+        self._app_state.review_image.pan_y = (nh / 2.0) - (cy * scale)
         self._render_review_image_display()
 
     def _on_review_csv_row_double_click(self, event) -> None:
@@ -4925,7 +4816,7 @@ class WellViewerApp(QWidget):
     # ── Batch export ──────────────────────────────────────────────────────────
 
     def _open_batch_export(self) -> None:
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -5018,7 +4909,7 @@ class WellViewerApp(QWidget):
             return
         tab = self._current_centre_tab()
         prev_tab = getattr(self, "_last_tab_name", None)
-        prev_selected = set(getattr(self, "_selected_wells", set()))
+        prev_selected = set(self._app_state.selection.selected_wells)
 
         # Dismiss any open figure configurator on tab change — the user can
         # re-open it on the new tab via the plot card's sliders IconButton.
@@ -5050,7 +4941,7 @@ class WellViewerApp(QWidget):
             self._sync_preview_well_for_image_tabs()
             self._sidebar_preview_frame.setVisible(True)
             self._refresh_preview_picker()
-            self._update_preview(self._preview_selected_well)
+            self._update_preview(self._app_state.preview.selected_well)
             self._refresh_review_image()
 
         elif tab == "Image Table":
@@ -5066,7 +4957,7 @@ class WellViewerApp(QWidget):
         elif tab == "Statistics":
             self._sidebar_stats_frame.setVisible(True)
             # Auto-populate from rep-sets on first visit
-            if not self._stats_groups and hasattr(self, "_stats_grp_inner"):
+            if not self._app_state.stats.groups and hasattr(self, "_stats_grp_inner"):
                 self._stats_sync_from_app()
             if hasattr(self, "_stats_tp_cb"):
                 self._stats_update_tp_menu()
@@ -5086,8 +4977,8 @@ class WellViewerApp(QWidget):
 
         elif tab == "smFISH":
             self._sidebar_main_frame.setVisible(True)
-            if len(self._selected_wells) > 1:
-                keep = self._last_sel if self._last_sel in self._selected_wells else next(iter(self._selected_wells))
+            if len(self._app_state.selection.selected_wells) > 1:
+                keep = self._app_state.selection.last_sel if self._app_state.selection.last_sel in self._app_state.selection.selected_wells else next(iter(self._app_state.selection.selected_wells))
                 # Route through the central mutator so _prev_sel is
                 # snapshotted properly — bypassing it left the next
                 # selection diff in selection_controller mis-attributing
@@ -5164,28 +5055,28 @@ class WellViewerApp(QWidget):
 
     def _sync_preview_well_for_image_tabs(self) -> None:
         """Keep current preview well unless the active selection supplies one."""
-        cur_sel = self._sel_by_id(getattr(self, "_current_selection_id", None))
+        cur_sel = self._sel_by_id(self._app_state.selection.current_selection_id)
         sel_wells = (cur_sel.get("wells") or []) if cur_sel else []
 
         # Preserve explicit user choice when still valid.
-        current = getattr(self, "_preview_selected_well", None)
-        if current in self._well_paths:
+        current = self._app_state.preview.selected_well
+        if current in self._app_state.dataset.well_paths:
             # If the active selection has wells, prefer its first loaded well.
             for tok in sel_wells:
-                if tok in self._well_paths:
-                    self._preview_selected_well = tok
+                if tok in self._app_state.dataset.well_paths:
+                    self._app_state.preview.selected_well = tok
                     return
             return
 
         # If no valid current well, use the active selection's first loaded well.
         for tok in sel_wells:
-            if tok in self._well_paths:
-                self._preview_selected_well = tok
+            if tok in self._app_state.dataset.well_paths:
+                self._app_state.preview.selected_well = tok
                 return
 
         # Final fallback: keep previous behavior of choosing first available well.
-        if self._well_paths:
-            self._preview_selected_well = sorted(self._well_paths.keys(), key=self._parse_rc)[0]
+        if self._app_state.dataset.well_paths:
+            self._app_state.preview.selected_well = sorted(self._app_state.dataset.well_paths.keys(), key=self._parse_rc)[0]
 
     def _run_tab_switch_smoke_checks(
         self,
@@ -5201,8 +5092,8 @@ class WellViewerApp(QWidget):
         # Batch Export should share the same in-memory selection objects used by
         # the line/bar/scatter render paths.
         expected_ids = (
-            id(self._selected_wells),
-            id(self._selections),
+            id(self._app_state.selection.selected_wells),
+            id(self._app_state.selection.selections),
         )
         if not hasattr(self, "_selection_model_identity"):
             self._selection_model_identity = expected_ids
@@ -5214,7 +5105,7 @@ class WellViewerApp(QWidget):
 
         # UI smoke check: switching among Line/Bar/Batch must not mutate the
         # current per-well selection by itself.
-        if prev_tab in watched and prev_selected != self._selected_wells:
+        if prev_tab in watched and prev_selected != self._app_state.selection.selected_wells:
             _logger.warning(
                 "Tab switch altered selected wells unexpectedly: %s -> %s",
                 prev_tab, tab,
@@ -5231,16 +5122,16 @@ class WellViewerApp(QWidget):
     def _refresh_review_csv(self) -> None:
         if not hasattr(self, "_review_csv_table"):
             return
-        sels = sorted(self._selected_wells, key=self._parse_rc)
+        sels = sorted(self._app_state.selection.selected_wells, key=self._parse_rc)
         # When the user has no explicit picks but rep-sets exist, fall back
         # to every well in the active groups so the table populates on first
         # visit. Previously this path took the "Select one or more wells"
         # branch and left Review CSV empty whenever groups were defined.
-        if not sels and self._selections:
+        if not sels and self._app_state.selection.selections:
             seen: set = set()
             for rset in self._rep_sets_active():
                 for w in rset.wells:
-                    if w in self._well_paths and w not in seen:
+                    if w in self._app_state.dataset.well_paths and w not in seen:
                         seen.add(w)
             sels = sorted(seen, key=self._parse_rc)
         if not sels:
@@ -5298,7 +5189,7 @@ class WellViewerApp(QWidget):
         table.setRowCount(0)
 
         if rows is None:
-            sels = sorted(self._selected_wells, key=self._parse_rc)
+            sels = sorted(self._app_state.selection.selected_wells, key=self._parse_rc)
             rows = []
             for label in sels:
                 rows.extend(self._review_load_rows(label))
@@ -5327,7 +5218,7 @@ class WellViewerApp(QWidget):
         if not filtered:
             _logger.warning(
                 "No Review CSV rows matched filters: selected_wells=%s fov=%s tp=%s total_rows=%d",
-                sorted(self._selected_wells, key=self._parse_rc),
+                sorted(self._app_state.selection.selected_wells, key=self._parse_rc),
                 fov_sel, tp_sel, len(rows),
             )
             if not rows:
@@ -5406,7 +5297,7 @@ class WellViewerApp(QWidget):
                 continue
             by_label.setdefault(lbl, {})[(fov, tp, nid)] = val
         for lbl, lookup in by_label.items():
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             try:
                 df = self._get_rows(lbl)
@@ -5454,16 +5345,16 @@ class WellViewerApp(QWidget):
         not from the current selection — the selection controls what is plotted,
         but the dropdown must remain usable even when nothing is selected yet.
         """
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             _set_combo_values(self._bar_tp_cb, ["—"])
             self._bar_tp_cb.setCurrentText("—")
             return
 
-        all_tps: set = set(self._all_timepoints_cache)
+        all_tps: set = set(self._app_state.dataset.all_timepoints_cache)
 
         # If no timepoints were found the schema had no timepoint field.
         # Use 0.0 as a single synthetic timepoint so bar plots remain usable.
-        if not all_tps and self._well_paths:
+        if not all_tps and self._app_state.dataset.well_paths:
             all_tps.add(0.0)
 
         sorted_tps = sorted(all_tps)
@@ -5610,7 +5501,7 @@ class WellViewerApp(QWidget):
         if active_rsets:
             return []
         return sorted(
-            (lbl for lbl in self._selected_wells if lbl in self._well_paths),
+            (lbl for lbl in self._app_state.selection.selected_wells if lbl in self._app_state.dataset.well_paths),
             key=lambda lbl: self._parse_rc(lbl),
         )
 
@@ -5675,13 +5566,13 @@ class WellViewerApp(QWidget):
                 if rset is None:
                     continue
                 color = self._rank_color_rset(rset)
-                valid = [w for w in rset.wells if w in self._well_paths]
+                valid = [w for w in rset.wells if w in self._app_state.dataset.well_paths]
                 for w in valid:
                     plot_wells.append(w)
                     plot_colors.append(color)
                     plot_labels.append(f"{self._well_display_label(w)}\n[{rset.name}]")
         else:
-            plot_wells = [k for k in ordered_keys if k in self._well_paths]
+            plot_wells = [k for k in ordered_keys if k in self._app_state.dataset.well_paths]
             plot_colors = [self._rank_color_well(w) for w in plot_wells]
             plot_labels = [self._well_display_label(w) for w in plot_wells]
         if _debug_flags.review_bar_debug_enabled():
@@ -5695,8 +5586,8 @@ class WellViewerApp(QWidget):
         if _fc_state[0] or _fc_state[2]:
             cell_scale = _fc.build_cell_scaling(
                 self, plot_wells, fc_state=_fc_state, target_t=target_t,
-                threshold=threshold, val_col=self._active_val_col,
-                use_sem=self._use_sem,
+                threshold=threshold, val_col=self._app_state.channel.active_val_col,
+                use_sem=self._app_state.plot.use_sem,
                 per_fov_spread=self._use_fov_spread_active(),
                 cell_area_threshold=self._get_cell_area_threshold(),
                 fluor_gates=self._get_all_fluor_gates(),
@@ -5750,13 +5641,13 @@ class WellViewerApp(QWidget):
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         per_fov_spread = self._use_fov_spread_active()
-        use_sem = bool(self._use_sem)
+        use_sem = bool(self._app_state.plot.use_sem)
         n = len(wells)
         bar_w = min(0.6, 5.0 / max(n, 1))
         for i, lbl in enumerate(wells):
             pts = self._aggregate_well(
                 lbl, threshold=threshold, use_sem=use_sem,
-                val_col=self._active_val_col,
+                val_col=self._app_state.channel.active_val_col,
                 cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
@@ -5799,7 +5690,7 @@ class WellViewerApp(QWidget):
     def _well_display_label(self, lbl: str) -> str:
         """Return the custom display label for *lbl* if defined, else its token."""
         tok = _extract_well_token(lbl) or lbl
-        return self._well_labels.get(tok, tok)
+        return self._app_state.dataset.well_labels.get(tok, tok)
 
     def _bar_well_display_label(self, lbl: str) -> str:
         """Bar-plot-safe well label that avoids numeric-only tick text."""
@@ -5829,7 +5720,7 @@ class WellViewerApp(QWidget):
         if not generic_name:
             return name
 
-        wells = [self._well_display_label(w) for w in rset.wells if w in self._well_paths]
+        wells = [self._well_display_label(w) for w in rset.wells if w in self._app_state.dataset.well_paths]
         if not wells:
             return name
         if len(wells) <= 3:
@@ -5840,9 +5731,9 @@ class WellViewerApp(QWidget):
         """One ReplicateSet per selection that has ≥1 loaded well (ignores hidden),
         in ``_selections`` order — derived straight from the unified model."""
         out: "List[ReplicateSet]" = []
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             wells = s.get("wells") or []
-            if any(w in self._well_paths for w in wells):
+            if any(w in self._app_state.dataset.well_paths for w in wells):
                 out.append(ReplicateSet(s.get("name") or "", list(wells)))
         return out
 
@@ -5854,11 +5745,11 @@ class WellViewerApp(QWidget):
         """One ReplicateSet per visible (non-hidden) selection with ≥1 loaded
         well — these are exactly the traces drawn on the plots."""
         out: "List[ReplicateSet]" = []
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s.get("hidden"):
                 continue
             wells = s.get("wells") or []
-            if any(w in self._well_paths for w in wells):
+            if any(w in self._app_state.dataset.well_paths for w in wells):
                 out.append(ReplicateSet(s.get("name") or "", list(wells)))
         return out
 
@@ -5897,7 +5788,7 @@ class WellViewerApp(QWidget):
         fov_mean_spreads: List[float] = []
         fov_frac_spreads: List[float] = []
         for lbl in wells:
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             pts = self._aggregate_well(
                 lbl, threshold=threshold, use_sem=use_sem,
@@ -5967,26 +5858,26 @@ class WellViewerApp(QWidget):
         plot paths (line / bar / scatter-agg) compute the "mean across
         wells under active gating" identically.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
+        if not True:
+            self._app_state.stats.cache = {}
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
-                      self._active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+                      self._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         gm, gerr, gf, ferr = self._well_aggregate_stats(
             rset.wells, target_t,
             threshold=threshold,
-            val_col=self._active_val_col,
+            val_col=self._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             use_sem=use_sem,
         )
 
         result = (gm, gerr, gf, ferr)
-        self._stats_cache[cache_key] = result
+        self._app_state.stats.cache[cache_key] = result
         return result
 
     def _compute_rep_per_fov_stats(
@@ -6004,19 +5895,19 @@ class WellViewerApp(QWidget):
         disambiguated by prefixing with the source well label so identical FOV
         numbers in different wells stay distinct.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
+        if not True:
+            self._app_state.stats.cache = {}
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
-                     use_sem, self._active_val_col, cell_area_threshold,
+                     use_sem, self._app_state.channel.active_val_col, cell_area_threshold,
                      tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         frames = []
         for lbl in rset.wells:
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             df = self._get_rows(lbl)
             if df is None or len(df) == 0:
@@ -6031,7 +5922,7 @@ class WellViewerApp(QWidget):
 
         if not frames:
             result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
-            self._stats_cache[cache_key] = result
+            self._app_state.stats.cache[cache_key] = result
             return result
 
         pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
@@ -6039,11 +5930,11 @@ class WellViewerApp(QWidget):
             pooled,
             threshold=threshold,
             use_sem=use_sem,
-            val_col=self._active_val_col,
+            val_col=self._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=True,
-            ratios=self._ratio_index,
+            ratios=self._app_state.channel.ratio_index,
         )
         matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
         if matched:
@@ -6058,7 +5949,7 @@ class WellViewerApp(QWidget):
             )
         else:
             result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
-        self._stats_cache[cache_key] = result
+        self._app_state.stats.cache[cache_key] = result
         return result
 
     def _compute_rep_n_above(self, rset: "ReplicateSet", target_t: float) -> int:
@@ -6069,24 +5960,24 @@ class WellViewerApp(QWidget):
         cells that actually exceeded the active threshold — the same
         numerator that drives the fraction-above-threshold value.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
-        threshold = self._get_thresh_frac_on(self._active_channel)
+        if not True:
+            self._app_state.stats.cache = {}
+        threshold = self._get_thresh_frac_on(self._app_state.channel.active_channel)
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
-                     self._active_val_col, cell_area_threshold,
+                     self._app_state.channel.active_val_col, cell_area_threshold,
                      tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         total = 0
         for lbl in rset.wells:
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             pts = self._aggregate_well(
                 lbl, threshold=threshold, use_sem=False,
-                val_col=self._active_val_col,
+                val_col=self._app_state.channel.active_val_col,
                 cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
@@ -6094,12 +5985,12 @@ class WellViewerApp(QWidget):
             if matched:
                 # AggPoint index 4 = n_above; index 5 = n_total.
                 total += int(matched[0][4])
-        self._stats_cache[cache_key] = total
+        self._app_state.stats.cache[cache_key] = total
         return total
 
     def _invalidate_stats_cache(self) -> None:
         """Discard cached group statistics. Call whenever group definitions change."""
-        self._stats_cache: dict = {}
+        self._app_state.stats.cache: dict = {}
         # Replicate-set visibility may have shifted, so re-check whether the
         # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
         if hasattr(self, "_refresh_fov_btn_state"):
@@ -6108,7 +5999,7 @@ class WellViewerApp(QWidget):
         # the Review Image include map mirrors. Bumping the version key
         # forces the next refresh to recompute the include map (cheap)
         # while reusing the cached image arrays + boundary mask (expensive).
-        self._review_image_override_version += 1
+        self._app_state.review_image.override_version += 1
 
     def _invalidate_review_image_frame_cache(self) -> None:
         """Drop the decoded fluor / mask / boundary cache.
@@ -6116,9 +6007,9 @@ class WellViewerApp(QWidget):
         Call on data load (well paths change) and on dataset re-scan so the
         next refresh re-decodes from disk.
         """
-        self._review_image_frame_cache = None
-        self._review_image_include_cache.clear()
-        self._review_image_override_version += 1
+        self._app_state.review_image.frame_cache = None
+        self._app_state.review_image.include_cache.clear()
+        self._app_state.review_image.override_version += 1
 
     def _compute_group_stats(
         self,
@@ -6134,14 +6025,14 @@ class WellViewerApp(QWidget):
         use_sem) so repeated calls during the same redraw are free.  The cache is
         cleared by _invalidate_stats_cache() whenever group definitions change.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
+        if not True:
+            self._app_state.stats.cache = {}
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = (grp.name, tuple(grp.wells), target_t, threshold, use_sem,
-                      self._active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+                      self._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         rep_means: List[float] = []
         rep_fracs: List[float] = []
@@ -6150,11 +6041,11 @@ class WellViewerApp(QWidget):
             set_means: List[float] = []
             set_fracs: List[float] = []
             for lbl in rset:
-                if lbl not in self._well_paths:
+                if lbl not in self._app_state.dataset.well_paths:
                     continue
                 pts = self._aggregate_well(
                     lbl, threshold=threshold, use_sem=False,
-                    val_col=self._active_val_col,
+                    val_col=self._app_state.channel.active_val_col,
                     cell_area_threshold=cell_area_threshold,
                     fluor_gates=fluor_gates,
                 )
@@ -6185,7 +6076,7 @@ class WellViewerApp(QWidget):
             gf, g_err_f = float("nan"), 0.0
 
         result = (gm, g_err_m, gf, g_err_f)
-        self._stats_cache[cache_key] = result
+        self._app_state.stats.cache[cache_key] = result
         return result
 
     def _collect_bar_items(self, target_t: float, *,
@@ -6210,9 +6101,9 @@ class WellViewerApp(QWidget):
         """
         from matplotlib.figure import Figure as _Figure
 
-        use_sem   = self._use_sem
+        use_sem   = self._app_state.plot.use_sem
         band_lbl  = "SEM" if use_sem else "SD"
-        threshold = self._get_thresh_frac_on(self._active_channel)
+        threshold = self._get_thresh_frac_on(self._app_state.channel.active_channel)
 
         fig = _Figure(figsize=(8, 10), dpi=300, facecolor=PLOT_BG)
         ax_mean = fig.add_subplot(3, 1, 1)
@@ -6220,7 +6111,7 @@ class WellViewerApp(QWidget):
         ax_n = fig.add_subplot(3, 1, 3)
         fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.10, left=0.13, right=0.97)
 
-        _ch = self._active_channel.upper()
+        _ch = self._app_state.channel.active_channel.upper()
         apply_ax_style(ax_mean, f"Mean {_ch} (above threshold) ± {band_lbl}  —  t = {tp_str} h",
                        f"Mean {_ch}")
         apply_ax_style(ax_frac, f"Fraction above threshold  —  t = {tp_str} h", "Fraction")
@@ -6268,7 +6159,7 @@ class WellViewerApp(QWidget):
 
     def _open_bar_batch_export(self) -> None:
         """Switch Batch Export tab to the inline bar-plot export builder."""
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Bar Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -6278,7 +6169,7 @@ class WellViewerApp(QWidget):
 
     def _open_scatter_cells_batch_export(self) -> None:
         """Switch Batch Export tab to the inline scatter-cells export builder."""
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Scatter Cells Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -6288,7 +6179,7 @@ class WellViewerApp(QWidget):
 
     def _open_scatter_agg_batch_export(self) -> None:
         """Switch Batch Export tab to the inline aggregate-scatter export builder."""
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Scatter Aggregate Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -6397,7 +6288,7 @@ class WellViewerApp(QWidget):
             ch = entry[:-8]  # Remove " (spots)"
             return f"{ch}_smfish_count"
         else:
-            metric = getattr(self, "_active_metric", "mean_intensity") or "mean_intensity"
+            metric = self._app_state.channel.active_metric or "mean_intensity"
             if metric == "smfish_count":
                 # The scatter dropdown uses the " (spots)" suffix for smfish;
                 # fall back to mean intensity for the plain channel entry.
@@ -6507,7 +6398,7 @@ class WellViewerApp(QWidget):
         # per-axis Property combo now expresses smFISH count via the
         # ``smFISH Count`` metric entry, so we no longer overload the
         # channel column with aggregation flavour.
-        channels = list(self._fluor_channels) if self._fluor_channels else ["gfp"]
+        channels = list(self._app_state.channel.fluor_channels) if self._app_state.channel.fluor_channels else ["gfp"]
         ratio_labels = self._ratio_dropdown_labels()
         scatter_ch_options = list(channels) + ratio_labels
 
@@ -6526,7 +6417,7 @@ class WellViewerApp(QWidget):
             self._refresh_scatter_metric_for_axis(axis)
 
         # Update timepoint dropdown for cells scatter
-        timepoints = list(self._all_timepoints_cache) or _scatter_get_timepoints(self)
+        timepoints = list(self._app_state.dataset.all_timepoints_cache) or _scatter_get_timepoints(self)
         tp_strs = [f"{tp:.1f}" for tp in timepoints] if timepoints else ["0"]
         _set_combo_values(self._scatter_tp_cb, tp_strs)
 
@@ -6566,7 +6457,7 @@ class WellViewerApp(QWidget):
         for ch in channels:
             statistics.append(f"Mean Fluorescence {ch.upper()}")
             statistics.append(f"Fraction On {ch.upper()}")
-            if ch in self._smfish_channels:
+            if ch in self._app_state.channel.smfish_channels:
                 statistics.append(f"smFISH Count {ch.upper()}")
         for ratio_label in ratio_labels:
             statistics.append(f"Mean Ratio {ratio_label}")
@@ -6930,12 +6821,12 @@ class WellViewerApp(QWidget):
         key = ax_map.get(id(clicked_ax))
         if key is None:
             return
-        self._legend_visible[key] = not self._legend_visible[key]
+        self._app_state.plot.legend_visible[key] = not self._app_state.plot.legend_visible[key]
         leg = clicked_ax.get_legend()
         if leg is not None:
-            leg.set_visible(self._legend_visible[key])
+            leg.set_visible(self._app_state.plot.legend_visible[key])
             self._line_canvas.draw_idle()
-        state = "shown" if self._legend_visible[key] else "hidden"
+        state = "shown" if self._app_state.plot.legend_visible[key] else "hidden"
         self._set_status(f"Legend for '{key}' plot {state}  (right-click to toggle)")
 
     # ── Log / status helpers ──────────────────────────────────────────────────

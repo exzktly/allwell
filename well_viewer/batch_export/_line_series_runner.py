@@ -80,7 +80,7 @@ def collect_line_series_for_group(
 
     series_out: List[LineSeries] = []
     for rset in group.members:
-        valid_wells = [w for w in rset.wells if w in app._well_paths]
+        valid_wells = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
         if not valid_wells:
             continue
         pts = app._aggregate_group(
@@ -103,7 +103,7 @@ def collect_line_series_for_group(
             points=points, cdf_vals=_cdf_for(valid_wells),
         ))
     for w in group.solo_wells:
-        if w not in app._well_paths:
+        if w not in app._app_state.dataset.well_paths:
             continue
         pts = app._aggregate_well(
             w, threshold=threshold, use_sem=use_sem,

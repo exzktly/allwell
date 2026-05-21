@@ -29,7 +29,6 @@ _T0_LABEL = "t0 (first timepoint)"
 # defined here.
 from well_viewer.fold_change_scopes import (  # noqa: E402
     FoldChangeScope,
-    _DIRTY_ATTR,
     current_scope_name,
     flush_dirty_scopes,
     get_scope as _get_scope,
@@ -64,19 +63,19 @@ def _all_member_labels(app) -> list[str]:
     names: list[str] = []
     repset_names: set[str] = set()
     seen: set[str] = set()
-    for s in (getattr(app, "_selections", []) or []):
+    for s in (app._app_state.selection.selections or []):
         if s.get("hidden"):
             continue
         name = s.get("name") or ""
         if not name or name in seen:
             continue
         wells = s.get("wells") or []
-        if any(w in (getattr(app, "_well_paths", None) or {}) for w in wells):
+        if any(w in (app._app_state.dataset.well_paths or {}) for w in wells):
             names.append(name)
             seen.add(name)
             repset_names.add(name)
-    well_paths = getattr(app, "_well_paths", None) or {}
-    for w in sorted(getattr(app, "_selected_wells", []) or [], key=lambda x: x):
+    well_paths = app._app_state.dataset.well_paths or {}
+    for w in sorted(app._app_state.selection.selected_wells or [], key=lambda x: x):
         if w in well_paths and w not in seen:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
             names.append(entry)
@@ -93,7 +92,7 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
     selected index is still re-synced from app state.
     """
     members = _all_member_labels(app)
-    saved = getattr(app, "_fc_control_label", "") or ""
+    saved = app._app_state.plot.fc_control_label or ""
     # If the saved label matches a bare well token AND there's a
     # collision-suffixed entry in the candidate list, prefer the suffixed
     # form so the user-visible state is unambiguous.
@@ -127,7 +126,7 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
 
 def _repopulate_baseline_combo(app, combo: QComboBox) -> None:
     """Refresh the Baseline combo. Only ``t0`` is supported today."""
-    on = bool(getattr(app, "_fc_vs_t0_on", False))
+    on = bool(app._app_state.plot.fc_vs_t0_on)
     blocked = combo.blockSignals(True)
     try:
         combo.clear()

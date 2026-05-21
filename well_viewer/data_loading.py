@@ -606,8 +606,8 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
     """
     get_active = getattr(app, "_rep_sets_active", None)
     rep_sets = list(get_active() if callable(get_active) else [])
-    well_paths = getattr(app, "_well_paths", {}) or {}
-    selected = set(getattr(app, "_selected_wells", set()) or set())
+    well_paths = app._app_state.dataset.well_paths or {}
+    selected = set(app._app_state.selection.selected_wells or set())
     color_for_label = getattr(app, "_color_for_label", None)
     color_for_well = getattr(app, "_color_for_well", None)
     rank_rset = getattr(app, "_rank_color_rset", None)
@@ -659,7 +659,7 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
             frames = [app._get_rows(w) for w in wells]
             pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
             yield rset.name, _color_rset(rset), pooled
-        active_solo = getattr(app, "_active_solo_wells", set()) or set()
+        active_solo = app._app_state.selection.active_solo_wells or set()
         for w in sorted(w for w in active_solo
                         if w in well_paths and w not in in_any_group):
             yield w, _color_well(w), app._get_rows(w)

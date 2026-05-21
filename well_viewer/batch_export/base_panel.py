@@ -102,7 +102,7 @@ class BatchExportPanel(QWidget):
         self._app = app
         self._use_sidebar_groups = bool(use_sidebar_groups)
 
-        default_out = str(app._data_dir) if app._data_dir else ""
+        default_out = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
         export_prefs = getattr(app, "_export_style_prefs", {}) or {}
         default_fmt = str(export_prefs.get("format", "png")).lower()
         if default_fmt not in {"png", "svg", "eps", "pdf"}:
@@ -118,9 +118,9 @@ class BatchExportPanel(QWidget):
         # plot-tab state so a batch run isn't tied to whatever the on-screen
         # plot has set. Defaults inherited from the app at panel-creation
         # time so opening the panel "feels like" the active plot tab.
-        self._fc_vs_control_on: bool = bool(getattr(app, "_fc_vs_control_on", False))
-        self._fc_control_label: str = str(getattr(app, "_fc_control_label", "") or "")
-        self._fc_vs_t0_on: bool = bool(getattr(app, "_fc_vs_t0_on", False))
+        self._fc_vs_control_on: bool = bool(app._app_state.plot.fc_vs_control_on)
+        self._fc_control_label: str = str(app._app_state.plot.fc_control_label or "")
+        self._fc_vs_t0_on: bool = bool(app._app_state.plot.fc_vs_t0_on)
 
         self._groups: List[BarGroup] = self._groups_from_rep_sets()
         self._auto_named_group_ids: set[int] = set()
@@ -261,7 +261,7 @@ class BatchExportPanel(QWidget):
 
     def _plate_press(self, event) -> None:
         tok = self._tok_at(event.globalPosition().toPoint())
-        if tok is None or tok not in self._app._well_paths:
+        if tok is None or tok not in self._app._app_state.dataset.well_paths:
             return
         grp = self._active_group()
         if grp is None:
@@ -329,7 +329,7 @@ class BatchExportPanel(QWidget):
         row.addWidget(lbl)
         cb = QComboBox()
         cb.addItems(channels)
-        default = str(getattr(self._app, "_active_channel", "") or "")
+        default = str(self._app._app_state.channel.active_channel or "")
         if default and default in channels:
             cb.setCurrentText(default)
         else:
@@ -367,10 +367,10 @@ class BatchExportPanel(QWidget):
 
     def _all_export_channels(self) -> List[str]:
         """Fluorescence channels + ratio metrics available for batch export."""
-        channels = list(getattr(self._app, "_fluor_channels", None) or [])
+        channels = list(self._app._app_state.channel.fluor_channels or [])
         if not channels:
             channels = ["gfp"]
-        for r in (getattr(self._app, "_ratio_metrics", None) or []):
+        for r in (self._app._app_state.channel.ratio_metrics or []):
             lbl = r.display_label()
             if lbl and lbl not in channels:
                 channels.append(lbl)
@@ -413,7 +413,7 @@ class BatchExportPanel(QWidget):
                 prop_cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
-                    getattr(self._app, "_active_metric", "mean_intensity"),
+                    self._app._app_state.channel.active_metric,
                     "Mean Intensity",
                 )
                 idx = prop_cb.findText(fallback)
@@ -425,7 +425,7 @@ class BatchExportPanel(QWidget):
                 item = model.item(sm_idx) if model is not None else None
                 if item is not None:
                     smf_ok = channel in (
-                        getattr(self._app, "_smfish_channels", []) or []
+                        self._app._app_state.channel.smfish_channels or []
                     )
                     item.setEnabled(smf_ok)
         finally:
@@ -434,16 +434,16 @@ class BatchExportPanel(QWidget):
     def _selected_export_metric_key(self, channel_attr: str) -> str:
         """Return the metric key (``mean_intensity`` / ``total_intensity`` / …)
         for the Property combo paired with ``channel_attr``. Falls back to
-        ``app._active_metric`` when the combo is missing or shows
+        ``app._app_state.channel.active_metric`` when the combo is missing or shows
         ``Calculated Val`` (ratio path — caller resolves the column via
         :py:meth:`_export_val_col_for`)."""
         from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
         if prop_cb is None:
-            return getattr(self._app, "_active_metric", "mean_intensity") or "mean_intensity"
+            return self._app._app_state.channel.active_metric or "mean_intensity"
         label = str(prop_cb.currentText() or "")
         return METRIC_LABEL_TO_KEY.get(
-            label, getattr(self._app, "_active_metric", "mean_intensity") or "mean_intensity",
+            label, self._app._app_state.channel.active_metric or "mean_intensity",
         )
 
     @contextmanager
@@ -459,13 +459,13 @@ class BatchExportPanel(QWidget):
         column in their key, so this swap doesn't pollute the cache.
         """
         app = self._app
-        saved = getattr(app, "_active_val_col", None)
+        saved = app._app_state.channel.active_val_col
         try:
-            app._active_val_col = val_col
+            app._app_state.channel.active_val_col = val_col
             yield
         finally:
             if saved is not None:
-                app._active_val_col = saved
+                app._app_state.channel.active_val_col = saved
 
     def _export_val_col_for(self, channel_attr: str) -> str:
         """Resolve the (Channel, Property) pair to a CSV column / ratio key.
@@ -476,7 +476,7 @@ class BatchExportPanel(QWidget):
         """
         ch_cb = getattr(self, channel_attr, None)
         channel = str(ch_cb.currentText() or "") if ch_cb is not None else (
-            getattr(self._app, "_active_channel", "") or ""
+            self._app._app_state.channel.active_channel or ""
         )
         metric_key = self._selected_export_metric_key(channel_attr)
         if hasattr(self._app, "_col_for_scatter_axis"):
@@ -535,14 +535,14 @@ class BatchExportPanel(QWidget):
 
     def _selected_export_channel(self) -> str:
         """Return the channel currently picked in the channel row, falling
-        back to ``app._active_channel`` when the row hasn't been built."""
+        back to ``app._app_state.channel.active_channel`` when the row hasn't been built."""
         for attr in ("_line_channel_cb", "_bar_channel_cb"):
             cb = getattr(self, attr, None)
             if cb is not None:
                 text = str(cb.currentText() or "").strip()
                 if text:
                     return text
-        return str(getattr(self._app, "_active_channel", "") or "")
+        return str(self._app._app_state.channel.active_channel or "")
 
     def _build_export_profile_row(self, layout: QVBoxLayout) -> None:
         row = QHBoxLayout()
@@ -753,7 +753,7 @@ class BatchExportPanel(QWidget):
         # users may want to pick a control before they've finished building
         # the group editor.
         if not members:
-            for w in sorted((getattr(self._app, "_well_paths", None) or {})):
+            for w in sorted((self._app._app_state.dataset.well_paths or {})):
                 members.append(w)
         saved = self._fc_control_label
         blocked = combo.blockSignals(True)
@@ -819,7 +819,7 @@ class BatchExportPanel(QWidget):
             return
         self._drag_visited.add(tok)
         grp = self._active_group()
-        if grp is None or tok not in self._app._well_paths:
+        if grp is None or tok not in self._app._app_state.dataset.well_paths:
             return
         rset = next((r for r in self._app._rep_sets_loaded() if tok in r.wells), None)
         if rset is not None:
@@ -841,7 +841,7 @@ class BatchExportPanel(QWidget):
 
     def _refresh_single_btn(self, tok: str) -> None:
         btn = self._map_btns.get(tok)
-        if btn is None or tok not in self._app._well_paths:
+        if btn is None or tok not in self._app._app_state.dataset.well_paths:
             return
         for g in self._groups:
             if tok in g.wells:
@@ -851,7 +851,7 @@ class BatchExportPanel(QWidget):
         btn.set_colors(get_color("BG_CELL"), get_color("TXT_PRI"))
 
     def _refresh_map(self) -> None:
-        avail = set(self._app._well_paths.keys())
+        avail = set(self._app._app_state.dataset.well_paths.keys())
         tok_color: Dict[str, str] = {}
         for grp in self._groups:
             c = self._app._rank_color_rset(grp)  # decision #1: colour by well-position rank
@@ -1039,7 +1039,7 @@ class BatchExportPanel(QWidget):
             row_rsets = [r for r in self._app._rep_sets_loaded()
                          if any(w[0].upper() == row_ltr for w in r.wells)]
             assigned_wells = {w for r in row_rsets for w in r.wells}
-            row_solos = [tok for tok in self._app._well_paths
+            row_solos = [tok for tok in self._app._app_state.dataset.well_paths
                          if tok[0].upper() == row_ltr and tok not in assigned_wells]
             if not row_rsets and not row_solos:
                 continue
@@ -1057,7 +1057,7 @@ class BatchExportPanel(QWidget):
             col_rsets = [r for r in self._app._rep_sets_loaded()
                          if any(w[1:] == col for w in r.wells)]
             assigned_wells = {w for r in col_rsets for w in r.wells}
-            col_solos = [tok for tok in self._app._well_paths
+            col_solos = [tok for tok in self._app._app_state.dataset.well_paths
                          if tok[1:] == col and tok not in assigned_wells]
             if not col_rsets and not col_solos:
                 continue
@@ -1136,7 +1136,7 @@ class BatchExportPanel(QWidget):
 
         def _valid_tok(raw: str) -> Optional[str]:
             n = _norm(raw)
-            return n if n in self._app._well_paths else None
+            return n if n in self._app._app_state.dataset.well_paths else None
 
         rep_by_name = {r.name: r for r in self._app._rep_sets_loaded()}
 
@@ -1188,7 +1188,7 @@ class BatchExportPanel(QWidget):
                 QMessageBox.critical(self, "Output directory error",
                                      f"Cannot create:\n{p}\n{exc}")
                 return None
-        d = self._app._data_dir
+        d = self._app._app_state.dataset.data_dir
         if d and d.is_dir():
             return d
         QMessageBox.critical(self, "No output directory",
@@ -1290,7 +1290,7 @@ class BatchExportPanel(QWidget):
 
     def _run_batch(self) -> None:
         groups_with_data = [g for g in self._groups_for_export()
-                            if any(w in self._app._well_paths for w in g.wells)]
+                            if any(w in self._app._app_state.dataset.well_paths for w in g.wells)]
         if not groups_with_data:
             msg = (
                 "Define at least one non-empty group in Sample Definitions."
@@ -1304,7 +1304,7 @@ class BatchExportPanel(QWidget):
         if out_dir is None:
             return
 
-        _ch_selected = self._selected_export_channel() or self._app._active_channel
+        _ch_selected = self._selected_export_channel() or self._app._app_state.channel.active_channel
         # ``_get_thresh_frac_on`` looks up by the canonical key (bare
         # channel token or ``ratio:<name>``), not by the dropdown's
         # display label \u2014 translate ratio labels first so the user's
@@ -1313,7 +1313,7 @@ class BatchExportPanel(QWidget):
         threshold = self._app._get_thresh_frac_on(
             self._resolved_channel_key(_ch_selected)
         )
-        use_sem = self._app._use_sem
+        use_sem = self._app._app_state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"
         fmt = self._fmt_cb.currentText()
 
@@ -1427,7 +1427,7 @@ class BatchExportPanel(QWidget):
 
             try:
                 # ``_render_group_figure`` calls helpers (notably
-                # ``_compute_rep_stats``) that read ``app._active_val_col``
+                # ``_compute_rep_stats``) that read ``app._app_state.channel.active_val_col``
                 # directly. Swap it for the duration of the render so a
                 # batch export against a ratio column or a non-MFI
                 # property draws the correct curves.
@@ -1453,7 +1453,7 @@ class BatchExportPanel(QWidget):
         )
 
     def _log_sample_definitions_snapshot(self, groups_for_export: List[BarGroup]) -> None:
-        sels = list(getattr(self._app, "_selections", []) or [])
+        sels = list(self._app._app_state.selection.selections or [])
         sel_summary = [f"{s.get('name', '?')}={len(s.get('wells') or [])}w" for s in sels]
         export_summary = [f"{g.name}={len(g.wells)}w" for g in groups_for_export]
         _logger.info(
@@ -1480,7 +1480,7 @@ class BatchExportPanel(QWidget):
 
         legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none",
                          edgecolor=PLOT_SPN, labelcolor=get_color("PLOT_TXT"))
-        _ch = (self._selected_export_channel() or self._app._active_channel).upper()
+        _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
         _metric_key = self._selected_export_metric_key("_line_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")

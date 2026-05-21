@@ -193,10 +193,10 @@ def redraw_distribution(app) -> None:
     if canvas is None or fig is None:
         return
 
-    val_col = app._active_val_col
+    val_col = app._app_state.channel.active_val_col
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
 
     tp_str = (getattr(app, "_distribution_tp_var", None).currentText()
               if getattr(app, "_distribution_tp_var", None) is not None else "")
@@ -368,7 +368,7 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
     # Threshold marker for non-violin modes.
     if mode != "Violin (per group)":
         try:
-            threshold = app._get_thresh_frac_on(app._active_channel)
+            threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
             if math.isfinite(threshold):
                 ax.axvline(threshold, color="orange", linestyle="--", linewidth=1.0, alpha=0.8)
         except Exception:
@@ -391,7 +391,7 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h) -> None:
     grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
 
     try:
-        threshold = app._get_thresh_frac_on(app._active_channel)
+        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     except Exception:
         threshold = float("nan")
     show_threshold = math.isfinite(threshold)
@@ -444,15 +444,15 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h) -> None:
 
 
 def _xlabel_for(app) -> str:
-    label = app._active_channel_label() if hasattr(app, "_active_channel_label") else app._active_channel.upper()
-    metric = getattr(app, "_active_metric", "")
-    if metric and not str(getattr(app, "_active_val_col", "")).startswith("ratio:"):
+    label = app._active_channel_label() if hasattr(app, "_active_channel_label") else app._app_state.channel.active_channel.upper()
+    metric = app._app_state.channel.active_metric
+    if metric and not str(app._app_state.channel.active_val_col).startswith("ratio:"):
         return f"{label} {metric.replace('_', ' ')}"
     return label
 
 
 def _title_for(app, tp_h: float, n_cells: int, n_groups: int) -> str:
-    label = app._active_channel_label() if hasattr(app, "_active_channel_label") else app._active_channel.upper()
+    label = app._active_channel_label() if hasattr(app, "_active_channel_label") else app._app_state.channel.active_channel.upper()
     if math.isfinite(tp_h):
         tp_str = f"t = {tp_h:g} h"
     else:

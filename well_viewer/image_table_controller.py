@@ -86,9 +86,9 @@ def image_table_refresh_picker(app) -> None:
     """Push the active-well set onto the sidebar plate and update the count label."""
     plate = getattr(app, "_sidebar_image_table_plate", None)
     if plate is not None:
-        plate.setEnabledWells(list(app._well_paths.keys()))
+        plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
         active = sorted(
-            (w for w in app._image_table_active_wells if w in app._well_paths),
+            (w for w in app._image_table_active_wells if w in app._app_state.dataset.well_paths),
             key=app._parse_rc,
         )
         plate.setSelectedWellIds(active)
@@ -99,7 +99,7 @@ def image_table_refresh_picker(app) -> None:
 
 
 def image_table_select_all(app) -> None:
-    app._image_table_active_wells = set(app._well_paths.keys())
+    app._image_table_active_wells = set(app._app_state.dataset.well_paths.keys())
     image_table_refresh_picker(app)
 
 
@@ -114,20 +114,20 @@ def image_table_clear_active(app) -> None:
 def _channel_options(app) -> List[str]:
     """All channel tokens available for selection (uppercase for display).
 
-    Sourced from the canonical ``app._fluor_channels`` /
-    ``app._smfish_channels`` lists (built by ``_recalculate_threshold`` from
+    Sourced from the canonical ``app._app_state.channel.fluor_channels`` /
+    ``app._app_state.channel.smfish_channels`` lists (built by ``_recalculate_threshold`` from
     pipeline_info.json + CSV detection — same lists every other tab uses).
-    Falls back to the raw ``app._pipeline_info`` dict for the rare case
+    Falls back to the raw ``app._app_state.dataset.pipeline_info`` dict for the rare case
     where the tab is repopulated before the first ``_recalculate_threshold``
     pass. Adds the virtual ``NUC+SEG`` token at the end when a nuclear
     channel is known — that's where the pre-rendered segmentation overlay
     images live, and they're how the Image Table replaces the old Movie
     Montage tab.
     """
-    info = getattr(app, "_pipeline_info", None) or {}
+    info = app._app_state.dataset.pipeline_info or {}
     chans: List[str] = []
 
-    fluor = list(getattr(app, "_fluor_channels", None) or [])
+    fluor = list(app._app_state.channel.fluor_channels or [])
     if not fluor:
         nuclear_pi = (info.get("nuclear_token") or "").strip().lower()
         if nuclear_pi:
@@ -141,7 +141,7 @@ def _channel_options(app) -> List[str]:
         if tok and tok not in chans:
             chans.append(tok)
 
-    smfish = getattr(app, "_smfish_channels", None) or []
+    smfish = app._app_state.channel.smfish_channels or []
     for tok in smfish:
         tok = str(tok).strip().lower()
         if tok and tok not in chans:
@@ -158,7 +158,7 @@ def _channel_options(app) -> List[str]:
     # Append user-defined ratio metrics as virtual channels.  The display
     # label "GFP/RFP" is what appears in the dropdown; _find_ratio_for_channel
     # resolves it back to the RatioMetric at render time.
-    for r in (getattr(app, "_ratio_metrics", None) or []):
+    for r in (app._app_state.channel.ratio_metrics or []):
         lbl = r.display_label()
         if lbl and lbl not in options:
             options.append(lbl)
@@ -168,7 +168,7 @@ def _channel_options(app) -> List[str]:
 
 def _find_ratio_for_channel(app, chan: str):
     """Return the RatioMetric whose display_label matches *chan*, or None."""
-    for r in (getattr(app, "_ratio_metrics", None) or []):
+    for r in (app._app_state.channel.ratio_metrics or []):
         if r.display_label().upper() == chan.strip().upper():
             return r
     return None
@@ -233,12 +233,12 @@ def _tp_sort_key(tp: str):
 def _cache_column_tokens(app, column: str) -> List[str]:
     """Unique normalised tokens from ``column`` across every cached DataFrame.
 
-    ``app._cache`` values are DataFrames since the pandas migration; iterating
+    ``app._app_state.dataset.cache`` values are DataFrames since the pandas migration; iterating
     one with ``for row in df`` yields *column names*, not rows. Pull the column
     out vectorised instead — and skip frames that don't carry it at all.
     """
     seen: List[str] = []
-    cache = getattr(app, "_cache", None) or {}
+    cache = app._app_state.dataset.cache or {}
     for df in cache.values():
         if df is None or column not in getattr(df, "columns", ()):
             continue
@@ -250,7 +250,7 @@ def _cache_column_tokens(app, column: str) -> List[str]:
 
 
 def _timepoint_options(app) -> List[str]:
-    info = getattr(app, "_pipeline_info", None) or {}
+    info = app._app_state.dataset.pipeline_info or {}
     seen: List[str] = []
     for tp in (info.get("available_timepoints") or []):
         tok = _norm_token(tp)
@@ -264,7 +264,7 @@ def _timepoint_options(app) -> List[str]:
 
 
 def _fov_options(app) -> List[str]:
-    info = getattr(app, "_pipeline_info", None) or {}
+    info = app._app_state.dataset.pipeline_info or {}
     seen: List[str] = []
     for fv in (info.get("available_fovs") or []):
         tok = _norm_token(fv)
@@ -276,7 +276,7 @@ def _fov_options(app) -> List[str]:
 
 
 def _well_options(app) -> List[str]:
-    return sorted(app._well_paths.keys(), key=app._parse_rc)
+    return sorted(app._app_state.dataset.well_paths.keys(), key=app._parse_rc)
 
 
 def image_table_repopulate_dropdowns(app) -> None:
@@ -933,7 +933,7 @@ def _load_well_channel(
     key = (well, chan_lower, variant)
     if key in cache:
         return cache[key]
-    info = getattr(app, "_pipeline_info", None) or {}
+    info = app._app_state.dataset.pipeline_info or {}
     # Overlay images aren't keyed by a fluor channel; pass the nuclear token
     # as a sensible default so any token-based filtering inside the loader
     # has a real channel to match. The returned ``overlay`` dict comes from
@@ -943,12 +943,12 @@ def _load_well_channel(
         fluor_token = (info.get("nuclear_token") or chan_lower).strip().lower()
     try:
         fluor, overlay, mask, tophat = find_well_images_and_masks(
-            app._data_dir,
+            app._app_state.dataset.data_dir,
             well,
             fluor_token=fluor_token,
-            in_dir=app._in_dir,
-            _fov_tp_extractor=app._fov_tp_extractor,
-            _pipeline_info=app._pipeline_info,
+            in_dir=app._app_state.dataset.in_dir,
+            _fov_tp_extractor=app._app_state.dataset.fov_tp_extractor,
+            _pipeline_info=app._app_state.dataset.pipeline_info,
         )
     except Exception:
         fluor, overlay, mask, tophat = {}, {}, {}, {}
@@ -1777,7 +1777,7 @@ def image_table_export(app) -> None:
     if fig is None:
         return
 
-    initial_dir = str(app._data_dir) if getattr(app, "_data_dir", None) else ""
+    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
     initial = (
         str(Path(initial_dir) / "image_table.png") if initial_dir else "image_table.png"
     )

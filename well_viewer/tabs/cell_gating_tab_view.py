@@ -84,7 +84,7 @@ class GatingWorker(QThread):
         debug = _debug_flags.cell_gating_debug_enabled()
         cell_area_threshold = self._app._get_cell_area_threshold()
         fluor_gates = self._app._get_all_fluor_gates()
-        labels = list(self._app._well_paths)
+        labels = list(self._app._app_state.dataset.well_paths)
         total = len(labels)
 
         if debug:
@@ -290,7 +290,7 @@ def cell_gating_load_cell_areas(app) -> None:
     app._cell_gating_fluor_data = {}
     app._cell_gating_ratio_data = {}
     labels = _cell_gating_source_wells(app)
-    ratios = list(getattr(app, "_ratio_metrics", []) or [])
+    ratios = list(app._app_state.channel.ratio_metrics or [])
 
     for label in labels:
         df = app._get_rows(label)
@@ -304,7 +304,7 @@ def cell_gating_load_cell_areas(app) -> None:
             app._cell_gating_cell_areas.extend(
                 float(a) for a in area[np.isfinite(area) & (area > 0)]
             )
-        for channel in app._fluor_channels:
+        for channel in app._app_state.channel.fluor_channels:
             val_col = f"{channel}_mean_intensity"
             if val_col not in frame_df.columns:
                 continue
@@ -358,7 +358,7 @@ def _cell_gating_resolve_key(app, channel: str) -> str:
 
     Real fluor channels (``"gfp"``, ``"mcherry"``) are stored under their
     bare name. Ratios are stored under their full key (``"ratio:<name>"``).
-    Callers can pass either the bare ratio name (``app._active_channel``
+    Callers can pass either the bare ratio name (``app._app_state.channel.active_channel``
     after a ratio switch) or the full ``ratio:`` key — resolve to whichever
     form actually exists in the edits dict so the user's edit is honoured.
     """
@@ -432,7 +432,7 @@ def cell_gating_start_gating_worker(app) -> None:
     app._cell_gating_worker = worker
     bar = getattr(app, "_progress_bar", None)
     if bar is not None:
-        bar.setRange(0, max(1, len(app._well_paths)))
+        bar.setRange(0, max(1, len(app._app_state.dataset.well_paths)))
         bar.setValue(0)
         bar.show()
     worker.start()
@@ -512,7 +512,7 @@ def cell_gating_auto_threshold(app) -> None:
     """
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return
-    out_dir = getattr(app, "_data_dir", None)
+    out_dir = app._app_state.dataset.data_dir
     if not out_dir:
         try:
             app._set_status(
@@ -521,7 +521,7 @@ def cell_gating_auto_threshold(app) -> None:
         except Exception:
             pass
         return
-    channels = [str(ch).strip().lower() for ch in (getattr(app, "_fluor_channels", []) or []) if str(ch).strip()]
+    channels = [str(ch).strip().lower() for ch in (app._app_state.channel.fluor_channels or []) if str(ch).strip()]
     if not channels:
         try:
             app._set_status(
@@ -595,8 +595,8 @@ def cell_gating_auto_threshold(app) -> None:
         except Exception:
             pass
 
-    well_labels = list(getattr(app, "_well_paths", {}) or {})
-    in_dir = getattr(app, "_in_dir", None)
+    well_labels = list(app._app_state.dataset.well_paths or {})
+    in_dir = app._app_state.dataset.in_dir
     import logging as _logging
     _logging.getLogger("well_viewer.auto_threshold").info(
         "Auto-threshold: starting — data_dir=%s in_dir=%s wells=%d channels=%s",
@@ -633,13 +633,13 @@ def _cell_gating_build_channel_controls(app) -> None:
         if w is not None:
             w.deleteLater()
 
-    channels = list(app._fluor_channels)
+    channels = list(app._app_state.channel.fluor_channels)
     # Ratios show up as virtual channels in the plot dropdowns; surface
     # them here too so the user can give each ratio a FluorGating /
     # ThreshFracOn entry. They're keyed by ``ratio.key()`` (e.g.
     # ``ratio:gfp_over_mcherry``) in the edits dicts, distinct from the
     # plain fluor channel keys.
-    ratios = list(getattr(app, "_ratio_metrics", []) or [])
+    ratios = list(app._app_state.channel.ratio_metrics or [])
     row_specs: list[tuple[str, str]] = [(ch, ch.upper() + " Channel:") for ch in channels]
     for r in ratios:
         try:
@@ -750,20 +750,20 @@ def _cell_gating_source_wells(app) -> list[str]:
         ordered: list[str] = []
         for rset in active_rsets:
             for well in rset.wells:
-                if well in app._well_paths and well not in seen:
+                if well in app._app_state.dataset.well_paths and well not in seen:
                     seen.add(well)
                     ordered.append(well)
         return sorted(ordered, key=app._parse_rc)
 
     selected = [
-        label for label in app._selected_wells
-        if label in app._well_paths
+        label for label in app._app_state.selection.selected_wells
+        if label in app._app_state.dataset.well_paths
     ]
     # Fall back to every loaded well so the CDFs render on the first open
     # after a data load (before the user has made an explicit selection).
     # Once they pick wells in the sidebar, that selection scopes the plot.
     if not selected:
-        selected = list(app._well_paths)
+        selected = list(app._app_state.dataset.well_paths)
     return sorted(selected, key=app._parse_rc)
 
 

@@ -33,15 +33,15 @@ def snapshot(app) -> dict:
     """Build a JSON-serialisable view-state dict from current app state."""
     return {
         "schema_version": 1,
-        "selected_wells": sorted(getattr(app, "_selected_wells", set()) or []),
+        "selected_wells": sorted(app._app_state.selection.selected_wells or []),
         "active_centre_tab": _current_leaf_tab(app),
-        "active_channel": str(getattr(app, "_active_channel", "") or ""),
-        "active_metric": str(getattr(app, "_active_metric", "") or ""),
-        "use_sem": bool(getattr(app, "_use_sem", True)),
+        "active_channel": str(app._app_state.channel.active_channel or ""),
+        "active_metric": str(app._app_state.channel.active_metric or ""),
+        "use_sem": bool(app._app_state.plot.use_sem),
         "fold_change": {
-            "vs_control_on": bool(getattr(app, "_fc_vs_control_on", False)),
-            "control_label": str(getattr(app, "_fc_control_label", "") or ""),
-            "vs_t0_on": bool(getattr(app, "_fc_vs_t0_on", False)),
+            "vs_control_on": bool(app._app_state.plot.fc_vs_control_on),
+            "control_label": str(app._app_state.plot.fc_control_label or ""),
+            "vs_t0_on": bool(app._app_state.plot.fc_vs_t0_on),
         },
         "export_style_prefs": dict(getattr(app, "_export_style_prefs", {}) or {}),
         "tabs": _snapshot_tabs(app),
@@ -234,7 +234,7 @@ def restore(app, state: dict) -> None:
     wells = state.get("selected_wells") or []
     if isinstance(wells, list):
         valid = {str(w) for w in wells if isinstance(w, str)}
-        valid &= set(getattr(app, "_well_paths", {}) or {})
+        valid &= set(app._app_state.dataset.well_paths or {})
         if valid and hasattr(app, "_set_selected_wells"):
             try:
                 app._set_selected_wells(valid, commit=False)
@@ -243,18 +243,18 @@ def restore(app, state: dict) -> None:
 
     if "use_sem" in state:
         try:
-            app._use_sem = bool(state["use_sem"])
+            app._app_state.plot.use_sem = bool(state["use_sem"])
         except Exception:
             pass
 
     fc = state.get("fold_change") or {}
     if isinstance(fc, dict):
         if "vs_control_on" in fc:
-            app._fc_vs_control_on = bool(fc.get("vs_control_on"))
+            app._app_state.plot.fc_vs_control_on = bool(fc.get("vs_control_on"))
         if "control_label" in fc:
-            app._fc_control_label = str(fc.get("control_label") or "")
+            app._app_state.plot.fc_control_label = str(fc.get("control_label") or "")
         if "vs_t0_on" in fc:
-            app._fc_vs_t0_on = bool(fc.get("vs_t0_on"))
+            app._app_state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
         # Push the restored state into any fold-change combos that have
         # already been built. Lazily-built tabs (Bar) will pick the
         # values up on first install via _repopulate_*_combo, which both
@@ -277,7 +277,7 @@ def restore(app, state: dict) -> None:
     # Active channel — validated against the canonical list. Fall through
     # silently when the saved channel no longer exists in the new dataset.
     ch = state.get("active_channel")
-    fluor = list(getattr(app, "_fluor_channels", []) or [])
+    fluor = list(app._app_state.channel.fluor_channels or [])
     if (
         isinstance(ch, str) and ch
         and ch in fluor
@@ -290,7 +290,7 @@ def restore(app, state: dict) -> None:
 
     metric = state.get("active_metric")
     if isinstance(metric, str) and metric:
-        app._active_metric = metric
+        app._app_state.channel.active_metric = metric
 
     # Stash per-tab state for deferred apply on first tab visit.
     tabs = state.get("tabs") or {}
@@ -544,7 +544,7 @@ def _apply_image_table(app, state: dict) -> None:
 # ── save / load entry points ───────────────────────────────────────────────
 
 def save_to_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     try:
         state = snapshot(app)
@@ -555,7 +555,7 @@ def save_to_data_dir(app) -> None:
 
 
 def load_from_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     state = _doc.get_section(app, "view_state")
     if not isinstance(state, dict):
@@ -585,9 +585,9 @@ def reset(app) -> None:
         except Exception:
             _logger.debug("reset: clearing selected wells failed", exc_info=True)
     # Fold-change scopes.
-    app._fc_vs_control_on = False
-    app._fc_control_label = ""
-    app._fc_vs_t0_on = False
+    app._app_state.plot.fc_vs_control_on = False
+    app._app_state.plot.fc_control_label = ""
+    app._app_state.plot.fc_vs_t0_on = False
     try:
         from well_viewer.tabs.fold_change_controls import _sync_widgets_to_state
         _sync_widgets_to_state(app)
@@ -600,7 +600,7 @@ def reset(app) -> None:
     # Drop any pending state stashed from a previous restore.
     app._view_state_pending = None
     # Drop the view_state section so a fresh open doesn't repopulate.
-    if getattr(app, "_data_dir", None):
+    if app._app_state.dataset.data_dir:
         try:
             _doc.set_section(app, "view_state", None)
         except Exception:

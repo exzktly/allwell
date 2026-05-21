@@ -177,7 +177,7 @@ def collect_line_series(
         fc_state = _fc.fold_change_state(app)
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
     if val_col is None:
-        val_col = app._active_val_col
+        val_col = app._app_state.channel.active_val_col
 
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
@@ -204,12 +204,12 @@ def collect_line_series(
     if active_rsets:
         ordered_rsets = _apply_order(
             active_rsets,
-            list(getattr(app, "_line_order_rsets", []) or []),
+            list(app._app_state.plot.line_order_rsets or []),
             key=lambda r: getattr(r, "name", ""),
         )
         for rset in ordered_rsets:
             color = app._rank_color_rset(rset)
-            valid_wells = [w for w in rset.wells if w in app._well_paths]
+            valid_wells = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
             all_tps: set = set()
             cdf_vals: list = []
             for lbl in valid_wells:
@@ -226,7 +226,7 @@ def collect_line_series(
                         rows, val_col=val_col,
                         cell_area_threshold=cell_area_threshold,
                         fluor_gates=fluor_gates,
-                        ratios=getattr(app, "_ratio_index", None),
+                        ratios=app._app_state.channel.ratio_index,
                     ))
             _raw_pts: list = []
             for t in sorted(all_tps):
@@ -260,12 +260,12 @@ def collect_line_series(
 
     # Per-well branch.
     selected = sorted(
-        (lbl for lbl in app._selected_wells if lbl in app._well_paths),
+        (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
         key=lambda lbl: app._parse_rc(lbl),
     )
     ordered_selected = _apply_order(
         selected,
-        list(getattr(app, "_line_order_wells", []) or []),
+        list(app._app_state.plot.line_order_wells or []),
         key=lambda x: x,
     )
     for label in ordered_selected:
@@ -292,7 +292,7 @@ def collect_line_series(
                 rows, val_col=val_col,
                 cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
-                ratios=getattr(app, "_ratio_index", None),
+                ratios=app._app_state.channel.ratio_index,
             ))
         display = app._well_display_label(label)
         series_out.append(LineSeries(
@@ -324,9 +324,9 @@ def redraw_line_plots(
     for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_cdf):
         ax.cla()
 
-    use_sem = app._use_sem
+    use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    threshold = app._get_thresh_frac_on(app._active_channel)
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     selected = app._selected_labels()
 
     # Fold-change state read once for the axis title suffix. The actual
@@ -344,7 +344,7 @@ def redraw_line_plots(
     # legend background in non-default themes.
     legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none", edgecolor=_spine, labelcolor=_title_fg)
 
-    _ch = app._active_channel.upper()
+    _ch = app._app_state.channel.active_channel.upper()
     _fc_suffix = _fc.fold_change_suffix(fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl)
     apply_ax_style(app._line_ax_mean, f"{_ch} {metric_label} (above threshold) ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)
     apply_ax_style(app._line_ax_frac, "Fraction of Cells Above Threshold", "Fraction")
@@ -356,7 +356,7 @@ def redraw_line_plots(
     app._line_ax_cdf.set_ylim(-0.02, 1.05)
 
     active_rsets = app._rep_sets_active()
-    has_data = bool(getattr(app, "_well_paths", None))
+    has_data = bool(app._app_state.dataset.well_paths)
     # Empty-state warning needs to honour Screen mode so the text isn't
     # painted against a default white matplotlib figure when the rest of
     # the app is dark. Force the figure + axes facecolor to the theme bg
@@ -448,11 +448,11 @@ def redraw_line_plots(
         if _has_labeled(app._line_ax_mean):
             leg_mean = app._line_ax_mean.legend(**legend_kw)
             leg_mean.set_draggable(True)
-            leg_mean.set_visible(app._legend_visible["mean"])
+            leg_mean.set_visible(app._app_state.plot.legend_visible["mean"])
         if _has_labeled(app._line_ax_frac):
             leg_frac = app._line_ax_frac.legend(**legend_kw)
             leg_frac.set_draggable(True)
-            leg_frac.set_visible(app._legend_visible["frac"])
+            leg_frac.set_visible(app._app_state.plot.legend_visible["frac"])
     if any_cdf:
         app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
         try:
@@ -469,10 +469,10 @@ def redraw_line_plots(
         if _has_labeled(app._line_ax_cdf):
             leg_cdf = app._line_ax_cdf.legend(**legend_kw)
             leg_cdf.set_draggable(True)
-            leg_cdf.set_visible(app._legend_visible["cdf"])
+            leg_cdf.set_visible(app._app_state.plot.legend_visible["cdf"])
         app._line_ax_cdf.set_xlim(cdf_lo, cdf_hi)
     else:
-        app._line_ax_cdf.text(0.5, 0.5, f"No {app._active_channel.upper()} data found.", transform=app._line_ax_cdf.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
+        app._line_ax_cdf.text(0.5, 0.5, f"No {app._app_state.channel.active_channel.upper()} data found.", transform=app._line_ax_cdf.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
 
     if fc_misses:
         # Tell the user which timepoints lost their bars/points to a
@@ -483,7 +483,7 @@ def redraw_line_plots(
             f"Fold change: control missing at t={_tps} — those points dropped."
         )
     elif active_rsets:
-        n_wells = sum(sum(1 for w in r.wells if w in app._well_paths) for r in active_rsets)
+        n_wells = sum(sum(1 for w in r.wells if w in app._app_state.dataset.well_paths) for r in active_rsets)
         app._set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)  |  threshold={threshold:.2f}  |  band={band_lbl}")
     else:
         n_total = sum(len(app._get_rows(l)) for l in selected)

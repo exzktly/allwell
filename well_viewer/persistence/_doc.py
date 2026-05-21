@@ -35,8 +35,8 @@ LEGACY_SIDECARS: dict[str, str] = {
 
 
 def path_for(app) -> Optional[Path]:
-    if getattr(app, "_data_dir", None):
-        return Path(app._data_dir) / PERSISTENCE_FILENAME
+    if app._app_state.dataset.data_dir:
+        return Path(app._app_state.dataset.data_dir) / PERSISTENCE_FILENAME
     return None
 
 
@@ -47,7 +47,7 @@ def read(app) -> dict:
     legacy files are migrated into a freshly written doc and then deleted.
     Returns an empty dict when there's no data directory at all.
     """
-    cached = getattr(app, "_persistence_doc", None)
+    cached = app._app_state.dataset.persistence_doc
     if cached is not None:
         return cached
     p = path_for(app)
@@ -75,7 +75,7 @@ def read(app) -> dict:
     else:
         doc = _migrate_from_legacy(p)
     doc.setdefault("schema_version", SCHEMA_VERSION)
-    app._persistence_doc = doc
+    app._app_state.dataset.persistence_doc = doc
     return doc
 
 
@@ -90,7 +90,7 @@ def write(app, doc: dict) -> None:
     except OSError as exc:
         _logger.warning("Failed to write %s: %s", p, exc)
         return
-    app._persistence_doc = doc
+    app._app_state.dataset.persistence_doc = doc
 
 
 def get_section(app, key: str) -> Any:

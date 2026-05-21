@@ -36,16 +36,16 @@ def load_path(app, path: Path) -> None:
         logger = logging.getLogger("well_viewer")
         logger.info("Detected in/out layout: in=%s  out=%s", in_dir, out_dir)
         logger.info("Fluor images from: %s  |  masks/overlays from: %s", in_dir, out_dir)
-        app._in_dir = in_dir
-        app._fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._pipeline_info = app._read_pipeline_info(out_dir)
-        app._fov_tp_extractor = _resolve_fov_tp_extractor(app._fov_tp_extractor, app._pipeline_info)
-        app._smfish_channels = _smfish_tokens
+        app._app_state.dataset.in_dir = in_dir
+        app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(out_dir)
+        app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
+        app._app_state.channel.smfish_channels = _smfish_tokens
         app._load_directory(out_dir, label=f"{path.name}/out")
     else:
-        app._in_dir = None
-        app._fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._pipeline_info = app._read_pipeline_info(path)
-        app._fov_tp_extractor = _resolve_fov_tp_extractor(app._fov_tp_extractor, app._pipeline_info)
-        app._smfish_channels = _smfish_tokens
+        app._app_state.dataset.in_dir = None
+        app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(path)
+        app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
+        app._app_state.channel.smfish_channels = _smfish_tokens
         app._load_directory(path)
 
 
@@ -72,7 +72,7 @@ def load_directory(app, d: Path, label=None) -> None:
         return
     # Save the outgoing dataset's view-state before swapping data dirs so
     # reopening it later restores tab / wells / channel selection.
-    if app._data_dir is not None and hasattr(app, "_view_state_save_to_data_dir"):
+    if app._app_state.dataset.data_dir is not None and hasattr(app, "_view_state_save_to_data_dir"):
         try:
             app._view_state_save_to_data_dir()
         except Exception:
@@ -80,14 +80,13 @@ def load_directory(app, d: Path, label=None) -> None:
     # DatasetState resets the per-dataset caches (data dir, well paths, row
     # cache, persistence doc) for the switch to the new data directory.
     app._app_state.dataset.begin_load(d)
-    app._selected_wells.clear()
-    app._last_sel = None
-    app._prev_sel = set()
-    app._bar_order = None
+    app._app_state.selection.selected_wells.clear()
+    app._app_state.selection.last_sel = None
+    app._app_state.selection.prev_sel = set()
+    app._app_state.plot.bar_order = None
     # Drop the per-channel threshold (min, max) cache; the new dataset's
     # ranges may be completely different.
-    if hasattr(app, "_threshold_range_cache"):
-        app._threshold_range_cache.clear()
+    app._app_state.channel.threshold_range_cache.clear()
     if hasattr(app, "_invalidate_review_image_frame_cache"):
         app._invalidate_review_image_frame_cache()
     # Drop every cached ZipFile handle on dataset swap so the new
@@ -113,8 +112,8 @@ def load_directory(app, d: Path, label=None) -> None:
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(p.stem)
         key = tok if tok else p.stem
-        app._well_paths[key] = p
-        app._cache[key] = app._load_well_csv(p)
+        app._app_state.dataset.well_paths[key] = p
+        app._app_state.dataset.cache[key] = app._load_well_csv(p)
         app._step_progress(i, f"Loading {i}/{n}: {p.name}")
     app._hide_progress()
     app._rebuild_all_timepoints_cache()
@@ -146,8 +145,8 @@ def load_directory(app, d: Path, label=None) -> None:
         except Exception:
             pass
     app._refresh_sidebar_map()
-    if app._preview_selected_well not in app._well_paths:
-        app._preview_selected_well = None
+    if app._app_state.preview.selected_well not in app._app_state.dataset.well_paths:
+        app._app_state.preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
     if hasattr(app, "_image_table_refresh_picker"):
@@ -269,4 +268,4 @@ def _looks_like_well_measurement_csv(path: Path) -> bool:
 
 
 def build_tok_to_label(app) -> None:
-    app._tok_to_label = {tok: p.stem for tok, p in app._well_paths.items()}
+    app._app_state.dataset.tok_to_label = {tok: p.stem for tok, p in app._app_state.dataset.well_paths.items()}

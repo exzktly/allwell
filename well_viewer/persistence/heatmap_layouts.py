@@ -34,7 +34,7 @@ def _collect_settings(app) -> dict:
 
 
 def save_to_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     layouts = list(getattr(app, "_heatmap_layouts", []) or [])
     payload = {
@@ -50,7 +50,7 @@ def schedule_save(app) -> None:
     table writes the JSON dozens of times per second on a fast user."""
     if getattr(app, "_heatmap_layouts_save_pending", False):
         return
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     app._heatmap_layouts_save_pending = True
     QTimer.singleShot(500, lambda: _flush(app))
@@ -62,7 +62,7 @@ def _flush(app) -> None:
 
 
 def load_from_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     data = _doc.get_section(app, "heatmap_layouts")
     if not isinstance(data, dict):

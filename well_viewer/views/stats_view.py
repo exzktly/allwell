@@ -16,8 +16,8 @@ from well_viewer.ui_helpers import (
 
 
 def build_stats_tab(app, parent: QWidget, **_kw) -> None:
-    app._stats_groups = []
-    app._stats_active_grp = -1
+    app._app_state.stats.groups = []
+    app._app_state.stats.active_grp = -1
     app._build_stats_results_panel(parent)
 
 
@@ -61,28 +61,28 @@ def build_stats_group_editor(app, parent: QWidget, **_kw) -> None:
     )
     layout.addWidget(hdr)
 
-    app._stats_drag_adding = True
-    app._stats_drag_visited = set()
+    app._app_state.stats.drag_adding = True
+    app._app_state.stats.drag_visited = set()
 
     def _commit_plate_to_group(*_a) -> None:
         grp = app._stats_active_group()
         if grp is None:
             app._stats_refresh_map()        # no active group — revert the click
             return
-        new = {w for w in plate.selectedWellIds() if w in app._well_paths}
-        old = {w for w in grp.wells if w in app._well_paths}
+        new = {w for w in plate.selectedWellIds() if w in app._app_state.dataset.well_paths}
+        old = {w for w in grp.wells if w in app._app_state.dataset.well_paths}
         added, removed = new - old, old - new
         if not added and not removed:
             return
         # Reuse stats_apply_drag's "well in a loaded rep-set → add/remove the whole
         # set; else solo-well add/remove" logic, one token at a time.
         for tok in added:
-            app._stats_drag_adding = True
-            app._stats_drag_visited = set()
+            app._app_state.stats.drag_adding = True
+            app._app_state.stats.drag_visited = set()
             app._stats_apply_drag(tok)
         for tok in removed:
-            app._stats_drag_adding = False
-            app._stats_drag_visited = set()
+            app._app_state.stats.drag_adding = False
+            app._app_state.stats.drag_visited = set()
             app._stats_apply_drag(tok)
         app._stats_refresh_map()
         app._stats_refresh_group_list()
@@ -244,7 +244,7 @@ def build_stats_results_panel(app, parent: QWidget, **_kw) -> None:
             app._refresh_stats_property_combo()
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
         label = METRIC_KEY_TO_LABEL.get(
-            getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity"
+            app._app_state.channel.active_metric, "Mean Intensity"
         )
         idx = app._stats_property_cb.findText(label)
         if idx >= 0:

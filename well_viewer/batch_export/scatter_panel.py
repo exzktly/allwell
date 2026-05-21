@@ -136,11 +136,11 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self._build_run_row(layout, button_text="\u25b6  Run Scatter Batch Export")
 
     def _init_timepoint_dropdown(self) -> None:
-        timepoints = sorted(set(getattr(self._app, "_all_timepoints_cache", []) or []))
+        timepoints = sorted(set(self._app._app_state.dataset.all_timepoints_cache or []))
         if not timepoints:
             import pandas as _pd
             tps: set = set()
-            for lbl in self._app._well_paths:
+            for lbl in self._app._app_state.dataset.well_paths:
                 df = self._app._get_rows(lbl)
                 if df is None or "timepoint_hours" not in df.columns:
                     continue
@@ -229,7 +229,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 prop_cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
-                    getattr(self._app, "_active_metric", "mean_intensity"),
+                    self._app._app_state.channel.active_metric,
                     "Mean Intensity",
                 )
                 idx = prop_cb.findText(fallback)
@@ -242,7 +242,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 item = model.item(sm_idx) if model is not None else None
                 if item is not None:
                     smf_ok = channel in (
-                        getattr(self._app, "_smfish_channels", []) or []
+                        self._app._app_state.channel.smfish_channels or []
                     )
                     item.setEnabled(smf_ok)
         finally:
@@ -251,7 +251,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _scatter_channel_options(self) -> List[str]:
         """Real fluor channels + ratio labels — same source the per-tab
         scatter plot uses so the batch UI tracks the plot tabs exactly."""
-        channels = list(self._app._fluor_channels) if self._app._fluor_channels else ["gfp"]
+        channels = list(self._app._app_state.channel.fluor_channels) if self._app._app_state.channel.fluor_channels else ["gfp"]
         options: List[str] = list(channels)
         ratio_labels: List[str] = []
         if hasattr(self._app, "_ratio_dropdown_labels"):
@@ -361,7 +361,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _run_batch(self) -> None:
         groups_with_data = _groups_with_loaded_wells(
-            self._groups_for_export(), self._app._well_paths,
+            self._groups_for_export(), self._app._app_state.dataset.well_paths,
         )
         if not groups_with_data:
             QMessageBox.warning(self, "No groups", "Define at least one non-empty group.")
@@ -431,25 +431,25 @@ class ScatterBatchExportPanel(BatchExportPanel):
         """Temporarily make the app's selection state describe just *grp*: one
         selection per replicate-set member, plus the group's solo wells as the
         per-well selection. The scatter_controller collectors read
-        ``app._rep_sets_active()`` / ``app._selected_wells`` (both derived from
-        ``app._selections``), so we swap ``_selections`` for the duration."""
+        ``app._rep_sets_active()`` / ``app._app_state.selection.selected_wells`` (both derived from
+        ``app._app_state.selection.selections``), so we swap ``_selections`` for the duration."""
         from well_viewer.selections_model import make_selection
         app = self._app
-        saved = (app._selections, app._current_selection_id, app._selected_wells)
+        saved = (app._app_state.selection.selections, app._app_state.selection.current_selection_id, app._app_state.selection.selected_wells)
         try:
             used_names: set = set()
             used_ids: set = set()
-            app._selections = [
+            app._app_state.selection.selections = [
                 make_selection(name=m.name, wells=list(m.wells), source="rep_set",
                                used_names=used_names, used_ids=used_ids,
                                fallback_color_idx=i)
                 for i, m in enumerate(grp.members)
             ]
-            app._current_selection_id = None
-            app._selected_wells = set(grp.solo_wells)
+            app._app_state.selection.current_selection_id = None
+            app._app_state.selection.selected_wells = set(grp.solo_wells)
             yield
         finally:
-            (app._selections, app._current_selection_id, app._selected_wells) = saved
+            (app._app_state.selection.selections, app._app_state.selection.current_selection_id, app._app_state.selection.selected_wells) = saved
 
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,

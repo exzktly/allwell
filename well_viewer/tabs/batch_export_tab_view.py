@@ -32,7 +32,7 @@ def _build_spread_row(app, parent: QWidget) -> QWidget:
     The buttons register into the same ``app._sem_btns`` / ``app._fov_btns``
     lists used by the matplotlib toolbars, so toggling here propagates
     everywhere and the visuals stay in sync. The line/bar batch panels read
-    ``app._use_sem`` / ``app._use_fov_spread_active()`` directly, so toggling
+    ``app._app_state.plot.use_sem`` / ``app._use_fov_spread_active()`` directly, so toggling
     these immediately changes what the next "Generate" produces.
     """
     row = QWidget(parent)
@@ -44,7 +44,7 @@ def _build_spread_row(app, parent: QWidget) -> QWidget:
     eb_lbl.setObjectName("Muted")
     rl.addWidget(eb_lbl)
 
-    initial_sem = bool(getattr(app, "_use_sem", False))
+    initial_sem = bool(app._app_state.plot.use_sem)
     sem_btn = QPushButton("SEM" if initial_sem else "SD", row)
     sem_btn.setProperty("variant", "sem" if initial_sem else "sem_warn")
     sem_btn.setToolTip(

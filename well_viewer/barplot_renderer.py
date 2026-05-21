@@ -81,7 +81,7 @@ def draw_violin(
 
     xs_ticks = list(range(n))
     frac_vals: List[float] = []
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
 
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         df = app._get_rows(lbl)
@@ -92,7 +92,7 @@ def draw_violin(
             tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & (np.abs(tp - target_t) <= 1e-6)
-            v = resolve_value_series(df, app._active_val_col, ratios).to_numpy()
+            v = resolve_value_series(df, app._app_state.channel.active_val_col, ratios).to_numpy()
             mask &= np.isfinite(v)
             v_sel = v[mask]
             n_total = int(v_sel.size)
@@ -160,13 +160,13 @@ def draw_violin(
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
     from well_viewer import fold_change as _fc
-    _metric_label = _MLB.get(getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity")
+    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
     _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl) if cell_scale else ""
     ax_mean.set_title(
-        f"{app._active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  t = {tp_str} h",
+        f"{app._app_state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  t = {tp_str} h",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
-    ax_mean.set_ylabel(f"{app._active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
         f"Fraction above threshold  —  t = {tp_str} h",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
@@ -195,7 +195,7 @@ def draw_beeswarm(
     n = len(wells)
     xs_ticks = list(range(n))
     bar_w = min(0.35, 3.0 / max(n, 1))
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
 
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         df = app._get_rows(lbl)
@@ -214,7 +214,7 @@ def draw_beeswarm(
                 tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & (np.abs(tp - target_t) <= 1e-6)
-            val = resolve_value_series(df, app._active_val_col, ratios).to_numpy()
+            val = resolve_value_series(df, app._app_state.channel.active_val_col, ratios).to_numpy()
             mask &= np.isfinite(val)
             v_sel = val[mask]
             n_total = int(v_sel.size)
@@ -268,13 +268,13 @@ def draw_beeswarm(
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
     from well_viewer import fold_change as _fc
-    _metric_label = _MLB.get(getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity")
+    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
     _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl) if cell_scale else ""
     ax_mean.set_title(
-        f"{app._active_channel.upper()} {_metric_label} per cell (above threshold){_fc_suffix}  —  t = {tp_str} h",
+        f"{app._app_state.channel.active_channel.upper()} {_metric_label} per cell (above threshold){_fc_suffix}  —  t = {tp_str} h",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
-    ax_mean.set_ylabel(f"{app._active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
         f"Fraction above threshold  —  t = {tp_str} h",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
@@ -319,10 +319,10 @@ def draw_grouped_bar_mode(
         err_bar_color=CLR_ERR_BAR,
     )
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
-    _ch = app._active_channel.upper()
+    _ch = app._app_state.channel.active_channel.upper()
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
     from well_viewer import fold_change as _fc
-    _metric_label = _MLB.get(getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity")
+    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
     _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl)
     ax_mean.set_title(
@@ -369,15 +369,15 @@ def redraw_bars(app) -> None:
 
     use_sem = app._use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    threshold = app._get_thresh_frac_on(app._active_channel)
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
 
     active_rsets = app._rep_sets_active()
     bar_selected = app._selected_bar_wells(active_rsets)
 
-    _ch = app._active_channel.upper()
+    _ch = app._app_state.channel.active_channel.upper()
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
     from well_viewer import fold_change as _fc
-    _metric_label = _MLB.get(getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity")
+    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
     _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl)
     apply_ax_style(ax_mean,

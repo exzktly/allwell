@@ -46,15 +46,15 @@ def test_set_selected_wells_noop_when_unchanged(loaded_app):
 
 def test_set_active_channel_updates_channel_and_val_col(loaded_app):
     set_active_channel(loaded_app, "mcherry")
-    assert loaded_app._active_channel == "mcherry"
-    assert loaded_app._active_val_col == "mcherry_mean_intensity"
+    assert loaded_app._app_state.channel.active_channel == "mcherry"
+    assert loaded_app._app_state.channel.active_val_col == "mcherry_mean_intensity"
 
 
 def test_set_active_channel_round_trip(loaded_app):
     set_active_channel(loaded_app, "mcherry")
     set_active_channel(loaded_app, "gfp")
-    assert loaded_app._active_channel == "gfp"
-    assert loaded_app._active_val_col == "gfp_mean_intensity"
+    assert loaded_app._app_state.channel.active_channel == "gfp"
+    assert loaded_app._app_state.channel.active_val_col == "gfp_mean_intensity"
 
 
 # ── Fold-change ──────────────────────────────────────────────────────────────

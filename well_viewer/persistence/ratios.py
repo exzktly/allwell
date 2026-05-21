@@ -18,7 +18,7 @@ _logger = logging.getLogger("well_viewer")
 def save_to_data_dir(app) -> None:
     if not getattr(app, "_data_dir", None):
         return
-    _doc.set_section(app, "ratios", ratios_to_dict(app._ratio_metrics))
+    _doc.set_section(app, "ratios", ratios_to_dict(app._app_state.channel.ratio_metrics))
 
 
 def load_from_data_dir(app) -> None:

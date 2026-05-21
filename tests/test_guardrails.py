@@ -23,15 +23,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_APP = REPO_ROOT / "well_viewer" / "runtime_app.py"
 STATE_DIR = REPO_ROOT / "well_viewer" / "state"
 
-# Flip to True at Phase 9 so the budgets hard-fail instead of warning.
-_HARD_FAIL = False
+# Budgets hard-fail from Phase 9 on.
+_HARD_FAIL = True
 
-# Ratcheting ceilings. Re-measured each phase as the teardown proceeds.
-# Phase 0 baseline: 7028 lines / 166 attrs. Line count fluctuates around the
-# baseline as transitional shims are added and method bodies extracted; the
-# attr count is the truer signal. Phase 6 added the ViewerContext (+1 attr).
-RUNTIME_APP_LINE_BUDGET = 7018
-RUNTIME_APP_ATTR_BUDGET = 131
+# Ratcheting ceilings. Re-measured as the teardown proceeds; lowered as each
+# shim-migration domain deletes its property shims. Phase 0 baseline:
+# 7028 lines / 166 attrs.
+RUNTIME_APP_LINE_BUDGET = 7004
+RUNTIME_APP_ATTR_BUDGET = 125
 
 
 def _enforce(ok: bool, message: str) -> None:

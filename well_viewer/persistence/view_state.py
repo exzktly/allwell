@@ -35,8 +35,8 @@ def snapshot(app) -> dict:
         "schema_version": 1,
         "selected_wells": sorted(getattr(app, "_selected_wells", set()) or []),
         "active_centre_tab": _current_leaf_tab(app),
-        "active_channel": str(getattr(app, "_active_channel", "") or ""),
-        "active_metric": str(getattr(app, "_active_metric", "") or ""),
+        "active_channel": str(app._app_state.channel.active_channel or ""),
+        "active_metric": str(app._app_state.channel.active_metric or ""),
         "use_sem": bool(getattr(app, "_use_sem", True)),
         "fold_change": {
             "vs_control_on": bool(getattr(app, "_fc_vs_control_on", False)),
@@ -277,7 +277,7 @@ def restore(app, state: dict) -> None:
     # Active channel — validated against the canonical list. Fall through
     # silently when the saved channel no longer exists in the new dataset.
     ch = state.get("active_channel")
-    fluor = list(getattr(app, "_fluor_channels", []) or [])
+    fluor = list(app._app_state.channel.fluor_channels or [])
     if (
         isinstance(ch, str) and ch
         and ch in fluor
@@ -290,7 +290,7 @@ def restore(app, state: dict) -> None:
 
     metric = state.get("active_metric")
     if isinstance(metric, str) and metric:
-        app._active_metric = metric
+        app._app_state.channel.active_metric = metric
 
     # Stash per-tab state for deferred apply on first tab visit.
     tabs = state.get("tabs") or {}

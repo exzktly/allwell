@@ -329,7 +329,7 @@ class BatchExportPanel(QWidget):
         row.addWidget(lbl)
         cb = QComboBox()
         cb.addItems(channels)
-        default = str(getattr(self._app, "_active_channel", "") or "")
+        default = str(self._app._app_state.channel.active_channel or "")
         if default and default in channels:
             cb.setCurrentText(default)
         else:
@@ -367,10 +367,10 @@ class BatchExportPanel(QWidget):
 
     def _all_export_channels(self) -> List[str]:
         """Fluorescence channels + ratio metrics available for batch export."""
-        channels = list(getattr(self._app, "_fluor_channels", None) or [])
+        channels = list(self._app._app_state.channel.fluor_channels or [])
         if not channels:
             channels = ["gfp"]
-        for r in (getattr(self._app, "_ratio_metrics", None) or []):
+        for r in (self._app._app_state.channel.ratio_metrics or []):
             lbl = r.display_label()
             if lbl and lbl not in channels:
                 channels.append(lbl)
@@ -413,7 +413,7 @@ class BatchExportPanel(QWidget):
                 prop_cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
-                    getattr(self._app, "_active_metric", "mean_intensity"),
+                    self._app._app_state.channel.active_metric,
                     "Mean Intensity",
                 )
                 idx = prop_cb.findText(fallback)
@@ -425,7 +425,7 @@ class BatchExportPanel(QWidget):
                 item = model.item(sm_idx) if model is not None else None
                 if item is not None:
                     smf_ok = channel in (
-                        getattr(self._app, "_smfish_channels", []) or []
+                        self._app._app_state.channel.smfish_channels or []
                     )
                     item.setEnabled(smf_ok)
         finally:
@@ -434,16 +434,16 @@ class BatchExportPanel(QWidget):
     def _selected_export_metric_key(self, channel_attr: str) -> str:
         """Return the metric key (``mean_intensity`` / ``total_intensity`` / …)
         for the Property combo paired with ``channel_attr``. Falls back to
-        ``app._active_metric`` when the combo is missing or shows
+        ``app._app_state.channel.active_metric`` when the combo is missing or shows
         ``Calculated Val`` (ratio path — caller resolves the column via
         :py:meth:`_export_val_col_for`)."""
         from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
         if prop_cb is None:
-            return getattr(self._app, "_active_metric", "mean_intensity") or "mean_intensity"
+            return self._app._app_state.channel.active_metric or "mean_intensity"
         label = str(prop_cb.currentText() or "")
         return METRIC_LABEL_TO_KEY.get(
-            label, getattr(self._app, "_active_metric", "mean_intensity") or "mean_intensity",
+            label, self._app._app_state.channel.active_metric or "mean_intensity",
         )
 
     @contextmanager
@@ -459,13 +459,13 @@ class BatchExportPanel(QWidget):
         column in their key, so this swap doesn't pollute the cache.
         """
         app = self._app
-        saved = getattr(app, "_active_val_col", None)
+        saved = app._app_state.channel.active_val_col
         try:
-            app._active_val_col = val_col
+            app._app_state.channel.active_val_col = val_col
             yield
         finally:
             if saved is not None:
-                app._active_val_col = saved
+                app._app_state.channel.active_val_col = saved
 
     def _export_val_col_for(self, channel_attr: str) -> str:
         """Resolve the (Channel, Property) pair to a CSV column / ratio key.
@@ -476,7 +476,7 @@ class BatchExportPanel(QWidget):
         """
         ch_cb = getattr(self, channel_attr, None)
         channel = str(ch_cb.currentText() or "") if ch_cb is not None else (
-            getattr(self._app, "_active_channel", "") or ""
+            self._app._app_state.channel.active_channel or ""
         )
         metric_key = self._selected_export_metric_key(channel_attr)
         if hasattr(self._app, "_col_for_scatter_axis"):
@@ -535,14 +535,14 @@ class BatchExportPanel(QWidget):
 
     def _selected_export_channel(self) -> str:
         """Return the channel currently picked in the channel row, falling
-        back to ``app._active_channel`` when the row hasn't been built."""
+        back to ``app._app_state.channel.active_channel`` when the row hasn't been built."""
         for attr in ("_line_channel_cb", "_bar_channel_cb"):
             cb = getattr(self, attr, None)
             if cb is not None:
                 text = str(cb.currentText() or "").strip()
                 if text:
                     return text
-        return str(getattr(self._app, "_active_channel", "") or "")
+        return str(self._app._app_state.channel.active_channel or "")
 
     def _build_export_profile_row(self, layout: QVBoxLayout) -> None:
         row = QHBoxLayout()
@@ -1304,7 +1304,7 @@ class BatchExportPanel(QWidget):
         if out_dir is None:
             return
 
-        _ch_selected = self._selected_export_channel() or self._app._active_channel
+        _ch_selected = self._selected_export_channel() or self._app._app_state.channel.active_channel
         # ``_get_thresh_frac_on`` looks up by the canonical key (bare
         # channel token or ``ratio:<name>``), not by the dropdown's
         # display label \u2014 translate ratio labels first so the user's
@@ -1427,7 +1427,7 @@ class BatchExportPanel(QWidget):
 
             try:
                 # ``_render_group_figure`` calls helpers (notably
-                # ``_compute_rep_stats``) that read ``app._active_val_col``
+                # ``_compute_rep_stats``) that read ``app._app_state.channel.active_val_col``
                 # directly. Swap it for the duration of the render so a
                 # batch export against a ratio column or a non-MFI
                 # property draws the correct curves.
@@ -1480,7 +1480,7 @@ class BatchExportPanel(QWidget):
 
         legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none",
                          edgecolor=PLOT_SPN, labelcolor=get_color("PLOT_TXT"))
-        _ch = (self._selected_export_channel() or self._app._active_channel).upper()
+        _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
         _metric_key = self._selected_export_metric_key("_line_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")

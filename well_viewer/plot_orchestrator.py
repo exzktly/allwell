@@ -50,7 +50,7 @@ def redraw(
 
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
     metric_label = METRIC_KEY_TO_LABEL.get(
-        getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity"
+        app._app_state.channel.active_metric, "Mean Intensity"
     )
 
     # 1. Line plot — always present (eager-built); the entry point that

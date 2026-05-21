@@ -39,13 +39,13 @@ def load_path(app, path: Path) -> None:
         app._in_dir = in_dir
         app._fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._pipeline_info = app._read_pipeline_info(out_dir)
         app._fov_tp_extractor = _resolve_fov_tp_extractor(app._fov_tp_extractor, app._pipeline_info)
-        app._smfish_channels = _smfish_tokens
+        app._app_state.channel.smfish_channels = _smfish_tokens
         app._load_directory(out_dir, label=f"{path.name}/out")
     else:
         app._in_dir = None
         app._fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._pipeline_info = app._read_pipeline_info(path)
         app._fov_tp_extractor = _resolve_fov_tp_extractor(app._fov_tp_extractor, app._pipeline_info)
-        app._smfish_channels = _smfish_tokens
+        app._app_state.channel.smfish_channels = _smfish_tokens
         app._load_directory(path)
 
 
@@ -86,8 +86,7 @@ def load_directory(app, d: Path, label=None) -> None:
     app._bar_order = None
     # Drop the per-channel threshold (min, max) cache; the new dataset's
     # ranges may be completely different.
-    if hasattr(app, "_threshold_range_cache"):
-        app._threshold_range_cache.clear()
+    app._app_state.channel.threshold_range_cache.clear()
     if hasattr(app, "_invalidate_review_image_frame_cache"):
         app._invalidate_review_image_frame_cache()
     # Drop every cached ZipFile handle on dataset swap so the new

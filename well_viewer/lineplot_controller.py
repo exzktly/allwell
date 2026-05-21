@@ -177,7 +177,7 @@ def collect_line_series(
         fc_state = _fc.fold_change_state(app)
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
     if val_col is None:
-        val_col = app._active_val_col
+        val_col = app._app_state.channel.active_val_col
 
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
@@ -226,7 +226,7 @@ def collect_line_series(
                         rows, val_col=val_col,
                         cell_area_threshold=cell_area_threshold,
                         fluor_gates=fluor_gates,
-                        ratios=getattr(app, "_ratio_index", None),
+                        ratios=app._app_state.channel.ratio_index,
                     ))
             _raw_pts: list = []
             for t in sorted(all_tps):
@@ -292,7 +292,7 @@ def collect_line_series(
                 rows, val_col=val_col,
                 cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
-                ratios=getattr(app, "_ratio_index", None),
+                ratios=app._app_state.channel.ratio_index,
             ))
         display = app._well_display_label(label)
         series_out.append(LineSeries(
@@ -326,7 +326,7 @@ def redraw_line_plots(
 
     use_sem = app._use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    threshold = app._get_thresh_frac_on(app._active_channel)
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     selected = app._selected_labels()
 
     # Fold-change state read once for the axis title suffix. The actual
@@ -344,7 +344,7 @@ def redraw_line_plots(
     # legend background in non-default themes.
     legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none", edgecolor=_spine, labelcolor=_title_fg)
 
-    _ch = app._active_channel.upper()
+    _ch = app._app_state.channel.active_channel.upper()
     _fc_suffix = _fc.fold_change_suffix(fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl)
     apply_ax_style(app._line_ax_mean, f"{_ch} {metric_label} (above threshold) ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)
     apply_ax_style(app._line_ax_frac, "Fraction of Cells Above Threshold", "Fraction")
@@ -472,7 +472,7 @@ def redraw_line_plots(
             leg_cdf.set_visible(app._legend_visible["cdf"])
         app._line_ax_cdf.set_xlim(cdf_lo, cdf_hi)
     else:
-        app._line_ax_cdf.text(0.5, 0.5, f"No {app._active_channel.upper()} data found.", transform=app._line_ax_cdf.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
+        app._line_ax_cdf.text(0.5, 0.5, f"No {app._app_state.channel.active_channel.upper()} data found.", transform=app._line_ax_cdf.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
 
     if fc_misses:
         # Tell the user which timepoints lost their bars/points to a

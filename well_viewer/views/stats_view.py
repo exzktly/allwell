@@ -244,7 +244,7 @@ def build_stats_results_panel(app, parent: QWidget, **_kw) -> None:
             app._refresh_stats_property_combo()
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
         label = METRIC_KEY_TO_LABEL.get(
-            getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity"
+            app._app_state.channel.active_metric, "Mean Intensity"
         )
         idx = app._stats_property_cb.findText(label)
         if idx >= 0:

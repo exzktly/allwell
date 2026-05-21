@@ -80,7 +80,7 @@ def build_right_panel(self, parent: QWidget) -> None:
     lr = QHBoxLayout(lut_row)
     lr.setContentsMargins(8, 4, 8, 4)
     self._mon_lut_chan_lbl = QLabel(
-        f"{self._active_image_channel.upper()} LUT min:", lut_row,
+        f"{self._app_state.channel.active_image_channel.upper()} LUT min:", lut_row,
     )
     lr.addWidget(self._mon_lut_chan_lbl)
 
@@ -284,7 +284,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     lr = QHBoxLayout(lut_row)
     lr.setContentsMargins(8, 2, 8, 2)
     self._review_lut_chan_lbl = QLabel(
-        f"{self._active_image_channel.upper()} LUT min:", lut_row,
+        f"{self._app_state.channel.active_image_channel.upper()} LUT min:", lut_row,
     )
     lr.addWidget(self._review_lut_chan_lbl)
 

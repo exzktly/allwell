@@ -242,7 +242,7 @@ def draw_montage_thumbs(app, tp_list: list) -> None:
             lbl_fluor._sz_h = sz_h
             cl.addWidget(lbl_fluor)
         else:
-            na = QLabel(f"{getattr(app, '_active_image_channel', '').upper()}\nunavail", col_widget)
+            na = QLabel(f"{app._app_state.channel.active_image_channel.upper()}\nunavail", col_widget)
             na.setObjectName("Muted")
             na.setAlignment(Qt.AlignCenter)
             na.setFixedSize(sz_w, sz_h)

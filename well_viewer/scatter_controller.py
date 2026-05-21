@@ -71,7 +71,7 @@ def collect_scatter_data(
     scatter_data: Dict[str, Dict[str, Any]] = {}
 
     if ratios is None:
-        ratios = getattr(app, "_ratio_index", None) or {}
+        ratios = app._app_state.channel.ratio_index or {}
 
     if isinstance(timepoints_h, (int, float)):
         target_tps = [float(timepoints_h)]
@@ -490,7 +490,7 @@ def collect_scatter_agg_data(
     threshold_y = 0.0 if metric_y == "ratio" else app._get_thresh_frac_on(ch_y)
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()  # Apply all channel gates
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
     label_to_key = getattr(app, "_label_to_channel_key", None) or {}
 
     # Get active replicates or selected wells

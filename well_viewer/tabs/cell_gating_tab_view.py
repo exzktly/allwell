@@ -290,7 +290,7 @@ def cell_gating_load_cell_areas(app) -> None:
     app._cell_gating_fluor_data = {}
     app._cell_gating_ratio_data = {}
     labels = _cell_gating_source_wells(app)
-    ratios = list(getattr(app, "_ratio_metrics", []) or [])
+    ratios = list(app._app_state.channel.ratio_metrics or [])
 
     for label in labels:
         df = app._get_rows(label)
@@ -304,7 +304,7 @@ def cell_gating_load_cell_areas(app) -> None:
             app._cell_gating_cell_areas.extend(
                 float(a) for a in area[np.isfinite(area) & (area > 0)]
             )
-        for channel in app._fluor_channels:
+        for channel in app._app_state.channel.fluor_channels:
             val_col = f"{channel}_mean_intensity"
             if val_col not in frame_df.columns:
                 continue
@@ -358,7 +358,7 @@ def _cell_gating_resolve_key(app, channel: str) -> str:
 
     Real fluor channels (``"gfp"``, ``"mcherry"``) are stored under their
     bare name. Ratios are stored under their full key (``"ratio:<name>"``).
-    Callers can pass either the bare ratio name (``app._active_channel``
+    Callers can pass either the bare ratio name (``app._app_state.channel.active_channel``
     after a ratio switch) or the full ``ratio:`` key — resolve to whichever
     form actually exists in the edits dict so the user's edit is honoured.
     """
@@ -521,7 +521,7 @@ def cell_gating_auto_threshold(app) -> None:
         except Exception:
             pass
         return
-    channels = [str(ch).strip().lower() for ch in (getattr(app, "_fluor_channels", []) or []) if str(ch).strip()]
+    channels = [str(ch).strip().lower() for ch in (app._app_state.channel.fluor_channels or []) if str(ch).strip()]
     if not channels:
         try:
             app._set_status(
@@ -633,13 +633,13 @@ def _cell_gating_build_channel_controls(app) -> None:
         if w is not None:
             w.deleteLater()
 
-    channels = list(app._fluor_channels)
+    channels = list(app._app_state.channel.fluor_channels)
     # Ratios show up as virtual channels in the plot dropdowns; surface
     # them here too so the user can give each ratio a FluorGating /
     # ThreshFracOn entry. They're keyed by ``ratio.key()`` (e.g.
     # ``ratio:gfp_over_mcherry``) in the edits dicts, distinct from the
     # plain fluor channel keys.
-    ratios = list(getattr(app, "_ratio_metrics", []) or [])
+    ratios = list(app._app_state.channel.ratio_metrics or [])
     row_specs: list[tuple[str, str]] = [(ch, ch.upper() + " Channel:") for ch in channels]
     for r in ratios:
         try:

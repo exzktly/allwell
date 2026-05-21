@@ -72,7 +72,7 @@ def update_preview(app, well_label: Optional[str]) -> None:
         app._review_image_well_lbl.setText(tok)
 
     try:
-        active_image_channel = str(app._active_image_channel or "").strip().lower()
+        active_image_channel = str(app._app_state.channel.active_image_channel or "").strip().lower()
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 4] update_preview start well=%r active_channel=%r",
@@ -206,7 +206,7 @@ def refresh_review_image(app) -> None:
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 6] refresh_review_image start well=%r selected_fov_raw=%r normalized_fov=%r active_channel=%r",
-            well, fov_raw, fov, getattr(app, "_active_image_channel", ""),
+            well, fov_raw, fov, app._app_state.channel.active_image_channel,
         )
     _set_combo_values(app._review_image_tp_menu, tp_values or ["—"])
     if tp_values and app._review_image_tp_var.currentText() not in tp_values:
@@ -296,7 +296,7 @@ def refresh_review_image(app) -> None:
         threshold = app._get_thresh_frac_on()
         tm_key = (
             well, fov, tp, app._review_image_override_version,
-            app._active_val_col, threshold, cell_area_threshold,
+            app._app_state.channel.active_val_col, threshold, cell_area_threshold,
             tuple(sorted(fluor_gates.items())),
         )
         above_by_nid = app._review_image_threshold_map_cache.get(tm_key)
@@ -332,7 +332,7 @@ def draw_review_image(
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image channel=%r fit_lut=%s preserve_view=%s",
-            getattr(app, "_active_image_channel", ""),
+            app._app_state.channel.active_image_channel,
             fit_lut, preserve_view,
         )
     arr = _np.asarray(fluor_arr, dtype=_np.float32)
@@ -342,11 +342,11 @@ def draw_review_image(
         lo, hi = float(arr.min()), float(arr.max())
         if hi <= lo:
             hi = lo + 1.0
-        app._review_image_lut_by_channel[str(app._active_image_channel or "").lower()] = (lo, hi)
+        app._review_image_lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
     else:
         lo, hi = app._review_image_resolve_lut(arr)
     if hasattr(app, "_review_lut_chan_lbl"):
-        app._review_lut_chan_lbl.setText(f"{app._active_image_channel.upper()} LUT min:")
+        app._review_lut_chan_lbl.setText(f"{app._app_state.channel.active_image_channel.upper()} LUT min:")
     if hasattr(app, "_review_lut_min_edit") and hasattr(app, "_review_lut_max_edit"):
         app._review_lut_min_edit.setText(f"{lo:.0f}")
         app._review_lut_max_edit.setText(f"{hi:.0f}")
@@ -436,12 +436,12 @@ def draw_review_image(
         )
     else:
         app._review_image_status.setText(
-            f"Showing channel {app._active_image_channel.upper()} with included cell boundaries.{suffix}"
+            f"Showing channel {app._app_state.channel.active_image_channel.upper()} with included cell boundaries.{suffix}"
         )
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image complete status_channel=%r zoom=%.3f pan=(%.1f, %.1f)",
-            app._active_image_channel,
+            app._app_state.channel.active_image_channel,
             float(getattr(app, "_review_image_zoom", 1.0)),
             float(getattr(app, "_review_image_pan_x", 0.0)),
             float(getattr(app, "_review_image_pan_y", 0.0)),

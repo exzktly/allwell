@@ -161,6 +161,22 @@ class MockApp:
         return "mean_intensity"
 
     @property
+    def _app_state(self):
+        """A real ``AppState`` — controllers read channel state from
+        ``app._app_state.channel`` after the shim migration. Built lazily and
+        cached on the instance; the channel fields mirror the legacy MockApp
+        defaults above."""
+        st = self.__dict__.get("_app_state_cache")
+        if st is None:
+            from well_viewer.state import AppState
+            st = AppState()
+            st.channel.active_channel = "gfp"
+            st.channel.active_val_col = "gfp_mean_intensity"
+            st.channel.active_metric = "mean_intensity"
+            self.__dict__["_app_state_cache"] = st
+        return st
+
+    @property
     def _selected_wells(self):
         return set(self.per_well_pts)
 

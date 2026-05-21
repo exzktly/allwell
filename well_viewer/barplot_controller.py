@@ -146,7 +146,7 @@ def collect_bar_items(
     """
     use_sem = app._use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    threshold = app._get_thresh_frac_on(app._active_channel)
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     active_rsets = app._rep_sets_active()
     use_groups = bool(active_rsets)
 
@@ -165,7 +165,7 @@ def collect_bar_items(
     if fc_vs_ctrl and fc_ctrl_lbl:
         ctrl_stats = _fc.control_stats_at_for_bar(
             app, fc_ctrl_lbl, target_t,
-            threshold=threshold, val_col=app._active_val_col,
+            threshold=threshold, val_col=app._app_state.channel.active_val_col,
             use_sem=use_sem, per_fov_spread=per_fov_spread,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
@@ -210,7 +210,7 @@ def collect_bar_items(
             if fc_vs_t0:
                 stats = _fc.member_first_tp_stats(
                     app, rset.name,
-                    threshold=threshold, val_col=app._active_val_col,
+                    threshold=threshold, val_col=app._app_state.channel.active_val_col,
                     use_sem=use_sem, per_fov_spread=per_fov_spread,
                     cell_area_threshold=cell_area_threshold,
                     fluor_gates=fluor_gates,
@@ -249,7 +249,7 @@ def collect_bar_items(
         display = app._bar_well_display_label(label)
         pts = app._aggregate_well(
             label, threshold=threshold, use_sem=use_sem,
-            val_col=app._active_val_col,
+            val_col=app._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,

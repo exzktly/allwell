@@ -59,7 +59,7 @@ def test_collect_bar_items_stable_across_calls(all_wells_selected):
 def test_collect_line_series_per_well_points(all_wells_selected):
     series, _ = collect_line_series(
         all_wells_selected,
-        threshold=all_wells_selected._threshold,
+        threshold=all_wells_selected._app_state.channel.threshold,
         use_sem=all_wells_selected._use_sem,
     )
     by_key = {s.key: s for s in series}

@@ -829,20 +829,6 @@ class WellViewerApp(QWidget):
 
         return property(_get, _set)
 
-    _fluor_channels = _app_state_shim("channel", "fluor_channels")
-    _review_image_channels = _app_state_shim("channel", "review_image_channels")
-    _smfish_channels = _app_state_shim("channel", "smfish_channels")
-    _active_channel = _app_state_shim("channel", "active_channel")
-    _active_image_channel = _app_state_shim("channel", "active_image_channel")
-    _active_metric = _app_state_shim("channel", "active_metric")
-    _active_val_col = _app_state_shim("channel", "active_val_col")
-    _ratio_metrics = _app_state_shim("channel", "ratio_metrics")
-    _ratio_index = _app_state_shim("channel", "ratio_index")
-    _threshold_min = _app_state_shim("channel", "threshold_min")
-    _threshold_max = _app_state_shim("channel", "threshold_max")
-    _threshold = _app_state_shim("channel", "threshold")
-    _threshold_range_cache = _app_state_shim("channel", "threshold_range_cache")
-
     _selected_wells = _app_state_shim("selection", "selected_wells")
     _last_sel = _app_state_shim("selection", "last_sel")
     _prev_sel = _app_state_shim("selection", "prev_sel")
@@ -972,18 +958,18 @@ class WellViewerApp(QWidget):
         Used by aggregate_with_threshold_df to apply consistent gating across all channels.
         """
         gates = {}
-        for channel in self._fluor_channels:
+        for channel in self._app_state.channel.fluor_channels:
             gates[channel] = self._get_fluor_gate(channel)
         return gates
 
     def _get_thresh_frac_on(self, channel: Optional[str] = None) -> float:
         """Get ThreshFracOn threshold. Uses active channel if not specified."""
         if channel is None:
-            channel = self._active_channel
+            channel = self._app_state.channel.active_channel
         # _redraw can fire before the cell-gating tab is built (e.g. from
         # sidebar releases during early load); fall back to the default.
         if not hasattr(self, "_cell_gating_thresh_frac_edits"):
-            return self._threshold
+            return self._app_state.channel.threshold
         from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_thresh_frac_on
         return cell_gating_get_thresh_frac_on(self, channel)
 
@@ -1403,11 +1389,11 @@ class WellViewerApp(QWidget):
         # Channel dropdown — list every measurement column so the user can pick
         # any value to compare. Mirrors the scatter-tab dropdown construction
         # so labels and the _col_for_scatter_entry mapping are reused.
-        channels = list(self._fluor_channels) if self._fluor_channels else []
+        channels = list(self._app_state.channel.fluor_channels) if self._app_state.channel.fluor_channels else []
         ch_options: List[str] = []
         for ch in channels:
             ch_options.append(ch)
-            if ch in self._smfish_channels:
+            if ch in self._app_state.channel.smfish_channels:
                 ch_options.append(f"{ch} (spots)")
         ch_options.extend(self._ratio_dropdown_labels())
         if not ch_options:
@@ -1420,7 +1406,7 @@ class WellViewerApp(QWidget):
             else:
                 # Default to the active channel when possible to match the
                 # bar/line plots' current selection.
-                active = self._active_channel if self._active_channel in ch_options else ch_options[0]
+                active = self._app_state.channel.active_channel if self._app_state.channel.active_channel in ch_options else ch_options[0]
                 self._stats_channel_cb.setCurrentText(active)
         # Channel may now resolve to a ratio key — refresh the Property
         # combo's item set accordingly.
@@ -1467,19 +1453,19 @@ class WellViewerApp(QWidget):
     def _stats_active_channel_entry(self) -> str:
         cb = getattr(self, "_stats_channel_cb", None)
         if cb is None:
-            return self._active_channel or ""
+            return self._app_state.channel.active_channel or ""
         text = cb.currentText().strip()
-        return text if text and text != "—" else (self._active_channel or "")
+        return text if text and text != "—" else (self._app_state.channel.active_channel or "")
 
     def _stats_active_val_col(self) -> str:
         """Resolve the selected channel-dropdown entry to a value-column key."""
         entry = self._stats_active_channel_entry()
         if not entry:
-            return self._active_val_col
+            return self._app_state.channel.active_val_col
         try:
             return self._col_for_scatter_entry(entry)
         except Exception:
-            return self._active_val_col
+            return self._app_state.channel.active_val_col
 
     def _stats_active_threshold(self) -> float:
         """Use the per-channel ThreshFracOn from the Cell Gating tab.
@@ -1489,12 +1475,12 @@ class WellViewerApp(QWidget):
         """
         val_col = self._stats_active_val_col()
         if is_ratio_key(val_col):
-            return float(self._threshold)
+            return float(self._app_state.channel.threshold)
         # val_col is "<channel>_mean_intensity" or "<channel>_smfish_count".
         if "_" in val_col:
             channel = val_col.split("_", 1)[0]
             return float(self._get_thresh_frac_on(channel))
-        return float(self._get_thresh_frac_on(self._active_channel))
+        return float(self._get_thresh_frac_on(self._app_state.channel.active_channel))
 
     def _stats_active_statistic(self) -> str:
         cb = getattr(self, "_stats_statistic_cb", None)
@@ -2784,7 +2770,7 @@ class WellViewerApp(QWidget):
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(len(tp_list) + 1, 1)
 
-        channel_row_lbl = QLabel(self._active_image_channel.upper())
+        channel_row_lbl = QLabel(self._app_state.channel.active_image_channel.upper())
         channel_row_lbl.setObjectName("Muted")
         channel_row_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         grid.addWidget(channel_row_lbl, 1, 0)
@@ -2894,7 +2880,7 @@ class WellViewerApp(QWidget):
                 fluor_cell_layout.addWidget(lbl_fluor)
                 _install_montage_events(lbl_fluor, is_fluor=True)
             else:
-                miss = QLabel(f"{self._active_image_channel.upper()}\nunavail")
+                miss = QLabel(f"{self._app_state.channel.active_image_channel.upper()}\nunavail")
                 miss.setObjectName("Muted")
                 miss.setAlignment(Qt.AlignCenter)
                 fluor_cell_layout.addWidget(miss)
@@ -3517,13 +3503,13 @@ class WellViewerApp(QWidget):
         Disambiguates by appending ``[name]`` if two ratios share a label.
         """
         base = ratio.display_label()
-        same_base = [r for r in self._ratio_metrics if r.display_label() == base]
+        same_base = [r for r in self._app_state.channel.ratio_metrics if r.display_label() == base]
         if len(same_base) > 1:
             return f"{base} [{ratio.name}]"
         return base
 
     def _ratio_dropdown_labels(self) -> List[str]:
-        return [self._ratio_label_for(r) for r in self._ratio_metrics]
+        return [self._ratio_label_for(r) for r in self._app_state.channel.ratio_metrics]
 
     def _channel_key_for_label(self, label: str) -> str:
         """Map a dropdown label back to the ``_set_active_channel`` argument.
@@ -3540,23 +3526,23 @@ class WellViewerApp(QWidget):
 
     def _active_channel_label(self) -> str:
         """Return the dropdown label corresponding to the active channel."""
-        if is_ratio_key(self._active_val_col):
-            ratio_name = ratio_name_from_key(self._active_val_col)
-            for r in self._ratio_metrics:
+        if is_ratio_key(self._app_state.channel.active_val_col):
+            ratio_name = ratio_name_from_key(self._app_state.channel.active_val_col)
+            for r in self._app_state.channel.ratio_metrics:
                 if r.name == ratio_name:
                     return self._ratio_label_for(r)
             return ratio_name.upper()
-        return self._active_channel.upper()
+        return self._app_state.channel.active_channel.upper()
 
     def _rebuild_ratio_index(self) -> None:
         """Refresh the resolver-friendly ratio index and any dependent UI."""
-        self._ratio_index = build_ratio_index(self._ratio_metrics)
+        self._app_state.channel.ratio_index = build_ratio_index(self._app_state.channel.ratio_metrics)
         # If the active val_col references a deleted ratio, fall back to the
         # first real fluorescence channel so plots stay valid.
-        if is_ratio_key(self._active_val_col) and self._active_val_col not in self._ratio_index:
-            fallback = (self._fluor_channels or ["gfp"])[0]
-            self._active_channel = fallback
-            self._active_val_col = f"{fallback}_{self._active_metric}"
+        if is_ratio_key(self._app_state.channel.active_val_col) and self._app_state.channel.active_val_col not in self._app_state.channel.ratio_index:
+            fallback = (self._app_state.channel.fluor_channels or ["gfp"])[0]
+            self._app_state.channel.active_channel = fallback
+            self._app_state.channel.active_val_col = f"{fallback}_{self._app_state.channel.active_metric}"
         if hasattr(self, "_update_channel_selector"):
             self._update_channel_selector()
         self._invalidate_stats_cache()
@@ -3568,7 +3554,7 @@ class WellViewerApp(QWidget):
 
     def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None:
         """Replace the ratio list and rebuild the index + UI."""
-        self._ratio_metrics = list(ratios)
+        self._app_state.channel.ratio_metrics = list(ratios)
         self._rebuild_ratio_index()
         panel = getattr(self, "_ratio_panel", None)
         if panel is not None:
@@ -3611,12 +3597,12 @@ class WellViewerApp(QWidget):
             _logger.debug(
                 "[RI-CHSW step 3] set_active_image_channel requested=%r current=%r preserve_review_view=%s",
                 channel,
-                getattr(self, "_active_image_channel", ""),
+                self._app_state.channel.active_image_channel,
                 preserve_review_view,
             )
         if not channel or channel == "—":
             return
-        if channel == self._active_image_channel:
+        if channel == self._app_state.channel.active_image_channel:
             if preserve_review_view:
                 self._review_image_preserve_view_on_refresh = True
                 if self._preview_selected_well:
@@ -3624,12 +3610,12 @@ class WellViewerApp(QWidget):
             if channel_switch_debug:
                 _logger.debug(
                     "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
-                    self._active_image_channel,
+                    self._app_state.channel.active_image_channel,
                     preserve_review_view,
                 )
             return
-        prev_channel = self._active_image_channel
-        self._active_image_channel = channel
+        prev_channel = self._app_state.channel.active_image_channel
+        self._app_state.channel.active_image_channel = channel
         ch_upper = channel.upper()
         if hasattr(self, "_montage_chan_var"):
             self._montage_chan_var.setCurrentText(ch_upper)
@@ -3656,7 +3642,7 @@ class WellViewerApp(QWidget):
             _logger.debug(
                 "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
                 prev_channel,
-                self._active_image_channel,
+                self._app_state.channel.active_image_channel,
             )
 
     def _on_review_image_channel_selected(self, _e=None) -> None:
@@ -3672,7 +3658,7 @@ class WellViewerApp(QWidget):
             _logger.debug(
                 "[RI-CHSW step 2] review_image_channel_selected ui_value=%r active_before=%r",
                 selected_ui_value,
-                getattr(self, "_active_image_channel", ""),
+                self._app_state.channel.active_image_channel,
             )
         self._set_active_image_channel(selected_ui_value.lower(), preserve_review_view=True)
 
@@ -3721,7 +3707,7 @@ class WellViewerApp(QWidget):
             _logger.debug(
                 "preview_channel_selected ui_value=%r active_before=%r",
                 selected_ui_value,
-                getattr(self, "_active_image_channel", ""),
+                self._app_state.channel.active_image_channel,
             )
         self._set_active_image_channel(selected_ui_value.lower())
 
@@ -3743,7 +3729,7 @@ class WellViewerApp(QWidget):
         # smFISH count only makes sense on smfish channels; gracefully fall
         # back to mean intensity so the user sees a redraw instead of an
         # empty plot.
-        if metric == "smfish_count" and self._active_channel not in self._smfish_channels:
+        if metric == "smfish_count" and self._app_state.channel.active_channel not in self._app_state.channel.smfish_channels:
             metric = "mean_intensity"
         self._set_active_metric(metric)
 
@@ -3754,19 +3740,19 @@ class WellViewerApp(QWidget):
         if cb is None:
             return
         metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
-        if metric == "smfish_count" and self._active_channel not in self._smfish_channels:
+        if metric == "smfish_count" and self._app_state.channel.active_channel not in self._app_state.channel.smfish_channels:
             metric = "mean_intensity"
         self._set_active_metric(metric)
         # Stats display refreshes on its own when run; nothing to redraw here.
 
     def _set_active_metric(self, metric: str) -> None:
         """Switch the active intensity property and redraw."""
-        if metric == self._active_metric:
+        if metric == self._app_state.channel.active_metric:
             return
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
-        self._active_metric = metric
-        if not is_ratio_key(self._active_val_col):
-            self._active_val_col = f"{self._active_channel}_{self._active_metric}"
+        self._app_state.channel.active_metric = metric
+        if not is_ratio_key(self._app_state.channel.active_val_col):
+            self._app_state.channel.active_val_col = f"{self._app_state.channel.active_channel}_{self._app_state.channel.active_metric}"
         label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
         # Sync every metric combo (per-tab hidden legacy combos + the
         # global ctxbar combo + the stats per-tab Property combo) without
@@ -3813,7 +3799,7 @@ class WellViewerApp(QWidget):
         from well_viewer.heatmap_controller import (
             METRIC_MEAN, METRIC_FRACTION,
         )
-        is_mfi = self._active_metric == "mean_intensity"
+        is_mfi = self._app_state.channel.active_metric == "mean_intensity"
         model = cb.model()
         if model is None:
             return
@@ -3886,7 +3872,7 @@ class WellViewerApp(QWidget):
                 cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
-                    getattr(self, "_active_metric", "mean_intensity"), "Mean Intensity"
+                    self._app_state.channel.active_metric, "Mean Intensity"
                 )
                 idx = cb.findText(fallback)
                 if idx >= 0:
@@ -3898,7 +3884,7 @@ class WellViewerApp(QWidget):
                 if item is not None:
                     smf_ok = (
                         smfish_channel is not None
-                        and smfish_channel in self._smfish_channels
+                        and smfish_channel in self._app_state.channel.smfish_channels
                     )
                     item.setEnabled(smf_ok)
         finally:
@@ -3920,7 +3906,7 @@ class WellViewerApp(QWidget):
             return
         channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
         # Strip the " (spots)" suffix so smfish-enable matching works.
-        smf_base = channel.split(" ")[0] if channel else self._active_channel
+        smf_base = channel.split(" ")[0] if channel else self._app_state.channel.active_channel
         self._populate_metric_combo(
             m_cb, channel_entry=channel, smfish_channel=smf_base,
         )
@@ -4052,7 +4038,7 @@ class WellViewerApp(QWidget):
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates or {},
             per_fov_spread=per_fov_spread,
-            ratios=self._ratio_index,
+            ratios=self._app_state.channel.ratio_index,
         )
 
     def _aggregate_group(
@@ -4100,7 +4086,7 @@ class WellViewerApp(QWidget):
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates or {},
             per_fov_spread=per_fov_spread,
-            ratios=self._ratio_index,
+            ratios=self._app_state.channel.ratio_index,
         )
 
     # ── Preview panel ─────────────────────────────────────────────────────────
@@ -4262,7 +4248,7 @@ class WellViewerApp(QWidget):
         # The LUT range for raw vs top-hat differs significantly, so drop the
         # cached LUT for the active channel so the new image gets a fresh
         # auto-fit instead of a stale clip.
-        chan = str(getattr(self, "_active_image_channel", "") or "").lower()
+        chan = str(self._app_state.channel.active_image_channel or "").lower()
         if chan in self._review_image_lut_by_channel:
             del self._review_image_lut_by_channel[chan]
         self._refresh_review_image_source_btn()
@@ -4460,8 +4446,8 @@ class WellViewerApp(QWidget):
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         threshold = self._get_thresh_frac_on()
-        val_col = self._active_val_col
-        ratios = getattr(self, "_ratio_index", None)
+        val_col = self._app_state.channel.active_val_col
+        ratios = self._app_state.channel.ratio_index
         above_by_nid: Dict[int, bool] = {
             int(nid): False for nid in _np.unique(center) if int(nid) > 0
         }
@@ -4525,7 +4511,7 @@ class WellViewerApp(QWidget):
         render_review_image_display(self, pan_only=pan_only)
 
     def _review_image_resolve_lut(self, arr) -> Tuple[float, float]:
-        chan = str(self._active_image_channel or "").lower()
+        chan = str(self._app_state.channel.active_image_channel or "").lower()
         if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             try:
                 lo = float(self._review_lmin_entry.text().strip())
@@ -4554,7 +4540,7 @@ class WellViewerApp(QWidget):
         hi = float(arr_np.max())
         if hi <= lo:
             hi = lo + 1.0
-        self._review_image_lut_by_channel[str(self._active_image_channel or "").lower()] = (lo, hi)
+        self._review_image_lut_by_channel[str(self._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
         if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             self._review_lmin_entry.setText(f"{lo:.0f}")
             self._review_lmax_entry.setText(f"{hi:.0f}")
@@ -4709,7 +4695,7 @@ class WellViewerApp(QWidget):
         _show_image_pixel_tooltip_controller(
             self,
             event,
-            f"{self._active_image_channel.upper()}",
+            f"{self._app_state.channel.active_image_channel.upper()}",
             label=self._review_image_label,
         )
 
@@ -5695,7 +5681,7 @@ class WellViewerApp(QWidget):
         if _fc_state[0] or _fc_state[2]:
             cell_scale = _fc.build_cell_scaling(
                 self, plot_wells, fc_state=_fc_state, target_t=target_t,
-                threshold=threshold, val_col=self._active_val_col,
+                threshold=threshold, val_col=self._app_state.channel.active_val_col,
                 use_sem=self._use_sem,
                 per_fov_spread=self._use_fov_spread_active(),
                 cell_area_threshold=self._get_cell_area_threshold(),
@@ -5756,7 +5742,7 @@ class WellViewerApp(QWidget):
         for i, lbl in enumerate(wells):
             pts = self._aggregate_well(
                 lbl, threshold=threshold, use_sem=use_sem,
-                val_col=self._active_val_col,
+                val_col=self._app_state.channel.active_val_col,
                 cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
@@ -5972,14 +5958,14 @@ class WellViewerApp(QWidget):
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
-                      self._active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
+                      self._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
         if cache_key in self._stats_cache:
             return self._stats_cache[cache_key]
 
         gm, gerr, gf, ferr = self._well_aggregate_stats(
             rset.wells, target_t,
             threshold=threshold,
-            val_col=self._active_val_col,
+            val_col=self._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             use_sem=use_sem,
@@ -6009,7 +5995,7 @@ class WellViewerApp(QWidget):
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
-                     use_sem, self._active_val_col, cell_area_threshold,
+                     use_sem, self._app_state.channel.active_val_col, cell_area_threshold,
                      tuple(sorted(fluor_gates.items())))
         if cache_key in self._stats_cache:
             return self._stats_cache[cache_key]
@@ -6039,11 +6025,11 @@ class WellViewerApp(QWidget):
             pooled,
             threshold=threshold,
             use_sem=use_sem,
-            val_col=self._active_val_col,
+            val_col=self._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=True,
-            ratios=self._ratio_index,
+            ratios=self._app_state.channel.ratio_index,
         )
         matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
         if matched:
@@ -6071,11 +6057,11 @@ class WellViewerApp(QWidget):
         """
         if not hasattr(self, "_stats_cache"):
             self._stats_cache = {}
-        threshold = self._get_thresh_frac_on(self._active_channel)
+        threshold = self._get_thresh_frac_on(self._app_state.channel.active_channel)
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
-                     self._active_val_col, cell_area_threshold,
+                     self._app_state.channel.active_val_col, cell_area_threshold,
                      tuple(sorted(fluor_gates.items())))
         if cache_key in self._stats_cache:
             return self._stats_cache[cache_key]
@@ -6086,7 +6072,7 @@ class WellViewerApp(QWidget):
                 continue
             pts = self._aggregate_well(
                 lbl, threshold=threshold, use_sem=False,
-                val_col=self._active_val_col,
+                val_col=self._app_state.channel.active_val_col,
                 cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
@@ -6139,7 +6125,7 @@ class WellViewerApp(QWidget):
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = (grp.name, tuple(grp.wells), target_t, threshold, use_sem,
-                      self._active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
+                      self._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
         if cache_key in self._stats_cache:
             return self._stats_cache[cache_key]
 
@@ -6154,7 +6140,7 @@ class WellViewerApp(QWidget):
                     continue
                 pts = self._aggregate_well(
                     lbl, threshold=threshold, use_sem=False,
-                    val_col=self._active_val_col,
+                    val_col=self._app_state.channel.active_val_col,
                     cell_area_threshold=cell_area_threshold,
                     fluor_gates=fluor_gates,
                 )
@@ -6212,7 +6198,7 @@ class WellViewerApp(QWidget):
 
         use_sem   = self._use_sem
         band_lbl  = "SEM" if use_sem else "SD"
-        threshold = self._get_thresh_frac_on(self._active_channel)
+        threshold = self._get_thresh_frac_on(self._app_state.channel.active_channel)
 
         fig = _Figure(figsize=(8, 10), dpi=300, facecolor=PLOT_BG)
         ax_mean = fig.add_subplot(3, 1, 1)
@@ -6220,7 +6206,7 @@ class WellViewerApp(QWidget):
         ax_n = fig.add_subplot(3, 1, 3)
         fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.10, left=0.13, right=0.97)
 
-        _ch = self._active_channel.upper()
+        _ch = self._app_state.channel.active_channel.upper()
         apply_ax_style(ax_mean, f"Mean {_ch} (above threshold) ± {band_lbl}  —  t = {tp_str} h",
                        f"Mean {_ch}")
         apply_ax_style(ax_frac, f"Fraction above threshold  —  t = {tp_str} h", "Fraction")
@@ -6397,7 +6383,7 @@ class WellViewerApp(QWidget):
             ch = entry[:-8]  # Remove " (spots)"
             return f"{ch}_smfish_count"
         else:
-            metric = getattr(self, "_active_metric", "mean_intensity") or "mean_intensity"
+            metric = self._app_state.channel.active_metric or "mean_intensity"
             if metric == "smfish_count":
                 # The scatter dropdown uses the " (spots)" suffix for smfish;
                 # fall back to mean intensity for the plain channel entry.
@@ -6507,7 +6493,7 @@ class WellViewerApp(QWidget):
         # per-axis Property combo now expresses smFISH count via the
         # ``smFISH Count`` metric entry, so we no longer overload the
         # channel column with aggregation flavour.
-        channels = list(self._fluor_channels) if self._fluor_channels else ["gfp"]
+        channels = list(self._app_state.channel.fluor_channels) if self._app_state.channel.fluor_channels else ["gfp"]
         ratio_labels = self._ratio_dropdown_labels()
         scatter_ch_options = list(channels) + ratio_labels
 
@@ -6566,7 +6552,7 @@ class WellViewerApp(QWidget):
         for ch in channels:
             statistics.append(f"Mean Fluorescence {ch.upper()}")
             statistics.append(f"Fraction On {ch.upper()}")
-            if ch in self._smfish_channels:
+            if ch in self._app_state.channel.smfish_channels:
                 statistics.append(f"smFISH Count {ch.upper()}")
         for ratio_label in ratio_labels:
             statistics.append(f"Mean Ratio {ratio_label}")

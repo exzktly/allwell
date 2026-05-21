@@ -5,7 +5,7 @@ channel computed at read time from two ``{channel}_{metric}`` columns. The
 panel reads channel/metric options from the loaded CSVs via
 ``detect_fluor_channels`` / ``detect_smfish_channels``.
 
-Apply commits the new ratio list to ``app._ratio_metrics`` (via
+Apply commits the new ratio list to ``app._app_state.channel.ratio_metrics`` (via
 ``app._set_ratio_metrics``), persists it to the data directory, and triggers
 a redraw of all plots.
 """
@@ -104,19 +104,19 @@ class RatioMetricsPanel(QWidget):
     # ── Public refresh ───────────────────────────────────────────────────────
 
     def refresh_from_app(self) -> None:
-        """Reload table rows from ``app._ratio_metrics``.
+        """Reload table rows from ``app._app_state.channel.ratio_metrics``.
 
         Called after a fresh dataset load so the panel reflects whatever was
         persisted in the data directory.
         """
         self._table.setRowCount(0)
-        for r in list(getattr(self._app, "_ratio_metrics", []) or []):
+        for r in list(self._app._app_state.channel.ratio_metrics or []):
             self._append_row(r)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _channel_choices(self) -> List[str]:
-        chans = list(getattr(self._app, "_fluor_channels", []) or [])
+        chans = list(self._app._app_state.channel.fluor_channels or [])
         if not chans:
             chans = ["gfp"]
         return chans
@@ -229,7 +229,7 @@ class RatioMetricsPanel(QWidget):
         if hasattr(self._app, "_set_ratio_metrics"):
             self._app._set_ratio_metrics(ratios)
         else:
-            self._app._ratio_metrics = ratios
+            self._app._app_state.channel.ratio_metrics = ratios
         if hasattr(self._app, "_ratios_save_to_data_dir"):
             self._app._ratios_save_to_data_dir()
 

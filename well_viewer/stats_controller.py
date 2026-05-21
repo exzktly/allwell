@@ -52,14 +52,14 @@ def collect_group_values(
     statistic: str = "mean",
 ) -> List[float]:
     """Return one summary value per well (or per-FOV when the group has 1 well)."""
-    val_col = val_col or app._active_val_col
+    val_col = val_col or app._app_state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(app._get_thresh_frac_on(app._active_channel))
+            threshold = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
         except Exception:
-            threshold = float(getattr(app, "_threshold", 0.0))
+            threshold = float(app._app_state.channel.threshold)
     threshold = float(threshold)
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
 
     wells = [w for w in grp.wells if w in app._well_paths]
     if not wells:
@@ -107,14 +107,14 @@ def collect_group_per_cell_values(
     threshold: Optional[float] = None,
 ) -> List[float]:
     """Return per-cell values above threshold for KS-test (distribution comparison)."""
-    val_col = val_col or app._active_val_col
+    val_col = val_col or app._app_state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(app._get_thresh_frac_on(app._active_channel))
+            threshold = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
         except Exception:
-            threshold = float(getattr(app, "_threshold", 0.0))
+            threshold = float(app._app_state.channel.threshold)
     threshold = float(threshold)
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
     chunks: List[np.ndarray] = []
     for lbl in grp.wells:
         if lbl not in app._well_paths:
@@ -161,7 +161,7 @@ def draw_ks_cdf(app, group_vals: List[Tuple[str, List[float]]], tp_str: str, wel
     try:
         val_col = app._stats_active_val_col()
     except Exception:
-        val_col = getattr(app, "_active_val_col", "")
+        val_col = app._app_state.channel.active_val_col
     for (name, vals), color in zip(group_vals, colors):
         if not vals:
             continue
@@ -218,11 +218,11 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     try:
         threshold = float(app._stats_active_threshold())
     except Exception:
-        threshold = float(getattr(app, "_threshold", 0.0))
+        threshold = float(app._app_state.channel.threshold)
     try:
         val_col = app._stats_active_val_col()
     except Exception:
-        val_col = getattr(app, "_active_val_col", "")
+        val_col = app._app_state.channel.active_val_col
     try:
         statistic = app._stats_active_statistic()
     except Exception:

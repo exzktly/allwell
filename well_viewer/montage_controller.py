@@ -122,7 +122,7 @@ def on_montage_fluor_motion(app, event) -> None:
     _show_image_pixel_tooltip(
         app,
         event=event,
-        channel_label=f"{getattr(app, '_active_image_channel', '')}".upper() or "IMAGE",
+        channel_label=f"{app._app_state.channel.active_image_channel}".upper() or "IMAGE",
         label=getattr(app, "_montage_fluor_lbl", None),
     )
 

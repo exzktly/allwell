@@ -229,7 +229,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 prop_cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
-                    getattr(self._app, "_active_metric", "mean_intensity"),
+                    self._app._app_state.channel.active_metric,
                     "Mean Intensity",
                 )
                 idx = prop_cb.findText(fallback)
@@ -242,7 +242,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 item = model.item(sm_idx) if model is not None else None
                 if item is not None:
                     smf_ok = channel in (
-                        getattr(self._app, "_smfish_channels", []) or []
+                        self._app._app_state.channel.smfish_channels or []
                     )
                     item.setEnabled(smf_ok)
         finally:
@@ -251,7 +251,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _scatter_channel_options(self) -> List[str]:
         """Real fluor channels + ratio labels — same source the per-tab
         scatter plot uses so the batch UI tracks the plot tabs exactly."""
-        channels = list(self._app._fluor_channels) if self._app._fluor_channels else ["gfp"]
+        channels = list(self._app._app_state.channel.fluor_channels) if self._app._app_state.channel.fluor_channels else ["gfp"]
         options: List[str] = list(channels)
         ratio_labels: List[str] = []
         if hasattr(self._app, "_ratio_dropdown_labels"):

@@ -379,11 +379,11 @@ def redraw_heatmap(app) -> None:
         return
 
     metric = _selected_metric(app)
-    val_col = app._active_val_col
-    threshold = app._get_thresh_frac_on(app._active_channel)
+    val_col = app._app_state.channel.active_val_col
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
-    ratios = getattr(app, "_ratio_index", None)
+    ratios = app._app_state.channel.ratio_index
     cmap_name = _selected_cmap(app)
 
     arr = np.full((layout.rows, layout.cols), np.nan, dtype=float)
@@ -561,7 +561,7 @@ def redraw_heatmap(app) -> None:
             app._heatmap_colorbar = None
 
     title = (
-        f"{app._active_channel_label() if hasattr(app, '_active_channel_label') else app._active_channel.upper()}"
+        f"{app._active_channel_label() if hasattr(app, '_active_channel_label') else app._app_state.channel.active_channel.upper()}"
         f" — {metric} — t = {tp:g} h"
     )
     # ``pad`` lifts the title away from the heatmap rows so the descenders
@@ -597,7 +597,7 @@ def _format_cell_value(v: float, metric: str) -> str:
 def _metric_axis_label(metric: str, app) -> str:
     label = app._active_channel_label() if hasattr(app, "_active_channel_label") else ""
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
-    prop_label = _MLB.get(getattr(app, "_active_metric", "mean_intensity"), "Mean Intensity")
+    prop_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     if metric == METRIC_COUNT:
         return "Cell count"
     if metric == METRIC_FRACTION:

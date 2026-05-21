@@ -114,8 +114,8 @@ def image_table_clear_active(app) -> None:
 def _channel_options(app) -> List[str]:
     """All channel tokens available for selection (uppercase for display).
 
-    Sourced from the canonical ``app._fluor_channels`` /
-    ``app._smfish_channels`` lists (built by ``_recalculate_threshold`` from
+    Sourced from the canonical ``app._app_state.channel.fluor_channels`` /
+    ``app._app_state.channel.smfish_channels`` lists (built by ``_recalculate_threshold`` from
     pipeline_info.json + CSV detection — same lists every other tab uses).
     Falls back to the raw ``app._pipeline_info`` dict for the rare case
     where the tab is repopulated before the first ``_recalculate_threshold``
@@ -127,7 +127,7 @@ def _channel_options(app) -> List[str]:
     info = getattr(app, "_pipeline_info", None) or {}
     chans: List[str] = []
 
-    fluor = list(getattr(app, "_fluor_channels", None) or [])
+    fluor = list(app._app_state.channel.fluor_channels or [])
     if not fluor:
         nuclear_pi = (info.get("nuclear_token") or "").strip().lower()
         if nuclear_pi:
@@ -141,7 +141,7 @@ def _channel_options(app) -> List[str]:
         if tok and tok not in chans:
             chans.append(tok)
 
-    smfish = getattr(app, "_smfish_channels", None) or []
+    smfish = app._app_state.channel.smfish_channels or []
     for tok in smfish:
         tok = str(tok).strip().lower()
         if tok and tok not in chans:
@@ -158,7 +158,7 @@ def _channel_options(app) -> List[str]:
     # Append user-defined ratio metrics as virtual channels.  The display
     # label "GFP/RFP" is what appears in the dropdown; _find_ratio_for_channel
     # resolves it back to the RatioMetric at render time.
-    for r in (getattr(app, "_ratio_metrics", None) or []):
+    for r in (app._app_state.channel.ratio_metrics or []):
         lbl = r.display_label()
         if lbl and lbl not in options:
             options.append(lbl)
@@ -168,7 +168,7 @@ def _channel_options(app) -> List[str]:
 
 def _find_ratio_for_channel(app, chan: str):
     """Return the RatioMetric whose display_label matches *chan*, or None."""
-    for r in (getattr(app, "_ratio_metrics", None) or []):
+    for r in (app._app_state.channel.ratio_metrics or []):
         if r.display_label().upper() == chan.strip().upper():
             return r
     return None

@@ -322,7 +322,7 @@ class ScatterCellViewer(QDialog):
         self._row_timepoint = str(row.get("timepoint") or "").strip()
         self._debug(f"csv.channel={self._nuclear_token!r}")
         self._debug(f"csv.fov={self._row_fov!r}  csv.timepoint={self._row_timepoint!r}")
-        self._debug(f"fluor channels to probe={sorted(self.app._fluor_channels)!r}")
+        self._debug(f"fluor channels to probe={sorted(self.app._app_state.channel.fluor_channels)!r}")
 
         mask_arr, mask_path = self._load_output_image_by_filename("mask")
         # Mask-content sanity: log shape, label cardinality, and whether
@@ -363,7 +363,7 @@ class ScatterCellViewer(QDialog):
             self._cell_outline_mask = None
             self._debug(f"failed to compute cell outline mask: {e!r}")
 
-        for ch in sorted(self.app._fluor_channels):
+        for ch in sorted(self.app._app_state.channel.fluor_channels):
             self._debug(f"loading fluor channel {ch!r}...")
             arr = self._load_and_crop_channel(ch)
             if arr is not None:
@@ -389,7 +389,7 @@ class ScatterCellViewer(QDialog):
         else:
             self._debug("  -> mask unavailable")
 
-        available_channels = [ch for ch in sorted(self.app._fluor_channels) if self._cell_images.get(ch) is not None]
+        available_channels = [ch for ch in sorted(self.app._app_state.channel.fluor_channels) if self._cell_images.get(ch) is not None]
         if nuc_key in self._cell_images and nuc_key not in available_channels:
             available_channels.append(nuc_key)
         if "nuclear" in self._cell_images:

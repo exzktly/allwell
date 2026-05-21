@@ -135,7 +135,7 @@ class BarBatchExportPanel(BatchExportPanel):
         if out_dir is None:
             return
 
-        _ch_selected = self._selected_export_channel() or self._app._active_channel
+        _ch_selected = self._selected_export_channel() or self._app._app_state.channel.active_channel
         # Threshold lookup keys by the canonical channel/ratio key, not
         # the dropdown's display label — translate ratio labels first so
         # the bar plot draws against the user-configured ThreshFracOn
@@ -273,7 +273,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
             try:
                 # Helpers consulted during the render may read
-                # ``app._active_val_col`` directly — swap it for the
+                # ``app._app_state.channel.active_val_col`` directly — swap it for the
                 # panel's selection so a ratio or non-MFI batch draws
                 # the right curves.
                 with self._app_val_col_scope(_val_col):
@@ -314,7 +314,7 @@ class BarBatchExportPanel(BatchExportPanel):
                             left=0.13, right=0.97)
         fig.suptitle(f"{grp.name}  \u2014  t = {tp_str} h",
                      fontsize=10, fontweight="bold", color=get_color("PLOT_TXT"), y=0.97)
-        _ch = (self._selected_export_channel() or self._app._active_channel).upper()
+        _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
         _metric_key = self._selected_export_metric_key("_bar_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")

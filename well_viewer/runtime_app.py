@@ -103,6 +103,7 @@ from well_viewer.image_resolver import (
     normalize_well_token as _normalize_well_token,
     output_suffixes_for_kind as _output_suffixes_for_kind,
 )
+from well_viewer.state import AppState, EventBus
 
 
 # ── Lazy controller proxies ──────────────────────────────────────────────────
@@ -672,6 +673,16 @@ class WellViewerApp(QWidget):
         self._np = _np
         self._theme_name = "Dark"
 
+        # ── Typed domain state (runtime_app teardown, Phase 1) ───────────────
+        # ChannelState owns the channel / ratio / threshold attributes that
+        # were loose ``self._*`` fields; AppState aggregates the domain-state
+        # objects and EventBus carries the cross-cutting signal catalogue.
+        # The legacy attribute names survive as @property shims (search
+        # "Phase 1 ChannelState shims" below) — ChannelState is the single
+        # source of truth, so no call site needed to change.
+        self._app_state = AppState()
+        self._event_bus = EventBus()
+
         # Data state
         self._data_dir:   Optional[Path]        = None
         self._in_dir:     Optional[Path]        = None
@@ -684,20 +695,10 @@ class WellViewerApp(QWidget):
         self._prev_sel:   set                   = set()
         self._sidebar_map_refresh_pending: bool = False
 
-        # Active fluorescent channel (set when CSVs are loaded)
-        self._fluor_channels: List[str] = []
-        self._review_image_channels: List[str] = []
-        self._smfish_channels: set[str] = set()
-        self._active_channel: str       = "gfp"
-        self._active_image_channel: str = "gfp"
-        self._active_metric: str        = "mean_intensity"
-        self._active_val_col: str       = "gfp_mean_intensity"
-
-        # Ratio metrics: user-defined virtual channels computed at read time.
-        # ``_ratio_index`` is the resolver-friendly dict keyed by ``ratio:<name>``
-        # and is rebuilt whenever the list changes.
-        self._ratio_metrics: List[RatioMetric] = []
-        self._ratio_index: Dict[str, RatioMetric] = {}
+        # Active fluorescent channel, ratio catalogue, and threshold range
+        # now live in ``self._app_state.channel`` (well_viewer/state/channel.py).
+        # ``_fluor_channels`` / ``_active_channel`` / ``_ratio_metrics`` /
+        # ``_threshold*`` etc. remain as @property shims further down.
 
         # Heatmap layouts: arbitrary R×C grids decoupled from the physical
         # 8×12 plate. When empty, the heatmap controller synthesizes a plate
@@ -714,10 +715,8 @@ class WellViewerApp(QWidget):
         self._view_state_pending: Optional[dict] = None
 
         # Plot controls — widgets are assigned in _build_ui; keep placeholders
-        # until then so callers can inspect default state.
-        self._threshold_min = 0.0
-        self._threshold_max = 1.0
-        self._threshold     = 50.0
+        # until then so callers can inspect default state. Threshold range
+        # state lives in ``self._app_state.channel`` (see the shims below).
         # Qt: concrete widgets are assigned in _build_ui() / view builders.
         # Provide plain-Python defaults so early callers before _build_ui get sane values.
         # SEM/SD toggle state — one bool drives every per-toolbar SEM button.
@@ -888,6 +887,39 @@ class WellViewerApp(QWidget):
 
         if data_path is not None:
             QTimer.singleShot(100, lambda: self._load_path(data_path))
+
+    # ── Phase 1 ChannelState shims ───────────────────────────────────────────
+    # The channel / ratio / threshold attributes moved into
+    # ``self._app_state.channel`` (a typed ChannelState). These properties
+    # forward the legacy ``self._*`` names to it so existing call sites are
+    # untouched; ChannelState is the single source of truth — no duplicated
+    # storage. Generated from one factory rather than 13 hand-copied property
+    # pairs. Deleted once call sites read ChannelState directly.
+
+    def _channel_state_shim(_field: str) -> property:
+        def _get(self):
+            return getattr(self._app_state.channel, _field)
+
+        def _set(self, value) -> None:
+            setattr(self._app_state.channel, _field, value)
+
+        return property(_get, _set)
+
+    _fluor_channels = _channel_state_shim("fluor_channels")
+    _review_image_channels = _channel_state_shim("review_image_channels")
+    _smfish_channels = _channel_state_shim("smfish_channels")
+    _active_channel = _channel_state_shim("active_channel")
+    _active_image_channel = _channel_state_shim("active_image_channel")
+    _active_metric = _channel_state_shim("active_metric")
+    _active_val_col = _channel_state_shim("active_val_col")
+    _ratio_metrics = _channel_state_shim("ratio_metrics")
+    _ratio_index = _channel_state_shim("ratio_index")
+    _threshold_min = _channel_state_shim("threshold_min")
+    _threshold_max = _channel_state_shim("threshold_max")
+    _threshold = _channel_state_shim("threshold")
+    _threshold_range_cache = _channel_state_shim("threshold_range_cache")
+
+    del _channel_state_shim
 
     @staticmethod
     def _position_root_on_screen(root, *, preferred_w: int, preferred_h: int) -> None:

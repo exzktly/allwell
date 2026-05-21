@@ -118,9 +118,9 @@ class BatchExportPanel(QWidget):
         # plot-tab state so a batch run isn't tied to whatever the on-screen
         # plot has set. Defaults inherited from the app at panel-creation
         # time so opening the panel "feels like" the active plot tab.
-        self._fc_vs_control_on: bool = bool(getattr(app, "_fc_vs_control_on", False))
-        self._fc_control_label: str = str(getattr(app, "_fc_control_label", "") or "")
-        self._fc_vs_t0_on: bool = bool(getattr(app, "_fc_vs_t0_on", False))
+        self._fc_vs_control_on: bool = bool(app._app_state.plot.fc_vs_control_on)
+        self._fc_control_label: str = str(app._app_state.plot.fc_control_label or "")
+        self._fc_vs_t0_on: bool = bool(app._app_state.plot.fc_vs_t0_on)
 
         self._groups: List[BarGroup] = self._groups_from_rep_sets()
         self._auto_named_group_ids: set[int] = set()
@@ -1313,7 +1313,7 @@ class BatchExportPanel(QWidget):
         threshold = self._app._get_thresh_frac_on(
             self._resolved_channel_key(_ch_selected)
         )
-        use_sem = self._app._use_sem
+        use_sem = self._app._app_state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"
         fmt = self._fmt_cb.currentText()
 

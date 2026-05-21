@@ -143,7 +143,7 @@ class BarBatchExportPanel(BatchExportPanel):
         threshold = self._app._get_thresh_frac_on(
             self._resolved_channel_key(_ch_selected)
         )
-        use_sem = self._app._use_sem
+        use_sem = self._app._app_state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"
         fmt = self._fmt_cb.currentText()
         fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()

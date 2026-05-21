@@ -285,7 +285,7 @@ def export_plot_data(app) -> None:
     ch = app._app_state.channel.active_channel
     metric = app._app_state.channel.active_metric
     threshold = app._get_thresh_frac_on(ch)
-    use_sem = bool(app._use_sem)
+    use_sem = bool(app._app_state.plot.use_sem)
     band_lbl = "SEM" if use_sem else "SD"
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()

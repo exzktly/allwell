@@ -62,7 +62,7 @@ def test_set_active_channel_round_trip(loaded_app):
 def test_set_fold_change_vs_t0_makes_baseline_one(loaded_app):
     loaded_app._set_selected_wells(set(WELLS))
     set_fold_change_state(loaded_app, vs_t0_on=True)
-    assert loaded_app._fc_vs_t0_on is True
+    assert loaded_app._app_state.plot.fc_vs_t0_on is True
     _, items, _ = collect_bar_items(loaded_app, 0.0)
     assert items
     for it in items:
@@ -72,8 +72,8 @@ def test_set_fold_change_vs_t0_makes_baseline_one(loaded_app):
 def test_set_fold_change_vs_control_self_is_one(loaded_app):
     loaded_app._set_selected_wells(set(WELLS))
     set_fold_change_state(loaded_app, vs_control_on=True, control_label="A01")
-    assert loaded_app._fc_vs_control_on is True
-    assert loaded_app._fc_control_label == "A01"
+    assert loaded_app._app_state.plot.fc_vs_control_on is True
+    assert loaded_app._app_state.plot.fc_control_label == "A01"
     _, items, _ = collect_bar_items(loaded_app, 24.0)
     by_key = {it.key: it.mean for it in items}
     assert math.isclose(by_key["A01"], 1.0, rel_tol=1e-9)
@@ -82,4 +82,4 @@ def test_set_fold_change_vs_control_self_is_one(loaded_app):
 def test_set_fold_change_round_trip_off(loaded_app):
     set_fold_change_state(loaded_app, vs_t0_on=True)
     set_fold_change_state(loaded_app, vs_t0_on=False)
-    assert loaded_app._fc_vs_t0_on is False
+    assert loaded_app._app_state.plot.fc_vs_t0_on is False

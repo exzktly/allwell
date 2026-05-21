@@ -830,16 +830,6 @@ class WellViewerApp(QWidget):
         return property(_get, _set)
 
 
-    _use_sem = _app_state_shim("plot", "use_sem")
-    _use_fov_replicates = _app_state_shim("plot", "use_fov_replicates")
-    _legend_visible = _app_state_shim("plot", "legend_visible")
-    _bar_order = _app_state_shim("plot", "bar_order")
-    _line_order_rsets = _app_state_shim("plot", "line_order_rsets")
-    _line_order_wells = _app_state_shim("plot", "line_order_wells")
-    _fc_vs_control_on = _app_state_shim("plot", "fc_vs_control_on")
-    _fc_control_label = _app_state_shim("plot", "fc_control_label")
-    _fc_vs_t0_on = _app_state_shim("plot", "fc_vs_t0_on")
-    _fc_dirty_scopes = _app_state_shim("plot", "fc_dirty_scopes")
 
     _stats_groups = _app_state_shim("stats", "groups")
     _stats_active_grp = _app_state_shim("stats", "active_grp")
@@ -3927,7 +3917,7 @@ class WellViewerApp(QWidget):
 
     def _use_fov_spread_active(self) -> bool:
         """Effective state of the per-FOV-replicates toggle for plotting."""
-        return bool(self._use_fov_replicates)
+        return bool(self._app_state.plot.use_fov_replicates)
 
     def _toggle_fov_replicates(self) -> None:
         self._app_state.plot.toggle_fov_replicates()
@@ -3939,7 +3929,7 @@ class WellViewerApp(QWidget):
 
     def _refresh_fov_btn_state(self) -> None:
         """Sync every per-FOV toggle button's text/variant state."""
-        is_on = bool(self._use_fov_replicates)
+        is_on = bool(self._app_state.plot.use_fov_replicates)
         text = "FOV ✓" if is_on else "FOV"
         variant = "toggle_active" if is_on else "toggle"
         tooltip = (
@@ -5660,7 +5650,7 @@ class WellViewerApp(QWidget):
             cell_scale = _fc.build_cell_scaling(
                 self, plot_wells, fc_state=_fc_state, target_t=target_t,
                 threshold=threshold, val_col=self._app_state.channel.active_val_col,
-                use_sem=self._use_sem,
+                use_sem=self._app_state.plot.use_sem,
                 per_fov_spread=self._use_fov_spread_active(),
                 cell_area_threshold=self._get_cell_area_threshold(),
                 fluor_gates=self._get_all_fluor_gates(),
@@ -5714,7 +5704,7 @@ class WellViewerApp(QWidget):
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         per_fov_spread = self._use_fov_spread_active()
-        use_sem = bool(self._use_sem)
+        use_sem = bool(self._app_state.plot.use_sem)
         n = len(wells)
         bar_w = min(0.6, 5.0 / max(n, 1))
         for i, lbl in enumerate(wells):
@@ -6174,7 +6164,7 @@ class WellViewerApp(QWidget):
         """
         from matplotlib.figure import Figure as _Figure
 
-        use_sem   = self._use_sem
+        use_sem   = self._app_state.plot.use_sem
         band_lbl  = "SEM" if use_sem else "SD"
         threshold = self._get_thresh_frac_on(self._app_state.channel.active_channel)
 
@@ -6894,12 +6884,12 @@ class WellViewerApp(QWidget):
         key = ax_map.get(id(clicked_ax))
         if key is None:
             return
-        self._legend_visible[key] = not self._legend_visible[key]
+        self._app_state.plot.legend_visible[key] = not self._app_state.plot.legend_visible[key]
         leg = clicked_ax.get_legend()
         if leg is not None:
-            leg.set_visible(self._legend_visible[key])
+            leg.set_visible(self._app_state.plot.legend_visible[key])
             self._line_canvas.draw_idle()
-        state = "shown" if self._legend_visible[key] else "hidden"
+        state = "shown" if self._app_state.plot.legend_visible[key] else "hidden"
         self._set_status(f"Legend for '{key}' plot {state}  (right-click to toggle)")
 
     # ── Log / status helpers ──────────────────────────────────────────────────

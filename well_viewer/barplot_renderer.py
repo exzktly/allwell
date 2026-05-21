@@ -367,7 +367,7 @@ def redraw_bars(app) -> None:
     if ax_n is not None:
         ax_n.cla()
 
-    use_sem = app._use_sem
+    use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
     threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
 

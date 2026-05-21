@@ -127,7 +127,7 @@ def collect_scatter_data(
         from well_viewer.lineplot_controller import _apply_order as _apply_rs_order
         active_rsets = _apply_rs_order(
             active_rsets,
-            list(getattr(app, "_line_order_rsets", []) or []),
+            list(app._app_state.plot.line_order_rsets or []),
             key=lambda r: getattr(r, "name", ""),
         )
         for group_idx, rset in enumerate(active_rsets):
@@ -170,7 +170,7 @@ def collect_scatter_data(
         )
         selected_wells = _apply_well_order(
             selected_wells,
-            list(getattr(app, "_line_order_wells", []) or []),
+            list(app._app_state.plot.line_order_wells or []),
             key=lambda x: x,
         )
         for well_idx, well_label in enumerate(selected_wells):
@@ -480,7 +480,7 @@ def collect_scatter_agg_data(
 
     ch_x, metric_x, intensity_x = parse_statistic(stat_x)
     ch_y, metric_y, intensity_y = parse_statistic(stat_y)
-    use_sem = app._use_sem
+    use_sem = app._app_state.plot.use_sem
     per_fov = bool(
         getattr(app, "_use_fov_spread_active", lambda: False)()
     )

@@ -182,6 +182,8 @@ class MockApp:
         st.plot.fc_control_label = self.fc_control_label
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on
         st.plot.bar_order = getattr(self, "_bar_order", None)
+        st.plot.line_order_rsets = getattr(self, "_line_order_rsets", [])
+        st.plot.line_order_wells = getattr(self, "_line_order_wells", [])
         return st
 
     @property

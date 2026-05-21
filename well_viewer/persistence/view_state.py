@@ -37,11 +37,11 @@ def snapshot(app) -> dict:
         "active_centre_tab": _current_leaf_tab(app),
         "active_channel": str(app._app_state.channel.active_channel or ""),
         "active_metric": str(app._app_state.channel.active_metric or ""),
-        "use_sem": bool(getattr(app, "_use_sem", True)),
+        "use_sem": bool(app._app_state.plot.use_sem),
         "fold_change": {
-            "vs_control_on": bool(getattr(app, "_fc_vs_control_on", False)),
-            "control_label": str(getattr(app, "_fc_control_label", "") or ""),
-            "vs_t0_on": bool(getattr(app, "_fc_vs_t0_on", False)),
+            "vs_control_on": bool(app._app_state.plot.fc_vs_control_on),
+            "control_label": str(app._app_state.plot.fc_control_label or ""),
+            "vs_t0_on": bool(app._app_state.plot.fc_vs_t0_on),
         },
         "export_style_prefs": dict(getattr(app, "_export_style_prefs", {}) or {}),
         "tabs": _snapshot_tabs(app),
@@ -243,18 +243,18 @@ def restore(app, state: dict) -> None:
 
     if "use_sem" in state:
         try:
-            app._use_sem = bool(state["use_sem"])
+            app._app_state.plot.use_sem = bool(state["use_sem"])
         except Exception:
             pass
 
     fc = state.get("fold_change") or {}
     if isinstance(fc, dict):
         if "vs_control_on" in fc:
-            app._fc_vs_control_on = bool(fc.get("vs_control_on"))
+            app._app_state.plot.fc_vs_control_on = bool(fc.get("vs_control_on"))
         if "control_label" in fc:
-            app._fc_control_label = str(fc.get("control_label") or "")
+            app._app_state.plot.fc_control_label = str(fc.get("control_label") or "")
         if "vs_t0_on" in fc:
-            app._fc_vs_t0_on = bool(fc.get("vs_t0_on"))
+            app._app_state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
         # Push the restored state into any fold-change combos that have
         # already been built. Lazily-built tabs (Bar) will pick the
         # values up on first install via _repopulate_*_combo, which both
@@ -585,9 +585,9 @@ def reset(app) -> None:
         except Exception:
             _logger.debug("reset: clearing selected wells failed", exc_info=True)
     # Fold-change scopes.
-    app._fc_vs_control_on = False
-    app._fc_control_label = ""
-    app._fc_vs_t0_on = False
+    app._app_state.plot.fc_vs_control_on = False
+    app._app_state.plot.fc_control_label = ""
+    app._app_state.plot.fc_vs_t0_on = False
     try:
         from well_viewer.tabs.fold_change_controls import _sync_widgets_to_state
         _sync_widgets_to_state(app)

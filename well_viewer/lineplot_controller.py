@@ -204,7 +204,7 @@ def collect_line_series(
     if active_rsets:
         ordered_rsets = _apply_order(
             active_rsets,
-            list(getattr(app, "_line_order_rsets", []) or []),
+            list(app._app_state.plot.line_order_rsets or []),
             key=lambda r: getattr(r, "name", ""),
         )
         for rset in ordered_rsets:
@@ -265,7 +265,7 @@ def collect_line_series(
     )
     ordered_selected = _apply_order(
         selected,
-        list(getattr(app, "_line_order_wells", []) or []),
+        list(app._app_state.plot.line_order_wells or []),
         key=lambda x: x,
     )
     for label in ordered_selected:
@@ -324,7 +324,7 @@ def redraw_line_plots(
     for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_cdf):
         ax.cla()
 
-    use_sem = app._use_sem
+    use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
     threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     selected = app._selected_labels()
@@ -448,11 +448,11 @@ def redraw_line_plots(
         if _has_labeled(app._line_ax_mean):
             leg_mean = app._line_ax_mean.legend(**legend_kw)
             leg_mean.set_draggable(True)
-            leg_mean.set_visible(app._legend_visible["mean"])
+            leg_mean.set_visible(app._app_state.plot.legend_visible["mean"])
         if _has_labeled(app._line_ax_frac):
             leg_frac = app._line_ax_frac.legend(**legend_kw)
             leg_frac.set_draggable(True)
-            leg_frac.set_visible(app._legend_visible["frac"])
+            leg_frac.set_visible(app._app_state.plot.legend_visible["frac"])
     if any_cdf:
         app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
         try:
@@ -469,7 +469,7 @@ def redraw_line_plots(
         if _has_labeled(app._line_ax_cdf):
             leg_cdf = app._line_ax_cdf.legend(**legend_kw)
             leg_cdf.set_draggable(True)
-            leg_cdf.set_visible(app._legend_visible["cdf"])
+            leg_cdf.set_visible(app._app_state.plot.legend_visible["cdf"])
         app._line_ax_cdf.set_xlim(cdf_lo, cdf_hi)
     else:
         app._line_ax_cdf.text(0.5, 0.5, f"No {app._app_state.channel.active_channel.upper()} data found.", transform=app._line_ax_cdf.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)

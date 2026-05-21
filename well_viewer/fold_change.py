@@ -275,9 +275,9 @@ def fold_change_state(app) -> Tuple[bool, str, bool]:
     plot and the export stay in sync.
     """
     return (
-        bool(getattr(app, "_fc_vs_control_on", False)),
-        str(getattr(app, "_fc_control_label", "") or ""),
-        bool(getattr(app, "_fc_vs_t0_on", False)),
+        bool(app._app_state.plot.fc_vs_control_on),
+        str(app._app_state.plot.fc_control_label or ""),
+        bool(app._app_state.plot.fc_vs_t0_on),
     )
 
 

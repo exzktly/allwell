@@ -415,7 +415,9 @@ if __name__ == "__main__":
 
     class _StubApp:
         def __init__(self):
-            self._app_state.dataset.well_labels: dict[str, str] = {"A01": "Control", "A02": "High MOI"}
+            from well_viewer.state import AppState
+            self._app_state = AppState()
+            self._app_state.dataset.well_labels = {"A01": "Control", "A02": "High MOI"}
             self._app_state.dataset.well_paths = {f"{r}{c:02d}": object()
                                 for r in _ROW_LETTERS for c in range(1, 13)}
 

@@ -144,7 +144,7 @@ def collect_bar_items(
     renderer); the items themselves carry display labels and colours so
     callers don't need to re-resolve them.
     """
-    use_sem = app._use_sem
+    use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
     threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     active_rsets = app._rep_sets_active()
@@ -472,9 +472,9 @@ def ordered_bar_keys(app) -> list:
             (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
-    if app._bar_order is None:
+    if app._app_state.plot.bar_order is None:
         return keys
-    ordered = [k for k in app._bar_order if k in keys]
+    ordered = [k for k in app._app_state.plot.bar_order if k in keys]
     seen = set(ordered)
     ordered.extend(k for k in keys if k not in seen)
     return ordered
@@ -617,7 +617,7 @@ def apply_bar_ylims(app, ax_mean, ax_frac, *, ax_n=None) -> None:
 #
 # Lightweight helpers that drive the bar drag interaction. The view (matplotlib
 # canvas + axes) is owned by ``WellViewerApp``; these helpers only mutate
-# ``app._bar_drag_state`` / ``app._bar_order`` and trigger a redraw.
+# ``app._bar_drag_state`` / ``app._app_state.plot.bar_order`` and trigger a redraw.
 
 def bar_event_xdata(app, event) -> Optional[float]:
     """Return data-x for a matplotlib MouseEvent over any bar axis."""
@@ -636,7 +636,7 @@ def bar_idx_at_x(xdata: float, n: int) -> int:
 
 
 def bar_reset_order(app) -> None:
-    app._bar_order = None
+    app._app_state.plot.bar_order = None
     app._bar_reset_order_btn.setProperty("variant", "toggle_muted")
     app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
     app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)
@@ -718,7 +718,7 @@ def on_bar_drag_release(app, event) -> None:
 
     item = keys.pop(src)
     keys.insert(tgt, item)
-    app._bar_order = keys
+    app._app_state.plot.bar_order = keys
     app._bar_reset_order_btn.setProperty("variant", "toggle_accent")
     app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
     app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)

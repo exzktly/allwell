@@ -459,8 +459,8 @@ class _AutoThresholdWorker(QThread):
         self._app = app
         self._out_dir = out_dir
         self._channels = list(channels)
-        self._app_state.dataset.well_labels = list(well_labels) if well_labels else []
-        self._app_state.dataset.in_dir = in_dir
+        self._well_labels = list(well_labels) if well_labels else []
+        self._in_dir = in_dir
 
     def run(self) -> None:  # noqa: D401 - QThread override
         # Stream traceback into the log drawer too — the previous "fail
@@ -477,8 +477,8 @@ class _AutoThresholdWorker(QThread):
                 self._out_dir,
                 fluor_channels=self._channels,
                 progress=lambda msg: self.progress.emit(str(msg)),
-                well_labels=self._app_state.dataset.well_labels or None,
-                in_dir=self._app_state.dataset.in_dir,
+                well_labels=self._well_labels or None,
+                in_dir=self._in_dir,
             )
         except Exception as exc:
             _log.error(

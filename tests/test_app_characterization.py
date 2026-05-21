@@ -60,7 +60,7 @@ def test_collect_line_series_per_well_points(all_wells_selected):
     series, _ = collect_line_series(
         all_wells_selected,
         threshold=all_wells_selected._app_state.channel.threshold,
-        use_sem=all_wells_selected._use_sem,
+        use_sem=all_wells_selected._app_state.plot.use_sem,
     )
     by_key = {s.key: s for s in series}
     assert set(by_key) == set(WELLS)

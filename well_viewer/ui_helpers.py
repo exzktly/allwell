@@ -381,7 +381,7 @@ def make_band_controls(app: Any, parent: QWidget, *, with_fov: bool = False) -> 
     eb_lbl = QLabel("Error Band", w)
     eb_lbl.setObjectName("Muted")
     h.addWidget(eb_lbl)
-    initial = bool(getattr(app, "_use_sem", False))
+    initial = bool(app._app_state.plot.use_sem)
     sem_btn = QPushButton("SEM" if initial else "SD", w)
     sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
     sem_btn.clicked.connect(lambda _=False: app._toggle_sem())

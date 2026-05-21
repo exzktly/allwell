@@ -29,7 +29,6 @@ _T0_LABEL = "t0 (first timepoint)"
 # defined here.
 from well_viewer.fold_change_scopes import (  # noqa: E402
     FoldChangeScope,
-    _DIRTY_ATTR,
     current_scope_name,
     flush_dirty_scopes,
     get_scope as _get_scope,
@@ -93,7 +92,7 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
     selected index is still re-synced from app state.
     """
     members = _all_member_labels(app)
-    saved = getattr(app, "_fc_control_label", "") or ""
+    saved = app._app_state.plot.fc_control_label or ""
     # If the saved label matches a bare well token AND there's a
     # collision-suffixed entry in the candidate list, prefer the suffixed
     # form so the user-visible state is unambiguous.
@@ -127,7 +126,7 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
 
 def _repopulate_baseline_combo(app, combo: QComboBox) -> None:
     """Refresh the Baseline combo. Only ``t0`` is supported today."""
-    on = bool(getattr(app, "_fc_vs_t0_on", False))
+    on = bool(app._app_state.plot.fc_vs_t0_on)
     blocked = combo.blockSignals(True)
     try:
         combo.clear()

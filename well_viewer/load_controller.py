@@ -83,7 +83,7 @@ def load_directory(app, d: Path, label=None) -> None:
     app._app_state.selection.selected_wells.clear()
     app._app_state.selection.last_sel = None
     app._app_state.selection.prev_sel = set()
-    app._bar_order = None
+    app._app_state.plot.bar_order = None
     # Drop the per-channel threshold (min, max) cache; the new dataset's
     # ranges may be completely different.
     app._app_state.channel.threshold_range_cache.clear()

@@ -104,6 +104,7 @@ from well_viewer.image_resolver import (
     output_suffixes_for_kind as _output_suffixes_for_kind,
 )
 from well_viewer.state import AppState, EventBus
+from well_viewer.views.widget_registry import WidgetRegistry
 
 
 # ── Lazy controller proxies ──────────────────────────────────────────────────
@@ -682,6 +683,11 @@ class WellViewerApp(QWidget):
         # source of truth, so no call site needed to change.
         self._app_state = AppState()
         self._event_bus = EventBus()
+        # Name-keyed store for Qt widget handles. Tab builders register their
+        # figures / canvases / axes here; ``__getattr__`` (below) forwards
+        # legacy ``app._<widget>`` reads to it so reader call sites are
+        # untouched while writers migrate tab by tab.
+        self._widget_registry = WidgetRegistry()
 
         # Dataset state — data dir, well paths, row cache, timepoint / FOV
         # caches, pipeline_info, persistence doc — lives in
@@ -915,6 +921,24 @@ class WellViewerApp(QWidget):
     _fc_dirty_scopes = _app_state_shim("plot", "fc_dirty_scopes")
 
     del _app_state_shim
+
+    def __getattr__(self, name: str) -> object:
+        """Forward a legacy ``app._<widget>`` read to the WidgetRegistry.
+
+        Python calls ``__getattr__`` only when normal lookup fails, so handles
+        that migrated out of ``__dict__`` into the registry still resolve under
+        their old name. A name absent from the registry raises ``AttributeError``
+        exactly as before — a typo is never silently masked. Recursion-safe: the
+        registry is read straight from ``__dict__``. Transitional — removed once
+        every widget-handle reader uses the registry directly.
+        """
+        if name.startswith("_") and not name.startswith("__"):
+            registry = self.__dict__.get("_widget_registry")
+            if registry is not None and name in registry:
+                return registry.get(name)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )
 
     @staticmethod
     def _position_root_on_screen(root, *, preferred_w: int, preferred_h: int) -> None:

@@ -24,7 +24,8 @@ def build_line_graphs_tab(app, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, app._line_export_dock = make_plot_with_right_dock(parent)
+    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
+    app._widget_registry.register("_line_export_dock", export_dock)
     parent = plot_area
 
     # ── controls row above the card (Channel / Metric / style / Export CSV) ──
@@ -104,16 +105,19 @@ def build_line_graphs_tab(app, parent: QWidget) -> None:
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")          # the tab name is the title; keep the header lean
-    app._line_card = card
-    app._line_fig = card.figure
-    app._line_ax_mean = app._line_fig.add_subplot(3, 1, 1)
-    app._line_ax_frac = app._line_fig.add_subplot(3, 1, 2, sharex=app._line_ax_mean)
-    app._line_ax_cdf = app._line_fig.add_subplot(3, 1, 3)
-    app._line_fig.subplots_adjust(
+    # Widget handles go through the WidgetRegistry; legacy ``app._line_*``
+    # reads are forwarded to it by WellViewerApp.__getattr__.
+    reg = app._widget_registry
+    reg.register("_line_card", card)
+    fig = reg.register("_line_fig", card.figure)
+    ax_mean = reg.register("_line_ax_mean", fig.add_subplot(3, 1, 1))
+    reg.register("_line_ax_frac", fig.add_subplot(3, 1, 2, sharex=ax_mean))
+    reg.register("_line_ax_cdf", fig.add_subplot(3, 1, 3))
+    fig.subplots_adjust(
         hspace=0.62, top=0.96, bottom=0.08, left=0.13, right=0.97,
     )
-    app._line_canvas = card.canvas
-    app._line_canvas.setMinimumHeight(int(_FIG_H * _DPI))
+    canvas = reg.register("_line_canvas", card.canvas)
+    canvas.setMinimumHeight(int(_FIG_H * _DPI))
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)   # + header / controls / toolbar rows
 
     # The "Error Band: SEM/SD" + "Spread: FOV" toggles (formerly on the legacy
@@ -127,15 +131,15 @@ def build_line_graphs_tab(app, parent: QWidget) -> None:
     card.plotThemeChanged.connect(lambda _m: app._redraw())
     card.setStatsChipVisible(False)
 
-    app._line_scroll_canvas = QScrollArea(parent)
-    app._line_scroll_canvas.setWidgetResizable(True)
-    app._line_scroll_canvas.setFrameShape(QFrame.NoFrame)
-    app._line_scroll_canvas.setWidget(card)
-    install_canvas_wheel_scroll(app._line_canvas, app._line_scroll_canvas)
+    scroll = reg.register("_line_scroll_canvas", QScrollArea(parent))
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setWidget(card)
+    install_canvas_wheel_scroll(canvas, scroll)
     # Wrap the scroll area in an EmptyState stack — page 0 is the
     # placeholder shown until a dataset is loaded, page 1 is the figure.
     from well_viewer.ui_helpers import wrap_with_empty_state
-    layout.addWidget(wrap_with_empty_state(app, app._line_scroll_canvas), 1)
+    layout.addWidget(wrap_with_empty_state(app, scroll), 1)
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)

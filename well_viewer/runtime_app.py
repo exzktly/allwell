@@ -103,6 +103,8 @@ from well_viewer.image_resolver import (
     normalize_well_token as _normalize_well_token,
     output_suffixes_for_kind as _output_suffixes_for_kind,
 )
+from well_viewer.state import AppState, EventBus
+from well_viewer.views.widget_registry import WidgetRegistry
 
 
 # ── Lazy controller proxies ──────────────────────────────────────────────────
@@ -672,32 +674,31 @@ class WellViewerApp(QWidget):
         self._np = _np
         self._theme_name = "Dark"
 
-        # Data state
-        self._data_dir:   Optional[Path]        = None
-        self._in_dir:     Optional[Path]        = None
-        self._tmp_dir:    Optional[Path]        = None
-        self._well_paths: Dict[str, Path]       = {}
-        self._cache:      Dict[str, pd.DataFrame] = {}
-        self._all_timepoints_cache: List[float] = []
-        self._all_fovs_cache: List[str] = []
-        self._last_sel:   Optional[str]         = None
-        self._prev_sel:   set                   = set()
+        # ── Typed domain state (runtime_app teardown, Phase 1) ───────────────
+        # ChannelState owns the channel / ratio / threshold attributes that
+        # were loose ``self._*`` fields; AppState aggregates the domain-state
+        # objects and EventBus carries the cross-cutting signal catalogue.
+        # The legacy attribute names survive as @property shims (search
+        # "Phase 1 ChannelState shims" below) — ChannelState is the single
+        # source of truth, so no call site needed to change.
+        self._app_state = AppState()
+        self._event_bus = EventBus()
+        # Name-keyed store for Qt widget handles. Tab builders register their
+        # figures / canvases / axes here; ``__getattr__`` (below) forwards
+        # legacy ``app._<widget>`` reads to it so reader call sites are
+        # untouched while writers migrate tab by tab.
+        self._widget_registry = WidgetRegistry()
+
+        # Dataset state — data dir, well paths, row cache, timepoint / FOV
+        # caches, pipeline_info, persistence doc — lives in
+        # ``self._app_state.dataset`` (well_viewer/state/dataset.py); the
+        # legacy names remain as @property shims further down.
         self._sidebar_map_refresh_pending: bool = False
 
-        # Active fluorescent channel (set when CSVs are loaded)
-        self._fluor_channels: List[str] = []
-        self._review_image_channels: List[str] = []
-        self._smfish_channels: set[str] = set()
-        self._active_channel: str       = "gfp"
-        self._active_image_channel: str = "gfp"
-        self._active_metric: str        = "mean_intensity"
-        self._active_val_col: str       = "gfp_mean_intensity"
-
-        # Ratio metrics: user-defined virtual channels computed at read time.
-        # ``_ratio_index`` is the resolver-friendly dict keyed by ``ratio:<name>``
-        # and is rebuilt whenever the list changes.
-        self._ratio_metrics: List[RatioMetric] = []
-        self._ratio_index: Dict[str, RatioMetric] = {}
+        # Active fluorescent channel, ratio catalogue, and threshold range
+        # now live in ``self._app_state.channel`` (well_viewer/state/channel.py).
+        # ``_fluor_channels`` / ``_active_channel`` / ``_ratio_metrics`` /
+        # ``_threshold*`` etc. remain as @property shims further down.
 
         # Heatmap layouts: arbitrary R×C grids decoupled from the physical
         # 8×12 plate. When empty, the heatmap controller synthesizes a plate
@@ -705,42 +706,27 @@ class WellViewerApp(QWidget):
         self._heatmap_layouts: List = []
         self._active_heatmap_layout_name: Optional[str] = None
 
-        # persistence.json cache (populated lazily by persistence._doc.read).
-        # Cleared when the data dir changes so the next read reloads.
-        self._persistence_doc = None
         # Per-tab view-state values waiting to apply on first tab visit
         # (populated by view_state.load_from_data_dir, drained by
         # _on_tab_change → view_state.apply_pending_tab_state).
         self._view_state_pending: Optional[dict] = None
 
         # Plot controls — widgets are assigned in _build_ui; keep placeholders
-        # until then so callers can inspect default state.
-        self._threshold_min = 0.0
-        self._threshold_max = 1.0
-        self._threshold     = 50.0
-        # Qt: concrete widgets are assigned in _build_ui() / view builders.
-        # Provide plain-Python defaults so early callers before _build_ui get sane values.
-        # SEM/SD toggle state — one bool drives every per-toolbar SEM button.
-        # attach_plot_toolbar() registers each button in _sem_btns, so we must
-        # initialize both BEFORE any plot tab is built.
-        self._use_sem = True
+        # until then so callers can inspect default state. Plot options
+        # (SEM/SD, per-FOV replicates, legend visibility, draw order,
+        # fold-change) live in ``self._app_state.plot`` — see the shims below.
+        # The button/observer lists below stay here: they are widget handles,
+        # not state. attach_plot_toolbar() registers each SEM button in
+        # _sem_btns, so these must exist BEFORE any plot tab is built.
         self._sem_btns: List = []
         self._sem_btn = None
         # Observers notified after _toggle_sem flips the state — for v2 widgets
         # (e.g. the Statistics SegmentedControl in ExportStyleSidebar) that don't
         # share the QPushButton API _sem_btns assumes.
         self._sem_observers: List = []   # callables (use_sem: bool) -> None
-        # Per-FOV replicate toggle. When True (and no replicate sets are
-        # active), the bar/line plots compute the error band across per-FOV
-        # means within each well rather than across individual cells. The
-        # toggle is silently ignored whenever replicate sets are defined.
-        self._use_fov_replicates = False
         self._fov_btns: List = []
         self._fov_btn = None
         self._fov_observers: List = []   # callables (use_fov: bool) -> None
-        self._legend_visible: Dict[str, bool] = {
-            "mean": True, "frac": True, "cdf": True,
-        }
         # Channel / timepoint comboboxes are assigned to these attrs in the view builders.
         self._plot_chan_cb = None
         self._montage_chan_cb = None
@@ -753,20 +739,12 @@ class WellViewerApp(QWidget):
         self._bar_ylim_mean_hi_edit = None
         self._bar_ylim_frac_lo_edit = None
         self._bar_ylim_frac_hi_edit = None
-        self._bar_order: Optional[List] = None
-        # Fold-change normalization state (shared by Bar / Line tabs). Two
-        # independent toggles — they may be combined. The Bar / Line batch
-        # export panels keep their own per-panel mirror of this state so
-        # batch jobs aren't tied to whatever the on-screen plot has set.
-        self._fc_vs_control_on: bool = False
-        self._fc_control_label: str = ""
-        self._fc_vs_t0_on: bool = False
-        # Unified saved-selections model (Phase 8.0) — THE in-memory source of
-        # truth. See well_viewer/selections_model.py for the schema.
-        self._selections:               list = []
-        self._current_selection_id:     Optional[str] = None
-        self._selections_v2_writes_disabled: bool = False
-        self._well_labels:       Dict[str, str]    = {}
+        # Draw order and fold-change normalization state live in
+        # ``self._app_state.plot`` (well_viewer/state/plot.py) — see the shims.
+        # Plate selection and the unified saved-selections ("v2") model now
+        # live in ``self._app_state.selection`` (well_viewer/state/selection.py).
+        # ``_selections`` / ``_selected_wells`` / ``_active_solo_wells`` etc.
+        # remain as @property shims further down.
         self._rep_quick_pair_dir   = "row"
         self._rep_quick_iter_order = "row"
         self._bar_quick_pair_dir   = "row"
@@ -775,22 +753,11 @@ class WellViewerApp(QWidget):
         self._cdf_xmin_edit = None
         self._cdf_xmax_edit = None
 
-        # Plate-map well selection
-        self._selected_wells: set  = set()
-        # Coalesces commit-after-paint events. A drag paints 96 wells in
-        # rapid sequence; we want one commit (one full redraw) at the end
-        # of the event-loop tick, not 96.
-        self._plate_commit_pending: bool = False
-        # Plotting-tab solo-well overrides: when a user clicks a well not
-        # in any group, it's added here so the plot picks it up alongside
-        # the visible groups. Independent of ``_selected_wells``, which is
-        # the per-well selection used outside rep-mode.
-        self._active_solo_wells: set = set()
-        self._tok_to_label:   Dict[str, str] = {}
+        # Plate-map well selection, the commit-coalescing flag, and the
+        # plotting-tab solo-well overrides all live in
+        # ``self._app_state.selection`` (see the shims below).
 
         # Preview state
-        self._fov_tp_extractor = None
-        self._pipeline_info: Dict[str, object] = {}
         self._preview_selected_well: Optional[str] = None
         self._preview_fov_cb = None
         self._montage_photos: List[object] = []
@@ -836,11 +803,8 @@ class WellViewerApp(QWidget):
         # Debounce flag for cell_overrides.json autosave; coalesces bursts of
         # toggles into a single disk write via QTimer.singleShot.
         self._cell_overrides_save_pending: bool = False
-        # User-controlled draw order for the Line Plot tab. Empty list ⇒ use
-        # natural order (replicate-set list order or selection order). Non-empty
-        # entries are drawn first in saved order; unknown items append at end.
-        self._line_order_rsets: list[str] = []
-        self._line_order_wells: list[str] = []
+        # User-controlled Line-tab draw order lives in ``self._app_state.plot``
+        # (_line_order_rsets / _line_order_wells shims below).
         self._line_order_save_pending: bool = False
         self._notes_text: str = ""
         self._notes_save_pending: bool = False
@@ -888,6 +852,99 @@ class WellViewerApp(QWidget):
 
         if data_path is not None:
             QTimer.singleShot(100, lambda: self._load_path(data_path))
+
+    # ── Domain-state shims (runtime_app teardown) ────────────────────────────
+    # Channel/ratio/threshold (Phase 1), plate selection (Phase 2), dataset
+    # (Phase 3), plot options (Phase 4) and statistics (Phase 7) moved into
+    # ``self._app_state`` — typed ChannelState / SelectionState / DatasetState
+    # / PlotState / StatsState. These properties forward the legacy
+    # ``self._*`` names so existing call sites are untouched; the state
+    # objects are the single source of truth — no duplicated storage.
+    # Generated from one factory rather than ~48 hand-copied property pairs.
+    # Deleted once call sites read the state objects directly.
+
+    def _app_state_shim(_domain: str, _field: str) -> property:
+        def _get(self):
+            return getattr(getattr(self._app_state, _domain), _field)
+
+        def _set(self, value) -> None:
+            setattr(getattr(self._app_state, _domain), _field, value)
+
+        return property(_get, _set)
+
+    _fluor_channels = _app_state_shim("channel", "fluor_channels")
+    _review_image_channels = _app_state_shim("channel", "review_image_channels")
+    _smfish_channels = _app_state_shim("channel", "smfish_channels")
+    _active_channel = _app_state_shim("channel", "active_channel")
+    _active_image_channel = _app_state_shim("channel", "active_image_channel")
+    _active_metric = _app_state_shim("channel", "active_metric")
+    _active_val_col = _app_state_shim("channel", "active_val_col")
+    _ratio_metrics = _app_state_shim("channel", "ratio_metrics")
+    _ratio_index = _app_state_shim("channel", "ratio_index")
+    _threshold_min = _app_state_shim("channel", "threshold_min")
+    _threshold_max = _app_state_shim("channel", "threshold_max")
+    _threshold = _app_state_shim("channel", "threshold")
+    _threshold_range_cache = _app_state_shim("channel", "threshold_range_cache")
+
+    _selected_wells = _app_state_shim("selection", "selected_wells")
+    _last_sel = _app_state_shim("selection", "last_sel")
+    _prev_sel = _app_state_shim("selection", "prev_sel")
+    _active_solo_wells = _app_state_shim("selection", "active_solo_wells")
+    _selections = _app_state_shim("selection", "selections")
+    _current_selection_id = _app_state_shim("selection", "current_selection_id")
+    _selections_v2_writes_disabled = _app_state_shim(
+        "selection", "v2_writes_disabled")
+    _plate_commit_pending = _app_state_shim("selection", "plate_commit_pending")
+
+    _data_dir = _app_state_shim("dataset", "data_dir")
+    _in_dir = _app_state_shim("dataset", "in_dir")
+    _tmp_dir = _app_state_shim("dataset", "tmp_dir")
+    _well_paths = _app_state_shim("dataset", "well_paths")
+    _cache = _app_state_shim("dataset", "cache")
+    _all_timepoints_cache = _app_state_shim("dataset", "all_timepoints_cache")
+    _all_fovs_cache = _app_state_shim("dataset", "all_fovs_cache")
+    _pipeline_info = _app_state_shim("dataset", "pipeline_info")
+    _tok_to_label = _app_state_shim("dataset", "tok_to_label")
+    _well_labels = _app_state_shim("dataset", "well_labels")
+    _fov_tp_extractor = _app_state_shim("dataset", "fov_tp_extractor")
+    _persistence_doc = _app_state_shim("dataset", "persistence_doc")
+
+    _use_sem = _app_state_shim("plot", "use_sem")
+    _use_fov_replicates = _app_state_shim("plot", "use_fov_replicates")
+    _legend_visible = _app_state_shim("plot", "legend_visible")
+    _bar_order = _app_state_shim("plot", "bar_order")
+    _line_order_rsets = _app_state_shim("plot", "line_order_rsets")
+    _line_order_wells = _app_state_shim("plot", "line_order_wells")
+    _fc_vs_control_on = _app_state_shim("plot", "fc_vs_control_on")
+    _fc_control_label = _app_state_shim("plot", "fc_control_label")
+    _fc_vs_t0_on = _app_state_shim("plot", "fc_vs_t0_on")
+    _fc_dirty_scopes = _app_state_shim("plot", "fc_dirty_scopes")
+
+    _stats_groups = _app_state_shim("stats", "groups")
+    _stats_active_grp = _app_state_shim("stats", "active_grp")
+    _stats_cache = _app_state_shim("stats", "cache")
+    _stats_drag_adding = _app_state_shim("stats", "drag_adding")
+    _stats_drag_visited = _app_state_shim("stats", "drag_visited")
+
+    del _app_state_shim
+
+    def __getattr__(self, name: str) -> object:
+        """Forward a legacy ``app._<widget>`` read to the WidgetRegistry.
+
+        Python calls ``__getattr__`` only when normal lookup fails, so handles
+        that migrated out of ``__dict__`` into the registry still resolve under
+        their old name. A name absent from the registry raises ``AttributeError``
+        exactly as before — a typo is never silently masked. Recursion-safe: the
+        registry is read straight from ``__dict__``. Transitional — removed once
+        every widget-handle reader uses the registry directly.
+        """
+        if name.startswith("_") and not name.startswith("__"):
+            registry = self.__dict__.get("_widget_registry")
+            if registry is not None and name in registry:
+                return registry.get(name)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )
 
     @staticmethod
     def _position_root_on_screen(root, *, preferred_w: int, preferred_h: int) -> None:
@@ -3122,69 +3179,12 @@ class WellViewerApp(QWidget):
         _load_build_tok_to_label(self)
 
     def _rebuild_all_timepoints_cache(self) -> None:
-        """Cache global numeric timepoints for all plot/menu population.
-
-        Sources are merged in this single function so every tab that reads
-        ``_all_timepoints_cache`` gets the same canonical timepoint list:
-          1) loaded CSV rows (timepoint_hours / parsed timepoint strings)
-          2) pipeline_info.json ``available_timepoints`` when present
-        """
-        all_tps: set[float] = set()
-        for df in self._cache.values():
-            if df is None or df.empty:
-                continue
-            if "timepoint_hours" in df.columns:
-                tp_num = pd.to_numeric(df["timepoint_hours"], errors="coerce")
-                all_tps.update(float(t) for t in tp_num.dropna().unique())
-                missing = tp_num.isna()
-            else:
-                missing = pd.Series(True, index=df.index)
-            if "timepoint" in df.columns and missing.any():
-                for s in df.loc[missing, "timepoint"].fillna("").astype(str).unique():
-                    parsed = parse_timepoint_hours(s)
-                    if parsed is not None:
-                        all_tps.add(parsed)
-        pipeline_info = getattr(self, "_pipeline_info", {}) or {}
-        for tp in pipeline_info.get("available_timepoints", []) or []:
-            parsed = parse_timepoint_hours(str(tp))
-            if parsed is not None:
-                all_tps.add(parsed)
-        self._all_timepoints_cache = sorted(all_tps)
+        """Recompute the canonical timepoint list (delegates to DatasetState)."""
+        self._app_state.dataset.rebuild_timepoints()
 
     def _rebuild_all_fovs_cache(self) -> None:
-        """Cache global FOV labels once per dataset load (no per-refresh rebuilding)."""
-        def _norm_fov(value: object) -> str:
-            raw = str(value or "").strip()
-            if not raw:
-                return ""
-            try:
-                return f"{float(raw):g}"
-            except Exception:
-                return raw
-
-        all_fovs: set[str] = set()
-        for df in self._cache.values():
-            if df is None or df.empty or "fov" not in df.columns:
-                continue
-            for raw in df["fov"].fillna("").astype(str).unique():
-                fov = _norm_fov(raw)
-                if fov:
-                    all_fovs.add(fov)
-        pipeline_info = getattr(self, "_pipeline_info", {}) or {}
-        for fov in pipeline_info.get("available_fovs", []) or []:
-            fov_norm = _norm_fov(fov)
-            if fov_norm:
-                all_fovs.add(fov_norm)
-        if not all_fovs and self._well_paths:
-            all_fovs.add("1")
-
-        def _fov_sort_key(token: str) -> tuple[int, float, str]:
-            try:
-                return (0, float(token), token)
-            except ValueError:
-                return (1, 0.0, token)
-
-        self._all_fovs_cache = sorted(all_fovs, key=_fov_sort_key)
+        """Recompute the canonical FOV list (delegates to DatasetState)."""
+        self._app_state.dataset.rebuild_fovs()
 
     @staticmethod
     def _mute_color(hex_color: str, factor: float = 0.5) -> str:
@@ -3945,8 +3945,7 @@ class WellViewerApp(QWidget):
 
     def _toggle_sem(self) -> None:
         self._invalidate_stats_cache()
-        self._use_sem = not self._use_sem
-        is_sem = self._use_sem
+        is_sem = self._app_state.plot.toggle_sem()
         text = "SEM" if is_sem else "SD"
         variant = "sem" if is_sem else "sem_warn"
         for btn in list(getattr(self, "_sem_btns", []) or []):
@@ -3962,6 +3961,7 @@ class WellViewerApp(QWidget):
         self._redraw()
         if self._current_centre_tab() == "Bar Plots":
             self._redraw_bars()
+        self._event_bus.plot_options_changed.emit(self._app_state.plot)
 
     # ── Per-FOV-replicates toggle ────────────────────────────────────────────
 
@@ -3976,7 +3976,7 @@ class WellViewerApp(QWidget):
         return bool(self._use_fov_replicates)
 
     def _toggle_fov_replicates(self) -> None:
-        self._use_fov_replicates = not self._use_fov_replicates
+        self._app_state.plot.toggle_fov_replicates()
         self._invalidate_stats_cache()
         self._refresh_fov_btn_state()
         self._redraw()

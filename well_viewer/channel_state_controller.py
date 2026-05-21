@@ -32,7 +32,7 @@ from well_viewer.data_loading import (
     merge_fluor_channels,
     normalize_channel_tokens,
 )
-from well_viewer.ratio_models import is_ratio_key, ratio_name_from_key
+from well_viewer.ratio_models import is_ratio_key
 from well_viewer.ui_helpers import set_combo_values
 
 _logger = logging.getLogger("well_viewer")
@@ -81,15 +81,13 @@ def recalculate_threshold(app) -> None:
     )
     app._update_channel_selector()
 
-    # Update smFISH channels and reset metric if needed.
-    app._smfish_channels = set(detected_smfish)
-    if app._active_metric == "smfish_count" and app._active_channel not in app._smfish_channels:
-        app._active_metric = "mean_intensity"
-
-    # Derive _active_val_col from active channel and metric (skip when a
-    # ratio is active — the ratio key already lives in _active_val_col).
-    if not is_ratio_key(app._active_val_col):
-        app._active_val_col = f"{app._active_channel}_{app._active_metric}"
+    # Update smFISH channels, then let ChannelState re-assert its invariants:
+    # drop a stale smfish_count metric the new channel can't support, and
+    # re-derive the value column (a no-op while a ratio is active).
+    channel_state = app._app_state.channel
+    channel_state.smfish_channels = set(detected_smfish)
+    channel_state.normalize_metric()
+    channel_state.sync_val_col()
 
     # Update metric selector visibility (back-compat: per-tab frames).
     for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
@@ -119,16 +117,13 @@ def recalculate_threshold(app) -> None:
     # reuses the previous channel's range when the user flips back. Audit
     # M7: the unconditional concat across every loaded well × every cell
     # was the hot loop on channel switch (~3.5M float scans for 96 wells
-    # × 12 tp × 3k cells). Cache is invalidated by `load_directory` on
-    # dataset swap (`app._threshold_range_cache.clear()`).
-    cache = getattr(app, "_threshold_range_cache", None)
-    if cache is None:
-        cache = {}
-        app._threshold_range_cache = cache
-    cached = cache.get(app._active_val_col)
+    # × 12 tp × 3k cells). The cache lives on ChannelState and is invalidated
+    # by `load_directory` on dataset swap.
+    val_col = channel_state.active_val_col
+    cached = channel_state.cached_range(val_col)
     if cached is None:
         chunks = [
-            _all_fluor_values(app._get_rows(lbl), val_col=app._active_val_col)
+            _all_fluor_values(app._get_rows(lbl), val_col=val_col)
             for lbl in app._well_paths
         ]
         all_vals = np.concatenate(chunks) if chunks else np.empty(0)
@@ -137,11 +132,10 @@ def recalculate_threshold(app) -> None:
         lo, hi = float(all_vals.min()), float(all_vals.max())
         if hi <= lo:
             hi = lo + 1.0
-        cache[app._active_val_col] = (lo, hi)
+        channel_state.cache_range(val_col, lo, hi)
     else:
         lo, hi = cached
-    app._threshold_min = lo
-    app._threshold_max = hi
+    channel_state.apply_range(lo, hi)
 
     # Hydrate persisted gating params from pipeline_info.json.
     app._load_gating_from_pipeline_info()
@@ -168,37 +162,30 @@ def set_active_channel(app, channel: str) -> None:
     """
     if not channel or channel == "—":
         return
-    was_ratio = is_ratio_key(app._active_val_col)
-    ratio_active = is_ratio_key(channel)
-    if ratio_active:
-        ratio_name = ratio_name_from_key(channel)
-        ratio = next((r for r in app._ratio_metrics if r.name == ratio_name), None)
+    # ChannelState owns the channel/metric/val_col invariant — the mutators
+    # below perform the pure state transition (and report whether anything
+    # changed); this controller keeps the widget-sync that must stay in Qt.
+    channel_state = app._app_state.channel
+    if is_ratio_key(channel):
+        ratio = channel_state.resolve_ratio(channel)
         if ratio is None:
             return
-        new_val_col = ratio.key()
-        if new_val_col == app._active_val_col:
+        if not channel_state.set_active_ratio(ratio):
             return
-        app._active_channel = ratio_name
-        app._active_val_col = new_val_col
         # Hide the per-cell metric selector — ratios encode their own metrics.
         for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
             frame = getattr(app, frame_attr, None)
             if frame is not None:
                 frame.setVisible(False)
     else:
-        if channel == app._active_channel and not is_ratio_key(app._active_val_col):
+        # set_active_channel resets a stale ratio / smFISH metric so the new
+        # channel composes a real column, and re-derives the value column.
+        if not channel_state.set_active_channel(channel):
             return
-        app._active_channel = channel
-        # Coming back from a ratio leaves _active_metric pointing at
-        # whatever was last picked (often smfish_count) and the metric
-        # frames hidden. Reset both so the new channel composes a real
-        # column name and the user sees the metric selector again.
-        if was_ratio or channel not in app._smfish_channels:
-            app._active_metric = "mean_intensity"
-        # Sync every metric combo to the current ``_active_metric`` so a
+        # Sync every metric combo to the (possibly reset) active metric so a
         # freshly-visible non-ratio channel shows the right Property label.
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
-        label = METRIC_KEY_TO_LABEL.get(app._active_metric, "Mean Intensity")
+        label = METRIC_KEY_TO_LABEL.get(channel_state.active_metric, "Mean Intensity")
         for cb_attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
                         "_plotting_metric_cb"):
             cb = getattr(app, cb_attr, None)
@@ -212,8 +199,6 @@ def set_active_channel(app, channel: str) -> None:
                 cb.setCurrentIndex(idx)
             finally:
                 cb.blockSignals(blocked)
-        # Derive val_col from channel and metric.
-        app._active_val_col = f"{channel}_{app._active_metric}"
     # Keep all plot-tab channel selectors in sync so switching channel on
     # one tab is reflected on the others.
     target_label = app._active_channel_label()
@@ -239,6 +224,9 @@ def set_active_channel(app, channel: str) -> None:
     # picks up the channel change when the user switches tabs.
     from well_viewer.tabs.fold_change_controls import redraw_scopes_or_defer
     redraw_scopes_or_defer(app)
+    # Announce on the bus. Additive for now — the explicit redraw above still
+    # runs; subscribers are wired in later phases as tabs migrate to the bus.
+    app._event_bus.channel_changed.emit(channel_state)
     if hasattr(app, "_cdf_chan_lbl"):
         app._cdf_chan_lbl.setText(f"({target_label} x range)")
     if hasattr(app, "_bar_ylim_chan_lbl"):

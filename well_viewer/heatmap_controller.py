@@ -52,7 +52,7 @@ def active_layout(app) -> HeatmapLayout:
                 return lay
     if layouts:
         return layouts[0]
-    return make_plate_layout((getattr(app, "_well_paths", {}) or {}).keys())
+    return make_plate_layout((app._app_state.dataset.well_paths or {}).keys())
 
 
 def _selected_metric(app) -> str:
@@ -183,7 +183,7 @@ def _cell_value(
 ) -> float:
     """Compute the heatmap cell value by pooling rows across *wells*."""
     expanded = _expand_repset_wells(app, wells)
-    valid_wells = [w for w in expanded if w in app._well_paths]
+    valid_wells = [w for w in expanded if w in app._app_state.dataset.well_paths]
     if not valid_wells:
         return float("nan")
 

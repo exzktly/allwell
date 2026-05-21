@@ -69,8 +69,8 @@ def build_stats_group_editor(app, parent: QWidget, **_kw) -> None:
         if grp is None:
             app._stats_refresh_map()        # no active group — revert the click
             return
-        new = {w for w in plate.selectedWellIds() if w in app._well_paths}
-        old = {w for w in grp.wells if w in app._well_paths}
+        new = {w for w in plate.selectedWellIds() if w in app._app_state.dataset.well_paths}
+        old = {w for w in grp.wells if w in app._app_state.dataset.well_paths}
         added, removed = new - old, old - new
         if not added and not removed:
             return

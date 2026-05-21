@@ -136,11 +136,11 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self._build_run_row(layout, button_text="\u25b6  Run Scatter Batch Export")
 
     def _init_timepoint_dropdown(self) -> None:
-        timepoints = sorted(set(getattr(self._app, "_all_timepoints_cache", []) or []))
+        timepoints = sorted(set(self._app._app_state.dataset.all_timepoints_cache or []))
         if not timepoints:
             import pandas as _pd
             tps: set = set()
-            for lbl in self._app._well_paths:
+            for lbl in self._app._app_state.dataset.well_paths:
                 df = self._app._get_rows(lbl)
                 if df is None or "timepoint_hours" not in df.columns:
                     continue
@@ -361,7 +361,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _run_batch(self) -> None:
         groups_with_data = _groups_with_loaded_wells(
-            self._groups_for_export(), self._app._well_paths,
+            self._groups_for_export(), self._app._app_state.dataset.well_paths,
         )
         if not groups_with_data:
             QMessageBox.warning(self, "No groups", "Define at least one non-empty group.")

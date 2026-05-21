@@ -25,7 +25,7 @@ def save_to_pipeline_info(app) -> None:
         build_sample_definitions_v2,
         save_to_pipeline_info as _write_block,
     )
-    if not app._data_dir:
+    if not app._app_state.dataset.data_dir:
         QMessageBox.warning(
             app, "No data loaded",
             "Open a data folder before saving sample definitions.",
@@ -47,10 +47,10 @@ def save_to_pipeline_info(app) -> None:
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
     block = build_sample_definitions_v2(
-        app._well_labels, selections, current_id, notes=notes_text,
+        app._app_state.dataset.well_labels, selections, current_id, notes=notes_text,
     )
     try:
-        info_path = _write_block(app._data_dir, block)
+        info_path = _write_block(app._app_state.dataset.data_dir, block)
     except FileNotFoundError as exc:
         QMessageBox.warning(app, "pipeline_info.json missing", str(exc))
         return
@@ -76,7 +76,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
     session, and returns ``(False, {})``.
     """
     from well_viewer import selections_model as _sel
-    tok_to_label = getattr(app, "_tok_to_label", {})
+    tok_to_label = app._app_state.dataset.tok_to_label
     # Mixed v1+v2 payload (both rep_sets/groups *and* a selections list
     # with content) — refuse to migrate. Either path would silently drop
     # data, so we keep the file untouched and disable v2 writes for the
@@ -157,25 +157,25 @@ def load_from_pipeline_info(app) -> bool:
     Returns True when a block was found and applied.
     """
     from well_viewer.sample_definitions import read_sample_definitions
-    if not app._data_dir:
+    if not app._app_state.dataset.data_dir:
         return False
-    block = read_sample_definitions(app._data_dir)
+    block = read_sample_definitions(app._app_state.dataset.data_dir)
     if not block:
         return False
     applied, well_labels = _apply_unified_state(app, block)
     if not applied:
         return True  # a block existed; we just couldn't upgrade it
-    valid = set(app._well_paths.keys())
+    valid = set(app._app_state.dataset.well_paths.keys())
     for tok, lab in (well_labels or {}).items():
         if tok in valid and str(lab).strip():
-            app._well_labels[str(tok)] = str(lab).strip()
+            app._app_state.dataset.well_labels[str(tok)] = str(lab).strip()
     app._invalidate_stats_cache()
     return True
 
 
 def save_all(app) -> None:
     """Persist labels + reps + groups + ratios + gating in one click."""
-    if not app._data_dir:
+    if not app._app_state.dataset.data_dir:
         QMessageBox.warning(
             app, "No data loaded",
             "Open a data folder before saving sample definitions.",
@@ -197,7 +197,7 @@ def save_all(app) -> None:
 
 def load_all(app) -> None:
     """Reload labels + reps + groups + ratios + gating from the data folder."""
-    if not app._data_dir:
+    if not app._app_state.dataset.data_dir:
         QMessageBox.warning(
             app, "No data loaded",
             "Open a data folder before loading sample definitions.",
@@ -239,7 +239,7 @@ def clear_all(app) -> None:
     if confirm != QMessageBox.Yes:
         return
 
-    app._well_labels.clear()
+    app._app_state.dataset.well_labels.clear()
     if hasattr(app, "_label_panel_refresh"):
         try:
             app._label_panel_refresh()

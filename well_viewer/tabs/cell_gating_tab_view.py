@@ -84,7 +84,7 @@ class GatingWorker(QThread):
         debug = _debug_flags.cell_gating_debug_enabled()
         cell_area_threshold = self._app._get_cell_area_threshold()
         fluor_gates = self._app._get_all_fluor_gates()
-        labels = list(self._app._well_paths)
+        labels = list(self._app._app_state.dataset.well_paths)
         total = len(labels)
 
         if debug:
@@ -432,7 +432,7 @@ def cell_gating_start_gating_worker(app) -> None:
     app._cell_gating_worker = worker
     bar = getattr(app, "_progress_bar", None)
     if bar is not None:
-        bar.setRange(0, max(1, len(app._well_paths)))
+        bar.setRange(0, max(1, len(app._app_state.dataset.well_paths)))
         bar.setValue(0)
         bar.show()
     worker.start()
@@ -459,8 +459,8 @@ class _AutoThresholdWorker(QThread):
         self._app = app
         self._out_dir = out_dir
         self._channels = list(channels)
-        self._well_labels = list(well_labels) if well_labels else []
-        self._in_dir = in_dir
+        self._app_state.dataset.well_labels = list(well_labels) if well_labels else []
+        self._app_state.dataset.in_dir = in_dir
 
     def run(self) -> None:  # noqa: D401 - QThread override
         # Stream traceback into the log drawer too — the previous "fail
@@ -477,8 +477,8 @@ class _AutoThresholdWorker(QThread):
                 self._out_dir,
                 fluor_channels=self._channels,
                 progress=lambda msg: self.progress.emit(str(msg)),
-                well_labels=self._well_labels or None,
-                in_dir=self._in_dir,
+                well_labels=self._app_state.dataset.well_labels or None,
+                in_dir=self._app_state.dataset.in_dir,
             )
         except Exception as exc:
             _log.error(
@@ -512,7 +512,7 @@ def cell_gating_auto_threshold(app) -> None:
     """
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return
-    out_dir = getattr(app, "_data_dir", None)
+    out_dir = app._app_state.dataset.data_dir
     if not out_dir:
         try:
             app._set_status(
@@ -595,8 +595,8 @@ def cell_gating_auto_threshold(app) -> None:
         except Exception:
             pass
 
-    well_labels = list(getattr(app, "_well_paths", {}) or {})
-    in_dir = getattr(app, "_in_dir", None)
+    well_labels = list(app._app_state.dataset.well_paths or {})
+    in_dir = app._app_state.dataset.in_dir
     import logging as _logging
     _logging.getLogger("well_viewer.auto_threshold").info(
         "Auto-threshold: starting — data_dir=%s in_dir=%s wells=%d channels=%s",
@@ -750,20 +750,20 @@ def _cell_gating_source_wells(app) -> list[str]:
         ordered: list[str] = []
         for rset in active_rsets:
             for well in rset.wells:
-                if well in app._well_paths and well not in seen:
+                if well in app._app_state.dataset.well_paths and well not in seen:
                     seen.add(well)
                     ordered.append(well)
         return sorted(ordered, key=app._parse_rc)
 
     selected = [
         label for label in app._app_state.selection.selected_wells
-        if label in app._well_paths
+        if label in app._app_state.dataset.well_paths
     ]
     # Fall back to every loaded well so the CDFs render on the first open
     # after a data load (before the user has made an explicit selection).
     # Once they pick wells in the sidebar, that selection scopes the plot.
     if not selected:
-        selected = list(app._well_paths)
+        selected = list(app._app_state.dataset.well_paths)
     return sorted(selected, key=app._parse_rc)
 
 

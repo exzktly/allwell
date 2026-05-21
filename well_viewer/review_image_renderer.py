@@ -79,12 +79,12 @@ def update_preview(app, well_label: Optional[str]) -> None:
                 well_label, active_image_channel,
             )
         fluor, overlay, mask, tophat_fluor = find_well_images_and_masks(
-            app._data_dir,
+            app._app_state.dataset.data_dir,
             well_label,
             fluor_token=active_image_channel,
-            in_dir=app._in_dir,
-            _fov_tp_extractor=app._fov_tp_extractor,
-            _pipeline_info=app._pipeline_info,
+            in_dir=app._app_state.dataset.in_dir,
+            _fov_tp_extractor=app._app_state.dataset.fov_tp_extractor,
+            _pipeline_info=app._app_state.dataset.pipeline_info,
         )
     except Exception as _exc:
         _logger.exception("Unexpected error searching images for %r: %s", well_label, _exc)
@@ -140,7 +140,7 @@ def update_preview(app, well_label: Optional[str]) -> None:
             _set_combo_values(app._fov_menu, ["—"])
             app._preview_fov_var.setCurrentText("—")
         tok = _extract_well_token(well_label) or well_label
-        dirs = f"in={app._in_dir}  out={app._data_dir}"
+        dirs = f"in={app._app_state.dataset.in_dir}  out={app._app_state.dataset.data_dir}"
         msg = f"No images found for {tok}. Searched: {dirs}"
         _logger.warning(msg)
         if hasattr(app, "_montage_status"):

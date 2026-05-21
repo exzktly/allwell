@@ -38,13 +38,13 @@ def rep_quick_pairs(app) -> None:
         if iter_order == "row":
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
-                          if f"{row_ltr}{col}" in app._well_paths]
+                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
                 new_sets.extend(make_replicate_pairs(loaded, row_ltr))
         else:
             by_col = {}
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
-                          if f"{row_ltr}{col}" in app._well_paths]
+                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
                 row_sets = make_replicate_pairs(loaded, row_ltr)
                 for s in row_sets:
                     if s.wells:
@@ -59,13 +59,13 @@ def rep_quick_pairs(app) -> None:
         if iter_order == "col":
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
-                          if f"{row_ltr}{col}" in app._well_paths]
+                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
                 new_sets.extend(make_replicate_pairs(loaded, col))
         else:
             by_row = {}
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
-                          if f"{row_ltr}{col}" in app._well_paths]
+                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
                 col_sets = make_replicate_pairs(loaded, col)
                 for s in col_sets:
                     if s.wells:

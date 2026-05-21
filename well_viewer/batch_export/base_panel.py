@@ -102,7 +102,7 @@ class BatchExportPanel(QWidget):
         self._app = app
         self._use_sidebar_groups = bool(use_sidebar_groups)
 
-        default_out = str(app._data_dir) if app._data_dir else ""
+        default_out = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
         export_prefs = getattr(app, "_export_style_prefs", {}) or {}
         default_fmt = str(export_prefs.get("format", "png")).lower()
         if default_fmt not in {"png", "svg", "eps", "pdf"}:
@@ -261,7 +261,7 @@ class BatchExportPanel(QWidget):
 
     def _plate_press(self, event) -> None:
         tok = self._tok_at(event.globalPosition().toPoint())
-        if tok is None or tok not in self._app._well_paths:
+        if tok is None or tok not in self._app._app_state.dataset.well_paths:
             return
         grp = self._active_group()
         if grp is None:
@@ -753,7 +753,7 @@ class BatchExportPanel(QWidget):
         # users may want to pick a control before they've finished building
         # the group editor.
         if not members:
-            for w in sorted((getattr(self._app, "_well_paths", None) or {})):
+            for w in sorted((self._app._app_state.dataset.well_paths or {})):
                 members.append(w)
         saved = self._fc_control_label
         blocked = combo.blockSignals(True)
@@ -819,7 +819,7 @@ class BatchExportPanel(QWidget):
             return
         self._drag_visited.add(tok)
         grp = self._active_group()
-        if grp is None or tok not in self._app._well_paths:
+        if grp is None or tok not in self._app._app_state.dataset.well_paths:
             return
         rset = next((r for r in self._app._rep_sets_loaded() if tok in r.wells), None)
         if rset is not None:
@@ -841,7 +841,7 @@ class BatchExportPanel(QWidget):
 
     def _refresh_single_btn(self, tok: str) -> None:
         btn = self._map_btns.get(tok)
-        if btn is None or tok not in self._app._well_paths:
+        if btn is None or tok not in self._app._app_state.dataset.well_paths:
             return
         for g in self._groups:
             if tok in g.wells:
@@ -851,7 +851,7 @@ class BatchExportPanel(QWidget):
         btn.set_colors(get_color("BG_CELL"), get_color("TXT_PRI"))
 
     def _refresh_map(self) -> None:
-        avail = set(self._app._well_paths.keys())
+        avail = set(self._app._app_state.dataset.well_paths.keys())
         tok_color: Dict[str, str] = {}
         for grp in self._groups:
             c = self._app._rank_color_rset(grp)  # decision #1: colour by well-position rank
@@ -1039,7 +1039,7 @@ class BatchExportPanel(QWidget):
             row_rsets = [r for r in self._app._rep_sets_loaded()
                          if any(w[0].upper() == row_ltr for w in r.wells)]
             assigned_wells = {w for r in row_rsets for w in r.wells}
-            row_solos = [tok for tok in self._app._well_paths
+            row_solos = [tok for tok in self._app._app_state.dataset.well_paths
                          if tok[0].upper() == row_ltr and tok not in assigned_wells]
             if not row_rsets and not row_solos:
                 continue
@@ -1057,7 +1057,7 @@ class BatchExportPanel(QWidget):
             col_rsets = [r for r in self._app._rep_sets_loaded()
                          if any(w[1:] == col for w in r.wells)]
             assigned_wells = {w for r in col_rsets for w in r.wells}
-            col_solos = [tok for tok in self._app._well_paths
+            col_solos = [tok for tok in self._app._app_state.dataset.well_paths
                          if tok[1:] == col and tok not in assigned_wells]
             if not col_rsets and not col_solos:
                 continue
@@ -1136,7 +1136,7 @@ class BatchExportPanel(QWidget):
 
         def _valid_tok(raw: str) -> Optional[str]:
             n = _norm(raw)
-            return n if n in self._app._well_paths else None
+            return n if n in self._app._app_state.dataset.well_paths else None
 
         rep_by_name = {r.name: r for r in self._app._rep_sets_loaded()}
 
@@ -1188,7 +1188,7 @@ class BatchExportPanel(QWidget):
                 QMessageBox.critical(self, "Output directory error",
                                      f"Cannot create:\n{p}\n{exc}")
                 return None
-        d = self._app._data_dir
+        d = self._app._app_state.dataset.data_dir
         if d and d.is_dir():
             return d
         QMessageBox.critical(self, "No output directory",
@@ -1290,7 +1290,7 @@ class BatchExportPanel(QWidget):
 
     def _run_batch(self) -> None:
         groups_with_data = [g for g in self._groups_for_export()
-                            if any(w in self._app._well_paths for w in g.wells)]
+                            if any(w in self._app._app_state.dataset.well_paths for w in g.wells)]
         if not groups_with_data:
             msg = (
                 "Define at least one non-empty group in Sample Definitions."

@@ -398,7 +398,7 @@ def redraw_bars(app) -> None:
             apply_ax_style(ax_n, "Events above threshold (N)", "N(above)")
     ax_frac.set_ylim(-0.05, 1.05)
 
-    if not getattr(app, "_well_paths", None):
+    if not app._app_state.dataset.well_paths:
         app._draw_bar_empty_state(
             ax_mean, ax_frac,
             "Load a directory.\n"

@@ -62,7 +62,7 @@ class ExportStyleSidebar(QWidget):
         self._fig = fig
         self._canvas = canvas
         self._default_name = default_name
-        self._base_dir = Path(app._data_dir) if getattr(app, "_data_dir", None) else Path.cwd()
+        self._base_dir = Path(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else Path.cwd()
         self._prefs = _ensure_export_style_prefs(app)
         self._updating = False
         self._getters: dict[str, Callable[[], object]] = {}

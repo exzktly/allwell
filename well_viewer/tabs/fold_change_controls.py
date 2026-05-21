@@ -71,11 +71,11 @@ def _all_member_labels(app) -> list[str]:
         if not name or name in seen:
             continue
         wells = s.get("wells") or []
-        if any(w in (getattr(app, "_well_paths", None) or {}) for w in wells):
+        if any(w in (app._app_state.dataset.well_paths or {}) for w in wells):
             names.append(name)
             seen.add(name)
             repset_names.add(name)
-    well_paths = getattr(app, "_well_paths", None) or {}
+    well_paths = app._app_state.dataset.well_paths or {}
     for w in sorted(app._app_state.selection.selected_wells or [], key=lambda x: x):
         if w in well_paths and w not in seen:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w

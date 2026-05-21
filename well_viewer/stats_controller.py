@@ -61,7 +61,7 @@ def collect_group_values(
     threshold = float(threshold)
     ratios = app._app_state.channel.ratio_index
 
-    wells = [w for w in grp.wells if w in app._well_paths]
+    wells = [w for w in grp.wells if w in app._app_state.dataset.well_paths]
     if not wells:
         return []
     aggregate_per_fov = (len(wells) == 1)
@@ -117,7 +117,7 @@ def collect_group_per_cell_values(
     ratios = app._app_state.channel.ratio_index
     chunks: List[np.ndarray] = []
     for lbl in grp.wells:
-        if lbl not in app._well_paths:
+        if lbl not in app._app_state.dataset.well_paths:
             continue
         df = app._get_rows(lbl)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
@@ -242,7 +242,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             )
         else:
             vals = collect_group_values_fn(g, target_t)
-            n_wells = len([w for w in g.wells if w in app._well_paths])
+            n_wells = len([w for w in g.wells if w in app._app_state.dataset.well_paths])
             if n_wells == 1:
                 empty_msg = (
                     f"Group '{g.name}' (1 well, FOV-aggregated) has no "
@@ -270,7 +270,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     # of replication.
     solo_groups = [
         g.name for g in groups
-        if len([w for w in g.wells if w in app._well_paths]) == 1
+        if len([w for w in g.wells if w in app._app_state.dataset.well_paths]) == 1
     ]
     if is_ks:
         sample_units = "per-cell values"
@@ -416,7 +416,7 @@ def stats_apply_drag(app, tok: str) -> None:
         return
     app._stats_drag_visited.add(tok)
     grp = stats_active_group(app)
-    if grp is None or tok not in app._well_paths:
+    if grp is None or tok not in app._app_state.dataset.well_paths:
         return
     rset = next((r for r in app._rep_sets_loaded() if tok in r.wells), None)
     if rset is not None:
@@ -443,18 +443,18 @@ def stats_refresh_map(app) -> None:
     plate = getattr(app, "_stats_map_plate", None)
     if plate is None:
         return
-    avail = list(app._well_paths.keys())
+    avail = list(app._app_state.dataset.well_paths.keys())
     plate.setEnabledWells(avail)
     tok_color: dict = {}
     for grp in app._stats_groups:
         c = app._rank_color_rset(grp)  # decision #1: colour by well-position rank
         for w in grp.wells:
-            if w in app._well_paths:
+            if w in app._app_state.dataset.well_paths:
                 tok_color[w] = c   # last group wins — matches the other plates
     plate.clearWellColors()
     plate.setWellColors(tok_color)
     grp = stats_active_group(app)
-    active = [w for w in grp.wells if w in app._well_paths] if grp else []
+    active = [w for w in grp.wells if w in app._app_state.dataset.well_paths] if grp else []
     plate.setSelectedWellIds(active)
 
 

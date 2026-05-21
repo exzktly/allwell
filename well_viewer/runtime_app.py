@@ -829,18 +829,6 @@ class WellViewerApp(QWidget):
 
         return property(_get, _set)
 
-    _data_dir = _app_state_shim("dataset", "data_dir")
-    _in_dir = _app_state_shim("dataset", "in_dir")
-    _tmp_dir = _app_state_shim("dataset", "tmp_dir")
-    _well_paths = _app_state_shim("dataset", "well_paths")
-    _cache = _app_state_shim("dataset", "cache")
-    _all_timepoints_cache = _app_state_shim("dataset", "all_timepoints_cache")
-    _all_fovs_cache = _app_state_shim("dataset", "all_fovs_cache")
-    _pipeline_info = _app_state_shim("dataset", "pipeline_info")
-    _tok_to_label = _app_state_shim("dataset", "tok_to_label")
-    _well_labels = _app_state_shim("dataset", "well_labels")
-    _fov_tp_extractor = _app_state_shim("dataset", "fov_tp_extractor")
-    _persistence_doc = _app_state_shim("dataset", "persistence_doc")
 
     _use_sem = _app_state_shim("plot", "use_sem")
     _use_fov_replicates = _app_state_shim("plot", "use_fov_replicates")
@@ -1364,7 +1352,7 @@ class WellViewerApp(QWidget):
     def _stats_update_tp_menu(self) -> None:
         """Populate the timepoint, channel, and statistic dropdowns."""
         all_tps: set = set()
-        for label in self._well_paths:
+        for label in self._app_state.dataset.well_paths:
             df = self._get_rows(label)
             if df is None or "timepoint_hours" not in df.columns:
                 continue
@@ -1764,7 +1752,7 @@ class WellViewerApp(QWidget):
                 cell_gating_load_threshold_frac_on,
             )
             build_cell_gating_tab(self._ctx, frame)
-            if self._well_paths:
+            if self._app_state.dataset.well_paths:
                 try:
                     cell_gating_load_cell_areas(self)
                     self._load_gating_from_pipeline_info()
@@ -1794,17 +1782,17 @@ class WellViewerApp(QWidget):
         plate = getattr(self, "_rep_map_plate", None)
         if plate is None:
             return
-        plate.setEnabledWells(list(self._well_paths.keys()))
+        plate.setEnabledWells(list(self._app_state.dataset.well_paths.keys()))
         colors: Dict[str, str] = {}
         for s in self._app_state.selection.selections:
             c = self._sel_color(s)
             for tok in (s.get("wells") or []):
-                if tok in self._well_paths:
+                if tok in self._app_state.dataset.well_paths:
                     colors[tok] = c
         plate.clearWellColors()
         plate.setWellColors(colors)
         cur = self._sel_by_id(self._app_state.selection.current_selection_id)
-        cur_wells = [w for w in (cur.get("wells") or []) if w in self._well_paths] if cur else []
+        cur_wells = [w for w in (cur.get("wells") or []) if w in self._app_state.dataset.well_paths] if cur else []
         plate.setSelectedWellIds(cur_wells)
 
     def _rep_panel_refresh(self) -> None:
@@ -1828,7 +1816,7 @@ class WellViewerApp(QWidget):
         name_edit = QLineEdit(f"Rep {len(self._app_state.selection.selections)+1}")
         v.addWidget(name_edit)
         v.addWidget(QLabel("Select wells:"))
-        available = sorted(self._well_paths.keys(),
+        available = sorted(self._app_state.dataset.well_paths.keys(),
                            key=lambda l: self._parse_rc(l))
         lb = _wells_multiselect_listbox(dlg, available)
         v.addWidget(lb, 1)
@@ -1885,8 +1873,8 @@ class WellViewerApp(QWidget):
         _v(self)
 
     def _labels_clear_all(self) -> None:
-        if self._well_labels:
-            self._well_labels.clear()
+        if self._app_state.dataset.well_labels:
+            self._app_state.dataset.well_labels.clear()
             self._label_panel_refresh()
             self._invalidate_stats_cache()
 
@@ -1928,12 +1916,12 @@ class WellViewerApp(QWidget):
             return
 
         for tok in selected:
-            current = self._well_labels.get(tok, "")
+            current = self._app_state.dataset.well_labels.get(tok, "")
             new = (text + current) if where == "prefix" else (current + text)
             if new:
-                self._well_labels[tok] = new
+                self._app_state.dataset.well_labels[tok] = new
             else:
-                self._well_labels.pop(tok, None)
+                self._app_state.dataset.well_labels.pop(tok, None)
 
         self._invalidate_stats_cache()
         self._label_panel_refresh()
@@ -2196,7 +2184,7 @@ class WellViewerApp(QWidget):
                 )
             return
         name = str(sel.get("name") or "(unnamed)")
-        n_wells = sum(1 for w in (sel.get("wells") or []) if w in self._well_paths)
+        n_wells = sum(1 for w in (sel.get("wells") or []) if w in self._app_state.dataset.well_paths)
         lbl.setText(f"{name}  ·  {n_wells} well(s)")
         if _theme is not None:
             lbl.setStyleSheet(
@@ -3124,9 +3112,9 @@ class WellViewerApp(QWidget):
         return _extract_well_token(label)
 
     def _cleanup_tmp(self) -> None:
-        if self._tmp_dir and self._tmp_dir.exists():
-            shutil.rmtree(self._tmp_dir, ignore_errors=True)
-        self._tmp_dir = None
+        if self._app_state.dataset.tmp_dir and self._app_state.dataset.tmp_dir.exists():
+            shutil.rmtree(self._app_state.dataset.tmp_dir, ignore_errors=True)
+        self._app_state.dataset.tmp_dir = None
 
     def _on_close(self) -> None:
         self._cleanup_tmp()
@@ -3211,11 +3199,11 @@ class WellViewerApp(QWidget):
                 full_c = self._sel_color(s)
                 shade = self._mute_color(full_c) if s.get("hidden") else full_c
                 for tok in (s.get("wells") or []):
-                    if tok in self._well_paths:
+                    if tok in self._app_state.dataset.well_paths:
                         colors[tok] = shade
         else:
             for tok in self._app_state.selection.selected_wells:
-                if tok in self._well_paths:
+                if tok in self._app_state.dataset.well_paths:
                     colors[tok] = self._rank_color_well(tok)
 
         # smFISH suppresses row/col header selection and forces single-well.
@@ -3232,7 +3220,7 @@ class WellViewerApp(QWidget):
             except Exception:
                 smfish = False
 
-        plate.setEnabledWells(list(self._well_paths.keys()))
+        plate.setEnabledWells(list(self._app_state.dataset.well_paths.keys()))
         plate.setSelectionMode("passive" if rep_mode else "select")
         plate.setRowColumnSelectable(not smfish)
         plate.setSingleSelectionMode(smfish and not rep_mode)
@@ -3255,11 +3243,11 @@ class WellViewerApp(QWidget):
             # in ``_active_solo_wells``.
             visible_wells = {
                 w for s in self._app_state.selection.selections if not s.get("hidden")
-                for w in (s.get("wells") or []) if w in self._well_paths
+                for w in (s.get("wells") or []) if w in self._app_state.dataset.well_paths
             }
             visible_wells |= {
                 w for w in (self._app_state.selection.active_solo_wells or set())
-                if w in self._well_paths
+                if w in self._app_state.dataset.well_paths
             }
             plate.setSelectedWellIds(list(visible_wells))
         else:
@@ -3278,7 +3266,7 @@ class WellViewerApp(QWidget):
                 self._sel_count_lbl.setText((f"{n_vis} well{'s' if n_vis != 1 else ''} selected"
                           if n_vis else "No wells selected"))
         if hasattr(self, "_sel_count_chip"):
-            total = len(self._well_paths) if hasattr(self, "_well_paths") else 96
+            total = len(self._app_state.dataset.well_paths) if True else 96
             if rep_mode:
                 # Count *wells* across every visible group + active solo
                 # well, not groups. Earlier we showed group count here,
@@ -3288,10 +3276,10 @@ class WellViewerApp(QWidget):
                     if s.get("hidden"):
                         continue
                     for w in (s.get("wells") or []):
-                        if w in self._well_paths:
+                        if w in self._app_state.dataset.well_paths:
                             active_wells.add(w)
                 for w in (self._app_state.selection.active_solo_wells or set()):
-                    if w in self._well_paths:
+                    if w in self._app_state.dataset.well_paths:
                         active_wells.add(w)
                 self._sel_count_chip.setText(f"{len(active_wells)} / {total or 96}")
             else:
@@ -3331,7 +3319,7 @@ class WellViewerApp(QWidget):
             return  # rep-set mode: the plate is passive; its selection is unused
         # Keep the invariant ``_selected_wells ⊆ _well_paths`` — downstream
         # code (e.g. redraw_line_plots → _get_rows) assumes it.
-        new_set = {w for w in ids if w in self._well_paths}
+        new_set = {w for w in ids if w in self._app_state.dataset.well_paths}
         if new_set == self._app_state.selection.selected_wells:
             return
         self._app_state.selection.selected_wells = new_set
@@ -3402,7 +3390,7 @@ class WellViewerApp(QWidget):
         # the plate's three-state painter promotes those wells to the raised
         # + bright (``_paint_lit``) look and the plot refocuses. Other groups
         # stay in the recessed-with-tint state.
-        if well_id not in self._well_paths:
+        if well_id not in self._app_state.dataset.well_paths:
             return
         try:
             tab = self._current_centre_tab()
@@ -3988,10 +3976,10 @@ class WellViewerApp(QWidget):
         """Phase 13 (B7): flip the current selection — every loaded well that
         was selected becomes unselected, and vice versa. Only wells with data
         (``_well_paths``) participate."""
-        if not hasattr(self, "_well_paths"):
+        if not True:
             return
         cur = set(self._app_state.selection.selected_wells)
-        new = {w for w in self._well_paths.keys() if w not in cur}
+        new = {w for w in self._app_state.dataset.well_paths.keys() if w not in cur}
         self._app_state.selection.selected_wells = new
         # Re-use the standard refresh path the click handlers go through.
         self._refresh_sidebar_map()
@@ -4003,9 +3991,9 @@ class WellViewerApp(QWidget):
         return sorted(self._app_state.selection.selected_wells, key=lambda lbl: self._parse_rc(lbl))
 
     def _get_rows(self, label: str) -> pd.DataFrame:
-        if label not in self._cache:
-            self._cache[label] = load_well_csv(self._well_paths[label])
-        return self._cache[label]
+        if label not in self._app_state.dataset.cache:
+            self._app_state.dataset.cache[label] = load_well_csv(self._app_state.dataset.well_paths[label])
+        return self._app_state.dataset.cache[label]
 
     def _aggregate_well(
         self,
@@ -4043,7 +4031,7 @@ class WellViewerApp(QWidget):
         tp_col: str = "timepoint_hours",
     ):
         """Aggregate a list of wells via the vectorized path (concatenated when len>1)."""
-        valid = [w for w in wells if w in self._well_paths]
+        valid = [w for w in wells if w in self._app_state.dataset.well_paths]
         if not valid:
             return []
         if len(valid) == 1:
@@ -4191,7 +4179,7 @@ class WellViewerApp(QWidget):
         pipeline_tp_values = sorted(
             {
                 self._norm_timepoint(tp)
-                for tp in (getattr(self, "_pipeline_info", {}) or {}).get("available_timepoints", [])
+                for tp in (self._app_state.dataset.pipeline_info or {}).get("available_timepoints", [])
                 if self._norm_timepoint(tp)
             },
             key=self._review_tp_sort_key,
@@ -4901,7 +4889,7 @@ class WellViewerApp(QWidget):
     # ── Batch export ──────────────────────────────────────────────────────────
 
     def _open_batch_export(self) -> None:
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -5145,23 +5133,23 @@ class WellViewerApp(QWidget):
 
         # Preserve explicit user choice when still valid.
         current = getattr(self, "_preview_selected_well", None)
-        if current in self._well_paths:
+        if current in self._app_state.dataset.well_paths:
             # If the active selection has wells, prefer its first loaded well.
             for tok in sel_wells:
-                if tok in self._well_paths:
+                if tok in self._app_state.dataset.well_paths:
                     self._preview_selected_well = tok
                     return
             return
 
         # If no valid current well, use the active selection's first loaded well.
         for tok in sel_wells:
-            if tok in self._well_paths:
+            if tok in self._app_state.dataset.well_paths:
                 self._preview_selected_well = tok
                 return
 
         # Final fallback: keep previous behavior of choosing first available well.
-        if self._well_paths:
-            self._preview_selected_well = sorted(self._well_paths.keys(), key=self._parse_rc)[0]
+        if self._app_state.dataset.well_paths:
+            self._preview_selected_well = sorted(self._app_state.dataset.well_paths.keys(), key=self._parse_rc)[0]
 
     def _run_tab_switch_smoke_checks(
         self,
@@ -5216,7 +5204,7 @@ class WellViewerApp(QWidget):
             seen: set = set()
             for rset in self._rep_sets_active():
                 for w in rset.wells:
-                    if w in self._well_paths and w not in seen:
+                    if w in self._app_state.dataset.well_paths and w not in seen:
                         seen.add(w)
             sels = sorted(seen, key=self._parse_rc)
         if not sels:
@@ -5382,7 +5370,7 @@ class WellViewerApp(QWidget):
                 continue
             by_label.setdefault(lbl, {})[(fov, tp, nid)] = val
         for lbl, lookup in by_label.items():
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             try:
                 df = self._get_rows(lbl)
@@ -5430,16 +5418,16 @@ class WellViewerApp(QWidget):
         not from the current selection — the selection controls what is plotted,
         but the dropdown must remain usable even when nothing is selected yet.
         """
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             _set_combo_values(self._bar_tp_cb, ["—"])
             self._bar_tp_cb.setCurrentText("—")
             return
 
-        all_tps: set = set(self._all_timepoints_cache)
+        all_tps: set = set(self._app_state.dataset.all_timepoints_cache)
 
         # If no timepoints were found the schema had no timepoint field.
         # Use 0.0 as a single synthetic timepoint so bar plots remain usable.
-        if not all_tps and self._well_paths:
+        if not all_tps and self._app_state.dataset.well_paths:
             all_tps.add(0.0)
 
         sorted_tps = sorted(all_tps)
@@ -5586,7 +5574,7 @@ class WellViewerApp(QWidget):
         if active_rsets:
             return []
         return sorted(
-            (lbl for lbl in self._app_state.selection.selected_wells if lbl in self._well_paths),
+            (lbl for lbl in self._app_state.selection.selected_wells if lbl in self._app_state.dataset.well_paths),
             key=lambda lbl: self._parse_rc(lbl),
         )
 
@@ -5651,13 +5639,13 @@ class WellViewerApp(QWidget):
                 if rset is None:
                     continue
                 color = self._rank_color_rset(rset)
-                valid = [w for w in rset.wells if w in self._well_paths]
+                valid = [w for w in rset.wells if w in self._app_state.dataset.well_paths]
                 for w in valid:
                     plot_wells.append(w)
                     plot_colors.append(color)
                     plot_labels.append(f"{self._well_display_label(w)}\n[{rset.name}]")
         else:
-            plot_wells = [k for k in ordered_keys if k in self._well_paths]
+            plot_wells = [k for k in ordered_keys if k in self._app_state.dataset.well_paths]
             plot_colors = [self._rank_color_well(w) for w in plot_wells]
             plot_labels = [self._well_display_label(w) for w in plot_wells]
         if _debug_flags.review_bar_debug_enabled():
@@ -5775,7 +5763,7 @@ class WellViewerApp(QWidget):
     def _well_display_label(self, lbl: str) -> str:
         """Return the custom display label for *lbl* if defined, else its token."""
         tok = _extract_well_token(lbl) or lbl
-        return self._well_labels.get(tok, tok)
+        return self._app_state.dataset.well_labels.get(tok, tok)
 
     def _bar_well_display_label(self, lbl: str) -> str:
         """Bar-plot-safe well label that avoids numeric-only tick text."""
@@ -5805,7 +5793,7 @@ class WellViewerApp(QWidget):
         if not generic_name:
             return name
 
-        wells = [self._well_display_label(w) for w in rset.wells if w in self._well_paths]
+        wells = [self._well_display_label(w) for w in rset.wells if w in self._app_state.dataset.well_paths]
         if not wells:
             return name
         if len(wells) <= 3:
@@ -5818,7 +5806,7 @@ class WellViewerApp(QWidget):
         out: "List[ReplicateSet]" = []
         for s in self._app_state.selection.selections:
             wells = s.get("wells") or []
-            if any(w in self._well_paths for w in wells):
+            if any(w in self._app_state.dataset.well_paths for w in wells):
                 out.append(ReplicateSet(s.get("name") or "", list(wells)))
         return out
 
@@ -5834,7 +5822,7 @@ class WellViewerApp(QWidget):
             if s.get("hidden"):
                 continue
             wells = s.get("wells") or []
-            if any(w in self._well_paths for w in wells):
+            if any(w in self._app_state.dataset.well_paths for w in wells):
                 out.append(ReplicateSet(s.get("name") or "", list(wells)))
         return out
 
@@ -5873,7 +5861,7 @@ class WellViewerApp(QWidget):
         fov_mean_spreads: List[float] = []
         fov_frac_spreads: List[float] = []
         for lbl in wells:
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             pts = self._aggregate_well(
                 lbl, threshold=threshold, use_sem=use_sem,
@@ -5992,7 +5980,7 @@ class WellViewerApp(QWidget):
 
         frames = []
         for lbl in rset.wells:
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             df = self._get_rows(lbl)
             if df is None or len(df) == 0:
@@ -6058,7 +6046,7 @@ class WellViewerApp(QWidget):
 
         total = 0
         for lbl in rset.wells:
-            if lbl not in self._well_paths:
+            if lbl not in self._app_state.dataset.well_paths:
                 continue
             pts = self._aggregate_well(
                 lbl, threshold=threshold, use_sem=False,
@@ -6126,7 +6114,7 @@ class WellViewerApp(QWidget):
             set_means: List[float] = []
             set_fracs: List[float] = []
             for lbl in rset:
-                if lbl not in self._well_paths:
+                if lbl not in self._app_state.dataset.well_paths:
                     continue
                 pts = self._aggregate_well(
                     lbl, threshold=threshold, use_sem=False,
@@ -6244,7 +6232,7 @@ class WellViewerApp(QWidget):
 
     def _open_bar_batch_export(self) -> None:
         """Switch Batch Export tab to the inline bar-plot export builder."""
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Bar Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -6254,7 +6242,7 @@ class WellViewerApp(QWidget):
 
     def _open_scatter_cells_batch_export(self) -> None:
         """Switch Batch Export tab to the inline scatter-cells export builder."""
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Scatter Cells Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -6264,7 +6252,7 @@ class WellViewerApp(QWidget):
 
     def _open_scatter_agg_batch_export(self) -> None:
         """Switch Batch Export tab to the inline aggregate-scatter export builder."""
-        if not self._well_paths:
+        if not self._app_state.dataset.well_paths:
             QMessageBox.warning(self, "No data", "Load data before opening Scatter Aggregate Batch Export.")
             return
         if hasattr(self, "_notebook"):
@@ -6502,7 +6490,7 @@ class WellViewerApp(QWidget):
             self._refresh_scatter_metric_for_axis(axis)
 
         # Update timepoint dropdown for cells scatter
-        timepoints = list(self._all_timepoints_cache) or _scatter_get_timepoints(self)
+        timepoints = list(self._app_state.dataset.all_timepoints_cache) or _scatter_get_timepoints(self)
         tp_strs = [f"{tp:.1f}" for tp in timepoints] if timepoints else ["0"]
         _set_combo_values(self._scatter_tp_cb, tp_strs)
 

@@ -209,7 +209,7 @@ def collect_line_series(
         )
         for rset in ordered_rsets:
             color = app._rank_color_rset(rset)
-            valid_wells = [w for w in rset.wells if w in app._well_paths]
+            valid_wells = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
             all_tps: set = set()
             cdf_vals: list = []
             for lbl in valid_wells:
@@ -260,7 +260,7 @@ def collect_line_series(
 
     # Per-well branch.
     selected = sorted(
-        (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
+        (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
         key=lambda lbl: app._parse_rc(lbl),
     )
     ordered_selected = _apply_order(
@@ -356,7 +356,7 @@ def redraw_line_plots(
     app._line_ax_cdf.set_ylim(-0.02, 1.05)
 
     active_rsets = app._rep_sets_active()
-    has_data = bool(getattr(app, "_well_paths", None))
+    has_data = bool(app._app_state.dataset.well_paths)
     # Empty-state warning needs to honour Screen mode so the text isn't
     # painted against a default white matplotlib figure when the rest of
     # the app is dark. Force the figure + axes facecolor to the theme bg
@@ -483,7 +483,7 @@ def redraw_line_plots(
             f"Fold change: control missing at t={_tps} — those points dropped."
         )
     elif active_rsets:
-        n_wells = sum(sum(1 for w in r.wells if w in app._well_paths) for r in active_rsets)
+        n_wells = sum(sum(1 for w in r.wells if w in app._app_state.dataset.well_paths) for r in active_rsets)
         app._set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)  |  threshold={threshold:.2f}  |  band={band_lbl}")
     else:
         n_total = sum(len(app._get_rows(l)) for l in selected)

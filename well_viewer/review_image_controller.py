@@ -112,7 +112,7 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
         preview_well = app._preview_selected_well
         if (
             preview_well
-            and preview_well in getattr(app, "_well_paths", {})
+            and preview_well in app._app_state.dataset.well_paths
             and preview_well not in app._app_state.selection.selected_wells
         ):
             # Go through the single mutation helper so _prev_sel is
@@ -236,7 +236,7 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
     row = _table_row_dict(table, row_idx)
     fov, tp, nid = app._review_row_keys(row)
     well_tok = str(row.get("well", "")).strip()
-    key = well_tok if well_tok in app._well_paths else None
+    key = well_tok if well_tok in app._app_state.dataset.well_paths else None
     if key is None and app._app_state.selection.selected_wells:
         key = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)[0]
     if key is None:

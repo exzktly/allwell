@@ -29,8 +29,8 @@ _HARD_FAIL = True
 # Ratcheting ceilings. Re-measured as the teardown proceeds; lowered as each
 # shim-migration domain deletes its property shims. Phase 0 baseline:
 # 7028 lines / 166 attrs.
-RUNTIME_APP_LINE_BUDGET = 6994
-RUNTIME_APP_ATTR_BUDGET = 119
+RUNTIME_APP_LINE_BUDGET = 6982
+RUNTIME_APP_ATTR_BUDGET = 116
 
 
 def _enforce(ok: bool, message: str) -> None:

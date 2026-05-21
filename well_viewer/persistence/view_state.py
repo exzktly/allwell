@@ -234,7 +234,7 @@ def restore(app, state: dict) -> None:
     wells = state.get("selected_wells") or []
     if isinstance(wells, list):
         valid = {str(w) for w in wells if isinstance(w, str)}
-        valid &= set(getattr(app, "_well_paths", {}) or {})
+        valid &= set(app._app_state.dataset.well_paths or {})
         if valid and hasattr(app, "_set_selected_wells"):
             try:
                 app._set_selected_wells(valid, commit=False)
@@ -544,7 +544,7 @@ def _apply_image_table(app, state: dict) -> None:
 # ── save / load entry points ───────────────────────────────────────────────
 
 def save_to_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     try:
         state = snapshot(app)
@@ -555,7 +555,7 @@ def save_to_data_dir(app) -> None:
 
 
 def load_from_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     state = _doc.get_section(app, "view_state")
     if not isinstance(state, dict):
@@ -600,7 +600,7 @@ def reset(app) -> None:
     # Drop any pending state stashed from a previous restore.
     app._view_state_pending = None
     # Drop the view_state section so a fresh open doesn't repopulate.
-    if getattr(app, "_data_dir", None):
+    if app._app_state.dataset.data_dir:
         try:
             _doc.set_section(app, "view_state", None)
         except Exception:

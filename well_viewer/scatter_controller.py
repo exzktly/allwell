@@ -18,7 +18,7 @@ NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left 
 def get_all_timepoints(app) -> List[float]:
     """Extract all unique included timepoints across loaded wells."""
     timepoints: set = set()
-    for label in app._well_paths:
+    for label in app._app_state.dataset.well_paths:
         df = app._get_rows(label)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             continue
@@ -142,7 +142,7 @@ def collect_scatter_data(
             # CSV exporter and click resolver still consume them.
             wells_breakdown: dict[str, dict] = {}
             for well_label in rset.wells:
-                if well_label not in app._well_paths:
+                if well_label not in app._app_state.dataset.well_paths:
                     continue
                 got = _collect_well(well_label)
                 if got is None:
@@ -165,7 +165,7 @@ def collect_scatter_data(
     else:
         from well_viewer.lineplot_controller import _apply_order as _apply_well_order
         selected_wells = sorted(
-            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
+            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
         selected_wells = _apply_well_order(
@@ -236,7 +236,7 @@ def redraw_scatter(
         return
 
     active_rsets = app._rep_sets_active()
-    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths]
+    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths]
 
     # Clear existing plot
     app._ax_scatter.clear()
@@ -502,7 +502,7 @@ def collect_scatter_agg_data(
     else:
         # Mode: individual wells
         selected_wells = sorted(
-            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
+            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
         labels_to_process = [(lbl, [lbl]) for lbl in selected_wells]
@@ -623,7 +623,7 @@ def redraw_scatter_agg(
         return
 
     active_rsets = app._rep_sets_active()
-    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths]
+    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths]
 
     # Clear existing plot
     app._ax_scatter_agg.clear()

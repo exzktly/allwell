@@ -48,7 +48,7 @@ def recalculate_threshold(app) -> None:
     Replaces ``WellViewerApp._recalculate_threshold``.
     """
     sample_df = next(
-        (app._get_rows(lbl) for lbl in app._well_paths),
+        (app._get_rows(lbl) for lbl in app._app_state.dataset.well_paths),
         pd.DataFrame(),
     )
     detected = detect_fluor_channels(sample_df)
@@ -56,16 +56,16 @@ def recalculate_threshold(app) -> None:
     pipeline_fluor_raw = [
         str(tok).strip().lower()
         for tok in (
-            app._pipeline_info.get("fluor_tokens", [])
-            if isinstance(app._pipeline_info, dict) else []
+            app._app_state.dataset.pipeline_info.get("fluor_tokens", [])
+            if isinstance(app._app_state.dataset.pipeline_info, dict) else []
         )
         if str(tok).strip()
     ]
     pipeline_fluor = normalize_channel_tokens(pipeline_fluor_raw)
     detected = normalize_channel_tokens(detected)
     seg_tok = ""
-    if isinstance(app._pipeline_info, dict):
-        seg_tok = str(app._pipeline_info.get("nuclear_token", "") or "").strip().lower()
+    if isinstance(app._app_state.dataset.pipeline_info, dict):
+        seg_tok = str(app._app_state.dataset.pipeline_info.get("nuclear_token", "") or "").strip().lower()
     if not seg_tok:
         seg_tok = detect_nuclear_channel_token(sample_df)
     fluor_channels = merge_fluor_channels(pipeline_fluor, detected, seg_tok)
@@ -124,7 +124,7 @@ def recalculate_threshold(app) -> None:
     if cached is None:
         chunks = [
             _all_fluor_values(app._get_rows(lbl), val_col=val_col)
-            for lbl in app._well_paths
+            for lbl in app._app_state.dataset.well_paths
         ]
         all_vals = np.concatenate(chunks) if chunks else np.empty(0)
         if all_vals.size == 0:

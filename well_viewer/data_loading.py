@@ -606,7 +606,7 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
     """
     get_active = getattr(app, "_rep_sets_active", None)
     rep_sets = list(get_active() if callable(get_active) else [])
-    well_paths = getattr(app, "_well_paths", {}) or {}
+    well_paths = app._app_state.dataset.well_paths or {}
     selected = set(app._app_state.selection.selected_wells or set())
     color_for_label = getattr(app, "_color_for_label", None)
     color_for_well = getattr(app, "_color_for_well", None)

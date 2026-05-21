@@ -15,7 +15,7 @@ _logger = logging.getLogger("well_viewer")
 
 
 def save_to_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     payload = {
         "version": 1,
@@ -26,7 +26,7 @@ def save_to_data_dir(app) -> None:
 
 
 def load_from_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     data = _doc.get_section(app, "line_order")
     if not isinstance(data, dict):
@@ -64,7 +64,7 @@ def _reorder_selections_by_line_order(app) -> None:
 def schedule_save(app) -> None:
     if app._line_order_save_pending:
         return
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     app._line_order_save_pending = True
     QTimer.singleShot(500, lambda: _flush(app))

@@ -243,7 +243,7 @@ def collect_bar_items(
 
     # Per-well branch — iterate the same drag order, look up cell data.
     for label in ordered_keys:
-        if label not in app._well_paths:
+        if label not in app._app_state.dataset.well_paths:
             continue
         color = app._rank_color_well(label)
         display = app._bar_well_display_label(label)
@@ -378,12 +378,12 @@ def collect_bar_items_for_group(
     items: List[BarItem] = []
     members: List[Tuple[str, str, list[str]]] = []  # (key, display, wells)
     for rset in group.members:
-        valid = [w for w in rset.wells if w in app._well_paths]
+        valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
         if not valid:
             continue
         members.append((rset.name, rset.name, valid))
     for w in group.solo_wells:
-        if w not in app._well_paths:
+        if w not in app._app_state.dataset.well_paths:
             continue
         members.append((w, w, [w]))
 
@@ -469,7 +469,7 @@ def ordered_bar_keys(app) -> list:
         keys = [r.name for r in active_rsets]
     else:
         keys = sorted(
-            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
+            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
     if app._bar_order is None:

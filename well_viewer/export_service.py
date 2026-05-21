@@ -14,12 +14,12 @@ _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
 
 def _well_labels_map(app) -> dict:
     """Snapshot of the Sample Definitions well-label map (token → name)."""
-    return dict(getattr(app, "_well_labels", None) or {})
+    return dict(app._app_state.dataset.well_labels or {})
 
 
 def _well_paths_keys(app) -> set:
     """Set of valid well tokens for the loaded project."""
-    paths = getattr(app, "_well_paths", None) or {}
+    paths = app._app_state.dataset.well_paths or {}
     return set(paths)
 
 
@@ -61,7 +61,7 @@ def well_names_joined(tokens, well_labels: dict, *,
 
 
 def _ask_save_csv(app, title: str, default_name: str) -> str:
-    initial_dir = str(app._data_dir) if app._data_dir else ""
+    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
     initial_path = str(Path(initial_dir) / default_name) if initial_dir else default_name
     out, _ = QFileDialog.getSaveFileName(app, title, initial_path, _CSV_FILTER)
     return out or ""
@@ -275,7 +275,7 @@ def export_plot_data(app) -> None:
         seen: set = set()
         for rset in (app._rep_sets_active() or []):
             for w in rset.wells:
-                if w in app._well_paths and w not in seen:
+                if w in app._app_state.dataset.well_paths and w not in seen:
                     seen.add(w)
                     selected.append(w)
                     well_to_repset[w] = getattr(rset, "name", "")
@@ -467,7 +467,7 @@ def export_bar_plot_data(app) -> None:
 
 
 def export_raw_data_csv(app) -> None:
-    if not app._well_paths:
+    if not app._app_state.dataset.well_paths:
         _warn(app, "Export", "Load data before exporting raw CSV.")
         return
 
@@ -486,7 +486,7 @@ def export_raw_data_csv(app) -> None:
     gate_col = f"{app._app_state.channel.active_channel}_mean_intensity"
 
     frames = []
-    for label in sorted(app._well_paths):
+    for label in sorted(app._app_state.dataset.well_paths):
         df = app._get_rows(label)
         if df is None or df.empty or "area_px" not in df.columns or gate_col not in df.columns:
             continue

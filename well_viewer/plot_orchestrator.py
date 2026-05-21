@@ -84,7 +84,7 @@ def redraw(
 def save_matplotlib_fig(app, fig, default_name: str, *, plot_bg: str) -> None:
     import matplotlib as _mpl
 
-    initial_dir = str(app._data_dir) if app._data_dir else ""
+    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
     initial_path = str(Path(initial_dir) / default_name) if initial_dir else default_name
     filter_str = _qt_file_filter_from_filetypes(app._FIG_FILETYPES)
 

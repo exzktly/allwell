@@ -14,7 +14,7 @@ API
 * ``LabelGrid(app, parent=None)``
 * ``setEnabledWells(iter)`` — only those wells become editable + selectable.
 * ``selectedTokens() -> list[str]`` — read by the runtime's Add-Affix logic.
-* ``refresh()`` — pull values back from ``app._well_labels``.
+* ``refresh()`` — pull values back from ``app._app_state.dataset.well_labels``.
 
 The widget is owned by the Sample Definitions Well Labels sub-tab and
 stashed on the app as ``app._lbl_grid``.
@@ -113,7 +113,7 @@ class LabelGrid(QWidget):
         self._col_hdrs: list[_HeaderLabel] = []
         self._selected: set[str] = set()
         # Start with no wells enabled — the host calls setEnabledWells() with
-        # ``app._well_paths.keys()`` once a dataset is loaded. Treating None
+        # ``app._app_state.dataset.well_paths.keys()`` once a dataset is loaded. Treating None
         # as "all enabled" is only useful for the standalone __main__ demo.
         self._enabled: set[str] | None = set()
 
@@ -213,9 +213,9 @@ class LabelGrid(QWidget):
         return sorted(self._selected)
 
     def refresh(self) -> None:
-        """Re-load every cell from ``app._well_labels`` without firing
+        """Re-load every cell from ``app._app_state.dataset.well_labels`` without firing
         textChanged."""
-        labels = getattr(self._app, "_well_labels", {}) or {}
+        labels = self._app._app_state.dataset.well_labels or {}
         for tok, cell in self._cells.items():
             blocked = cell.blockSignals(True)
             try:
@@ -227,12 +227,12 @@ class LabelGrid(QWidget):
     def _on_text_changed(self, tok: str, text: str) -> None:
         val = (text or "").strip()
         app = self._app
-        if not hasattr(app, "_well_labels"):
+        if not True:
             return
         if val:
-            app._well_labels[tok] = val
+            app._app_state.dataset.well_labels[tok] = val
         else:
-            app._well_labels.pop(tok, None)
+            app._app_state.dataset.well_labels.pop(tok, None)
         if hasattr(app, "_invalidate_stats_cache"):
             app._invalidate_stats_cache()
 
@@ -399,12 +399,12 @@ def build_label_grid(app, parent: QWidget) -> None:
 
 
 def label_grid_refresh(app) -> None:
-    """Re-load the grid cells from ``app._well_labels`` and update the
+    """Re-load the grid cells from ``app._app_state.dataset.well_labels`` and update the
     enabled set from ``_well_paths``."""
     grid = getattr(app, "_lbl_grid", None)
     if grid is None:
         return
-    enabled = list((getattr(app, "_well_paths", {}) or {}).keys())
+    enabled = list((app._app_state.dataset.well_paths or {}).keys())
     grid.setEnabledWells(enabled)
     grid.refresh()
 
@@ -415,8 +415,8 @@ if __name__ == "__main__":
 
     class _StubApp:
         def __init__(self):
-            self._well_labels: dict[str, str] = {"A01": "Control", "A02": "High MOI"}
-            self._well_paths = {f"{r}{c:02d}": object()
+            self._app_state.dataset.well_labels: dict[str, str] = {"A01": "Control", "A02": "High MOI"}
+            self._app_state.dataset.well_paths = {f"{r}{c:02d}": object()
                                 for r in _ROW_LETTERS for c in range(1, 13)}
 
         def _invalidate_stats_cache(self): pass

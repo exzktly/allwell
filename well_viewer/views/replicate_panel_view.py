@@ -78,9 +78,9 @@ def build_replicate_panel(app, parent: QWidget) -> None:
         if sel is None:
             app._rep_refresh_map()      # no current selection — revert the click
             return
-        new = sorted((w for w in plate.selectedWellIds() if w in app._well_paths),
+        new = sorted((w for w in plate.selectedWellIds() if w in app._app_state.dataset.well_paths),
                      key=app._parse_rc)
-        old = sorted((w for w in (sel.get("wells") or []) if w in app._well_paths),
+        old = sorted((w for w in (sel.get("wells") or []) if w in app._app_state.dataset.well_paths),
                      key=app._parse_rc)
         if new == old:
             return

@@ -16,13 +16,13 @@ _logger = logging.getLogger("well_viewer")
 
 
 def save_to_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     _doc.set_section(app, "ratios", ratios_to_dict(app._app_state.channel.ratio_metrics))
 
 
 def load_from_data_dir(app) -> None:
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     data = _doc.get_section(app, "ratios")
     if data is None:
@@ -36,7 +36,7 @@ def schedule_save(app) -> None:
     debouncing each keystroke produces a JSON write."""
     if getattr(app, "_ratios_save_pending", False):
         return
-    if not getattr(app, "_data_dir", None):
+    if not app._app_state.dataset.data_dir:
         return
     app._ratios_save_pending = True
     QTimer.singleShot(500, lambda: _flush(app))

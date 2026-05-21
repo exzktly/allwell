@@ -39,7 +39,7 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     app._sidebar_image_table_plate = plate
 
     def _on_plate_changed(ids) -> None:
-        new = {w for w in ids if w in app._well_paths}
+        new = {w for w in ids if w in app._app_state.dataset.well_paths}
         if new == app._image_table_active_wells:
             return
         app._image_table_active_wells = new

@@ -109,7 +109,7 @@ def select_row(app, row: str) -> None:
     if app._app_state.selection.selections:  # rep-mode
         crossing = [
             s for s in app._app_state.selection.selections
-            if any(_well_rc(app, w)[0] == row and w in app._well_paths
+            if any(_well_rc(app, w)[0] == row and w in app._app_state.dataset.well_paths
                    for w in (s.get("wells") or []))
         ]
         # In rep-mode (plotting and non-plotting tabs alike), a row click
@@ -119,7 +119,7 @@ def select_row(app, row: str) -> None:
             _set_groups_hidden(app, crossing)
         return
     else:
-        row_labels = [lbl for lbl in app._well_paths if _well_rc(app, lbl)[0] == row]
+        row_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(app, lbl)[0] == row]
         if not row_labels:
             return
         if any(lbl not in app._app_state.selection.selected_wells for lbl in row_labels):
@@ -133,14 +133,14 @@ def select_col(app, col: str) -> None:
     if app._app_state.selection.selections:
         crossing = [
             s for s in app._app_state.selection.selections
-            if any(_well_rc(app, w)[1] == col and w in app._well_paths
+            if any(_well_rc(app, w)[1] == col and w in app._app_state.dataset.well_paths
                    for w in (s.get("wells") or []))
         ]
         if crossing:
             _set_groups_hidden(app, crossing)
         return
     else:
-        col_labels = [lbl for lbl in app._well_paths if _well_rc(app, lbl)[1] == col]
+        col_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(app, lbl)[1] == col]
         if not col_labels:
             return
         if any(lbl not in app._app_state.selection.selected_wells for lbl in col_labels):
@@ -154,7 +154,7 @@ def select_all(app) -> None:
     if app._app_state.selection.selections:  # rep-mode: show every group
         _set_groups_hidden(app, app._app_state.selection.selections, target=False)
     else:
-        app._app_state.selection.select_wells(app._well_paths.keys())
+        app._app_state.selection.select_wells(app._app_state.dataset.well_paths.keys())
         _refresh_after_selection_change(app)
 
 

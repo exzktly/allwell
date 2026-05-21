@@ -225,7 +225,7 @@ def smfish_sync_from_app(app) -> None:
     if not hasattr(app, "_smfish_channel_cb"):
         return  # tab not built yet
 
-    out_dir = getattr(app, "_data_dir", None) or app._smfish_out_dir
+    out_dir = app._app_state.dataset.data_dir or app._smfish_out_dir
     if out_dir is None:
         _smfish_set_status(app, "No output loaded.")
         return
@@ -705,8 +705,8 @@ def _smfish_apply_to_all(app) -> None:
 
 
 def _smfish_refresh_app_cache(app) -> None:
-    for label, path in app._well_paths.items():
-        if label in app._cache:
-            app._cache[label] = app._load_well_csv(path)
+    for label, path in app._app_state.dataset.well_paths.items():
+        if label in app._app_state.dataset.cache:
+            app._app_state.dataset.cache[label] = app._load_well_csv(path)
     app._recalculate_threshold()
     app._redraw()

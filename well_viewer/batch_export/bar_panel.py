@@ -114,7 +114,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
     def _run_batch(self) -> None:
         groups_with_data = _groups_with_loaded_wells(
-            self._groups_for_export(), self._app._well_paths,
+            self._groups_for_export(), self._app._app_state.dataset.well_paths,
         )
         if not groups_with_data:
             msg = (
@@ -211,13 +211,13 @@ class BarBatchExportPanel(BatchExportPanel):
                 # up its wells / member_type without a second pass.
                 _meta_by_key: Dict[str, tuple] = {}
                 for rset in grp.members:
-                    valid = [w for w in rset.wells if w in self._app._well_paths]
+                    valid = [w for w in rset.wells if w in self._app._app_state.dataset.well_paths]
                     if valid:
                         _meta_by_key[rset.name] = (
                             "replicate_set", ";".join(valid), len(valid),
                         )
                 for w in grp.solo_wells:
-                    if w in self._app._well_paths:
+                    if w in self._app._app_state.dataset.well_paths:
                         _meta_by_key[w] = ("solo_well", w, 1)
 
                 rows_csv: List[dict] = []

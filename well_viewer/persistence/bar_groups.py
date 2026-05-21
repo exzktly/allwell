@@ -30,7 +30,7 @@ def to_payload(app) -> dict:
 def from_dict(app, data) -> None:
     """Restore selections state on *app* from a saved (v1 or v2) payload.
     v1 is migrated by ``from_block``."""
-    tok_to_label = getattr(app, "_tok_to_label", {})
+    tok_to_label = app._app_state.dataset.tok_to_label
     selections, current_id, _labels, _notes = _sel.from_block(data, tok_to_label=tok_to_label)
     app._app_state.selection.selections = selections
     app._app_state.selection.current_selection_id = current_id
@@ -44,7 +44,7 @@ def save_via_dialog(app) -> None:
             "Define at least one selection before saving.",
         )
         return
-    out_dir = app._data_dir if app._data_dir else None
+    out_dir = app._app_state.dataset.data_dir if app._app_state.dataset.data_dir else None
     init_dir = str(out_dir) if out_dir else ""
     init_path = str(Path(init_dir) / "bar_groups.json") if init_dir else "bar_groups.json"
     path_str, _ = QFileDialog.getSaveFileName(
@@ -63,7 +63,7 @@ def save_via_dialog(app) -> None:
 
 def load_via_dialog(app) -> None:
     """Prompt the user for a JSON path and load bar groups from it."""
-    out_dir = app._data_dir if app._data_dir else None
+    out_dir = app._app_state.dataset.data_dir if app._app_state.dataset.data_dir else None
     init_dir = str(out_dir) if out_dir else ""
     path_str, _ = QFileDialog.getOpenFileName(
         app, "Load bar group definitions",

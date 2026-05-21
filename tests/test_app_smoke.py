@@ -43,11 +43,11 @@ def test_tab_switch_matrix(viewer_app):
 
 
 def test_open_dataset_golden_path(loaded_app):
-    assert sorted(loaded_app._well_paths) == ["A01", "A02", "B01", "B02"]
+    assert sorted(loaded_app._app_state.dataset.well_paths) == ["A01", "A02", "B01", "B02"]
     assert "gfp" in loaded_app._app_state.channel.fluor_channels
     assert "mcherry" in loaded_app._app_state.channel.fluor_channels
-    assert loaded_app._all_timepoints_cache == [0.0, 24.0, 48.0]
-    assert all(not df.empty for df in loaded_app._cache.values())
+    assert loaded_app._app_state.dataset.all_timepoints_cache == [0.0, 24.0, 48.0]
+    assert all(not df.empty for df in loaded_app._app_state.dataset.cache.values())
 
 
 def test_tab_switch_matrix_after_load(loaded_app):

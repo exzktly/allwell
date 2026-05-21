@@ -61,7 +61,7 @@ def rep_panel_refresh(app) -> None:
     if lst is None:
         return
     try:
-        lst.setEnabledWells(list(getattr(app, "_well_paths", {}).keys()))
+        lst.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
     except Exception:
         pass
     sels = list(app._app_state.selection.selections or [])

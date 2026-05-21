@@ -39,7 +39,7 @@ def build_preview_picker(app, parent: QWidget, **_kw) -> None:
     app._sidebar_preview_plate = plate
 
     def _on_plate_changed(ids) -> None:
-        tok = next((w for w in ids if w in app._well_paths), None)
+        tok = next((w for w in ids if w in app._app_state.dataset.well_paths), None)
         if tok == app._preview_selected_well:
             return
         app._preview_selected_well = tok
@@ -66,7 +66,7 @@ def refresh_preview_picker(app, **_kw) -> None:
     plate = getattr(app, "_sidebar_preview_plate", None)
     sel = app._preview_selected_well
     if plate is not None:
-        plate.setEnabledWells(list(app._well_paths.keys()))
-        plate.setSelectedWellIds([sel] if sel and sel in app._well_paths else [])
+        plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
+        plate.setSelectedWellIds([sel] if sel and sel in app._app_state.dataset.well_paths else [])
     if hasattr(app, "_preview_sel_lbl"):
         app._preview_sel_lbl.setText(f"Selected: {sel}" if sel else "No well selected")

@@ -24,7 +24,7 @@ pytestmark = pytest.mark.qt
 
 def test_set_selected_wells_updates_state(loaded_app):
     loaded_app._set_selected_wells({"A01", "B02"})
-    assert loaded_app._selected_wells == {"A01", "B02"}
+    assert loaded_app._app_state.selection.selected_wells == {"A01", "B02"}
 
 
 def test_set_selected_wells_tracks_prev_sel(loaded_app):
@@ -32,14 +32,14 @@ def test_set_selected_wells_tracks_prev_sel(loaded_app):
     # _on_plate_sel_change consumes it to compute the selection diff.
     loaded_app._set_selected_wells({"A01"}, commit=False)
     loaded_app._set_selected_wells({"A01", "A02"}, commit=False)
-    assert loaded_app._prev_sel == {"A01"}
+    assert loaded_app._app_state.selection.prev_sel == {"A01"}
 
 
 def test_set_selected_wells_noop_when_unchanged(loaded_app):
     loaded_app._set_selected_wells({"A01"})
-    loaded_app._prev_sel = {"sentinel"}
+    loaded_app._app_state.selection.prev_sel = {"sentinel"}
     loaded_app._set_selected_wells({"A01"})  # identical set -> early return
-    assert loaded_app._prev_sel == {"sentinel"}
+    assert loaded_app._app_state.selection.prev_sel == {"sentinel"}
 
 
 # ── Channel switching ────────────────────────────────────────────────────────

@@ -45,7 +45,7 @@ def _reorder_selections_by_line_order(app) -> None:
     ``_bar_groups`` shadow is left alone here — the legacy renderers already
     re-order at draw time via ``_line_order_rsets`` / ``_line_order_wells``.
     """
-    sels = getattr(app, "_selections", None)
+    sels = app._app_state.selection.selections
     if not sels:
         return
     try:
@@ -56,7 +56,7 @@ def _reorder_selections_by_line_order(app) -> None:
             well_order=getattr(app, "_line_order_wells", None),
         )
         if [s["id"] for s in new] != [s["id"] for s in sels]:
-            app._selections = new
+            app._app_state.selection.selections = new
     except Exception:  # pragma: no cover - never break loading over a re-sort
         _logger.exception("Couldn't re-apply line order to selections")
 

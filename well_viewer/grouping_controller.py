@@ -79,10 +79,10 @@ def rep_quick_pairs(app) -> None:
 
     if not new_sets:
         return
-    if getattr(app, "_selections", None):
+    if app._app_state.selection.selections:
         resp = QMessageBox.question(
             app, "Replace groups?",
-            f"This will replace the current {len(app._selections)} group(s). Continue?",
+            f"This will replace the current {len(app._app_state.selection.selections)} group(s). Continue?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if resp != QMessageBox.Yes:
@@ -95,6 +95,6 @@ def rep_quick_pairs(app) -> None:
                            source="rep_set", used_names=used_names, used_ids=used_ids,
                            fallback_color_idx=i)
             for i, s in enumerate(new_sets)]
-    app._selections = sels
-    app._current_selection_id = sels[0]["id"] if sels else None
+    app._app_state.selection.selections = sels
+    app._app_state.selection.current_selection_id = sels[0]["id"] if sels else None
     app._rebuild_all()

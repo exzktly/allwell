@@ -8,7 +8,7 @@ from PySide6.QtCore import QTimer
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The "GROUPS" panel on the Sample Definitions tab — a widgets.SavedSelectionsList
-# over the unified app._selections model (Phase 8.0 Stage C: _selections is the
+# over the unified app._app_state.selection.selections model (Phase 8.0 Stage C: _selections is the
 # in-memory source of truth; the SavedSelectionsList's signals go straight to the
 # app's `_sel_*` mutators, keyed by selection id).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ def wire_selections_list(app, lst) -> None:
 
 
 def rep_panel_refresh(app) -> None:
-    """Refresh the GROUPS list (a widgets.SavedSelectionsList over app._selections)."""
+    """Refresh the GROUPS list (a widgets.SavedSelectionsList over app._app_state.selection.selections)."""
     lst = getattr(app, "_rep_list", None)
     if lst is None:
         return
@@ -64,9 +64,9 @@ def rep_panel_refresh(app) -> None:
         lst.setEnabledWells(list(getattr(app, "_well_paths", {}).keys()))
     except Exception:
         pass
-    sels = list(getattr(app, "_selections", []) or [])
+    sels = list(app._app_state.selection.selections or [])
     lst.updateSelections(sels)
-    cur = getattr(app, "_current_selection_id", None)
+    cur = app._app_state.selection.current_selection_id
     # When the app has explicitly cleared the active group (e.g. the user
     # just entered the Groups sub-tab), force the list's current row to
     # "" so no row paints with the active stripe. The list otherwise

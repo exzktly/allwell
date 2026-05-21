@@ -7,7 +7,7 @@ Sample Definitions tab is split between three places:
     membership.
   - **Centre — Groups sub-tab** (``build_replicate_groups_centre``): the
     GROUPS header, Quick Replicates row, and the editable
-    SavedSelectionsList over ``app._selections``. Hoisted out of the
+    SavedSelectionsList over ``app._app_state.selection.selections``. Hoisted out of the
     sidebar so the user has full vertical room for the list and the
     plate keeps its proper aspect ratio.
   - **Centre — Well Labels sub-tab**: see ``label_grid_view``.
@@ -73,7 +73,7 @@ def build_replicate_panel(app, parent: QWidget) -> None:
                     return
             except Exception:
                 pass
-        sid = getattr(app, "_current_selection_id", None)
+        sid = app._app_state.selection.current_selection_id
         sel = app._sel_by_id(sid) if sid else None
         if sel is None:
             app._rep_refresh_map()      # no current selection — revert the click
@@ -98,7 +98,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     Contents (top → bottom):
       - GROUPS header with Clear-all / + Add buttons
       - Quick Replicates row (Pair + Order dropdowns + Apply button)
-      - SavedSelectionsList (composable) over ``app._selections``
+      - SavedSelectionsList (composable) over ``app._app_state.selection.selections``
       - 1-line usage hint
     """
     layout = parent.layout()
@@ -178,7 +178,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     layout.addWidget(active_row)
 
     # The groups card-list — a widgets.SavedSelectionsList (composable)
-    # over app._selections.
+    # over app._app_state.selection.selections.
     from widgets.saved_selections_list import SavedSelectionsList
     from well_viewer.views.grouping_view import wire_selections_list as _wire
     app._rep_list = SavedSelectionsList(parent)

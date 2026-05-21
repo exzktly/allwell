@@ -829,16 +829,6 @@ class WellViewerApp(QWidget):
 
         return property(_get, _set)
 
-    _selected_wells = _app_state_shim("selection", "selected_wells")
-    _last_sel = _app_state_shim("selection", "last_sel")
-    _prev_sel = _app_state_shim("selection", "prev_sel")
-    _active_solo_wells = _app_state_shim("selection", "active_solo_wells")
-    _selections = _app_state_shim("selection", "selections")
-    _current_selection_id = _app_state_shim("selection", "current_selection_id")
-    _selections_v2_writes_disabled = _app_state_shim(
-        "selection", "v2_writes_disabled")
-    _plate_commit_pending = _app_state_shim("selection", "plate_commit_pending")
-
     _data_dir = _app_state_shim("dataset", "data_dir")
     _in_dir = _app_state_shim("dataset", "in_dir")
     _tmp_dir = _app_state_shim("dataset", "tmp_dir")
@@ -1747,8 +1737,8 @@ class WellViewerApp(QWidget):
             # built by ``build_replicate_groups_centre`` updates via
             # ``_groups_centre_refresh``.
             if name == "Groups":
-                if getattr(self, "_current_selection_id", None) is not None:
-                    self._current_selection_id = None
+                if self._app_state.selection.current_selection_id is not None:
+                    self._app_state.selection.current_selection_id = None
                     self._groups_centre_refresh()
                     self._refresh_sidebar_map()
                 if hasattr(self, "_rep_active_group_lbl"):
@@ -1806,14 +1796,14 @@ class WellViewerApp(QWidget):
             return
         plate.setEnabledWells(list(self._well_paths.keys()))
         colors: Dict[str, str] = {}
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             c = self._sel_color(s)
             for tok in (s.get("wells") or []):
                 if tok in self._well_paths:
                     colors[tok] = c
         plate.clearWellColors()
         plate.setWellColors(colors)
-        cur = self._sel_by_id(getattr(self, "_current_selection_id", None))
+        cur = self._sel_by_id(self._app_state.selection.current_selection_id)
         cur_wells = [w for w in (cur.get("wells") or []) if w in self._well_paths] if cur else []
         plate.setSelectedWellIds(cur_wells)
 
@@ -1824,7 +1814,7 @@ class WellViewerApp(QWidget):
 
     def _rep_select(self, idx: int) -> None:
         # Legacy bridge: select the idx-th rep_set-source selection.
-        sels = [s for s in self._selections if s.get("source") == "rep_set"]
+        sels = [s for s in self._app_state.selection.selections if s.get("source") == "rep_set"]
         if 0 <= idx < len(sels):
             self._sel_select(sels[idx].get("id"))
 
@@ -1835,7 +1825,7 @@ class WellViewerApp(QWidget):
         dlg.setModal(True)
         v = QVBoxLayout(dlg)
         v.addWidget(QLabel("Name:"))
-        name_edit = QLineEdit(f"Rep {len(self._selections)+1}")
+        name_edit = QLineEdit(f"Rep {len(self._app_state.selection.selections)+1}")
         v.addWidget(name_edit)
         v.addWidget(QLabel("Select wells:"))
         available = sorted(self._well_paths.keys(),
@@ -1856,7 +1846,7 @@ class WellViewerApp(QWidget):
             if not sel:
                 QMessageBox.warning(dlg, "No wells", "Select at least one well.")
                 return
-            name = name_edit.text().strip() or f"Rep {len(self._selections) + 1}"
+            name = name_edit.text().strip() or f"Rep {len(self._app_state.selection.selections) + 1}"
             dlg.accept()
             # _sel_add enforces well-exclusivity (the new group takes the wells).
             self._sel_add(name, list(sel), replicates=[list(sel)], source="rep_set")
@@ -1866,11 +1856,11 @@ class WellViewerApp(QWidget):
         dlg.exec()
 
     def _rep_clear_all(self) -> None:
-        if not self._selections:
+        if not self._app_state.selection.selections:
             return
         resp = QMessageBox.question(
             self, "Clear all groups?",
-            f"Remove all {len(self._selections)} group(s)?",
+            f"Remove all {len(self._app_state.selection.selections)} group(s)?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if resp == QMessageBox.Yes:
@@ -1920,7 +1910,7 @@ class WellViewerApp(QWidget):
         if grid_sel:
             selected = sorted(grid_sel, key=self._parse_rc)
         else:
-            selected = sorted(self._selected_wells, key=self._parse_rc)
+            selected = sorted(self._app_state.selection.selected_wells, key=self._parse_rc)
         if not selected:
             self._set_status(
                 f"Add {where.title()}: no wells selected — click a row/column "
@@ -1957,22 +1947,22 @@ class WellViewerApp(QWidget):
     def _labels_add_suffix(self) -> None:
         self._labels_apply_affix(where="suffix")
 
-    # ── unified-model (app._selections) — the in-memory source of truth ──────
+    # ── unified-model (app._app_state.selection.selections) — the in-memory source of truth ──────
 
     def _sel_by_id(self, sid):
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s.get("id") == sid:
                 return s
         return None
 
     def _sel_index_of(self, sid) -> int:
-        for i, s in enumerate(self._selections):
+        for i, s in enumerate(self._app_state.selection.selections):
             if s.get("id") == sid:
                 return i
         return -1
 
     def _sel_id_for_well(self, tok):
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if tok in (s.get("wells") or []):
                 return s.get("id")
         return None
@@ -1980,7 +1970,7 @@ class WellViewerApp(QWidget):
     def _sel_strip_wells(self, wells, *, keep_id=None) -> None:
         """A well belongs to ≤1 group: remove ``wells`` from every selection but
         ``keep_id``, pruning their replicates to the survivors. Also drop the
-        same wells from ``self._selected_wells`` so the plotting tabs don't
+        same wells from ``self._app_state.selection.selected_wells`` so the plotting tabs don't
         keep treating them as solo wells once they've joined a group (the
         sidebar plate becomes passive in rep_mode and the user can't update
         the set themselves)."""
@@ -1988,28 +1978,28 @@ class WellViewerApp(QWidget):
         wset = set(wells or [])
         if not wset:
             return
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s.get("id") == keep_id:
                 continue
             nw = [w for w in (s.get("wells") or []) if w not in wset]
             if nw != s.get("wells"):
                 s["wells"] = nw
                 s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(nw))
-        if wset & self._selected_wells:
-            self._selected_wells = self._selected_wells - wset
+        if wset & self._app_state.selection.selected_wells:
+            self._app_state.selection.selected_wells = self._app_state.selection.selected_wells - wset
 
     def _sel_add(self, name=None, wells=None, replicates=None, source="user",
                  *, make_current=True):
         from well_viewer.selections_model import make_selection
-        used_names = {s.get("name") for s in self._selections}
-        used_ids = {s.get("id") for s in self._selections}
+        used_names = {s.get("name") for s in self._app_state.selection.selections}
+        used_ids = {s.get("id") for s in self._app_state.selection.selections}
         sel = make_selection(name=name, wells=wells, replicates=replicates,
                              source=source, used_names=used_names, used_ids=used_ids,
-                             fallback_color_idx=len(self._selections))
+                             fallback_color_idx=len(self._app_state.selection.selections))
         self._sel_strip_wells(sel["wells"], keep_id=sel["id"])
-        self._selections.append(sel)
+        self._app_state.selection.selections.append(sel)
         if make_current:
-            self._current_selection_id = sel["id"]
+            self._app_state.selection.current_selection_id = sel["id"]
         self._rebuild_all()
         return sel["id"]
 
@@ -2018,7 +2008,7 @@ class WellViewerApp(QWidget):
         s = self._sel_by_id(sid)
         if s is None:
             return
-        new = _uq(name, {x.get("name") for x in self._selections if x.get("id") != sid})
+        new = _uq(name, {x.get("name") for x in self._app_state.selection.selections if x.get("id") != sid})
         if new == s.get("name"):
             return
         s["name"] = new
@@ -2028,11 +2018,11 @@ class WellViewerApp(QWidget):
         i = self._sel_index_of(sid)
         if i < 0:
             return
-        self._selections.pop(i)
-        if self._current_selection_id == sid:
-            self._current_selection_id = (
-                self._selections[min(i, len(self._selections) - 1)].get("id")
-                if self._selections else None)
+        self._app_state.selection.selections.pop(i)
+        if self._app_state.selection.current_selection_id == sid:
+            self._app_state.selection.current_selection_id = (
+                self._app_state.selection.selections[min(i, len(self._app_state.selection.selections) - 1)].get("id")
+                if self._app_state.selection.selections else None)
         self._rebuild_all()
 
     def _sel_set_hidden(self, sid, hidden, *, light=False) -> None:
@@ -2108,27 +2098,27 @@ class WellViewerApp(QWidget):
         self._rebuild_all()
 
     def _sel_select(self, sid) -> None:
-        if sid not in {s.get("id") for s in self._selections}:
+        if sid not in {s.get("id") for s in self._app_state.selection.selections}:
             return
-        if sid == getattr(self, "_current_selection_id", None):
+        if sid == self._app_state.selection.current_selection_id:
             return
-        self._current_selection_id = sid
+        self._app_state.selection.current_selection_id = sid
         self._groups_centre_refresh()
         self._refresh_sidebar_map()
 
     def _sel_reorder(self, ids) -> None:
-        by_id = {s.get("id"): s for s in self._selections}
+        by_id = {s.get("id"): s for s in self._app_state.selection.selections}
         new = [by_id[i] for i in ids if i in by_id]
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s not in new:
                 new.append(s)
-        if new != self._selections:
-            self._selections = new
+        if new != self._app_state.selection.selections:
+            self._app_state.selection.selections = new
             self._rebuild_all()
 
     def _sel_clear_all(self) -> None:
-        self._selections = []
-        self._current_selection_id = None
+        self._app_state.selection.selections = []
+        self._app_state.selection.current_selection_id = None
         self._rebuild_all()
 
     def _sel_duplicate(self, sid):
@@ -2144,7 +2134,7 @@ class WellViewerApp(QWidget):
         helpers already enforce this (edited group wins); this is a safety net
         and cleans up pre-existing overlaps from old saved data."""
         seen: set = set()
-        for s in getattr(self, "_selections", []):
+        for s in self._app_state.selection.selections:
             if not isinstance(s, dict):
                 continue
             kept = []
@@ -2189,7 +2179,7 @@ class WellViewerApp(QWidget):
         lbl = getattr(self, "_rep_active_group_lbl", None)
         if lbl is None:
             return
-        sid = getattr(self, "_current_selection_id", None)
+        sid = self._app_state.selection.current_selection_id
         sel = self._sel_by_id(sid) if sid else None
         try:
             import theme as _theme
@@ -2407,7 +2397,7 @@ class WellViewerApp(QWidget):
 
     def _import_selections_from_json(self) -> None:
         """Import a selections JSON file (the same schema used by Save) and
-        merge it into ``self._selections``. Existing names get a ``_v2``
+        merge it into ``self._app_state.selection.selections``. Existing names get a ``_v2``
         suffix on collision so nothing already loaded is overwritten."""
         import json
         from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -2497,7 +2487,7 @@ class WellViewerApp(QWidget):
         rank colour of its lowest well."""
         name = getattr(rset, "name", None)
         if name:
-            for s in self._selections:
+            for s in self._app_state.selection.selections:
                 if s.get("name") == name:
                     return self._sel_color(s)
         return self._rank_color_wells(getattr(rset, "wells", None))
@@ -2505,7 +2495,7 @@ class WellViewerApp(QWidget):
     def _rep_color_for(self, lbl: str) -> Optional[str]:
         """Return the colour for the selection that owns *lbl*, or None if the
         well is not in any selection."""
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if lbl in (s.get("wells") or []):
                 return self._sel_color(s)
         return None
@@ -3213,18 +3203,18 @@ class WellViewerApp(QWidget):
         except Exception:
             tab_name = ""
         per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        rep_mode = bool(self._selections) and not per_well_tab
+        rep_mode = bool(self._app_state.selection.selections) and not per_well_tab
 
         colors: Dict[str, object] = {}
         if rep_mode:
-            for s in self._selections:
+            for s in self._app_state.selection.selections:
                 full_c = self._sel_color(s)
                 shade = self._mute_color(full_c) if s.get("hidden") else full_c
                 for tok in (s.get("wells") or []):
                     if tok in self._well_paths:
                         colors[tok] = shade
         else:
-            for tok in self._selected_wells:
+            for tok in self._app_state.selection.selected_wells:
                 if tok in self._well_paths:
                     colors[tok] = self._rank_color_well(tok)
 
@@ -3264,20 +3254,20 @@ class WellViewerApp(QWidget):
             # filter stay in lock-step. Solo wells (not in any group) live
             # in ``_active_solo_wells``.
             visible_wells = {
-                w for s in self._selections if not s.get("hidden")
+                w for s in self._app_state.selection.selections if not s.get("hidden")
                 for w in (s.get("wells") or []) if w in self._well_paths
             }
             visible_wells |= {
-                w for w in (getattr(self, "_active_solo_wells", set()) or set())
+                w for w in (self._app_state.selection.active_solo_wells or set())
                 if w in self._well_paths
             }
             plate.setSelectedWellIds(list(visible_wells))
         else:
-            plate.setSelectedWellIds(list(self._selected_wells))
+            plate.setSelectedWellIds(list(self._app_state.selection.selected_wells))
 
         # Count label / hint
         loaded  = self._rep_sets_loaded() if rep_mode else []
-        n_vis   = len(self._rep_sets_active()) if rep_mode else len(self._selected_wells)
+        n_vis   = len(self._rep_sets_active()) if rep_mode else len(self._app_state.selection.selected_wells)
         n_loaded = len(loaded)
         if hasattr(self, "_sel_count_lbl"):
             if rep_mode:
@@ -3294,13 +3284,13 @@ class WellViewerApp(QWidget):
                 # well, not groups. Earlier we showed group count here,
                 # which read as "1 / 96" for a group with 4 members.
                 active_wells: set = set()
-                for s in self._selections:
+                for s in self._app_state.selection.selections:
                     if s.get("hidden"):
                         continue
                     for w in (s.get("wells") or []):
                         if w in self._well_paths:
                             active_wells.add(w)
-                for w in (getattr(self, "_active_solo_wells", set()) or set()):
+                for w in (self._app_state.selection.active_solo_wells or set()):
                     if w in self._well_paths:
                         active_wells.add(w)
                 self._sel_count_chip.setText(f"{len(active_wells)} / {total or 96}")
@@ -3316,7 +3306,7 @@ class WellViewerApp(QWidget):
 
     # ── v2 plate-widget bridge (WellPlateSelector ↔ WellViewerApp state) ──────
     # The left-rail plate is now a single ``widgets.WellPlateSelector`` instead
-    # of an ``app._sidebar_btns`` grid of ``WellButton``s. ``app._selected_wells``
+    # of an ``app._sidebar_btns`` grid of ``WellButton``s. ``app._app_state.selection.selected_wells``
     # stays the source of truth; ``_refresh_sidebar_map_now`` pushes appearance /
     # selection onto the widget, and the handlers below take user actions back.
 
@@ -3337,14 +3327,14 @@ class WellViewerApp(QWidget):
         except Exception:
             tab_name = ""
         per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        if self._selections and not per_well_tab:
+        if self._app_state.selection.selections and not per_well_tab:
             return  # rep-set mode: the plate is passive; its selection is unused
         # Keep the invariant ``_selected_wells ⊆ _well_paths`` — downstream
         # code (e.g. redraw_line_plots → _get_rows) assumes it.
         new_set = {w for w in ids if w in self._well_paths}
-        if new_set == self._selected_wells:
+        if new_set == self._app_state.selection.selected_wells:
             return
-        self._selected_wells = new_set
+        self._app_state.selection.selected_wells = new_set
         self._refresh_sidebar_map()
         # Coalesce the commit. A drag through 96 cells fires this handler
         # 96 times in one event-loop tick; without coalescing each one
@@ -3354,17 +3344,17 @@ class WellViewerApp(QWidget):
         # `_on_sidebar_plate_drag_finished` already commits at drag end
         # too, so this matters mostly for single-click mode (smFISH /
         # Segmentation tabs) where no drag_finished signal fires.
-        if not self._plate_commit_pending:
-            self._plate_commit_pending = True
+        if not self._app_state.selection.plate_commit_pending:
+            self._app_state.selection.plate_commit_pending = True
             QTimer.singleShot(0, self._plate_commit_deferred)
 
     def _plate_commit_deferred(self) -> None:
         """Run the deferred commit scheduled by a paint event. No-op if
         a drag_finished handler already cleared the pending flag (which
         means it already committed in the same tick)."""
-        if not self._plate_commit_pending:
+        if not self._app_state.selection.plate_commit_pending:
             return
-        self._plate_commit_pending = False
+        self._app_state.selection.plate_commit_pending = False
         self._on_plate_sel_change()
 
     def _set_selected_wells(self, new_set, *, commit: bool = True) -> None:
@@ -3377,12 +3367,12 @@ class WellViewerApp(QWidget):
         additions / removals across tabs. Funnel everything through here.
         """
         new_set = set(new_set or [])
-        if new_set == self._selected_wells:
+        if new_set == self._app_state.selection.selected_wells:
             return
         # Snapshot the previous selection so on_plate_sel_change can
         # compute an accurate diff if it runs after this.
-        self._prev_sel = set(self._selected_wells)
-        self._selected_wells = new_set
+        self._app_state.selection.prev_sel = set(self._app_state.selection.selected_wells)
+        self._app_state.selection.selected_wells = new_set
         if hasattr(self, "_refresh_sidebar_map"):
             self._refresh_sidebar_map()
         if commit and hasattr(self, "_on_plate_sel_change"):
@@ -3394,11 +3384,11 @@ class WellViewerApp(QWidget):
         except Exception:
             tab_name = ""
         per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        if self._selections and not per_well_tab:
+        if self._app_state.selection.selections and not per_well_tab:
             return
         # Cancel any pending deferred commit from the paint events that
         # led here — we're committing right now.
-        self._plate_commit_pending = False
+        self._app_state.selection.plate_commit_pending = False
         self._on_plate_sel_change()
 
     _PLOTTING_TABS = frozenset({
@@ -3427,19 +3417,19 @@ class WellViewerApp(QWidget):
             if sid is not None:
                 self._sel_toggle_hidden(sid)
                 return
-            if not hasattr(self, "_active_solo_wells"):
-                self._active_solo_wells = set()
-            if well_id in self._active_solo_wells:
-                self._active_solo_wells.discard(well_id)
+            if not True:
+                self._app_state.selection.active_solo_wells = set()
+            if well_id in self._app_state.selection.active_solo_wells:
+                self._app_state.selection.active_solo_wells.discard(well_id)
             else:
-                self._active_solo_wells.add(well_id)
+                self._app_state.selection.active_solo_wells.add(well_id)
             self._refresh_sidebar_map()
             self._on_plate_sel_change()
             return
         # Legacy fallback for non-plotting tabs that still receive
         # wellActivated in rep-set mode (Image Table / smFISH / etc):
         # toggle the clicked group's visibility.
-        if not self._selections:
+        if not self._app_state.selection.selections:
             return
         sid = self._sel_id_for_well(well_id)
         if sid is None:
@@ -3447,7 +3437,7 @@ class WellViewerApp(QWidget):
         self._sel_toggle_hidden(sid)
 
     def _on_sidebar_plate_row_activated(self, row: str) -> None:
-        if self._selections:
+        if self._app_state.selection.selections:
             self._select_row(row)            # rep-set-aware toggle + refresh
         else:
             # The widget already toggled the row and synced ``_selected_wells``
@@ -3455,7 +3445,7 @@ class WellViewerApp(QWidget):
             self._on_plate_sel_change()
 
     def _on_sidebar_plate_col_activated(self, col: str) -> None:
-        if self._selections:
+        if self._app_state.selection.selections:
             self._select_col(col)
         else:
             self._on_plate_sel_change()
@@ -4000,9 +3990,9 @@ class WellViewerApp(QWidget):
         (``_well_paths``) participate."""
         if not hasattr(self, "_well_paths"):
             return
-        cur = set(self._selected_wells)
+        cur = set(self._app_state.selection.selected_wells)
         new = {w for w in self._well_paths.keys() if w not in cur}
-        self._selected_wells = new
+        self._app_state.selection.selected_wells = new
         # Re-use the standard refresh path the click handlers go through.
         self._refresh_sidebar_map()
         if hasattr(self, "_on_plate_sel_change"):
@@ -4010,7 +4000,7 @@ class WellViewerApp(QWidget):
 
     def _selected_labels(self) -> List[str]:
         """Return labels in a stable order (sorted) for consistent plot colours."""
-        return sorted(self._selected_wells, key=lambda lbl: self._parse_rc(lbl))
+        return sorted(self._app_state.selection.selected_wells, key=lambda lbl: self._parse_rc(lbl))
 
     def _get_rows(self, label: str) -> pd.DataFrame:
         if label not in self._cache:
@@ -5004,7 +4994,7 @@ class WellViewerApp(QWidget):
             return
         tab = self._current_centre_tab()
         prev_tab = getattr(self, "_last_tab_name", None)
-        prev_selected = set(getattr(self, "_selected_wells", set()))
+        prev_selected = set(self._app_state.selection.selected_wells)
 
         # Dismiss any open figure configurator on tab change — the user can
         # re-open it on the new tab via the plot card's sliders IconButton.
@@ -5072,8 +5062,8 @@ class WellViewerApp(QWidget):
 
         elif tab == "smFISH":
             self._sidebar_main_frame.setVisible(True)
-            if len(self._selected_wells) > 1:
-                keep = self._last_sel if self._last_sel in self._selected_wells else next(iter(self._selected_wells))
+            if len(self._app_state.selection.selected_wells) > 1:
+                keep = self._app_state.selection.last_sel if self._app_state.selection.last_sel in self._app_state.selection.selected_wells else next(iter(self._app_state.selection.selected_wells))
                 # Route through the central mutator so _prev_sel is
                 # snapshotted properly — bypassing it left the next
                 # selection diff in selection_controller mis-attributing
@@ -5150,7 +5140,7 @@ class WellViewerApp(QWidget):
 
     def _sync_preview_well_for_image_tabs(self) -> None:
         """Keep current preview well unless the active selection supplies one."""
-        cur_sel = self._sel_by_id(getattr(self, "_current_selection_id", None))
+        cur_sel = self._sel_by_id(self._app_state.selection.current_selection_id)
         sel_wells = (cur_sel.get("wells") or []) if cur_sel else []
 
         # Preserve explicit user choice when still valid.
@@ -5187,8 +5177,8 @@ class WellViewerApp(QWidget):
         # Batch Export should share the same in-memory selection objects used by
         # the line/bar/scatter render paths.
         expected_ids = (
-            id(self._selected_wells),
-            id(self._selections),
+            id(self._app_state.selection.selected_wells),
+            id(self._app_state.selection.selections),
         )
         if not hasattr(self, "_selection_model_identity"):
             self._selection_model_identity = expected_ids
@@ -5200,7 +5190,7 @@ class WellViewerApp(QWidget):
 
         # UI smoke check: switching among Line/Bar/Batch must not mutate the
         # current per-well selection by itself.
-        if prev_tab in watched and prev_selected != self._selected_wells:
+        if prev_tab in watched and prev_selected != self._app_state.selection.selected_wells:
             _logger.warning(
                 "Tab switch altered selected wells unexpectedly: %s -> %s",
                 prev_tab, tab,
@@ -5217,12 +5207,12 @@ class WellViewerApp(QWidget):
     def _refresh_review_csv(self) -> None:
         if not hasattr(self, "_review_csv_table"):
             return
-        sels = sorted(self._selected_wells, key=self._parse_rc)
+        sels = sorted(self._app_state.selection.selected_wells, key=self._parse_rc)
         # When the user has no explicit picks but rep-sets exist, fall back
         # to every well in the active groups so the table populates on first
         # visit. Previously this path took the "Select one or more wells"
         # branch and left Review CSV empty whenever groups were defined.
-        if not sels and self._selections:
+        if not sels and self._app_state.selection.selections:
             seen: set = set()
             for rset in self._rep_sets_active():
                 for w in rset.wells:
@@ -5284,7 +5274,7 @@ class WellViewerApp(QWidget):
         table.setRowCount(0)
 
         if rows is None:
-            sels = sorted(self._selected_wells, key=self._parse_rc)
+            sels = sorted(self._app_state.selection.selected_wells, key=self._parse_rc)
             rows = []
             for label in sels:
                 rows.extend(self._review_load_rows(label))
@@ -5313,7 +5303,7 @@ class WellViewerApp(QWidget):
         if not filtered:
             _logger.warning(
                 "No Review CSV rows matched filters: selected_wells=%s fov=%s tp=%s total_rows=%d",
-                sorted(self._selected_wells, key=self._parse_rc),
+                sorted(self._app_state.selection.selected_wells, key=self._parse_rc),
                 fov_sel, tp_sel, len(rows),
             )
             if not rows:
@@ -5596,7 +5586,7 @@ class WellViewerApp(QWidget):
         if active_rsets:
             return []
         return sorted(
-            (lbl for lbl in self._selected_wells if lbl in self._well_paths),
+            (lbl for lbl in self._app_state.selection.selected_wells if lbl in self._well_paths),
             key=lambda lbl: self._parse_rc(lbl),
         )
 
@@ -5826,7 +5816,7 @@ class WellViewerApp(QWidget):
         """One ReplicateSet per selection that has ≥1 loaded well (ignores hidden),
         in ``_selections`` order — derived straight from the unified model."""
         out: "List[ReplicateSet]" = []
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             wells = s.get("wells") or []
             if any(w in self._well_paths for w in wells):
                 out.append(ReplicateSet(s.get("name") or "", list(wells)))
@@ -5840,7 +5830,7 @@ class WellViewerApp(QWidget):
         """One ReplicateSet per visible (non-hidden) selection with ≥1 loaded
         well — these are exactly the traces drawn on the plots."""
         out: "List[ReplicateSet]" = []
-        for s in self._selections:
+        for s in self._app_state.selection.selections:
             if s.get("hidden"):
                 continue
             wells = s.get("wells") or []

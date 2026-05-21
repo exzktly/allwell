@@ -33,7 +33,7 @@ def snapshot(app) -> dict:
     """Build a JSON-serialisable view-state dict from current app state."""
     return {
         "schema_version": 1,
-        "selected_wells": sorted(getattr(app, "_selected_wells", set()) or []),
+        "selected_wells": sorted(app._app_state.selection.selected_wells or []),
         "active_centre_tab": _current_leaf_tab(app),
         "active_channel": str(app._app_state.channel.active_channel or ""),
         "active_metric": str(app._app_state.channel.active_metric or ""),

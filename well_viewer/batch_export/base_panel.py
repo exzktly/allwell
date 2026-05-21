@@ -1453,7 +1453,7 @@ class BatchExportPanel(QWidget):
         )
 
     def _log_sample_definitions_snapshot(self, groups_for_export: List[BarGroup]) -> None:
-        sels = list(getattr(self._app, "_selections", []) or [])
+        sels = list(self._app._app_state.selection.selections or [])
         sel_summary = [f"{s.get('name', '?')}={len(s.get('wells') or [])}w" for s in sels]
         export_summary = [f"{g.name}={len(g.wells)}w" for g in groups_for_export]
         _logger.info(

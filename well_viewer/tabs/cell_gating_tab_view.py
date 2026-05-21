@@ -756,7 +756,7 @@ def _cell_gating_source_wells(app) -> list[str]:
         return sorted(ordered, key=app._parse_rc)
 
     selected = [
-        label for label in app._selected_wells
+        label for label in app._app_state.selection.selected_wells
         if label in app._well_paths
     ]
     # Fall back to every loaded well so the CDFs render on the first open

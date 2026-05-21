@@ -165,7 +165,7 @@ def collect_scatter_data(
     else:
         from well_viewer.lineplot_controller import _apply_order as _apply_well_order
         selected_wells = sorted(
-            (lbl for lbl in app._selected_wells if lbl in app._well_paths),
+            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
         selected_wells = _apply_well_order(
@@ -236,7 +236,7 @@ def redraw_scatter(
         return
 
     active_rsets = app._rep_sets_active()
-    selected_wells = [lbl for lbl in app._selected_wells if lbl in app._well_paths]
+    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths]
 
     # Clear existing plot
     app._ax_scatter.clear()
@@ -502,7 +502,7 @@ def collect_scatter_agg_data(
     else:
         # Mode: individual wells
         selected_wells = sorted(
-            (lbl for lbl in app._selected_wells if lbl in app._well_paths),
+            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
         labels_to_process = [(lbl, [lbl]) for lbl in selected_wells]
@@ -623,7 +623,7 @@ def redraw_scatter_agg(
         return
 
     active_rsets = app._rep_sets_active()
-    selected_wells = [lbl for lbl in app._selected_wells if lbl in app._well_paths]
+    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths]
 
     # Clear existing plot
     app._ax_scatter_agg.clear()

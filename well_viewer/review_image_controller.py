@@ -113,17 +113,17 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
         if (
             preview_well
             and preview_well in getattr(app, "_well_paths", {})
-            and preview_well not in app._selected_wells
+            and preview_well not in app._app_state.selection.selected_wells
         ):
             # Go through the single mutation helper so _prev_sel is
             # snapshotted properly. commit=False because we're about to
             # switch tabs anyway — the tab-change handler will trigger
             # the redraw.
             if hasattr(app, "_set_selected_wells"):
-                new_sel = set(app._selected_wells) | {preview_well}
+                new_sel = set(app._app_state.selection.selected_wells) | {preview_well}
                 app._set_selected_wells(new_sel, commit=False)
             else:
-                app._selected_wells.add(preview_well)
+                app._app_state.selection.selected_wells.add(preview_well)
                 if hasattr(app, "_refresh_sidebar_map"):
                     app._refresh_sidebar_map()
         # If the Review CSV tab is already built, pre-point its FOV/TP combos
@@ -237,8 +237,8 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
     fov, tp, nid = app._review_row_keys(row)
     well_tok = str(row.get("well", "")).strip()
     key = well_tok if well_tok in app._well_paths else None
-    if key is None and app._selected_wells:
-        key = sorted(app._selected_wells, key=app._parse_rc)[0]
+    if key is None and app._app_state.selection.selected_wells:
+        key = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)[0]
     if key is None:
         return
 

@@ -80,9 +80,9 @@ def load_directory(app, d: Path, label=None) -> None:
     # DatasetState resets the per-dataset caches (data dir, well paths, row
     # cache, persistence doc) for the switch to the new data directory.
     app._app_state.dataset.begin_load(d)
-    app._selected_wells.clear()
-    app._last_sel = None
-    app._prev_sel = set()
+    app._app_state.selection.selected_wells.clear()
+    app._app_state.selection.last_sel = None
+    app._app_state.selection.prev_sel = set()
     app._bar_order = None
     # Drop the per-channel threshold (min, max) cache; the new dataset's
     # ranges may be completely different.

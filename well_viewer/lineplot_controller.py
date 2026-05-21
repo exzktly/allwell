@@ -260,7 +260,7 @@ def collect_line_series(
 
     # Per-well branch.
     selected = sorted(
-        (lbl for lbl in app._selected_wells if lbl in app._well_paths),
+        (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
         key=lambda lbl: app._parse_rc(lbl),
     )
     ordered_selected = _apply_order(

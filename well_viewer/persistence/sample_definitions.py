@@ -31,7 +31,7 @@ def save_to_pipeline_info(app) -> None:
             "Open a data folder before saving sample definitions.",
         )
         return
-    if getattr(app, "_selections_v2_writes_disabled", False):
+    if app._app_state.selection.v2_writes_disabled:
         QMessageBox.warning(
             app, "Save unavailable",
             "Saved sample definitions couldn't be upgraded earlier this session, "
@@ -44,8 +44,8 @@ def save_to_pipeline_info(app) -> None:
         else getattr(app, "_notes_text", "") or ""
     )
     app._notes_text = notes_text
-    selections = list(getattr(app, "_selections", []) or [])
-    current_id = getattr(app, "_current_selection_id", None)
+    selections = list(app._app_state.selection.selections or [])
+    current_id = app._app_state.selection.current_selection_id
     block = build_sample_definitions_v2(
         app._well_labels, selections, current_id, notes=notes_text,
     )
@@ -68,7 +68,7 @@ def save_to_pipeline_info(app) -> None:
 
 
 def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, dict]:
-    """Parse a sample_definitions/bar_groups block → set ``app._selections`` (the
+    """Parse a sample_definitions/bar_groups block → set ``app._app_state.selection.selections`` (the
     in-memory source of truth). v1 blocks are migrated by ``from_block``.
 
     Returns ``(applied, well_labels_dict)``. On a malformed block / migration
@@ -87,7 +87,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
             "(selections) keys populated; refusing to migrate to avoid data "
             "loss. v2 writes disabled for this session."
         )
-        app._selections_v2_writes_disabled = True
+        app._app_state.selection.v2_writes_disabled = True
         try:
             app._set_status(
                 "Saved sample definitions are in a mixed v1/v2 shape — using "
@@ -112,7 +112,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
     except Exception:  # pragma: no cover - defensive: never crash on bad data
         _logger.exception("Couldn't upgrade saved sample definitions — using "
                           "compatibility mode; the file was left untouched.")
-        app._selections_v2_writes_disabled = True
+        app._app_state.selection.v2_writes_disabled = True
         try:
             app._set_status("Couldn't upgrade saved sample definitions — using "
                             "them in compatibility mode (see log).")
@@ -120,8 +120,8 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
             pass
         return False, {}
 
-    app._selections = selections
-    app._current_selection_id = current_id
+    app._app_state.selection.selections = selections
+    app._app_state.selection.current_selection_id = current_id
     if was_v1:
         # Surface the migration so users know an upgrade happened; the new
         # state will be persisted with a backup the next time they Save.
@@ -255,8 +255,8 @@ def clear_all(app) -> None:
         finally:
             notes_edit.blockSignals(blocked)
 
-    app._selections = []
-    app._current_selection_id = None
+    app._app_state.selection.selections = []
+    app._app_state.selection.current_selection_id = None
 
     app._set_ratio_metrics([])
 

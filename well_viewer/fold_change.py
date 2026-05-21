@@ -326,7 +326,7 @@ def resolve_control_wells(app, control_label: str) -> List[str]:
         if bare in (getattr(app, "_well_paths", None) or {}):
             return [bare]
         return []
-    for s in (getattr(app, "_selections", []) or []):
+    for s in (app._app_state.selection.selections or []):
         if s.get("name") == label:
             wells = [w for w in (s.get("wells") or []) if w in app._well_paths]
             if wells:
@@ -386,7 +386,7 @@ def _label_to_replicate_set(app, label: str):
     """
     if not label:
         return None
-    for s in (getattr(app, "_selections", []) or []):
+    for s in (app._app_state.selection.selections or []):
         if s.get("name") == label:
             wells = [w for w in (s.get("wells") or [])
                      if w in app._well_paths]

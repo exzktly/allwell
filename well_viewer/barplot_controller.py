@@ -469,7 +469,7 @@ def ordered_bar_keys(app) -> list:
         keys = [r.name for r in active_rsets]
     else:
         keys = sorted(
-            (lbl for lbl in app._selected_wells if lbl in app._well_paths),
+            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._well_paths),
             key=lambda lbl: app._parse_rc(lbl),
         )
     if app._bar_order is None:

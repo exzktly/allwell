@@ -514,7 +514,7 @@ def redraw_heatmap(app) -> None:
         )
 
     # Selection rectangles.
-    selected = set(getattr(app, "_selected_wells", set()) or set())
+    selected = set(app._app_state.selection.selected_wells or set())
     for (r, c), wells in cell_well_index.items():
         if any(w in selected for w in wells):
             rect = mpatches.Rectangle(
@@ -633,7 +633,7 @@ def on_heatmap_click(app, event) -> None:
     if not wells_here:
         return
 
-    selected = set(getattr(app, "_selected_wells", set()) or set())
+    selected = set(app._app_state.selection.selected_wells or set())
     modifiers = 0
     try:
         # Matplotlib events expose the GUI event for modifier inspection.
@@ -661,7 +661,7 @@ def on_heatmap_click(app, event) -> None:
     if hasattr(app, "_set_selected_wells"):
         app._set_selected_wells(selected)
     else:
-        app._selected_wells = selected
+        app._app_state.selection.selected_wells = selected
         if hasattr(app, "_redraw"):
             app._redraw()
 

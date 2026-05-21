@@ -449,7 +449,7 @@ def _smfish_show_no_smfish_state(app) -> None:
 
 
 def _smfish_selected_well_token(app) -> str | None:
-    sels = sorted(app._selected_wells, key=lambda lbl: app._parse_rc(lbl))
+    sels = sorted(app._app_state.selection.selected_wells, key=lambda lbl: app._parse_rc(lbl))
     if len(sels) != 1:
         return None
     tok = app._extract_well_token(sels[0]) or sels[0]

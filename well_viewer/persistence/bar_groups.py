@@ -22,8 +22,8 @@ _logger = logging.getLogger("well_viewer")
 def to_payload(app) -> dict:
     """Serialise the app's unified ``selections`` state for ``bar_groups.json``."""
     return _sel.to_bar_groups_payload(
-        list(getattr(app, "_selections", []) or []),
-        getattr(app, "_current_selection_id", None),
+        list(app._app_state.selection.selections or []),
+        app._app_state.selection.current_selection_id,
     )
 
 
@@ -32,13 +32,13 @@ def from_dict(app, data) -> None:
     v1 is migrated by ``from_block``."""
     tok_to_label = getattr(app, "_tok_to_label", {})
     selections, current_id, _labels, _notes = _sel.from_block(data, tok_to_label=tok_to_label)
-    app._selections = selections
-    app._current_selection_id = current_id
+    app._app_state.selection.selections = selections
+    app._app_state.selection.current_selection_id = current_id
 
 
 def save_via_dialog(app) -> None:
     """Prompt the user for a JSON path and write the current selections."""
-    if not getattr(app, "_selections", None):
+    if not app._app_state.selection.selections:
         QMessageBox.warning(
             app, "Nothing to save",
             "Define at least one selection before saving.",
@@ -83,10 +83,10 @@ def load_via_dialog(app) -> None:
             f"Could not read group definitions:\n{exc}",
         )
         return
-    if app._selections:
+    if app._app_state.selection.selections:
         resp = QMessageBox.question(
             app, "Replace existing groups?",
-            f"Loading will replace the current {len(app._selections)} "
+            f"Loading will replace the current {len(app._app_state.selection.selections)} "
             f"group(s).  Continue?",
             QMessageBox.Yes | QMessageBox.No,
         )
@@ -95,4 +95,4 @@ def load_via_dialog(app) -> None:
     from_dict(app, data)
     app._rebuild_all()
     _logger.info("Bar groups loaded from %s (%d group(s))",
-                 path_str, len(app._selections))
+                 path_str, len(app._app_state.selection.selections))

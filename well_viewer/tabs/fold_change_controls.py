@@ -64,7 +64,7 @@ def _all_member_labels(app) -> list[str]:
     names: list[str] = []
     repset_names: set[str] = set()
     seen: set[str] = set()
-    for s in (getattr(app, "_selections", []) or []):
+    for s in (app._app_state.selection.selections or []):
         if s.get("hidden"):
             continue
         name = s.get("name") or ""
@@ -76,7 +76,7 @@ def _all_member_labels(app) -> list[str]:
             seen.add(name)
             repset_names.add(name)
     well_paths = getattr(app, "_well_paths", None) or {}
-    for w in sorted(getattr(app, "_selected_wells", []) or [], key=lambda x: x):
+    for w in sorted(app._app_state.selection.selected_wells or [], key=lambda x: x):
         if w in well_paths and w not in seen:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
             names.append(entry)

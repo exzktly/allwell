@@ -1067,10 +1067,10 @@ class ExportStyleSidebar(QWidget):
             self._line_order_wells_list.blockSignals(True)
             self._line_order_wells_list.clear()
             # Per-well code paths in line/bar/scatter all derive from
-            # ``app._selected_wells`` sorted by ``_parse_rc``; mirror that
+            # ``app._app_state.selection.selected_wells`` sorted by ``_parse_rc``; mirror that
             # exactly so the order list matches the plot.
             try:
-                raw = getattr(app, "_selected_wells", set()) or set()
+                raw = app._app_state.selection.selected_wells or set()
                 parse_rc = getattr(app, "_parse_rc", None)
                 if callable(parse_rc):
                     selected = sorted(raw, key=parse_rc)

@@ -409,7 +409,7 @@ def _on_autopopulate(app) -> None:
     has more wells than the current grid can hold.
     """
     layout = _ensure_sidebar_layout(app)
-    selected = list(getattr(app, "_selected_wells", set()) or [])
+    selected = list(app._app_state.selection.selected_wells or [])
     if not selected:
         return
     parse_rc = getattr(app, "_parse_rc", None)

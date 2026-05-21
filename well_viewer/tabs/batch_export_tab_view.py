@@ -133,7 +133,8 @@ def _mode_button(parent: QWidget, text: str, command) -> QPushButton:
     return b
 
 
-def build_batch_export_tab(app, parent: QWidget) -> None:
+def build_batch_export_tab(ctx, parent: QWidget) -> None:
+    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)

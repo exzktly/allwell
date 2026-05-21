@@ -22,8 +22,9 @@ from well_viewer.crop_tool import CropTool
 from well_viewer.ui_helpers import btn_primary, btn_secondary
 
 
-def build_image_table_tab(app, parent: QWidget) -> None:
+def build_image_table_tab(ctx, parent: QWidget) -> None:
     """Construct the Image Table tab inside *parent*."""
+    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)

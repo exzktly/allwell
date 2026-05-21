@@ -163,12 +163,13 @@ class GatingWorker(QThread):
 # ── builder ───────────────────────────────────────────────────────────────
 
 
-def build_cell_gating_tab(app, parent: QWidget) -> None:
+def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     """Build the Cell Gating tab inside *parent*.
 
     State and widget handles are attached to ``app`` under the
     ``_cell_gating_*`` prefix.
     """
+    app = ctx.app  # transitional DI seam
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
 

@@ -24,7 +24,8 @@ _CMAP_OPTIONS = ["viridis", "magma", "coolwarm", "RdYlBu_r", "Greys"]
 _SCALE_OPTIONS = ["Auto", "Fixed"]
 
 
-def build_heatmap_tab(app, parent: QWidget) -> None:
+def build_heatmap_tab(ctx, parent: QWidget) -> None:
+    app = ctx.app  # transitional DI seam
     # Defer matplotlib + heatmap_controller imports until the tab actually
     # builds. heatmap_controller pulls in matplotlib.patches and numpy at
     # module load, so importing it lazily keeps utility entry points like

@@ -104,6 +104,7 @@ from well_viewer.image_resolver import (
     output_suffixes_for_kind as _output_suffixes_for_kind,
 )
 from well_viewer.state import AppState, EventBus
+from well_viewer.viewer_context import ViewerContext
 from well_viewer.views.widget_registry import WidgetRegistry
 
 
@@ -688,6 +689,15 @@ class WellViewerApp(QWidget):
         # legacy ``app._<widget>`` reads to it so reader call sites are
         # untouched while writers migrate tab by tab.
         self._widget_registry = WidgetRegistry()
+        # The dependency-injection context handed to tab builders and
+        # controllers in place of ``self``. Bundles the typed state, the bus,
+        # and the widget registry (+ a transitional ``app`` escape hatch).
+        self._ctx = ViewerContext(
+            app=self,
+            state=self._app_state,
+            bus=self._event_bus,
+            widgets=self._widget_registry,
+        )
 
         # Dataset state — data dir, well paths, row cache, timepoint / FOV
         # caches, pipeline_info, persistence doc — lives in
@@ -1777,7 +1787,7 @@ class WellViewerApp(QWidget):
                 cell_gating_load_cell_areas,
                 cell_gating_load_threshold_frac_on,
             )
-            build_cell_gating_tab(self, frame)
+            build_cell_gating_tab(self._ctx, frame)
             if self._well_paths:
                 try:
                     cell_gating_load_cell_areas(self)
@@ -5216,7 +5226,7 @@ class WellViewerApp(QWidget):
 
     def _build_review_csv_tab(self, parent) -> None:
         from well_viewer.tabs.review_csv_tab_view import build_review_csv_tab as _v
-        _v(self, parent)
+        _v(self._ctx, parent)
 
     def _refresh_review_csv(self) -> None:
         if not hasattr(self, "_review_csv_table"):

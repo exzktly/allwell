@@ -174,23 +174,23 @@ def build_centre(app, parent: QWidget) -> None:
     # tab in the first group is the initial active tab and is built eagerly.
     def _line_graphs_eager() -> None:
         from well_viewer.tabs.line_graphs_tab_view import build_line_graphs_tab
-        build_line_graphs_tab(app, tab_frames["Line Graphs"])
+        build_line_graphs_tab(app._ctx, tab_frames["Line Graphs"])
 
     def _build_bar() -> None:
         from well_viewer.tabs.bar_plots_tab_view import build_bar_plots_tab
-        build_bar_plots_tab(app, tab_frames["Bar Plots"])
+        build_bar_plots_tab(app._ctx, tab_frames["Bar Plots"])
 
     def _build_scatter() -> None:
         from well_viewer.tabs.scatter_tab_view import build_scatter_tab
-        build_scatter_tab(app, tab_frames["Scatter Plot"])
+        build_scatter_tab(app._ctx, tab_frames["Scatter Plot"])
 
     def _build_distribution() -> None:
         from well_viewer.tabs.distribution_tab_view import build_distribution_tab
-        build_distribution_tab(app, tab_frames["Distribution"])
+        build_distribution_tab(app._ctx, tab_frames["Distribution"])
 
     def _build_heatmap() -> None:
         from well_viewer.tabs.heatmap_tab_view import build_heatmap_tab
-        build_heatmap_tab(app, tab_frames["Heat Map"])
+        build_heatmap_tab(app._ctx, tab_frames["Heat Map"])
 
     # Register plot sub-tab builders in pending now so the background drain
     # can populate their frames while the app is starting up.  _build_plotting
@@ -602,7 +602,7 @@ def build_centre(app, parent: QWidget) -> None:
     def _build_image_table() -> None:
         from well_viewer.tabs.image_table_tab_view import build_image_table_tab
         from well_viewer.views.image_table_picker_view import build_image_table_picker
-        build_image_table_tab(app, tab_frames["Image Table"])
+        build_image_table_tab(app._ctx, tab_frames["Image Table"])
         build_image_table_picker(app, app._sidebar_image_table_frame)
 
     def _build_cell_segmentation() -> None:
@@ -664,7 +664,7 @@ def build_centre(app, parent: QWidget) -> None:
                 return
             try:
                 from well_viewer.tabs.smfish_tab_view import build_smfish_tab
-                build_smfish_tab(app, smfish_page)
+                build_smfish_tab(app._ctx, smfish_page)
                 app._cell_segmentation_smfish_built = True
             except Exception:
                 _logger.exception("Deferred build for smFISH sub-tab failed")
@@ -712,7 +712,7 @@ def build_centre(app, parent: QWidget) -> None:
 
     def _build_batch_export() -> None:
         from well_viewer.tabs.batch_export_tab_view import build_batch_export_tab
-        build_batch_export_tab(app, tab_frames["Batch Export"])
+        build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         ("Analysis", [

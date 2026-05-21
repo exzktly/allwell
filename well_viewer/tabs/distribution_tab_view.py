@@ -20,7 +20,8 @@ _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per
 _LAYOUT_OPTIONS = ["Overlay", "Faceted (one per group)"]
 
 
-def build_distribution_tab(app, parent: QWidget) -> None:
+def build_distribution_tab(ctx, parent: QWidget) -> None:
+    app = ctx.app  # transitional DI seam
     from widgets.plot_card import PlotCard
 
     layout = parent.layout()

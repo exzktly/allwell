@@ -757,85 +757,31 @@ class WellViewerApp(QWidget):
         # plotting-tab solo-well overrides all live in
         # ``self._app_state.selection`` (see the shims below).
 
-        # Preview state
-        self._preview_selected_well: Optional[str] = None
+        # Preview / Review-image state — selected well, image maps, view
+        # transform, drag bookkeeping, decoded-frame caches, overlay colours —
+        # lives in ``self._app_state.preview`` and ``self._app_state.review_image``
+        # (well_viewer/state/review_image.py); see the @property shims below.
+        # Widget handles and the lazily-built montage arrays stay here.
         self._preview_fov_cb = None
-        self._montage_photos: List[object] = []
-        self._preview_fluor:   Dict[Tuple[str,str], ImgRef] = {}
-        self._preview_overlay: Dict[Tuple[str,str], ImgRef] = {}
-        self._preview_mask:    Dict[Tuple[str,str], ImgRef] = {}
         self._review_image_tp_cb = None
-        self._review_image_selected_nucleus: Optional[int] = None
-        self._review_image_nucleus_to_iid: Dict[int, str] = {}
-        self._review_image_include_edit_mode: bool = False
-        # Rubber-band rectangle state for box-delete in include-edit mode.
-        # Anchor is in label-local pixels; the QRubberBand is parented to
-        # _review_image_label so it scrolls with the image and is unaffected
-        # by window position. Coordinates are converted to mask-array space
-        # at release time using the current _review_image_scale.
-        self._review_image_box_anchor: Optional[Tuple[float, float]] = None
-        self._review_image_box_active: bool = False
+        # Rubber-band rectangle for box-delete in include-edit mode; the
+        # QRubberBand is parented to _review_image_label so it scrolls with
+        # the image. Coordinates convert to mask-array space at release time.
         self._review_image_rubber_band: Optional[QRubberBand] = None
         self._review_included_overrides: Dict[Tuple[str, str, str, str], str] = {}
         self._review_csv_lookup_context: Dict[str, str] = {}
-        self._review_image_zoom: float = 1.0
-        self._review_image_pan_x: float = 0.0
-        self._review_image_pan_y: float = 0.0
-        self._review_image_dragging: bool = False
-        self._review_image_drag_moved: bool = False
-        self._review_image_drag_last_xy: Tuple[int, int] = (0, 0)
-        self._review_image_base_pil = None
-        self._review_image_is_tif: bool = False
-        self._review_image_lut_by_channel: Dict[str, Tuple[float, float]] = {}
-        self._review_image_last_fluor_arr = None
-        self._review_image_preserve_view_on_refresh: bool = False
-        # Caches for the Review Image hot path. The frame cache stores the
-        # decoded fluorescence + label arrays plus the boundary mask for the
-        # currently-displayed (fluor_ref, mask_ref) pair; LUT edits, channel
-        # switches that reuse the same arrays, and cell toggles all reuse it
-        # instead of re-decoding from disk and re-running the boundary
-        # convolution. The include cache memoises {nucleus_id -> included}
-        # per (well, fov, tp) so a refresh can skip the row-iteration loop
-        # unless the user has actually toggled inclusion or gating ran.
-        self._review_image_frame_cache: Optional[dict] = None
-        self._review_image_include_cache: Dict[Tuple[str, str, str, int], Dict[int, bool]] = {}
-        self._review_image_override_version: int = 0
-        # Debounce flag for cell_overrides.json autosave; coalesces bursts of
-        # toggles into a single disk write via QTimer.singleShot.
+        # Debounce flags for the data-dir autosaves; each coalesces a burst of
+        # edits into a single QTimer.singleShot disk write.
         self._cell_overrides_save_pending: bool = False
-        # User-controlled Line-tab draw order lives in ``self._app_state.plot``
-        # (_line_order_rsets / _line_order_wells shims below).
         self._line_order_save_pending: bool = False
         self._notes_text: str = ""
         self._notes_save_pending: bool = False
-        # Debounce flags for ratios.json + heatmap_layouts.json autosaves;
-        # ratio-panel field edits and heatmap-layout drags both fire saves
-        # per signal — without debouncing they hit disk dozens of times
-        # per second.
         self._ratios_save_pending: bool = False
         self._heatmap_layouts_save_pending: bool = False
-        # When True, the Review Image tab loads the unprocessed fluorescence
-        # frame; when False (default) it prefers the top-hat-filtered output.
-        self._review_image_show_raw: bool = False
         self._review_image_raw_btn = None
-        # User-customizable colors for the Review Image overlay. Tint scales
-        # the grayscale fluorescence channel-by-channel; (255, 255, 255)
-        # leaves the image fully grayscale.
-        self._review_image_boundary_color: Tuple[int, int, int] = (255, 64, 64)
-        self._review_image_selected_color: Tuple[int, int, int] = (255, 230, 64)
-        self._review_image_tint_color: Tuple[int, int, int] = (255, 255, 255)
         self._review_image_color_swatches: Dict[str, object] = {}
-        # Binary-mask visualization: when True, render cells as white (above
-        # threshold per the bar-plot gating logic) or black (below) on a
-        # black background, instead of the grayscale + colored boundary view.
-        self._review_image_binary_mask: bool = False
         self._review_image_binary_btn = None
-        # When False, cell boundary outlines are hidden on the canvas.
-        self._review_image_show_outline: bool = True
         self._review_image_outline_btn = None
-        # Cache for the {nid -> above_threshold} map per (well, fov, tp,
-        # override_version, val_col, threshold, area_thr, fluor_gates).
-        self._review_image_threshold_map_cache: Dict[Tuple, Dict[int, bool]] = {}
         # Movie Montage square-region crop. State lives in a CropTool
         # instance; legacy attribute names are preserved as read-only
         # delegates further down so existing readers (export_service,
@@ -855,12 +801,13 @@ class WellViewerApp(QWidget):
 
     # ── Domain-state shims (runtime_app teardown) ────────────────────────────
     # Channel/ratio/threshold (Phase 1), plate selection (Phase 2), dataset
-    # (Phase 3), plot options (Phase 4) and statistics (Phase 7) moved into
-    # ``self._app_state`` — typed ChannelState / SelectionState / DatasetState
-    # / PlotState / StatsState. These properties forward the legacy
-    # ``self._*`` names so existing call sites are untouched; the state
-    # objects are the single source of truth — no duplicated storage.
-    # Generated from one factory rather than ~48 hand-copied property pairs.
+    # (Phase 3), plot options (Phase 4), statistics (Phase 7) and the
+    # review-image / preview state (Phase 8) moved into ``self._app_state`` —
+    # typed ChannelState / SelectionState / DatasetState / PlotState /
+    # StatsState / ReviewImageState / PreviewState. These properties forward
+    # the legacy ``self._*`` names so existing call sites are untouched; the
+    # state objects are the single source of truth — no duplicated storage.
+    # Generated from one factory rather than ~79 hand-copied property pairs.
     # Deleted once call sites read the state objects directly.
 
     def _app_state_shim(_domain: str, _field: str) -> property:
@@ -925,6 +872,39 @@ class WellViewerApp(QWidget):
     _stats_cache = _app_state_shim("stats", "cache")
     _stats_drag_adding = _app_state_shim("stats", "drag_adding")
     _stats_drag_visited = _app_state_shim("stats", "drag_visited")
+
+    _review_image_selected_nucleus = _app_state_shim("review_image", "selected_nucleus")
+    _review_image_nucleus_to_iid = _app_state_shim("review_image", "nucleus_to_iid")
+    _review_image_include_edit_mode = _app_state_shim("review_image", "include_edit_mode")
+    _review_image_box_anchor = _app_state_shim("review_image", "box_anchor")
+    _review_image_box_active = _app_state_shim("review_image", "box_active")
+    _review_image_zoom = _app_state_shim("review_image", "zoom")
+    _review_image_pan_x = _app_state_shim("review_image", "pan_x")
+    _review_image_pan_y = _app_state_shim("review_image", "pan_y")
+    _review_image_preserve_view_on_refresh = _app_state_shim("review_image", "preserve_view_on_refresh")
+    _review_image_dragging = _app_state_shim("review_image", "dragging")
+    _review_image_drag_moved = _app_state_shim("review_image", "drag_moved")
+    _review_image_drag_last_xy = _app_state_shim("review_image", "drag_last_xy")
+    _review_image_base_pil = _app_state_shim("review_image", "base_pil")
+    _review_image_is_tif = _app_state_shim("review_image", "is_tif")
+    _review_image_last_fluor_arr = _app_state_shim("review_image", "last_fluor_arr")
+    _review_image_lut_by_channel = _app_state_shim("review_image", "lut_by_channel")
+    _review_image_frame_cache = _app_state_shim("review_image", "frame_cache")
+    _review_image_include_cache = _app_state_shim("review_image", "include_cache")
+    _review_image_threshold_map_cache = _app_state_shim("review_image", "threshold_map_cache")
+    _review_image_override_version = _app_state_shim("review_image", "override_version")
+    _review_image_show_raw = _app_state_shim("review_image", "show_raw")
+    _review_image_binary_mask = _app_state_shim("review_image", "binary_mask")
+    _review_image_show_outline = _app_state_shim("review_image", "show_outline")
+    _review_image_boundary_color = _app_state_shim("review_image", "boundary_color")
+    _review_image_selected_color = _app_state_shim("review_image", "selected_color")
+    _review_image_tint_color = _app_state_shim("review_image", "tint_color")
+
+    _preview_selected_well = _app_state_shim("preview", "selected_well")
+    _preview_fluor = _app_state_shim("preview", "fluor")
+    _preview_overlay = _app_state_shim("preview", "overlay")
+    _preview_mask = _app_state_shim("preview", "mask")
+    _montage_photos = _app_state_shim("preview", "montage_photos")
 
     del _app_state_shim
 

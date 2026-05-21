@@ -855,13 +855,13 @@ class WellViewerApp(QWidget):
 
     # ── Domain-state shims (runtime_app teardown) ────────────────────────────
     # Channel/ratio/threshold (Phase 1), plate selection (Phase 2), dataset
-    # (Phase 3) and plot options (Phase 4) moved into ``self._app_state`` —
-    # typed ChannelState / SelectionState / DatasetState / PlotState. These
-    # properties forward the legacy ``self._*`` names so existing call sites
-    # are untouched; the state objects are the single source of truth — no
-    # duplicated storage. Generated from one factory rather than ~43
-    # hand-copied property pairs. Deleted once call sites read the state
-    # objects directly.
+    # (Phase 3), plot options (Phase 4) and statistics (Phase 7) moved into
+    # ``self._app_state`` — typed ChannelState / SelectionState / DatasetState
+    # / PlotState / StatsState. These properties forward the legacy
+    # ``self._*`` names so existing call sites are untouched; the state
+    # objects are the single source of truth — no duplicated storage.
+    # Generated from one factory rather than ~48 hand-copied property pairs.
+    # Deleted once call sites read the state objects directly.
 
     def _app_state_shim(_domain: str, _field: str) -> property:
         def _get(self):
@@ -919,6 +919,12 @@ class WellViewerApp(QWidget):
     _fc_control_label = _app_state_shim("plot", "fc_control_label")
     _fc_vs_t0_on = _app_state_shim("plot", "fc_vs_t0_on")
     _fc_dirty_scopes = _app_state_shim("plot", "fc_dirty_scopes")
+
+    _stats_groups = _app_state_shim("stats", "groups")
+    _stats_active_grp = _app_state_shim("stats", "active_grp")
+    _stats_cache = _app_state_shim("stats", "cache")
+    _stats_drag_adding = _app_state_shim("stats", "drag_adding")
+    _stats_drag_visited = _app_state_shim("stats", "drag_visited")
 
     del _app_state_shim
 

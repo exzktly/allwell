@@ -403,15 +403,12 @@ import copy as _copy
 
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from well_viewer.batch_models import BarGroup
 from well_viewer.plate_layout import WELL_COLORS
 from well_viewer.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
 
 
 def stats_active_group(app):
-    if 0 <= app._stats_active_grp < len(app._stats_groups):
-        return app._stats_groups[app._stats_active_grp]
-    return None
+    return app._app_state.stats.active_group()
 
 
 def stats_apply_drag(app, tok: str) -> None:
@@ -517,42 +514,35 @@ def stats_refresh_group_list(app) -> None:
 
 
 def stats_select_grp(app, idx: int) -> None:
-    app._stats_active_grp = idx
+    app._app_state.stats.select_group(idx)
     stats_refresh_group_list(app)
 
 
 def stats_grp_add(app) -> None:
-    n = len(app._stats_groups) + 1
-    app._stats_groups.append(BarGroup(f"Group {n}"))
-    app._stats_active_grp = len(app._stats_groups) - 1
+    app._app_state.stats.add_group()
     stats_refresh_group_list(app)
 
 
 def stats_grp_delete(app, idx: int) -> None:
-    if 0 <= idx < len(app._stats_groups):
-        app._stats_groups.pop(idx)
-        app._stats_active_grp = max(0, min(
-            app._stats_active_grp, len(app._stats_groups) - 1))
+    if app._app_state.stats.delete_group(idx):
         stats_refresh_group_list(app)
 
 
 def stats_grp_rename(app, idx: int) -> None:
-    if not (0 <= idx < len(app._stats_groups)):
+    stats = app._app_state.stats
+    if not (0 <= idx < len(stats.groups)):
         return
-    old = app._stats_groups[idx].name
+    old = stats.groups[idx].name
     name = _ask_name_dialog(app, title="Rename group", prompt="Group name:", default=old)
-    if name:
-        app._stats_groups[idx].name = name
+    if name and stats.rename_group(idx, name):
         stats_refresh_group_list(app)
 
 
 def stats_grp_clear_all(app) -> None:
-    app._stats_groups.clear()
-    app._stats_active_grp = -1
+    app._app_state.stats.clear_groups()
     stats_refresh_group_list(app)
 
 
 def stats_sync_from_app(app) -> None:
-    app._stats_groups = _copy.deepcopy(app._groups_from_rep_sets())
-    app._stats_active_grp = 0 if app._stats_groups else -1
+    app._app_state.stats.set_groups(_copy.deepcopy(app._groups_from_rep_sets()))
     stats_refresh_group_list(app)

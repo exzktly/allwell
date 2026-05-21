@@ -18,8 +18,9 @@ from well_viewer.state.dataset import DatasetState
 from well_viewer.state.event_bus import EventBus
 from well_viewer.state.plot import PlotState
 from well_viewer.state.selection import SelectionState
+from well_viewer.state.stats import StatsState
 
 __all__ = [
     "AppState", "ChannelState", "DatasetState", "EventBus", "PlotState",
-    "SelectionState",
+    "SelectionState", "StatsState",
 ]

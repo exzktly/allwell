@@ -29,10 +29,9 @@ _HARD_FAIL = False
 # Ratcheting ceilings. Re-measured each phase as the teardown proceeds.
 # Phase 0 baseline: 7028 lines / 166 attrs. Line count fluctuates around the
 # baseline as transitional shims are added and method bodies extracted; the
-# attr count is the truer signal and falls steeply once widget handles and
-# the remaining call sites migrate.
-RUNTIME_APP_LINE_BUDGET = 7028
-RUNTIME_APP_ATTR_BUDGET = 144
+# attr count is the truer signal — down to 130 after Phase 8.
+RUNTIME_APP_LINE_BUDGET = 7008
+RUNTIME_APP_ATTR_BUDGET = 130
 
 
 def _enforce(ok: bool, message: str) -> None:

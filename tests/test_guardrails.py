@@ -27,10 +27,10 @@ STATE_DIR = REPO_ROOT / "well_viewer" / "state"
 _HARD_FAIL = False
 
 # Ratcheting ceilings. Re-measured and lowered as the teardown proceeds.
-# Phase 0 baseline: 7028 lines / 166 attrs. Phase 3 dropped below baseline as
-# the DatasetState rebuild methods left the file.
-RUNTIME_APP_LINE_BUDGET = 7005
-RUNTIME_APP_ATTR_BUDGET = 151
+# Phase 0 baseline: 7028 lines / 166 attrs. The file has been below baseline
+# since Phase 3 as extracted method bodies outweigh the transitional shims.
+RUNTIME_APP_LINE_BUDGET = 6998
+RUNTIME_APP_ATTR_BUDGET = 143
 
 
 def _enforce(ok: bool, message: str) -> None:

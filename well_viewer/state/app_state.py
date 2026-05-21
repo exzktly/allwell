@@ -6,7 +6,7 @@ Each domain object owns its own invariants; ``AppState`` only holds them so
 ``WellViewerApp`` can construct and pass them as a unit.
 
 It grows one field per phase of the runtime_app teardown — ``channel``,
-``selection`` and ``dataset`` so far; ``plot``, … follow.
+``selection``, ``dataset`` and ``plot`` so far.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from well_viewer.state.channel import ChannelState
 from well_viewer.state.dataset import DatasetState
+from well_viewer.state.plot import PlotState
 from well_viewer.state.selection import SelectionState
 
 
@@ -25,3 +26,4 @@ class AppState:
     channel: ChannelState = field(default_factory=ChannelState)
     selection: SelectionState = field(default_factory=SelectionState)
     dataset: DatasetState = field(default_factory=DatasetState)
+    plot: PlotState = field(default_factory=PlotState)

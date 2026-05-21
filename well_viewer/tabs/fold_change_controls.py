@@ -186,19 +186,16 @@ def set_fold_change_state(
     into the widget that just wrote the value (it already holds it,
     and re-applying could yank an open popup).
     """
-    if vs_control_on is not None:
-        app._fc_vs_control_on = bool(vs_control_on)
-    if control_label is not None:
-        # Normalize: drop the disambiguation suffix in storage so the
-        # underlying state stays a bare well token / rep-set name.
-        # ``resolve_control_wells`` would handle the suffix too, but
-        # we'd rather not push the UI artefact down the stack.
-        label = control_label
-        if label.endswith(_WELL_DISAMBIG_SUFFIX):
-            label = label[: -len(_WELL_DISAMBIG_SUFFIX)]
-        app._fc_control_label = label
-    if vs_t0_on is not None:
-        app._fc_vs_t0_on = bool(vs_t0_on)
+    # Normalize the control label here (UI layer): drop the disambiguation
+    # suffix so the stored state stays a bare well token / rep-set name —
+    # PlotState.set_fold_change keeps the UI artefact out of the state object.
+    if control_label is not None and control_label.endswith(_WELL_DISAMBIG_SUFFIX):
+        control_label = control_label[: -len(_WELL_DISAMBIG_SUFFIX)]
+    app._app_state.plot.set_fold_change(
+        vs_control_on=vs_control_on,
+        control_label=control_label,
+        vs_t0_on=vs_t0_on,
+    )
 
     _sync_widgets_to_state(app, skip_scope=initiating_scope)
 
@@ -208,6 +205,8 @@ def set_fold_change_state(
     # user looks at the other tab. Closes the deferred 'redraw only
     # visible tab' item from the refactor plan.
     redraw_scopes_or_defer(app)
+    # Announce on the bus. Additive — the explicit redraw above still runs.
+    app._event_bus.plot_options_changed.emit(app._app_state.plot)
 
 
 def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) -> None:

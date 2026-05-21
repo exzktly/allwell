@@ -706,31 +706,21 @@ class WellViewerApp(QWidget):
         self._view_state_pending: Optional[dict] = None
 
         # Plot controls — widgets are assigned in _build_ui; keep placeholders
-        # until then so callers can inspect default state. Threshold range
-        # state lives in ``self._app_state.channel`` (see the shims below).
-        # Qt: concrete widgets are assigned in _build_ui() / view builders.
-        # Provide plain-Python defaults so early callers before _build_ui get sane values.
-        # SEM/SD toggle state — one bool drives every per-toolbar SEM button.
-        # attach_plot_toolbar() registers each button in _sem_btns, so we must
-        # initialize both BEFORE any plot tab is built.
-        self._use_sem = True
+        # until then so callers can inspect default state. Plot options
+        # (SEM/SD, per-FOV replicates, legend visibility, draw order,
+        # fold-change) live in ``self._app_state.plot`` — see the shims below.
+        # The button/observer lists below stay here: they are widget handles,
+        # not state. attach_plot_toolbar() registers each SEM button in
+        # _sem_btns, so these must exist BEFORE any plot tab is built.
         self._sem_btns: List = []
         self._sem_btn = None
         # Observers notified after _toggle_sem flips the state — for v2 widgets
         # (e.g. the Statistics SegmentedControl in ExportStyleSidebar) that don't
         # share the QPushButton API _sem_btns assumes.
         self._sem_observers: List = []   # callables (use_sem: bool) -> None
-        # Per-FOV replicate toggle. When True (and no replicate sets are
-        # active), the bar/line plots compute the error band across per-FOV
-        # means within each well rather than across individual cells. The
-        # toggle is silently ignored whenever replicate sets are defined.
-        self._use_fov_replicates = False
         self._fov_btns: List = []
         self._fov_btn = None
         self._fov_observers: List = []   # callables (use_fov: bool) -> None
-        self._legend_visible: Dict[str, bool] = {
-            "mean": True, "frac": True, "cdf": True,
-        }
         # Channel / timepoint comboboxes are assigned to these attrs in the view builders.
         self._plot_chan_cb = None
         self._montage_chan_cb = None
@@ -743,14 +733,8 @@ class WellViewerApp(QWidget):
         self._bar_ylim_mean_hi_edit = None
         self._bar_ylim_frac_lo_edit = None
         self._bar_ylim_frac_hi_edit = None
-        self._bar_order: Optional[List] = None
-        # Fold-change normalization state (shared by Bar / Line tabs). Two
-        # independent toggles — they may be combined. The Bar / Line batch
-        # export panels keep their own per-panel mirror of this state so
-        # batch jobs aren't tied to whatever the on-screen plot has set.
-        self._fc_vs_control_on: bool = False
-        self._fc_control_label: str = ""
-        self._fc_vs_t0_on: bool = False
+        # Draw order and fold-change normalization state live in
+        # ``self._app_state.plot`` (well_viewer/state/plot.py) — see the shims.
         # Plate selection and the unified saved-selections ("v2") model now
         # live in ``self._app_state.selection`` (well_viewer/state/selection.py).
         # ``_selections`` / ``_selected_wells`` / ``_active_solo_wells`` etc.
@@ -813,11 +797,8 @@ class WellViewerApp(QWidget):
         # Debounce flag for cell_overrides.json autosave; coalesces bursts of
         # toggles into a single disk write via QTimer.singleShot.
         self._cell_overrides_save_pending: bool = False
-        # User-controlled draw order for the Line Plot tab. Empty list ⇒ use
-        # natural order (replicate-set list order or selection order). Non-empty
-        # entries are drawn first in saved order; unknown items append at end.
-        self._line_order_rsets: list[str] = []
-        self._line_order_wells: list[str] = []
+        # User-controlled Line-tab draw order lives in ``self._app_state.plot``
+        # (_line_order_rsets / _line_order_wells shims below).
         self._line_order_save_pending: bool = False
         self._notes_text: str = ""
         self._notes_save_pending: bool = False
@@ -867,13 +848,14 @@ class WellViewerApp(QWidget):
             QTimer.singleShot(100, lambda: self._load_path(data_path))
 
     # ── Domain-state shims (runtime_app teardown) ────────────────────────────
-    # Channel / ratio / threshold state (Phase 1) and plate-selection state
-    # (Phase 2) moved into ``self._app_state`` (typed ChannelState /
-    # SelectionState). These properties forward the legacy ``self._*`` names so
-    # existing call sites are untouched; the state objects are the single
-    # source of truth — no duplicated storage. Generated from one factory
-    # rather than ~21 hand-copied property pairs. Deleted once call sites read
-    # the state objects directly.
+    # Channel/ratio/threshold (Phase 1), plate selection (Phase 2), dataset
+    # (Phase 3) and plot options (Phase 4) moved into ``self._app_state`` —
+    # typed ChannelState / SelectionState / DatasetState / PlotState. These
+    # properties forward the legacy ``self._*`` names so existing call sites
+    # are untouched; the state objects are the single source of truth — no
+    # duplicated storage. Generated from one factory rather than ~43
+    # hand-copied property pairs. Deleted once call sites read the state
+    # objects directly.
 
     def _app_state_shim(_domain: str, _field: str) -> property:
         def _get(self):
@@ -920,6 +902,17 @@ class WellViewerApp(QWidget):
     _well_labels = _app_state_shim("dataset", "well_labels")
     _fov_tp_extractor = _app_state_shim("dataset", "fov_tp_extractor")
     _persistence_doc = _app_state_shim("dataset", "persistence_doc")
+
+    _use_sem = _app_state_shim("plot", "use_sem")
+    _use_fov_replicates = _app_state_shim("plot", "use_fov_replicates")
+    _legend_visible = _app_state_shim("plot", "legend_visible")
+    _bar_order = _app_state_shim("plot", "bar_order")
+    _line_order_rsets = _app_state_shim("plot", "line_order_rsets")
+    _line_order_wells = _app_state_shim("plot", "line_order_wells")
+    _fc_vs_control_on = _app_state_shim("plot", "fc_vs_control_on")
+    _fc_control_label = _app_state_shim("plot", "fc_control_label")
+    _fc_vs_t0_on = _app_state_shim("plot", "fc_vs_t0_on")
+    _fc_dirty_scopes = _app_state_shim("plot", "fc_dirty_scopes")
 
     del _app_state_shim
 
@@ -3922,8 +3915,7 @@ class WellViewerApp(QWidget):
 
     def _toggle_sem(self) -> None:
         self._invalidate_stats_cache()
-        self._use_sem = not self._use_sem
-        is_sem = self._use_sem
+        is_sem = self._app_state.plot.toggle_sem()
         text = "SEM" if is_sem else "SD"
         variant = "sem" if is_sem else "sem_warn"
         for btn in list(getattr(self, "_sem_btns", []) or []):
@@ -3939,6 +3931,7 @@ class WellViewerApp(QWidget):
         self._redraw()
         if self._current_centre_tab() == "Bar Plots":
             self._redraw_bars()
+        self._event_bus.plot_options_changed.emit(self._app_state.plot)
 
     # ── Per-FOV-replicates toggle ────────────────────────────────────────────
 
@@ -3953,7 +3946,7 @@ class WellViewerApp(QWidget):
         return bool(self._use_fov_replicates)
 
     def _toggle_fov_replicates(self) -> None:
-        self._use_fov_replicates = not self._use_fov_replicates
+        self._app_state.plot.toggle_fov_replicates()
         self._invalidate_stats_cache()
         self._refresh_fov_btn_state()
         self._redraw()

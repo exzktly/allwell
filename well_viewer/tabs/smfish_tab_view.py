@@ -58,12 +58,13 @@ _NO_SMFISH_MESSAGE = (
 )
 
 
-def build_smfish_tab(app, parent: QWidget) -> None:
+def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
 
     State and widget handles are attached to ``app`` under the
     ``_smfish_*`` prefix.
     """
+    app = ctx.app  # transitional DI seam
     # Defer matplotlib imports until the tab actually builds. Loading the
     # QtAgg backend at module import time was a measurable chunk of startup.
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas

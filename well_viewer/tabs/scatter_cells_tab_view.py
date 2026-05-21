@@ -13,7 +13,8 @@ from well_viewer.ui_helpers import (
     make_plot_view_switcher)
 
 
-def build_scatter_cells_tab(app, parent: QWidget) -> None:
+def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
+    app = ctx.app  # transitional DI seam
     from widgets.plot_card import PlotCard
 
     layout = parent.layout()

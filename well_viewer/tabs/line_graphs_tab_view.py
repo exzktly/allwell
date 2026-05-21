@@ -15,7 +15,8 @@ from well_viewer.ui_helpers import (
 _FIG_W, _FIG_H, _DPI = 7.2, 10.5, 100
 
 
-def build_line_graphs_tab(app, parent: QWidget) -> None:
+def build_line_graphs_tab(ctx, parent: QWidget) -> None:
+    app = ctx.app  # transitional DI seam — narrow to ctx.state / ctx.widgets over time
     from widgets.plot_card import PlotCard
 
     layout = parent.layout()

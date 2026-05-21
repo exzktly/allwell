@@ -28,8 +28,9 @@ _MODE_CELLS = "cells"
 _MODE_AGG = "aggregate"
 
 
-def build_scatter_tab(app, parent: QWidget) -> None:
+def build_scatter_tab(ctx, parent: QWidget) -> None:
     """Construct the unified Scatter Plot tab inside *parent*."""
+    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -48,12 +49,12 @@ def build_scatter_tab(app, parent: QWidget) -> None:
 
     cells_page = QWidget()
     QVBoxLayout(cells_page).setContentsMargins(0, 0, 0, 0)
-    build_scatter_cells_tab(app, cells_page)
+    build_scatter_cells_tab(ctx, cells_page)
     tab_widget.addTab(cells_page, "Per-cell points")
 
     agg_page = QWidget()
     QVBoxLayout(agg_page).setContentsMargins(0, 0, 0, 0)
-    build_scatter_agg_tab(app, agg_page)
+    build_scatter_agg_tab(ctx, agg_page)
     tab_widget.addTab(agg_page, "Per-well aggregate")
 
     app._scatter_mode = _MODE_CELLS

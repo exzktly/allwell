@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 
-def build_review_csv_tab(app, parent: QWidget) -> None:
+def build_review_csv_tab(ctx, parent: QWidget) -> None:
+    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)

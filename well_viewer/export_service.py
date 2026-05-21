@@ -539,7 +539,7 @@ def save_montage_figure(app) -> None:
         _warn(app, "Nothing to save", "Load a well in the Preview tab first.")
         return
     fov = app._preview_fov_cb.currentText()
-    well = _extract_well_token(app._preview_selected_well or "") or "well"
+    well = _extract_well_token(app._app_state.preview.selected_well or "") or "well"
     n = len(app._montage_fluor_arrays)
     try:
         lo = float(app._mon_lmin_edit.text())
@@ -562,7 +562,7 @@ def save_montage_figure(app) -> None:
     tophat_on = getattr(app, "_mon_tophat_cb", None) is not None and app._mon_tophat_cb.isChecked()
     use_display = tophat_on and hasattr(app, "_montage_fluor_display_arrays") and len(app._montage_fluor_display_arrays) == len(app._montage_fluor_arrays)
     fluor_source = app._montage_fluor_display_arrays if use_display else app._montage_fluor_arrays
-    tp_list = [(tp, ref) for (f, tp), ref in sorted(app._preview_fluor.items()) if f == fov]
+    tp_list = [(tp, ref) for (f, tp), ref in sorted(app._app_state.preview.fluor.items()) if f == fov]
     crop = getattr(app, "_montage_crop", None)
 
     def _apply_crop(a):

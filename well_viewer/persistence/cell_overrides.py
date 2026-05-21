@@ -156,7 +156,7 @@ def load_from_data_dir(app) -> None:
         return
     app._review_included_overrides.clear()
     app._review_included_overrides.update(new_map)
-    app._review_image_override_version += 1
+    app._app_state.review_image.override_version += 1
 
 
 def schedule_save(app) -> None:

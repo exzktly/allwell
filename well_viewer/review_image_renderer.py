@@ -53,10 +53,10 @@ def update_preview(app, well_label: Optional[str]) -> None:
         if hasattr(app, "_review_image_tp_menu"):
             _set_combo_values(app._review_image_tp_menu, ["—"])
             app._review_image_tp_var.setCurrentText("—")
-        app._preview_fluor = app._preview_overlay = app._preview_mask = {}
+        app._app_state.preview.fluor = app._app_state.preview.overlay = app._app_state.preview.mask = {}
         if hasattr(app, "_montage_inner"):
             _clear_layout(app._montage_inner.layout())
-            app._montage_photos.clear()
+            app._app_state.preview.montage_photos.clear()
             app._montage_status.setText("Select a well in the left panel.")
         if hasattr(app, "_review_image_status"):
             app._review_image_status.setText("Select a well in the left panel.")
@@ -89,9 +89,9 @@ def update_preview(app, well_label: Optional[str]) -> None:
     except Exception as _exc:
         _logger.exception("Unexpected error searching images for %r: %s", well_label, _exc)
         fluor, overlay, mask, tophat_fluor = {}, {}, {}, {}
-    app._preview_fluor = fluor
-    app._preview_overlay = overlay
-    app._preview_mask = mask
+    app._app_state.preview.fluor = fluor
+    app._app_state.preview.overlay = overlay
+    app._app_state.preview.mask = mask
     app._preview_tophat_fluor = tophat_fluor
     if channel_switch_debug:
         _logger.debug(
@@ -181,7 +181,7 @@ def refresh_review_image(app) -> None:
         return
     channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
     image_load_debug = _debug_flags.review_image_load_debug_enabled()
-    well = app._preview_selected_well
+    well = app._app_state.preview.selected_well
     if well is None:
         if channel_switch_debug:
             _logger.debug("[RI-CHSW step 6] refresh_review_image aborted: no selected well")
@@ -244,7 +244,7 @@ def refresh_review_image(app) -> None:
                 fluor_ref, mask_ref,
             )
         return
-    app._review_image_is_tif = str(getattr(fluor_ref, "name", "")).lower().endswith((".tif", ".tiff"))
+    app._app_state.review_image.is_tif = str(getattr(fluor_ref, "name", "")).lower().endswith((".tif", ".tiff"))
     if not _NP_AVAILABLE:
         app._review_image_status.setText("Could not render review image (numpy unavailable).")
         return
@@ -253,7 +253,7 @@ def refresh_review_image(app) -> None:
         getattr(fluor_ref, "full_path_str", id(fluor_ref)),
         getattr(mask_ref, "full_path_str", id(mask_ref)),
     )
-    cached = app._review_image_frame_cache
+    cached = app._app_state.review_image.frame_cache
     if cached is not None and cached.get("key") == cache_key:
         fluor_arr = cached["fluor_arr"]
         center = cached["center"]
@@ -274,40 +274,40 @@ def refresh_review_image(app) -> None:
             (center != padded[1:-1, :-2]) |
             (center != padded[1:-1, 2:])
         )
-        app._review_image_frame_cache = {
+        app._app_state.review_image.frame_cache = {
             "key": cache_key,
             "fluor_arr": fluor_arr,
             "center": center,
             "boundary": boundary,
         }
 
-    ic_key = (well, fov, tp, app._review_image_override_version)
-    include_by_nid = app._review_image_include_cache.get(ic_key)
+    ic_key = (well, fov, tp, app._app_state.review_image.override_version)
+    include_by_nid = app._app_state.review_image.include_cache.get(ic_key)
     if include_by_nid is None:
         include_by_nid = app._review_build_include_map(center, well, fov, tp)
-        if len(app._review_image_include_cache) > 32:
-            app._review_image_include_cache.clear()
-        app._review_image_include_cache[ic_key] = include_by_nid
+        if len(app._app_state.review_image.include_cache) > 32:
+            app._app_state.review_image.include_cache.clear()
+        app._app_state.review_image.include_cache[ic_key] = include_by_nid
 
     above_by_nid: Optional[Dict[int, bool]] = None
-    if bool(getattr(app, "_review_image_binary_mask", False)):
+    if bool(app._app_state.review_image.binary_mask):
         cell_area_threshold = app._get_cell_area_threshold()
         fluor_gates = app._get_all_fluor_gates()
         threshold = app._get_thresh_frac_on()
         tm_key = (
-            well, fov, tp, app._review_image_override_version,
+            well, fov, tp, app._app_state.review_image.override_version,
             app._app_state.channel.active_val_col, threshold, cell_area_threshold,
             tuple(sorted(fluor_gates.items())),
         )
-        above_by_nid = app._review_image_threshold_map_cache.get(tm_key)
+        above_by_nid = app._app_state.review_image.threshold_map_cache.get(tm_key)
         if above_by_nid is None:
             above_by_nid = app._review_build_threshold_map(center, well, fov, tp)
-            if len(app._review_image_threshold_map_cache) > 32:
-                app._review_image_threshold_map_cache.clear()
-            app._review_image_threshold_map_cache[tm_key] = above_by_nid
+            if len(app._app_state.review_image.threshold_map_cache) > 32:
+                app._app_state.review_image.threshold_map_cache.clear()
+            app._app_state.review_image.threshold_map_cache[tm_key] = above_by_nid
 
-    preserve_view = bool(getattr(app, "_review_image_preserve_view_on_refresh", False))
-    app._review_image_preserve_view_on_refresh = False
+    preserve_view = bool(app._app_state.review_image.preserve_view_on_refresh)
+    app._app_state.review_image.preserve_view_on_refresh = False
     if channel_switch_debug:
         _logger.debug("[RI-CHSW step 6->7] draw_review_image preserve_view=%s", preserve_view)
     draw_review_image(
@@ -336,13 +336,13 @@ def draw_review_image(
             fit_lut, preserve_view,
         )
     arr = _np.asarray(fluor_arr, dtype=_np.float32)
-    app._review_image_last_fluor_arr = arr
+    app._app_state.review_image.last_fluor_arr = arr
     m = _np.asarray(mask_arr)
     if fit_lut:
         lo, hi = float(arr.min()), float(arr.max())
         if hi <= lo:
             hi = lo + 1.0
-        app._review_image_lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
+        app._app_state.review_image.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
     else:
         lo, hi = app._review_image_resolve_lut(arr)
     if hasattr(app, "_review_lut_chan_lbl"):
@@ -367,8 +367,8 @@ def draw_review_image(
             (center_view != padded[1:-1, 2:])
         )
 
-    binary_mask_mode = bool(getattr(app, "_review_image_binary_mask", False))
-    sel_nid = app._review_image_selected_nucleus
+    binary_mask_mode = bool(app._app_state.review_image.binary_mask)
+    sel_nid = app._app_state.review_image.selected_nucleus
 
     if binary_mask_mode:
         if above_by_nid is None:
@@ -380,11 +380,11 @@ def draw_review_image(
             above_mask = _np.isin(center, above_arr)
             rgb[above_mask] = _np.array([255, 255, 255], dtype=_np.uint8)
         if sel_nid is not None:
-            sel_color = _np.asarray(app._review_image_selected_color, dtype=_np.uint8)
+            sel_color = _np.asarray(app._app_state.review_image.selected_color, dtype=_np.uint8)
             sel_boundary = boundary & (center == int(sel_nid))
             rgb[sel_boundary] = sel_color
     else:
-        tint = app._review_image_tint_color
+        tint = app._app_state.review_image.tint_color
         tr, tg, tb = (max(0, min(255, int(c))) for c in tint)
         rgb = _np.empty((h, w, 3), dtype=_np.uint8)
         if (tr, tg, tb) == (255, 255, 255):
@@ -403,28 +403,28 @@ def draw_review_image(
             include_mask = _np.isin(center, included_arr)
         else:
             include_mask = _np.zeros(center.shape, dtype=bool)
-        show_outline = bool(getattr(app, "_review_image_show_outline", True))
+        show_outline = bool(app._app_state.review_image.show_outline)
         if show_outline:
             draw_boundary = boundary & include_mask
-            boundary_color = _np.asarray(app._review_image_boundary_color, dtype=_np.uint8)
+            boundary_color = _np.asarray(app._app_state.review_image.boundary_color, dtype=_np.uint8)
             rgb[draw_boundary] = boundary_color
             if sel_nid is not None:
-                sel_color = _np.asarray(app._review_image_selected_color, dtype=_np.uint8)
+                sel_color = _np.asarray(app._app_state.review_image.selected_color, dtype=_np.uint8)
                 sel_boundary = boundary & (center == int(sel_nid))
                 rgb[sel_boundary] = sel_color
         elif sel_nid is not None:
-            sel_color = _np.asarray(app._review_image_selected_color, dtype=_np.uint8)
+            sel_color = _np.asarray(app._app_state.review_image.selected_color, dtype=_np.uint8)
             sel_boundary = boundary & (center == int(sel_nid))
             rgb[sel_boundary] = sel_color
 
     app._review_image_base_rgb = _np.ascontiguousarray(rgb)
-    app._review_image_base_pil = (
+    app._app_state.review_image.base_pil = (
         _PILImage.fromarray(rgb, mode="RGB") if _PIL_AVAILABLE else None
     )
     if not preserve_view:
-        app._review_image_zoom = 1.0
-        app._review_image_pan_x = 0.0
-        app._review_image_pan_y = 0.0
+        app._app_state.review_image.zoom = 1.0
+        app._app_state.review_image.pan_x = 0.0
+        app._app_state.review_image.pan_y = 0.0
     render_review_image_display(app)
     app._review_image_label._mask_arr = center
     app._review_image_label._raw_arr = arr
@@ -442,9 +442,9 @@ def draw_review_image(
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image complete status_channel=%r zoom=%.3f pan=(%.1f, %.1f)",
             app._app_state.channel.active_image_channel,
-            float(getattr(app, "_review_image_zoom", 1.0)),
-            float(getattr(app, "_review_image_pan_x", 0.0)),
-            float(getattr(app, "_review_image_pan_y", 0.0)),
+            float(app._app_state.review_image.zoom),
+            float(app._app_state.review_image.pan_x),
+            float(app._app_state.review_image.pan_y),
         )
 
 
@@ -452,7 +452,7 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
     if not hasattr(app, "_review_image_label"):
         return
     rgb = getattr(app, "_review_image_base_rgb", None)
-    if rgb is None and app._review_image_base_pil is None:
+    if rgb is None and app._app_state.review_image.base_pil is None:
         return
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
@@ -462,12 +462,12 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
     if rgb is not None:
         ih, iw = rgb.shape[:2]
     else:
-        iw, ih = app._review_image_base_pil.size
+        iw, ih = app._app_state.review_image.base_pil.size
     vp = app._review_image_canvas.viewport()
     cw = max(1, vp.width())
     ch = max(1, vp.height())
     fit = min(cw / max(iw, 1), ch / max(ih, 1))
-    scale = max(0.05, fit * max(0.1, float(app._review_image_zoom)))
+    scale = max(0.05, fit * max(0.1, float(app._app_state.review_image.zoom)))
     nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
 
     cached_scale = getattr(app, "_review_image_scale", None)
@@ -486,7 +486,7 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
                     nw, nh, Qt.IgnoreAspectRatio, Qt.FastTransformation,
                 )
         else:
-            img = app._review_image_base_pil
+            img = app._app_state.review_image.base_pil
             shown = img.resize((nw, nh), _PILImage.NEAREST)
             if shown.mode != "RGBA":
                 shown = shown.convert("RGBA")
@@ -498,8 +498,8 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
         app._review_image_label.setPixmap(pm)
         app._review_image_label.resize(max(nw, cw), max(nh, ch))
         app._review_image_scale = scale
-    pan_x = float(getattr(app, "_review_image_pan_x", 0.0))
-    pan_y = float(getattr(app, "_review_image_pan_y", 0.0))
+    pan_x = float(app._app_state.review_image.pan_x)
+    pan_y = float(app._app_state.review_image.pan_y)
     hbar = app._review_image_canvas.horizontalScrollBar()
     vbar = app._review_image_canvas.verticalScrollBar()
     cx = max(0, (max(nw, cw) - cw) // 2) - int(pan_x)

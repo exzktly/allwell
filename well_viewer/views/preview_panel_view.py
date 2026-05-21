@@ -255,7 +255,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_raw_btn = QPushButton("Top-hat", ctrl)
     self._review_image_raw_btn.setProperty("variant", "toggle")
     self._review_image_raw_btn.setCheckable(True)
-    self._review_image_raw_btn.setChecked(bool(getattr(self, "_review_image_show_raw", False)))
+    self._review_image_raw_btn.setChecked(bool(self._app_state.review_image.show_raw))
     self._review_image_raw_btn.setToolTip(
         "Showing the top-hat-filtered fluorescence frame (default).\n"
         "Click to switch to the unprocessed raw image."
@@ -339,7 +339,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_outline_btn.setProperty("variant", "toggle")
     self._review_image_outline_btn.setCheckable(True)
     self._review_image_outline_btn.setChecked(
-        bool(getattr(self, "_review_image_show_outline", True))
+        bool(self._app_state.review_image.show_outline)
     )
     self._review_image_outline_btn.clicked.connect(
         lambda _=False: self._toggle_review_image_outline()
@@ -351,7 +351,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_binary_btn.setProperty("variant", "toggle")
     self._review_image_binary_btn.setCheckable(True)
     self._review_image_binary_btn.setChecked(
-        bool(getattr(self, "_review_image_binary_mask", False))
+        bool(self._app_state.review_image.binary_mask)
     )
     self._review_image_binary_btn.clicked.connect(
         lambda _=False: self._toggle_review_image_binary_mask()

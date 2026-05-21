@@ -2,7 +2,7 @@
 
 A single-well plate-map picker (a ``widgets.WellPlateSelector`` in single-select
 mode) — clicking a well loads its images; clicking the selected well clears it.
-State is ``app._preview_selected_well`` (a token or ``None``).
+State is ``app._app_state.preview.selected_well`` (a token or ``None``).
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ def build_preview_picker(app, parent: QWidget, **_kw) -> None:
 
     def _on_plate_changed(ids) -> None:
         tok = next((w for w in ids if w in app._app_state.dataset.well_paths), None)
-        if tok == app._preview_selected_well:
+        if tok == app._app_state.preview.selected_well:
             return
-        app._preview_selected_well = tok
+        app._app_state.preview.selected_well = tok
         app._refresh_preview_picker()
         app._update_preview(tok)
     plate.selectionChanged.connect(_on_plate_changed)
@@ -64,7 +64,7 @@ def build_preview_picker(app, parent: QWidget, **_kw) -> None:
 
 def refresh_preview_picker(app, **_kw) -> None:
     plate = getattr(app, "_sidebar_preview_plate", None)
-    sel = app._preview_selected_well
+    sel = app._app_state.preview.selected_well
     if plate is not None:
         plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
         plate.setSelectedWellIds([sel] if sel and sel in app._app_state.dataset.well_paths else [])

@@ -124,7 +124,7 @@ def refresh_preview_montage(app) -> None:
     app._montage_th_overlay_lbls = []
     app._montage_th_cancel = True
 
-    well = app._preview_selected_well
+    well = app._app_state.preview.selected_well
     if well is None:
         app._montage_status.setText("Select a well in the left panel.")
         return
@@ -135,14 +135,14 @@ def refresh_preview_montage(app) -> None:
         app._montage_status.setText("No images found for this well.")
         return
 
-    fluor_refs = [(tp, ref) for (f, tp), ref in sorted(app._preview_fluor.items()) if f == fov]
+    fluor_refs = [(tp, ref) for (f, tp), ref in sorted(app._app_state.preview.fluor.items()) if f == fov]
     tophat_refs = getattr(app, "_preview_tophat_fluor", {})
     used_tophat_as_primary = False
     if not fluor_refs:
         fluor_refs = [(tp, ref) for (f, tp), ref in sorted(tophat_refs.items()) if f == fov]
         used_tophat_as_primary = bool(fluor_refs)
 
-    overlay_refs = [(tp, ref) for (f, tp), ref in sorted(app._preview_overlay.items()) if f == fov]
+    overlay_refs = [(tp, ref) for (f, tp), ref in sorted(app._app_state.preview.overlay.items()) if f == fov]
     ov_map = dict(overlay_refs)
     n = len(fluor_refs)
     if n == 0:
@@ -331,7 +331,7 @@ def montage_tophat_toggled(app) -> None:
     app._montage_th_cancel = False
 
     fov = app._preview_fov_cb.currentText()
-    tp_list = [(tp, ref) for (f, tp), ref in sorted(app._preview_fluor.items()) if f == fov]
+    tp_list = [(tp, ref) for (f, tp), ref in sorted(app._app_state.preview.fluor.items()) if f == fov]
     if tp_list:
         app._draw_montage_thumbs(tp_list)
 

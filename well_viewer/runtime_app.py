@@ -809,63 +809,6 @@ class WellViewerApp(QWidget):
         if data_path is not None:
             QTimer.singleShot(100, lambda: self._load_path(data_path))
 
-    # ── Domain-state shims (runtime_app teardown) ────────────────────────────
-    # Channel/ratio/threshold (Phase 1), plate selection (Phase 2), dataset
-    # (Phase 3), plot options (Phase 4), statistics (Phase 7) and the
-    # review-image / preview state (Phase 8) moved into ``self._app_state`` —
-    # typed ChannelState / SelectionState / DatasetState / PlotState /
-    # StatsState / ReviewImageState / PreviewState. These properties forward
-    # the legacy ``self._*`` names so existing call sites are untouched; the
-    # state objects are the single source of truth — no duplicated storage.
-    # Generated from one factory rather than ~79 hand-copied property pairs.
-    # Deleted once call sites read the state objects directly.
-
-    def _app_state_shim(_domain: str, _field: str) -> property:
-        def _get(self):
-            return getattr(getattr(self._app_state, _domain), _field)
-
-        def _set(self, value) -> None:
-            setattr(getattr(self._app_state, _domain), _field, value)
-
-        return property(_get, _set)
-
-
-
-    _review_image_selected_nucleus = _app_state_shim("review_image", "selected_nucleus")
-    _review_image_nucleus_to_iid = _app_state_shim("review_image", "nucleus_to_iid")
-    _review_image_include_edit_mode = _app_state_shim("review_image", "include_edit_mode")
-    _review_image_box_anchor = _app_state_shim("review_image", "box_anchor")
-    _review_image_box_active = _app_state_shim("review_image", "box_active")
-    _review_image_zoom = _app_state_shim("review_image", "zoom")
-    _review_image_pan_x = _app_state_shim("review_image", "pan_x")
-    _review_image_pan_y = _app_state_shim("review_image", "pan_y")
-    _review_image_preserve_view_on_refresh = _app_state_shim("review_image", "preserve_view_on_refresh")
-    _review_image_dragging = _app_state_shim("review_image", "dragging")
-    _review_image_drag_moved = _app_state_shim("review_image", "drag_moved")
-    _review_image_drag_last_xy = _app_state_shim("review_image", "drag_last_xy")
-    _review_image_base_pil = _app_state_shim("review_image", "base_pil")
-    _review_image_is_tif = _app_state_shim("review_image", "is_tif")
-    _review_image_last_fluor_arr = _app_state_shim("review_image", "last_fluor_arr")
-    _review_image_lut_by_channel = _app_state_shim("review_image", "lut_by_channel")
-    _review_image_frame_cache = _app_state_shim("review_image", "frame_cache")
-    _review_image_include_cache = _app_state_shim("review_image", "include_cache")
-    _review_image_threshold_map_cache = _app_state_shim("review_image", "threshold_map_cache")
-    _review_image_override_version = _app_state_shim("review_image", "override_version")
-    _review_image_show_raw = _app_state_shim("review_image", "show_raw")
-    _review_image_binary_mask = _app_state_shim("review_image", "binary_mask")
-    _review_image_show_outline = _app_state_shim("review_image", "show_outline")
-    _review_image_boundary_color = _app_state_shim("review_image", "boundary_color")
-    _review_image_selected_color = _app_state_shim("review_image", "selected_color")
-    _review_image_tint_color = _app_state_shim("review_image", "tint_color")
-
-    _preview_selected_well = _app_state_shim("preview", "selected_well")
-    _preview_fluor = _app_state_shim("preview", "fluor")
-    _preview_overlay = _app_state_shim("preview", "overlay")
-    _preview_mask = _app_state_shim("preview", "mask")
-    _montage_photos = _app_state_shim("preview", "montage_photos")
-
-    del _app_state_shim
-
     def __getattr__(self, name: str) -> object:
         """Forward a legacy ``app._<widget>`` read to the WidgetRegistry.
 
@@ -2542,7 +2485,7 @@ class WellViewerApp(QWidget):
 
         # Clear previous content
         _clear_layout(self._montage_inner.layout())
-        self._montage_photos.clear()
+        self._app_state.preview.montage_photos.clear()
         self._montage_fluor_arrays         = []
         self._montage_overlay_arrays     = []
         self._montage_fluor_display_arrays = []   # cleared on new load
@@ -2550,7 +2493,7 @@ class WellViewerApp(QWidget):
         self._montage_th_overlay_lbls    = []
         self._montage_th_cancel          = True   # no thread running initially
 
-        well = self._preview_selected_well
+        well = self._app_state.preview.selected_well
         if well is None:
             self._montage_status.setText("Select a well in the left panel.")
             return
@@ -2568,7 +2511,7 @@ class WellViewerApp(QWidget):
         # Filter refs to this FOV. Prefer pre-generated tophat frames from the
         # out directory for each timepoint, with raw fluor as fallback.
         raw_by_tp = {
-            tp: ref for (f, tp), ref in sorted(self._preview_fluor.items())
+            tp: ref for (f, tp), ref in sorted(self._app_state.preview.fluor.items())
             if f == fov
         }
         tophat_refs = getattr(self, "_preview_tophat_fluor", {})
@@ -2584,7 +2527,7 @@ class WellViewerApp(QWidget):
         fluor_refs = [(tp, ref) for tp, ref in fluor_refs if ref is not None]
         _used_tophat_as_primary = bool(fluor_refs) and all(tp in tophat_by_tp for tp, _ in fluor_refs)
 
-        overlay_refs = [(tp, ref) for (f, tp), ref in sorted(self._preview_overlay.items())
+        overlay_refs = [(tp, ref) for (f, tp), ref in sorted(self._app_state.preview.overlay.items())
                         if f == fov]
         # Align by timepoint (use all TPs from GFP; overlay may be subset)
         ov_map = dict(overlay_refs)
@@ -2659,7 +2602,7 @@ class WellViewerApp(QWidget):
     def _draw_montage_thumbs(self, tp_list: list) -> None:
         """Render fluorescence + overlay thumbnail pairs, one column per timepoint."""
         _clear_layout(self._montage_inner.layout())
-        self._montage_photos.clear()
+        self._app_state.preview.montage_photos.clear()
         # Overlay label refs must be rebuilt each time since all widgets are destroyed
         self._montage_th_overlay_lbls = []
 
@@ -2826,7 +2769,7 @@ class WellViewerApp(QWidget):
                 painter.end()
                 pix_fluor = pm
             if pix_fluor:
-                self._montage_photos.append(pix_fluor)
+                self._app_state.preview.montage_photos.append(pix_fluor)
                 lbl_fluor = QLabel()
                 lbl_fluor.setPixmap(pix_fluor)
                 lbl_fluor.setCursor(Qt.CrossCursor)
@@ -2895,7 +2838,7 @@ class WellViewerApp(QWidget):
                 painter.end()
                 pix_ov = pm
             if pix_ov:
-                self._montage_photos.append(pix_ov)
+                self._app_state.preview.montage_photos.append(pix_ov)
                 lbl_ov = QLabel()
                 lbl_ov.setPixmap(pix_ov)
                 ov_cell_layout.addWidget(lbl_ov)
@@ -3566,8 +3509,8 @@ class WellViewerApp(QWidget):
             return
         if channel == self._app_state.channel.active_image_channel:
             if preserve_review_view:
-                self._review_image_preserve_view_on_refresh = True
-                if self._preview_selected_well:
+                self._app_state.review_image.preserve_view_on_refresh = True
+                if self._app_state.preview.selected_well:
                     self._refresh_review_image()
             if channel_switch_debug:
                 _logger.debug(
@@ -3587,19 +3530,19 @@ class WellViewerApp(QWidget):
             self._mon_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
         if hasattr(self, "_review_lut_chan_lbl"):
             self._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
-        saved_review_lut = self._review_image_lut_by_channel.get(channel)
+        saved_review_lut = self._app_state.review_image.lut_by_channel.get(channel)
         if saved_review_lut and hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             self._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
             self._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
         if preserve_review_view:
-            self._review_image_preserve_view_on_refresh = True
-        if self._preview_selected_well:
+            self._app_state.review_image.preserve_view_on_refresh = True
+        if self._app_state.preview.selected_well:
             if channel_switch_debug:
                 _logger.debug(
                     "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
-                    self._preview_selected_well,
+                    self._app_state.preview.selected_well,
                 )
-            self._update_preview(self._preview_selected_well)
+            self._update_preview(self._app_state.preview.selected_well)
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
@@ -4155,7 +4098,7 @@ class WellViewerApp(QWidget):
         tp_values = sorted(
             {
                 self._norm_timepoint(tp)
-                for (f, tp) in self._preview_fluor.keys()
+                for (f, tp) in self._app_state.preview.fluor.keys()
                 if _norm(f) == fov and self._norm_timepoint(tp)
             },
             key=self._review_tp_sort_key,
@@ -4182,9 +4125,9 @@ class WellViewerApp(QWidget):
         than failing keeps Review Image usable on datasets that only ship
         one of the two image kinds for a given FOV/timepoint.
         """
-        raw_first = bool(getattr(self, "_review_image_show_raw", False))
+        raw_first = bool(self._app_state.review_image.show_raw)
         tophat_map = getattr(self, "_preview_tophat_fluor", {})
-        raw_map = self._preview_fluor
+        raw_map = self._app_state.preview.fluor
         if raw_first:
             primary, fallback = raw_map, tophat_map
         else:
@@ -4199,22 +4142,22 @@ class WellViewerApp(QWidget):
                 norm_timepoint=self._norm_timepoint,
             )
         mask_ref = _resolve_ref_by_fov_tp(
-            self._preview_mask, fov_raw=fov_raw, tp_raw=tp_raw,
+            self._app_state.preview.mask, fov_raw=fov_raw, tp_raw=tp_raw,
             norm_timepoint=self._norm_timepoint,
         )
         return fluor_ref, mask_ref
 
     def _toggle_review_image_source(self) -> None:
         """Flip raw vs top-hat preference for the Review Image fluorescence channel."""
-        self._review_image_show_raw = not bool(getattr(self, "_review_image_show_raw", False))
+        self._app_state.review_image.show_raw = not bool(self._app_state.review_image.show_raw)
         # The LUT range for raw vs top-hat differs significantly, so drop the
         # cached LUT for the active channel so the new image gets a fresh
         # auto-fit instead of a stale clip.
         chan = str(self._app_state.channel.active_image_channel or "").lower()
-        if chan in self._review_image_lut_by_channel:
-            del self._review_image_lut_by_channel[chan]
+        if chan in self._app_state.review_image.lut_by_channel:
+            del self._app_state.review_image.lut_by_channel[chan]
         self._refresh_review_image_source_btn()
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _refresh_review_image_source_btn(self) -> None:
@@ -4222,7 +4165,7 @@ class WellViewerApp(QWidget):
         btn = getattr(self, "_review_image_raw_btn", None)
         if btn is None:
             return
-        on = bool(getattr(self, "_review_image_show_raw", False))
+        on = bool(self._app_state.review_image.show_raw)
         btn.setChecked(on)
         btn.setText("Raw" if on else "Top-hat")
         btn.setProperty("variant", "toggle")
@@ -4253,7 +4196,7 @@ class WellViewerApp(QWidget):
         rgb_clamped = tuple(max(0, min(255, int(c))) for c in rgb)
         setattr(self, attr, rgb_clamped)
         self._review_image_refresh_color_swatch(which)
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _review_image_refresh_color_swatch(self, which: str) -> None:
@@ -4306,25 +4249,25 @@ class WellViewerApp(QWidget):
         for which, default in self._REVIEW_IMAGE_COLOR_DEFAULTS.items():
             setattr(self, f"_review_image_{which}_color", tuple(default))
             self._review_image_refresh_color_swatch(which)
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     # ── Binary mask toggle ────────────────────────────────────────────────
 
     def _toggle_review_image_binary_mask(self) -> None:
         """Flip the binary-mask overlay on/off and refresh the canvas."""
-        self._review_image_binary_mask = not bool(
-            getattr(self, "_review_image_binary_mask", False)
+        self._app_state.review_image.binary_mask = not bool(
+            self._app_state.review_image.binary_mask
         )
         self._refresh_review_image_binary_btn()
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _refresh_review_image_binary_btn(self) -> None:
         btn = getattr(self, "_review_image_binary_btn", None)
         if btn is None:
             return
-        on = bool(getattr(self, "_review_image_binary_mask", False))
+        on = bool(self._app_state.review_image.binary_mask)
         btn.setChecked(on)
         btn.setText("Binary: On" if on else "Binary: Off")
         btn.setToolTip(
@@ -4338,18 +4281,18 @@ class WellViewerApp(QWidget):
 
     def _toggle_review_image_outline(self) -> None:
         """Flip the cell-outline overlay on/off and refresh the canvas."""
-        self._review_image_show_outline = not bool(
-            getattr(self, "_review_image_show_outline", True)
+        self._app_state.review_image.show_outline = not bool(
+            self._app_state.review_image.show_outline
         )
         self._refresh_review_image_outline_btn()
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _refresh_review_image_outline_btn(self) -> None:
         btn = getattr(self, "_review_image_outline_btn", None)
         if btn is None:
             return
-        on = bool(getattr(self, "_review_image_show_outline", True))
+        on = bool(self._app_state.review_image.show_outline)
         btn.setChecked(on)
         btn.setText("Outline: On" if on else "Outline: Off")
         btn.style().unpolish(btn)
@@ -4479,22 +4422,22 @@ class WellViewerApp(QWidget):
                 lo = float(self._review_lmin_entry.text().strip())
                 hi = float(self._review_lmax_entry.text().strip())
                 if hi > lo:
-                    self._review_image_lut_by_channel[chan] = (lo, hi)
+                    self._app_state.review_image.lut_by_channel[chan] = (lo, hi)
                     return lo, hi
             except Exception:
                 pass
-        saved = self._review_image_lut_by_channel.get(chan)
+        saved = self._app_state.review_image.lut_by_channel.get(chan)
         if saved is not None and saved[1] > saved[0]:
             return saved
         lo = float(arr.min())
         hi = float(arr.max())
         if hi <= lo:
             hi = lo + 1.0
-        self._review_image_lut_by_channel[chan] = (lo, hi)
+        self._app_state.review_image.lut_by_channel[chan] = (lo, hi)
         return lo, hi
 
     def _review_image_auto_lut(self) -> None:
-        arr = getattr(self, "_review_image_last_fluor_arr", None)
+        arr = self._app_state.review_image.last_fluor_arr
         if arr is None or not _NP_AVAILABLE:
             return
         arr_np = _np.asarray(arr, dtype=_np.float32)
@@ -4502,36 +4445,36 @@ class WellViewerApp(QWidget):
         hi = float(arr_np.max())
         if hi <= lo:
             hi = lo + 1.0
-        self._review_image_lut_by_channel[str(self._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
+        self._app_state.review_image.lut_by_channel[str(self._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
         if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             self._review_lmin_entry.setText(f"{lo:.0f}")
             self._review_lmax_entry.setText(f"{hi:.0f}")
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _review_image_commit_lut(self) -> None:
-        arr = getattr(self, "_review_image_last_fluor_arr", None)
+        arr = self._app_state.review_image.last_fluor_arr
         if arr is None:
             return
         lo, hi = self._review_image_resolve_lut(_np.asarray(arr, dtype=_np.float32))
         if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
             self._review_lmin_entry.setText(f"{lo:.0f}")
             self._review_lmax_entry.setText(f"{hi:.0f}")
-        self._review_image_preserve_view_on_refresh = True
+        self._app_state.review_image.preserve_view_on_refresh = True
         self._refresh_review_image()
 
     def _review_image_zoom_step(self, direction: int) -> None:
         steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-        cur = getattr(self, "_review_image_zoom", 1.0)
+        cur = self._app_state.review_image.zoom
         idx = min(range(len(steps)), key=lambda i: abs(steps[i] - cur))
         idx = max(0, min(len(steps) - 1, idx + direction))
-        self._review_image_zoom = steps[idx]
+        self._app_state.review_image.zoom = steps[idx]
         self._render_review_image_display()
 
     def _review_image_zoom_fit(self) -> None:
-        self._review_image_zoom = 1.0
-        self._review_image_pan_x = 0.0
-        self._review_image_pan_y = 0.0
+        self._app_state.review_image.zoom = 1.0
+        self._app_state.review_image.pan_x = 0.0
+        self._app_state.review_image.pan_y = 0.0
         self._render_review_image_display()
 
     def _on_review_image_wheel(self, event) -> None:
@@ -4548,11 +4491,11 @@ class WellViewerApp(QWidget):
         # bulk delete instead of panning. We record the anchor in label-local
         # pixels (event.position()) so it is invariant to window position
         # and scrollbar state.
-        if getattr(self, "_review_image_include_edit_mode", False):
+        if self._app_state.review_image.include_edit_mode:
             pos = event.position()
             ax, ay = float(pos.x()), float(pos.y())
-            self._review_image_box_anchor = (ax, ay)
-            self._review_image_box_active = True
+            self._app_state.review_image.box_anchor = (ax, ay)
+            self._app_state.review_image.box_active = True
             label = getattr(self, "_review_image_label", None)
             if label is not None:
                 rb = self._review_image_rubber_band
@@ -4562,15 +4505,15 @@ class WellViewerApp(QWidget):
                 rb.setGeometry(QRect(int(ax), int(ay), 1, 1))
                 rb.show()
             return
-        self._review_image_dragging = True
-        self._review_image_drag_moved = False
+        self._app_state.review_image.dragging = True
+        self._app_state.review_image.drag_moved = False
         gp = event.globalPosition().toPoint()
-        self._review_image_drag_last_xy = (int(gp.x()), int(gp.y()))
+        self._app_state.review_image.drag_last_xy = (int(gp.x()), int(gp.y()))
 
     def _on_review_image_drag(self, event) -> None:
         # Rubber-band update path: stay anchored in label-local pixels.
-        if getattr(self, "_review_image_box_active", False):
-            anchor = self._review_image_box_anchor
+        if self._app_state.review_image.box_active:
+            anchor = self._app_state.review_image.box_anchor
             rb = self._review_image_rubber_band
             if anchor is None or rb is None:
                 return
@@ -4583,18 +4526,18 @@ class WellViewerApp(QWidget):
             h = max(1, int(abs(cy - ay)))
             rb.setGeometry(QRect(x0, y0, w, h))
             return
-        if not getattr(self, "_review_image_dragging", False):
+        if not self._app_state.review_image.dragging:
             return
         gp = event.globalPosition().toPoint()
         gx, gy = int(gp.x()), int(gp.y())
-        lx, ly = self._review_image_drag_last_xy
+        lx, ly = self._app_state.review_image.drag_last_xy
         dx = gx - lx
         dy = gy - ly
         if dx or dy:
-            self._review_image_drag_moved = True
-        self._review_image_pan_x = float(getattr(self, "_review_image_pan_x", 0.0) + dx)
-        self._review_image_pan_y = float(getattr(self, "_review_image_pan_y", 0.0) + dy)
-        self._review_image_drag_last_xy = (gx, gy)
+            self._app_state.review_image.drag_moved = True
+        self._app_state.review_image.pan_x = float(self._app_state.review_image.pan_x + dx)
+        self._app_state.review_image.pan_y = float(self._app_state.review_image.pan_y + dy)
+        self._app_state.review_image.drag_last_xy = (gx, gy)
         # Pan reuses the existing pixmap; only the scrollbars need to move.
         self._render_review_image_display(pan_only=True)
 
@@ -4603,11 +4546,11 @@ class WellViewerApp(QWidget):
         # pixels in either axis falls through to the existing single-cell
         # click handler, so quick taps in edit mode still toggle one cell.
         _CLICK_PX_THRESH = 3
-        if getattr(self, "_review_image_box_active", False):
-            anchor = self._review_image_box_anchor
+        if self._app_state.review_image.box_active:
+            anchor = self._app_state.review_image.box_anchor
             rb = self._review_image_rubber_band
-            self._review_image_box_active = False
-            self._review_image_box_anchor = None
+            self._app_state.review_image.box_active = False
+            self._app_state.review_image.box_anchor = None
             if rb is not None:
                 rb.hide()
             if anchor is None:
@@ -4630,10 +4573,10 @@ class WellViewerApp(QWidget):
             my0, my1 = int((ay - off_y) / scale), int((ry - off_y) / scale)
             self._apply_box_delete(mx0, my0, mx1, my1)
             return
-        was_dragging = getattr(self, "_review_image_dragging", False)
-        moved = getattr(self, "_review_image_drag_moved", False)
-        self._review_image_dragging = False
-        self._review_image_drag_moved = False
+        was_dragging = self._app_state.review_image.dragging
+        moved = self._app_state.review_image.drag_moved
+        self._app_state.review_image.dragging = False
+        self._app_state.review_image.drag_moved = False
         if was_dragging and not moved:
             self._on_review_image_click(event)
 
@@ -4672,7 +4615,7 @@ class WellViewerApp(QWidget):
         to both the label and the scroll viewport so it does not flicker
         back to the arrow over scrollbar gutters or padding.
         """
-        enabled = bool(getattr(self, "_review_image_include_edit_mode", False))
+        enabled = bool(self._app_state.review_image.include_edit_mode)
         cursor = Qt.CrossCursor if enabled else Qt.PointingHandCursor
         if hasattr(self, "_review_image_label"):
             self._review_image_label.setCursor(cursor)
@@ -4687,7 +4630,7 @@ class WellViewerApp(QWidget):
         _select_review_csv_row_for_cell_controller(self, fov, tp, nucleus_id, _logger)
 
     def _set_review_image_include_mode(self, enabled: bool) -> None:
-        self._review_image_include_edit_mode = bool(enabled)
+        self._app_state.review_image.include_edit_mode = bool(enabled)
         self._apply_review_image_cursor()
         btn = getattr(self, "_review_image_delete_btn", None)
         if btn is not None:
@@ -4700,20 +4643,20 @@ class WellViewerApp(QWidget):
             self._set_status("Delete mode OFF.")
 
     def _toggle_selected_review_cell(self) -> None:
-        self._set_review_image_include_mode(not getattr(self, "_review_image_include_edit_mode", False))
+        self._set_review_image_include_mode(not self._app_state.review_image.include_edit_mode)
 
     def _set_review_cell_included(self, fov: str, tp: str, nid: str, included: str) -> None:
-        if self._preview_selected_well is None:
+        if self._app_state.preview.selected_well is None:
             return
         fov_n, tp_n, nid_n = self._review_row_keys({"fov": fov, "tp": tp, "nucleus_id": nid})
         if not (fov_n and tp_n and nid_n):
             return
-        key = (self._preview_selected_well, fov_n, tp_n, nid_n)
+        key = (self._app_state.preview.selected_well, fov_n, tp_n, nid_n)
         self._review_included_overrides[key] = str(included).strip() or "1"
         # Project the override onto the cached row immediately so other tabs
         # (Bar/Line/Distribution/Stats/Heatmap) honor it without waiting for
         # the next gating recompute, then invalidate the stats cache.
-        self._apply_review_overrides_to_cache(self._preview_selected_well)
+        self._apply_review_overrides_to_cache(self._app_state.preview.selected_well)
         if hasattr(self, "_invalidate_stats_cache"):
             try:
                 self._invalidate_stats_cache()
@@ -4724,19 +4667,19 @@ class WellViewerApp(QWidget):
         # Bump the override version so the include-map cache is bypassed
         # on the next refresh; the frame cache (decoded image + boundary)
         # remains valid because the underlying mask label image is unchanged.
-        self._review_image_override_version += 1
-        prev_zoom = float(getattr(self, "_review_image_zoom", 1.0))
-        prev_pan_x = float(getattr(self, "_review_image_pan_x", 0.0))
-        prev_pan_y = float(getattr(self, "_review_image_pan_y", 0.0))
+        self._app_state.review_image.override_version += 1
+        prev_zoom = float(self._app_state.review_image.zoom)
+        prev_pan_x = float(self._app_state.review_image.pan_x)
+        prev_pan_y = float(self._app_state.review_image.pan_y)
         # Skip a full Review CSV table rebuild here — the user is on the
         # Review Image tab and rebuilding tens of thousands of QTableWidgetItems
         # per click was the dominant memory leak. The table reads the effective
         # Included via override on the next refresh (combobox change / Refresh
         # button / well-selection change), so the value is never lost.
         self._refresh_review_image()
-        self._review_image_zoom = prev_zoom
-        self._review_image_pan_x = prev_pan_x
-        self._review_image_pan_y = prev_pan_y
+        self._app_state.review_image.zoom = prev_zoom
+        self._app_state.review_image.pan_x = prev_pan_x
+        self._app_state.review_image.pan_y = prev_pan_y
         self._render_review_image_display()
 
     def _set_review_cells_included_batch(
@@ -4748,9 +4691,9 @@ class WellViewerApp(QWidget):
         cache-projection, stats invalidation, save-schedule, and image
         refresh — otherwise a 100-cell box delete would redraw 100 times.
         """
-        if self._preview_selected_well is None or not items:
+        if self._app_state.preview.selected_well is None or not items:
             return
-        well = self._preview_selected_well
+        well = self._app_state.preview.selected_well
         any_changed = False
         for fov, tp, nid, included in items:
             fov_n, tp_n, nid_n = self._review_row_keys(
@@ -4771,14 +4714,14 @@ class WellViewerApp(QWidget):
             except Exception:
                 pass
         self._cell_overrides_schedule_save()
-        self._review_image_override_version += 1
-        prev_zoom = float(getattr(self, "_review_image_zoom", 1.0))
-        prev_pan_x = float(getattr(self, "_review_image_pan_x", 0.0))
-        prev_pan_y = float(getattr(self, "_review_image_pan_y", 0.0))
+        self._app_state.review_image.override_version += 1
+        prev_zoom = float(self._app_state.review_image.zoom)
+        prev_pan_x = float(self._app_state.review_image.pan_x)
+        prev_pan_y = float(self._app_state.review_image.pan_y)
         self._refresh_review_image()
-        self._review_image_zoom = prev_zoom
-        self._review_image_pan_x = prev_pan_x
-        self._review_image_pan_y = prev_pan_y
+        self._app_state.review_image.zoom = prev_zoom
+        self._app_state.review_image.pan_x = prev_pan_x
+        self._app_state.review_image.pan_y = prev_pan_y
         self._render_review_image_display()
 
     def _apply_box_delete(self, x0: int, y0: int, x1: int, y1: int) -> None:
@@ -4791,7 +4734,7 @@ class WellViewerApp(QWidget):
         """
         label = getattr(self, "_review_image_label", None)
         mask = getattr(label, "_mask_arr", None) if label is not None else None
-        if mask is None or self._preview_selected_well is None:
+        if mask is None or self._app_state.preview.selected_well is None:
             return
         h, w = int(mask.shape[0]), int(mask.shape[1])
         xa, xb = sorted((max(0, min(w, int(x0))), max(0, min(w, int(x1)))))
@@ -4819,7 +4762,7 @@ class WellViewerApp(QWidget):
     def _zoom_review_image_to_selected_nucleus(self, zoom: float = 3.0) -> None:
         if not hasattr(self, "_review_image_label") or not hasattr(self, "_review_image_canvas"):
             return
-        nid = self._review_image_selected_nucleus
+        nid = self._app_state.review_image.selected_nucleus
         mask_arr = getattr(self._review_image_label, "_mask_arr", None)
         if nid is None or mask_arr is None:
             return
@@ -4828,12 +4771,12 @@ class WellViewerApp(QWidget):
             return
         cx = float(xs.mean())
         cy = float(ys.mean())
-        self._review_image_zoom = float(max(1.0, zoom))
+        self._app_state.review_image.zoom = float(max(1.0, zoom))
         rgb = getattr(self, "_review_image_base_rgb", None)
         if rgb is not None:
             ih, iw = rgb.shape[:2]
         else:
-            img = self._review_image_base_pil
+            img = self._app_state.review_image.base_pil
             if img is None:
                 return
             iw, ih = img.size
@@ -4841,7 +4784,7 @@ class WellViewerApp(QWidget):
         cw = max(1, vp.width())
         ch = max(1, vp.height())
         fit = min(cw / max(iw, 1), ch / max(ih, 1))
-        scale = max(0.05, fit * max(0.1, float(self._review_image_zoom)))
+        scale = max(0.05, fit * max(0.1, float(self._app_state.review_image.zoom)))
         nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
         # The renderer derives the scrollbar value as
         #     scroll = max(0, (max(nw, cw) - cw) // 2) - int(pan)
@@ -4851,8 +4794,8 @@ class WellViewerApp(QWidget):
         # The old `cw/2 - base_x - cx*scale` form mis-offset the pan by
         # roughly (nw - cw)/2 px once you zoomed in, which is why the
         # yellow nucleus ended up off-screen.
-        self._review_image_pan_x = (nw / 2.0) - (cx * scale)
-        self._review_image_pan_y = (nh / 2.0) - (cy * scale)
+        self._app_state.review_image.pan_x = (nw / 2.0) - (cx * scale)
+        self._app_state.review_image.pan_y = (nh / 2.0) - (cy * scale)
         self._render_review_image_display()
 
     def _on_review_csv_row_double_click(self, event) -> None:
@@ -4998,7 +4941,7 @@ class WellViewerApp(QWidget):
             self._sync_preview_well_for_image_tabs()
             self._sidebar_preview_frame.setVisible(True)
             self._refresh_preview_picker()
-            self._update_preview(self._preview_selected_well)
+            self._update_preview(self._app_state.preview.selected_well)
             self._refresh_review_image()
 
         elif tab == "Image Table":
@@ -5116,24 +5059,24 @@ class WellViewerApp(QWidget):
         sel_wells = (cur_sel.get("wells") or []) if cur_sel else []
 
         # Preserve explicit user choice when still valid.
-        current = getattr(self, "_preview_selected_well", None)
+        current = self._app_state.preview.selected_well
         if current in self._app_state.dataset.well_paths:
             # If the active selection has wells, prefer its first loaded well.
             for tok in sel_wells:
                 if tok in self._app_state.dataset.well_paths:
-                    self._preview_selected_well = tok
+                    self._app_state.preview.selected_well = tok
                     return
             return
 
         # If no valid current well, use the active selection's first loaded well.
         for tok in sel_wells:
             if tok in self._app_state.dataset.well_paths:
-                self._preview_selected_well = tok
+                self._app_state.preview.selected_well = tok
                 return
 
         # Final fallback: keep previous behavior of choosing first available well.
         if self._app_state.dataset.well_paths:
-            self._preview_selected_well = sorted(self._app_state.dataset.well_paths.keys(), key=self._parse_rc)[0]
+            self._app_state.preview.selected_well = sorted(self._app_state.dataset.well_paths.keys(), key=self._parse_rc)[0]
 
     def _run_tab_switch_smoke_checks(
         self,
@@ -6056,7 +5999,7 @@ class WellViewerApp(QWidget):
         # the Review Image include map mirrors. Bumping the version key
         # forces the next refresh to recompute the include map (cheap)
         # while reusing the cached image arrays + boundary mask (expensive).
-        self._review_image_override_version += 1
+        self._app_state.review_image.override_version += 1
 
     def _invalidate_review_image_frame_cache(self) -> None:
         """Drop the decoded fluor / mask / boundary cache.
@@ -6064,9 +6007,9 @@ class WellViewerApp(QWidget):
         Call on data load (well paths change) and on dataset re-scan so the
         next refresh re-decodes from disk.
         """
-        self._review_image_frame_cache = None
-        self._review_image_include_cache.clear()
-        self._review_image_override_version += 1
+        self._app_state.review_image.frame_cache = None
+        self._app_state.review_image.include_cache.clear()
+        self._app_state.review_image.override_version += 1
 
     def _compute_group_stats(
         self,

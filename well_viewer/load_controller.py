@@ -145,8 +145,8 @@ def load_directory(app, d: Path, label=None) -> None:
         except Exception:
             pass
     app._refresh_sidebar_map()
-    if app._preview_selected_well not in app._app_state.dataset.well_paths:
-        app._preview_selected_well = None
+    if app._app_state.preview.selected_well not in app._app_state.dataset.well_paths:
+        app._app_state.preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
     if hasattr(app, "_image_table_refresh_picker"):

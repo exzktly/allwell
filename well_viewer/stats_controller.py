@@ -195,7 +195,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         app._stats_write_result("Invalid timepoint.")
         return
 
-    groups = [g for g in app._stats_groups if g.wells]
+    groups = [g for g in app._app_state.stats.groups if g.wells]
     if len(groups) < 2:
         app._stats_write_result("Define at least 2 non-empty groups to run a test.")
         return
@@ -412,22 +412,22 @@ def stats_active_group(app):
 
 
 def stats_apply_drag(app, tok: str) -> None:
-    if tok in app._stats_drag_visited:
+    if tok in app._app_state.stats.drag_visited:
         return
-    app._stats_drag_visited.add(tok)
+    app._app_state.stats.drag_visited.add(tok)
     grp = stats_active_group(app)
     if grp is None or tok not in app._app_state.dataset.well_paths:
         return
     rset = next((r for r in app._rep_sets_loaded() if tok in r.wells), None)
     if rset is not None:
-        if app._stats_drag_adding:
+        if app._app_state.stats.drag_adding:
             if rset not in grp.members:
                 grp.members.append(rset)
         else:
             if rset in grp.members:
                 grp.members.remove(rset)
     else:
-        if app._stats_drag_adding:
+        if app._app_state.stats.drag_adding:
             if tok not in grp.solo_wells:
                 grp.solo_wells.append(tok)
         else:
@@ -446,7 +446,7 @@ def stats_refresh_map(app) -> None:
     avail = list(app._app_state.dataset.well_paths.keys())
     plate.setEnabledWells(avail)
     tok_color: dict = {}
-    for grp in app._stats_groups:
+    for grp in app._app_state.stats.groups:
         c = app._rank_color_rset(grp)  # decision #1: colour by well-position rank
         for w in grp.wells:
             if w in app._app_state.dataset.well_paths:
@@ -466,14 +466,14 @@ def stats_refresh_group_list(app) -> None:
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
     _clear_layout(layout)
-    if not app._stats_groups:
+    if not app._app_state.stats.groups:
         lbl = QLabel("No groups.  Click + Add to create one.")
         lbl.setObjectName("Muted")
         layout.addWidget(lbl)
         stats_refresh_map(app)
         return
-    for gi, grp in enumerate(app._stats_groups):
-        is_sel = (gi == app._stats_active_grp)
+    for gi, grp in enumerate(app._app_state.stats.groups):
+        is_sel = (gi == app._app_state.stats.active_grp)
         color = app._rank_color_rset(grp)  # decision #1: colour by well-position rank
         card = QFrame()
         card.setObjectName("StatsGroupCard")

@@ -831,12 +831,6 @@ class WellViewerApp(QWidget):
 
 
 
-    _stats_groups = _app_state_shim("stats", "groups")
-    _stats_active_grp = _app_state_shim("stats", "active_grp")
-    _stats_cache = _app_state_shim("stats", "cache")
-    _stats_drag_adding = _app_state_shim("stats", "drag_adding")
-    _stats_drag_visited = _app_state_shim("stats", "drag_visited")
-
     _review_image_selected_nucleus = _app_state_shim("review_image", "selected_nucleus")
     _review_image_nucleus_to_iid = _app_state_shim("review_image", "nucleus_to_iid")
     _review_image_include_edit_mode = _app_state_shim("review_image", "include_edit_mode")
@@ -5020,7 +5014,7 @@ class WellViewerApp(QWidget):
         elif tab == "Statistics":
             self._sidebar_stats_frame.setVisible(True)
             # Auto-populate from rep-sets on first visit
-            if not self._stats_groups and hasattr(self, "_stats_grp_inner"):
+            if not self._app_state.stats.groups and hasattr(self, "_stats_grp_inner"):
                 self._stats_sync_from_app()
             if hasattr(self, "_stats_tp_cb"):
                 self._stats_update_tp_menu()
@@ -5921,14 +5915,14 @@ class WellViewerApp(QWidget):
         plot paths (line / bar / scatter-agg) compute the "mean across
         wells under active gating" identically.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
+        if not True:
+            self._app_state.stats.cache = {}
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
                       self._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         gm, gerr, gf, ferr = self._well_aggregate_stats(
             rset.wells, target_t,
@@ -5940,7 +5934,7 @@ class WellViewerApp(QWidget):
         )
 
         result = (gm, gerr, gf, ferr)
-        self._stats_cache[cache_key] = result
+        self._app_state.stats.cache[cache_key] = result
         return result
 
     def _compute_rep_per_fov_stats(
@@ -5958,15 +5952,15 @@ class WellViewerApp(QWidget):
         disambiguated by prefixing with the source well label so identical FOV
         numbers in different wells stay distinct.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
+        if not True:
+            self._app_state.stats.cache = {}
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
                      use_sem, self._app_state.channel.active_val_col, cell_area_threshold,
                      tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         frames = []
         for lbl in rset.wells:
@@ -5985,7 +5979,7 @@ class WellViewerApp(QWidget):
 
         if not frames:
             result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
-            self._stats_cache[cache_key] = result
+            self._app_state.stats.cache[cache_key] = result
             return result
 
         pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
@@ -6012,7 +6006,7 @@ class WellViewerApp(QWidget):
             )
         else:
             result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
-        self._stats_cache[cache_key] = result
+        self._app_state.stats.cache[cache_key] = result
         return result
 
     def _compute_rep_n_above(self, rset: "ReplicateSet", target_t: float) -> int:
@@ -6023,16 +6017,16 @@ class WellViewerApp(QWidget):
         cells that actually exceeded the active threshold — the same
         numerator that drives the fraction-above-threshold value.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
+        if not True:
+            self._app_state.stats.cache = {}
         threshold = self._get_thresh_frac_on(self._app_state.channel.active_channel)
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
                      self._app_state.channel.active_val_col, cell_area_threshold,
                      tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         total = 0
         for lbl in rset.wells:
@@ -6048,12 +6042,12 @@ class WellViewerApp(QWidget):
             if matched:
                 # AggPoint index 4 = n_above; index 5 = n_total.
                 total += int(matched[0][4])
-        self._stats_cache[cache_key] = total
+        self._app_state.stats.cache[cache_key] = total
         return total
 
     def _invalidate_stats_cache(self) -> None:
         """Discard cached group statistics. Call whenever group definitions change."""
-        self._stats_cache: dict = {}
+        self._app_state.stats.cache: dict = {}
         # Replicate-set visibility may have shifted, so re-check whether the
         # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
         if hasattr(self, "_refresh_fov_btn_state"):
@@ -6088,14 +6082,14 @@ class WellViewerApp(QWidget):
         use_sem) so repeated calls during the same redraw are free.  The cache is
         cleared by _invalidate_stats_cache() whenever group definitions change.
         """
-        if not hasattr(self, "_stats_cache"):
-            self._stats_cache = {}
+        if not True:
+            self._app_state.stats.cache = {}
         cell_area_threshold = self._get_cell_area_threshold()
         fluor_gates = self._get_all_fluor_gates()
         cache_key = (grp.name, tuple(grp.wells), target_t, threshold, use_sem,
                       self._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
-        if cache_key in self._stats_cache:
-            return self._stats_cache[cache_key]
+        if cache_key in self._app_state.stats.cache:
+            return self._app_state.stats.cache[cache_key]
 
         rep_means: List[float] = []
         rep_fracs: List[float] = []
@@ -6139,7 +6133,7 @@ class WellViewerApp(QWidget):
             gf, g_err_f = float("nan"), 0.0
 
         result = (gm, g_err_m, gf, g_err_f)
-        self._stats_cache[cache_key] = result
+        self._app_state.stats.cache[cache_key] = result
         return result
 
     def _collect_bar_items(self, target_t: float, *,

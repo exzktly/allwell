@@ -691,8 +691,6 @@ class WellViewerApp(QWidget):
         self._cache:      Dict[str, pd.DataFrame] = {}
         self._all_timepoints_cache: List[float] = []
         self._all_fovs_cache: List[str] = []
-        self._last_sel:   Optional[str]         = None
-        self._prev_sel:   set                   = set()
         self._sidebar_map_refresh_pending: bool = False
 
         # Active fluorescent channel, ratio catalogue, and threshold range
@@ -760,11 +758,10 @@ class WellViewerApp(QWidget):
         self._fc_vs_control_on: bool = False
         self._fc_control_label: str = ""
         self._fc_vs_t0_on: bool = False
-        # Unified saved-selections model (Phase 8.0) — THE in-memory source of
-        # truth. See well_viewer/selections_model.py for the schema.
-        self._selections:               list = []
-        self._current_selection_id:     Optional[str] = None
-        self._selections_v2_writes_disabled: bool = False
+        # Plate selection and the unified saved-selections ("v2") model now
+        # live in ``self._app_state.selection`` (well_viewer/state/selection.py).
+        # ``_selections`` / ``_selected_wells`` / ``_active_solo_wells`` etc.
+        # remain as @property shims further down.
         self._well_labels:       Dict[str, str]    = {}
         self._rep_quick_pair_dir   = "row"
         self._rep_quick_iter_order = "row"
@@ -774,17 +771,9 @@ class WellViewerApp(QWidget):
         self._cdf_xmin_edit = None
         self._cdf_xmax_edit = None
 
-        # Plate-map well selection
-        self._selected_wells: set  = set()
-        # Coalesces commit-after-paint events. A drag paints 96 wells in
-        # rapid sequence; we want one commit (one full redraw) at the end
-        # of the event-loop tick, not 96.
-        self._plate_commit_pending: bool = False
-        # Plotting-tab solo-well overrides: when a user clicks a well not
-        # in any group, it's added here so the plot picks it up alongside
-        # the visible groups. Independent of ``_selected_wells``, which is
-        # the per-well selection used outside rep-mode.
-        self._active_solo_wells: set = set()
+        # Plate-map well selection, the commit-coalescing flag, and the
+        # plotting-tab solo-well overrides all live in
+        # ``self._app_state.selection`` (see the shims below).
         self._tok_to_label:   Dict[str, str] = {}
 
         # Preview state
@@ -888,38 +877,49 @@ class WellViewerApp(QWidget):
         if data_path is not None:
             QTimer.singleShot(100, lambda: self._load_path(data_path))
 
-    # ── Phase 1 ChannelState shims ───────────────────────────────────────────
-    # The channel / ratio / threshold attributes moved into
-    # ``self._app_state.channel`` (a typed ChannelState). These properties
-    # forward the legacy ``self._*`` names to it so existing call sites are
-    # untouched; ChannelState is the single source of truth — no duplicated
-    # storage. Generated from one factory rather than 13 hand-copied property
-    # pairs. Deleted once call sites read ChannelState directly.
+    # ── Domain-state shims (runtime_app teardown) ────────────────────────────
+    # Channel / ratio / threshold state (Phase 1) and plate-selection state
+    # (Phase 2) moved into ``self._app_state`` (typed ChannelState /
+    # SelectionState). These properties forward the legacy ``self._*`` names so
+    # existing call sites are untouched; the state objects are the single
+    # source of truth — no duplicated storage. Generated from one factory
+    # rather than ~21 hand-copied property pairs. Deleted once call sites read
+    # the state objects directly.
 
-    def _channel_state_shim(_field: str) -> property:
+    def _app_state_shim(_domain: str, _field: str) -> property:
         def _get(self):
-            return getattr(self._app_state.channel, _field)
+            return getattr(getattr(self._app_state, _domain), _field)
 
         def _set(self, value) -> None:
-            setattr(self._app_state.channel, _field, value)
+            setattr(getattr(self._app_state, _domain), _field, value)
 
         return property(_get, _set)
 
-    _fluor_channels = _channel_state_shim("fluor_channels")
-    _review_image_channels = _channel_state_shim("review_image_channels")
-    _smfish_channels = _channel_state_shim("smfish_channels")
-    _active_channel = _channel_state_shim("active_channel")
-    _active_image_channel = _channel_state_shim("active_image_channel")
-    _active_metric = _channel_state_shim("active_metric")
-    _active_val_col = _channel_state_shim("active_val_col")
-    _ratio_metrics = _channel_state_shim("ratio_metrics")
-    _ratio_index = _channel_state_shim("ratio_index")
-    _threshold_min = _channel_state_shim("threshold_min")
-    _threshold_max = _channel_state_shim("threshold_max")
-    _threshold = _channel_state_shim("threshold")
-    _threshold_range_cache = _channel_state_shim("threshold_range_cache")
+    _fluor_channels = _app_state_shim("channel", "fluor_channels")
+    _review_image_channels = _app_state_shim("channel", "review_image_channels")
+    _smfish_channels = _app_state_shim("channel", "smfish_channels")
+    _active_channel = _app_state_shim("channel", "active_channel")
+    _active_image_channel = _app_state_shim("channel", "active_image_channel")
+    _active_metric = _app_state_shim("channel", "active_metric")
+    _active_val_col = _app_state_shim("channel", "active_val_col")
+    _ratio_metrics = _app_state_shim("channel", "ratio_metrics")
+    _ratio_index = _app_state_shim("channel", "ratio_index")
+    _threshold_min = _app_state_shim("channel", "threshold_min")
+    _threshold_max = _app_state_shim("channel", "threshold_max")
+    _threshold = _app_state_shim("channel", "threshold")
+    _threshold_range_cache = _app_state_shim("channel", "threshold_range_cache")
 
-    del _channel_state_shim
+    _selected_wells = _app_state_shim("selection", "selected_wells")
+    _last_sel = _app_state_shim("selection", "last_sel")
+    _prev_sel = _app_state_shim("selection", "prev_sel")
+    _active_solo_wells = _app_state_shim("selection", "active_solo_wells")
+    _selections = _app_state_shim("selection", "selections")
+    _current_selection_id = _app_state_shim("selection", "current_selection_id")
+    _selections_v2_writes_disabled = _app_state_shim(
+        "selection", "v2_writes_disabled")
+    _plate_commit_pending = _app_state_shim("selection", "plate_commit_pending")
+
+    del _app_state_shim
 
     @staticmethod
     def _position_root_on_screen(root, *, preferred_w: int, preferred_h: int) -> None:

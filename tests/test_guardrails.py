@@ -28,7 +28,7 @@ _HARD_FAIL = False
 
 # Ratcheting ceilings. Re-measured and lowered as the teardown proceeds.
 RUNTIME_APP_LINE_BUDGET = 7060   # Phase 0 baseline 7028; +32 for Phase 1 shims
-RUNTIME_APP_ATTR_BUDGET = 162    # Phase 0 baseline 166
+RUNTIME_APP_ATTR_BUDGET = 160    # Phase 0 baseline 166 (Phase 1: 162)
 
 
 def _enforce(ok: bool, message: str) -> None:

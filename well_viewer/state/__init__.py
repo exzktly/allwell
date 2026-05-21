@@ -15,5 +15,6 @@ methods for its domain. ``AppState`` merely aggregates them.
 from well_viewer.state.app_state import AppState
 from well_viewer.state.channel import ChannelState
 from well_viewer.state.event_bus import EventBus
+from well_viewer.state.selection import SelectionState
 
-__all__ = ["AppState", "ChannelState", "EventBus"]
+__all__ = ["AppState", "ChannelState", "EventBus", "SelectionState"]

@@ -27,6 +27,9 @@ def _active_tab(app) -> str:
 def _refresh_after_selection_change(app) -> None:
     """Refresh only UI/views relevant to the active tab."""
     app._refresh_sidebar_map()
+    # Announce on the bus. Additive — the per-tab dispatch below still runs;
+    # bus subscribers replace it as tabs migrate in later phases.
+    app._event_bus.selection_changed.emit(app._app_state.selection)
     tab = _active_tab(app)
     if tab == "Bar Plots":
         app._update_bar_tp_menu()
@@ -53,21 +56,17 @@ def _refresh_after_selection_change(app) -> None:
 
 
 def on_plate_sel_change(app) -> None:
-    cur_labels = app._selected_wells.copy()
-    added = cur_labels - app._prev_sel
-    removed = app._prev_sel - cur_labels
-    if added:
-        app._last_sel = next(iter(added))
-    elif removed:
-        deselected = next(iter(removed))
-        app._last_sel = deselected if cur_labels else None
-    app._prev_sel = cur_labels
+    # SelectionState diffs the new selection against its prev_sel snapshot to
+    # resolve last_sel, then re-snapshots.
+    sel = app._app_state.selection
+    sel.commit_plate_change()
     if hasattr(app, "_notebook"):
         tab = app._notebook.currentName()
-        if tab == "smFISH" and len(app._selected_wells) > 1:
-            keep = app._last_sel if app._last_sel in app._selected_wells else next(iter(app._selected_wells))
-            app._selected_wells = {keep}
-            app._prev_sel = app._selected_wells.copy()
+        if tab == "smFISH" and len(sel.selected_wells) > 1:
+            keep = (sel.last_sel if sel.last_sel in sel.selected_wells
+                    else next(iter(sel.selected_wells)))
+            sel.selected_wells = {keep}
+            sel.prev_sel = set(sel.selected_wells)
     _refresh_after_selection_change(app)
 
 
@@ -155,10 +154,7 @@ def select_all(app) -> None:
     if app._selections:  # rep-mode: show every group
         _set_groups_hidden(app, app._selections, target=False)
     else:
-        app._selected_wells = set(app._well_paths.keys())
-        if app._selected_wells:
-            app._last_sel = next(iter(app._selected_wells))
-        app._prev_sel = app._selected_wells.copy()
+        app._app_state.selection.select_wells(app._well_paths.keys())
         _refresh_after_selection_change(app)
 
 
@@ -166,7 +162,5 @@ def select_none(app) -> None:
     if app._selections:  # rep-mode: hide every group
         _set_groups_hidden(app, app._selections, target=True)
     else:
-        app._selected_wells.clear()
-        app._last_sel = None
-        app._prev_sel = set()
+        app._app_state.selection.clear_selection()
         _refresh_after_selection_change(app)

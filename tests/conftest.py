@@ -13,6 +13,18 @@ plain ``python -m pytest`` with just numpy + pandas in the venv.
 
 from __future__ import annotations
 
+import logging
+import os
+
+# Qt + matplotlib must run headless. Set before any Qt / matplotlib import —
+# this conftest is an initial conftest, loaded before plugin pytest_configure.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MPLBACKEND", "Agg")
+
+# The offscreen container has no Helvetica; matplotlib logs a findfont warning
+# per text draw, drowning the test output. The Agg fallback is harmless.
+logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
@@ -211,3 +223,38 @@ def mock_app():
         {"name": "TREAT", "wells": ["B01", "B02"], "hidden": False},
     ]
     return MockApp(per_well_pts=pts, selections=selections)
+
+
+# ── Headless Qt fixtures ─────────────────────────────────────────────────────
+#
+# These construct a real ``WellViewerApp`` on the offscreen Qt platform. They
+# are the foundation for structural-refactor verification: nothing exercised
+# ``runtime_app.py`` before this harness existed.
+
+@pytest.fixture
+def mini_dataset(tmp_path):
+    """Materialise the deterministic mini dataset; returns its directory."""
+    from tests.fixtures.mini_dataset import build_mini_dataset
+    return build_mini_dataset(tmp_path / "mini_dataset")
+
+
+@pytest.fixture
+def viewer_app(qtbot):
+    """A freshly-constructed, un-loaded ``WellViewerApp``.
+
+    Lazy centre tabs are NOT drained — callers that need every tab built
+    should call ``app._drain_pending_centre_builders()`` (the smoke test
+    for the drain itself depends on starting from the un-drained state).
+    """
+    from well_viewer.runtime_app import WellViewerApp
+    app = WellViewerApp()
+    qtbot.addWidget(app)
+    return app
+
+
+@pytest.fixture
+def loaded_app(viewer_app, mini_dataset):
+    """``WellViewerApp`` with the mini dataset loaded (and all tabs drained —
+    ``_load_path`` drains pending centre builders as part of loading)."""
+    viewer_app._load_path(mini_dataset)
+    return viewer_app

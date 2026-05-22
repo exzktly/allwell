@@ -38,7 +38,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 5 | `WidgetRegistry` adoption | — | ⏭️ deferred | — | skipped as a standalone phase — ~300 behaviour-neutral edits that move no tracked metric (the writes live in `tabs/`/`views/`, not `runtime_app.py`). The registry adoption that actually shrinks `runtime_app.py` happens organically in Phase 8, when each `_build_*` method relocates and its `self._x = w` becomes `ctx.widgets.register(...)` |
 | 6 | DI: plot controllers take `ctx` | — | ⬜ deferred | — | entangled (controllers ↔ `plot_orchestrator` ↔ batch-export ↔ tests) and flat (no line win) — sequenced after Phase 8 |
 | 7 | DI: remaining controllers take `ctx` | — | ⬜ deferred | — | as Phase 6 |
-| 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,501 | stats group done — `_build_stats_*` ×3 delegating wrappers removed |
+| 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,356 | stats group + sample-definitions centre relocated; attrs → 89 |
 | 9a | Relocate `_on_*`/`_redraw_*` into controllers | — | ⬜ | — | one PR per section |
 | 9b | `_on_tab_change` → `TabRegistry` | — | ⬜ | — | |
 | 10 | Composition root + finalize | — | ⬜ | — | drop `__getattr__` / `ctx.app` |
@@ -118,6 +118,14 @@ Dead code / redundancy eliminated outside the tracked metrics:
   (`**_kw`). Wrappers + dead theme-kwarg threading removed; `centre_view.py` /
   `stats_view.py` call the `build_stats_*` functions directly.
   `runtime_app.py` 6,552 → 6,501.
+  Second increment: **`_build_groups_centre`** — a genuinely inline ~145-line
+  builder for the Sample Definitions tab — relocated to
+  `views/replicate_panel_view.py::build_sample_definitions_centre` (next to
+  `build_replicate_groups_centre`, which it embeds). Its 3 widget-attr writes
+  (`_sample_definitions_subtabs`, `_cell_gating_subtab_frame`, `_notes_edit`)
+  leave `runtime_app.py` with it, dropping the attr budget 92 → 89. A dead
+  `btn_primary`/`btn_secondary` import was discarded in the move.
+  `runtime_app.py` 6,501 → 6,356.
 
 ## Guiding rules
 

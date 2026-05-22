@@ -134,7 +134,7 @@ def build_centre(app, parent: QWidget) -> None:
 
     # Pre-create stable widget handles so deferred builder closures can
     # capture them. Sample Definitions in particular needs the QWidget to
-    # be allocated up-front so the deferred ``_build_groups_centre_body``
+    # be allocated up-front so the deferred ``_build_sample_definitions``
     # closure can see it; otherwise the variable would be shadowed by the
     # ``addTab`` call further down.
     tab_groups = QWidget(app._notebook)
@@ -652,7 +652,10 @@ def build_centre(app, parent: QWidget) -> None:
         app._build_review_csv_tab(tab_frames["Review CSV"])
 
     def _build_sample_definitions() -> None:
-        app._build_groups_centre(tab_groups)
+        from well_viewer.views.replicate_panel_view import (
+            build_sample_definitions_centre,
+        )
+        build_sample_definitions_centre(app, tab_groups)
 
     def _build_batch_export() -> None:
         from well_viewer.tabs.batch_export_tab_view import build_batch_export_tab

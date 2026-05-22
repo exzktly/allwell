@@ -35,8 +35,10 @@ _HARD_FAIL = True
 # Phase 3a added 3 lines of load-bearing EventBus wiring (RedrawCoordinator).
 # Phase 4 (PersistenceRegistry) removed ~17 wrapper methods + 5 debounce flags.
 # Phase 8 (stats group) removed the 3 _build_stats_* delegating wrappers.
-RUNTIME_APP_LINE_BUDGET = 6501
-RUNTIME_APP_ATTR_BUDGET = 92
+# Phase 8 (sample-definitions) relocated _build_groups_centre into views/.
+RUNTIME_APP_LINE_BUDGET = 6356
+# Phase 8 (sample-definitions) moved 3 widget attrs out with _build_groups_centre.
+RUNTIME_APP_ATTR_BUDGET = 89
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only

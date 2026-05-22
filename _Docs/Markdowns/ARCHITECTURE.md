@@ -490,12 +490,20 @@ registry so reader call sites are untouched while writers migrate.
 single typed handle injected into tab builders and controllers in place of the
 god-object. `WellViewerApp` builds `self._ctx`; tab builders take `ctx`.
 
-**Migration status.** The state extraction (phases above) is complete; the
-loose attributes survive as delegating `@property` shims, deleted as readers
-migrate. The remaining teardown work is mechanical: migrate the reader call
-sites off the shims, move `_build_*` methods into `views/` and `_on_*` /
-`_redraw_*` into controllers, then `runtime_app.py` collapses toward a thin
-composition root.
+**Migration status (teardown in progress — not complete).** The typed-state
+infrastructure has landed: the `state/` package, `EventBus`, `WidgetRegistry`
+and `ViewerContext` all exist, and `WellViewerApp.__init__` builds them. The
+bulk of the file has *not* been relocated, though — `runtime_app.py` is still
+~6,900 lines, down only marginally from its ~7,000-line starting point. The
+loose attributes survive as delegating `@property` shims, and a transitional
+`WellViewerApp.__getattr__` forwards legacy widget-handle reads to the
+`WidgetRegistry`. The outstanding work is the large part: migrate reader call
+sites off the shims, move the `_build_*` methods into `views/` and the `_on_*`
+/ `_redraw_*` methods into controllers, drop the `__getattr__`, and let
+`runtime_app.py` collapse toward a thin composition root.
+`tests/test_guardrails.py` holds a ratcheting line-count / attribute-count
+ceiling (lowered as work lands, never raised) and enforces the
+`state/`-import-safety boundary, so the file can only shrink from here.
 
 ---
 

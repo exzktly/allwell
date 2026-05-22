@@ -66,7 +66,7 @@ csbdeep_data = (str(pkg_dir("csbdeep")), "csbdeep")
 # ``Markdowns/`` directory ships so relative image links inside the
 # README resolve correctly at runtime; missing folder silently hides the
 # section in the help drawer (trimmed builds), which is fine.
-_markdowns_dir = _parent / "Markdowns"
+_markdowns_dir = _parent / "_Docs" / "Markdowns"
 extra_data: list = []
 if _markdowns_dir.is_dir():
     extra_data.append((str(_markdowns_dir), "Markdowns"))

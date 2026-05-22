@@ -38,7 +38,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 5 | `WidgetRegistry` adoption | — | ⏭️ deferred | — | skipped as a standalone phase — ~300 behaviour-neutral edits that move no tracked metric (the writes live in `tabs/`/`views/`, not `runtime_app.py`). The registry adoption that actually shrinks `runtime_app.py` happens organically in Phase 8, when each `_build_*` method relocates and its `self._x = w` becomes `ctx.widgets.register(...)` |
 | 6 | DI: plot controllers take `ctx` | — | ⬜ deferred | — | entangled (controllers ↔ `plot_orchestrator` ↔ batch-export ↔ tests) and flat (no line win) — sequenced after Phase 8 |
 | 7 | DI: remaining controllers take `ctx` | — | ⬜ deferred | — | as Phase 6 |
-| 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,356 | stats group + sample-definitions centre relocated; attrs → 89 |
+| 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,303 | stats group, sample-definitions centre, preview-picker wrapper, cell-gating subtab relocated; attrs → 88 |
 | 9a | Relocate `_on_*`/`_redraw_*` into controllers | — | ⬜ | — | one PR per section |
 | 9b | `_on_tab_change` → `TabRegistry` | — | ⬜ | — | |
 | 10 | Composition root + finalize | — | ⬜ | — | drop `__getattr__` / `ctx.app` |
@@ -126,6 +126,23 @@ Dead code / redundancy eliminated outside the tracked metrics:
   leave `runtime_app.py` with it, dropping the attr budget 92 → 89. A dead
   `btn_primary`/`btn_secondary` import was discarded in the move.
   `runtime_app.py` 6,501 → 6,356.
+  Third increment: removed the **`_build_preview_picker`** wrapper (17 lines —
+  a `**_kw`-ignored theme-kwarg thread, same shape as the stats group) and
+  relocated the genuinely-inline **`_build_cell_gating_subtab`** (~30 lines —
+  the lazy-build coordinator for the Cell Gating sub-tab) into
+  `tabs/cell_gating_tab_view.py::build_cell_gating_subtab`, where its three
+  sibling calls become local. Its `_cell_gating_subtab_built` write left
+  `runtime_app.py`, dropping the attr budget 89 → 88; a now-dead
+  `hasattr(app, "_build_cell_gating_subtab")` probe in
+  `persistence/cell_gating.py` was dropped with it. `runtime_app.py` 6,356 →
+  6,303.
+
+  Note on the remaining `_build_*`: most are already thin delegators to
+  `views/` builders — the real construction code already lives there, so the
+  correct change is to *delete the wrapper* (callers invoke the `views/`
+  function directly), never to add another layer. The only genuinely-inline
+  `_build_*` left are the structural assemblers `_build_ui` / `_build_sidebar`,
+  which the plan correctly slates last.
 
 ## Guiding rules
 

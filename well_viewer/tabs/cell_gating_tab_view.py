@@ -282,6 +282,32 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
 # ── public API ────────────────────────────────────────────────────────────
 
 
+def build_cell_gating_subtab(app) -> None:
+    """Build the Cell Gating sub-tab content if it hasn't been built yet.
+
+    Called on first sub-tab activation and from persistence when persisted
+    thresholds need to be applied immediately. Idempotent.
+    """
+    if getattr(app, "_cell_gating_subtab_built", False):
+        return
+    frame = getattr(app, "_cell_gating_subtab_frame", None)
+    if frame is None:
+        return
+    try:
+        build_cell_gating_tab(app._ctx, frame)
+        if app._app_state.dataset.well_paths:
+            try:
+                cell_gating_load_cell_areas(app)
+                app._load_gating_from_pipeline_info()
+                cell_gating_load_threshold_frac_on(app)
+            except Exception:
+                logger.exception("Cell Gating post-build sync failed")
+    except Exception:
+        logger.exception("Cell Gating sub-tab build failed")
+    finally:
+        app._cell_gating_subtab_built = True
+
+
 def cell_gating_load_cell_areas(app) -> None:
     """Repopulate cell-area + per-channel fluorescence CDFs from selected wells."""
     if not hasattr(app, "_cell_gating_area_edit"):

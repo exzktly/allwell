@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
-def build_preview_picker(app, parent: QWidget, **_kw) -> None:
+def build_preview_picker(app, parent: QWidget) -> None:
     """Compact single-well plate-map preview picker in the sidebar."""
     from widgets.well_plate_selector import WellPlateSelector
 

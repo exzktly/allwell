@@ -141,9 +141,6 @@ _find_well_subfolder_path = _lazy("well_viewer.image_resolver", "find_well_subfo
 _resolve_ref_by_fov_tp = _lazy("well_viewer.image_resolver", "resolve_ref_by_fov_tp")
 _well_token_matches_text = _lazy("well_viewer.image_resolver", "well_token_matches_text")
 
-# preview_view.build_preview_picker is invoked from build_centre at startup
-# so we keep it eager. The refresh helper can defer.
-from well_viewer.views.preview_view import build_preview_picker as _build_preview_picker_view
 _refresh_preview_picker_view = _lazy("well_viewer.views.preview_view", "refresh_preview_picker")
 
 _it_apply_dimensions = _lazy("well_viewer.image_table_controller", "image_table_apply_dimensions")
@@ -1078,25 +1075,6 @@ class WellViewerApp(QWidget):
 
     # ── Preview sidebar picker ────────────────────────────────────────────────
 
-    def _build_preview_picker(self, parent) -> None:
-        _build_preview_picker_view(
-            self,
-            parent,
-            fm_bold=FM_BOLD,
-            fm_tiny=FM_TINY,
-            txt_mut=TXT_MUT,
-            txt_pri=TXT_PRI,
-            bg_side=BG_SIDE,
-            bg_cell=BG_CELL,
-            bg_panel=BG_PANEL,
-            bg_hover=BG_HOVER,
-            border=BORDER,
-            accent=ACCENT,
-            clr_white=CLR_WHITE,
-            clr_accent_dark=CLR_ACCENT_DARK,
-            extract_well_token_fn=_extract_well_token,
-        )
-
     def _refresh_preview_picker(self) -> None:
         from ui.theme import get_color
         _refresh_preview_picker_view(
@@ -1183,37 +1161,6 @@ class WellViewerApp(QWidget):
             image_table_open_export_settings as _it_open_export_settings,
         )
         _it_open_export_settings(self)
-
-    def _build_cell_gating_subtab(self) -> None:
-        """Build the Cell Gating sub-tab content if it hasn't been built yet.
-
-        Called on first sub-tab activation and from
-        ``_load_gating_from_pipeline_info`` when persisted thresholds need
-        to be applied immediately. Idempotent.
-        """
-        if getattr(self, "_cell_gating_subtab_built", False):
-            return
-        frame = getattr(self, "_cell_gating_subtab_frame", None)
-        if frame is None:
-            return
-        try:
-            from well_viewer.tabs.cell_gating_tab_view import (
-                build_cell_gating_tab,
-                cell_gating_load_cell_areas,
-                cell_gating_load_threshold_frac_on,
-            )
-            build_cell_gating_tab(self._ctx, frame)
-            if self._app_state.dataset.well_paths:
-                try:
-                    cell_gating_load_cell_areas(self)
-                    self._load_gating_from_pipeline_info()
-                    cell_gating_load_threshold_frac_on(self)
-                except Exception:
-                    _logger.exception("Cell Gating post-build sync failed")
-        except Exception:
-            _logger.exception("Cell Gating sub-tab build failed")
-        finally:
-            self._cell_gating_subtab_built = True
 
     # ─────────────────────────────────────────────────────────────────────────
     # Replicate panel

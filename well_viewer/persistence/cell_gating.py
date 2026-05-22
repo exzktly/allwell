@@ -55,8 +55,8 @@ def load_from_pipeline_info(app) -> bool:
         build = getattr(app, "_centre_build_pending", None)
         if callable(build):
             build("Sample Definitions")
-        if hasattr(app, "_build_cell_gating_subtab"):
-            app._build_cell_gating_subtab()
+        from well_viewer.tabs.cell_gating_tab_view import build_cell_gating_subtab
+        build_cell_gating_subtab(app)
     if not hasattr(app, "_cell_gating_area_edit"):
         return False
 

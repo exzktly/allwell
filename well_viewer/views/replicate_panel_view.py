@@ -216,6 +216,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
         QVBoxLayout as _QVBoxLayout,
         QWidget as _QWidget,
     )
+    from well_viewer.tabs.cell_gating_tab_view import build_cell_gating_subtab
     from well_viewer.views.ratio_panel_view import build_ratios_inline_panel
     from widgets.icon_button import IconButton as _IconButton
 
@@ -326,7 +327,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     def _on_sample_def_subtab(idx: int) -> None:
         name = sub_tabs.tabText(idx)
         if name == "Cell Gating":
-            app._build_cell_gating_subtab()
+            build_cell_gating_subtab(app)
         # Entering the Groups sub-tab deselects any previously-active
         # group so a click on the sidebar plate has no consequence
         # until the user explicitly picks one. The active-group banner

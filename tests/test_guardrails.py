@@ -36,9 +36,12 @@ _HARD_FAIL = True
 # Phase 4 (PersistenceRegistry) removed ~17 wrapper methods + 5 debounce flags.
 # Phase 8 (stats group) removed the 3 _build_stats_* delegating wrappers.
 # Phase 8 (sample-definitions) relocated _build_groups_centre into views/.
-RUNTIME_APP_LINE_BUDGET = 6356
-# Phase 8 (sample-definitions) moved 3 widget attrs out with _build_groups_centre.
-RUNTIME_APP_ATTR_BUDGET = 89
+# Phase 8 removed the _build_preview_picker wrapper + relocated
+# _build_cell_gating_subtab into tabs/cell_gating_tab_view.py.
+RUNTIME_APP_LINE_BUDGET = 6303
+# Phase 8 moved widget attrs out with _build_groups_centre (3) and
+# _build_cell_gating_subtab (1).
+RUNTIME_APP_ATTR_BUDGET = 88
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only

@@ -350,7 +350,7 @@ The current list (with a one-line role each):
 | `preview_controller.py` | Image-preview helpers (zip member classification, byte reading). |
 | `plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. PR #249 unified the dist/heatmap dispatch here so a new default-scope tab is wired in one place. |
 | `plot_style.py` | `apply_ax_style` — token-aware axes styling for matplotlib. |
-| `figure_export_editor.py` | The floating Export Style sidebar's prefs + apply pipeline + `launch_export_editor`. |
+| `figure_export_editor.py` | The floating Export Style sidebar's prefs + apply pipeline + `launch_export_editor`; also `copy_figure_to_clipboard` — Copy SVG, which writes the macOS pasteboard natively (PDF/SVG via pyobjc) so Illustrator pastes editable vector, with a Qt-clipboard fallback off macOS. |
 | `grouping_controller.py` | Sample-Definitions group editor logic. |
 | `auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `auto_threshold_core.py` so the pipeline and the GUI agree exactly. |
 | `fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by the line / bar plot controllers, their renderers, the batch-export panels, and `export_service.py`. |

@@ -38,7 +38,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 5 | `WidgetRegistry` adoption | — | ⏭️ deferred | — | skipped as a standalone phase — ~300 behaviour-neutral edits that move no tracked metric (the writes live in `tabs/`/`views/`, not `runtime_app.py`). The registry adoption that actually shrinks `runtime_app.py` happens organically in Phase 8, when each `_build_*` method relocates and its `self._x = w` becomes `ctx.widgets.register(...)` |
 | 6 | DI: plot controllers take `ctx` | — | ⬜ deferred | — | entangled (controllers ↔ `plot_orchestrator` ↔ batch-export ↔ tests) and flat (no line win) — sequenced after Phase 8 |
 | 7 | DI: remaining controllers take `ctx` | — | ⬜ deferred | — | as Phase 6 |
-| 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,303 | stats group, sample-definitions centre, preview-picker wrapper, cell-gating subtab relocated; attrs → 88 |
+| 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,179 | stats group, sample-definitions centre, preview-picker, cell-gating subtab, and the `_build_ui` window shell relocated; attrs → 74 |
 | 9a | Relocate `_on_*`/`_redraw_*` into controllers | — | ⬜ | — | one PR per section |
 | 9b | `_on_tab_change` → `TabRegistry` | — | ⬜ | — | |
 | 10 | Composition root + finalize | — | ⬜ | — | drop `__getattr__` / `ctx.app` |
@@ -137,12 +137,21 @@ Dead code / redundancy eliminated outside the tracked metrics:
   `persistence/cell_gating.py` was dropped with it. `runtime_app.py` 6,356 →
   6,303.
 
-  Note on the remaining `_build_*`: most are already thin delegators to
-  `views/` builders — the real construction code already lives there, so the
+  Fourth increment: relocated **`_build_ui`** — the ~123-line top-level window
+  assembler (topbar + sidebar│centre splitter + status bar) — into the new
+  `views/app_shell_view.py::build_ui`. It is called once from `__init__`. Its
+  14 single-assignment widget attrs (`_top_bar`, `_dir_label`, `_h_pane`,
+  `_section_nav`, the five `_sidebar_*_frame`s, `_central_pane_stack`, …) leave
+  `runtime_app.py` with it, dropping the attr budget 88 → 74 — the largest
+  single attr drop of the teardown. A then-dead `QSplitter` import was removed.
+  `runtime_app.py` 6,303 → 6,179.
+
+  Note on the remaining `_build_*`: every one left is now a thin delegator to a
+  `views/` builder — the real construction code already lives there, so the
   correct change is to *delete the wrapper* (callers invoke the `views/`
-  function directly), never to add another layer. The only genuinely-inline
-  `_build_*` left are the structural assemblers `_build_ui` / `_build_sidebar`,
-  which the plan correctly slates last.
+  function directly), never to add another layer. `_build_sidebar` /
+  `_build_centre` / `_build_bottom` are 3-line delegators; removing them is
+  near line-neutral, so they are low priority.
 
 ## Guiding rules
 

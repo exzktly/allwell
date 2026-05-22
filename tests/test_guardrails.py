@@ -34,14 +34,13 @@ _HARD_FAIL = True
 # Teardown-completion Phase 1 (helper extraction + dead-code deletion): 6628.
 # Phase 3a added 3 lines of load-bearing EventBus wiring (RedrawCoordinator).
 # Phase 4 (PersistenceRegistry) removed ~17 wrapper methods + 5 debounce flags.
-# Phase 8 (stats group) removed the 3 _build_stats_* delegating wrappers.
-# Phase 8 (sample-definitions) relocated _build_groups_centre into views/.
-# Phase 8 removed the _build_preview_picker wrapper + relocated
-# _build_cell_gating_subtab into tabs/cell_gating_tab_view.py.
-RUNTIME_APP_LINE_BUDGET = 6303
-# Phase 8 moved widget attrs out with _build_groups_centre (3) and
-# _build_cell_gating_subtab (1).
-RUNTIME_APP_ATTR_BUDGET = 88
+# Phase 8 relocated the _build_* builders into views/: stats group,
+# _build_groups_centre, _build_preview_picker, _build_cell_gating_subtab,
+# and _build_ui (the window-shell assembler -> views/app_shell_view.py).
+RUNTIME_APP_LINE_BUDGET = 6179
+# Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
+# _build_cell_gating_subtab (1), _build_ui (14).
+RUNTIME_APP_ATTR_BUDGET = 74
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only

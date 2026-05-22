@@ -208,7 +208,8 @@ panel wrote loose attributes onto it (`app._line_fig`, `app._selected_wells`,
 `self._*` *state* attributes have moved into typed domain-state objects. The
 intended end state — `WellViewerApp` as a thin root that owns the
 `ViewerContext` and only wires the UI together — has **not** been reached: the
-file is still ~6,900 lines. See §5.9 for the precise status.
+file is still ~6,600 lines. A teardown-completion effort is underway — see §5.9
+for the precise status and `RUNTIME_APP_TEARDOWN.md` for phase-by-phase progress.
 
 What lives on `WellViewerApp` today:
 
@@ -514,7 +515,7 @@ the rest are gone from `runtime_app.py`; call sites read
 What did **not** land: the `EventBus` has no subscribers; the `ViewerContext`
 is unwrapped to `app` at every call site; controllers still take `app`; the
 `WidgetRegistry` holds one tab's handles; and `runtime_app.py` is still
-~6,900 lines — the `_build_*` / `_on_*` / `_redraw_*` bodies have not been
+~6,600 lines — the `_build_*` / `_on_*` / `_redraw_*` bodies have not been
 relocated, so the file never collapsed toward a thin composition root. A
 transitional `WellViewerApp.__getattr__` forwards legacy widget-handle reads
 to the registry.
@@ -523,8 +524,10 @@ The outstanding work, in dependency order: subscribe the redraw wiring to the
 `EventBus` (and retire the direct calls); narrow tab builders and controllers
 from `app` to `ctx.state` / `ctx.widgets`; relocate the `_build_*` methods into
 `views/` and the `_on_*` / `_redraw_*` methods into controllers; drop the
-`__getattr__`. `tests/test_guardrails.py` holds a ratcheting line-count /
-attribute-count ceiling (lowered as work lands, never raised) and enforces the
+`__getattr__`. This is being executed as a phased teardown-completion effort —
+the plan and live progress tracker is `RUNTIME_APP_TEARDOWN.md`.
+`tests/test_guardrails.py` holds a ratcheting line-count / attribute-count
+ceiling (lowered as work lands, never raised) and enforces the
 `state/`-import-safety boundary, so the file can only shrink from here.
 
 ---

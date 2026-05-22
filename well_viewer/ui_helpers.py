@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Any, Callable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QAbstractItemView, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
+    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
+    QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 
@@ -479,3 +480,162 @@ def refresh_plot_toolbar_icons(widget: QWidget) -> None:
     for tb in widget.findChildren(NavigationToolbar2QT):
         if tb.objectName() == "PlotToolbar" and hasattr(tb, "refresh_icons"):
             tb.refresh_icons()
+
+
+# ── Thumbnail rendering ──────────────────────────────────────────────────────
+
+def make_fluor_thumb(arr, sz_w: int, sz_h: int,
+                     lo: Optional[float], hi: Optional[float],
+                     crop=None,
+                     tint: Optional[Tuple[float, float, float]] = None,
+                     cmap: Optional[str] = None):
+    """Render a greyscale float32 array as a QPixmap with LUT [lo, hi].
+
+    Rendering selection (in priority order):
+      * If ``cmap`` is a matplotlib colormap name (e.g. ``"viridis"``,
+        ``"Reds"``, ``"Greens"``…), the LUT-clipped intensity is mapped
+        through that colormap across its full gradient — low intensity →
+        cmap(0.0), high intensity → cmap(1.0). This is the canonical
+        multi-colour LUT path the Image Table uses.
+      * Else if ``tint`` is an ``(r, g, b)`` triple, the LUT-clipped
+        intensity is multiplied by the tint (legacy single-colour ramp).
+      * Else the result is grayscale.
+
+    When ``crop`` is a (y0, x0, y1, x1) tuple the array is sliced to that
+    sub-region before LUT application and scaling.
+    """
+    import numpy as _np
+
+    if arr is None:
+        return None
+    arr = _np.asarray(arr, dtype=_np.float32)
+    if crop is not None:
+        y0, x0, y1, x1 = crop
+        ih, iw = arr.shape[:2]
+        y0 = max(0, min(int(y0), ih))
+        y1 = max(y0, min(int(y1), ih))
+        x0 = max(0, min(int(x0), iw))
+        x1 = max(x0, min(int(x1), iw))
+        if y1 > y0 and x1 > x0:
+            arr = arr[y0:y1, x0:x1]
+    alo = lo if lo is not None else float(arr.min())
+    ahi = hi if hi is not None else float(arr.max())
+    if ahi <= alo:
+        ahi = alo + 1.0
+    norm = (_np.clip(arr, alo, ahi) - alo) / (ahi - alo)
+    if cmap:
+        try:
+            from matplotlib import colormaps as _mpl_cmaps
+            mpl_cmap = _mpl_cmaps[cmap]
+        except (KeyError, Exception):
+            mpl_cmap = None
+        if mpl_cmap is not None:
+            mapped = mpl_cmap(norm)[..., :3]  # drop alpha
+            rgb = (mapped * 255).astype(_np.uint8).copy()
+        else:
+            disp = (norm * 255).astype(_np.uint8)
+            rgb = _np.stack([disp, disp, disp], axis=-1).copy()
+    elif tint is not None:
+        disp = (norm * 255).astype(_np.uint8)
+        r, g, b = (max(0.0, min(1.0, float(c))) for c in tint)
+        df = disp.astype(_np.float32)
+        rgb = _np.stack([
+            (df * r).astype(_np.uint8),
+            (df * g).astype(_np.uint8),
+            (df * b).astype(_np.uint8),
+        ], axis=-1).copy()
+    else:
+        disp = (norm * 255).astype(_np.uint8)
+        rgb = _np.stack([disp, disp, disp], axis=-1).copy()
+    h, w, _ = rgb.shape
+    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+    pm = QPixmap.fromImage(qimg)
+    return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
+def make_overlay_thumb(arr, sz_w: int, sz_h: int,
+                       lo: Optional[float] = None, hi: Optional[float] = None,
+                       crop=None):
+    """Render a 2-D or 3-D array as a QPixmap scaled to (sz_w, sz_h).
+
+    If ``lo``/``hi`` are given they override the per-image auto range so the
+    Movie Montage overlay LUT controls can tune brightness/contrast. For 3-D
+    RGB overlays the [lo, hi] window is applied uniformly across channels.
+    When ``crop`` is supplied, the same (y0, x0, y1, x1) sub-region is used
+    so overlay thumbnails align with the cropped fluorescence thumbnails.
+    """
+    import numpy as _np
+
+    if arr is None:
+        return None
+    arr = _np.asarray(arr)
+    if crop is not None:
+        y0, x0, y1, x1 = crop
+        ih, iw = arr.shape[:2]
+        y0 = max(0, min(int(y0), ih))
+        y1 = max(y0, min(int(y1), ih))
+        x0 = max(0, min(int(x0), iw))
+        x1 = max(x0, min(int(x1), iw))
+        if y1 > y0 and x1 > x0:
+            arr = arr[y0:y1, x0:x1]
+    if arr.ndim == 2:
+        arr_f = arr.astype(_np.float32)
+        alo = lo if lo is not None else float(arr_f.min())
+        ahi = hi if hi is not None else float(arr_f.max())
+        if ahi <= alo:
+            ahi = alo + 1.0
+        disp = ((_np.clip(arr_f, alo, ahi) - alo) / (ahi - alo) * 255).astype(_np.uint8)
+        rgb = _np.stack([disp, disp, disp], axis=-1).copy()
+    elif arr.ndim == 3 and arr.shape[2] >= 3:
+        a = arr[:, :, :3].astype(_np.float32)
+        alo = lo if lo is not None else float(a.min())
+        ahi = hi if hi is not None else float(a.max())
+        if ahi <= alo:
+            ahi = alo + 1.0
+        a = _np.clip((a - alo) / (ahi - alo) * 255.0, 0, 255).astype(_np.uint8)
+        rgb = _np.ascontiguousarray(a)
+    else:
+        return None
+    h, w, _ = rgb.shape
+    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+    pm = QPixmap.fromImage(qimg)
+    return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
+# ── Small value / widget helpers ─────────────────────────────────────────────
+
+def safe_int_or_none(value: object) -> Optional[int]:
+    """Best-effort coercion of ``value`` to int, returning None on failure."""
+    if value is None:
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def bind_drag(frame, btn_store, on_press, on_drag, on_release, *,
+              button: int = 1) -> None:
+    """Bind press/drag/release events — stub retained for API compat under Qt."""
+    # Qt: wire mousePressEvent/mouseMoveEvent/mouseReleaseEvent overrides instead.
+    frame.mousePressEvent = on_press
+    frame.mouseMoveEvent = on_drag
+    frame.mouseReleaseEvent = on_release
+
+
+def wells_multiselect_listbox(parent, available, preselect=None) -> QListWidget:
+    """Return a QListWidget of *available* well labels with multi-selection."""
+    lb = QListWidget(parent)
+    lb.setSelectionMode(QAbstractItemView.MultiSelection)
+    preset = set(preselect or ())
+    for w in available:
+        item = QListWidgetItem(w)
+        lb.addItem(item)
+        if w in preset:
+            item.setSelected(True)
+    return lb
+
+
+def selected_list_values(lb) -> list:
+    """Return the current selected item text list from a QListWidget."""
+    return [lb.item(i).text() for i in range(lb.count()) if lb.item(i).isSelected()]

@@ -53,9 +53,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -67,8 +66,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -209,12 +206,18 @@ from well_viewer.viewer_state import make_schema_extractor as _make_schema_extra
 from well_viewer.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.ui_helpers import (
     ask_name_dialog as _ui_ask_name_dialog,
+    bind_drag as _bind_drag,
     btn_card as _btn_card,
     btn_danger as _btn_danger,
     btn_primary as _btn_primary,
     btn_secondary as _btn_secondary,
     clear_layout as _clear_layout,
+    make_fluor_thumb,
+    make_overlay_thumb,
     make_scrollable_canvas as _ui_make_scrollable_canvas,
+    safe_int_or_none as _safe_int_or_none,
+    selected_list_values as _selected_list_values,
+    wells_multiselect_listbox as _wells_multiselect_listbox,
 )
 from ui.theme import (
     ACCENT,
@@ -315,213 +318,12 @@ from well_viewer.selections_model import well_rank as _sel_well_rank
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
 
-def make_scrollable_canvas(parent, bg: str = BG_APP, scrollbar_width: int = 7):
-    """Return (scroll_area, inner_widget) for a vertically scrollable panel."""
-    return _ui_make_scrollable_canvas(parent, bg=bg)
-
-
-# =============================================================================
-# Shared UI helpers
-# =============================================================================
-
-def ask_name_dialog(parent, title: str = "Name", prompt: str = "Name:",
-                    default: str = "", width: int = 24) -> Optional[str]:
-    """Reusable modal text-input dialog."""
-    return _ui_ask_name_dialog(parent, title=title, prompt=prompt, default=default)
-
-
 # `_set_combo_values` was hoisted into well_viewer.ui_helpers so the new
 # `channel_state_controller` can use it without a circular import back
 # into runtime_app. Re-export the old private name for compatibility with
 # call sites that still reference it via the runtime_app module.
 from well_viewer.ui_helpers import set_combo_values as _set_combo_values  # noqa: E402, F401
 
-
-
-def make_fluor_thumb(arr, sz_w: int, sz_h: int,
-                   lo: Optional[float], hi: Optional[float],
-                   crop=None,
-                   tint: Optional[Tuple[float, float, float]] = None,
-                   cmap: Optional[str] = None):
-    """Render a greyscale float32 array as a QPixmap with LUT [lo, hi].
-
-    Rendering selection (in priority order):
-      * If ``cmap`` is a matplotlib colormap name (e.g. ``"viridis"``,
-        ``"Reds"``, ``"Greens"``…), the LUT-clipped intensity is mapped
-        through that colormap across its full gradient — low intensity →
-        cmap(0.0), high intensity → cmap(1.0). This is the canonical
-        multi-colour LUT path the Image Table uses.
-      * Else if ``tint`` is an ``(r, g, b)`` triple, the LUT-clipped
-        intensity is multiplied by the tint (legacy single-colour ramp).
-      * Else the result is grayscale.
-
-    When ``crop`` is a (y0, x0, y1, x1) tuple the array is sliced to that
-    sub-region before LUT application and scaling.
-    """
-    if arr is None or not _NP_AVAILABLE:
-        return None
-    arr = _np.asarray(arr, dtype=_np.float32)
-    if crop is not None:
-        y0, x0, y1, x1 = crop
-        ih, iw = arr.shape[:2]
-        y0 = max(0, min(int(y0), ih))
-        y1 = max(y0, min(int(y1), ih))
-        x0 = max(0, min(int(x0), iw))
-        x1 = max(x0, min(int(x1), iw))
-        if y1 > y0 and x1 > x0:
-            arr = arr[y0:y1, x0:x1]
-    alo = lo if lo is not None else float(arr.min())
-    ahi = hi if hi is not None else float(arr.max())
-    if ahi <= alo:
-        ahi = alo + 1.0
-    norm = (_np.clip(arr, alo, ahi) - alo) / (ahi - alo)
-    if cmap:
-        try:
-            from matplotlib import colormaps as _mpl_cmaps
-            mpl_cmap = _mpl_cmaps[cmap]
-        except (KeyError, Exception):
-            mpl_cmap = None
-        if mpl_cmap is not None:
-            mapped = mpl_cmap(norm)[..., :3]  # drop alpha
-            rgb = (mapped * 255).astype(_np.uint8).copy()
-        else:
-            disp = (norm * 255).astype(_np.uint8)
-            rgb = _np.stack([disp, disp, disp], axis=-1).copy()
-    elif tint is not None:
-        disp = (norm * 255).astype(_np.uint8)
-        r, g, b = (max(0.0, min(1.0, float(c))) for c in tint)
-        df = disp.astype(_np.float32)
-        rgb = _np.stack([
-            (df * r).astype(_np.uint8),
-            (df * g).astype(_np.uint8),
-            (df * b).astype(_np.uint8),
-        ], axis=-1).copy()
-    else:
-        disp = (norm * 255).astype(_np.uint8)
-        rgb = _np.stack([disp, disp, disp], axis=-1).copy()
-    h, w, _ = rgb.shape
-    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-    pm = QPixmap.fromImage(qimg)
-    return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-
-def make_overlay_thumb(arr, sz_w: int, sz_h: int,
-                       lo: Optional[float] = None, hi: Optional[float] = None,
-                       crop=None):
-    """Render a 2-D or 3-D array as a QPixmap scaled to (sz_w, sz_h).
-
-    If ``lo``/``hi`` are given they override the per-image auto range so the
-    Movie Montage overlay LUT controls can tune brightness/contrast. For 3-D
-    RGB overlays the [lo, hi] window is applied uniformly across channels.
-    When ``crop`` is supplied, the same (y0, x0, y1, x1) sub-region is used
-    so overlay thumbnails align with the cropped fluorescence thumbnails.
-    """
-    if arr is None or not _NP_AVAILABLE:
-        return None
-    arr = _np.asarray(arr)
-    if crop is not None:
-        y0, x0, y1, x1 = crop
-        ih, iw = arr.shape[:2]
-        y0 = max(0, min(int(y0), ih))
-        y1 = max(y0, min(int(y1), ih))
-        x0 = max(0, min(int(x0), iw))
-        x1 = max(x0, min(int(x1), iw))
-        if y1 > y0 and x1 > x0:
-            arr = arr[y0:y1, x0:x1]
-    if arr.ndim == 2:
-        arr_f = arr.astype(_np.float32)
-        alo = lo if lo is not None else float(arr_f.min())
-        ahi = hi if hi is not None else float(arr_f.max())
-        if ahi <= alo:
-            ahi = alo + 1.0
-        disp = ((_np.clip(arr_f, alo, ahi) - alo) / (ahi - alo) * 255).astype(_np.uint8)
-        rgb = _np.stack([disp, disp, disp], axis=-1).copy()
-    elif arr.ndim == 3 and arr.shape[2] >= 3:
-        a = arr[:, :, :3].astype(_np.float32)
-        alo = lo if lo is not None else float(a.min())
-        ahi = hi if hi is not None else float(a.max())
-        if ahi <= alo:
-            ahi = alo + 1.0
-        a = _np.clip((a - alo) / (ahi - alo) * 255.0, 0, 255).astype(_np.uint8)
-        rgb = _np.ascontiguousarray(a)
-    else:
-        return None
-    h, w, _ = rgb.shape
-    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-    pm = QPixmap.fromImage(qimg)
-    return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-
-def _safe_int_or_none(value: object) -> Optional[int]:
-    """Best-effort coercion of ``value`` to int, returning None on failure."""
-    if value is None:
-        return None
-    try:
-        return int(float(str(value).strip()))
-    except (TypeError, ValueError):
-        return None
-
-
-def _bind_drag(frame, btn_store, on_press, on_drag, on_release, *, button: int = 1) -> None:
-    """Bind press/drag/release events — stub retained for API compat under Qt."""
-    # Qt: wire mousePressEvent/mouseMoveEvent/mouseReleaseEvent overrides instead.
-    frame.mousePressEvent = on_press
-    frame.mouseMoveEvent = on_drag
-    frame.mouseReleaseEvent = on_release
-
-
-def _wells_multiselect_listbox(parent, available, preselect=None):
-    """Return a QListWidget of *available* well labels with multi-selection."""
-    lb = QListWidget(parent)
-    lb.setSelectionMode(QAbstractItemView.MultiSelection)
-    preset = set(preselect or ())
-    for w in available:
-        item = QListWidgetItem(w)
-        lb.addItem(item)
-        if w in preset:
-            item.setSelected(True)
-    return lb
-
-
-def _selected_list_values(lb) -> list:
-    """Return the current selected item text list from a QListWidget."""
-    return [lb.item(i).text() for i in range(lb.count()) if lb.item(i).isSelected()]
-
-
-def save_json_file(parent, data: object, *,
-                   title: str = "Save", default_name: str = "data.json",
-                   initial_dir: Optional[str] = None) -> bool:
-    """Show a save-file dialog and write *data* as indented JSON."""
-    initial = default_name if not initial_dir else str(Path(initial_dir) / default_name)
-    path_str, _ = QFileDialog.getSaveFileName(
-        parent, title, initial, "JSON files (*.json);;All files (*.*)",
-    )
-    if not path_str:
-        return False
-    try:
-        with open(path_str, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        return True
-    except OSError as exc:
-        QMessageBox.critical(parent, "Save failed", str(exc))
-        return False
-
-
-def load_json_file(parent, *, title: str = "Load",
-                   initial_dir: Optional[str] = None) -> Optional[object]:
-    """Show an open-file dialog and return the parsed JSON object, or None."""
-    start_dir = initial_dir or ""
-    path_str, _ = QFileDialog.getOpenFileName(
-        parent, title, start_dir, "JSON files (*.json);;All files (*.*)",
-    )
-    if not path_str:
-        return None
-    try:
-        with open(path_str, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        QMessageBox.critical(parent, "Load failed", str(exc))
-        return None
 
 
 from well_viewer.plot_style import apply_ax_style
@@ -572,31 +374,6 @@ from well_viewer.data_loading import extract_well_token as _extract_well_token  
 from well_viewer.views.image_panel_view import _label_to_rgb
 
 # =============================================================================
-# Tooltip
-# =============================================================================
-
-from PySide6.QtWidgets import QToolTip
-
-
-class _Tooltip:
-    """Lightweight pixel-tooltip helper backed by ``QToolTip``."""
-
-    def __init__(self, parent=None) -> None:
-        self._parent = parent
-
-    def show(self, x: int, y: int, text: str) -> None:
-        from PySide6.QtCore import QPoint
-        widget = self._parent
-        if widget is None:
-            QToolTip.showText(QPoint(int(x), int(y)), text)
-            return
-        global_pt = widget.mapToGlobal(QPoint(int(x), int(y)))
-        QToolTip.showText(global_pt, text, widget)
-
-    def hide(self) -> None:
-        QToolTip.hideText()
-
-# =============================================================================
 # Reusable image panel  (canonical: well_viewer/views/image_panel_view.py)
 # =============================================================================
 
@@ -607,65 +384,6 @@ from well_viewer.views.image_panel_view import _ImagePanel
 # =============================================================================
 
 from well_viewer.views.status_view import _GUILogHandler
-
-# =============================================================================
-# Montage popout window
-# =============================================================================
-
-
-# =============================================================================
-# Batch export – data model
-# =============================================================================
-
-class BatchSubset:
-    """
-    A named subset of wells for a single batch export run.
-
-    *wells*       – ordered list of well labels (e.g. 'gfp_measurements_B03').
-    *replicates*  – future extension: maps a replicate-group name to a list of
-                    well labels within this subset that are biological replicates.
-                    Currently always empty; reserved for a future update that
-                    will compute proper replicate-averaged statistics.
-
-    Example (future use):
-        subset.replicates = {
-            "rep_A": ["gfp_measurements_B03", "gfp_measurements_B04"],
-            "rep_B": ["gfp_measurements_C03", "gfp_measurements_C04"],
-        }
-    """
-    def __init__(self, name: str, wells: List[str]) -> None:
-        self.name:       str                    = name
-        self.wells:      List[str]              = list(wells)
-        self.replicates: Dict[str, List[str]]   = {}   # reserved for future use
-
-    def __repr__(self) -> str:
-        return f"BatchSubset({self.name!r}, wells={self.wells})"
-
-
-
-# Plate layout constants
-from well_viewer.plate_layout import PLATE_ROWS as _PLATE_ROWS, PLATE_COLS as _PLATE_COLS
-
-
-class _SubsetEntry:
-    """
-    Holds one named subset of wells for batch export.
-
-    Fields intentionally include *replicate_group* (empty string by default)
-    so that a future update can assign wells to replicate groups and compute
-    combined statistics without changing the data model.
-
-    replicate_group maps well_label -> group identifier string.
-    e.g.  {"gfp_measurements_B03": "rep1", "gfp_measurements_B04": "rep1",
-            "gfp_measurements_B05": "rep2"}
-    When empty, each well is treated as an independent measurement.
-    """
-
-    def __init__(self, name: str) -> None:
-        self.name:             str            = name
-        self.wells:            List[str]      = []   # ordered list of well labels
-        self.replicate_group:  Dict[str, str] = {}   # well_label -> replicate id (future use)
-
 
 class WellViewerApp(QWidget):
 
@@ -1198,7 +916,7 @@ class WellViewerApp(QWidget):
             clr_avail_hover=CLR_AVAIL_HOVER,
             well_colors=WELL_COLORS,
             bind_drag_fn=_bind_drag,
-            make_scrollable_canvas_fn=make_scrollable_canvas,
+            make_scrollable_canvas_fn=_ui_make_scrollable_canvas,
             extract_well_token_fn=_extract_well_token,
         )
 
@@ -1785,7 +1503,8 @@ class WellViewerApp(QWidget):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _ask_name_dialog(self, default: str) -> Optional[str]:
-        return ask_name_dialog(self, default=default)
+        return _ui_ask_name_dialog(self, title="Name", prompt="Name:",
+                                   default=default)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Well-label editor

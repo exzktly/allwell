@@ -1093,7 +1093,7 @@ def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_ar
     wherever the boundary of *mask_arr* falls (same padded-diff approach used
     in the review image renderer). Returns a QPixmap or None on failure.
     """
-    from well_viewer.runtime_app import make_fluor_thumb, make_overlay_thumb
+    from well_viewer.ui_helpers import make_fluor_thumb, make_overlay_thumb
     try:
         import numpy as _np
     except Exception:
@@ -1314,7 +1314,7 @@ def _install_cell_events(
 
 def image_table_generate(app) -> None:
     """Load images for every cell and lay out the rendered image table."""
-    from well_viewer.runtime_app import make_fluor_thumb, make_overlay_thumb
+    from well_viewer.ui_helpers import make_fluor_thumb, make_overlay_thumb
     from well_viewer.ui_helpers import clear_layout
 
     cells = getattr(app, "_image_table_cells", None) or []

@@ -27,9 +27,9 @@ STATE_DIR = REPO_ROOT / "well_viewer" / "state"
 _HARD_FAIL = True
 
 # Ratcheting ceilings. Re-measured as the teardown proceeds; lowered as each
-# shim-migration domain deletes its property shims. Phase 0 baseline:
-# 7028 lines / 166 attrs.
-RUNTIME_APP_LINE_BUDGET = 6909
+# phase removes code. Phase 0 baseline: 7028 lines / 166 attrs.
+# Teardown-completion Phase 1 (helper extraction + dead-code deletion): 6628.
+RUNTIME_APP_LINE_BUDGET = 6628
 RUNTIME_APP_ATTR_BUDGET = 97
 
 

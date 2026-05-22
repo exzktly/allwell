@@ -36,9 +36,9 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 3c | Bus load-bearing — `dataset_loaded` | #271 | 🔄 in progress | 6,631 | `RedrawCoordinator` subscribes `dataset_loaded` → full `_redraw`; direct call removed from `load_controller`. smFISH resync stays direct (tab-specific, moves with the tab). Phase 3 complete |
 | 4 | `PersistenceRegistry` | #271 | 🔄 in progress | 6,552 | one registry replaces ~17 save/load wrapper methods, 5 debounce flags, and 5 identical `schedule_save`/`_flush` pairs. Field-list collapse dropped — see Phase 4 note |
 | 5 | `WidgetRegistry` adoption | — | ⏭️ deferred | — | skipped as a standalone phase — ~300 behaviour-neutral edits that move no tracked metric (the writes live in `tabs/`/`views/`, not `runtime_app.py`). The registry adoption that actually shrinks `runtime_app.py` happens organically in Phase 8, when each `_build_*` method relocates and its `self._x = w` becomes `ctx.widgets.register(...)` |
-| 6 | DI: plot controllers take `ctx` | — | ⬜ | — | one PR per controller |
-| 7 | DI: remaining controllers take `ctx` | — | ⬜ | — | one PR per controller |
-| 8 | Relocate `_build_*` into `views/` | — | ⬜ | — | 3–4 PRs by file |
+| 6 | DI: plot controllers take `ctx` | — | ⬜ deferred | — | entangled (controllers ↔ `plot_orchestrator` ↔ batch-export ↔ tests) and flat (no line win) — sequenced after Phase 8 |
+| 7 | DI: remaining controllers take `ctx` | — | ⬜ deferred | — | as Phase 6 |
+| 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,501 | stats group done — `_build_stats_*` ×3 delegating wrappers removed |
 | 9a | Relocate `_on_*`/`_redraw_*` into controllers | — | ⬜ | — | one PR per section |
 | 9b | `_on_tab_change` → `TabRegistry` | — | ⬜ | — | |
 | 10 | Composition root + finalize | — | ⬜ | — | drop `__getattr__` / `ctx.app` |
@@ -103,6 +103,21 @@ Dead code / redundancy eliminated outside the tracked metrics:
   `ratios_to_dict`/`ratios_from_dict`). There is no meaningful hand-maintained
   field-list duplication to collapse — forcing dataclass machinery would *add*
   complexity, not remove it.
+- **Phases 6-7 deferred** — DI-narrowing the controllers to take `ctx` is, on
+  inspection, deeply entangled (controllers ↔ `plot_orchestrator` ↔
+  batch-export ↔ MockApp-based tests) so the plan's "one controller per PR"
+  isn't achievable, and the plan itself marks it "flat" (no `runtime_app.py`
+  shrinkage). Sequenced after Phase 8; the typed-`ctx` adoption happens
+  organically as `_build_*` / `_on_*` code relocates in Phases 8-9.
+- **Phase 8 (started)** — the 16 `_build_*` methods are a mix: some thin
+  wrappers around already-extracted `views/` builders, others large inline
+  builders (`_build_label_editor` ~540 lines, `_build_review_image_panel`
+  ~510). First increment: the **stats group** — `_build_stats_tab`,
+  `_build_stats_group_editor`, `_build_stats_results_panel` were thin wrappers
+  threading theme constants the `views/stats_view.py` builders already ignored
+  (`**_kw`). Wrappers + dead theme-kwarg threading removed; `centre_view.py` /
+  `stats_view.py` call the `build_stats_*` functions directly.
+  `runtime_app.py` 6,552 → 6,501.
 
 ## Guiding rules
 

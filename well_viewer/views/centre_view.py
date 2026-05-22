@@ -642,8 +642,11 @@ def build_centre(app, parent: QWidget) -> None:
         sub_seg.currentChanged.connect(_on_cell_seg_sub_seg)
 
     def _build_stats() -> None:
-        app._build_stats_tab(tab_frames["Statistics"])
-        app._build_stats_group_editor(app._sidebar_stats_frame)
+        from well_viewer.views.stats_view import (
+            build_stats_group_editor, build_stats_tab,
+        )
+        build_stats_tab(app, tab_frames["Statistics"])
+        build_stats_group_editor(app, app._sidebar_stats_frame)
 
     def _build_review_csv() -> None:
         app._build_review_csv_tab(tab_frames["Review CSV"])

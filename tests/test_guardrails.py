@@ -34,7 +34,8 @@ _HARD_FAIL = True
 # Teardown-completion Phase 1 (helper extraction + dead-code deletion): 6628.
 # Phase 3a added 3 lines of load-bearing EventBus wiring (RedrawCoordinator).
 # Phase 4 (PersistenceRegistry) removed ~17 wrapper methods + 5 debounce flags.
-RUNTIME_APP_LINE_BUDGET = 6552
+# Phase 8 (stats group) removed the 3 _build_stats_* delegating wrappers.
+RUNTIME_APP_LINE_BUDGET = 6501
 RUNTIME_APP_ATTR_BUDGET = 92
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a

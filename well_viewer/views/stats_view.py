@@ -15,13 +15,13 @@ from well_viewer.ui_helpers import (
 )
 
 
-def build_stats_tab(app, parent: QWidget, **_kw) -> None:
+def build_stats_tab(app, parent: QWidget) -> None:
     app._app_state.stats.groups = []
     app._app_state.stats.active_grp = -1
-    app._build_stats_results_panel(parent)
+    build_stats_results_panel(app, parent)
 
 
-def build_stats_group_editor(app, parent: QWidget, **_kw) -> None:
+def build_stats_group_editor(app, parent: QWidget) -> None:
     """Build the left-hand statistics group editor."""
     from well_viewer.ui_helpers import make_scrollable_canvas
     from widgets.well_plate_selector import WellPlateSelector
@@ -112,7 +112,7 @@ def build_stats_group_editor(app, parent: QWidget, **_kw) -> None:
     app._stats_refresh_group_list()
 
 
-def build_stats_results_panel(app, parent: QWidget, **_kw) -> None:
+def build_stats_results_panel(app, parent: QWidget) -> None:
     """Build the right-hand stats controls/results panel."""
     layout = parent.layout()
     if layout is None:

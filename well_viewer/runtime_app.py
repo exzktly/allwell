@@ -198,12 +198,6 @@ _stats_collect_group_values = _lazy("well_viewer.stats_controller", "collect_gro
 _stats_draw_ks_cdf = _lazy("well_viewer.stats_controller", "draw_ks_cdf")
 _stats_run_controller = _lazy("well_viewer.stats_controller", "run_stats")
 
-# stats_view builders are invoked from centre_view at startup; keep eager so
-# the build path doesn't pay a lazy resolution penalty.
-from well_viewer.views.stats_view import build_stats_group_editor as _build_stats_group_editor_view
-from well_viewer.views.stats_view import build_stats_results_panel as _build_stats_results_panel_view
-from well_viewer.views.stats_view import build_stats_tab as _build_stats_tab_view
-
 from well_viewer.viewer_state import make_schema_extractor as _make_schema_extractor
 from well_viewer.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.ui_helpers import (
@@ -892,35 +886,9 @@ class WellViewerApp(QWidget):
             self._tab_history_replaying = False
 
     # ── Statistics tab ────────────────────────────────────────────────────────
-
-    def _build_stats_tab(self, parent) -> None:
-        _build_stats_tab_view(self, parent, bg_app=BG_APP, bg_side=BG_SIDE)
-
-    # ── Stats left: group editor ──────────────────────────────────────────────
-
-    def _build_stats_group_editor(self, parent) -> None:
-        _build_stats_group_editor_view(
-            self,
-            parent,
-            fm_bold=FM_BOLD,
-            fm_tiny=FM_TINY,
-            txt_mut=TXT_MUT,
-            txt_sec=TXT_SEC,
-            txt_pri=TXT_PRI,
-            bg_side=BG_SIDE,
-            bg_panel=BG_PANEL,
-            bg_cell=BG_CELL,
-            bg_hover=BG_HOVER,
-            accent=ACCENT,
-            border=BORDER,
-            clr_white=CLR_WHITE,
-            clr_avail_well=CLR_AVAIL_WELL,
-            clr_avail_hover=CLR_AVAIL_HOVER,
-            well_colors=WELL_COLORS,
-            bind_drag_fn=_bind_drag,
-            make_scrollable_canvas_fn=_ui_make_scrollable_canvas,
-            extract_well_token_fn=_extract_well_token,
-        )
+    # Tab / panel construction lives in ``views/stats_view.py`` — callers invoke
+    # ``build_stats_tab`` / ``build_stats_group_editor`` / ``build_stats_results_panel``
+    # there directly (teardown Phase 8).
 
     # Stats tab group-editor methods (delegate to stats_controller)
 
@@ -966,25 +934,6 @@ class WellViewerApp(QWidget):
     def _stats_sync_from_app(self) -> None:
         from well_viewer.stats_controller import stats_sync_from_app
         stats_sync_from_app(self)
-
-    # ── Stats right: test selector + results ─────────────────────────────────
-
-    def _build_stats_results_panel(self, parent) -> None:
-        _build_stats_results_panel_view(
-            self,
-            parent,
-            fm_bold=FM_BOLD,
-            fm_tiny=FM_TINY,
-            txt_mut=TXT_MUT,
-            txt_sec=TXT_SEC,
-            txt_pri=TXT_PRI,
-            bg_app=BG_APP,
-            bg_side=BG_SIDE,
-            bg_panel=BG_PANEL,
-            border=BORDER,
-            accent=ACCENT,
-            clr_white=CLR_WHITE,
-        )
 
     def _stats_on_test_change(self) -> None:
         """Clear results when test changes; update UI hints."""

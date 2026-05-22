@@ -7,12 +7,10 @@ matplotlib export pipeline live in ``well_viewer.figure_export_editor``.
 
 from __future__ import annotations
 
-from io import BytesIO
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
@@ -808,103 +806,6 @@ class ExportStyleSidebar(QWidget):
             self._app._set_status(f"Figure saved → {out_path.name}")
         except Exception as exc:
             QMessageBox.critical(self, "Export failed", str(exc))
-
-    # ── Clipboard copy ───────────────────────────────────────────────────────
-
-    def _copy_png(self) -> None:
-        """Copy the current figure to the clipboard as a PNG image."""
-        try:
-            self._persist()
-            apply_export_style_to_current(self._app, self._fig, self._canvas)
-            buf = BytesIO()
-            self._fig.savefig(
-                buf, format="png", dpi=300,
-                bbox_inches="tight", transparent=False,
-            )
-            img = QImage.fromData(buf.getvalue(), "PNG")
-            if img.isNull():
-                QMessageBox.critical(self, "Copy failed", "Could not encode PNG.")
-                return
-            QApplication.clipboard().setPixmap(QPixmap.fromImage(img))
-            self._app._set_status("Figure copied to clipboard (PNG)")
-        except Exception as exc:
-            QMessageBox.critical(self, "Copy PNG failed", str(exc))
-
-    def _copy_svg(self) -> None:
-        """Copy the current figure to the clipboard.
-
-        Standard cross-platform Qt clipboard write: ``image/svg+xml``
-        (SVG markup), ``application/pdf`` (vector container) and a
-        raster ``QImage`` via ``setImageData``. Apps pick the slot
-        they understand. For a true vector handoff to Keynote (which
-        rasterises clipboard input by design), use the **Save As…**
-        button to write a PDF to disk and drag it onto the slide.
-        """
-        try:
-            self._persist()
-            apply_export_style_to_current(self._app, self._fig, self._canvas)
-            import matplotlib as _mpl
-            from PySide6.QtCore import QMimeData
-            from PySide6.QtGui import QImage
-
-            try:
-                svg_buf = BytesIO()
-                with _mpl.rc_context({"svg.fonttype": "none"}):
-                    self._fig.savefig(
-                        svg_buf, format="svg",
-                        bbox_inches="tight", transparent=True,
-                    )
-                svg_bytes = svg_buf.getvalue()
-            except Exception:
-                svg_bytes = b""
-
-            pdf_bytes: bytes | None = None
-            try:
-                pdf_buf = BytesIO()
-                # Type 42 (TrueType) instead of matplotlib's default
-                # Type 3 (bitmap glyphs) — keeps text editable in
-                # downstream vector tools.
-                with _mpl.rc_context({
-                    "pdf.fonttype": 42, "ps.fonttype": 42,
-                }):
-                    self._fig.savefig(
-                        pdf_buf, format="pdf",
-                        bbox_inches="tight", transparent=True,
-                    )
-                pdf_bytes = pdf_buf.getvalue()
-            except Exception:
-                pass
-
-            png_bytes: bytes | None = None
-            try:
-                png_buf = BytesIO()
-                self._fig.savefig(
-                    png_buf, format="png",
-                    bbox_inches="tight", transparent=True, dpi=200,
-                )
-                png_bytes = png_buf.getvalue()
-            except Exception:
-                pass
-
-            mime = QMimeData()
-            if svg_bytes:
-                svg_qba = QByteArray(svg_bytes)
-                mime.setData("image/svg+xml", svg_qba)
-                mime.setData("image/svg", svg_qba)
-            if pdf_bytes is not None:
-                mime.setData("application/pdf", QByteArray(pdf_bytes))
-            if png_bytes is not None:
-                mime.setData("image/png", QByteArray(png_bytes))
-                img = QImage.fromData(png_bytes, "PNG")
-                if not img.isNull():
-                    mime.setImageData(img)
-            QApplication.clipboard().setMimeData(mime)
-
-            self._app._set_status(
-                "Figure copied to clipboard (SVG + PDF + PNG)."
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Copy SVG failed", str(exc))
 
     # ── Reorder ──────────────────────────────────────────────────────────────
 

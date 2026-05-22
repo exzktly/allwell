@@ -10,6 +10,59 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox, QWidget
 
+
+def figure_to_vector_mimedata(fig, *, svg_kwargs=None, pdf_kwargs=None):
+    """Build a clipboard payload carrying *only* vector representations of
+    *fig* — ``image/svg+xml`` (SVG markup) and ``application/pdf``.
+
+    No raster flavour is attached, on purpose: a clipboard that advertises
+    both a raster image and a vector type makes Illustrator (and most vector
+    apps) paste the raster — which is why a "Copy SVG" that also carried a
+    ``QImage`` came out rasterised. With no raster to fall back to, a
+    vector-aware app pastes editable paths.
+
+    ``svg_kwargs`` / ``pdf_kwargs`` are extra ``Figure.savefig`` keyword
+    arguments (default ``bbox_inches="tight"``); ``format`` is set here.
+    """
+    import io
+
+    import matplotlib as _mpl
+    from PySide6.QtCore import QByteArray, QMimeData
+
+    svg_kw = {"bbox_inches": "tight"} if svg_kwargs is None else dict(svg_kwargs)
+    pdf_kw = {"bbox_inches": "tight"} if pdf_kwargs is None else dict(pdf_kwargs)
+    svg_kw.pop("format", None)
+    pdf_kw.pop("format", None)
+
+    svg_bytes = b""
+    try:
+        buf = io.BytesIO()
+        with _mpl.rc_context({"svg.fonttype": "none"}):
+            fig.savefig(buf, format="svg", **svg_kw)
+        svg_bytes = buf.getvalue()
+    except Exception:
+        pass
+
+    pdf_bytes = b""
+    try:
+        buf = io.BytesIO()
+        # Type-42 (TrueType) fonts keep text editable in downstream tools.
+        with _mpl.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42}):
+            fig.savefig(buf, format="pdf", **pdf_kw)
+        pdf_bytes = buf.getvalue()
+    except Exception:
+        pass
+
+    mime = QMimeData()
+    if svg_bytes:
+        qba = QByteArray(svg_bytes)
+        mime.setData("image/svg+xml", qba)
+        mime.setData("image/svg", qba)
+    if pdf_bytes:
+        mime.setData("application/pdf", QByteArray(pdf_bytes))
+    return mime
+
+
 DEFAULT_EXPORT_STYLE_PREFS = {
     "axis_label_size": 18,
     "tick_label_size": 18,

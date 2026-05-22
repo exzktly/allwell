@@ -11,15 +11,21 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMessageBox, QWidget
 
 
-def figure_to_vector_mimedata(fig, *, svg_kwargs=None, pdf_kwargs=None):
-    """Build a clipboard payload carrying *only* vector representations of
-    *fig* — ``image/svg+xml`` (SVG markup) and ``application/pdf``.
+def figure_to_vector_mimedata(fig, *, svg_kwargs=None, pdf_kwargs=None,
+                              raster_fallback=True):
+    """Build a clipboard payload for *fig*, preferring vector.
 
-    No raster flavour is attached, on purpose: a clipboard that advertises
-    both a raster image and a vector type makes Illustrator (and most vector
-    apps) paste the raster — which is why a "Copy SVG" that also carried a
-    ``QImage`` came out rasterised. With no raster to fall back to, a
-    vector-aware app pastes editable paths.
+    Renders the figure as PDF and SVG and registers each under both its MIME
+    type *and* the macOS pasteboard UTI a vector app looks for —
+    ``com.adobe.pdf`` (Illustrator / Preview) and ``public.svg-image``. Qt
+    passes a reverse-DNS format string straight through as the pasteboard
+    type, which a plain ``application/pdf`` MIME does not reach — so without
+    the UTI flavour Illustrator finds nothing it recognises.
+
+    When ``raster_fallback`` is set, a PNG is also attached as the standard
+    image flavour so a raster-only target (and any app that can't read the
+    vector flavours) still has something to paste; vector-aware apps prefer
+    the PDF / SVG flavours above it.
 
     ``svg_kwargs`` / ``pdf_kwargs`` are extra ``Figure.savefig`` keyword
     arguments (default ``bbox_inches="tight"``); ``format`` is set here.
@@ -28,6 +34,7 @@ def figure_to_vector_mimedata(fig, *, svg_kwargs=None, pdf_kwargs=None):
 
     import matplotlib as _mpl
     from PySide6.QtCore import QByteArray, QMimeData
+    from PySide6.QtGui import QImage
 
     svg_kw = {"bbox_inches": "tight"} if svg_kwargs is None else dict(svg_kwargs)
     pdf_kw = {"bbox_inches": "tight"} if pdf_kwargs is None else dict(pdf_kwargs)
@@ -54,12 +61,30 @@ def figure_to_vector_mimedata(fig, *, svg_kwargs=None, pdf_kwargs=None):
         pass
 
     mime = QMimeData()
-    if svg_bytes:
-        qba = QByteArray(svg_bytes)
-        mime.setData("image/svg+xml", qba)
-        mime.setData("image/svg", qba)
     if pdf_bytes:
-        mime.setData("application/pdf", QByteArray(pdf_bytes))
+        pdf_qba = QByteArray(pdf_bytes)
+        mime.setData("application/pdf", pdf_qba)
+        mime.setData("com.adobe.pdf", pdf_qba)        # macOS UTI — Illustrator
+    if svg_bytes:
+        svg_qba = QByteArray(svg_bytes)
+        mime.setData("image/svg+xml", svg_qba)
+        mime.setData("image/svg", svg_qba)
+        mime.setData("public.svg-image", svg_qba)     # macOS UTI
+
+    if raster_fallback and (svg_bytes or pdf_bytes):
+        try:
+            buf = io.BytesIO()
+            raster_kw = dict(svg_kw)
+            raster_kw.setdefault("dpi", 200)
+            fig.savefig(buf, format="png", **raster_kw)
+            png = buf.getvalue()
+            mime.setData("image/png", QByteArray(png))
+            img = QImage.fromData(png, "PNG")
+            if not img.isNull():
+                mime.setImageData(img)
+        except Exception:
+            pass
+
     return mime
 
 

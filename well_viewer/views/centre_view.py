@@ -474,13 +474,13 @@ def build_centre(app, parent: QWidget) -> None:
         app._plot_edit_axes = _edit_axes
 
         def _copy_svg() -> None:
-            """Copy the active card's figure to the clipboard as vector data.
+            """Copy the active card's figure to the clipboard, preferring
+            vector.
 
-            Writes only vector flavours — ``image/svg+xml`` and
-            ``application/pdf`` — so a vector app (Illustrator, Inkscape)
-            pastes editable paths. No raster flavour is attached: a clipboard
-            carrying both a raster image and a vector type makes such apps
-            paste the raster. The figure is captured in publication mode.
+            The payload carries PDF / SVG under the macOS pasteboard UTIs a
+            vector app reads, plus a PNG raster fallback (see
+            ``figure_to_vector_mimedata``). The figure is captured in
+            publication mode.
             """
             from PySide6.QtGui import QGuiApplication
 

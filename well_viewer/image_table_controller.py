@@ -1823,12 +1823,10 @@ def image_table_copy_png(app) -> None:
 
 
 def image_table_copy_svg(app) -> None:
-    """Render the image table and copy it to the clipboard as vector data.
+    """Render the image table and copy it to the clipboard, preferring vector.
 
-    Writes only vector flavours — ``image/svg+xml`` and ``application/pdf`` —
-    so a vector app (Illustrator, Inkscape) pastes editable paths. No raster
-    flavour is attached: a clipboard carrying both makes such apps paste the
-    raster instead.
+    The payload carries PDF / SVG under the macOS pasteboard UTIs a vector app
+    reads, plus a PNG raster fallback (see ``figure_to_vector_mimedata``).
     """
     from PySide6.QtGui import QGuiApplication
 

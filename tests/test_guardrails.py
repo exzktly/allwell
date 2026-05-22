@@ -37,7 +37,8 @@ _HARD_FAIL = True
 # Phase 8 relocated the _build_* builders into views/: stats group,
 # _build_groups_centre, _build_preview_picker, _build_cell_gating_subtab,
 # and _build_ui (the window-shell assembler -> views/app_shell_view.py).
-RUNTIME_APP_LINE_BUDGET = 6179
+# Phase 9 (Bar) relocated _draw_per_cell_bar_mode + helpers into barplot_renderer.py.
+RUNTIME_APP_LINE_BUDGET = 5931
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 RUNTIME_APP_ATTR_BUDGET = 74

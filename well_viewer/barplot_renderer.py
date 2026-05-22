@@ -372,7 +372,7 @@ def redraw_bars(app) -> None:
     threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
 
     active_rsets = app._rep_sets_active()
-    bar_selected = app._selected_bar_wells(active_rsets)
+    bar_selected = selected_bar_wells(app, active_rsets)
 
     _ch = app._app_state.channel.active_channel.upper()
     from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
@@ -399,24 +399,25 @@ def redraw_bars(app) -> None:
     ax_frac.set_ylim(-0.05, 1.05)
 
     if not app._app_state.dataset.well_paths:
-        app._draw_bar_empty_state(
-            ax_mean, ax_frac,
+        draw_bar_empty_state(
+            app, ax_mean, ax_frac,
             "Load a directory.\n"
             "Use the Open button at the top-right (⌘O) to pick a folder.",
             ax_n=ax_n,
         )
         return
     if not bar_selected and not active_rsets:
-        app._draw_bar_empty_state(ax_mean, ax_frac, NO_SELECTION_MSG, ax_n=ax_n)
+        draw_bar_empty_state(app, ax_mean, ax_frac, NO_SELECTION_MSG, ax_n=ax_n)
         return
 
-    tp_data = app._resolve_bar_timepoint()
+    tp_data = resolve_bar_timepoint(app)
     if tp_data is None:
-        app._draw_bar_empty_state(ax_mean, ax_frac, "Select a timepoint above", ax_n=ax_n)
+        draw_bar_empty_state(app, ax_mean, ax_frac, "Select a timepoint above", ax_n=ax_n)
         return
     target_t, tp_str = tp_data
 
-    if app._draw_per_cell_bar_mode(
+    if draw_per_cell_bar_mode(
+        app,
         ax_mean=ax_mean,
         ax_frac=ax_frac,
         ax_n=ax_n,
@@ -441,3 +442,188 @@ def redraw_bars(app) -> None:
     from well_viewer.figure_export_editor import apply_export_style_to_current
 
     apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))
+
+
+def draw_bar_empty_state(app, ax_mean, ax_frac, message: str, *, ax_n=None) -> None:
+    # Honour Screen vs Publication mode so the placeholder doesn't render
+    # as a glaring white block when the rest of the app is dark.
+    _bg, _title_fg, _muted_fg, _grid, _spine = tokens_for(ax_mean)
+    try:
+        ax_mean.figure.set_facecolor(_bg)
+    except Exception:
+        pass
+    axes = [ax_mean, ax_frac]
+    if ax_n is not None:
+        axes.append(ax_n)
+    for ax in axes:
+        ax.set_facecolor(_bg)
+        ax.text(
+            0.5, 0.5, message,
+            transform=ax.transAxes,
+            ha="center", va="center",
+            color=_muted_fg, fontsize=10,
+        )
+        ax.set_axis_off()
+    app._bar_canvas.draw_idle()
+
+
+def resolve_bar_timepoint(app) -> Optional[tuple]:
+    tp_str = app._bar_tp_var.currentText()
+    if tp_str in ("—", ""):
+        return None
+    try:
+        return float(tp_str), tp_str
+    except ValueError:
+        return None
+
+
+def selected_bar_wells(app, active_rsets) -> List[str]:
+    if active_rsets:
+        return []
+    return sorted(
+        (lbl for lbl in app._app_state.selection.selected_wells
+         if lbl in app._app_state.dataset.well_paths),
+        key=lambda lbl: app._parse_rc(lbl),
+    )
+
+
+def draw_per_cell_bar_mode(
+    app,
+    *,
+    ax_mean,
+    ax_frac,
+    ax_n=None,
+    active_rsets,
+    target_t: float,
+    tp_str: str,
+    threshold: float,
+) -> bool:
+    from well_viewer import debug_flags as _debug_flags
+    from well_viewer import fold_change as _fc
+
+    use_per_cell = app._bar_violin or app._bar_swarm
+    if not use_per_cell:
+        return False
+    ordered_keys = app._bar_current_keys()
+    if active_rsets:
+        rset_by_name = {r.name: r for r in active_rsets}
+        plot_wells: List[str] = []
+        plot_colors: List[str] = []
+        plot_labels: List[str] = []
+        for si, key in enumerate(ordered_keys):
+            rset = rset_by_name.get(key)
+            if rset is None:
+                continue
+            color = app._rank_color_rset(rset)
+            valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+            for w in valid:
+                plot_wells.append(w)
+                plot_colors.append(color)
+                plot_labels.append(f"{app._well_display_label(w)}\n[{rset.name}]")
+    else:
+        plot_wells = [k for k in ordered_keys if k in app._app_state.dataset.well_paths]
+        plot_colors = [app._rank_color_well(w) for w in plot_wells]
+        plot_labels = [app._well_display_label(w) for w in plot_wells]
+    if _debug_flags.review_bar_debug_enabled():
+        mode = "violin" if app._bar_violin else "beeswarm"
+        print(f"DEBUG barplot_renderer: per-cell mode={mode} wells={plot_wells!r} labels={plot_labels!r}")
+    # Build the per-well scale dict ONCE — same denominator each well uses for
+    # its cell values. Pass through to violin / beeswarm so fold-change
+    # participation no longer ends at the bar renderer.
+    _fc_state = _fc.fold_change_state(app)
+    if _fc_state[0] or _fc_state[2]:
+        cell_scale = _fc.build_cell_scaling(
+            app, plot_wells, fc_state=_fc_state, target_t=target_t,
+            threshold=threshold, val_col=app._app_state.channel.active_val_col,
+            use_sem=app._app_state.plot.use_sem,
+            per_fov_spread=app._use_fov_spread_active(),
+            cell_area_threshold=app._get_cell_area_threshold(),
+            fluor_gates=app._get_all_fluor_gates(),
+        )
+    else:
+        cell_scale = None
+    if plot_wells:
+        if app._bar_violin:
+            draw_violin(
+                app, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
+                target_t, tp_str, threshold,
+                cell_scale=cell_scale,
+            )
+        else:
+            draw_beeswarm(
+                app, ax_mean, ax_frac,
+                plot_wells, plot_colors, plot_labels,
+                target_t, tp_str, threshold,
+                cell_scale=cell_scale,
+            )
+        _apply_bar_ylims(app, ax_mean, ax_frac, ax_n=ax_n)
+        # Even in violin/beeswarm mode the user wants to see the events
+        # above threshold count alongside the distribution.
+        if ax_n is not None:
+            draw_per_well_n_bars(app, ax_n, plot_wells, plot_colors, plot_labels, target_t, threshold)
+    app._bar_canvas.draw_idle()
+    return True
+
+
+def draw_per_well_n_bars(
+    app,
+    ax_n,
+    wells: List[str],
+    colors: List[str],
+    xlabels: List[str],
+    target_t: float,
+    threshold: float,
+) -> None:
+    """Render the events-above-threshold panel for per-cell view modes.
+
+    Honours the Aggregate-FOVs toggle: when active, each well's bar is the
+    mean of its per-FOV above-threshold counts and an error bar spans ±
+    the per-FOV SD/SEM. When the toggle is off, the bar is the well's
+    total above-threshold count with no error bar.
+    """
+    from matplotlib.ticker import MaxNLocator
+    cell_area_threshold = app._get_cell_area_threshold()
+    fluor_gates = app._get_all_fluor_gates()
+    per_fov_spread = app._use_fov_spread_active()
+    use_sem = bool(app._app_state.plot.use_sem)
+    n = len(wells)
+    bar_w = min(0.6, 5.0 / max(n, 1))
+    for i, lbl in enumerate(wells):
+        pts = app._aggregate_well(
+            lbl, threshold=threshold, use_sem=use_sem,
+            val_col=app._app_state.channel.active_val_col,
+            cell_area_threshold=cell_area_threshold,
+            fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+        color = colors[i % len(colors)] if colors else app._rank_color_well(lbl)
+        if matched:
+            pt = matched[0]
+            if per_fov_spread:
+                # AggPoint index 7 = mean per-FOV n_above; index 8 = SD/SEM.
+                bar_val = float(pt[7]) if len(pt) >= 8 else 0.0
+                err_val = float(pt[8]) if len(pt) >= 9 else 0.0
+            else:
+                # AggPoint index 4 = total n_above for the well.
+                bar_val = float(pt[4])
+                err_val = 0.0
+        else:
+            bar_val = 0.0
+            err_val = 0.0
+        if bar_val > 0:
+            ax_n.bar(i, bar_val, width=bar_w, color=color, alpha=0.85, zorder=3, linewidth=0)
+            if err_val > 0:
+                ax_n.errorbar(i, bar_val, yerr=err_val, fmt="none", ecolor=CLR_ERR_BAR, elinewidth=1.4, capsize=4, zorder=4)
+        else:
+            ax_n.bar(i, 0, width=bar_w, color=CLR_PLACEHOLDER, linewidth=1, edgecolor=CLR_MUTED_DISABLED, linestyle="--", zorder=3)
+    xs = list(range(n))
+    ax_n.set_xticks(xs)
+    ax_n.set_xticklabels(xlabels, rotation=45 if n > 8 else 0, ha="right" if n > 8 else "center", fontsize=7)
+    ax_n.set_xlim(-0.6, n - 0.4)
+    # Use float ticks when the bar shows a per-FOV mean (Aggregate FOVs
+    # toggle on); otherwise the events-above value is an integer count.
+    cur_lo, cur_hi = ax_n.get_ylim()
+    ax_n.set_ylim(0, max(cur_hi, 1))
+    ax_n.yaxis.set_major_locator(MaxNLocator(integer=not per_fov_spread))
+    setattr(ax_n, "_categorical_xaxis", True)

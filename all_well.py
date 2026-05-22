@@ -574,20 +574,27 @@ class AllWellApp(QMainWindow):
                 "viewed section tab<br>"
                 "<tt>⌘→</tt> / <tt>Ctrl+→</tt> — Forward to the next section "
                 "tab in history<br>"
-                "<tt>⌘W</tt> / <tt>Ctrl+W</tt> — Close window<br><br>"
-                "For the full architectural overview see <tt>Markdowns/ARCHITECTURE.md</tt>."
+                "<tt>⌘W</tt> / <tt>Ctrl+W</tt> — Close window"
             )
             cl.addWidget(body)
 
             # README section — rendered from the bundled Markdown file so
             # the full reference manual is reachable without leaving the
-            # app. Missing files fail silently (e.g. trimmed-down builds
+            # app. In the source tree the file lives under _Docs/Markdowns/;
+            # PyInstaller bundles it to Markdowns/ at the app root — try
+            # both. Missing files fail silently (e.g. trimmed-down builds
             # that ship without the Markdowns/ folder).
-            readme_path = Path(__file__).resolve().parent / "Markdowns" / "README_WellViewer.md"
-            try:
-                readme_text = readme_path.read_text(encoding="utf-8")
-            except OSError:
-                readme_text = ""
+            base = Path(__file__).resolve().parent
+            readme_text = ""
+            readme_path = base / "Markdowns" / "README_WellViewer.md"
+            for _candidate in (base / "_Docs" / "Markdowns" / "README_WellViewer.md",
+                               base / "Markdowns" / "README_WellViewer.md"):
+                try:
+                    readme_text = _candidate.read_text(encoding="utf-8")
+                    readme_path = _candidate
+                    break
+                except OSError:
+                    continue
             if readme_text:
                 rule = QFrame(content)
                 rule.setFrameShape(QFrame.HLine)

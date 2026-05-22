@@ -430,7 +430,9 @@ Every plot tab carries the same action buttons on its controls row:
 
 - **Export CSV** — writes the underlying data behind the current plot.
 - **Copy SVG** — puts a vector copy of the figure on the clipboard
-  (paste into Illustrator / Inkscape / Keynote / Slides).
+  (paste into Illustrator / Inkscape / Keynote / Slides). On macOS the
+  clipboard is written natively (PDF + SVG) so Illustrator pastes editable
+  vector; this needs `pyobjc-framework-Cocoa` (see `requirements.txt`).
 - **Save figure** — saves to disk; the file dialog picks the format from
   the extension (`.svg` / `.pdf` / `.eps` / `.png`).
 - **Properties** — opens the styling sidebar described above.

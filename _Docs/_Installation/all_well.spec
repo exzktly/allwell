@@ -66,7 +66,7 @@ csbdeep_data = (str(pkg_dir("csbdeep")), "csbdeep")
 # ``Markdowns/`` directory ships so relative image links inside the
 # README resolve correctly at runtime; missing folder silently hides the
 # section in the help drawer (trimmed builds), which is fine.
-_markdowns_dir = _parent / "Markdowns"
+_markdowns_dir = _parent / "_Docs" / "Markdowns"
 extra_data: list = []
 if _markdowns_dir.is_dir():
     extra_data.append((str(_markdowns_dir), "Markdowns"))
@@ -154,6 +154,13 @@ hiddenimports = [
     "PySide6.QtWidgets",
     "PySide6.QtSvg",
     "shiboken6",
+
+    # pyobjc — Copy SVG writes NSPasteboard natively so Illustrator pastes
+    # true vector. Imported lazily inside figure_export_editor; PyInstaller's
+    # static analysis cannot see it, so name the frameworks explicitly.
+    "AppKit",
+    "Foundation",
+    "objc",
 
     # pandas — the Review tab and gating pipeline run on DataFrames.
     "pandas",

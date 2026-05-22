@@ -116,5 +116,12 @@ exceptiongroup<1.3
 # (avoids needing admin to install the system vcredist).
 PySide6==6.7.3
 
+# ── macOS native clipboard (Copy SVG) ────────────────────────────────────────
+# Qt's QMimeData cannot register a payload under a raw macOS UTI, so Copy SVG
+# would only ever paste raster into Illustrator. pyobjc lets us write
+# NSPasteboard directly under com.adobe.pdf / public.svg-image. macOS-only;
+# off macOS Copy SVG falls back to the Qt clipboard.
+pyobjc-framework-Cocoa==10.3.1 ; sys_platform == "darwin"
+
 # ── Build tooling (build only) ───────────────────────────────────────────────
 pyinstaller==6.1.0

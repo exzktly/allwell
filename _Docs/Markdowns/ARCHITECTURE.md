@@ -350,7 +350,7 @@ The current list (with a one-line role each):
 | `preview_controller.py` | Image-preview helpers (zip member classification, byte reading). |
 | `plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. PR #249 unified the dist/heatmap dispatch here so a new default-scope tab is wired in one place. |
 | `plot_style.py` | `apply_ax_style` — token-aware axes styling for matplotlib. |
-| `figure_export_editor.py` | The floating Export Style sidebar's prefs + apply pipeline + `launch_export_editor`. |
+| `figure_export_editor.py` | The floating Export Style sidebar's prefs + apply pipeline + `launch_export_editor`; also `copy_figure_to_clipboard` — Copy SVG, which writes the macOS pasteboard natively (PDF/SVG via pyobjc) so Illustrator pastes editable vector, with a Qt-clipboard fallback off macOS. |
 | `grouping_controller.py` | Sample-Definitions group editor logic. |
 | `auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `auto_threshold_core.py` so the pipeline and the GUI agree exactly. |
 | `fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by the line / bar plot controllers, their renderers, the batch-export panels, and `export_service.py`. |
@@ -490,12 +490,20 @@ registry so reader call sites are untouched while writers migrate.
 single typed handle injected into tab builders and controllers in place of the
 god-object. `WellViewerApp` builds `self._ctx`; tab builders take `ctx`.
 
-**Migration status.** The state extraction (phases above) is complete; the
-loose attributes survive as delegating `@property` shims, deleted as readers
-migrate. The remaining teardown work is mechanical: migrate the reader call
-sites off the shims, move `_build_*` methods into `views/` and `_on_*` /
-`_redraw_*` into controllers, then `runtime_app.py` collapses toward a thin
-composition root.
+**Migration status (teardown in progress — not complete).** The typed-state
+infrastructure has landed: the `state/` package, `EventBus`, `WidgetRegistry`
+and `ViewerContext` all exist, and `WellViewerApp.__init__` builds them. The
+bulk of the file has *not* been relocated, though — `runtime_app.py` is still
+~6,900 lines, down only marginally from its ~7,000-line starting point. The
+loose attributes survive as delegating `@property` shims, and a transitional
+`WellViewerApp.__getattr__` forwards legacy widget-handle reads to the
+`WidgetRegistry`. The outstanding work is the large part: migrate reader call
+sites off the shims, move the `_build_*` methods into `views/` and the `_on_*`
+/ `_redraw_*` methods into controllers, drop the `__getattr__`, and let
+`runtime_app.py` collapse toward a thin composition root.
+`tests/test_guardrails.py` holds a ratcheting line-count / attribute-count
+ceiling (lowered as work lands, never raised) and enforces the
+`state/`-import-safety boundary, so the file can only shrink from here.
 
 ---
 

@@ -474,17 +474,15 @@ def build_centre(app, parent: QWidget) -> None:
         app._plot_edit_axes = _edit_axes
 
         def _copy_svg() -> None:
-            """Copy the active card's figure to the clipboard as vector data.
+            """Copy the active card's figure to the clipboard, preferring
+            vector.
 
-            Writes only vector flavours — ``image/svg+xml`` and
-            ``application/pdf`` — so a vector app (Illustrator, Inkscape)
-            pastes editable paths. No raster flavour is attached: a clipboard
-            carrying both a raster image and a vector type makes such apps
-            paste the raster. The figure is captured in publication mode.
+            On macOS the figure is written natively to ``NSPasteboard`` so
+            Illustrator pastes true editable vector; elsewhere a Qt
+            clipboard payload is used (see ``copy_figure_to_clipboard``).
+            The figure is captured in publication mode.
             """
-            from PySide6.QtGui import QGuiApplication
-
-            from well_viewer.figure_export_editor import figure_to_vector_mimedata
+            from well_viewer.figure_export_editor import copy_figure_to_clipboard
             for attr in ("_line_card", "_bar_card", "_scatter_card",
                          "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
                 card = getattr(app, attr, None)
@@ -501,11 +499,7 @@ def build_centre(app, parent: QWidget) -> None:
                     if hasattr(card, "setPlotTheme") and prev_theme != "publication":
                         card.setPlotTheme("publication")
 
-                    mime = figure_to_vector_mimedata(fig)
-                    if not (mime.hasFormat("image/svg+xml")
-                            or mime.hasFormat("application/pdf")):
-                        return
-                    QGuiApplication.clipboard().setMimeData(mime)
+                    status = copy_figure_to_clipboard(fig)
                 finally:
                     if (hasattr(card, "setPlotTheme")
                             and getattr(card, "_plot_theme", "screen") != prev_theme):
@@ -514,9 +508,7 @@ def build_centre(app, parent: QWidget) -> None:
                         except Exception:
                             pass
                 if hasattr(app, "_set_status"):
-                    app._set_status(
-                        "Copied figure to clipboard (vector SVG + PDF, publication)."
-                    )
+                    app._set_status(status)
                 return
         app._copy_active_card_as_svg = _copy_svg
 

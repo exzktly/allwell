@@ -230,8 +230,7 @@ class RatioMetricsPanel(QWidget):
             self._app._set_ratio_metrics(ratios)
         else:
             self._app._app_state.channel.ratio_metrics = ratios
-        if hasattr(self._app, "_ratios_save_to_data_dir"):
-            self._app._ratios_save_to_data_dir()
+        self._app._persistence.schedule_save("ratios")
 
 
 def build_ratios_inline_panel(app, parent: QWidget) -> RatioMetricsPanel:

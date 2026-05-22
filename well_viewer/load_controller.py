@@ -72,9 +72,9 @@ def load_directory(app, d: Path, label=None) -> None:
         return
     # Save the outgoing dataset's view-state before swapping data dirs so
     # reopening it later restores tab / wells / channel selection.
-    if app._app_state.dataset.data_dir is not None and hasattr(app, "_view_state_save_to_data_dir"):
+    if app._app_state.dataset.data_dir is not None:
         try:
-            app._view_state_save_to_data_dir()
+            app._persistence.save("view_state")
         except Exception:
             logging.getLogger("well_viewer").exception("view_state save on switch failed")
     # DatasetState resets the per-dataset caches (data dir, well paths, row
@@ -132,18 +132,16 @@ def load_directory(app, d: Path, label=None) -> None:
     # any controller queries cached rows, then project them onto row['Included']
     # so all downstream stats honor user curation. Both calls are safe no-ops
     # when no patch file exists.
-    if hasattr(app, "_cell_overrides_load_from_data_dir"):
-        try:
-            app._cell_overrides_load_from_data_dir()
-            app._apply_review_overrides_to_cache()
-        except Exception:
-            pass
+    try:
+        app._persistence.load("cell_overrides")
+        app._apply_review_overrides_to_cache()
+    except Exception:
+        pass
     # Hydrate user-defined line-plot draw order (line_order.json).
-    if hasattr(app, "_line_order_load_from_data_dir"):
-        try:
-            app._line_order_load_from_data_dir()
-        except Exception:
-            pass
+    try:
+        app._persistence.load("line_order")
+    except Exception:
+        pass
     app._refresh_sidebar_map()
     if app._app_state.preview.selected_well not in app._app_state.dataset.well_paths:
         app._app_state.preview.selected_well = None
@@ -166,8 +164,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # Auto-load any persisted ratio definitions and heatmap layouts that live
     # in the same data directory. Both calls are safe no-ops when no file
     # exists; errors are logged and swallowed.
-    if hasattr(app, "_ratios_load_from_data_dir"):
-        app._ratios_load_from_data_dir()
+    app._persistence.load("ratios")
     # Eagerly hydrate Cell Gating thresholds from ``pipeline_info.json`` so the
     # very first plot draw (line / bar / batch export) has the user's
     # per-channel and per-ratio ThreshFracOn values available. The Cell Gating
@@ -184,17 +181,15 @@ def load_directory(app, d: Path, label=None) -> None:
             logging.getLogger("well_viewer").exception(
                 "Eager Cell Gating load from pipeline_info failed"
             )
-    if hasattr(app, "_heatmap_layouts_load_from_data_dir"):
-        app._heatmap_layouts_load_from_data_dir()
+    app._persistence.load("heatmap_layouts")
     # Hydrate view-state (active tab, selected wells, channel, fold-change
     # scopes, per-tab combos) — must come after the cross-cutting state
     # (channels, wells, ratios, heatmap layouts) is loaded so validation
     # against the active dataset's options can drop stale values cleanly.
-    if hasattr(app, "_view_state_load_from_data_dir"):
-        try:
-            app._view_state_load_from_data_dir()
-        except Exception:
-            logging.getLogger("well_viewer").exception("view_state load failed")
+    try:
+        app._persistence.load("view_state")
+    except Exception:
+        logging.getLogger("well_viewer").exception("view_state load failed")
     if hasattr(app, "_heatmap_sidebar_table"):
         try:
             from well_viewer.views.heatmap_layout_sidebar_view import (

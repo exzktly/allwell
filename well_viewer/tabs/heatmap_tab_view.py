@@ -399,12 +399,11 @@ def _on_cmap_changed(app) -> None:
 
 
 def _persist_settings(app) -> None:
-    """Save heatmap visual settings to disk (debounced via existing JSON write)."""
-    if hasattr(app, "_heatmap_layouts_save_to_data_dir"):
-        try:
-            app._heatmap_layouts_save_to_data_dir()
-        except Exception:
-            pass
+    """Save heatmap visual settings to disk (debounced via the registry)."""
+    try:
+        app._persistence.schedule_save("heatmap_layouts")
+    except Exception:
+        pass
 
 
 def _on_label_double_click(app, evt) -> None:

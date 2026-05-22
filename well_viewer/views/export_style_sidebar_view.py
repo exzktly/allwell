@@ -858,11 +858,10 @@ class ExportStyleSidebar(QWidget):
         if (self._line_order_wells_section is not None
                 and self._line_order_wells_section.isVisible()):
             app._app_state.plot.line_order_wells = _ids(self._line_order_wells_list)
-        if hasattr(app, "_line_order_schedule_save"):
-            try:
-                app._line_order_schedule_save()
-            except Exception:
-                pass
+        try:
+            app._persistence.schedule_save("line_order")
+        except Exception:
+            pass
         self._redraw_bound_figure()
 
     def _redraw_bound_figure(self) -> None:

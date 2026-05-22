@@ -34,7 +34,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 3a | Bus load-bearing — redraw signals | #271 | 🔄 in progress | 6,631 | new `redraw_coordinator.py`; `channel_changed` + `plot_options_changed` drive redraws via a real subscriber, paired direct calls removed. `_toggle_sem` kept off the bus until Phase 9 (its redraw covers Distribution / Heat Map, which the coalescer omits) |
 | 3b | Bus load-bearing — `selection_changed` | #271 | 🔄 in progress | 6,631 | extracted `apply_selection_refresh` + dedicated `SelectionRefreshCoordinator`; the 3 selection mutators emit the signal instead of calling the refresh directly. New `bus_wiring.py` centralizes subscriber wiring + `test_selection_refresh.py` characterizes each tab branch |
 | 3c | Bus load-bearing — `dataset_loaded` | #271 | 🔄 in progress | 6,631 | `RedrawCoordinator` subscribes `dataset_loaded` → full `_redraw`; direct call removed from `load_controller`. smFISH resync stays direct (tab-specific, moves with the tab). Phase 3 complete |
-| 4 | `PersistenceRegistry` + field-list collapse | — | ⬜ | — | |
+| 4 | `PersistenceRegistry` | #271 | 🔄 in progress | 6,552 | one registry replaces ~17 save/load wrapper methods, 5 debounce flags, and 5 identical `schedule_save`/`_flush` pairs. Field-list collapse dropped — see Phase 4 note |
 | 5 | `WidgetRegistry` adoption | — | ⬜ | — | one PR per builder file |
 | 6 | DI: plot controllers take `ctx` | — | ⬜ | — | one PR per controller |
 | 7 | DI: remaining controllers take `ctx` | — | ⬜ | — | one PR per controller |
@@ -51,7 +51,7 @@ ratcheting counters in `test_guardrails.py` as of Phase 2.
 | Metric | Baseline | Current | Target | Enforced |
 |---|---|---|---|---|
 | `getattr`/`hasattr` probes in `runtime_app.py` | 207 | 207 | ~0 | ✅ guardrail |
-| Persistence save/load wrapper methods | 10 | 10 | 0 | ✅ guardrail |
+| Persistence save/load wrapper methods | 10 | 0 | 0 | ✅ guardrail |
 | `app = ctx.app` unwraps in tab builders | 12 | 12 | 0 | ✅ guardrail |
 | Additive bus double-paths (emit + direct redraw) | 5 | 0 | 0 | `test_redraw_fanout` |
 | `_on_tab_change` dispatch branches | 8 | 8 | 0 | — |
@@ -86,6 +86,23 @@ Dead code / redundancy eliminated outside the tracked metrics:
   a direct call (a tab-specific data resync, not a redraw — it moves onto the
   bus when the smFISH tab is relocated, like `_toggle_sem`). Additive
   double-paths 1 → 0 — **the EventBus is now fully load-bearing**.
+- **Phase 4** — `well_viewer/persistence/registry.py::PersistenceRegistry`
+  replaced the data-dir-JSON persistence plumbing: ~17 thin
+  `WellViewerApp._<domain>_{save,load}_to_data_dir` / `_schedule_save` /
+  `_path` wrapper methods, the 5 `_<domain>_save_pending` debounce flags, and
+  the 5 *identical* `schedule_save`/`_flush` pairs duplicated across the
+  persistence modules — all collapse to one registry with one debounce path.
+  Call sites use `app._persistence.{save,load,schedule_save}(name)`; several
+  defensive `hasattr` probes around them went away too. Persistence-wrapper
+  metric 10 → 0; `runtime_app.py` 6,631 → 6,552; attrs 97 → 92 budget.
+  **Field-list collapse dropped:** the plan assumed the persistence modules
+  were thin dataclass serializers that could be driven from
+  `dataclasses.fields()`. Investigation showed they are hand-written
+  serializers with real domain logic (`view_state.py` alone is 675 lines of
+  UI-state serialization; `ratios.py` already delegates to
+  `ratios_to_dict`/`ratios_from_dict`). There is no meaningful hand-maintained
+  field-list duplication to collapse — forcing dataclass machinery would *add*
+  complexity, not remove it.
 
 ## Guiding rules
 

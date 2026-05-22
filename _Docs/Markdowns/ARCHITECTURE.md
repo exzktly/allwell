@@ -413,17 +413,23 @@ Every "save state into the dataset folder" path lives under
 and deletes them.
 
 Persistence modules expose `load_from_data_dir(app)` / `save_to_data_dir(app)`
-function pairs. `WellViewerApp` delegates to them via thin shims.
+function pairs. They are registered, by name, with the **`PersistenceRegistry`**
+(`well_viewer/persistence/registry.py`, built once in `WellViewerApp.__init__`
+as `app._persistence`); call sites use `app._persistence.{save,load,
+schedule_save}(name)`. The registry replaced ~17 thin `WellViewerApp` wrapper
+methods (teardown Phase 4).
 
 **Atomic writes.** Every save goes through
 `well_viewer/persistence/_io.atomic_write_json` (or `atomic_write_text` for
 the smFISH worker's per-well CSV writer): tmp file + fsync + `os.replace`.
 A crash, signal, or full-disk mid-write can no longer leave a truncated
 sidecar that the next viewer load reads as empty state and silently
-clobbers. Two persistence paths share a debounce flag
-(`_<name>_save_pending` on the app) so signal storms (ratio-panel field
-edits, heatmap layout drag-and-drop) coalesce into one disk write per
-500 ms burst. `cell_overrides.json` v2 stamps each row with the well's
+clobbers. The registry owns the **one** debounced-save path — `schedule_save`
+with a shared pending-set — so signal storms (ratio-panel field edits, heatmap
+layout drag-and-drop, cell-override toggles) coalesce into one disk write per
+500 ms burst; this replaced five identical per-domain `schedule_save`/`_flush`
+pairs and their `_<name>_save_pending` flags. `cell_overrides.json` v2 stamps
+each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.
 

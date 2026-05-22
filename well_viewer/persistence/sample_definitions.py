@@ -19,6 +19,21 @@ from well_viewer.persistence import (
 _logger = logging.getLogger("well_viewer")
 
 
+def save_notes(app) -> None:
+    """Debounced-autosave entry for the Notes sub-tab.
+
+    Registered as the ``notes`` persistence domain. Tolerates a missing
+    ``pipeline_info.json`` — the Notes text stays in memory (``app._notes_text``)
+    until a dataset that has one is loaded.
+    """
+    try:
+        save_to_pipeline_info(app)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        _logger.exception("Notes auto-save failed")
+
+
 def save_to_pipeline_info(app) -> None:
     """Merge well labels + the unified ``selections`` model into pipeline_info.json."""
     from well_viewer.sample_definitions import (

@@ -102,6 +102,7 @@ from well_viewer.image_resolver import (
 )
 from well_viewer.state import AppState, EventBus
 from well_viewer.bus_wiring import wire_event_bus
+from well_viewer.persistence.registry import build_persistence_registry
 from well_viewer.viewer_context import ViewerContext
 from well_viewer.views.widget_registry import WidgetRegistry
 
@@ -419,6 +420,9 @@ class WellViewerApp(QWidget):
         )
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
         wire_event_bus(self, self._event_bus)
+        # Phase 4 teardown: one debounce path + save/load dispatch for the
+        # data-dir JSON domains, replacing the per-domain wrapper methods.
+        self._persistence = build_persistence_registry(self)
 
         # Dataset state — data dir, well paths, row cache, timepoint / FOV
         # caches, pipeline_info, persistence doc — lives in
@@ -501,14 +505,9 @@ class WellViewerApp(QWidget):
         self._review_image_rubber_band: Optional[QRubberBand] = None
         self._review_included_overrides: Dict[Tuple[str, str, str, str], str] = {}
         self._review_csv_lookup_context: Dict[str, str] = {}
-        # Debounce flags for the data-dir autosaves; each coalesces a burst of
-        # edits into a single QTimer.singleShot disk write.
-        self._cell_overrides_save_pending: bool = False
-        self._line_order_save_pending: bool = False
+        # Notes sub-tab text buffer. Data-dir autosave debouncing now lives in
+        # the PersistenceRegistry (self._persistence, built below).
         self._notes_text: str = ""
-        self._notes_save_pending: bool = False
-        self._ratios_save_pending: bool = False
-        self._heatmap_layouts_save_pending: bool = False
         self._review_image_raw_btn = None
         self._review_image_color_swatches: Dict[str, object] = {}
         self._review_image_binary_btn = None
@@ -1911,103 +1910,25 @@ class WellViewerApp(QWidget):
             return
         nb.setCurrentByName("Sample Definitions")
 
-    # ── Ratio / heatmap / cell-override / line-order persistence ─────────────
-    # Each block delegates to ``well_viewer.persistence.<domain>``.
-
-    def _ratios_path(self) -> Optional[Path]:
-        from well_viewer.persistence import _doc as _d
-        return _d.path_for(self)
-
-    def _ratios_save_to_data_dir(self) -> None:
-        # Debounced via the persistence module's schedule_save — every
-        # ratio-panel field edit fires this; without debouncing each
-        # keystroke produced a JSON write.
-        from well_viewer.persistence import ratios as _r
-        _r.schedule_save(self)
-
-    def _ratios_load_from_data_dir(self) -> None:
-        from well_viewer.persistence import ratios as _r
-        _r.load_from_data_dir(self)
-
-    def _heatmap_layouts_path(self) -> Optional[Path]:
-        from well_viewer.persistence import _doc as _d
-        return _d.path_for(self)
-
-    def _heatmap_layouts_save_to_data_dir(self) -> None:
-        # Debounced — heatmap layout drag-and-drop fires save per drop
-        # event; without debouncing, dragging wells writes JSON dozens
-        # of times per second.
-        from well_viewer.persistence import heatmap_layouts as _h
-        _h.schedule_save(self)
-
-    def _heatmap_layouts_load_from_data_dir(self) -> None:
-        from well_viewer.persistence import heatmap_layouts as _h
-        _h.load_from_data_dir(self)
-
-    def _cell_overrides_path(self) -> Optional[Path]:
-        from well_viewer.persistence import cell_overrides as _c
-        return _c.path_for(self)
-
-    def _cell_overrides_save_to_data_dir(self) -> None:
-        from well_viewer.persistence import cell_overrides as _c
-        _c.save_to_data_dir(self)
-
-    def _cell_overrides_load_from_data_dir(self) -> None:
-        from well_viewer.persistence import cell_overrides as _c
-        _c.load_from_data_dir(self)
-
-    def _cell_overrides_schedule_save(self) -> None:
-        from well_viewer.persistence import cell_overrides as _c
-        _c.schedule_save(self)
-
-    def _line_order_path(self) -> Optional[Path]:
-        from well_viewer.persistence import _doc as _d
-        return _d.path_for(self)
-
-    def _line_order_save_to_data_dir(self) -> None:
-        from well_viewer.persistence import line_order as _lo
-        _lo.save_to_data_dir(self)
-
-    def _line_order_load_from_data_dir(self) -> None:
-        from well_viewer.persistence import line_order as _lo
-        _lo.load_from_data_dir(self)
-
-    def _line_order_schedule_save(self) -> None:
-        from well_viewer.persistence import line_order as _lo
-        _lo.schedule_save(self)
-
-    def _view_state_save_to_data_dir(self) -> None:
-        from well_viewer.persistence import view_state as _vs
-        _vs.save_to_data_dir(self)
-
-    def _view_state_load_from_data_dir(self) -> None:
-        from well_viewer.persistence import view_state as _vs
-        _vs.load_from_data_dir(self)
+    # ── Persistence ──────────────────────────────────────────────────────────
+    # The data-dir JSON domains (ratios / heatmap_layouts / cell_overrides /
+    # line_order / view_state / notes) are saved and loaded through
+    # ``self._persistence`` — see well_viewer/persistence/registry.py.
 
     def _view_state_reset(self) -> None:
         from well_viewer.persistence import view_state as _vs
         _vs.reset(self)
 
     def _notes_schedule_save(self) -> None:
-        """Debounced save for the Notes sub-tab (sample_definitions JSON)."""
+        """Capture the Notes text and queue a debounced save.
+
+        The widget read must stay here (the registry never touches widgets);
+        the debounce + disk write live in the PersistenceRegistry.
+        """
         edit = getattr(self, "_notes_edit", None)
         if edit is not None:
             self._notes_text = edit.toPlainText()
-        if getattr(self, "_notes_save_pending", False):
-            return
-        self._notes_save_pending = True
-        QTimer.singleShot(500, lambda: self._notes_flush_save())
-
-    def _notes_flush_save(self) -> None:
-        self._notes_save_pending = False
-        try:
-            from well_viewer.persistence import sample_definitions as _sd
-            _sd.save_to_pipeline_info(self)
-        except FileNotFoundError:
-            # No pipeline_info yet — nothing to merge into; keep text in memory.
-            pass
-        except Exception:
-            _logger.exception("Notes auto-save failed")
+        self._persistence.schedule_save("notes")
 
     # ── Sample Definitions + Cell Gating persistence ─────────────────────────
     # Implementations live in ``well_viewer.persistence.{sample_definitions,cell_gating}``.
@@ -4385,7 +4306,7 @@ class WellViewerApp(QWidget):
             except Exception:
                 pass
         # Persist to disk (debounced) so curation survives between sessions.
-        self._cell_overrides_schedule_save()
+        self._persistence.schedule_save("cell_overrides")
         # Bump the override version so the include-map cache is bypassed
         # on the next refresh; the frame cache (decoded image + boundary)
         # remains valid because the underlying mask label image is unchanged.
@@ -4435,7 +4356,7 @@ class WellViewerApp(QWidget):
                 self._invalidate_stats_cache()
             except Exception:
                 pass
-        self._cell_overrides_schedule_save()
+        self._persistence.schedule_save("cell_overrides")
         self._app_state.review_image.override_version += 1
         prev_zoom = float(self._app_state.review_image.zoom)
         prev_pan_x = float(self._app_state.review_image.pan_x)

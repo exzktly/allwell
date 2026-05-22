@@ -446,11 +446,10 @@ def _on_autopopulate(app) -> None:
 
 
 def _persist_and_redraw(app) -> None:
-    if hasattr(app, "_heatmap_layouts_save_to_data_dir"):
-        try:
-            app._heatmap_layouts_save_to_data_dir()
-        except Exception:
-            pass
+    try:
+        app._persistence.schedule_save("heatmap_layouts")
+    except Exception:
+        pass
     if hasattr(app, "_heatmap_canvas"):
         try:
             from well_viewer.heatmap_controller import redraw_heatmap

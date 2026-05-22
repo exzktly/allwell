@@ -32,17 +32,16 @@ _HARD_FAIL = True
 # Ratcheting ceilings. Re-measured as the teardown proceeds; lowered as each
 # phase removes code. Phase 0 baseline: 7028 lines / 166 attrs.
 # Teardown-completion Phase 1 (helper extraction + dead-code deletion): 6628.
-# Phase 3a added 3 lines of load-bearing EventBus wiring (RedrawCoordinator) —
-# coupling phases may add minimal teardown wiring; the ratchet still trends
-# strongly down (Phases 8-9 remove thousands of lines).
-RUNTIME_APP_LINE_BUDGET = 6631
-RUNTIME_APP_ATTR_BUDGET = 97
+# Phase 3a added 3 lines of load-bearing EventBus wiring (RedrawCoordinator).
+# Phase 4 (PersistenceRegistry) removed ~17 wrapper methods + 5 debounce flags.
+RUNTIME_APP_LINE_BUDGET = 6552
+RUNTIME_APP_ATTR_BUDGET = 92
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only
 # ratchet down. A PR that adds a parallel implementation trips one of these.
-RUNTIME_APP_GETATTR_BUDGET = 207        # defensive getattr/hasattr probes
-RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 10  # save/load persistence wrappers
+RUNTIME_APP_GETATTR_BUDGET = 206        # defensive getattr/hasattr probes
+RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 0   # save/load persistence wrappers
 TAB_CTX_APP_UNWRAP_BUDGET = 12          # `app = ctx.app` unwraps in tabs/
 
 

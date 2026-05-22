@@ -23,8 +23,6 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
-from PySide6.QtCore import QTimer
-
 from well_viewer.persistence._io import atomic_write_json
 
 _logger = logging.getLogger("well_viewer")
@@ -157,18 +155,3 @@ def load_from_data_dir(app) -> None:
     app._review_included_overrides.clear()
     app._review_included_overrides.update(new_map)
     app._app_state.review_image.override_version += 1
-
-
-def schedule_save(app) -> None:
-    """Debounced autosave (coalesces toggle bursts into a single write)."""
-    if app._cell_overrides_save_pending:
-        return
-    if path_for(app) is None:
-        return
-    app._cell_overrides_save_pending = True
-    QTimer.singleShot(500, lambda: _flush(app))
-
-
-def _flush(app) -> None:
-    app._cell_overrides_save_pending = False
-    save_to_data_dir(app)

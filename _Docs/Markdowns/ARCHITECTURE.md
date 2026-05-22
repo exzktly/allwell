@@ -484,18 +484,26 @@ catalogue of exactly five cross-cutting signals — `channel_changed`,
 `redraw_requested`. Signal payloads are the relevant *state object*, never
 `app` (`redraw_requested` carries a scope name). The catalogue and its contract
 are documented in the module docstring; status-bar messages are deliberately
-*not* on the bus — `status_signal.py` owns those. As of teardown Phase 3a the
-bus is **partly load-bearing**: `redraw_coordinator.py`'s `RedrawCoordinator`
-subscribes the redraw-only signals `channel_changed` and `plot_options_changed`
-and forwards them to the scope coalescer, and the paired direct redraw calls in
-`set_active_channel` and `set_fold_change_state` have been removed — the emit
-*is* the redraw trigger. (`_toggle_sem`, the SEM/SD toggle, is deliberately
-kept off the bus: its redraw covers Distribution / Heat Map, which the coalescer
-does not, so it keeps direct redraws until Phase 9 relocates it.) The remaining
-signals (`selection_changed`, `dataset_loaded`) still run through direct calls;
-subscribing them is the rest of Phase 3 (see `RUNTIME_APP_TEARDOWN.md`). The
-`tests/test_redraw_fanout.py` harness pins the one-redraw-per-action invariant
-that migration must preserve.
+*not* on the bus — `status_signal.py` owns those. As of teardown Phase 3 the
+bus is **largely load-bearing**. Subscribers are constructed and connected by
+`bus_wiring.py`'s `wire_event_bus`, called once from `WellViewerApp.__init__`:
+
+- `redraw_coordinator.py`'s `RedrawCoordinator` subscribes the redraw-only
+  signals `channel_changed` and `plot_options_changed` and forwards them to the
+  scope coalescer.
+- `SelectionRefreshCoordinator` (`selection_controller.py`) subscribes
+  `selection_changed` and runs `apply_selection_refresh` — sidebar refresh plus
+  a per-tab view refresh.
+
+The paired direct calls in `set_active_channel`, `set_fold_change_state`, and
+the three selection mutators have been removed — the emit *is* the trigger.
+(`_toggle_sem`, the SEM/SD toggle, is deliberately kept off the bus: its redraw
+covers Distribution / Heat Map, which the coalescer does not, so it keeps
+direct redraws until Phase 9 relocates it.) Only `dataset_loaded` still runs
+through a direct call; subscribing it is the rest of Phase 3 (see
+`RUNTIME_APP_TEARDOWN.md`). The `tests/test_redraw_fanout.py` and
+`tests/test_selection_refresh.py` harnesses pin the invariants migration must
+preserve.
 
 **`WidgetRegistry` (`views/widget_registry.py`).** A name-keyed store for Qt
 widget handles (figures, canvases, axes). The intent is that tab builders call

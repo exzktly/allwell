@@ -32,7 +32,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 1 | Helper extraction + dead-code deletion | #271 | 🔄 in progress | 6,628 | moved 6 helpers to `ui_helpers.py`; deleted 5 dead-code blocks; collapsed 2 redundant wrappers |
 | 2 | Bus regression harness + catalogue cleanup | #271 | 🔄 in progress | 6,628 | new `test_redraw_fanout.py` (one-redraw-per-action harness); `event_bus` trimmed to 5 signals + documented contract; 3 ratcheting redundancy guardrails added |
 | 3a | Bus load-bearing — redraw signals | #271 | 🔄 in progress | 6,631 | new `redraw_coordinator.py`; `channel_changed` + `plot_options_changed` drive redraws via a real subscriber, paired direct calls removed. `_toggle_sem` kept off the bus until Phase 9 (its redraw covers Distribution / Heat Map, which the coalescer omits) |
-| 3b | Bus load-bearing — `selection_changed` | — | ⬜ | — | |
+| 3b | Bus load-bearing — `selection_changed` | #271 | 🔄 in progress | 6,631 | extracted `apply_selection_refresh` + dedicated `SelectionRefreshCoordinator`; the 3 selection mutators emit the signal instead of calling the refresh directly. New `bus_wiring.py` centralizes subscriber wiring + `test_selection_refresh.py` characterizes each tab branch |
 | 3c | Bus load-bearing — `dataset_loaded` | — | ⬜ | — | |
 | 4 | `PersistenceRegistry` + field-list collapse | — | ⬜ | — | |
 | 5 | `WidgetRegistry` adoption | — | ⬜ | — | one PR per builder file |
@@ -53,7 +53,7 @@ ratcheting counters in `test_guardrails.py` as of Phase 2.
 | `getattr`/`hasattr` probes in `runtime_app.py` | 207 | 207 | ~0 | ✅ guardrail |
 | Persistence save/load wrapper methods | 10 | 10 | 0 | ✅ guardrail |
 | `app = ctx.app` unwraps in tab builders | 12 | 12 | 0 | ✅ guardrail |
-| Additive bus double-paths (emit + direct redraw) | 5 | 2 | 0 | `test_redraw_fanout` |
+| Additive bus double-paths (emit + direct redraw) | 5 | 1 | 0 | `test_redraw_fanout` |
 | `_on_tab_change` dispatch branches | 8 | 8 | 0 | — |
 
 Dead code / redundancy eliminated outside the tracked metrics:
@@ -73,6 +73,13 @@ Dead code / redundancy eliminated outside the tracked metrics:
   Distribution / Heat Map, tabs the coalescer does not, so it keeps its direct
   redraws until Phase 9 relocates it to a controller. Additive double-paths
   5 → 2 (only `selection_changed` and `dataset_loaded` remain).
+- **Phase 3b** — made the `EventBus` load-bearing for `selection_changed`: the
+  body of `_refresh_after_selection_change` became the free function
+  `apply_selection_refresh`, driven by a dedicated `SelectionRefreshCoordinator`
+  subscriber; the three selection mutators (`on_plate_sel_change`, `select_all`,
+  `select_none`) now emit the signal instead of calling the refresh directly.
+  New `bus_wiring.py` centralizes all subscriber wiring behind one
+  `wire_event_bus` call. Additive double-paths 2 → 1 (only `dataset_loaded`).
 
 ## Guiding rules
 

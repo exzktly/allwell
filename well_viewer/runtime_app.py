@@ -101,7 +101,7 @@ from well_viewer.image_resolver import (
     output_suffixes_for_kind as _output_suffixes_for_kind,
 )
 from well_viewer.state import AppState, EventBus
-from well_viewer.redraw_coordinator import RedrawCoordinator
+from well_viewer.bus_wiring import wire_event_bus
 from well_viewer.viewer_context import ViewerContext
 from well_viewer.views.widget_registry import WidgetRegistry
 
@@ -417,8 +417,8 @@ class WellViewerApp(QWidget):
             bus=self._event_bus,
             widgets=self._widget_registry,
         )
-        # Phase 3 teardown: subscribe redraw-only bus signals (Qt child of self).
-        RedrawCoordinator(self, self._event_bus)
+        # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
+        wire_event_bus(self, self._event_bus)
 
         # Dataset state — data dir, well paths, row cache, timepoint / FOV
         # caches, pipeline_info, persistence doc — lives in

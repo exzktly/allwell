@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QObject
+
 
 def _active_tab(app) -> str:
     # Plot tabs (Line Graphs / Bar Plots / Scatter Plot) live inside a nested
@@ -24,12 +26,16 @@ def _active_tab(app) -> str:
         return ""
 
 
-def _refresh_after_selection_change(app) -> None:
-    """Refresh only UI/views relevant to the active tab."""
+def apply_selection_refresh(app) -> None:
+    """Refresh the sidebar and the active tab's view after a selection change.
+
+    The subscriber body for the ``selection_changed`` bus signal: every
+    selection mutator emits the signal, and ``SelectionRefreshCoordinator``
+    runs this in response. It does more than a plot redraw — the sidebar
+    plate-map plus a per-tab view refresh — which is why it has its own
+    coordinator rather than sharing ``RedrawCoordinator``.
+    """
     app._refresh_sidebar_map()
-    # Announce on the bus. Additive — the per-tab dispatch below still runs;
-    # bus subscribers replace it as tabs migrate in later phases.
-    app._event_bus.selection_changed.emit(app._app_state.selection)
     tab = _active_tab(app)
     if tab == "Bar Plots":
         app._update_bar_tp_menu()
@@ -55,6 +61,25 @@ def _refresh_after_selection_change(app) -> None:
         app._redraw()
 
 
+class SelectionRefreshCoordinator(QObject):
+    """Subscribe ``selection_changed`` to :func:`apply_selection_refresh`.
+
+    A dedicated subscriber, kept separate from ``RedrawCoordinator`` because a
+    selection change refreshes the sidebar and the active tab's view, not just
+    the plot. Constructed as a Qt child of the ``WellViewerApp`` so Qt
+    ownership keeps the coordinator — and its connection — alive without a
+    ``self._*`` slot on the app.
+    """
+
+    def __init__(self, app, bus) -> None:
+        super().__init__(app)
+        self._app = app
+        bus.selection_changed.connect(self._on_selection_changed)
+
+    def _on_selection_changed(self, _state=None) -> None:
+        apply_selection_refresh(self._app)
+
+
 def on_plate_sel_change(app) -> None:
     # SelectionState diffs the new selection against its prev_sel snapshot to
     # resolve last_sel, then re-snapshots.
@@ -67,7 +92,7 @@ def on_plate_sel_change(app) -> None:
                     else next(iter(sel.selected_wells)))
             sel.selected_wells = {keep}
             sel.prev_sel = set(sel.selected_wells)
-    _refresh_after_selection_change(app)
+    app._event_bus.selection_changed.emit(app._app_state.selection)
 
 
 def _well_rc(app, w):
@@ -155,7 +180,7 @@ def select_all(app) -> None:
         _set_groups_hidden(app, app._app_state.selection.selections, target=False)
     else:
         app._app_state.selection.select_wells(app._app_state.dataset.well_paths.keys())
-        _refresh_after_selection_change(app)
+        app._event_bus.selection_changed.emit(app._app_state.selection)
 
 
 def select_none(app) -> None:
@@ -163,4 +188,4 @@ def select_none(app) -> None:
         _set_groups_hidden(app, app._app_state.selection.selections, target=True)
     else:
         app._app_state.selection.clear_selection()
-        _refresh_after_selection_change(app)
+        app._event_bus.selection_changed.emit(app._app_state.selection)

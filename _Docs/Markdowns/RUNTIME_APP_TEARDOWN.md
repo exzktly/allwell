@@ -35,7 +35,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 3b | Bus load-bearing — `selection_changed` | #271 | 🔄 in progress | 6,631 | extracted `apply_selection_refresh` + dedicated `SelectionRefreshCoordinator`; the 3 selection mutators emit the signal instead of calling the refresh directly. New `bus_wiring.py` centralizes subscriber wiring + `test_selection_refresh.py` characterizes each tab branch |
 | 3c | Bus load-bearing — `dataset_loaded` | #271 | 🔄 in progress | 6,631 | `RedrawCoordinator` subscribes `dataset_loaded` → full `_redraw`; direct call removed from `load_controller`. smFISH resync stays direct (tab-specific, moves with the tab). Phase 3 complete |
 | 4 | `PersistenceRegistry` | #271 | 🔄 in progress | 6,552 | one registry replaces ~17 save/load wrapper methods, 5 debounce flags, and 5 identical `schedule_save`/`_flush` pairs. Field-list collapse dropped — see Phase 4 note |
-| 5 | `WidgetRegistry` adoption | — | ⬜ | — | one PR per builder file |
+| 5 | `WidgetRegistry` adoption | — | ⏭️ deferred | — | skipped as a standalone phase — ~300 behaviour-neutral edits that move no tracked metric (the writes live in `tabs/`/`views/`, not `runtime_app.py`). The registry adoption that actually shrinks `runtime_app.py` happens organically in Phase 8, when each `_build_*` method relocates and its `self._x = w` becomes `ctx.widgets.register(...)` |
 | 6 | DI: plot controllers take `ctx` | — | ⬜ | — | one PR per controller |
 | 7 | DI: remaining controllers take `ctx` | — | ⬜ | — | one PR per controller |
 | 8 | Relocate `_build_*` into `views/` | — | ⬜ | — | 3–4 PRs by file |
@@ -162,9 +162,17 @@ with one `well_viewer/persistence/registry.py::PersistenceRegistry`. Drive each
 persistence module's save/load from `dataclasses.fields()` / `asdict()` so the
 field list exists once.
 
-### Phase 5 — WidgetRegistry adoption *(flat)*
-Migrate the ~60 `app._<widget> = handle` writes in `tabs/*` and `views/*`
-builders to `ctx.widgets.register(...)`. One PR per builder file.
+### Phase 5 — WidgetRegistry adoption *(deferred)*
+**Skipped as a standalone phase.** Investigation found the plan's premise was
+inaccurate: it is ~300 `app._<widget> = handle` writes (not ~60), spread across
+~25 `tabs/`/`views/` files, and migrating them moves **no** tracked metric —
+the attr budget counts `self._*` in `runtime_app.py` source, not `app._x` writes
+in other files. It is behaviour-neutral and its real payoff (deleting
+`__getattr__`) needs the reader migration that lands much later. The
+registry adoption that *does* shrink `runtime_app.py` happens organically in
+Phase 8: when a `_build_*` method relocates into a `views/` file, its
+`self._x = widget` is rewritten as `ctx.widgets.register("_x", widget)` in the
+same edit. No separate phase needed.
 
 ### Phase 6 — DI: plot controllers take `ctx` *(flat)*
 `lineplot`/`barplot`/`scatter`/`distribution`/`heatmap` controllers +

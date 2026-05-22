@@ -1,11 +1,14 @@
 """EventBus → redraw wiring.
 
-The bus's *redraw-only* signals — those whose only consequence is "the plots
-need to refresh" — are routed through this coordinator. It owns no redraw
-policy of its own: it forwards to ``redraw_scopes_or_defer``, the existing
-coalescer in ``well_viewer.fold_change_scopes``. The bus only *triggers* a
-redraw; the coalescer stays the *throttle* — redraw the visible scope now,
-mark the rest dirty, flush on tab change.
+The redraw consequence of the bus signals is routed through this coordinator:
+``channel_changed`` and ``plot_options_changed`` (whose only consequence is "the
+plots need to refresh") and the redraw part of ``dataset_loaded``. The
+coordinator owns no redraw *policy* — for the redraw-only signals it forwards to
+``redraw_scopes_or_defer``, the existing coalescer in
+``well_viewer.fold_change_scopes`` (the bus only *triggers* a redraw; the
+coalescer stays the *throttle* — redraw the visible scope now, mark the rest
+dirty, flush on tab change). ``dataset_loaded`` instead drives a full
+``_redraw`` because a freshly loaded dataset invalidates every plot.
 
 Wired once at app construction by ``WellViewerApp.__init__``. Connections use
 the default ``AutoConnection``, which is a synchronous ``DirectConnection``
@@ -37,8 +40,17 @@ class RedrawCoordinator(QObject):
         self._app = app
         bus.channel_changed.connect(self._on_redraw_signal)
         bus.plot_options_changed.connect(self._on_redraw_signal)
+        bus.dataset_loaded.connect(self._on_dataset_loaded)
 
     def _on_redraw_signal(self, _state=None) -> None:
         """A redraw-only signal fired — coalesce a redraw of the visible scope."""
         from well_viewer.fold_change_scopes import redraw_scopes_or_defer
         redraw_scopes_or_defer(self._app)
+
+    def _on_dataset_loaded(self, _state=None) -> None:
+        """A dataset finished loading — redraw the default-scope plots.
+
+        Uses the full ``_redraw`` (line / distribution / heat map) rather than
+        the scope coalescer: a freshly loaded dataset invalidates every plot.
+        """
+        self._app._redraw()

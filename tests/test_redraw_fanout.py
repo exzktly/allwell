@@ -108,6 +108,20 @@ def test_fold_change_toggle_redraws_visible_scope_once(counted_app):
     assert counter.total == 1, "no fan-out: one action -> one redraw"
 
 
+# ── Dataset load ─────────────────────────────────────────────────────────────
+
+def test_dataset_loaded_signal_redraws_once(counted_app):
+    app, counter = counted_app
+    counter.reset()
+
+    app._event_bus.dataset_loaded.emit(app._app_state.dataset)
+
+    # _redraw (the line-scope method) covers line / distribution / heat map —
+    # the full post-load redraw. Bars redraw lazily on tab entry.
+    assert counter.counts["line"] == 1, "dataset load must drive exactly one _redraw"
+    assert counter.counts["bar"] == 0
+
+
 # ── Deferred-scope flush on tab switch ───────────────────────────────────────
 
 def test_deferred_scope_flushes_exactly_once_on_tab_switch(counted_app):

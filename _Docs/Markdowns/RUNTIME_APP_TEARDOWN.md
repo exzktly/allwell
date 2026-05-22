@@ -33,7 +33,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 2 | Bus regression harness + catalogue cleanup | #271 | 🔄 in progress | 6,628 | new `test_redraw_fanout.py` (one-redraw-per-action harness); `event_bus` trimmed to 5 signals + documented contract; 3 ratcheting redundancy guardrails added |
 | 3a | Bus load-bearing — redraw signals | #271 | 🔄 in progress | 6,631 | new `redraw_coordinator.py`; `channel_changed` + `plot_options_changed` drive redraws via a real subscriber, paired direct calls removed. `_toggle_sem` kept off the bus until Phase 9 (its redraw covers Distribution / Heat Map, which the coalescer omits) |
 | 3b | Bus load-bearing — `selection_changed` | #271 | 🔄 in progress | 6,631 | extracted `apply_selection_refresh` + dedicated `SelectionRefreshCoordinator`; the 3 selection mutators emit the signal instead of calling the refresh directly. New `bus_wiring.py` centralizes subscriber wiring + `test_selection_refresh.py` characterizes each tab branch |
-| 3c | Bus load-bearing — `dataset_loaded` | — | ⬜ | — | |
+| 3c | Bus load-bearing — `dataset_loaded` | #271 | 🔄 in progress | 6,631 | `RedrawCoordinator` subscribes `dataset_loaded` → full `_redraw`; direct call removed from `load_controller`. smFISH resync stays direct (tab-specific, moves with the tab). Phase 3 complete |
 | 4 | `PersistenceRegistry` + field-list collapse | — | ⬜ | — | |
 | 5 | `WidgetRegistry` adoption | — | ⬜ | — | one PR per builder file |
 | 6 | DI: plot controllers take `ctx` | — | ⬜ | — | one PR per controller |
@@ -53,7 +53,7 @@ ratcheting counters in `test_guardrails.py` as of Phase 2.
 | `getattr`/`hasattr` probes in `runtime_app.py` | 207 | 207 | ~0 | ✅ guardrail |
 | Persistence save/load wrapper methods | 10 | 10 | 0 | ✅ guardrail |
 | `app = ctx.app` unwraps in tab builders | 12 | 12 | 0 | ✅ guardrail |
-| Additive bus double-paths (emit + direct redraw) | 5 | 1 | 0 | `test_redraw_fanout` |
+| Additive bus double-paths (emit + direct redraw) | 5 | 0 | 0 | `test_redraw_fanout` |
 | `_on_tab_change` dispatch branches | 8 | 8 | 0 | — |
 
 Dead code / redundancy eliminated outside the tracked metrics:
@@ -80,6 +80,12 @@ Dead code / redundancy eliminated outside the tracked metrics:
   `select_none`) now emit the signal instead of calling the refresh directly.
   New `bus_wiring.py` centralizes all subscriber wiring behind one
   `wire_event_bus` call. Additive double-paths 2 → 1 (only `dataset_loaded`).
+- **Phase 3c** — made the `EventBus` load-bearing for `dataset_loaded`:
+  `RedrawCoordinator` subscribes it and runs the full post-load `_redraw`; the
+  direct call was removed from `load_controller`. The smFISH tab resync stays
+  a direct call (a tab-specific data resync, not a redraw — it moves onto the
+  bus when the smFISH tab is relocated, like `_toggle_sem`). Additive
+  double-paths 1 → 0 — **the EventBus is now fully load-bearing**.
 
 ## Guiding rules
 

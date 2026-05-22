@@ -212,19 +212,19 @@ def load_directory(app, d: Path, label=None) -> None:
     # _recalculate_threshold, which fires on every channel/metric switch)
     # keeps Included flags consistent with the loaded thresholds.
     _kick_off_gating_after_load(app)
-    app._redraw()
     # Re-sync the smFISH tab so its cached well→zip map, channel list, and
     # extractor reflect the freshly loaded dataset. Without this, a dataset
     # reload (e.g., after Analyze pipeline completes) leaves the tab pointing
     # at the previous dataset's zips and shows no images until the user
-    # re-selects a well.
+    # re-selects a well. (Stays a direct call — a tab-specific resync, not a
+    # redraw; it moves onto the bus when the smFISH tab is relocated.)
     try:
         from well_viewer.tabs.smfish_tab_view import smfish_sync_from_app
         smfish_sync_from_app(app)
     except Exception:
         logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
-    # Announce on the bus. Additive — every refresh above already ran; bus
-    # subscribers replace the explicit calls as tabs migrate in later phases.
+    # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs
+    # the post-load plot redraw — the emit is the redraw trigger.
     app._event_bus.dataset_loaded.emit(app._app_state.dataset)
 
 

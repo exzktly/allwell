@@ -485,25 +485,25 @@ catalogue of exactly five cross-cutting signals — `channel_changed`,
 `app` (`redraw_requested` carries a scope name). The catalogue and its contract
 are documented in the module docstring; status-bar messages are deliberately
 *not* on the bus — `status_signal.py` owns those. As of teardown Phase 3 the
-bus is **largely load-bearing**. Subscribers are constructed and connected by
-`bus_wiring.py`'s `wire_event_bus`, called once from `WellViewerApp.__init__`:
+bus is **load-bearing**: every signal has a real subscriber. Subscribers are
+constructed and connected by `bus_wiring.py`'s `wire_event_bus`, called once
+from `WellViewerApp.__init__`:
 
-- `redraw_coordinator.py`'s `RedrawCoordinator` subscribes the redraw-only
-  signals `channel_changed` and `plot_options_changed` and forwards them to the
-  scope coalescer.
+- `redraw_coordinator.py`'s `RedrawCoordinator` subscribes `channel_changed`
+  and `plot_options_changed` (forwarded to the scope coalescer) and
+  `dataset_loaded` (a full post-load `_redraw`).
 - `SelectionRefreshCoordinator` (`selection_controller.py`) subscribes
   `selection_changed` and runs `apply_selection_refresh` — sidebar refresh plus
   a per-tab view refresh.
 
-The paired direct calls in `set_active_channel`, `set_fold_change_state`, and
-the three selection mutators have been removed — the emit *is* the trigger.
-(`_toggle_sem`, the SEM/SD toggle, is deliberately kept off the bus: its redraw
-covers Distribution / Heat Map, which the coalescer does not, so it keeps
-direct redraws until Phase 9 relocates it.) Only `dataset_loaded` still runs
-through a direct call; subscribing it is the rest of Phase 3 (see
-`RUNTIME_APP_TEARDOWN.md`). The `tests/test_redraw_fanout.py` and
-`tests/test_selection_refresh.py` harnesses pin the invariants migration must
-preserve.
+The paired direct calls in `set_active_channel`, `set_fold_change_state`, the
+three selection mutators, and `load_controller` have been removed — the emit
+*is* the trigger. Two refreshes are deliberately kept off the bus until the
+owning code relocates in a later phase: `_toggle_sem` (the SEM/SD toggle — its
+redraw covers Distribution / Heat Map, which the coalescer does not) and the
+smFISH tab resync after a dataset load (a tab-specific data resync, not a
+redraw). The `tests/test_redraw_fanout.py` and `tests/test_selection_refresh.py`
+harnesses pin the invariants migration must preserve.
 
 **`WidgetRegistry` (`views/widget_registry.py`).** A name-keyed store for Qt
 widget handles (figures, canvases, axes). The intent is that tab builders call
@@ -529,16 +529,16 @@ attributes. `_active_channel`, `_selected_wells`, `_data_dir`, `_use_sem` and
 the rest are gone from `runtime_app.py`; call sites read
 `self._app_state.<domain>.<field>` directly — no parallel copies, no shims.
 
-What did **not** land: the `EventBus` has no subscribers; the `ViewerContext`
-is unwrapped to `app` at every call site; controllers still take `app`; the
-`WidgetRegistry` holds one tab's handles; and `runtime_app.py` is still
-~6,600 lines — the `_build_*` / `_on_*` / `_redraw_*` bodies have not been
-relocated, so the file never collapsed toward a thin composition root. A
-transitional `WellViewerApp.__getattr__` forwards legacy widget-handle reads
-to the registry.
+What has landed since: the `EventBus` is now load-bearing (teardown Phase 3 —
+every signal has a real subscriber, the paired direct calls retired). What still
+has **not** landed: the `ViewerContext` is unwrapped to `app` at every call
+site; controllers still take `app`; the `WidgetRegistry` holds one tab's
+handles; and `runtime_app.py` is still ~6,600 lines — the `_build_*` / `_on_*` /
+`_redraw_*` bodies have not been relocated, so the file never collapsed toward a
+thin composition root. A transitional `WellViewerApp.__getattr__` forwards
+legacy widget-handle reads to the registry.
 
-The outstanding work, in dependency order: subscribe the redraw wiring to the
-`EventBus` (and retire the direct calls); narrow tab builders and controllers
+The outstanding work, in dependency order: narrow tab builders and controllers
 from `app` to `ctx.state` / `ctx.widgets`; relocate the `_build_*` methods into
 `views/` and the `_on_*` / `_redraw_*` methods into controllers; drop the
 `__getattr__`. This is being executed as a phased teardown-completion effort —

@@ -3564,7 +3564,7 @@ class WellViewerApp(QWidget):
         self._redraw()
         if self._current_centre_tab() == "Bar Plots":
             self._redraw_bars()
-        self._event_bus.plot_options_changed.emit(self._app_state.plot)
+        # _toggle_sem stays off the bus until Phase 9 relocates it (see teardown doc).
 
     # ── Per-FOV-replicates toggle ────────────────────────────────────────────
 

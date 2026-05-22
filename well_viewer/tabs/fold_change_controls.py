@@ -32,7 +32,6 @@ from well_viewer.fold_change_scopes import (  # noqa: E402
     current_scope_name,
     flush_dirty_scopes,
     get_scope as _get_scope,
-    redraw_scopes_or_defer,
     register_fold_change_scope,
     registered_scopes,
 )
@@ -198,13 +197,10 @@ def set_fold_change_state(
 
     _sync_widgets_to_state(app, skip_scope=initiating_scope)
 
-    # Redraw only the visible scope; mark others dirty for redraw on
-    # tab switch. The runtime_app's tab-change handler calls
-    # ``flush_dirty_scopes`` so the deferred work fires the moment the
-    # user looks at the other tab. Closes the deferred 'redraw only
-    # visible tab' item from the refactor plan.
-    redraw_scopes_or_defer(app)
-    # Announce on the bus. Additive — the explicit redraw above still runs.
+    # Announce on the bus. The RedrawCoordinator subscriber coalesces the
+    # redraw — visible scope now, others marked dirty for redraw on tab switch
+    # (the tab-change handler calls ``flush_dirty_scopes``). The bus emit *is*
+    # the redraw trigger; see redraw_coordinator.py / fold_change_scopes.py.
     app._event_bus.plot_options_changed.emit(app._app_state.plot)
 
 

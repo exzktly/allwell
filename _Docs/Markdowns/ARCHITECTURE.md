@@ -486,13 +486,16 @@ catalogue of exactly five cross-cutting signals — `channel_changed`,
 are documented in the module docstring; status-bar messages are deliberately
 *not* on the bus — `status_signal.py` owns those. As of teardown Phase 3a the
 bus is **partly load-bearing**: `redraw_coordinator.py`'s `RedrawCoordinator`
-subscribes `channel_changed` and forwards to the scope coalescer, and
-`set_active_channel`'s paired direct redraw call has been removed — the emit
-*is* the redraw trigger. The other signals (`plot_options_changed`,
-`selection_changed`, `dataset_loaded`) still run through direct calls;
-subscribing them and retiring those calls is the rest of Phase 3 (see
-`RUNTIME_APP_TEARDOWN.md`). The `tests/test_redraw_fanout.py` harness pins the
-one-redraw-per-action invariant that migration must preserve.
+subscribes the redraw-only signals `channel_changed` and `plot_options_changed`
+and forwards them to the scope coalescer, and the paired direct redraw calls in
+`set_active_channel` and `set_fold_change_state` have been removed — the emit
+*is* the redraw trigger. (`_toggle_sem`, the SEM/SD toggle, is deliberately
+kept off the bus: its redraw covers Distribution / Heat Map, which the coalescer
+does not, so it keeps direct redraws until Phase 9 relocates it.) The remaining
+signals (`selection_changed`, `dataset_loaded`) still run through direct calls;
+subscribing them is the rest of Phase 3 (see `RUNTIME_APP_TEARDOWN.md`). The
+`tests/test_redraw_fanout.py` harness pins the one-redraw-per-action invariant
+that migration must preserve.
 
 **`WidgetRegistry` (`views/widget_registry.py`).** A name-keyed store for Qt
 widget handles (figures, canvases, axes). The intent is that tab builders call

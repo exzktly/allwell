@@ -36,6 +36,7 @@ class RedrawCoordinator(QObject):
         super().__init__(app)
         self._app = app
         bus.channel_changed.connect(self._on_redraw_signal)
+        bus.plot_options_changed.connect(self._on_redraw_signal)
 
     def _on_redraw_signal(self, _state=None) -> None:
         """A redraw-only signal fired — coalesce a redraw of the visible scope."""

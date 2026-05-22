@@ -19,13 +19,28 @@ class EventBus(QObject):
 
     Signal payloads are domain-state objects (typed ``object`` here because the
     state classes are introduced phase by phase). Subscribers receive the state
-    they need and nothing more.
+    they need and nothing more — never ``app``.
+
+    Catalogue contract (runtime_app teardown, Phase 2):
+
+    - ``channel_changed`` — the active fluorescent channel / metric changed;
+      payload ``ChannelState``. Fold-change *threshold* changes fold into this
+      signal rather than carrying a separate one.
+    - ``selection_changed`` — the well / group selection changed; payload
+      ``SelectionState``.
+    - ``dataset_loaded`` — a dataset finished loading; payload ``DatasetState``.
+    - ``plot_options_changed`` — a plot option (fold-change mode, error bars,
+      ordering, …) changed; payload ``PlotState``.
+    - ``redraw_requested`` — an explicit request to redraw a named scope;
+      payload the scope name (``"bar"`` / ``"line"`` / …).
+
+    The catalogue is deliberately capped at these five: an event bus that
+    accumulates dozens of signals has just become a new god-object. Status-bar
+    messages are *not* here — ``well_viewer/status_signal.py`` owns those.
     """
 
     channel_changed = Signal(object)       # ChannelState
-    threshold_changed = Signal(object)     # ChannelState
-    dataset_loaded = Signal(object)        # DatasetState   (Phase 3)
-    selection_changed = Signal(object)     # SelectionState (Phase 2)
-    plot_options_changed = Signal(object)  # PlotState      (Phase 4)
+    selection_changed = Signal(object)     # SelectionState
+    dataset_loaded = Signal(object)        # DatasetState
+    plot_options_changed = Signal(object)  # PlotState
     redraw_requested = Signal(str)         # scope name
-    status_message = Signal(str)

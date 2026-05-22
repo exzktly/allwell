@@ -29,8 +29,8 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | Phase | Step | PR | Status | `runtime_app.py` lines | Notes |
 |---|---|---|---|---|---|
 | — | Baseline (`main` @ `7f03297`) | — | — | 6,909 | audited starting point |
-| 1 | Helper extraction + dead-code deletion | TBD | 🔄 in progress | 6,628 | moved 6 helpers to `ui_helpers.py`; deleted 5 dead-code blocks; collapsed 2 redundant wrappers |
-| 2 | Bus regression harness + catalogue cleanup | — | ⬜ | — | |
+| 1 | Helper extraction + dead-code deletion | #271 | 🔄 in progress | 6,628 | moved 6 helpers to `ui_helpers.py`; deleted 5 dead-code blocks; collapsed 2 redundant wrappers |
+| 2 | Bus regression harness + catalogue cleanup | #271 | 🔄 in progress | 6,628 | new `test_redraw_fanout.py` (one-redraw-per-action harness); `event_bus` trimmed to 5 signals + documented contract; 3 ratcheting redundancy guardrails added |
 | 3a | Bus load-bearing — redraw signals | — | ⬜ | — | |
 | 3b | Bus load-bearing — `selection_changed` | — | ⬜ | — | |
 | 3c | Bus load-bearing — `dataset_loaded` | — | ⬜ | — | |
@@ -45,22 +45,25 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 
 ## Redundancy scoreboard
 
-Updated by every PR. Each metric may only fall (`test_guardrails.py` ratchets
-the first three from Phase 2 onward).
+Updated by every PR. Each metric may only fall. The first three are enforced by
+ratcheting counters in `test_guardrails.py` as of Phase 2.
 
-| Metric | Baseline | Current | Target |
-|---|---|---|---|
-| `getattr`/`hasattr` probes in `runtime_app.py` | 207 | 207 | ~0 |
-| Persistence save/load wrapper methods | 10 | 10 | 0 |
-| `app = ctx.app` unwraps in tab builders | 12 | 12 | 0 |
-| Additive bus double-paths (emit + direct redraw) | 5 | 5 | 0 |
-| `_on_tab_change` dispatch branches | 8 | 8 | 0 |
+| Metric | Baseline | Current | Target | Enforced |
+|---|---|---|---|---|
+| `getattr`/`hasattr` probes in `runtime_app.py` | 207 | 207 | ~0 | ✅ guardrail |
+| Persistence save/load wrapper methods | 10 | 10 | 0 | ✅ guardrail |
+| `app = ctx.app` unwraps in tab builders | 12 | 12 | 0 | ✅ guardrail |
+| Additive bus double-paths (emit + direct redraw) | 5 | 5 | 0 | `test_redraw_fanout` |
+| `_on_tab_change` dispatch branches | 8 | 8 | 0 | — |
 
 Dead code / redundancy eliminated outside the tracked metrics:
 - **Phase 1** — deleted 5 dead-code blocks (`save_json_file`, `load_json_file`,
   `_Tooltip`, `BatchSubset`, `_SubsetEntry` — defined, never used) and collapsed
   2 redundant wrappers (`make_scrollable_canvas`, `ask_name_dialog`) that merely
   re-wrapped `ui_helpers` equivalents.
+- **Phase 2** — trimmed the `EventBus` catalogue from 7 signals to 5, deleting
+  the two unused signals (`threshold_changed`, `status_message`); added the
+  three redundancy guardrails above so every later phase is held to the goal.
 
 ## Guiding rules
 

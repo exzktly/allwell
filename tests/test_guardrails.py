@@ -1,8 +1,10 @@
 """CI guardrails for the ``runtime_app`` teardown.
 
 These ratchet the god-object's decline. Each phase re-measures and tightens the
-budgets; a phase that regrows ``runtime_app.py`` past its ceiling, or adds a
-parallel state implementation, trips a guardrail.
+budgets; a phase that regrows ``runtime_app.py`` past its ceiling, adds a
+parallel state implementation, or grows one of the tracked redundancy metrics
+(getattr/hasattr probes, persistence wrappers, ``app = ctx.app`` unwraps) trips
+a guardrail.
 
 Per the teardown plan the budgets were warn-only through Phases 1-8 and
 **hard-fail from Phase 9** — ``_HARD_FAIL`` is now ``True``. A change that
@@ -22,6 +24,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_APP = REPO_ROOT / "well_viewer" / "runtime_app.py"
 STATE_DIR = REPO_ROOT / "well_viewer" / "state"
+TABS_DIR = REPO_ROOT / "well_viewer" / "tabs"
 
 # Budgets hard-fail (Phase 9 onward).
 _HARD_FAIL = True
@@ -31,6 +34,13 @@ _HARD_FAIL = True
 # Teardown-completion Phase 1 (helper extraction + dead-code deletion): 6628.
 RUNTIME_APP_LINE_BUDGET = 6628
 RUNTIME_APP_ATTR_BUDGET = 97
+
+# Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
+# concrete duplication the teardown consumes; like the budgets above they only
+# ratchet down. A PR that adds a parallel implementation trips one of these.
+RUNTIME_APP_GETATTR_BUDGET = 207        # defensive getattr/hasattr probes
+RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 10  # save/load persistence wrappers
+TAB_CTX_APP_UNWRAP_BUDGET = 12          # `app = ctx.app` unwraps in tabs/
 
 
 def _enforce(ok: bool, message: str) -> None:
@@ -115,4 +125,96 @@ def test_state_package_import_contract():
     assert not offenders, (
         "well_viewer/state/ broke its import contract:\n  "
         + "\n  ".join(offenders)
+    )
+
+
+# ── Redundancy-metric ratchets ───────────────────────────────────────────────
+#
+# A co-equal goal of the teardown is consuming redundancy, not relocating it.
+# Each counter below tracks a concrete duplication a later phase eliminates;
+# the guardrail holds the count from rising in the meantime.
+
+
+def _getattr_hasattr_calls(path: Path) -> int:
+    """Count ``getattr()`` / ``hasattr()`` call sites in *path*.
+
+    These defensive probes exist because the god-object's construction order
+    was uncertain. Dependency injection (Phases 6-10) makes presence
+    guaranteed, so each migrated domain deletes its probes.
+    """
+    tree = ast.parse(path.read_text())
+    return sum(
+        1 for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id in ("getattr", "hasattr")
+    )
+
+
+def _persistence_wrapper_methods(path: Path) -> int:
+    """Count the save/load persistence wrapper methods in *path*.
+
+    Each merely forwards to a ``well_viewer.persistence.<domain>`` function;
+    Phase 4 folds all of them into one ``PersistenceRegistry``.
+    """
+    tree = ast.parse(path.read_text())
+    return sum(
+        1 for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and (node.name.endswith("_save_to_data_dir")
+             or node.name.endswith("_load_from_data_dir"))
+    )
+
+
+def _ctx_app_unwraps(directory: Path) -> int:
+    """Count ``app = ctx.app`` unwrap statements across *directory*.
+
+    The redundant verbatim line that opens nearly every tab builder. DI
+    narrowing (Phases 6-7) removes one per builder as its controller takes
+    ``ctx`` directly.
+    """
+    if not directory.is_dir():
+        return 0
+    total = 0
+    for py in sorted(directory.rglob("*.py")):
+        tree = ast.parse(py.read_text())
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and node.targets[0].id == "app"
+                    and isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "app"
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "ctx"):
+                total += 1
+    return total
+
+
+def test_runtime_app_getattr_probe_budget():
+    count = _getattr_hasattr_calls(RUNTIME_APP)
+    _enforce(
+        count <= RUNTIME_APP_GETATTR_BUDGET,
+        f"runtime_app.py has {count} getattr/hasattr probes, over the "
+        f"{RUNTIME_APP_GETATTR_BUDGET} budget. These defensive probes exist "
+        "only because construction order is uncertain; DI removes the "
+        "uncertainty. The ratchet only moves down — delete probes, don't add.",
+    )
+
+
+def test_runtime_app_persistence_wrapper_budget():
+    count = _persistence_wrapper_methods(RUNTIME_APP)
+    _enforce(
+        count <= RUNTIME_APP_PERSIST_WRAPPER_BUDGET,
+        f"runtime_app.py has {count} persistence save/load wrapper methods, "
+        f"over the {RUNTIME_APP_PERSIST_WRAPPER_BUDGET} budget. Phase 4 folds "
+        "these into one PersistenceRegistry — the ratchet only moves down.",
+    )
+
+
+def test_tab_ctx_app_unwrap_budget():
+    count = _ctx_app_unwraps(TABS_DIR)
+    _enforce(
+        count <= TAB_CTX_APP_UNWRAP_BUDGET,
+        f"well_viewer/tabs/ has {count} 'app = ctx.app' unwraps, over the "
+        f"{TAB_CTX_APP_UNWRAP_BUDGET} budget. DI narrowing (Phases 6-7) removes "
+        "one per builder — the ratchet only moves down.",
     )

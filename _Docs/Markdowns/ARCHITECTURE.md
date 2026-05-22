@@ -203,30 +203,32 @@ The `WellViewerApp(QWidget)` class is the application's **composition root**.
 
 Historically it was a deliberate god-object: every centre tab and sidebar
 panel wrote loose attributes onto it (`app._line_fig`, `app._selected_wells`,
-…) so controllers could reach state from anywhere without circular imports. An
-in-progress teardown (see §5.9) is replacing that pattern — the loose `self._*`
-state has moved into typed domain-state objects, and `WellViewerApp` is
-shrinking toward a thin root that owns the `ViewerContext` and wires the UI
-together.
+…) so controllers could reach state from anywhere without circular imports. A
+**partial teardown** (see §5.9) replaced part of that pattern — the loose
+`self._*` *state* attributes have moved into typed domain-state objects. The
+intended end state — `WellViewerApp` as a thin root that owns the
+`ViewerContext` and only wires the UI together — has **not** been reached: the
+file is still ~6,900 lines. See §5.9 for the precise status.
 
 What lives on `WellViewerApp` today:
 
 - **`self._app_state`** — an `AppState` aggregate of the typed domain-state
   objects (`channel`, `selection`, `dataset`, `plot`, `stats`, `review_image`,
-  `preview`). This is the single source of truth for runtime state.
+  `preview`). This is the single source of truth for runtime state, and the
+  migration to it is complete — call sites read `self._app_state.<domain>.<field>`
+  directly; there are no `@property` shims for the old loose state names.
 - **`self._event_bus` / `self._widget_registry` / `self._ctx`** — the
   `EventBus`, the widget-handle store, and the `ViewerContext` that bundles all
-  three for injection (see §5.9).
-- **Transitional `@property` shims** — the legacy names (`app._selected_wells`,
-  `app._active_channel`, …) survive as properties that delegate to
-  `self._app_state`, so existing call sites are untouched. They are deleted as
-  call sites migrate to read the state objects directly.
-- **Widget handles** — figures / canvases / docks the tab builders produce.
-  These move into `self._widget_registry`; a transitional `__getattr__`
-  forwarder resolves legacy `app._<widget>` reads against it.
-- **Behaviour** — the remaining `_build_*` / `_on_*` / `_redraw_*` methods and
-  the controller-delegating shims. Still the bulk of the file; extraction into
-  `views/` and controllers is ongoing.
+  three for injection. All three are constructed but only lightly wired in
+  (see §5.9).
+- **Widget handles** — figures / canvases / docks the tab builders produce,
+  still stored as loose `self._<widget>` attributes. One tab
+  (`line_graphs_tab_view`) registers them in `self._widget_registry` instead;
+  a transitional `__getattr__` forwarder resolves legacy `app._<widget>` reads
+  against the registry. Registry adoption has barely begun.
+- **Behaviour** — the `_build_*` / `_on_*` / `_redraw_*` methods. This is still
+  the bulk of the file; extraction into `views/` and controllers has not
+  started.
 
 When you add behaviour: put state on the relevant domain object in
 `well_viewer/state/`, put logic in a `*_controller.py` module, and have it take
@@ -265,8 +267,10 @@ the v1 UI is gone; the page stack is purely name-keyed.
 
 ### 5.3 Centre tab builders: `tabs/<x>_tab_view.py`
 
-Each module exposes a single `build_<name>_tab(app, parent)` function. The
-function:
+Each module exposes a single `build_<name>_tab(ctx, parent)` function — `ctx`
+is a `ViewerContext`, but today every builder's first line is `app = ctx.app`
+and it then uses the god-object exactly as before; the DI seam exists but is
+not yet narrowed to `ctx.state` / `ctx.widgets`. The function:
 
 1. Creates a `make_plot_with_right_dock(parent)` host (returns
    `(plot_area, layout, right_dock)`) — the right-side dock is reserved for
@@ -476,33 +480,51 @@ type, not just data):
 **`EventBus` (`state/event_bus.py`).** A `QObject` carrying a small, capped
 catalogue of cross-cutting signals (`channel_changed`, `selection_changed`,
 `dataset_loaded`, `plot_options_changed`, …). Signal payloads are the relevant
-*state object*, never `app`. Cross-cutting mutations emit on it; subscriber
-wiring is migrated incrementally.
+*state object*, never `app`. Five mutation sites emit on it today
+(`selection_controller`, `channel_state_controller`, `load_controller`,
+`fold_change_controls`, and `runtime_app`'s per-FOV toggle) — but **nothing
+subscribes yet**, so the bus is not load-bearing: redraw wiring still runs
+through direct calls. Connecting subscribers, and retiring the direct calls
+they would replace, is unfinished.
 
 **`WidgetRegistry` (`views/widget_registry.py`).** A name-keyed store for Qt
-widget handles (figures, canvases, axes). Tab builders call
-`ctx.widgets.register("_line_fig", fig)`; a transitional
+widget handles (figures, canvases, axes). The intent is that tab builders call
+`ctx.widgets.register("_line_fig", fig)` and a transitional
 `WellViewerApp.__getattr__` forwards a legacy `app._line_fig` read to the
-registry so reader call sites are untouched while writers migrate.
+registry. The forwarder is in place, but only one tab
+(`line_graphs_tab_view`) registers anything so far — almost every widget
+handle is still a loose `self._<widget>` attribute.
 
 **`ViewerContext` (`viewer_context.py`).** A frozen dataclass bundling
-`state` / `bus` / `widgets` (plus a transitional `app` escape hatch) — the
-single typed handle injected into tab builders and controllers in place of the
-god-object. `WellViewerApp` builds `self._ctx`; tab builders take `ctx`.
+`state` / `bus` / `widgets` plus a transitional `app` escape hatch. It is
+*meant* to be the single typed handle injected in place of the god-object.
+`WellViewerApp` builds `self._ctx` and passes it to tab builders — but every
+builder immediately does `app = ctx.app`, so in practice the god-object is
+still what flows through. Controllers do not take `ctx` at all; they still
+take `app` and reach into it directly. Narrowing call sites to `ctx.state` /
+`ctx.widgets` is unfinished.
 
-**Migration status (teardown in progress — not complete).** The typed-state
-infrastructure has landed: the `state/` package, `EventBus`, `WidgetRegistry`
-and `ViewerContext` all exist, and `WellViewerApp.__init__` builds them. The
-bulk of the file has *not* been relocated, though — `runtime_app.py` is still
-~6,900 lines, down only marginally from its ~7,000-line starting point. The
-loose attributes survive as delegating `@property` shims, and a transitional
-`WellViewerApp.__getattr__` forwards legacy widget-handle reads to the
-`WidgetRegistry`. The outstanding work is the large part: migrate reader call
-sites off the shims, move the `_build_*` methods into `views/` and the `_on_*`
-/ `_redraw_*` methods into controllers, drop the `__getattr__`, and let
-`runtime_app.py` collapse toward a thin composition root.
-`tests/test_guardrails.py` holds a ratcheting line-count / attribute-count
-ceiling (lowered as work lands, never raised) and enforces the
+**Migration status — roughly half done.** What genuinely landed: the typed
+state objects (`state/`, behaviour-rich — one `@dataclass` per domain, each
+carrying its own invariant methods) fully replaced the loose `self._*` *state*
+attributes. `_active_channel`, `_selected_wells`, `_data_dir`, `_use_sem` and
+the rest are gone from `runtime_app.py`; call sites read
+`self._app_state.<domain>.<field>` directly — no parallel copies, no shims.
+
+What did **not** land: the `EventBus` has no subscribers; the `ViewerContext`
+is unwrapped to `app` at every call site; controllers still take `app`; the
+`WidgetRegistry` holds one tab's handles; and `runtime_app.py` is still
+~6,900 lines — the `_build_*` / `_on_*` / `_redraw_*` bodies have not been
+relocated, so the file never collapsed toward a thin composition root. A
+transitional `WellViewerApp.__getattr__` forwards legacy widget-handle reads
+to the registry.
+
+The outstanding work, in dependency order: subscribe the redraw wiring to the
+`EventBus` (and retire the direct calls); narrow tab builders and controllers
+from `app` to `ctx.state` / `ctx.widgets`; relocate the `_build_*` methods into
+`views/` and the `_on_*` / `_redraw_*` methods into controllers; drop the
+`__getattr__`. `tests/test_guardrails.py` holds a ratcheting line-count /
+attribute-count ceiling (lowered as work lands, never raised) and enforces the
 `state/`-import-safety boundary, so the file can only shrink from here.
 
 ---

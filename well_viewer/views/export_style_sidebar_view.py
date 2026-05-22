@@ -52,6 +52,18 @@ from widgets.toggle_switch import ToggleSwitch
 EXPORT_STYLE_PANEL_WIDTH = 440
 
 
+#: Figure-export formats offered by the Export… dialog, in display order.
+#: ``label`` is the Qt file-filter prefix; the savefig format is the dict key.
+_EXPORT_FILTERS: dict[str, str] = {
+    "png": "PNG (*.png)",
+    "tiff": "TIFF (*.tiff *.tif)",
+    "svg": "SVG (*.svg)",
+    "eps": "EPS (*.eps)",
+    "pdf": "Vector PDF (*.pdf)",
+}
+_EXPORT_FILTER_ORDER = ("png", "tiff", "svg", "eps", "pdf")
+
+
 class ExportStyleSidebar(QWidget):
     def __init__(self, app, parent, fig, canvas, default_name: str):
         super().__init__(parent)
@@ -735,111 +747,64 @@ class ExportStyleSidebar(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Save preset failed", str(exc))
 
-    def _save_as(self) -> None:
-        """Save the figure to a file, vector formats preferred.
-
-        Unlike :meth:`_export`, which is locked to the export
-        profile's ``format`` field, this dialog offers PDF / SVG /
-        EPS / PNG side-by-side with PDF as the default — so the
-        user can drop a true vector file to disk without first
-        editing the preset. Type-42 (TrueType) fonts are used for
-        PDF/EPS so text stays editable downstream.
-        """
-        try:
-            self._persist()
-            apply_export_style_to_current(self._app, self._fig, self._canvas)
-
-            stem = Path(self._default_name).stem or "figure"
-            start = str(self._base_dir / f"{stem}.pdf")
-            filters = (
-                "Vector PDF (*.pdf);;"
-                "SVG (*.svg);;"
-                "EPS (*.eps);;"
-                "PNG (*.png);;"
-                "All files (*.*)"
-            )
-            out, picked_filter = QFileDialog.getSaveFileName(
-                self, "Save figure as", start, filters,
-            )
-            if not out:
-                return
-
-            out_path = Path(out)
-            # Resolve format from the chosen extension; fall back to the
-            # selected filter when the user typed a name without one.
-            ext = out_path.suffix.lstrip(".").lower()
-            if ext in {"pdf", "svg", "eps", "png"}:
-                fmt = ext
-            else:
-                fmt = {
-                    "Vector PDF": "pdf",
-                    "SVG": "svg",
-                    "EPS": "eps",
-                    "PNG": "png",
-                }.get(picked_filter.split(" (")[0], "pdf")
-                out_path = out_path.with_suffix(f".{fmt}")
-
-            kw: dict = {
-                "format": fmt,
-                "bbox_inches": "tight",
-                "transparent": True,
-            }
-            rc_overrides: dict = {}
-            if fmt == "png":
-                kw["dpi"] = 300
-            elif fmt == "svg":
-                rc_overrides["svg.fonttype"] = "none"
-            else:  # pdf / eps
-                # Type 42 (TrueType) instead of matplotlib's default
-                # Type 3 (bitmap glyphs) — keeps text editable in
-                # downstream vector tools.
-                rc_overrides["pdf.fonttype"] = 42
-                rc_overrides["ps.fonttype"] = 42
-
-            import matplotlib as _mpl
-            with _mpl.rc_context(rc_overrides):
-                self._fig.savefig(str(out_path), **kw)
-
-            self._app._set_status(f"Figure saved → {out_path.name}")
-        except Exception as exc:
-            QMessageBox.critical(self, "Save As failed", str(exc))
+    def _write_figure(self, out_path: Path, fmt: str) -> None:
+        """Save ``self._fig`` to *out_path* as *fmt* with format-appropriate
+        settings: 300 dpi for raster (PNG / TIFF), text-kept-as-text for SVG,
+        and Type-42 (TrueType) fonts for PDF / EPS so text stays editable in
+        downstream vector tools."""
+        kw: dict = {"format": fmt, "bbox_inches": "tight", "transparent": True}
+        rc_overrides: dict = {}
+        if fmt in ("png", "tiff"):
+            kw["dpi"] = 300
+        elif fmt == "svg":
+            rc_overrides["svg.fonttype"] = "none"
+        else:  # pdf / eps
+            rc_overrides["pdf.fonttype"] = 42
+            rc_overrides["ps.fonttype"] = 42
+        import matplotlib as _mpl
+        with _mpl.rc_context(rc_overrides):
+            self._fig.savefig(str(out_path), **kw)
 
     def _export(self) -> None:
+        """Save the figure to disk. The dialog offers every supported format —
+        PNG, TIFF, SVG, EPS, PDF — with the export profile's ``format`` pref as
+        the default filter; the user may pick any of them."""
         try:
             self._persist()
-            fmt = (self._prefs.get("format") or "png").lower()
-            initialfile = self._default_name
-            if not initialfile.lower().endswith(f".{fmt}"):
-                initialfile = f"{Path(initialfile).stem}.{fmt}"
-            start = str(self._base_dir / initialfile)
-            out, _filter = QFileDialog.getSaveFileName(
-                self, "Save figure", start,
-                f"Image (*.{fmt});;All files (*.*)",
+
+            default_fmt = (self._prefs.get("format") or "png").lower()
+            if default_fmt not in _EXPORT_FILTERS:
+                default_fmt = "png"
+            stem = Path(self._default_name).stem or "figure"
+            start = str(self._base_dir / f"{stem}.{default_fmt}")
+            filter_str = ";;".join(
+                _EXPORT_FILTERS[f] for f in _EXPORT_FILTER_ORDER
+            ) + ";;All files (*.*)"
+
+            out, picked = QFileDialog.getSaveFileName(
+                self, "Save figure", start, filter_str,
+                _EXPORT_FILTERS[default_fmt],
             )
             if not out:
                 return
+
             out_path = Path(out)
-            kw = {"format": fmt, "bbox_inches": "tight", "transparent": True}
-            orig_svg = orig_ps = None
-            if fmt == "png":
-                kw["dpi"] = 300
-            elif fmt == "svg":
-                import matplotlib as _mpl
-                orig_svg = _mpl.rcParams.get("svg.fonttype", "path")
-                _mpl.rcParams["svg.fonttype"] = "none"
-            elif fmt == "eps":
-                import matplotlib as _mpl
-                orig_ps = _mpl.rcParams.get("ps.fonttype", 3)
-                _mpl.rcParams["ps.fonttype"] = 42
-            try:
-                self._fig.savefig(str(out_path), **kw)
-            finally:
-                if fmt == "svg" and orig_svg is not None:
-                    import matplotlib as _mpl
-                    _mpl.rcParams["svg.fonttype"] = orig_svg
-                if fmt == "eps" and orig_ps is not None:
-                    import matplotlib as _mpl
-                    _mpl.rcParams["ps.fonttype"] = orig_ps
+            # Resolve the format from the typed extension; fall back to the
+            # filter the user selected when no known extension was given.
+            ext = out_path.suffix.lstrip(".").lower()
+            ext = "tiff" if ext == "tif" else ext
+            if ext in _EXPORT_FILTERS:
+                fmt = ext
+            else:
+                label = picked.split(" (")[0]
+                fmt = next(
+                    (f for f, flt in _EXPORT_FILTERS.items()
+                     if flt.startswith(label)),
+                    default_fmt,
+                )
+                out_path = out_path.with_suffix(f".{fmt}")
+
+            self._write_figure(out_path, fmt)
             self._app._set_status(f"Figure saved → {out_path.name}")
         except Exception as exc:
             QMessageBox.critical(self, "Export failed", str(exc))

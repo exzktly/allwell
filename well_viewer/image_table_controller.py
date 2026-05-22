@@ -1823,69 +1823,28 @@ def image_table_copy_png(app) -> None:
 
 
 def image_table_copy_svg(app) -> None:
-    """Render the image table and place it on the system clipboard.
+    """Render the image table and copy it to the clipboard as vector data.
 
-    Standard cross-platform Qt clipboard write: ``image/svg+xml``,
-    ``application/pdf`` and a raster ``QImage`` via ``setImageData``.
-    Apps pick the slot they understand — Inkscape reads SVG,
-    Illustrator / Affinity read PDF, raster-only consumers (Slack,
-    Mail, browser composers) read the image. For a true vector
-    handoff to Keynote (which rasterises clipboard input by design),
-    use the Save As… button in the Export Style sidebar.
+    Writes only vector flavours — ``image/svg+xml`` and ``application/pdf`` —
+    so a vector app (Illustrator, Inkscape) pastes editable paths. No raster
+    flavour is attached: a clipboard carrying both makes such apps paste the
+    raster instead.
     """
-    import io
-    from PySide6.QtCore import QByteArray, QMimeData
-    from PySide6.QtGui import QGuiApplication, QImage
+    from PySide6.QtGui import QGuiApplication
+
+    from well_viewer.figure_export_editor import figure_to_vector_mimedata
 
     fig, save_kwargs = _build_export_figure(app)
     if fig is None:
         return
     save_kwargs.pop("_dpi", None)
-    pdf_kwargs = {k: v for k, v in save_kwargs.items() if k != "format"}
-    raster_kwargs = dict(pdf_kwargs)
-    raster_kwargs.setdefault("dpi", 200)
+    save_kwargs.pop("format", None)
 
-    import matplotlib as _mpl
-
-    svg_buf = io.BytesIO()
-    try:
-        with _mpl.rc_context({"svg.fonttype": "none"}):
-            fig.savefig(svg_buf, format="svg", **save_kwargs)
-    except Exception as exc:
-        QMessageBox.critical(app, "Copy failed", str(exc))
+    mime = figure_to_vector_mimedata(
+        fig, svg_kwargs=save_kwargs, pdf_kwargs=save_kwargs,
+    )
+    if not (mime.hasFormat("image/svg+xml") or mime.hasFormat("application/pdf")):
+        QMessageBox.critical(app, "Copy failed", "Could not render the image table.")
         return
-
-    pdf_bytes: bytes | None = None
-    try:
-        pdf_buf = io.BytesIO()
-        # Type 42 (TrueType) instead of matplotlib's default Type 3
-        # (bitmap glyphs) — keeps text editable in downstream vector
-        # tools.
-        with _mpl.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42}):
-            fig.savefig(pdf_buf, format="pdf", **pdf_kwargs)
-        pdf_bytes = pdf_buf.getvalue()
-    except Exception:
-        pass
-
-    png_bytes: bytes | None = None
-    try:
-        png_buf = io.BytesIO()
-        fig.savefig(png_buf, format="png", **raster_kwargs)
-        png_bytes = png_buf.getvalue()
-    except Exception:
-        pass
-
-    md = QMimeData()
-    svg_qba = QByteArray(svg_buf.getvalue())
-    md.setData("image/svg+xml", svg_qba)
-    md.setData("image/svg", svg_qba)
-    if pdf_bytes is not None:
-        md.setData("application/pdf", QByteArray(pdf_bytes))
-    if png_bytes is not None:
-        md.setData("image/png", QByteArray(png_bytes))
-        img = QImage.fromData(png_bytes, "PNG")
-        if not img.isNull():
-            md.setImageData(img)
-    QGuiApplication.clipboard().setMimeData(md)
-
-    app._set_status("Image table copied to clipboard (SVG + PDF + PNG).")
+    QGuiApplication.clipboard().setMimeData(mime)
+    app._set_status("Image table copied to clipboard (vector SVG + PDF).")

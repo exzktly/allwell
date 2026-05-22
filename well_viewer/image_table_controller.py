@@ -1825,12 +1825,11 @@ def image_table_copy_png(app) -> None:
 def image_table_copy_svg(app) -> None:
     """Render the image table and copy it to the clipboard, preferring vector.
 
-    The payload carries PDF / SVG under the macOS pasteboard UTIs a vector app
-    reads, plus a PNG raster fallback (see ``figure_to_vector_mimedata``).
+    On macOS the figure is written natively to ``NSPasteboard`` so Illustrator
+    pastes true editable vector; elsewhere a Qt clipboard payload is used (see
+    ``copy_figure_to_clipboard``).
     """
-    from PySide6.QtGui import QGuiApplication
-
-    from well_viewer.figure_export_editor import figure_to_vector_mimedata
+    from well_viewer.figure_export_editor import copy_figure_to_clipboard
 
     fig, save_kwargs = _build_export_figure(app)
     if fig is None:
@@ -1838,11 +1837,10 @@ def image_table_copy_svg(app) -> None:
     save_kwargs.pop("_dpi", None)
     save_kwargs.pop("format", None)
 
-    mime = figure_to_vector_mimedata(
+    status = copy_figure_to_clipboard(
         fig, svg_kwargs=save_kwargs, pdf_kwargs=save_kwargs,
     )
-    if not (mime.hasFormat("image/svg+xml") or mime.hasFormat("application/pdf")):
+    if status.startswith("Copy failed"):
         QMessageBox.critical(app, "Copy failed", "Could not render the image table.")
         return
-    QGuiApplication.clipboard().setMimeData(mime)
-    app._set_status("Image table copied to clipboard (vector SVG + PDF).")
+    app._set_status("Image table " + status[0].lower() + status[1:])

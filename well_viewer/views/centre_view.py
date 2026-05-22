@@ -477,14 +477,12 @@ def build_centre(app, parent: QWidget) -> None:
             """Copy the active card's figure to the clipboard, preferring
             vector.
 
-            The payload carries PDF / SVG under the macOS pasteboard UTIs a
-            vector app reads, plus a PNG raster fallback (see
-            ``figure_to_vector_mimedata``). The figure is captured in
-            publication mode.
+            On macOS the figure is written natively to ``NSPasteboard`` so
+            Illustrator pastes true editable vector; elsewhere a Qt
+            clipboard payload is used (see ``copy_figure_to_clipboard``).
+            The figure is captured in publication mode.
             """
-            from PySide6.QtGui import QGuiApplication
-
-            from well_viewer.figure_export_editor import figure_to_vector_mimedata
+            from well_viewer.figure_export_editor import copy_figure_to_clipboard
             for attr in ("_line_card", "_bar_card", "_scatter_card",
                          "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
                 card = getattr(app, attr, None)
@@ -501,11 +499,7 @@ def build_centre(app, parent: QWidget) -> None:
                     if hasattr(card, "setPlotTheme") and prev_theme != "publication":
                         card.setPlotTheme("publication")
 
-                    mime = figure_to_vector_mimedata(fig)
-                    if not (mime.hasFormat("image/svg+xml")
-                            or mime.hasFormat("application/pdf")):
-                        return
-                    QGuiApplication.clipboard().setMimeData(mime)
+                    status = copy_figure_to_clipboard(fig)
                 finally:
                     if (hasattr(card, "setPlotTheme")
                             and getattr(card, "_plot_theme", "screen") != prev_theme):
@@ -514,9 +508,7 @@ def build_centre(app, parent: QWidget) -> None:
                         except Exception:
                             pass
                 if hasattr(app, "_set_status"):
-                    app._set_status(
-                        "Copied figure to clipboard (vector SVG + PDF, publication)."
-                    )
+                    app._set_status(status)
                 return
         app._copy_active_card_as_svg = _copy_svg
 

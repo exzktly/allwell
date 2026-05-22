@@ -8,84 +8,125 @@ lookups, ``apply_export_style_prefs``, and ``launch_export_editor``.
 
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtWidgets import QMessageBox, QWidget
 
 
-def figure_to_vector_mimedata(fig, *, svg_kwargs=None, pdf_kwargs=None,
-                              raster_fallback=True):
-    """Build a clipboard payload for *fig*, preferring vector.
+def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
+    """Render *fig* to *fmt* and return the encoded bytes (``b""`` on error)."""
+    import io
 
-    Renders the figure as PDF and SVG and registers each under both its MIME
-    type *and* the macOS pasteboard UTI a vector app looks for —
-    ``com.adobe.pdf`` (Illustrator / Preview) and ``public.svg-image``. Qt
-    passes a reverse-DNS format string straight through as the pasteboard
-    type, which a plain ``application/pdf`` MIME does not reach — so without
-    the UTI flavour Illustrator finds nothing it recognises.
+    import matplotlib as _mpl
 
-    When ``raster_fallback`` is set, a PNG is also attached as the standard
-    image flavour so a raster-only target (and any app that can't read the
-    vector flavours) still has something to paste; vector-aware apps prefer
-    the PDF / SVG flavours above it.
+    kw = dict(savefig_kwargs)
+    kw.pop("format", None)
+    try:
+        buf = io.BytesIO()
+        with _mpl.rc_context(rc_overrides):
+            fig.savefig(buf, format=fmt, **kw)
+        return buf.getvalue()
+    except Exception:
+        return b""
+
+
+def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,
+                            png_bytes: bytes) -> bool:
+    """Write the figure to the macOS pasteboard under the UTIs Illustrator reads.
+
+    Qt's ``QMimeData`` cannot register a payload under a raw macOS UTI
+    (``com.adobe.pdf`` / ``public.svg-image``) — it treats the string as a
+    MIME type and mangles it — so a vector app pasting from a Qt clipboard
+    only ever finds the raster flavour. Writing ``NSPasteboard`` directly is
+    the only way to put true vector data where Illustrator looks for it.
+
+    Returns ``True`` when the native write succeeded; ``False`` on any
+    non-macOS platform, missing pyobjc, or error — the caller then falls
+    back to the Qt clipboard so Copy never breaks to "nothing to paste".
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        from AppKit import NSPasteboard
+        from Foundation import NSData
+    except Exception:
+        return False
+    try:
+        flavours = []
+        if pdf_bytes:
+            flavours.append(("com.adobe.pdf", pdf_bytes))
+        if svg_bytes:
+            flavours.append(("public.svg-image", svg_bytes))
+        if png_bytes:
+            flavours.append(("public.png", png_bytes))
+        if not flavours:
+            return False
+        pb = NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        # declareTypes_owner_ must list every type before any setData call —
+        # Illustrator picks com.adobe.pdf first because it leads the list.
+        pb.declareTypes_owner_([uti for uti, _ in flavours], None)
+        wrote = False
+        for uti, data in flavours:
+            nsdata = NSData.dataWithBytes_length_(data, len(data))
+            if pb.setData_forType_(nsdata, uti):
+                wrote = True
+        return wrote
+    except Exception:
+        return False
+
+
+def copy_figure_to_clipboard(fig, *, svg_kwargs=None, pdf_kwargs=None) -> str:
+    """Copy *fig* to the clipboard as vector, returning a human status string.
+
+    On macOS the figure is written natively to ``NSPasteboard`` as PDF + SVG
+    + PNG, so Illustrator pastes true editable vector. Everywhere else (and
+    if the native write fails) it falls back to a Qt ``QMimeData`` carrying
+    PDF, SVG and a raster image so Copy still produces something pasteable.
 
     ``svg_kwargs`` / ``pdf_kwargs`` are extra ``Figure.savefig`` keyword
     arguments (default ``bbox_inches="tight"``); ``format`` is set here.
     """
-    import io
-
-    import matplotlib as _mpl
-    from PySide6.QtCore import QByteArray, QMimeData
-    from PySide6.QtGui import QImage
-
     svg_kw = {"bbox_inches": "tight"} if svg_kwargs is None else dict(svg_kwargs)
     pdf_kw = {"bbox_inches": "tight"} if pdf_kwargs is None else dict(pdf_kwargs)
-    svg_kw.pop("format", None)
-    pdf_kw.pop("format", None)
 
-    svg_bytes = b""
-    try:
-        buf = io.BytesIO()
-        with _mpl.rc_context({"svg.fonttype": "none"}):
-            fig.savefig(buf, format="svg", **svg_kw)
-        svg_bytes = buf.getvalue()
-    except Exception:
-        pass
+    # svg.fonttype="none" keeps text as editable <text> rather than outlines;
+    # Type-42 (TrueType) fonts keep PDF text editable downstream.
+    svg_bytes = _render_figure(fig, "svg", svg_kw, {"svg.fonttype": "none"})
+    pdf_bytes = _render_figure(fig, "pdf", pdf_kw,
+                               {"pdf.fonttype": 42, "ps.fonttype": 42})
 
-    pdf_bytes = b""
-    try:
-        buf = io.BytesIO()
-        # Type-42 (TrueType) fonts keep text editable in downstream tools.
-        with _mpl.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42}):
-            fig.savefig(buf, format="pdf", **pdf_kw)
-        pdf_bytes = buf.getvalue()
-    except Exception:
-        pass
+    png_kw = dict(svg_kw)
+    png_kw.setdefault("dpi", 200)
+    png_bytes = _render_figure(fig, "png", png_kw, {})
+
+    if not (svg_bytes or pdf_bytes):
+        return "Copy failed: the figure could not be rendered."
+
+    if _macos_pasteboard_write(pdf_bytes, svg_bytes, png_bytes):
+        return "Copied as vector (PDF/SVG) — paste into Illustrator."
+
+    from PySide6.QtCore import QByteArray, QMimeData
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
 
     mime = QMimeData()
     if pdf_bytes:
-        pdf_qba = QByteArray(pdf_bytes)
-        mime.setData("application/pdf", pdf_qba)
-        mime.setData("com.adobe.pdf", pdf_qba)        # macOS UTI — Illustrator
+        mime.setData("application/pdf", QByteArray(pdf_bytes))
     if svg_bytes:
         svg_qba = QByteArray(svg_bytes)
         mime.setData("image/svg+xml", svg_qba)
         mime.setData("image/svg", svg_qba)
-        mime.setData("public.svg-image", svg_qba)     # macOS UTI
-
-    if raster_fallback and (svg_bytes or pdf_bytes):
-        try:
-            buf = io.BytesIO()
-            raster_kw = dict(svg_kw)
-            raster_kw.setdefault("dpi", 200)
-            fig.savefig(buf, format="png", **raster_kw)
-            png = buf.getvalue()
-            mime.setData("image/png", QByteArray(png))
-            img = QImage.fromData(png, "PNG")
-            if not img.isNull():
-                mime.setImageData(img)
-        except Exception:
-            pass
-
-    return mime
+    if png_bytes:
+        mime.setData("image/png", QByteArray(png_bytes))
+        img = QImage.fromData(png_bytes, "PNG")
+        if not img.isNull():
+            mime.setImageData(img)
+    QApplication.clipboard().setMimeData(mime)
+    if sys.platform == "darwin":
+        return ("Copied as raster — native vector clipboard unavailable "
+                "(install pyobjc-framework-Cocoa for vector paste).")
+    return "Copied figure to clipboard (PDF/SVG/PNG)."
 
 
 DEFAULT_EXPORT_STYLE_PREFS = {

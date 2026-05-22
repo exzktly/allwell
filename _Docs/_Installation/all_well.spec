@@ -155,6 +155,13 @@ hiddenimports = [
     "PySide6.QtSvg",
     "shiboken6",
 
+    # pyobjc — Copy SVG writes NSPasteboard natively so Illustrator pastes
+    # true vector. Imported lazily inside figure_export_editor; PyInstaller's
+    # static analysis cannot see it, so name the frameworks explicitly.
+    "AppKit",
+    "Foundation",
+    "objc",
+
     # pandas — the Review tab and gating pipeline run on DataFrames.
     "pandas",
     "pandas.io",

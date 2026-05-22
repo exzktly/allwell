@@ -31,7 +31,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | — | Baseline (`main` @ `7f03297`) | — | — | 6,909 | audited starting point |
 | 1 | Helper extraction + dead-code deletion | #271 | 🔄 in progress | 6,628 | moved 6 helpers to `ui_helpers.py`; deleted 5 dead-code blocks; collapsed 2 redundant wrappers |
 | 2 | Bus regression harness + catalogue cleanup | #271 | 🔄 in progress | 6,628 | new `test_redraw_fanout.py` (one-redraw-per-action harness); `event_bus` trimmed to 5 signals + documented contract; 3 ratcheting redundancy guardrails added |
-| 3a | Bus load-bearing — redraw signals | — | ⬜ | — | |
+| 3a | Bus load-bearing — `channel_changed` | #271 | 🔄 in progress | 6,631 | new `redraw_coordinator.py`; `channel_changed` now drives the redraw via a real subscriber, direct call removed. `plot_options_changed` deferred pending a `_toggle_sem` decision |
 | 3b | Bus load-bearing — `selection_changed` | — | ⬜ | — | |
 | 3c | Bus load-bearing — `dataset_loaded` | — | ⬜ | — | |
 | 4 | `PersistenceRegistry` + field-list collapse | — | ⬜ | — | |
@@ -53,7 +53,7 @@ ratcheting counters in `test_guardrails.py` as of Phase 2.
 | `getattr`/`hasattr` probes in `runtime_app.py` | 207 | 207 | ~0 | ✅ guardrail |
 | Persistence save/load wrapper methods | 10 | 10 | 0 | ✅ guardrail |
 | `app = ctx.app` unwraps in tab builders | 12 | 12 | 0 | ✅ guardrail |
-| Additive bus double-paths (emit + direct redraw) | 5 | 5 | 0 | `test_redraw_fanout` |
+| Additive bus double-paths (emit + direct redraw) | 5 | 4 | 0 | `test_redraw_fanout` |
 | `_on_tab_change` dispatch branches | 8 | 8 | 0 | — |
 
 Dead code / redundancy eliminated outside the tracked metrics:
@@ -64,6 +64,10 @@ Dead code / redundancy eliminated outside the tracked metrics:
 - **Phase 2** — trimmed the `EventBus` catalogue from 7 signals to 5, deleting
   the two unused signals (`threshold_changed`, `status_message`); added the
   three redundancy guardrails above so every later phase is held to the goal.
+- **Phase 3a** — made the `EventBus` load-bearing for `channel_changed`: new
+  `redraw_coordinator.py` subscribes the signal to the scope coalescer and the
+  paired direct `redraw_scopes_or_defer` call was removed from
+  `set_active_channel` (one additive double-path eliminated, 5 → 4).
 
 ## Guiding rules
 

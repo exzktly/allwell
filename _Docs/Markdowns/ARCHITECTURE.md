@@ -484,13 +484,14 @@ catalogue of exactly five cross-cutting signals — `channel_changed`,
 `redraw_requested`. Signal payloads are the relevant *state object*, never
 `app` (`redraw_requested` carries a scope name). The catalogue and its contract
 are documented in the module docstring; status-bar messages are deliberately
-*not* on the bus — `status_signal.py` owns those. Five mutation sites emit on it
-today (`selection_controller`, `channel_state_controller`, `load_controller`,
-`fold_change_controls`, and `runtime_app`'s per-FOV toggle) — but **nothing
-subscribes yet**, so the bus is not load-bearing: redraw wiring still runs
-through direct calls. Connecting subscribers, and retiring the direct calls
-they would replace, is the next phase of the teardown (see
-`RUNTIME_APP_TEARDOWN.md`); the `tests/test_redraw_fanout.py` harness pins the
+*not* on the bus — `status_signal.py` owns those. As of teardown Phase 3a the
+bus is **partly load-bearing**: `redraw_coordinator.py`'s `RedrawCoordinator`
+subscribes `channel_changed` and forwards to the scope coalescer, and
+`set_active_channel`'s paired direct redraw call has been removed — the emit
+*is* the redraw trigger. The other signals (`plot_options_changed`,
+`selection_changed`, `dataset_loaded`) still run through direct calls;
+subscribing them and retiring those calls is the rest of Phase 3 (see
+`RUNTIME_APP_TEARDOWN.md`). The `tests/test_redraw_fanout.py` harness pins the
 one-redraw-per-action invariant that migration must preserve.
 
 **`WidgetRegistry` (`views/widget_registry.py`).** A name-keyed store for Qt

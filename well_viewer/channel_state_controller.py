@@ -220,12 +220,9 @@ def set_active_channel(app, channel: str) -> None:
     app._recalculate_threshold()
     app._invalidate_stats_cache()
     app._refresh_metric_combo_for_channel()
-    # Redraw the visible plot scope only; mark the other one dirty so it
-    # picks up the channel change when the user switches tabs.
-    from well_viewer.tabs.fold_change_controls import redraw_scopes_or_defer
-    redraw_scopes_or_defer(app)
-    # Announce on the bus. Additive for now — the explicit redraw above still
-    # runs; subscribers are wired in later phases as tabs migrate to the bus.
+    # Announce on the bus. The RedrawCoordinator subscriber coalesces the
+    # redraw — visible scope now, the other marked dirty for redraw on tab
+    # switch (see redraw_coordinator.py / fold_change_scopes.py).
     app._event_bus.channel_changed.emit(channel_state)
     if hasattr(app, "_cdf_chan_lbl"):
         app._cdf_chan_lbl.setText(f"({target_label} x range)")

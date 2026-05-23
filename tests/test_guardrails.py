@@ -46,10 +46,12 @@ _HARD_FAIL = True
 # selection_controller.
 # Phase 9 (Stats/RI-channel) moved _stats_on_test_change, _stats_update_tp_menu,
 # _stats_refresh_colors, _on_review_image_channel_selected.
-RUNTIME_APP_LINE_BUDGET = 5426
+# Phase 9b moved _on_tab_change + _on_notebook_current_changed bodies into
+# new tab_controller (with the centre-stack dispatch + notebook history).
+RUNTIME_APP_LINE_BUDGET = 5266
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
-RUNTIME_APP_ATTR_BUDGET = 74
+RUNTIME_APP_ATTR_BUDGET = 71
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only

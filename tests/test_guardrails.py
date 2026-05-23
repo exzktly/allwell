@@ -23,8 +23,15 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_APP = REPO_ROOT / "well_viewer" / "runtime_app.py"
-STATE_DIR = REPO_ROOT / "well_viewer" / "state"
-TABS_DIR = REPO_ROOT / "well_viewer" / "tabs"
+STATE_FILES = [
+    REPO_ROOT / "well_viewer" / "core" / name for name in
+    ("app_state.py", "event_bus.py", "dataset_state.py",
+     "selection_state.py", "plot_state.py", "channel_state.py")
+] + [
+    REPO_ROOT / "well_viewer" / "features" / "stats" / "state.py",
+    REPO_ROOT / "well_viewer" / "features" / "review_image" / "state.py",
+]
+FEATURES_DIR = REPO_ROOT / "well_viewer" / "features"
 
 # Budgets hard-fail (Phase 9 onward).
 _HARD_FAIL = True
@@ -119,16 +126,14 @@ def test_state_package_import_contract():
     directly — the key unlock of the teardown. Unlike the budgets this is a
     hard invariant: a breach is a real import cycle, so it always fails.
     """
-    if not STATE_DIR.is_dir():
-        pytest.skip("well_viewer/state/ not created yet (introduced in Phase 1)")
+    if not all(p.exists() for p in STATE_FILES):
+        pytest.skip("state modules not yet relocated")
 
     forbidden = (
         "well_viewer.runtime_app",
-        "well_viewer.views",
-        "well_viewer.tabs",
     )
     offenders: list[str] = []
-    for py in sorted(STATE_DIR.rglob("*.py")):
+    for py in sorted(p for p in STATE_FILES if p.exists()):
         tree = ast.parse(py.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -232,10 +237,10 @@ def test_runtime_app_persistence_wrapper_budget():
 
 
 def test_tab_ctx_app_unwrap_budget():
-    count = _ctx_app_unwraps(TABS_DIR)
+    count = _ctx_app_unwraps(FEATURES_DIR)
     _enforce(
         count <= TAB_CTX_APP_UNWRAP_BUDGET,
-        f"well_viewer/tabs/ has {count} 'app = ctx.app' unwraps, over the "
+        f"well_viewer/features/ has {count} 'app = ctx.app' unwraps, over the "
         f"{TAB_CTX_APP_UNWRAP_BUDGET} budget. DI narrowing (Phases 6-7) removes "
         "one per builder — the ratchet only moves down.",
     )

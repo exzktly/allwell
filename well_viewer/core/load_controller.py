@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 from well_viewer.features.image_table.controller import image_table_refresh_picker
 from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
-from well_viewer.views.label_grid_view import label_grid_refresh
+from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.channel_state_controller import recalculate_threshold
 from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
@@ -198,7 +198,7 @@ def load_directory(app, d: Path, label=None) -> None:
         logging.getLogger("well_viewer").exception("view_state load failed")
     if hasattr(app, "_heatmap_sidebar_table"):
         try:
-            from well_viewer.views.heatmap_layout_sidebar_view import (
+            from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
             refresh_heatmap_layout_sidebar(app)
@@ -220,7 +220,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # re-selects a well. (Stays a direct call — a tab-specific resync, not a
     # redraw; it moves onto the bus when the smFISH tab is relocated.)
     try:
-        from well_viewer.tabs.smfish_tab_view import smfish_sync_from_app
+        from well_viewer.features.smfish.tab_view import smfish_sync_from_app
         smfish_sync_from_app(app)
     except Exception:
         logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
@@ -245,7 +245,7 @@ def _kick_off_gating_after_load(app) -> None:
         except ValueError:
             pass
     if cell_area > 0.0 or has_non_default_gate:
-        from well_viewer.tabs.cell_gating_tab_view import cell_gating_start_gating_worker
+        from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(app)
 
 

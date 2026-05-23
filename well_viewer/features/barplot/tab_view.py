@@ -71,7 +71,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Fold-change normalization sits on the main controls row, left-aligned;
     # the stretch below pushes the action buttons to the right.
-    from well_viewer.tabs.fold_change_controls import install_fold_change_controls
+    from well_viewer.domain.fold_change_controls import install_fold_change_controls
     install_fold_change_controls(ctx.app, bar_ctrl, cl, scope="bar")
 
     cl.addStretch(1)

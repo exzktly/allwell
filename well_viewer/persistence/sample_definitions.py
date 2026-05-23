@@ -15,7 +15,7 @@ from well_viewer.persistence import (
     cell_gating as _cell_gating,
     ratios as _ratios,
 )
-from well_viewer.views.label_grid_view import label_grid_refresh
+from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 
 _logger = logging.getLogger("well_viewer")
 
@@ -278,7 +278,7 @@ def clear_all(app) -> None:
 
     if hasattr(app, "_cell_gating_area_edit"):
         try:
-            from well_viewer.tabs.cell_gating_tab_view import (
+            from well_viewer.features.grouping.cell_gating_tab_view import (
                 cell_gating_on_gating_change,
                 cell_gating_on_threshold_frac_on_change,
             )

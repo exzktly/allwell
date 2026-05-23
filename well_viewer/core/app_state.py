@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from well_viewer.state.channel import ChannelState
-from well_viewer.state.dataset import DatasetState
-from well_viewer.state.plot import PlotState
-from well_viewer.state.review_image import PreviewState, ReviewImageState
-from well_viewer.state.selection import SelectionState
-from well_viewer.state.stats import StatsState
+from well_viewer.core.channel_state import ChannelState
+from well_viewer.core.dataset_state import DatasetState
+from well_viewer.core.plot_state import PlotState
+from well_viewer.features.review_image.state import PreviewState, ReviewImageState
+from well_viewer.core.selection_state import SelectionState
+from well_viewer.features.stats.state import StatsState
 
 
 @dataclass

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary
-from well_viewer.views.label_grid_view import build_label_grid
+from well_viewer.features.grouping.label_grid_view import build_label_grid
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.selection_controller import update_active_group_label
 
@@ -183,7 +183,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     # The groups card-list — a widgets.SavedSelectionsList (composable)
     # over app._app_state.selection.selections.
     from widgets.saved_selections_list import SavedSelectionsList
-    from well_viewer.views.grouping_view import wire_selections_list as _wire
+    from well_viewer.features.grouping.view import wire_selections_list as _wire
     app._rep_list = SavedSelectionsList(parent)
     app._rep_list.setComposable(True)
     layout.addWidget(app._rep_list, 1)
@@ -219,8 +219,8 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
         QVBoxLayout as _QVBoxLayout,
         QWidget as _QWidget,
     )
-    from well_viewer.tabs.cell_gating_tab_view import build_cell_gating_subtab
-    from well_viewer.views.ratio_panel_view import build_ratios_inline_panel
+    from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
+    from well_viewer.features.scatter.ratio_panel_view import build_ratios_inline_panel
     from widgets.icon_button import IconButton as _IconButton
 
     outer_layout = parent.layout()

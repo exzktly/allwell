@@ -342,7 +342,7 @@ def image_table_apply_dimensions(app) -> None:
 def image_table_rebuild_grid(app) -> None:
     """Rebuild the selector grid (rows × cols of cell groupboxes) plus the
     per-row channel + LUT-colour column at column 0."""
-    from well_viewer.views.image_table_grid_view import build_image_table_grid
+    from well_viewer.features.image_table.grid_view import build_image_table_grid
 
     rows = int(getattr(app, "_image_table_rows", 2) or 2)
     cols = int(getattr(app, "_image_table_cols", 3) or 3)
@@ -720,7 +720,7 @@ def image_table_load_heatmap_layout(app) -> None:
     on the first well token (the ``QComboBox.addItems`` default of A1)
     that ``image_table_rebuild_grid`` had just put there.
     """
-    from well_viewer.views.heatmap_layout_sidebar_view import (
+    from well_viewer.features.heatmap.sidebar_view import (
         SIDEBAR_LAYOUT_NAME,
     )
 
@@ -874,7 +874,7 @@ def image_table_rebuild_lut_row(app) -> None:
     Only the channels currently assigned to a cell in the grid get a LUT
     box; unused channels are hidden.
     """
-    from well_viewer.views.image_table_grid_view import build_lut_row
+    from well_viewer.features.image_table.grid_view import build_lut_row
 
     build_lut_row(
         app,

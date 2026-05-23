@@ -104,13 +104,13 @@ def recalculate_threshold(app) -> None:
         stats_update_tp_menu(app)
     if hasattr(app, "_distribution_tp_cb"):
         try:
-            from well_viewer.tabs.distribution_tab_view import refresh_distribution_timepoints
+            from well_viewer.features.distribution.tab_view import refresh_distribution_timepoints
             refresh_distribution_timepoints(app)
         except Exception:
             _logger.exception("Distribution timepoint refresh failed")
     if hasattr(app, "_heatmap_tp_slider"):
         try:
-            from well_viewer.tabs.heatmap_tab_view import refresh_heatmap_timepoints
+            from well_viewer.features.heatmap.tab_view import refresh_heatmap_timepoints
             refresh_heatmap_timepoints(app)
         except Exception:
             _logger.exception("Heatmap timepoint refresh failed")
@@ -154,7 +154,7 @@ def recalculate_threshold(app) -> None:
     # Hydrate persisted gating params from pipeline_info.json.
     app._load_gating_from_pipeline_info()
     if hasattr(app, "_cell_gating_area_edit"):
-        from well_viewer.tabs.cell_gating_tab_view import (
+        from well_viewer.features.grouping.cell_gating_tab_view import (
             cell_gating_load_cell_areas,
             cell_gating_load_threshold_frac_on,
         )
@@ -676,7 +676,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
     # the ratio rows into the table whenever the ratio set changes.
     if hasattr(app, "_cell_gating_area_edit"):
         try:
-            from well_viewer.tabs.cell_gating_tab_view import cell_gating_load_cell_areas
+            from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
         except Exception:
             pass
@@ -782,7 +782,7 @@ def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
     # sidebar releases during early load); fall back to the default.
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):
         return app._app_state.channel.threshold
-    from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_thresh_frac_on
+    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
     return cell_gating_get_thresh_frac_on(app, channel)
 
 
@@ -802,7 +802,7 @@ def get_cell_area_threshold(app) -> float:
 def get_fluor_gate(app, channel: str) -> float:
     """Get FluorGating threshold for a channel."""
     if hasattr(app, "_cell_gating_area_edit"):
-        from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_fluor_gate
+        from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_fluor_gate
         return cell_gating_get_fluor_gate(app, channel)
     return 0.0
 

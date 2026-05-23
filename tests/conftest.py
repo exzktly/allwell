@@ -170,7 +170,7 @@ class MockApp:
         test that mutates a MockApp field after construction (e.g.
         ``fc_vs_control_on``) is reflected the next time a controller reads it.
         """
-        from well_viewer.state import AppState
+        from well_viewer.core.app_state import AppState
         st = AppState()
         st.channel.active_channel = "gfp"
         st.channel.active_val_col = "gfp_mean_intensity"

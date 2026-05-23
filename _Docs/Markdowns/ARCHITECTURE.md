@@ -95,15 +95,68 @@ forbids `well_viewer` / `widgets` / Qt imports, so anything both the pipeline
 and the GUI need to agree on has to live in a Qt-free module the pipeline can
 import. See §6.2 for the contract.
 
+The Review side (`well_viewer/`) is organised per-feature: one package per
+visible tab / functional area, with cross-cutting infrastructure split out
+by role. Inside `well_viewer/`:
+
+```
+well_viewer/
+├── runtime_app.py                 ← WellViewerApp composition root
+├── viewer_context.py              ← ViewerContext DI bundle
+├── core/                          ← cross-cutting infrastructure
+│   ├── app_state.py, event_bus.py
+│   ├── channel_state.py, dataset_state.py, plot_state.py, selection_state.py
+│   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
+│   ├── widget_registry.py
+│   ├── bus_wiring.py, redraw_coordinator.py
+│   ├── load_controller.py, tab_controller.py, selection_controller.py,
+│   │   channel_state_controller.py
+│   ├── plot_orchestrator.py, plot_style.py
+│   ├── ui_helpers.py, debug_flags.py, status_signal.py
+├── data/                          ← IO + decode
+│   ├── data_loading.py, image_discovery.py, image_resolver.py,
+│   │   zipfile_cache.py, auto_threshold.py, crop_tool.py, metric_labels.py
+├── domain/                        ← Qt-free models + pure logic
+│   ├── batch_models.py, ratio_models.py, selections_model.py, plate_layout.py
+│   ├── fold_change.py, fold_change_scopes.py, fold_change_controls.py
+│   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
+├── features/                      ← one package per UI feature
+│   ├── barplot/      controller.py, renderer.py, tab_view.py
+│   ├── lineplot/     controller.py, tab_view.py
+│   ├── scatter/      controller.py, callbacks.py, ratio_panel_view.py,
+│   │                 tab_view.py, cells_tab_view.py, agg_tab_view.py
+│   ├── heatmap/      controller.py, models.py, sidebar_view.py, tab_view.py
+│   ├── distribution/ controller.py, tab_view.py
+│   ├── stats/        controller.py, state.py, view.py
+│   ├── review_image/ controller.py, renderer.py, state.py, csv_tab_view.py
+│   ├── preview/      controller.py, callbacks.py, montage.py,
+│   │                 preview_view.py, panel_view.py
+│   ├── smfish/       controller.py, worker.py, tab_view.py
+│   ├── image_table/  controller.py, tab_view.py, panel_view.py,
+│   │                 grid_view.py, picker_view.py
+│   ├── grouping/     controller.py, view.py, label_grid_view.py,
+│   │                 label_editor_view.py, replicate_panel_view.py,
+│   │                 cell_gating_tab_view.py
+│   └── export/       service.py, style.py, sidebar_view.py
+├── persistence/                   ← JSON read/write, debounced save registry
+└── batch_export/                  ← batch CSV / figure export panels + tab
+```
+
 A few rules of thumb so you know where to put something new:
 
 - **It runs the pipeline →** put it in / next to `process_microscopy.py`. Keep
   the pipeline self-sufficient — it must run with no dependency on
   `well_viewer/` (see §6.2).
-- **It's a Review-side tab body or sidebar →** `well_viewer/tabs/` or
-  `well_viewer/views/`.
-- **It's a Review-side stateful behaviour (data load, redraw, persistence)
-  →** `well_viewer/<noun>_controller.py` or `well_viewer/persistence/`.
+- **It's a Review-side tab body or sidebar for an existing feature →**
+  add a `<name>_view.py` / `<name>_tab_view.py` inside
+  `well_viewer/features/<feature>/`.
+- **It's a brand-new Review-side feature (its own tab) →** create
+  `well_viewer/features/<feature>/` and put `controller.py`,
+  optionally `renderer.py`, and `tab_view.py` inside.
+- **It's Review-side stateful behaviour for an existing feature →** add it
+  to that feature's `controller.py` (or `renderer.py` for matplotlib
+  drawing). Cross-cutting behaviour (load, selection, channel, tabs) goes
+  in `well_viewer/core/`. Persistence stays in `well_viewer/persistence/`.
 - **It's a reusable Qt widget with no All-Well-specific knowledge →**
   `widgets/`.
 - **It's a design token / colour / size →** `theme.py` (for code) and
@@ -235,23 +288,24 @@ What lives on `WellViewerApp` today:
   one-line proxy here only if existing callers reference it via
   `app._method(…)`.
 - **No business logic.** Every `_build_*`, `_on_*`, `_redraw_*`, `_refresh_*`,
-  `_compute_*`, `_draw_*`, `_review_*`, `_sel_*` body lives in a controller
-  module (`barplot_controller`, `lineplot_controller`, `scatter_controller`,
-  `selection_controller`, `channel_state_controller`, `review_image_controller`,
-  `review_image_renderer`, `montage_controller`, `tab_controller`,
-  `stats_controller`, `stats_compute`, `grouping_controller`,
-  `plot_orchestrator`, `figure_export_editor`, `load_controller`,
-  `preview_controller`, `export_service`, `ui_helpers`) or a `views/`
-  builder. The class itself owns none of it.
+  `_compute_*`, `_draw_*`, `_review_*`, `_sel_*` body lives in either a
+  feature package (`well_viewer.features.<feature>.controller` /
+  `renderer` / `*_view`) or a cross-cutting module under
+  `well_viewer.core` (e.g. `selection_controller`, `tab_controller`,
+  `channel_state_controller`, `plot_orchestrator`, `load_controller`,
+  `ui_helpers`). The class itself owns none of it.
 
 When you add behaviour: put state on the relevant domain object in
-`well_viewer/state/`, put logic in a `*_controller.py` (or `views/*`) module,
-and have it take `app` (or, where the call site has one, `ctx`) rather than
-becoming a method on `WellViewerApp`. Do **not** add a new loose `self._*`
-attribute — a CI guardrail (`tests/test_guardrails.py`) budgets the count and
-it only ratchets down (current ceiling: 71 distinct `self._*` attrs).
+`well_viewer/core/<domain>_state.py` (cross-cutting) or
+`well_viewer/features/<feature>/state.py` (feature-local), put logic in the
+feature's `controller.py` / `renderer.py` (or under `core/` if it's
+cross-cutting), and have it take `app` (or, where the call site has one,
+`ctx`) rather than becoming a method on `WellViewerApp`. Do **not** add a
+new loose `self._*` attribute — a CI guardrail (`tests/test_guardrails.py`)
+budgets the count and it only ratchets down (current ceiling: 71 distinct
+`self._*` attrs).
 
-### 5.2 The page stack: `views/centre_view.py`
+### 5.2 The page stack: `core/centre_view.py`
 
 `build_centre(app, parent)` returns nothing; it mutates `app._notebook`
 (a `NamedPageStack` — a `QStackedWidget` subclass with name-keyed pages)
@@ -279,12 +333,13 @@ changes to the notebook drive the rail back via
 `WellViewerApp._on_notebook_current_changed`. The QTabWidget tab bar from
 the v1 UI is gone; the page stack is purely name-keyed.
 
-### 5.3 Centre tab builders: `tabs/<x>_tab_view.py`
+### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 
-Each module exposes a single `build_<name>_tab(ctx, parent)` function — `ctx`
-is a `ViewerContext`, but today every builder's first line is `app = ctx.app`
-and it then uses the god-object exactly as before; the DI seam exists but is
-not yet narrowed to `ctx.state` / `ctx.widgets`. The function:
+Each module exposes a single `build_<name>_tab(ctx, parent)` function —
+`ctx` is a `ViewerContext`. After the Phase 6/7 DI narrowing, each builder
+references `ctx.app` / `ctx.state` / `ctx.widgets` directly rather than
+unwrapping into a local `app` (the guardrail `TAB_CTX_APP_UNWRAP_BUDGET = 0`
+enforces this). The function:
 
 1. Creates a `make_plot_with_right_dock(parent)` host (returns
    `(plot_area, layout, right_dock)`) — the right-side dock is reserved for
@@ -295,90 +350,111 @@ not yet narrowed to `ctx.state` / `ctx.widgets`. The function:
    custom toolbar inside a styled panel).
 4. Stashes the figure / canvas on `app` so controllers can reach them
    later (`app._line_fig`, `app._bar_canvas`, …).
-5. Wires signals to the corresponding controller's redraw entry point
-   (e.g. `_redraw_bars` → `barplot_controller.redraw_bar_plots`).
+5. Wires signals to the feature's controller / renderer entry points
+   (e.g. matplotlib clicks → `features.scatter.controller.on_scatter_click`,
+   button presses → `features.barplot.renderer.redraw_bars`).
 
-The split between `tabs/` and `views/` is deliberate:
+Each feature package owns the full vertical slice for its tab — the
+tab-builder, the controller, the renderer (where applicable), and any
+panel-shaped sub-views the tab embeds. `centre_view` (under `core/`) just
+calls the per-feature `build_<name>_tab` from a single registration loop.
 
-| | `tabs/` | `views/` |
-|--|---------|----------|
-| Granularity | One module per *centre page* | Many panel-shaped builders |
-| Couples to | The runtime app's per-tab attributes | Smaller surfaces (sidebar, preview, stats list) |
-| Typical caller | `centre_view._build_<tab>()` | A `tabs/` module *or* `views.app_shell_view.build_ui` |
-
-In one sentence: if it's the body of a centre page, it's a `tabs/` module;
-if it's any other panel-shaped composition, it's a `views/` module.
-
-One `tabs/` module is a shared widget helper rather than a centre-page
-builder: `tabs/fold_change_controls.py` exposes
+One module sits in `domain/` rather than under a feature package:
+`domain/fold_change_controls.py` exposes
 `install_fold_change_controls(app, parent, layout, scope=…)` — the
 Control + Baseline dropdown pair installed on both the Bar Plots and
-Line Graphs control rows. It owns the cross-tab widget sync
+Line Graphs control rows. It lives in `domain/` because it's shared
+between two features and owns the cross-tab widget sync
 (`_sync_widgets_to_state`) that mirrors each state change into the
 other tab's widget instances, so the shared `app._fc_*` state stays
 visually in lockstep across tab switches.
 
 ### 5.4 The left sidebar
 
-`views/sidebar_view.build_sidebar(app, parent)` builds the well picker
+`core/sidebar_view.build_sidebar(app, parent)` builds the well picker
 (`widgets/well_plate_selector.WellPlateSelector`) plus the **Select all /
 Select none** buttons, the selection-count chip, and the group hint label.
-Selection signals route through `well_viewer/selection_controller.py`
+Selection signals route through `well_viewer/core/selection_controller.py`
 functions (`on_sidebar_plate_selection_changed`, `…_drag_finished`,
 `…_well_activated`, `…_row_activated`, `…_col_activated`,
 `…_well_dropped`); `WellViewerApp._on_sidebar_plate_*` are 1-line proxies
 to those functions, kept so the sidebar's `signal.connect(app._on_…)` wires
 still resolve.
 
-Other sidebar bodies (preview picker, image-table picker, sample-definitions
-group editor, stats group editor) live in `views/*_view.py`. They're stacked
-inside the same sidebar QWidget and shown/hidden by
-`tab_controller.on_tab_change` (the relocated body of the legacy
-`_on_tab_change`) based on the active tab.
+Other sidebar bodies live with their feature: the preview picker is
+`features/preview/preview_view.py`, the image-table picker is
+`features/image_table/picker_view.py`, the Sample-Definitions group editor
+is `features/grouping/view.py`, and the Statistics group editor is
+`features/stats/view.py`. They're stacked inside the same sidebar QWidget
+and shown/hidden by `core/tab_controller.on_tab_change` based on the
+active tab.
 
 ### 5.5 Controllers
 
-Every non-trivial behaviour lives in a `*_controller.py` module at the
-top of `well_viewer/`. The convention is:
+Every non-trivial behaviour lives in either its feature's `controller.py` /
+`renderer.py` (under `well_viewer/features/<feature>/`) or in
+`well_viewer/core/` for cross-cutting responsibilities. The convention is:
 
 - Functions (`def foo(app, …)`) that take the `WellViewerApp` — or, where
   the call site has one, a `ViewerContext` — plus any extra args.
 - Read and mutate runtime state through the typed domain-state objects:
   `app._app_state.channel`, `app._app_state.selection`, … (or
-  `ctx.state.<domain>`). The `well_viewer/state/` package is import-safe — it
-  imports no `runtime_app` / `views` / `tabs`, so a controller **can** import
-  it directly with no circular dependency (a guardrail test enforces that
-  boundary). Prefer that to reaching for loose attributes.
+  `ctx.state.<domain>`). The state modules (under `well_viewer/core/` for
+  cross-cutting, `well_viewer/features/<feature>/state.py` for feature-local)
+  are import-safe — they never reach back into `runtime_app`, so a
+  controller can import them directly with no circular dependency (the
+  `test_state_package_import_contract` guardrail enforces that boundary).
+  Prefer that to reaching for loose attributes.
 - Don't import `WellViewerApp` itself — that would be circular. The remaining
   un-extracted behaviour is reached via the `app` argument.
-- One module per *behaviour domain*: `lineplot_controller.py`, not
-  `line_tab_controller.py`. The behaviour outlives the tab name.
+- One module per *behaviour domain*: a feature's `controller.py` /
+  `renderer.py`, not a per-tab handler module. The behaviour outlives the
+  tab name.
 
-The current list (with a one-line role each):
+Cross-cutting controllers (in `well_viewer/core/`):
 
 | Module | Role |
 |--------|------|
-| `load_controller.py` | Open a dataset folder, scan CSVs, populate caches, schedule first redraw. |
-| `selection_controller.py` | Plate-selection events; commits a selection change into the redraw pipeline. |
-| `lineplot_controller.py` | Line Graphs: redraw the 3-stacked-subplot figure. |
-| `barplot_controller.py` + `barplot_renderer.py` | Bar Plots: redraw + bar-draw math (split from controller because it's used by batch export too). |
-| `scatter_controller.py` + `scatter_callbacks.py` | Scatter Plot (cells + aggregate). |
-| `heatmap_controller.py` + `heatmap_models.py` | Heat Map: layout + redraw. |
-| `distribution_controller.py` | Distribution tab: histogram / KDE / violin. |
-| `stats_controller.py` | Statistics tab: groupwise tests, KS CDF. |
-| `image_table_controller.py` | Image Table grid: per-cell config, distribute, export. |
-| `montage_controller.py` | (legacy) Movie Montage popout — folded into Image Table; retained for image-LUT helpers. |
-| `smfish_controller.py` + `smfish_worker.py` | smFISH spot detection + the background worker. |
-| `review_image_controller.py` + `review_image_renderer.py` | Segmentation tab review-image + Review-CSV jump-to-image. |
-| `preview_controller.py` | Image-preview helpers (zip member classification, byte reading). |
-| `plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. PR #249 unified the dist/heatmap dispatch here so a new default-scope tab is wired in one place. |
-| `plot_style.py` | `apply_ax_style` — token-aware axes styling for matplotlib. |
-| `figure_export_editor.py` | The floating Export Style sidebar's prefs + apply pipeline + `launch_export_editor`; also `copy_figure_to_clipboard` — Copy SVG, which writes the macOS pasteboard natively (PDF/SVG via pyobjc) so Illustrator pastes editable vector, with a Qt-clipboard fallback off macOS. |
-| `grouping_controller.py` | Sample-Definitions group editor logic. |
-| `auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `auto_threshold_core.py` so the pipeline and the GUI agree exactly. |
-| `fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by the line / bar plot controllers, their renderers, the batch-export panels, and `export_service.py`. |
-| `channel_state_controller.py` | Channel-state machinery extracted from the runtime god-object (PR #249): `recalculate_threshold`, `set_active_channel`, `update_channel_selector`, `refresh_metric_combo_for_channel`. Owns the per-channel `(min, max)` cache on `app._threshold_range_cache` that turns repeat channel toggles from an O(total cells) scan into an O(1) lookup. |
-| `zipfile_cache.py` | Process-wide LRU of open `ZipFile` handles, lock-guarded per handle so `read_member_bytes` / `scan_zip_members` share one open file across the thousands of per-member reads the Image Table / heatmap / smFISH-worker paths issue. Invalidated on dataset swap. |
+| `core/load_controller.py` | Open a dataset folder, scan CSVs, populate caches, schedule first redraw. |
+| `core/selection_controller.py` | Plate-selection events; commits a selection change into the redraw pipeline. |
+| `core/tab_controller.py` | `on_tab_change` dispatch, tab history, scope flush. |
+| `core/channel_state_controller.py` | Channel-state machinery: `recalculate_threshold`, `set_active_channel`, `update_channel_selector`, `refresh_metric_combo_for_channel`. Owns the per-channel `(min, max)` cache that turns repeat channel toggles from an O(total cells) scan into an O(1) lookup. |
+| `core/plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. |
+| `core/plot_style.py` | `apply_ax_style` — token-aware axes styling for matplotlib. |
+| `core/bus_wiring.py`, `core/redraw_coordinator.py` | Wire the `EventBus` signals to the redraw coalescer. |
+| `core/ui_helpers.py` | Cross-cutting widget helpers (combo population, button factories, theme application). |
+
+Per-feature controllers / renderers (under `well_viewer/features/`):
+
+| Feature package | Role |
+|-----------------|------|
+| `features/lineplot/controller.py` | Line Graphs: redraw the 3-stacked-subplot figure. |
+| `features/barplot/{controller,renderer}.py` | Bar Plots: redraw + bar-draw math (split because batch export reuses the math). |
+| `features/scatter/{controller,callbacks}.py` | Scatter Plot (cells + aggregate). |
+| `features/heatmap/{controller,models}.py` | Heat Map: layout + redraw. |
+| `features/distribution/controller.py` | Distribution tab: histogram / KDE / violin. |
+| `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. |
+| `features/image_table/controller.py` | Image Table grid: per-cell config, distribute, export. |
+| `features/preview/{controller,callbacks,montage}.py` | Preview-panel helpers; `montage.py` is the legacy Movie Montage popout, folded into Image Table — kept for image-LUT helpers. |
+| `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. |
+| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. |
+| `features/grouping/controller.py` | Sample-Definitions group editor logic. |
+| `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
+
+Shared domain helpers (under `well_viewer/domain/`):
+
+| Module | Role |
+|--------|------|
+| `domain/fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by line / bar plot, batch export, and `features/export/service.py`. |
+| `domain/stats_compute.py` | `well_aggregate_stats`, `compute_rep_stats`, `aggregate_well`, `aggregate_group` — the pure-math layer the bar / line / scatter controllers share. |
+| `domain/batch_models.py`, `domain/ratio_models.py`, `domain/selections_model.py` | Plain dataclass models. |
+
+Data-layer helpers (under `well_viewer/data/`):
+
+| Module | Role |
+|--------|------|
+| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `auto_threshold_core.py` so the pipeline and the GUI agree exactly. |
+| `data/zipfile_cache.py` | Process-wide LRU of open `ZipFile` handles, lock-guarded so `read_member_bytes` / `scan_zip_members` share one open file across the thousands of per-member reads the Image Table / heatmap / smFISH-worker paths issue. Invalidated on dataset swap. |
 
 ### 5.6 The data layer
 
@@ -456,9 +532,10 @@ on load instead of re-binding them to unrelated cells.
 Each plot tab pre-allocates a right-side dock via
 `make_plot_with_right_dock(parent)`. The dock is hidden by default and a
 **Properties** button on the tab's controls row toggles it. When opened, the
-dock hosts an `ExportStyleSidebar` (from `views/export_style_sidebar_view.py`)
-backed by a single per-app dict (`app._export_style_prefs`). The widget
-binds to that dict via `_bind_getter_setter`, so changes flow:
+dock hosts an `ExportStyleSidebar` (from
+`features/export/sidebar_view.py`) backed by a single per-app dict
+(`app._export_style_prefs`). The widget binds to that dict via
+`_bind_getter_setter`, so changes flow:
 
 ```
 Properties widget → app._export_style_prefs
@@ -468,39 +545,42 @@ Properties widget → app._export_style_prefs
                   canvas.draw_idle()
 ```
 
-`figure_export_editor.py` owns the prefs dict + the apply pipeline. Every
+`features/export/style.py` owns the prefs dict + the apply pipeline. Every
 redraw path ends with a call to
-`figure_export_editor.apply_export_style_to_current(app, fig, canvas)` so the
-sidebar's toggles (grid on/off, axis label size, log-scale, …) survive a
-re-render.
+`features.export.style.apply_export_style_to_current(app, fig, canvas)` so
+the sidebar's toggles (grid on/off, axis label size, log-scale, …) survive
+a re-render.
 
 ### 5.9 Typed state, the event bus, and the DI context
 
 The `runtime_app` god-object teardown introduced four pieces that, together,
 let controllers and tabs depend on typed seams instead of the loose
-`WellViewerApp` namespace. All of `well_viewer/state/` is **import-safe**: it
-imports only stdlib, numpy/pandas, the Qt-free domain models (`ratio_models`,
-`selections_model`, `batch_models`, `data_loading`) and — for the bus only —
-`PySide6.QtCore`. It never imports `runtime_app`, `views`, or `tabs`, so any
-controller can import it with no circular dependency. `tests/test_guardrails.py`
-enforces that boundary.
+`WellViewerApp` namespace. The state modules — cross-cutting ones under
+`well_viewer/core/` and per-feature ones under
+`well_viewer/features/<feature>/state.py` — are **import-safe**: they
+import only stdlib, numpy/pandas, the Qt-free domain models
+(`domain/ratio_models`, `domain/selections_model`, `domain/batch_models`,
+`data/data_loading`) and — for `core/event_bus.py` only — `PySide6.QtCore`.
+None of them imports `runtime_app`, so any controller can import them with
+no circular dependency. `tests/test_guardrails.py` enforces that boundary.
 
-**`well_viewer/state/` — typed domain-state objects.** One `@dataclass` per
-behaviour domain, each owning its own invariants (behaviour lives *in* the
-type, not just data):
+**Typed domain-state objects.** One `@dataclass` per behaviour domain, each
+owning its own invariants (behaviour lives *in* the type, not just data):
 
-| Object | Owns |
-|--------|------|
-| `ChannelState` | active channel / metric / ratio catalogue / threshold range — `set_active_channel` keeps `active_val_col` consistent |
-| `SelectionState` | plate selection + the saved-selections ("v2") model; composes `selections_model` |
-| `DatasetState` | data dir, well paths, row cache, canonical timepoint / FOV lists, `pipeline_info` |
-| `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization |
-| `StatsState` | Statistics-tab comparison groups + result cache |
-| `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview/montage image maps |
+| Object | Owned by | Lives in |
+|--------|----------|----------|
+| `ChannelState` | active channel / metric / ratio catalogue / threshold range — `set_active_channel` keeps `active_val_col` consistent | `core/channel_state.py` |
+| `SelectionState` | plate selection + the saved-selections ("v2") model; composes `selections_model` | `core/selection_state.py` |
+| `DatasetState` | data dir, well paths, row cache, canonical timepoint / FOV lists, `pipeline_info` | `core/dataset_state.py` |
+| `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization | `core/plot_state.py` |
+| `StatsState` | Statistics-tab comparison groups + result cache | `features/stats/state.py` |
+| `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview/montage image maps | `features/review_image/state.py` |
 
-`AppState` (`state/app_state.py`) is a plain aggregate of all of the above —
+`AppState` (`core/app_state.py`) is a plain aggregate of all of the above —
 *not* a mega-dataclass with behaviour. `WellViewerApp` builds one as
-`self._app_state`.
+`self._app_state`. The cross-cutting state objects live in `core/`; each
+feature's local state lives next to its controller / renderer in the same
+feature package.
 
 **`EventBus` (`state/event_bus.py`).** A `QObject` carrying a small, capped
 catalogue of exactly five cross-cutting signals — `channel_changed`,
@@ -513,12 +593,12 @@ bus is **load-bearing**: every signal has a real subscriber. Subscribers are
 constructed and connected by `bus_wiring.py`'s `wire_event_bus`, called once
 from `WellViewerApp.__init__`:
 
-- `redraw_coordinator.py`'s `RedrawCoordinator` subscribes `channel_changed`
-  and `plot_options_changed` (forwarded to the scope coalescer) and
-  `dataset_loaded` (a full post-load `_redraw`).
-- `SelectionRefreshCoordinator` (`selection_controller.py`) subscribes
-  `selection_changed` and runs `apply_selection_refresh` — sidebar refresh plus
-  a per-tab view refresh.
+- `core/redraw_coordinator.py`'s `RedrawCoordinator` subscribes
+  `channel_changed` and `plot_options_changed` (forwarded to the scope
+  coalescer) and `dataset_loaded` (a full post-load `_redraw`).
+- `SelectionRefreshCoordinator` (`core/selection_controller.py`) subscribes
+  `selection_changed` and runs `apply_selection_refresh` — sidebar refresh
+  plus a per-tab view refresh.
 
 The paired direct calls in `set_active_channel`, `set_fold_change_state`, the
 three selection mutators, and `load_controller` have been removed — the emit
@@ -529,7 +609,7 @@ smFISH tab resync after a dataset load (a tab-specific data resync, not a
 redraw). The `tests/test_redraw_fanout.py` and `tests/test_selection_refresh.py`
 harnesses pin the invariants migration must preserve.
 
-**`WidgetRegistry` (`views/widget_registry.py`).** A name-keyed store for Qt
+**`WidgetRegistry` (`core/widget_registry.py`).** A name-keyed store for Qt
 widget handles (figures, canvases, axes). `register("_line_fig", fig)`
 stashes the handle by name *and* `setattr`s it onto the bound app, so legacy
 `app._line_fig` readers resolve via plain attribute lookup — no
@@ -556,8 +636,8 @@ The `TAB_CTX_APP_UNWRAP_BUDGET` guardrail is now zero.
 | 3 | `EventBus` made load-bearing — `RedrawCoordinator` + `SelectionRefreshCoordinator` subscribe every signal; paired direct calls retired |
 | 4 | `PersistenceRegistry` replaced ~17 wrapper methods + 5 debounce flags |
 | 5 | `WidgetRegistry.register` setattrs onto app — sidesteps the 300-edit mechanical migration |
-| 6 + 7 | Every `app = ctx.app` unwrap removed from `tabs/*_tab_view.py` builders |
-| 8 | `_build_*` builders relocated into `views/` (`app_shell_view`, `stats_view`, etc.) |
+| 6 + 7 | Every `app = ctx.app` unwrap removed from per-feature `tab_view.py` builders |
+| 8 | `_build_*` builders relocated into per-feature `*_view.py` modules and `core/app_shell_view.py` |
 | 9a | Bar / Scatter / Review-image / Selection / Stats / RI-channel handler bodies relocated into their controllers |
 | 9b | `_on_tab_change` + `_on_notebook_current_changed` relocated into `tab_controller` |
 | 10 | `__getattr__` widget forwarder deleted (Phase 5 made it unnecessary); the 12 `ctx.app` unwraps gone |
@@ -765,7 +845,7 @@ User clicks Open…  or  Ctrl+O  or  --data_dir argv
 WellViewerApp._load_path(path)        ← runtime_app.py
         │
         ▼
-load_controller.load_path(app, path)  ← well_viewer/load_controller.py
+load_controller.load_path(app, path)  ← well_viewer/core/load_controller.py
         ├── detect in/out layout
         ├── app._read_pipeline_info(out_dir)  ← schema, fluor tokens, smFISH tokens
         ├── app._fov_tp_extractor ← make_schema_extractor(sep, fov_idx, tp_idx)
@@ -1066,15 +1146,15 @@ Process exits. Analyze tab offers the dataset to Review.
 
 ### 10.2 Status signal
 
-`well_viewer/status_signal.py` is a tiny pub-sub for the bottom status bar's
-`StatusDot`. Long-running operations call
+`well_viewer/core/status_signal.py` is a tiny pub-sub for the bottom status
+bar's `StatusDot`. Long-running operations call
 `with status_signal.warn_scope(): …` so the dot turns amber while they run,
 and call `status_signal.signal_failed()` on exceptions so it turns red and
 auto-clears after `DANGER_HOLD_SECS`.
 
 ### 10.3 Debug flags
 
-`well_viewer/debug_flags.py` exposes module-level booleans
+`well_viewer/core/debug_flags.py` exposes module-level booleans
 (`REVIEW_TAB_DEBUG`, `REVIEW_BAR_DEBUG`, `REVIEW_SCATTER_DEBUG`,
 `ANALYZE_TAB_DEBUG`, `MOVIE_MONTAGE_DEBUG`, `REVIEW_IMAGE_CHSW_DEBUG`).
 `all_well.main()` wires the top-of-file constants in `all_well.py` into
@@ -1095,39 +1175,45 @@ calls inside its domain; off by default.
 
 ### 11.1 Add a new plotting tab
 
-1. Create `well_viewer/tabs/<name>_tab_view.py` with a
+1. Create `well_viewer/features/<name>/tab_view.py` with a
    `build_<name>_tab(ctx, parent)` function. Model it on
-   `line_graphs_tab_view.py`. The minimum:
+1. Create `well_viewer/features/<name>/` with `__init__.py`, `controller.py`
+   (and, if you're rendering matplotlib, `renderer.py`), and `tab_view.py`.
+   The `tab_view.build_<name>_tab(ctx, parent)` minimum:
    - `make_plot_with_right_dock(parent)` for the export dock.
    - A controls row with `btn_secondary("Properties", …,
      icon="sliders-horizontal")` as the rightmost widget.
    - A `PlotCard` that hosts your figure(s).
    - Register the figure / canvas / dock / card in the widget registry:
-     `ctx.widgets.register("_<name>_fig", fig)`, etc. (the legacy
-     `app._<name>_fig` read still resolves via `WellViewerApp.__getattr__`).
-     Do **not** assign new loose `app._*` attributes.
-2. Add a controller `well_viewer/<name>_controller.py` with a `redraw` pure
-   function. Read state from the typed objects (`ctx.state.plot`,
-   `ctx.state.dataset`, …); import `well_viewer.state` freely — it is
-   import-safe. Don't import `WellViewerApp`.
+     `ctx.widgets.register("_<name>_fig", fig)`, etc. (`register` also
+     setattrs the widget onto the app, so legacy `app._<name>_fig` reads
+     resolve via plain attribute lookup). Do **not** assign new loose
+     `app._*` attributes.
+2. In `controller.py`, write a `redraw` pure function. Read state from the
+   typed objects (`ctx.state.plot`, `ctx.state.dataset`, …); import
+   `well_viewer.core.<...>_state` / `well_viewer.features.<name>.state`
+   freely — they are import-safe. Don't import `WellViewerApp`.
 3. Wire the controller's `redraw` into the redraw pipeline. Either:
-   - Add a branch to `plot_orchestrator.redraw` (if it should redraw on every
-     selection change); or
+   - Add a branch to `core/plot_orchestrator.redraw` (if it should redraw on
+     every selection change); or
    - Add an `app._redraw_<name>()` shim on `WellViewerApp` and call it from
      the relevant tab-change / selection-change paths in
-     `selection_controller._refresh_after_selection_change`.
-4. Register the tab in `views/centre_view.py`'s `groups` list (it sits
+     `core/selection_controller`.
+4. Register the tab in `core/centre_view.py`'s `groups` list (it sits
    under "Analysis" / "Images" / "Data" sections) and create a
    `_build_<name>()` closure that calls your `build_<name>_tab`.
 5. Add an icon to `_SECTION_ICONS` in `runtime_app.py` if you want it to
    appear in the rail nav.
-6. End your redraw with `apply_export_style_to_current(app, fig, canvas)`
+6. End your redraw with
+   `features.export.style.apply_export_style_to_current(app, fig, canvas)`
    so the Properties sidebar's toggles apply.
 
 ### 11.2 Add a sidebar widget for a specific tab
 
-1. Create `well_viewer/views/<name>_view.py` with a
-   `build_<name>(app, parent)` function.
+1. Add `<name>_view.py` (or extend an existing `*_view.py`) in the owning
+   feature package — `well_viewer/features/<feature>/` — with a
+   `build_<name>(app, parent)` function. Pure cross-cutting sidebar bodies
+   (e.g. the main plate picker) live in `well_viewer/core/sidebar_view.py`.
 2. In `runtime_app._build_ui`, allocate a `QWidget` for it and hide it by
    default:
    ```python
@@ -1136,10 +1222,10 @@ calls inside its domain; off by default.
    sidebar_layout.addWidget(self._sidebar_<name>_frame, 1)
    self._sidebar_<name>_frame.hide()
    ```
-3. In `_on_tab_change`, show your frame on the relevant tab and hide every
-   other sibling frame.
+3. In `core/tab_controller.on_tab_change`, show your frame on the relevant
+   tab and hide every other sibling frame.
 4. Build the frame body lazily — usually called from the tab's
-   `_build_<tab>()` closure in `centre_view.py`.
+   `_build_<tab>()` closure in `core/centre_view.py`.
 
 ### 11.3 Persist some state to disk
 
@@ -1157,12 +1243,12 @@ calls inside its domain; off by default.
 
 ### 11.4 Add a new channel-ratio metric or aggregation
 
-1. The ratio model is in `ratio_models.py` (`RatioMetric` dataclass) and
-   the persistence layer in `persistence/ratios.py`.
-2. Aggregations are configured in `data_loading.aggregate_with_threshold_df`
+1. The ratio model is in `domain/ratio_models.py` (`RatioMetric` dataclass)
+   and the persistence layer in `persistence/ratios.py`.
+2. Aggregations are configured in `data/data_loading.aggregate_with_threshold_df`
    and `_aggregate_arrays`. Add the new metric as a column or in the
    AggPoint tuple, then teach `bar_metric_row` / `line_metric_row` in
-   `export_service.py` how to format it for CSV export.
+   `features/export/service.py` how to format it for CSV export.
 
 ### 11.5 Hook a new keyboard shortcut
 
@@ -1271,7 +1357,7 @@ than as live files. What remains:
 | `README_WellViewer.md` | User-facing README — install, run, troubleshoot. |
 
 The on-disk shape of `pipeline_info.json::sample_definitions` (the saved
-selections schema) is described in the `well_viewer/selections_model.py`
+selections schema) is described in the `well_viewer/domain/selections_model.py`
 module docstring; that module is the live source of truth for the
 contract.
 
@@ -1305,7 +1391,7 @@ assets — for visual reference only.
 
 - **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
-  `well_viewer/smfish_worker.py` and the `services.pipeline_runner`
+  `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`
   pattern). Streaming progress messages route through `logging` →
   `status_signal` → the bottom `StatusDot`.
 - **Plate selections are well IDs (strings), not (row, col) tuples.**

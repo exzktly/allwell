@@ -8,7 +8,7 @@ is what verifies it independently of ``WellViewerApp``.
 from __future__ import annotations
 
 from well_viewer.domain.ratio_models import RatioMetric
-from well_viewer.state.channel import ChannelState
+from well_viewer.core.channel_state import ChannelState
 
 
 def _ratio(name: str = "ng_ratio") -> RatioMetric:

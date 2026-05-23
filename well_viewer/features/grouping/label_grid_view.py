@@ -415,7 +415,7 @@ if __name__ == "__main__":
 
     class _StubApp:
         def __init__(self):
-            from well_viewer.state import AppState
+            from well_viewer.core.app_state import AppState
             self._app_state = AppState()
             self._app_state.dataset.well_labels = {"A01": "Control", "A02": "High MOI"}
             self._app_state.dataset.well_paths = {f"{r}{c:02d}": object()

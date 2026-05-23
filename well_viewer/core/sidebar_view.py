@@ -129,7 +129,7 @@ def build_sidebar(app, parent: QWidget) -> None:
 
     # Heat-map layout configurator (sidebar variant). Hidden by default;
     # ``_on_tab_change`` reveals it when the Heat Map tab is active.
-    from well_viewer.views.heatmap_layout_sidebar_view import (
+    from well_viewer.features.heatmap.sidebar_view import (
         build_heatmap_layout_sidebar,
     )
     heatmap_frame = build_heatmap_layout_sidebar(app, parent)

@@ -21,7 +21,7 @@ from __future__ import annotations
 import pytest
 
 from well_viewer.core.channel_state_controller import set_active_channel
-from well_viewer.tabs.fold_change_controls import set_fold_change_state
+from well_viewer.domain.fold_change_controls import set_fold_change_state
 
 pytestmark = pytest.mark.qt
 

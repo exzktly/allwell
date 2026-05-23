@@ -55,7 +55,7 @@ def load_from_data_dir(app) -> None:
         app._heatmap_persisted_settings = settings
     if hasattr(app, "_heatmap_sidebar_table"):
         try:
-            from well_viewer.views.heatmap_layout_sidebar_view import (
+            from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
             refresh_heatmap_layout_sidebar(app)

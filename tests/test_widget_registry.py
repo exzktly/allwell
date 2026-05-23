@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from well_viewer.views.widget_registry import WidgetRegistry
+from well_viewer.core.widget_registry import WidgetRegistry
 
 
 def test_register_and_get():

@@ -5,8 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import QObject
 from well_viewer.features.barplot.renderer import redraw_bars
 from well_viewer.features.scatter.controller import update_scatter_menus
-from well_viewer.views.grouping_view import rep_panel_refresh
-from well_viewer.views.label_grid_view import label_grid_refresh
+from well_viewer.features.grouping.view import rep_panel_refresh
+from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 
 
 def _active_tab(app) -> str:
@@ -46,18 +46,18 @@ def apply_selection_refresh(app) -> None:
         redraw_bars(app)
     elif tab == "Scatter Plot":
         update_scatter_menus(app)
-        from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
+        from well_viewer.features.scatter.tab_view import scatter_redraw_active
         scatter_redraw_active(app)
     elif tab == "Review CSV":
         app._refresh_review_csv()
     elif tab == "smFISH":
-        from well_viewer.tabs.smfish_tab_view import smfish_sync_from_app
+        from well_viewer.features.smfish.tab_view import smfish_sync_from_app
         smfish_sync_from_app(app)
     elif tab == "Sample Definitions":
         # Cell Gating is a sub-tab here; refresh its CDF if the user has
         # opened it at least once.
         if hasattr(app, "_cell_gating_area_edit"):
-            from well_viewer.tabs.cell_gating_tab_view import cell_gating_load_cell_areas
+            from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
         # Don't fall through to _redraw — labels-and-groups edits don't
         # require a plot redraw.
@@ -296,7 +296,7 @@ def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:
     if not token:
         return
     try:
-        from well_viewer.views.heatmap_layout_sidebar_view import _on_drop_event
+        from well_viewer.features.heatmap.sidebar_view import _on_drop_event
         _on_drop_event(app, "palette", None, token)
     except Exception:
         import logging
@@ -728,7 +728,7 @@ def rebuild_all(app) -> None:
     redraw_bars(app)
     app._redraw()
     try:
-        from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
+        from well_viewer.features.scatter.tab_view import scatter_redraw_active
         scatter_redraw_active(app)
     except Exception:
         __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")

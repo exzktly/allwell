@@ -410,7 +410,7 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
     try:
         # Lazy import: the view module imports symbols defined above, so a
         # top-level import would create a circular dependency.
-        from well_viewer.views.export_style_sidebar_view import ExportStyleSidebar
+        from well_viewer.features.export.sidebar_view import ExportStyleSidebar
 
         dock = _resolve_export_dock(app, fig)
         parent = dock if dock is not None else (canvas.parent() if canvas is not None else app)
@@ -430,7 +430,7 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
                 # the container narrower than its child, clipping content
                 # against the window edge). Importing the constant here
                 # keeps the two sides in lock-step.
-                from well_viewer.views.export_style_sidebar_view import (
+                from well_viewer.features.export.sidebar_view import (
                     EXPORT_STYLE_PANEL_WIDTH as _PANEL_W,
                 )
                 host = getattr(dock, "_dock_host", None)
@@ -444,7 +444,7 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
                         parent_layout.addWidget(sb)
 
         if dock is not None:
-            from well_viewer.views.export_style_sidebar_view import (
+            from well_viewer.features.export.sidebar_view import (
                 EXPORT_STYLE_PANEL_WIDTH as _PANEL_W,
             )
             host = getattr(dock, "_dock_host", None)

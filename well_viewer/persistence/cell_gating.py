@@ -21,7 +21,7 @@ def save_to_pipeline_info(app) -> None:
         build_gating_block,
         save_gating_to_pipeline_info,
     )
-    from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_thresh_frac_on
+    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     # Persist every key that has a Cell Gating row, including ratio entries
@@ -55,7 +55,7 @@ def load_from_pipeline_info(app) -> bool:
         build = getattr(app, "_centre_build_pending", None)
         if callable(build):
             build("Sample Definitions")
-        from well_viewer.tabs.cell_gating_tab_view import build_cell_gating_subtab
+        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(app)
     if not hasattr(app, "_cell_gating_area_edit"):
         return False

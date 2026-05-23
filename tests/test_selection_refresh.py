@@ -95,7 +95,7 @@ def test_review_csv_branch_refreshes_csv(loaded_app):
 def test_scatter_branch_redraws_scatter(loaded_app, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "well_viewer.tabs.scatter_tab_view.scatter_redraw_active",
+        "well_viewer.features.scatter.tab_view.scatter_redraw_active",
         lambda app: calls.append(app),
     )
     _show_plotting_tab(loaded_app, "Scatter Plot")
@@ -107,7 +107,7 @@ def test_scatter_branch_redraws_scatter(loaded_app, monkeypatch):
 def test_smfish_branch_syncs(loaded_app, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "well_viewer.tabs.smfish_tab_view.smfish_sync_from_app",
+        "well_viewer.features.smfish.tab_view.smfish_sync_from_app",
         lambda app: calls.append(app),
     )
     assert loaded_app._notebook.setCurrentByName("Segmentation")

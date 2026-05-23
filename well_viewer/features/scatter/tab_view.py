@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
     QTabWidget, QVBoxLayout, QWidget,
 )
 
-from well_viewer.tabs.scatter_agg_tab_view import build_scatter_agg_tab
-from well_viewer.tabs.scatter_cells_tab_view import build_scatter_cells_tab
+from well_viewer.features.scatter.agg_tab_view import build_scatter_agg_tab
+from well_viewer.features.scatter.cells_tab_view import build_scatter_cells_tab
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from well_viewer.features.scatter.controller import update_scatter_menus

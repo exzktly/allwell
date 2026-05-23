@@ -32,8 +32,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
-from well_viewer.views.preview_panel_view import build_review_image_panel
-from well_viewer.views.replicate_panel_view import build_replicate_panel
+from well_viewer.features.preview.panel_view import build_review_image_panel
+from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
 
 
 _logger = logging.getLogger("well_viewer.centre_view")
@@ -157,7 +157,7 @@ def build_centre(app, parent: QWidget) -> None:
     # Sidebars referenced by data-load + tab-switch logic must exist
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
-    from well_viewer.views.preview_view import build_preview_picker
+    from well_viewer.features.preview.preview_view import build_preview_picker
     build_replicate_panel(app, app._sidebar_sample_frame)
     build_preview_picker(app, app._sidebar_preview_frame)
 
@@ -177,23 +177,23 @@ def build_centre(app, parent: QWidget) -> None:
     # builder is registered in ``pending`` and drained later. The first
     # tab in the first group is the initial active tab and is built eagerly.
     def _line_graphs_eager() -> None:
-        from well_viewer.tabs.line_graphs_tab_view import build_line_graphs_tab
+        from well_viewer.features.lineplot.tab_view import build_line_graphs_tab
         build_line_graphs_tab(app._ctx, tab_frames["Line Graphs"])
 
     def _build_bar() -> None:
-        from well_viewer.tabs.bar_plots_tab_view import build_bar_plots_tab
+        from well_viewer.features.barplot.tab_view import build_bar_plots_tab
         build_bar_plots_tab(app._ctx, tab_frames["Bar Plots"])
 
     def _build_scatter() -> None:
-        from well_viewer.tabs.scatter_tab_view import build_scatter_tab
+        from well_viewer.features.scatter.tab_view import build_scatter_tab
         build_scatter_tab(app._ctx, tab_frames["Scatter Plot"])
 
     def _build_distribution() -> None:
-        from well_viewer.tabs.distribution_tab_view import build_distribution_tab
+        from well_viewer.features.distribution.tab_view import build_distribution_tab
         build_distribution_tab(app._ctx, tab_frames["Distribution"])
 
     def _build_heatmap() -> None:
-        from well_viewer.tabs.heatmap_tab_view import build_heatmap_tab
+        from well_viewer.features.heatmap.tab_view import build_heatmap_tab
         build_heatmap_tab(app._ctx, tab_frames["Heat Map"])
 
     # Register plot sub-tab builders in pending now so the background drain
@@ -545,8 +545,8 @@ def build_centre(app, parent: QWidget) -> None:
         _refresh_channel_chip("Line Graphs")
 
     def _build_image_table() -> None:
-        from well_viewer.tabs.image_table_tab_view import build_image_table_tab
-        from well_viewer.views.image_table_picker_view import build_image_table_picker
+        from well_viewer.features.image_table.tab_view import build_image_table_tab
+        from well_viewer.features.image_table.picker_view import build_image_table_picker
         build_image_table_tab(app._ctx, tab_frames["Image Table"])
         build_image_table_picker(app, app._sidebar_image_table_frame)
 
@@ -608,7 +608,7 @@ def build_centre(app, parent: QWidget) -> None:
             if getattr(app, "_cell_segmentation_smfish_built", False):
                 return
             try:
-                from well_viewer.tabs.smfish_tab_view import build_smfish_tab
+                from well_viewer.features.smfish.tab_view import build_smfish_tab
                 build_smfish_tab(app._ctx, smfish_page)
                 app._cell_segmentation_smfish_built = True
             except Exception:
@@ -646,7 +646,7 @@ def build_centre(app, parent: QWidget) -> None:
         sub_seg.currentChanged.connect(_on_cell_seg_sub_seg)
 
     def _build_stats() -> None:
-        from well_viewer.views.stats_view import (
+        from well_viewer.features.stats.view import (
             build_stats_group_editor, build_stats_tab,
         )
         build_stats_tab(app, tab_frames["Statistics"])
@@ -656,13 +656,13 @@ def build_centre(app, parent: QWidget) -> None:
         app._build_review_csv_tab(tab_frames["Review CSV"])
 
     def _build_sample_definitions() -> None:
-        from well_viewer.views.replicate_panel_view import (
+        from well_viewer.features.grouping.replicate_panel_view import (
             build_sample_definitions_centre,
         )
         build_sample_definitions_centre(app, tab_groups)
 
     def _build_batch_export() -> None:
-        from well_viewer.tabs.batch_export_tab_view import build_batch_export_tab
+        from well_viewer.batch_export.tab_view import build_batch_export_tab
         build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [

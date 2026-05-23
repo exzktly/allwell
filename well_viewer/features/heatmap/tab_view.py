@@ -362,7 +362,7 @@ def _on_vminmax_changed(app) -> None:
 
 
 def _on_transpose(app) -> None:
-    from well_viewer.views.heatmap_layout_sidebar_view import (
+    from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout, _persist_and_redraw, refresh_heatmap_layout_sidebar,
     )
     layout = _ensure_sidebar_layout(app)
@@ -441,7 +441,7 @@ def _on_label_double_click(app, evt) -> None:
                 break
     if target is None:
         return
-    from well_viewer.views.heatmap_layout_sidebar_view import (
+    from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout, _persist_and_redraw,
     )
     layout = _ensure_sidebar_layout(app)

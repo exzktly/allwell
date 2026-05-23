@@ -322,7 +322,7 @@ def sync_preview_well_for_image_tabs(app) -> None:
 
 
 def refresh_preview_picker_shim(app) -> None:
-    from well_viewer.views.preview_view import refresh_preview_picker as _refresh_preview_picker_view
+    from well_viewer.features.preview.preview_view import refresh_preview_picker as _refresh_preview_picker_view
     from well_viewer.data.data_loading import extract_well_token as _extract_well_token
     from ui.theme import get_color
     _refresh_preview_picker_view(

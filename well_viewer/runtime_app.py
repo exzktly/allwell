@@ -54,11 +54,12 @@ import matplotlib
 import pandas as pd
 from matplotlib.figure import Figure
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
-from well_viewer.state import AppState, EventBus
+from well_viewer.core.app_state import AppState
+from well_viewer.core.event_bus import EventBus
 from well_viewer.core.bus_wiring import wire_event_bus
 from well_viewer.persistence.registry import build_persistence_registry
 from well_viewer.viewer_context import ViewerContext
-from well_viewer.views.widget_registry import WidgetRegistry
+from well_viewer.core.widget_registry import WidgetRegistry
 
 
 # ── Lazy controller proxies ──────────────────────────────────────────────────
@@ -207,8 +208,8 @@ from well_viewer.core.selection_controller import rep_select, rep_clear_all, lab
 from well_viewer.features.stats.controller import stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change
 from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks
 from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
-from well_viewer.views.centre_view import drain_pending_centre_builders
-from well_viewer.views.preview_panel_view import refresh_fov_btn_state
+from well_viewer.core.centre_view import drain_pending_centre_builders
+from well_viewer.features.preview.panel_view import refresh_fov_btn_state
 
 class WellViewerApp(QWidget):
 
@@ -346,7 +347,7 @@ class WellViewerApp(QWidget):
         self._montage_crop_btn = None
         self._montage_crop_status_lbl = None
 
-        from well_viewer.views.app_shell_view import build_ui
+        from well_viewer.core.app_shell_view import build_ui
         build_ui(self)
         self._apply_theme()
 
@@ -1067,7 +1068,7 @@ class WellViewerApp(QWidget):
         pass
 
     def _build_review_csv_tab(self, parent) -> None:
-        from well_viewer.tabs.review_csv_tab_view import build_review_csv_tab as _v
+        from well_viewer.features.review_image.csv_tab_view import build_review_csv_tab as _v
         _v(self._ctx, parent)
 
     def _refresh_review_csv(self) -> None: refresh_review_csv(self)

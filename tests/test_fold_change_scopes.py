@@ -18,7 +18,7 @@ from well_viewer.domain.fold_change_scopes import (
     redraw_scopes_or_defer, register_fold_change_scope,
     registered_scopes,
 )
-from well_viewer.state import AppState
+from well_viewer.core.app_state import AppState
 
 
 @dataclass

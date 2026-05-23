@@ -6,7 +6,7 @@ cohesive behaviours — view reset and cache invalidation.
 
 from __future__ import annotations
 
-from well_viewer.state.review_image import PreviewState, ReviewImageState
+from well_viewer.features.review_image.state import PreviewState, ReviewImageState
 
 
 # ── ReviewImageState ─────────────────────────────────────────────────────────

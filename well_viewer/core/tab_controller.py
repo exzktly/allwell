@@ -100,14 +100,14 @@ def on_tab_change(app, _e=None) -> None:
             # mis-attributing cross-tab additions / removals.
             app._set_selected_wells({keep}, commit=False)
         app._refresh_sidebar_map()
-        from well_viewer.tabs.smfish_tab_view import smfish_sync_from_app
+        from well_viewer.features.smfish.tab_view import smfish_sync_from_app
         smfish_sync_from_app(app)
 
     elif tab == "Cell Gating":
         app._sidebar_main_frame.setVisible(True)
         app._refresh_sidebar_map()
         if hasattr(app, "_cell_gating_area_edit"):
-            from well_viewer.tabs.cell_gating_tab_view import cell_gating_load_cell_areas
+            from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
 
     else:
@@ -119,12 +119,12 @@ def on_tab_change(app, _e=None) -> None:
             redraw_bars(app)
         elif tab == "Scatter Plot":
             update_scatter_menus(app)
-            from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
+            from well_viewer.features.scatter.tab_view import scatter_redraw_active
             scatter_redraw_active(app)
         else:
             if tab == "Heat Map" and hasattr(app, "_heatmap_sidebar_frame"):
                 try:
-                    from well_viewer.views.heatmap_layout_sidebar_view import (
+                    from well_viewer.features.heatmap.sidebar_view import (
                         refresh_heatmap_layout_sidebar,
                     )
                     refresh_heatmap_layout_sidebar(app)
@@ -160,7 +160,7 @@ def on_notebook_current_changed(app, _idx) -> None:
     # fold-change state mutations (and active-channel changes) now mark
     # non-visible scopes dirty rather than eagerly redrawing both.
     try:
-        from well_viewer.tabs.fold_change_controls import flush_dirty_scopes
+        from well_viewer.domain.fold_change_controls import flush_dirty_scopes
         flush_dirty_scopes(app)
     except Exception:
         import traceback
@@ -272,7 +272,7 @@ def sync_heatmap_well_drag_mode(app, enable: bool) -> None:
     plate = getattr(app, "_sidebar_plate", None)
     if plate is None:
         return
-    from well_viewer.views.heatmap_layout_sidebar_view import WELL_MIME
+    from well_viewer.features.heatmap.sidebar_view import WELL_MIME
     if enable:
         plate.setDragMime(WELL_MIME)
         plate.setAcceptDropMime(WELL_MIME)
@@ -349,7 +349,7 @@ def on_central_pane_changed(app, idx: int) -> None:
 
 
 def build_centre_shim(app, parent) -> None:
-    from well_viewer.views.centre_view import build_centre as _build_centre_view
+    from well_viewer.core.centre_view import build_centre as _build_centre_view
     _build_centre_view(app, parent)
     # Phase 10 (A1): mirror the notebook's tab list into the rail nav.
     # The nav drives the (hidden-tab-bar) QTabWidget; the QTabWidget's

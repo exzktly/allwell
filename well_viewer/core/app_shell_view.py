@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from well_viewer.views.sidebar_view import build_sidebar
-from well_viewer.views.status_view import build_bottom
+from well_viewer.core.sidebar_view import build_sidebar
+from well_viewer.core.status_view import build_bottom
 
 
 def build_ui(app) -> None:

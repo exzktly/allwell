@@ -876,7 +876,7 @@ def on_heatmap_label_drag_release(app, event) -> None:
 
 
 def _apply_label_reorder(app, kind: str, src: int, dst: int) -> None:
-    from well_viewer.views.heatmap_layout_sidebar_view import (
+    from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout,
         _persist_and_redraw,
         refresh_heatmap_layout_sidebar,

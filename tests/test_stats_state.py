@@ -6,7 +6,7 @@ select / delete / rename / clear and the active-group cursor clamping.
 
 from __future__ import annotations
 
-from well_viewer.state.stats import StatsState
+from well_viewer.features.stats.state import StatsState
 
 
 def test_defaults():

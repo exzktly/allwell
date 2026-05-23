@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QToolTip, QVBoxLayout, QWidget
 from well_viewer.montage_controller import on_montage_fluor_motion
+from well_viewer.montage_controller import draw_montage_thumbs
 from well_viewer.montage_controller import on_montage_shift_wheel
 from well_viewer.montage_controller import on_montage_wheel
 
@@ -336,7 +337,7 @@ def montage_tophat_toggled(app) -> None:
     fov = app._preview_fov_cb.currentText()
     tp_list = [(tp, ref) for (f, tp), ref in sorted(app._app_state.preview.fluor.items()) if f == fov]
     if tp_list:
-        app._draw_montage_thumbs(tp_list)
+        draw_montage_thumbs(app, tp_list)
 
     bridge = _TophatBridge()
 

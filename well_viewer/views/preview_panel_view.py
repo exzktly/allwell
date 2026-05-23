@@ -1,6 +1,7 @@
 """Movie montage / review-image view builders (Qt port)."""
 
 from __future__ import annotations
+from well_viewer.montage_controller import refresh_preview_montage
 
 from typing import List, Optional
 
@@ -59,7 +60,7 @@ def build_right_panel(self, parent: QWidget) -> None:
     self._fov_menu = QComboBox(ctrl)
     self._fov_menu.addItems(["—"])
     self._fov_menu.currentIndexChanged.connect(
-        lambda _i: self._refresh_preview_montage()
+        lambda _i: refresh_preview_montage(self)
     )
     cl.addWidget(self._fov_menu)
     self._preview_fov_var = self._fov_menu

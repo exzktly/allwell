@@ -6,6 +6,7 @@ decoding, boundary computation, or pixmap composition. Each function takes
 """
 
 from __future__ import annotations
+from well_viewer.montage_controller import refresh_preview_montage
 
 import logging
 from typing import Dict, Optional
@@ -162,11 +163,10 @@ def update_preview(app, well_label: Optional[str]) -> None:
         if all_fovs and cur not in all_fovs:
             app._preview_fov_var.setCurrentText(all_fovs[0])
 
-    if hasattr(app, "_refresh_preview_montage"):
-        try:
-            app._refresh_preview_montage()
-        except AttributeError:
-            pass
+    try:
+        refresh_preview_montage(app)
+    except AttributeError:
+        pass
     if channel_switch_debug:
         _logger.debug("[RI-CHSW step 4->6] triggering refresh_review_image after preview reload")
     refresh_review_image(app)

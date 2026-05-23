@@ -114,6 +114,12 @@ def recalculate_threshold(app) -> None:
             refresh_heatmap_timepoints(app)
         except Exception:
             _logger.exception("Heatmap timepoint refresh failed")
+    if hasattr(app, "_scatter_ch_x_cb"):
+        try:
+            from well_viewer.scatter_controller import update_scatter_menus
+            update_scatter_menus(app)
+        except Exception:
+            _logger.exception("Scatter menu refresh failed")
 
     # Per-channel (min, max) cache — keyed on val_col so a channel toggle
     # reuses the previous channel's range when the user flips back. Audit

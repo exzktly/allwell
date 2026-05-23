@@ -38,11 +38,11 @@ def redraw(
     Drives line graphs, distribution, and heat map — every plot that
     re-renders in response to a channel / metric / threshold change.
     Bar / scatter / scatter-aggregate live outside this fan-out and are
-    invoked from their own per-tab redraw shims (``_redraw_bars``,
-    ``scatter_redraw_active``, ``_redraw_scatter_agg``) because they
-    consume scope-specific state (the bar timepoint slider, the
-    scatter-axis property combos, etc.) and route through the
-    fold-change scope registry on selection changes.
+    invoked through the fold-change scope registry (``redraw_bars``,
+    ``scatter_redraw_active``, ``redraw_scatter_agg_orchestrate``)
+    because they consume scope-specific state (the bar timepoint
+    slider, the scatter-axis property combos, etc.) and only redraw
+    when their tab is the visible scope.
 
     Audit M6 was the split-brain: distribution + heatmap dispatch used
     to live in `runtime_app._redraw` *after* the orchestrator call, so

@@ -18,6 +18,8 @@ def wire_event_bus(app, bus) -> None:
     """
     from well_viewer.core.redraw_coordinator import RedrawCoordinator
     from well_viewer.core.selection_controller import SelectionRefreshCoordinator
+    from well_viewer.core.scope_registry import register_default_scopes
 
     RedrawCoordinator(app, bus)
     SelectionRefreshCoordinator(app, bus)
+    register_default_scopes()

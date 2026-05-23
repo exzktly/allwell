@@ -274,7 +274,7 @@ def build_tok_to_label(app) -> None:
 
 def load_path_shim(app, path):
     # Drain any pending deferred tab builds so post-load redraw paths
-    # (e.g., _redraw_bars in _recalculate_threshold call sites) hit
+    # (e.g., the bar redraw in _recalculate_threshold call sites) hit
     # fully-constructed tabs instead of unbuilt placeholders.
     from well_viewer.core import status_signal as _status_signal
     app._drain_pending_centre_builders()

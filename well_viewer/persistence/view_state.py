@@ -607,15 +607,18 @@ def reset(app) -> None:
             _doc.set_section(app, "view_state", None)
         except Exception:
             _logger.debug("reset: persistence.json update failed", exc_info=True)
-    # Force a redraw on whatever tab is active.
-    for fn_name in ("_redraw", "_redraw_bars", "_redraw_scatter",
-                    "_redraw_scatter_agg"):
-        fn = getattr(app, fn_name, None)
-        if callable(fn):
-            try:
-                fn()
-            except Exception:
-                pass
+    # Force a redraw on whatever tab is active. The scope coalescer redraws
+    # the visible fold-change tab (bar / line) and marks the rest dirty; the
+    # default-scope _redraw() handles line / distribution / heat map.
+    from well_viewer.domain.fold_change_scopes import redraw_scopes_or_defer
+    try:
+        redraw_scopes_or_defer(app)
+    except Exception:
+        _logger.debug("reset: scope redraw failed", exc_info=True)
+    try:
+        app._redraw()
+    except Exception:
+        _logger.debug("reset: default redraw failed", exc_info=True)
 
 
 def _reset_bar(app) -> None:

@@ -1,9 +1,9 @@
 """Redraw fan-out regression harness.
 
-Counts actual invocations of the scope redraw methods (``_redraw`` for the
-line scope, ``_redraw_bars`` for the bar scope) on a *real* ``WellViewerApp``.
-A single user action must produce **exactly one** redraw of the visible
-scope — never zero, never two.
+Counts actual invocations of each fold-change scope's redraw callable
+(``redraw_app`` for the line scope, ``redraw_bars`` for the bar scope) on
+a *real* ``WellViewerApp``. A single user action must produce **exactly
+one** redraw of the visible scope — never zero, never two.
 
 This guards Phase 3 of the ``runtime_app.py`` teardown. When the ``EventBus``
 becomes load-bearing, a bus subscriber must *replace* the direct redraw call,
@@ -18,37 +18,60 @@ visible scope per action; the bus emit goes nowhere.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from well_viewer.core.channel_state_controller import set_active_channel
 from well_viewer.domain.fold_change_controls import set_fold_change_state
+from well_viewer.domain.fold_change_scopes import (
+    get_scope, register_fold_change_scope,
+)
 
 pytestmark = pytest.mark.qt
 
 
 class _RedrawCounter:
-    """Wrap the scope redraw methods on a real app and tally invocations.
+    """Tally every invocation of the line / bar scope redraw callables.
 
-    The wrappers call through to the originals so the app behaves normally —
-    only the call count is observed.
+    The bar scope only enters through the scope coalescer, so wrapping
+    the scope's callable is enough. The line scope enters through TWO
+    paths: the coalescer (channel / fold-change) and the
+    ``dataset_loaded`` subscriber (which calls ``app._redraw`` directly
+    for a full post-load redraw). Wrap both so every effective redraw
+    is observed exactly once. Wrappers call through to the originals so
+    the app behaves normally; ``restore()`` undoes both wrappings.
     """
-
-    _METHODS = {"line": "_redraw", "bar": "_redraw_bars"}
 
     def __init__(self, app) -> None:
         self.app = app
         self.counts = {"line": 0, "bar": 0}
-        for scope, method in self._METHODS.items():
-            setattr(app, method, self._wrap(scope, getattr(app, method)))
 
-    def _wrap(self, scope, original):
+        self._original_scopes = {}
+        for name in ("line", "bar"):
+            scope = get_scope(name)
+            assert scope is not None, f"scope {name!r} not registered"
+            self._original_scopes[name] = scope
+            register_fold_change_scope(replace(
+                scope, redraw=self._wrap(name, scope.redraw),
+            ))
+
+        self._original_app_redraw = app._redraw
+        app._redraw = self._wrap("line", app._redraw)
+
+    def _wrap(self, name, original):
         def _counted(*args, **kwargs):
-            self.counts[scope] += 1
+            self.counts[name] += 1
             return original(*args, **kwargs)
         return _counted
 
     def reset(self) -> None:
         self.counts = {"line": 0, "bar": 0}
+
+    def restore(self) -> None:
+        for scope in self._original_scopes.values():
+            register_fold_change_scope(scope)
+        self.app._redraw = self._original_app_redraw
 
     @property
     def total(self) -> int:
@@ -65,7 +88,11 @@ def _show_centre_tab(app, leaf: str) -> None:
 @pytest.fixture
 def counted_app(loaded_app):
     """A loaded app plus a redraw counter wired onto its scope methods."""
-    return loaded_app, _RedrawCounter(loaded_app)
+    counter = _RedrawCounter(loaded_app)
+    try:
+        yield loaded_app, counter
+    finally:
+        counter.restore()
 
 
 # ── Channel change ───────────────────────────────────────────────────────────

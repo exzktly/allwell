@@ -868,23 +868,26 @@ class ExportStyleSidebar(QWidget):
         self._redraw_bound_figure()
 
     def _redraw_bound_figure(self) -> None:
-        """Trigger the redraw entry point that matches the bound figure."""
+        """Trigger the redraw entry point that matches the bound figure.
+
+        Dispatch is by figure identity — the imported redraw function is
+        the source of truth, not a string method name on app.
+        """
         app = self._app
         try:
-            if getattr(app, "_line_fig", None) is self._fig and hasattr(app, "_redraw"):
+            if getattr(app, "_line_fig", None) is self._fig:
                 app._redraw()
                 return
-            if getattr(app, "_bar_fig", None) is self._fig and hasattr(app, "_redraw_bars"):
+            if getattr(app, "_bar_fig", None) is self._fig:
                 redraw_bars(app)
                 return
-            if getattr(app, "_scatter_fig", None) is self._fig and hasattr(app, "_redraw_scatter"):
+            if getattr(app, "_scatter_fig", None) is self._fig:
                 redraw_scatter_orchestrate(app)
                 return
-            if getattr(app, "_scatter_agg_fig", None) is self._fig and hasattr(app, "_redraw_scatter_agg"):
+            if getattr(app, "_scatter_agg_fig", None) is self._fig:
                 redraw_scatter_agg_orchestrate(app)
                 return
-            if hasattr(app, "_redraw"):
-                app._redraw()
+            app._redraw()
         except Exception:
             pass
 

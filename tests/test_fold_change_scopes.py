@@ -1,4 +1,4 @@
-"""Tests for the dirty-flag tab-redraw plumbing in fold_change_controls.
+"""Tests for the dirty-flag tab-redraw plumbing in fold_change_scopes.
 
 Verifies that ``redraw_scopes_or_defer`` only fires the visible scope's
 redraw and that ``flush_dirty_scopes`` drains pending redraws on a
@@ -14,6 +14,7 @@ import pytest
 
 from well_viewer.domain.fold_change_scopes import (
     FoldChangeScope,
+    _REGISTERED_SCOPES,
     current_scope_name, flush_dirty_scopes,
     redraw_scopes_or_defer, register_fold_change_scope,
     registered_scopes,
@@ -25,8 +26,8 @@ from well_viewer.core.app_state import AppState
 class _TabbedApp:
     """Mock of just the slice WellViewerApp exposes for tab tracking.
 
-    Records every redraw method called, so tests can assert the visible
-    tab fired and the others didn't.
+    Records every redraw callable invoked, so tests can assert the
+    visible tab fired and the others didn't.
     """
     current_tab: str = "Bar Plots"
     redraws: List[str] = field(default_factory=list)
@@ -35,17 +36,40 @@ class _TabbedApp:
     def _current_centre_tab(self) -> str:
         return self.current_tab
 
-    def _redraw_bars(self) -> None:
-        self.redraws.append("bar")
 
-    def _redraw(self) -> None:
-        self.redraws.append("line")
+def _record_bar(app) -> None:
+    app.redraws.append("bar")
+
+
+def _record_line(app) -> None:
+    app.redraws.append("line")
 
 
 @pytest.fixture(autouse=True)
-def _isolate_dirty_state(monkeypatch):
-    """Each test gets a clean scope-dirty set even if it shares an app."""
-    yield
+def _isolated_scope_registry():
+    """Register the two default scopes pointing at this test's recorders.
+
+    The production registration lives in ``core.scope_registry`` and is
+    triggered from ``bus_wiring`` during app construction; tests bypass
+    that init path, so we register equivalent scopes here.
+    """
+    snapshot = dict(_REGISTERED_SCOPES)
+    _REGISTERED_SCOPES.clear()
+    register_fold_change_scope(FoldChangeScope(
+        name="bar", ctrl_combo_attr="_fc_ctrl_combo_bar",
+        baseline_combo_attr="_fc_baseline_combo_bar",
+        redraw=_record_bar, tab_names=("Bar Plots",),
+    ))
+    register_fold_change_scope(FoldChangeScope(
+        name="line", ctrl_combo_attr="_fc_ctrl_combo_line",
+        baseline_combo_attr="_fc_baseline_combo_line",
+        redraw=_record_line, tab_names=("Line Graphs",),
+    ))
+    try:
+        yield
+    finally:
+        _REGISTERED_SCOPES.clear()
+        _REGISTERED_SCOPES.update(snapshot)
 
 
 def test_current_scope_name_bar_tab():
@@ -118,14 +142,11 @@ def test_register_fold_change_scope_replaces_existing():
         name="bar",
         ctrl_combo_attr="_test_ctrl",
         baseline_combo_attr="_test_baseline",
-        redraw_method="_redraw_bars",
+        redraw=_record_bar,
         tab_names=("Bar Plots",),
     )
     register_fold_change_scope(new)
-    try:
-        # Sanity — the new descriptor sticks.
-        cur = next(s for s in registered_scopes() if s.name == "bar")
-        assert cur.ctrl_combo_attr == "_test_ctrl"
-    finally:
-        # Restore the original so subsequent tests aren't affected.
-        register_fold_change_scope(original)
+    # Sanity — the new descriptor sticks. The autouse fixture restores
+    # the snapshot for the next test.
+    cur = next(s for s in registered_scopes() if s.name == "bar")
+    assert cur.ctrl_combo_attr == "_test_ctrl"

@@ -3,23 +3,28 @@
 Pure logic (no Qt) so the helpers can be unit-tested without spinning
 up a PySide6 environment. Each fold-change-aware tab registers a
 ``FoldChangeScope`` describing how to find its combo widgets and which
-``WellViewerApp`` method to call when its plot needs to redraw. The
+callable to invoke when its plot needs to redraw. The
 ``redraw_scopes_or_defer`` / ``flush_dirty_scopes`` pair implements
 the 'only redraw the visible tab; redraw the rest when the user looks
 at them' optimization without coupling either tab to the other.
 
-The Qt-facing fold-change controls module (`tabs.fold_change_controls`)
-re-exports these names so existing callers don't change.
+Registrations live in ``core/scope_registry.register_default_scopes``,
+which the app calls once during ``__init__``. Domain stays at the
+bottom of the import graph — it does not reach up into ``features/``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable
 
 
 @dataclass(frozen=True)
 class FoldChangeScope:
     """Per-tab description used by the cross-tab sync + redraw glue.
+
+    ``redraw`` is invoked with the running ``WellViewerApp`` whenever
+    the scope's tab is visible and a redraw is requested.
 
     ``tab_names`` is the set of leaf tab labels (as returned by
     ``WellViewerApp._current_centre_tab``) that the scope considers
@@ -30,7 +35,7 @@ class FoldChangeScope:
     name: str
     ctrl_combo_attr: str
     baseline_combo_attr: str
-    redraw_method: str  # method name on ``WellViewerApp``
+    redraw: Callable[[Any], None]
     tab_names: "tuple[str, ...]" = ()
 
 
@@ -52,23 +57,6 @@ def registered_scopes() -> "tuple[FoldChangeScope, ...]":
 
 def get_scope(name: str) -> "FoldChangeScope | None":
     return _REGISTERED_SCOPES.get(name)
-
-
-# Default registrations — the two scopes that exist today.
-register_fold_change_scope(FoldChangeScope(
-    name="bar",
-    ctrl_combo_attr="_fc_ctrl_combo_bar",
-    baseline_combo_attr="_fc_baseline_combo_bar",
-    redraw_method="_redraw_bars",
-    tab_names=("Bar Plots",),
-))
-register_fold_change_scope(FoldChangeScope(
-    name="line",
-    ctrl_combo_attr="_fc_ctrl_combo_line",
-    baseline_combo_attr="_fc_baseline_combo_line",
-    redraw_method="_redraw",
-    tab_names=("Line Graphs",),
-))
 
 
 # ── Dirty-tab management ────────────────────────────────────────────────────
@@ -100,13 +88,10 @@ def current_scope_name(app) -> "str | None":
 
 
 def _call_redraw(app, scope: FoldChangeScope) -> None:
-    """Invoke the scope's redraw method, swallowing exceptions to a trace."""
+    """Invoke the scope's redraw callable, swallowing exceptions to a trace."""
     import traceback
-    method = getattr(app, scope.redraw_method, None)
-    if method is None:
-        return
     try:
-        method()
+        scope.redraw(app)
     except Exception:
         traceback.print_exc()
 

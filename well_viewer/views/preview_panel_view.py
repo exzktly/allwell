@@ -1,7 +1,7 @@
 """Movie montage / review-image view builders (Qt port)."""
 
 from __future__ import annotations
-from well_viewer.montage_controller import refresh_preview_montage
+from well_viewer.features.preview.montage import refresh_preview_montage
 
 from typing import List, Optional
 
@@ -11,20 +11,20 @@ from PySide6.QtWidgets import (
     QToolTip, QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import btn_card, btn_secondary
-from well_viewer.preview_callbacks import montage_tophat_toggled
-from well_viewer.review_image_controller import on_review_image_channel_selected
-from well_viewer.montage_controller import montage_zoom_step
-from well_viewer.montage_controller import on_montage_shift_wheel
-from well_viewer.review_image_renderer import refresh_review_image
+from well_viewer.core.ui_helpers import btn_card, btn_secondary
+from well_viewer.features.preview.callbacks import montage_tophat_toggled
+from well_viewer.features.review_image.controller import on_review_image_channel_selected
+from well_viewer.features.preview.montage import montage_zoom_step
+from well_viewer.features.preview.montage import on_montage_shift_wheel
+from well_viewer.features.review_image.renderer import refresh_review_image
 from functools import partial
-from well_viewer.export_service import save_montage_figure
-from well_viewer.montage_controller import montage_redraw_at_zoom
-from well_viewer.montage_controller import montage_zoom_fit
-from well_viewer.review_image_controller import on_review_image_move
-from well_viewer.review_image_controller import on_review_image_press
-from well_viewer.review_image_controller import on_review_image_release
-from well_viewer.review_image_controller import pick_review_image_color
+from well_viewer.features.export.service import save_montage_figure
+from well_viewer.features.preview.montage import montage_redraw_at_zoom
+from well_viewer.features.preview.montage import montage_zoom_fit
+from well_viewer.features.review_image.controller import on_review_image_move
+from well_viewer.features.review_image.controller import on_review_image_press
+from well_viewer.features.review_image.controller import on_review_image_release
+from well_viewer.features.review_image.controller import pick_review_image_color
 
 
 def build_right_panel(self, parent: QWidget) -> None:

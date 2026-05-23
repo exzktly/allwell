@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from well_viewer.batch_models import BarGroup
+from well_viewer.domain.batch_models import BarGroup
 
 
 @dataclass

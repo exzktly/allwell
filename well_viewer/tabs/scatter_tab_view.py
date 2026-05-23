@@ -22,9 +22,9 @@ from PySide6.QtWidgets import (
 
 from well_viewer.tabs.scatter_agg_tab_view import build_scatter_agg_tab
 from well_viewer.tabs.scatter_cells_tab_view import build_scatter_cells_tab
-from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
-from well_viewer.scatter_controller import redraw_scatter_orchestrate
-from well_viewer.scatter_controller import update_scatter_menus
+from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
+from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
+from well_viewer.features.scatter.controller import update_scatter_menus
 
 
 _MODE_CELLS = "cells"

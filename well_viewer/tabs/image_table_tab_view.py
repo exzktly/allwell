@@ -18,24 +18,24 @@ from PySide6.QtWidgets import (
     QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from well_viewer.crop_tool import CropTool
-from well_viewer.ui_helpers import btn_primary, btn_secondary
-from well_viewer.image_table_controller import image_table_open_export_settings
-from well_viewer.image_table_controller import image_table_apply_dimensions
-from well_viewer.image_table_controller import image_table_apply_global
-from well_viewer.image_table_controller import image_table_rebuild_grid
-from well_viewer.image_table_controller import image_table_repopulate_dropdowns
-from well_viewer.image_table_controller import image_table_toggle_binary
-from well_viewer.image_table_controller import image_table_toggle_boundaries
-from well_viewer.image_table_controller import image_table_toggle_tophat
+from well_viewer.data.crop_tool import CropTool
+from well_viewer.core.ui_helpers import btn_primary, btn_secondary
+from well_viewer.features.image_table.controller import image_table_open_export_settings
+from well_viewer.features.image_table.controller import image_table_apply_dimensions
+from well_viewer.features.image_table.controller import image_table_apply_global
+from well_viewer.features.image_table.controller import image_table_rebuild_grid
+from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
+from well_viewer.features.image_table.controller import image_table_toggle_binary
+from well_viewer.features.image_table.controller import image_table_toggle_boundaries
+from well_viewer.features.image_table.controller import image_table_toggle_tophat
 from functools import partial
-from well_viewer.image_table_controller import image_table_copy_png
-from well_viewer.image_table_controller import image_table_copy_svg
-from well_viewer.image_table_controller import image_table_distribute_timepoints
-from well_viewer.image_table_controller import image_table_distribute_wells
-from well_viewer.image_table_controller import image_table_export
-from well_viewer.image_table_controller import image_table_generate
-from well_viewer.image_table_controller import image_table_load_heatmap_layout
+from well_viewer.features.image_table.controller import image_table_copy_png
+from well_viewer.features.image_table.controller import image_table_copy_svg
+from well_viewer.features.image_table.controller import image_table_distribute_timepoints
+from well_viewer.features.image_table.controller import image_table_distribute_wells
+from well_viewer.features.image_table.controller import image_table_export
+from well_viewer.features.image_table.controller import image_table_generate
+from well_viewer.features.image_table.controller import image_table_load_heatmap_layout
 
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:

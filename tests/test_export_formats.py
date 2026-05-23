@@ -20,7 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 
-from well_viewer.figure_export_editor import (  # noqa: E402
+from well_viewer.features.export.style import (  # noqa: E402
     _macos_pasteboard_write,
     _render_figure,
     copy_figure_to_clipboard,

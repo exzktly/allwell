@@ -7,7 +7,7 @@ is what verifies it independently of ``WellViewerApp``.
 
 from __future__ import annotations
 
-from well_viewer.ratio_models import RatioMetric
+from well_viewer.domain.ratio_models import RatioMetric
 from well_viewer.state.channel import ChannelState
 
 

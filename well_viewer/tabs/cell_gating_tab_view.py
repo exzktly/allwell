@@ -40,9 +40,9 @@ from PySide6.QtWidgets import (
 )
 
 from ui.theme import get_color
-from well_viewer import debug_flags as _debug_flags
-from well_viewer.ui_helpers import attach_plot_toolbar, install_canvas_wheel_scroll
-from well_viewer.review_image_controller import apply_review_overrides_to_cache
+from well_viewer.core import debug_flags as _debug_flags
+from well_viewer.core.ui_helpers import attach_plot_toolbar, install_canvas_wheel_scroll
+from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
 
 
 logger = logging.getLogger("well_viewer.gating_worker")
@@ -71,7 +71,7 @@ class GatingWorker(QThread):
         self._cancelled = True
 
     def run(self) -> None:
-        from well_viewer import status_signal as _status_signal
+        from well_viewer.core import status_signal as _status_signal
         _status_signal.busy_push()
         try:
             self._run_inner()
@@ -494,11 +494,11 @@ class _AutoThresholdWorker(QThread):
         # impossible to tell *why* the button hung up.
         import logging as _logging
         import traceback as _tb
-        _log = _logging.getLogger("well_viewer.auto_threshold")
-        from well_viewer import status_signal as _status_signal
+        _log = _logging.getLogger("well_viewer.data.auto_threshold")
+        from well_viewer.core import status_signal as _status_signal
         _status_signal.busy_push()
         try:
-            from well_viewer.auto_threshold import compute_auto_thresholds
+            from well_viewer.data.auto_threshold import compute_auto_thresholds
             result = compute_auto_thresholds(
                 self._out_dir,
                 fluor_channels=self._channels,
@@ -613,7 +613,7 @@ def cell_gating_auto_threshold(app) -> None:
 
     def _on_failed(msg: str) -> None:
         import logging as _logging
-        _logging.getLogger("well_viewer.auto_threshold").error(
+        _logging.getLogger("well_viewer.data.auto_threshold").error(
             "Auto-threshold failed: %s", msg,
         )
         try:
@@ -624,7 +624,7 @@ def cell_gating_auto_threshold(app) -> None:
     well_labels = list(app._app_state.dataset.well_paths or {})
     in_dir = app._app_state.dataset.in_dir
     import logging as _logging
-    _logging.getLogger("well_viewer.auto_threshold").info(
+    _logging.getLogger("well_viewer.data.auto_threshold").info(
         "Auto-threshold: starting — data_dir=%s in_dir=%s wells=%d channels=%s",
         out_dir, in_dir, len(well_labels), ",".join(channels),
     )

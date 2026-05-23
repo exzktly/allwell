@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from well_viewer.selections_model import validate_repair
+from well_viewer.domain.selections_model import validate_repair
 
 
 @dataclass

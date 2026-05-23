@@ -14,14 +14,14 @@ from PySide6.QtWidgets import (
     QPushButton, QSlider, QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import (
+from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, make_band_controls, make_plot_view_switcher,
     make_plot_with_right_dock,
 )
 from functools import partial
-from well_viewer.channel_state_controller import refresh_metric_combo_for_channel
-from well_viewer.export_service import export_heatmap_data
-from well_viewer.channel_state_controller import refresh_heatmap_aggregation_options
+from well_viewer.core.channel_state_controller import refresh_metric_combo_for_channel
+from well_viewer.features.export.service import export_heatmap_data
+from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
 
 
 _CMAP_OPTIONS = ["viridis", "magma", "coolwarm", "RdYlBu_r", "Greys"]
@@ -33,7 +33,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # builds. heatmap_controller pulls in matplotlib.patches and numpy at
     # module load, so importing it lazily keeps utility entry points like
     # ``refresh_heatmap_timepoints`` cheap.
-    from well_viewer.heatmap_controller import METRIC_OPTIONS
+    from well_viewer.features.heatmap.controller import METRIC_OPTIONS
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -222,7 +222,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # redraw would wipe the widget-side theme styling that setPlotTheme already
     # applied. Let PlotCard.setPlotTheme's apply_axes_style walk stand.
     card.setStatsChipVisible(False)
-    from well_viewer.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.app, card, icon="layout-grid",
     ), 1)
@@ -279,7 +279,7 @@ def refresh_heatmap_timepoints(app) -> None:
     if slider is None:
         return
     try:
-        from well_viewer.scatter_controller import get_all_timepoints
+        from well_viewer.features.scatter.controller import get_all_timepoints
         tps = list(get_all_timepoints(app))
     except Exception:
         tps = []
@@ -481,7 +481,7 @@ def _on_label_double_click(app, evt) -> None:
 
 
 def _on_canvas_press(app, evt) -> None:
-    from well_viewer.heatmap_controller import on_heatmap_label_drag_press, on_heatmap_click
+    from well_viewer.features.heatmap.controller import on_heatmap_label_drag_press, on_heatmap_click
     # Label drag takes priority; double-click rename is next; cell select last.
     if on_heatmap_label_drag_press(app, evt):
         return
@@ -492,17 +492,17 @@ def _on_canvas_press(app, evt) -> None:
 
 
 def _on_canvas_motion(app, evt) -> None:
-    from well_viewer.heatmap_controller import on_heatmap_label_drag_motion, on_heatmap_motion
+    from well_viewer.features.heatmap.controller import on_heatmap_label_drag_motion, on_heatmap_motion
     on_heatmap_label_drag_motion(app, evt)
     if not getattr(app, "_heatmap_label_drag", None):
         on_heatmap_motion(app, evt)
 
 
 def _on_canvas_release(app, evt) -> None:
-    from well_viewer.heatmap_controller import on_heatmap_label_drag_release
+    from well_viewer.features.heatmap.controller import on_heatmap_label_drag_release
     on_heatmap_label_drag_release(app, evt)
 
 
 def _redraw(app) -> None:
-    from well_viewer.heatmap_controller import redraw_heatmap
+    from well_viewer.features.heatmap.controller import redraw_heatmap
     redraw_heatmap(app)

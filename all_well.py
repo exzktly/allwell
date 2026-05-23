@@ -235,7 +235,7 @@ class AllWellApp(QMainWindow):
         # Wire the status-signal registry to this dot so every long-running
         # operation in the package (workers, redraws, dataset loads) can
         # flip the colour without taking a hard dependency on this module.
-        from well_viewer import status_signal as _status_signal
+        from well_viewer.core import status_signal as _status_signal
         _status_signal.register_driver(
             lambda state: self._status_dot.setStatus(state),
             initial_state="neutral",
@@ -448,7 +448,7 @@ class AllWellApp(QMainWindow):
         QMainWindow title (which the host OS renders at the top of the
         window), and refreshes the in-window status bar string.
         """
-        from well_viewer import status_signal as _status_signal
+        from well_viewer.core import status_signal as _status_signal
         if path is None:
             self._dataset_status.setStatus("neutral")
             _status_signal.set_idle_state("neutral")
@@ -746,7 +746,7 @@ class AllWellApp(QMainWindow):
         # workers that catch + log exceptions don't have to call
         # ``signal_failed`` themselves. Auto-clears after the configured
         # DANGER_HOLD_SECS in well_viewer.status_signal.
-        from well_viewer import status_signal as _status_signal
+        from well_viewer.core import status_signal as _status_signal
 
         class _RingHandler(_logging.Handler):
             def emit(self, record):  # noqa: N802
@@ -849,7 +849,7 @@ class AllWellApp(QMainWindow):
             except Exception:
                 pass
         try:
-            from well_viewer.barplot_renderer import redraw_bars
+            from well_viewer.features.barplot.renderer import redraw_bars
             redraw_bars(self._review)
         except Exception:
             pass
@@ -961,7 +961,7 @@ def _install_combobox_popup_widener() -> None:
 
 
 def main() -> None:
-    from well_viewer import debug_flags as _debug_flags
+    from well_viewer.core import debug_flags as _debug_flags
 
     _debug_flags.REVIEW_TAB_DEBUG = REVIEW_TAB_DEBUG
     _debug_flags.ANALYZE_TAB_DEBUG = ANALYZE_TAB_DEBUG

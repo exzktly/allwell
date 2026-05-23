@@ -21,13 +21,13 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from well_viewer import fold_change as _fc
-from well_viewer.batch_models import BarGroup
-from well_viewer.lineplot_controller import (
+from well_viewer.domain import fold_change as _fc
+from well_viewer.domain.batch_models import BarGroup
+from well_viewer.features.lineplot.controller import (
     LinePoint, LineSeries, _aggpoint_to_linepoint,
 )
-from well_viewer.stats_compute import aggregate_well
-from well_viewer.stats_compute import aggregate_group
+from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.domain.stats_compute import aggregate_group
 
 
 def collect_line_series_for_group(
@@ -71,7 +71,7 @@ def collect_line_series_for_group(
     def _cdf_for(wells: List[str]) -> List[float]:
         if not include_cdf:
             return []
-        from well_viewer.data_loading import all_fluor_values as _all_fluor_values
+        from well_viewer.data.data_loading import all_fluor_values as _all_fluor_values
         vals: List[float] = []
         for lbl in wells:
             df = app._get_rows(lbl)

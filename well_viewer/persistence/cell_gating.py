@@ -17,7 +17,7 @@ def save_to_pipeline_info(app) -> None:
         return
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):
         return
-    from well_viewer.gating_state import (
+    from well_viewer.domain.gating_state import (
         build_gating_block,
         save_gating_to_pipeline_info,
     )
@@ -46,7 +46,7 @@ def load_from_pipeline_info(app) -> bool:
     """
     if not app._app_state.dataset.data_dir:
         return False
-    from well_viewer.gating_state import read_gating_params
+    from well_viewer.domain.gating_state import read_gating_params
     block = read_gating_params(app._app_state.dataset.data_dir)
     if not block:
         return False

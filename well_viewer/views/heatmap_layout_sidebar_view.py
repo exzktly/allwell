@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from well_viewer.heatmap_models import HeatmapLayout
+from well_viewer.features.heatmap.models import HeatmapLayout
 
 
 SIDEBAR_LAYOUT_NAME = "Sidebar"
@@ -452,7 +452,7 @@ def _persist_and_redraw(app) -> None:
         pass
     if hasattr(app, "_heatmap_canvas"):
         try:
-            from well_viewer.heatmap_controller import redraw_heatmap
+            from well_viewer.features.heatmap.controller import redraw_heatmap
             redraw_heatmap(app)
         except Exception:
             pass

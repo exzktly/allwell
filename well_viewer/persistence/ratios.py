@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 from well_viewer.persistence import _doc
-from well_viewer.ratio_models import ratios_from_dict, ratios_to_dict
+from well_viewer.domain.ratio_models import ratios_from_dict, ratios_to_dict
 
 _logger = logging.getLogger("well_viewer")
 

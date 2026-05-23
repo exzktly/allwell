@@ -43,7 +43,7 @@ def build_image_table_grid(
     Returns ``(cells, row_chan_cbs, row_lut_color_cbs, row_well_cbs)``. The
     caller (controller) wires those onto ``app`` and re-renders the LUT row.
     """
-    from well_viewer.ui_helpers import clear_layout
+    from well_viewer.core.ui_helpers import clear_layout
 
     layout = app._image_table_selector_grid
     clear_layout(layout)
@@ -177,7 +177,7 @@ def build_lut_row(
     on_auto_lut,
 ) -> None:
     """Rebuild the per-channel LUT min/max editors below the selector grid."""
-    from well_viewer.ui_helpers import btn_secondary, clear_layout
+    from well_viewer.core.ui_helpers import btn_secondary, clear_layout
 
     container = getattr(app, "_image_table_lut_container", None)
     if container is None:

@@ -47,7 +47,7 @@ def _reorder_selections_by_line_order(app) -> None:
     if not sels:
         return
     try:
-        from well_viewer import selections_model as _sel
+        from well_viewer.domain import selections_model as _sel
         new = _sel.reorder_by_line_order(
             sels,
             rset_order=app._app_state.plot.line_order_rsets,

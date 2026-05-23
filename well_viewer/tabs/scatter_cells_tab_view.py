@@ -8,14 +8,14 @@ from PySide6.QtWidgets import (
     QWidget, QWidgetAction,
 )
 
-from well_viewer.ui_helpers import (
+from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
-from well_viewer.scatter_controller import redraw_scatter_orchestrate
+from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from functools import partial
-from well_viewer.export_service import export_scatter_data
-from well_viewer.scatter_controller import on_scatter_click
-from well_viewer.scatter_controller import on_scatter_motion
+from well_viewer.features.export.service import export_scatter_data
+from well_viewer.features.scatter.controller import on_scatter_click
+from well_viewer.features.scatter.controller import on_scatter_motion
 
 
 def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
@@ -39,7 +39,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # the global ctxbar channel/property combos (those are hidden when
     # Scatter Plot is the active plotting subtab) because each axis
     # needs to render an independent column.
-    from well_viewer.metric_labels import METRIC_ORDER as _METRIC_ORDER
+    from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     cl.addWidget(QLabel("X-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
     ctx.app._scatter_ch_x_cb = QComboBox(ctrl)
@@ -124,7 +124,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_orchestrate(ctx.app))
     card.setStatsChipVisible(False)
-    from well_viewer.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.app, card, icon="scatter-chart",
     ), 1)

@@ -197,10 +197,10 @@ class ScatterBatchExportPanel(BatchExportPanel):
         currently-selected channel (ratio → ``Calculated Val``, real
         channel → full intensity set, optionally + ``Fraction above
         threshold`` for the agg axis)."""
-        from well_viewer.metric_labels import (
+        from well_viewer.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
         )
-        from well_viewer.ratio_models import is_ratio_key as _is_ratio_key
+        from well_viewer.domain.ratio_models import is_ratio_key as _is_ratio_key
         prop_cb = getattr(ch_cb, "_paired_property_cb", None)
         if prop_cb is None:
             return
@@ -329,7 +329,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         ``calculated_val`` (ratio path — caller is expected to resolve the
         column via ``_col_for_scatter_axis`` instead).
         """
-        from well_viewer.metric_labels import (
+        from well_viewer.data.metric_labels import (
             METRIC_LABEL_TO_KEY, CALCULATED_VAL_LABEL,
         )
         label = str(prop_cb.currentText() or "")
@@ -433,7 +433,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         per-well selection. The scatter_controller collectors read
         ``app._rep_sets_active()`` / ``app._app_state.selection.selected_wells`` (both derived from
         ``app._app_state.selection.selections``), so we swap ``_selections`` for the duration."""
-        from well_viewer.selections_model import make_selection
+        from well_viewer.domain.selections_model import make_selection
         app = self._app
         saved = (app._app_state.selection.selections, app._app_state.selection.current_selection_id, app._app_state.selection.selected_wells)
         try:
@@ -454,7 +454,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
     ) -> Optional[str]:
-        from well_viewer.scatter_controller import collect_scatter_data as _collect_scatter_data
+        from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
         col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
         col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
         with self._app_group_scope(grp):
@@ -470,7 +470,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         if not scatter_data:
             return f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h"
         try:
-            from well_viewer.export_service import _well_labels_map, well_name_for
+            from well_viewer.features.export.service import _well_labels_map, well_name_for
             _well_labels = _well_labels_map(self._app)
             rows: List[dict] = []
             for label, data in scatter_data.items():
@@ -509,7 +509,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _run_scatter_agg_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
     ) -> Optional[str]:
-        from well_viewer.scatter_controller import collect_scatter_agg_data as _collect_scatter_agg_data
+        from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
         stat_x = self._scatter_axis_stat(self._sc_agg_x_cb, self._sc_agg_metric_x_cb)
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
         with self._app_group_scope(grp):
@@ -520,7 +520,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         if not scatter_data:
             return f"{grp.name}: no scatter-aggregate data at t={tp_h:.1f}h"
         try:
-            from well_viewer.export_service import (
+            from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
             )
             _well_labels = _well_labels_map(self._app)
@@ -572,7 +572,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self, grp: BarGroup, timepoints: List[float],
         csv_path: Path, fig_path: Path, fmt: str,
     ) -> Optional[str]:
-        from well_viewer.scatter_controller import collect_scatter_data as _collect_scatter_data
+        from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
         combined_rows: List[dict] = []
         combined_series: List[tuple] = []
         for tp_h in sorted(timepoints):
@@ -588,7 +588,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     fluor_gate_x=self._app._get_fluor_gate(ch_x_base),
                     fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
                 )
-            from well_viewer.export_service import _well_labels_map, well_name_for
+            from well_viewer.features.export.service import _well_labels_map, well_name_for
             _well_labels = _well_labels_map(self._app)
             for label, data in scatter_data.items():
                 combined_series.append((tp_h, label, data))
@@ -634,7 +634,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self, grp: BarGroup, timepoints: List[float],
         csv_path: Path, fig_path: Path, fmt: str,
     ) -> Optional[str]:
-        from well_viewer.scatter_controller import collect_scatter_agg_data as _collect_scatter_agg_data
+        from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
         stat_x = self._scatter_axis_stat(self._sc_agg_x_cb, self._sc_agg_metric_x_cb)
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
         with self._app_group_scope(grp):
@@ -645,7 +645,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         if not scatter_data:
             return f"{grp.name}: no scatter-aggregate data for selected timepoints"
         try:
-            from well_viewer.export_service import (
+            from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
             )
             _well_labels = _well_labels_map(self._app)

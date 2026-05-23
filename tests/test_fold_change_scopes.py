@@ -12,7 +12,7 @@ from typing import List
 
 import pytest
 
-from well_viewer.fold_change_scopes import (
+from well_viewer.domain.fold_change_scopes import (
     FoldChangeScope,
     current_scope_name, flush_dirty_scopes,
     redraw_scopes_or_defer, register_fold_change_scope,

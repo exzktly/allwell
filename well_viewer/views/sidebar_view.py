@@ -9,12 +9,12 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 from functools import partial
-from well_viewer.selection_controller import on_sidebar_plate_col_activated
-from well_viewer.selection_controller import on_sidebar_plate_drag_finished
-from well_viewer.selection_controller import on_sidebar_plate_row_activated
-from well_viewer.selection_controller import on_sidebar_plate_selection_changed
-from well_viewer.selection_controller import on_sidebar_plate_well_activated
-from well_viewer.selection_controller import on_sidebar_plate_well_dropped
+from well_viewer.core.selection_controller import on_sidebar_plate_col_activated
+from well_viewer.core.selection_controller import on_sidebar_plate_drag_finished
+from well_viewer.core.selection_controller import on_sidebar_plate_row_activated
+from well_viewer.core.selection_controller import on_sidebar_plate_selection_changed
+from well_viewer.core.selection_controller import on_sidebar_plate_well_activated
+from well_viewer.core.selection_controller import on_sidebar_plate_well_dropped
 
 
 def _drag_info(tok, pos):
@@ -47,7 +47,7 @@ def build_sidebar(app, parent: QWidget) -> None:
       - Selected-well count label
       - Group-mode hint label
     """
-    from well_viewer.plate_layout import PLATE_ROWS as _PLATE_ROWS, PLATE_COLS as _PLATE_COLS
+    from well_viewer.domain.plate_layout import PLATE_ROWS as _PLATE_ROWS, PLATE_COLS as _PLATE_COLS
     from widgets.well_plate_selector import WellPlateSelector
 
     # Ensure parent has a vertical layout

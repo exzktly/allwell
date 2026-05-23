@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from well_viewer.ratio_models import RatioMetric
+from well_viewer.domain.ratio_models import RatioMetric
 
 
 _METRIC_CHOICES: List[str] = ["mean_intensity", "total_intensity", "max_intensity", "smfish_count"]

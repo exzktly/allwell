@@ -345,7 +345,7 @@ class LabelGrid(QWidget):
 
 def build_label_grid(app, parent: QWidget) -> None:
     """Mount the LabelGrid in the Well Labels sub-tab and wire it up."""
-    from well_viewer.ui_helpers import btn_secondary
+    from well_viewer.core.ui_helpers import btn_secondary
 
     layout = parent.layout()
     if layout is None:

@@ -8,15 +8,15 @@ from PySide6.QtWidgets import (
     QSlider, QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import (
+from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
-from well_viewer.barplot_controller import bar_reset_order
-from well_viewer.barplot_renderer import redraw_bars
+from well_viewer.features.barplot.controller import bar_reset_order
+from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
-from well_viewer.barplot_controller import on_bar_drag_press
-from well_viewer.barplot_controller import on_bar_drag_release
-from well_viewer.export_service import export_bar_plot_data
+from well_viewer.features.barplot.controller import on_bar_drag_press
+from well_viewer.features.barplot.controller import on_bar_drag_release
+from well_viewer.features.export.service import export_bar_plot_data
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -57,7 +57,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Hidden per-tab metric combo — back-compat shim only. The global
     # plotting ctxbar's ``_plotting_metric_cb`` is the single visible
     # source of truth for the active intensity property.
-    from well_viewer.metric_labels import METRIC_ORDER as _METRIC_ORDER
+    from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     ctx.app._metric_selector_frame_bar = QWidget(bar_ctrl)
     mf_l = QHBoxLayout(ctx.app._metric_selector_frame_bar)
     mf_l.setContentsMargins(0, 0, 0, 0)
@@ -175,7 +175,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_scroll_canvas.setFrameShape(QFrame.NoFrame)
     ctx.app._bar_scroll_canvas.setWidget(card)
     install_canvas_wheel_scroll(ctx.app._bar_canvas, ctx.app._bar_scroll_canvas)
-    from well_viewer.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
     right_l.addWidget(wrap_with_empty_state(
         ctx.app, ctx.app._bar_scroll_canvas, icon="bar-chart-horizontal",
     ), 1)

@@ -11,11 +11,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import (
+from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
 from functools import partial
-from well_viewer.export_service import export_distribution_data
+from well_viewer.features.export.service import export_distribution_data
 
 
 _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)"]
@@ -144,7 +144,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     # PlotCard.setPlotTheme's own apply_axes_style walk handle spines / grid /
     # ticks / title / labels for the existing axes.
     card.setStatsChipVisible(False)
-    from well_viewer.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.app, card, icon="line-chart",
     ), 1)
@@ -154,7 +154,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
 def _on_changed(app) -> None:
     """Common callback for any control change in the Distribution tab."""
-    from well_viewer.distribution_controller import redraw_distribution
+    from well_viewer.features.distribution.controller import redraw_distribution
     redraw_distribution(app)
 
 
@@ -164,7 +164,7 @@ def refresh_distribution_timepoints(app) -> None:
     if cb is None:
         return
     try:
-        from well_viewer.scatter_controller import get_all_timepoints
+        from well_viewer.features.scatter.controller import get_all_timepoints
         tps = get_all_timepoints(app)
     except Exception:
         tps = []

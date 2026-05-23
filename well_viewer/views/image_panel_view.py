@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QToolTip, QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import btn_card, btn_secondary
+from well_viewer.core.ui_helpers import btn_card, btn_secondary
 
 
 _LABEL_PALETTE = None

@@ -10,7 +10,7 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
-from well_viewer.data_loading import extract_well_token
+from well_viewer.data.data_loading import extract_well_token
 from well_viewer.persistence import (
     cell_gating as _cell_gating,
     ratios as _ratios,
@@ -37,7 +37,7 @@ def save_notes(app) -> None:
 
 def save_to_pipeline_info(app) -> None:
     """Merge well labels + the unified ``selections`` model into pipeline_info.json."""
-    from well_viewer.sample_definitions import (
+    from well_viewer.domain.sample_definitions import (
         build_sample_definitions_v2,
         save_to_pipeline_info as _write_block,
     )
@@ -91,7 +91,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
     failure: logs, leaves the existing state alone, disables v2 writes for the
     session, and returns ``(False, {})``.
     """
-    from well_viewer import selections_model as _sel
+    from well_viewer.domain import selections_model as _sel
     tok_to_label = app._app_state.dataset.tok_to_label
     # Mixed v1+v2 payload (both rep_sets/groups *and* a selections list
     # with content) — refuse to migrate. Either path would silently drop
@@ -172,7 +172,7 @@ def load_from_pipeline_info(app) -> bool:
     migrated state is persisted, with a one-time backup, on the next Save).
     Returns True when a block was found and applied.
     """
-    from well_viewer.sample_definitions import read_sample_definitions
+    from well_viewer.domain.sample_definitions import read_sample_definitions
     if not app._app_state.dataset.data_dir:
         return False
     block = read_sample_definitions(app._app_state.dataset.data_dir)

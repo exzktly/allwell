@@ -10,18 +10,18 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import (
+from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, build_hline_separator, build_section_header,
 )
-from well_viewer.stats_controller import stats_apply_drag
-from well_viewer.stats_controller import stats_on_test_change
-from well_viewer.stats_controller import stats_refresh_group_list
-from well_viewer.stats_controller import stats_update_tp_menu
-from well_viewer.stats_controller import stats_refresh_map
+from well_viewer.features.stats.controller import stats_apply_drag
+from well_viewer.features.stats.controller import stats_on_test_change
+from well_viewer.features.stats.controller import stats_refresh_group_list
+from well_viewer.features.stats.controller import stats_update_tp_menu
+from well_viewer.features.stats.controller import stats_refresh_map
 from functools import partial
-from well_viewer.stats_controller import stats_grp_add
-from well_viewer.stats_controller import stats_grp_clear_all
-from well_viewer.channel_state_controller import refresh_stats_property_combo
+from well_viewer.features.stats.controller import stats_grp_add
+from well_viewer.features.stats.controller import stats_grp_clear_all
+from well_viewer.core.channel_state_controller import refresh_stats_property_combo
 
 
 def build_stats_tab(app, parent: QWidget) -> None:
@@ -32,7 +32,7 @@ def build_stats_tab(app, parent: QWidget) -> None:
 
 def build_stats_group_editor(app, parent: QWidget) -> None:
     """Build the left-hand statistics group editor."""
-    from well_viewer.ui_helpers import make_scrollable_canvas
+    from well_viewer.core.ui_helpers import make_scrollable_canvas
     from widgets.well_plate_selector import WellPlateSelector
 
     layout = parent.layout()
@@ -180,7 +180,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     # Per-tab Property combo — picks which CSV column drives the test.
     # Mirrors the global ctxbar Property combo's state, kept local so it
     # appears next to the channel/statistic selectors.
-    from well_viewer.metric_labels import METRIC_ORDER as _ST_METRIC_ORDER
+    from well_viewer.data.metric_labels import METRIC_ORDER as _ST_METRIC_ORDER
     app._stats_property_label = QLabel("Property:", app._stats_ctrl)
     cl.addWidget(app._stats_property_label, 3, 0, Qt.AlignLeft)
     app._stats_property_cb = QComboBox(app._stats_ctrl)
@@ -251,7 +251,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     try:
         if hasattr(app, "_refresh_stats_property_combo"):
             refresh_stats_property_combo(app)
-        from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
+        from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
         label = METRIC_KEY_TO_LABEL.get(
             app._app_state.channel.active_metric, "Mean Intensity"
         )

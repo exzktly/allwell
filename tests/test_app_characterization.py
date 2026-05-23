@@ -15,9 +15,9 @@ import pytest
 from tests.fixtures.mini_dataset import (
     CELLS_PER_TP, TIMEPOINTS, WELLS, cell_gfp, cell_mcherry,
 )
-from well_viewer.barplot_controller import collect_bar_items
-from well_viewer.channel_state_controller import set_active_channel
-from well_viewer.lineplot_controller import collect_line_series
+from well_viewer.features.barplot.controller import collect_bar_items
+from well_viewer.core.channel_state_controller import set_active_channel
+from well_viewer.features.lineplot.controller import collect_line_series
 
 pytestmark = pytest.mark.qt
 

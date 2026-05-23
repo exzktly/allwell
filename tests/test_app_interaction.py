@@ -13,8 +13,8 @@ import math
 import pytest
 
 from tests.fixtures.mini_dataset import WELLS
-from well_viewer.barplot_controller import collect_bar_items
-from well_viewer.channel_state_controller import set_active_channel
+from well_viewer.features.barplot.controller import collect_bar_items
+from well_viewer.core.channel_state_controller import set_active_channel
 from well_viewer.tabs.fold_change_controls import set_fold_change_state
 
 pytestmark = pytest.mark.qt

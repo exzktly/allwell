@@ -18,7 +18,7 @@ from typing import Callable
 
 import pandas as pd
 
-from well_viewer.data_loading import parse_timepoint_hours
+from well_viewer.data.data_loading import parse_timepoint_hours
 
 
 def _norm_fov(value: object) -> str:

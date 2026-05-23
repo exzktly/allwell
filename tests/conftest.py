@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 import pytest
-from well_viewer.stats_compute import compute_rep_stats
+from well_viewer.domain.stats_compute import compute_rep_stats
 
 
 # ── AggPoint helpers ────────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ class MockApp:
         return set(self.per_well_pts)
 
     def _rep_sets_active(self):
-        from well_viewer.batch_models import ReplicateSet
+        from well_viewer.domain.batch_models import ReplicateSet
         out = []
         for s in self.selections:
             if s.get("hidden"):

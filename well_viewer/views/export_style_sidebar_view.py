@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from well_viewer.figure_export_editor import (
+from well_viewer.features.export.style import (
     DEFAULT_EXPORT_STYLE_PREFS,
     EXPORT_PROFILES,
     _ensure_custom_export_profiles,
@@ -35,9 +35,9 @@ from well_viewer.figure_export_editor import (
 import theme
 from widgets.collapsible_section import CollapsibleSection
 from widgets.toggle_switch import ToggleSwitch
-from well_viewer.barplot_renderer import redraw_bars
-from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
-from well_viewer.scatter_controller import redraw_scatter_orchestrate
+from well_viewer.features.barplot.renderer import redraw_bars
+from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
+from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 
 
 #: Single source of truth for the style-panel width — read by both the

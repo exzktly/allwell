@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from well_viewer.ratio_models import (
+from well_viewer.domain.ratio_models import (
     RatioMetric,
     build_ratio_index,
     is_ratio_key,

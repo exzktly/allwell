@@ -53,9 +53,9 @@ from PySide6.QtWidgets import (
 import matplotlib
 import pandas as pd
 from matplotlib.figure import Figure
-from well_viewer.batch_models import BarGroup, ReplicateSet
+from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.state import AppState, EventBus
-from well_viewer.bus_wiring import wire_event_bus
+from well_viewer.core.bus_wiring import wire_event_bus
 from well_viewer.persistence.registry import build_persistence_registry
 from well_viewer.viewer_context import ViewerContext
 from well_viewer.views.widget_registry import WidgetRegistry
@@ -81,31 +81,31 @@ def _lazy(module_path: str, attr: str):
     return _proxy
 
 
-_bar_apply_ylims = _lazy("well_viewer.barplot_controller", "apply_bar_ylims")
-_bar_ordered_keys = _lazy("well_viewer.barplot_controller", "ordered_bar_keys")
+_bar_apply_ylims = _lazy("well_viewer.features.barplot.controller", "apply_bar_ylims")
+_bar_ordered_keys = _lazy("well_viewer.features.barplot.controller", "ordered_bar_keys")
 
 
 
 
 
 
-_load_directory_controller = _lazy("well_viewer.load_controller", "load_directory")
+_load_directory_controller = _lazy("well_viewer.core.load_controller", "load_directory")
 
-_plot_save_bar_figure_orchestrator = _lazy("well_viewer.plot_orchestrator", "save_bar_figure")
-_plot_save_line_figure_orchestrator = _lazy("well_viewer.plot_orchestrator", "save_line_figure")
-_plot_save_matplotlib_fig_orchestrator = _lazy("well_viewer.plot_orchestrator", "save_matplotlib_fig")
+_plot_save_bar_figure_orchestrator = _lazy("well_viewer.core.plot_orchestrator", "save_bar_figure")
+_plot_save_line_figure_orchestrator = _lazy("well_viewer.core.plot_orchestrator", "save_line_figure")
+_plot_save_matplotlib_fig_orchestrator = _lazy("well_viewer.core.plot_orchestrator", "save_matplotlib_fig")
 
-_montage_auto_lut_controller = _lazy("well_viewer.montage_controller", "montage_auto_lut")
-_montage_tophat_done_controller = _lazy("well_viewer.montage_controller", "montage_tophat_done")
+_montage_auto_lut_controller = _lazy("well_viewer.features.preview.montage", "montage_auto_lut")
+_montage_tophat_done_controller = _lazy("well_viewer.features.preview.montage", "montage_tophat_done")
 
-_on_review_image_click_controller = _lazy("well_viewer.review_image_controller", "on_review_image_click")
-_select_review_csv_row_for_cell_controller = _lazy("well_viewer.review_image_controller", "select_review_csv_row_for_cell")
+_on_review_image_click_controller = _lazy("well_viewer.features.review_image.controller", "on_review_image_click")
+_select_review_csv_row_for_cell_controller = _lazy("well_viewer.features.review_image.controller", "select_review_csv_row_for_cell")
 
-_stats_collect_group_values = _lazy("well_viewer.stats_controller", "collect_group_values")
-_stats_draw_ks_cdf = _lazy("well_viewer.stats_controller", "draw_ks_cdf")
+_stats_collect_group_values = _lazy("well_viewer.features.stats.controller", "collect_group_values")
+_stats_draw_ks_cdf = _lazy("well_viewer.features.stats.controller", "draw_ks_cdf")
 
-from well_viewer.viewer_state import read_pipeline_info as _read_pipeline_info_shared
-from well_viewer.ui_helpers import (
+from well_viewer.domain.viewer_state import read_pipeline_info as _read_pipeline_info_shared
+from well_viewer.core.ui_helpers import (
     ask_name_dialog as _ui_ask_name_dialog, make_fluor_thumb, make_overlay_thumb,
 )
 from ui.theme import (
@@ -139,8 +139,8 @@ _logger = logging.getLogger("well_viewer")
 # ── Semantic colour aliases (use these instead of magic hex strings) ──────────
 CLR_ACCENT_DARK = ACCENT_DARK
 
-from well_viewer.plate_layout import WELL_COLORS
-from well_viewer.selections_model import well_rank as _sel_well_rank
+from well_viewer.domain.plate_layout import WELL_COLORS
+from well_viewer.domain.selections_model import well_rank as _sel_well_rank
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -149,21 +149,21 @@ NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left 
 # `channel_state_controller` can use it without a circular import back
 # into runtime_app. Re-export the old private name for compatibility with
 # call sites that still reference it via the runtime_app module.
-from well_viewer.ui_helpers import set_combo_values as _set_combo_values  # noqa: E402, F401
+from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values  # noqa: E402, F401
 
 
 
 
 
-from well_viewer.data_loading import (
+from well_viewer.data.data_loading import (
     load_well_csv, parse_timepoint_hours,
 )
-from well_viewer.ratio_models import RatioMetric
+from well_viewer.domain.ratio_models import RatioMetric
 
 
 
 # Aliased to avoid collision with the WellViewerApp._extract_well_token method below.
-from well_viewer.data_loading import extract_well_token as _extract_well_token  # noqa: F401
+from well_viewer.data.data_loading import extract_well_token as _extract_well_token  # noqa: F401
 
 
 # =============================================================================
@@ -180,33 +180,33 @@ from well_viewer.data_loading import extract_well_token as _extract_well_token  
 # GUI log handler  (canonical: well_viewer/views/status_view.py)
 # =============================================================================
 
-from well_viewer.grouping_controller import rep_quick_pairs
-from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
-from well_viewer.scatter_controller import redraw_scatter_orchestrate
-from well_viewer.stats_controller import stats_refresh_map
-from well_viewer.ui_helpers import refresh_plot_empty_states
+from well_viewer.features.grouping.controller import rep_quick_pairs
+from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
+from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
+from well_viewer.features.stats.controller import stats_refresh_map
+from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from functools import partial
-from well_viewer.montage_controller import montage_redraw_at_zoom
-from well_viewer.montage_controller import refresh_preview_montage
-from well_viewer.selection_controller import labels_apply_affix
-from well_viewer.barplot_controller import toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app
-from well_viewer.channel_state_controller import get_cell_area_threshold, get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
-from well_viewer.export_service import export_scatter_agg_data
-from well_viewer.figure_export_editor import open_export_style_panel
-from well_viewer.grouping_controller import rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded
-from well_viewer.lineplot_controller import toggle_sem
-from well_viewer.load_controller import load_path_shim
-from well_viewer.montage_controller import update_tophat_controls
-from well_viewer.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
-from well_viewer.preview_controller import refresh_preview_picker_shim, sync_preview_well_for_image_tabs
-from well_viewer.review_image_controller import review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv, refresh_review_csv_rows, review_effective_included, review_load_rows
-from well_viewer.review_image_renderer import toggle_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache
-from well_viewer.scatter_callbacks import open_scatter_cell_viewer
-from well_viewer.scatter_controller import col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display
-from well_viewer.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
-from well_viewer.stats_controller import stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change
-from well_viewer.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks
-from well_viewer.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
+from well_viewer.features.preview.montage import montage_redraw_at_zoom
+from well_viewer.features.preview.montage import refresh_preview_montage
+from well_viewer.core.selection_controller import labels_apply_affix
+from well_viewer.features.barplot.controller import toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app
+from well_viewer.core.channel_state_controller import get_cell_area_threshold, get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
+from well_viewer.features.export.service import export_scatter_agg_data
+from well_viewer.features.export.style import open_export_style_panel
+from well_viewer.features.grouping.controller import rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded
+from well_viewer.features.lineplot.controller import toggle_sem
+from well_viewer.core.load_controller import load_path_shim
+from well_viewer.features.preview.montage import update_tophat_controls
+from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
+from well_viewer.features.preview.controller import refresh_preview_picker_shim, sync_preview_well_for_image_tabs
+from well_viewer.features.review_image.controller import review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv, refresh_review_csv_rows, review_effective_included, review_load_rows
+from well_viewer.features.review_image.renderer import toggle_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache
+from well_viewer.features.scatter.callbacks import open_scatter_cell_viewer
+from well_viewer.features.scatter.controller import col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display
+from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
+from well_viewer.features.stats.controller import stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change
+from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks
+from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.views.centre_view import drain_pending_centre_builders
 from well_viewer.views.preview_panel_view import refresh_fov_btn_state
 
@@ -339,7 +339,7 @@ class WellViewerApp(QWidget):
         # instance; legacy attribute names are preserved as read-only
         # delegates further down so existing readers (export_service,
         # the montage redraw, etc.) keep working.
-        from well_viewer.crop_tool import CropTool as _CropTool
+        from well_viewer.data.crop_tool import CropTool as _CropTool
         self._montage_crop_tool = _CropTool(
             on_change=lambda: montage_redraw_at_zoom(self),
         )
@@ -1090,7 +1090,7 @@ class WellViewerApp(QWidget):
     def _bar_current_keys(self) -> List: return _bar_ordered_keys(self)
 
     def _bar_idx_at_x(self, xdata: float, n: int) -> int:
-        from well_viewer.barplot_controller import bar_idx_at_x
+        from well_viewer.features.barplot.controller import bar_idx_at_x
         return bar_idx_at_x(xdata, n)
 
 

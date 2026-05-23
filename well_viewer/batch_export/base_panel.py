@@ -384,7 +384,7 @@ class BatchExportPanel(QWidget):
         channels show the full ``METRIC_ORDER`` set with ``smFISH Count``
         greyed out when the channel isn't an smFISH one.
         """
-        from well_viewer.metric_labels import (
+        from well_viewer.data.metric_labels import (
             METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
         )
         ch_cb = getattr(self, channel_attr, None)
@@ -395,7 +395,7 @@ class BatchExportPanel(QWidget):
         ratio_key = (
             getattr(self._app, "_label_to_channel_key", None) or {}
         ).get(channel)
-        from well_viewer.ratio_models import is_ratio_key as _is_ratio_key
+        from well_viewer.domain.ratio_models import is_ratio_key as _is_ratio_key
         is_ratio = bool(ratio_key and _is_ratio_key(ratio_key))
 
         prev = str(prop_cb.currentText() or "")
@@ -437,7 +437,7 @@ class BatchExportPanel(QWidget):
         ``app._app_state.channel.active_metric`` when the combo is missing or shows
         ``Calculated Val`` (ratio path — caller resolves the column via
         :py:meth:`_export_val_col_for`)."""
-        from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
+        from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
         prop_cb = getattr(self, f"{channel_attr}_metric", None)
         if prop_cb is None:
             return self._app._app_state.channel.active_metric or "mean_intensity"
@@ -562,7 +562,7 @@ class BatchExportPanel(QWidget):
         self._apply_export_profile_to_prefs(self._export_profile_value)
 
     def _export_profile_names(self) -> List[str]:
-        from well_viewer.figure_export_editor import _get_all_profile_names
+        from well_viewer.features.export.style import _get_all_profile_names
 
         names = _get_all_profile_names(self._app)
         return names or ["Custom"]
@@ -577,7 +577,7 @@ class BatchExportPanel(QWidget):
         self._profile_combo.blockSignals(False)
 
     def _apply_export_profile_to_prefs(self, profile_name: str) -> None:
-        from well_viewer.figure_export_editor import (
+        from well_viewer.features.export.style import (
             EXPORT_PROFILES,
             _ensure_custom_export_profiles,
             _ensure_export_style_prefs,
@@ -1232,7 +1232,7 @@ class BatchExportPanel(QWidget):
     def _save_figure(self, fig, fig_path: Path, fmt: str) -> None:
         import matplotlib as _mpl
         import matplotlib.pyplot as _plt
-        from well_viewer.figure_export_editor import (
+        from well_viewer.features.export.style import (
             _ensure_export_style_prefs,
             apply_export_style_prefs,
         )
@@ -1332,7 +1332,7 @@ class BatchExportPanel(QWidget):
                 from well_viewer.batch_export._line_series_runner import (
                     collect_line_series_for_group,
                 )
-                from well_viewer.export_service import (
+                from well_viewer.features.export.service import (
                     _well_labels_map,
                     line_metric_fieldnames, line_metric_row,
                     well_name_for, well_names_joined,
@@ -1426,7 +1426,7 @@ class BatchExportPanel(QWidget):
                 return f"{grp.name} CSV: {exc}"
 
             try:
-                from well_viewer import fold_change as _fc
+                from well_viewer.domain import fold_change as _fc
                 fc_control_means: dict = {}
                 if fc_vs_ctrl and fc_ctrl_lbl:
                     fc_control_means = _fc.pts_to_mean_by_t(
@@ -1479,7 +1479,7 @@ class BatchExportPanel(QWidget):
         fc_vs_t0: bool = False,
     ):
         from matplotlib.figure import Figure as _Figure
-        from well_viewer import fold_change as _fc
+        from well_viewer.domain import fold_change as _fc
 
         fc_active = bool(fc_control_means) or bool(fc_vs_t0)
         fig = _Figure(figsize=(10, 11), dpi=300, facecolor=PLOT_BG)
@@ -1492,7 +1492,7 @@ class BatchExportPanel(QWidget):
         legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none",
                          edgecolor=PLOT_SPN, labelcolor=get_color("PLOT_TXT"))
         _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
-        from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+        from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
         _metric_key = self._selected_export_metric_key("_line_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
         _fc_suffix = _fc.fold_change_suffix(

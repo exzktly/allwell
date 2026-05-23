@@ -7,12 +7,12 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import btn_secondary
+from well_viewer.core.ui_helpers import btn_secondary
 
 
 def build_label_editor(app, parent: QWidget) -> None:
     """Centre panel of Sample Definitions tab: assign custom labels."""
-    from well_viewer.ui_helpers import make_scrollable_canvas
+    from well_viewer.core.ui_helpers import make_scrollable_canvas
 
     layout = parent.layout()
     if layout is None:

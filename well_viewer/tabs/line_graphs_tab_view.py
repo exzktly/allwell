@@ -7,12 +7,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import (
+from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
 from functools import partial
-from well_viewer.export_service import export_plot_data
-from well_viewer.lineplot_controller import on_fig_click
+from well_viewer.features.export.service import export_plot_data
+from well_viewer.features.lineplot.controller import on_fig_click
 
 # The Line Graphs figure: three stacked subplots (mean / fraction / CDF).
 _FIG_W, _FIG_H, _DPI = 7.2, 10.5, 100
@@ -55,7 +55,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # (``_plotting_metric_cb``). This hidden per-tab combo stays as a
     # back-compat shim for code that still reads ``_metric_var`` /
     # ``_metric_cb``; the global combo wins when present.
-    from well_viewer.metric_labels import METRIC_ORDER as _METRIC_ORDER
+    from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     ctx.app._metric_selector_frame = QWidget(line_ctrl)
     mfl = QHBoxLayout(ctx.app._metric_selector_frame)
     mfl.setContentsMargins(0, 0, 0, 0)
@@ -141,7 +141,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     install_canvas_wheel_scroll(canvas, scroll)
     # Wrap the scroll area in an EmptyState stack — page 0 is the
     # placeholder shown until a dataset is loaded, page 1 is the figure.
-    from well_viewer.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(ctx.app, scroll), 1)
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set

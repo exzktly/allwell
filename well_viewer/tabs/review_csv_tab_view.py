@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
     QVBoxLayout, QWidget,
 )
-from well_viewer.review_image_controller import on_review_csv_row_double_click
+from well_viewer.features.review_image.controller import on_review_csv_row_double_click
 
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:

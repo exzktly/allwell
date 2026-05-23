@@ -48,7 +48,7 @@ def load_from_data_dir(app) -> None:
     data = _doc.get_section(app, "heatmap_layouts")
     if not isinstance(data, dict):
         return
-    from well_viewer.heatmap_models import layouts_from_dict
+    from well_viewer.features.heatmap.models import layouts_from_dict
     app._heatmap_layouts = layouts_from_dict(data.get("layouts", []) or [])
     settings = data.get("settings", {}) or {}
     if isinstance(settings, dict):

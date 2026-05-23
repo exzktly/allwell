@@ -8,10 +8,10 @@ from PySide6.QtWidgets import (
     QWidget, QWidgetAction,
 )
 
-from well_viewer.ui_helpers import (
+from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
-from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
+from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 
 
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
@@ -38,7 +38,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # ``_scatter_agg_stat_x/y_cb`` combos stay as compatibility shims —
     # ``_update_scatter_menus`` still populates them so older code paths
     # (export_service, plot_orchestrator) keep working.
-    from well_viewer.metric_labels import METRIC_ORDER as _BASE_METRIC_ORDER
+    from well_viewer.data.metric_labels import METRIC_ORDER as _BASE_METRIC_ORDER
     AGG_METRIC_ORDER = list(_BASE_METRIC_ORDER) + ["Fraction above threshold"]
 
     cl.addWidget(QLabel("X-axis:", ctrl))
@@ -124,7 +124,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_agg_orchestrate(ctx.app))
     card.setStatsChipVisible(False)
-    from well_viewer.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.app, card, icon="scatter-chart",
     ), 1)

@@ -19,10 +19,10 @@ from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
-from well_viewer.ui_helpers import btn_primary, btn_secondary
+from well_viewer.core.ui_helpers import btn_primary, btn_secondary
 from well_viewer.views.label_grid_view import build_label_grid
-from well_viewer.selection_controller import import_selections_from_json
-from well_viewer.selection_controller import update_active_group_label
+from well_viewer.core.selection_controller import import_selections_from_json
+from well_viewer.core.selection_controller import update_active_group_label
 
 
 def build_replicate_panel(app, parent: QWidget) -> None:

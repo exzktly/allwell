@@ -31,7 +31,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
-from well_viewer.tab_controller import on_tab_change
+from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.views.preview_panel_view import build_review_image_panel
 from well_viewer.views.replicate_panel_view import build_replicate_panel
 
@@ -300,7 +300,7 @@ def build_centre(app, parent: QWidget) -> None:
         # Global Property (intensity-column) combo — mirrors the channel
         # combo styling. Drives ``app._app_state.channel.active_metric`` so every plot, stat,
         # and CSV export tracks the user's chosen intensity property.
-        from well_viewer.metric_labels import METRIC_ORDER as _METRIC_ORDER
+        from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
         prop_lbl = QLabel("Property")
         prop_lbl.setStyleSheet(
             f"color: {_C.text_muted}; font-size: {_T.caption_size}px; "
@@ -486,7 +486,7 @@ def build_centre(app, parent: QWidget) -> None:
             clipboard payload is used (see ``copy_figure_to_clipboard``).
             The figure is captured in publication mode.
             """
-            from well_viewer.figure_export_editor import copy_figure_to_clipboard
+            from well_viewer.features.export.style import copy_figure_to_clipboard
             for attr in ("_line_card", "_bar_card", "_scatter_card",
                          "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
                 card = getattr(app, attr, None)

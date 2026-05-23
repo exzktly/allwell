@@ -18,8 +18,8 @@ import logging
 from typing import Any
 
 from well_viewer.persistence import _doc
-from well_viewer.image_table_controller import image_table_apply_dimensions
-from well_viewer.channel_state_controller import set_active_channel
+from well_viewer.features.image_table.controller import image_table_apply_dimensions
+from well_viewer.core.channel_state_controller import set_active_channel
 
 _logger = logging.getLogger("well_viewer")
 

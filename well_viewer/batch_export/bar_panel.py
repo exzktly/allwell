@@ -166,10 +166,10 @@ class BarBatchExportPanel(BatchExportPanel):
             base = out_dir / f"bar_{safe_grp}_t{safe_tp}"
 
             try:
-                from well_viewer.barplot_controller import (
+                from well_viewer.features.barplot.controller import (
                     FC_STATE_OFF, collect_bar_items_for_group,
                 )
-                from well_viewer.export_service import (
+                from well_viewer.features.export.service import (
                     _well_labels_map, attach_bar_fold_change_columns,
                     bar_fold_change_fieldnames,
                     bar_metric_fieldnames, bar_metric_row,
@@ -301,8 +301,8 @@ class BarBatchExportPanel(BatchExportPanel):
         fc_state: tuple = (False, "", False),
     ):
         from matplotlib.figure import Figure as _Figure
-        from well_viewer import fold_change as _fc
-        from well_viewer.barplot_controller import collect_bar_items_for_group
+        from well_viewer.domain import fold_change as _fc
+        from well_viewer.features.barplot.controller import collect_bar_items_for_group
 
         fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
         fc_active = fc_vs_ctrl or fc_vs_t0
@@ -315,7 +315,7 @@ class BarBatchExportPanel(BatchExportPanel):
         fig.suptitle(f"{grp.name}  \u2014  t = {tp_str} h",
                      fontsize=10, fontweight="bold", color=get_color("PLOT_TXT"), y=0.97)
         _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
-        from well_viewer.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+        from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
         _metric_key = self._selected_export_metric_key("_bar_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
         _fc_suffix = _fc.fold_change_suffix(

@@ -32,17 +32,17 @@ from PySide6.QtWidgets import (
 )
 
 from ui.theme import get_color
-from well_viewer.image_resolver import resolve_ref_by_fov_tp
-from well_viewer.smfish_controller import (
+from well_viewer.data.image_resolver import resolve_ref_by_fov_tp
+from well_viewer.features.smfish.controller import (
     SmfishImgRef as _ImgRef,  # noqa: F401 - re-exported for callers
     make_classifier,
     read_image_arrays,
     scan_well_zip,
 )
-from well_viewer.smfish_worker import apply_global_threshold_async
-from well_viewer.ui_helpers import attach_plot_toolbar
-from well_viewer.viewer_state import make_schema_extractor
-from well_viewer.channel_state_controller import recalculate_threshold
+from well_viewer.features.smfish.worker import apply_global_threshold_async
+from well_viewer.core.ui_helpers import attach_plot_toolbar
+from well_viewer.domain.viewer_state import make_schema_extractor
+from well_viewer.core.channel_state_controller import recalculate_threshold
 
 logger = logging.getLogger("smfish_tab")
 

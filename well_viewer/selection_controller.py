@@ -299,3 +299,150 @@ def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:
     except Exception:
         import logging
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
+
+
+def import_selections_from_json(app) -> None:
+    """Import a selections JSON file (the same schema used by Save) and
+    merge it into ``app._app_state.selection.selections``. Existing names get a ``_v2``
+    suffix on collision so nothing already loaded is overwritten."""
+    import json
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    path, _ = QFileDialog.getOpenFileName(
+        app, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
+    )
+    if not path:
+        return
+    try:
+        with open(path) as fh:
+            payload = json.load(fh)
+    except Exception as exc:
+        QMessageBox.critical(app, "Import failed", f"Could not parse JSON:\n{exc}")
+        return
+
+    # Accept either a v2 sample-definitions block (with a 'selections' key)
+    # or a bare list of selection dicts.
+    items = None
+    if isinstance(payload, dict):
+        items = payload.get("selections") or payload.get("sample_definitions", {}).get("selections")
+    elif isinstance(payload, list):
+        items = payload
+    if not items:
+        QMessageBox.warning(app, "Import", "No selections found in that file.")
+        return
+
+    added = 0
+    for sel in items:
+        if not isinstance(sel, dict):
+            continue
+        name = sel.get("name") or "Imported"
+        wells = sel.get("wells") or []
+        replicates = sel.get("replicates")
+        source = sel.get("source") or "imported"
+        try:
+            app._sel_add(name=name, wells=list(wells),
+                          replicates=replicates, source=source)
+            added += 1
+        except Exception:
+            _logger = __import__("logging").getLogger("well_viewer.runtime_app")
+            _logger.exception("Import selection failed for %r", name)
+
+    if hasattr(app, "_groups_centre_refresh"):
+        try:
+            app._groups_centre_refresh()
+        except Exception:
+            pass
+    app._toast(f"Imported {added} selection(s) from {path}.", kind="success")
+
+
+
+def labels_apply_affix(app, *, where: str) -> None:
+    """Prompt for text and prepend/append it to the labels of every
+    well currently selected.
+
+    Selection precedence: the Well-Labels grid's selection wins when
+    non-empty (rows / columns / Shift-clicked cells); otherwise the
+    sidebar's plate selection is used as a fallback.
+    """
+    from well_viewer.ui_helpers import ask_name_dialog
+
+    grid = getattr(app, "_lbl_grid", None)
+    grid_sel: list[str] = []
+    if grid is not None:
+        try:
+            grid_sel = list(grid.selectedTokens())
+        except Exception:
+            grid_sel = []
+    if grid_sel:
+        selected = sorted(grid_sel, key=app._parse_rc)
+    else:
+        selected = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
+    if not selected:
+        app._set_status(
+            f"Add {where.title()}: no wells selected — click a row/column "
+            "header on the Well Labels grid or select wells on the sidebar plate."
+        )
+        return
+
+    title = "Add Prefix" if where == "prefix" else "Add Suffix"
+    verb = "prepend to" if where == "prefix" else "append to"
+    plural = "s" if len(selected) != 1 else ""
+    prompt = (f"Text to {verb} the custom label of {len(selected)} "
+              f"selected well{plural}:")
+    text = ask_name_dialog(app, title=title, prompt=prompt, default="", strip=False)
+    if not text:
+        return
+
+    for tok in selected:
+        current = app._app_state.dataset.well_labels.get(tok, "")
+        new = (text + current) if where == "prefix" else (current + text)
+        if new:
+            app._app_state.dataset.well_labels[tok] = new
+        else:
+            app._app_state.dataset.well_labels.pop(tok, None)
+
+    app._invalidate_stats_cache()
+    label_grid_refresh(app)
+    app._set_status(
+        f"Added {where} '{text}' to {len(selected)} well label{plural}."
+    )
+
+
+
+def update_active_group_label(app) -> None:
+    """Mirror ``_current_selection_id`` into the Groups sub-tab banner.
+
+    Shows the active group's name (bold, accent-coloured) when one is
+    selected, or a "click a group below" prompt when none is — so a
+    click on the sidebar plate always has a visible target.
+    """
+    lbl = getattr(app, "_rep_active_group_lbl", None)
+    if lbl is None:
+        return
+    sid = app._app_state.selection.current_selection_id
+    sel = app._sel_by_id(sid) if sid else None
+    try:
+        import theme as _theme
+    except Exception:
+        _theme = None
+    if sel is None:
+        lbl.setText("None selected — click a group below to start")
+        if _theme is not None:
+            lbl.setStyleSheet(
+                f"QLabel#ActiveGroupValue {{ "
+                f"color: {_theme.Colors.text_secondary}; "
+                f"font-size: {_theme.Typography.small_size}px; "
+                f"font-weight: 600; }}"
+            )
+        return
+    name = str(sel.get("name") or "(unnamed)")
+    n_wells = sum(1 for w in (sel.get("wells") or []) if w in app._app_state.dataset.well_paths)
+    lbl.setText(f"{name}  ·  {n_wells} well(s)")
+    if _theme is not None:
+        lbl.setStyleSheet(
+            f"QLabel#ActiveGroupValue {{ "
+            f"color: {_theme.Colors.accent}; "
+            f"font-size: {_theme.Typography.small_size}px; "
+            f"font-weight: 700; }}"
+        )
+

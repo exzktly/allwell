@@ -351,6 +351,8 @@ from well_viewer.montage_controller import refresh_preview_montage
 from well_viewer.channel_state_controller import set_active_image_channel
 from well_viewer.channel_state_controller import set_active_metric
 from well_viewer.channel_state_controller import populate_metric_combo
+from well_viewer.selection_controller import labels_apply_affix
+from well_viewer.selection_controller import update_active_group_label
 
 class WellViewerApp(QWidget):
 
@@ -910,62 +912,12 @@ class WellViewerApp(QWidget):
             label_grid_refresh(self)
             self._invalidate_stats_cache()
 
-    def _labels_apply_affix(self, *, where: str) -> None:
-        """Prompt for text and prepend/append it to the labels of every
-        well currently selected.
-
-        Selection precedence: the Well-Labels grid's selection wins when
-        non-empty (rows / columns / Shift-clicked cells); otherwise the
-        sidebar's plate selection is used as a fallback.
-        """
-        from well_viewer.ui_helpers import ask_name_dialog
-
-        grid = getattr(self, "_lbl_grid", None)
-        grid_sel: list[str] = []
-        if grid is not None:
-            try:
-                grid_sel = list(grid.selectedTokens())
-            except Exception:
-                grid_sel = []
-        if grid_sel:
-            selected = sorted(grid_sel, key=self._parse_rc)
-        else:
-            selected = sorted(self._app_state.selection.selected_wells, key=self._parse_rc)
-        if not selected:
-            self._set_status(
-                f"Add {where.title()}: no wells selected — click a row/column "
-                "header on the Well Labels grid or select wells on the sidebar plate."
-            )
-            return
-
-        title = "Add Prefix" if where == "prefix" else "Add Suffix"
-        verb = "prepend to" if where == "prefix" else "append to"
-        plural = "s" if len(selected) != 1 else ""
-        prompt = (f"Text to {verb} the custom label of {len(selected)} "
-                  f"selected well{plural}:")
-        text = ask_name_dialog(self, title=title, prompt=prompt, default="", strip=False)
-        if not text:
-            return
-
-        for tok in selected:
-            current = self._app_state.dataset.well_labels.get(tok, "")
-            new = (text + current) if where == "prefix" else (current + text)
-            if new:
-                self._app_state.dataset.well_labels[tok] = new
-            else:
-                self._app_state.dataset.well_labels.pop(tok, None)
-
-        self._invalidate_stats_cache()
-        label_grid_refresh(self)
-        self._set_status(
-            f"Added {where} '{text}' to {len(selected)} well label{plural}."
-        )
 
     def _labels_add_prefix(self) -> None:
-        self._labels_apply_affix(where="prefix")
+        labels_apply_affix(self, where="prefix")
 
     def _labels_add_suffix(self) -> None:
-        self._labels_apply_affix(where="suffix")
+        labels_apply_affix(self, where="suffix")
 
     # ── unified-model (app._app_state.selection.selections) — the in-memory source of truth ──────
 
@@ -1187,44 +1139,8 @@ class WellViewerApp(QWidget):
             rep_panel_refresh(self)
             label_grid_refresh(self)
         self._rep_refresh_map()
-        self._update_active_group_label()
+        update_active_group_label(self)
 
-    def _update_active_group_label(self) -> None:
-        """Mirror ``_current_selection_id`` into the Groups sub-tab banner.
-
-        Shows the active group's name (bold, accent-coloured) when one is
-        selected, or a "click a group below" prompt when none is — so a
-        click on the sidebar plate always has a visible target.
-        """
-        lbl = getattr(self, "_rep_active_group_lbl", None)
-        if lbl is None:
-            return
-        sid = self._app_state.selection.current_selection_id
-        sel = self._sel_by_id(sid) if sid else None
-        try:
-            import theme as _theme
-        except Exception:
-            _theme = None
-        if sel is None:
-            lbl.setText("None selected — click a group below to start")
-            if _theme is not None:
-                lbl.setStyleSheet(
-                    f"QLabel#ActiveGroupValue {{ "
-                    f"color: {_theme.Colors.text_secondary}; "
-                    f"font-size: {_theme.Typography.small_size}px; "
-                    f"font-weight: 600; }}"
-                )
-            return
-        name = str(sel.get("name") or "(unnamed)")
-        n_wells = sum(1 for w in (sel.get("wells") or []) if w in self._app_state.dataset.well_paths)
-        lbl.setText(f"{name}  ·  {n_wells} well(s)")
-        if _theme is not None:
-            lbl.setStyleSheet(
-                f"QLabel#ActiveGroupValue {{ "
-                f"color: {_theme.Colors.accent}; "
-                f"font-size: {_theme.Typography.small_size}px; "
-                f"font-weight: 700; }}"
-            )
 
     def _rebuild_all(self) -> None:
         """
@@ -1334,58 +1250,6 @@ class WellViewerApp(QWidget):
         from well_viewer.persistence import sample_definitions as _sd
         _sd.clear_all(self)
 
-    def _import_selections_from_json(self) -> None:
-        """Import a selections JSON file (the same schema used by Save) and
-        merge it into ``self._app_state.selection.selections``. Existing names get a ``_v2``
-        suffix on collision so nothing already loaded is overwritten."""
-        import json
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
-
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
-        )
-        if not path:
-            return
-        try:
-            with open(path) as fh:
-                payload = json.load(fh)
-        except Exception as exc:
-            QMessageBox.critical(self, "Import failed", f"Could not parse JSON:\n{exc}")
-            return
-
-        # Accept either a v2 sample-definitions block (with a 'selections' key)
-        # or a bare list of selection dicts.
-        items = None
-        if isinstance(payload, dict):
-            items = payload.get("selections") or payload.get("sample_definitions", {}).get("selections")
-        elif isinstance(payload, list):
-            items = payload
-        if not items:
-            QMessageBox.warning(self, "Import", "No selections found in that file.")
-            return
-
-        added = 0
-        for sel in items:
-            if not isinstance(sel, dict):
-                continue
-            name = sel.get("name") or "Imported"
-            wells = sel.get("wells") or []
-            replicates = sel.get("replicates")
-            source = sel.get("source") or "imported"
-            try:
-                self._sel_add(name=name, wells=list(wells),
-                              replicates=replicates, source=source)
-                added += 1
-            except Exception:
-                _logger = __import__("logging").getLogger("well_viewer.runtime_app")
-                _logger.exception("Import selection failed for %r", name)
-
-        if hasattr(self, "_groups_centre_refresh"):
-            try:
-                self._groups_centre_refresh()
-            except Exception:
-                pass
-        self._toast(f"Imported {added} selection(s) from {path}.", kind="success")
 
     def _save_gating_to_pipeline_info(self) -> None:
         from well_viewer.persistence import cell_gating as _cg

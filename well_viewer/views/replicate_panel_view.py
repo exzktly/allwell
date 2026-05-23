@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 
 from well_viewer.ui_helpers import btn_primary, btn_secondary
 from well_viewer.views.label_grid_view import build_label_grid
+from well_viewer.selection_controller import import_selections_from_json
+from well_viewer.selection_controller import update_active_group_label
 
 
 def build_replicate_panel(app, parent: QWidget) -> None:
@@ -254,7 +256,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
 
     import_ib = _IconButton("plus", toolbar)
     import_ib.setToolTip("Import selections from a JSON file (merges into the current set).")
-    import_ib.clicked.connect(lambda _=False: app._import_selections_from_json())
+    import_ib.clicked.connect(lambda _=False: import_selections_from_json(app))
     tl.addWidget(import_ib)
 
     clear_ib = _IconButton("x", toolbar)
@@ -340,5 +342,5 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
                 app._groups_centre_refresh()
                 app._refresh_sidebar_map()
             if hasattr(app, "_rep_active_group_lbl"):
-                app._update_active_group_label()
+                update_active_group_label(app)
     sub_tabs.currentChanged.connect(_on_sample_def_subtab)

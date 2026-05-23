@@ -1015,3 +1015,55 @@ def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
             table.setItem(r, ci, QTableWidgetItem(str(value)))
     app._review_csv_msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
 
+
+
+def review_row_keys(app, row: dict) -> Tuple[str, str, str]:
+    def _norm(v: object) -> str:
+        s = str(v or "").strip()
+        if not s:
+            return ""
+        try:
+            return f"{float(s):g}"
+        except Exception:
+            return s
+    def _pick(*names: str) -> object:
+        for name in names:
+            if name in row:
+                return row.get(name, "")
+        lowered = {str(k).lower(): v for k, v in row.items()}
+        for name in names:
+            key = name.lower()
+            if key in lowered:
+                return lowered[key]
+        return ""
+    return (
+        _norm(_pick("fov", "FOV")),
+        app._norm_timepoint(_pick("timepoint", "tp", "time", "time_h", "timepoint_hours")),
+        _norm(_pick("nucleus_id", "nucleus id", "nucleusId", "nucleusID")),
+    )
+
+
+
+def review_collect_timepoints(app, fov: str) -> list:
+    """Sorted list of timepoints available for ``fov`` (fluor + pipeline)."""
+    _norm = app._review_norm_fov
+    tp_values = sorted(
+        {
+            app._norm_timepoint(tp)
+            for (f, tp) in app._app_state.preview.fluor.keys()
+            if _norm(f) == fov and app._norm_timepoint(tp)
+        },
+        key=app._review_tp_sort_key,
+    )
+    pipeline_tp_values = sorted(
+        {
+            app._norm_timepoint(tp)
+            for tp in (app._app_state.dataset.pipeline_info or {}).get("available_timepoints", [])
+            if app._norm_timepoint(tp)
+        },
+        key=app._review_tp_sort_key,
+    )
+    if pipeline_tp_values:
+        tp_values = sorted(set(tp_values) | set(pipeline_tp_values), key=app._review_tp_sort_key)
+    return tp_values
+

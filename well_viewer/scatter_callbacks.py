@@ -968,3 +968,31 @@ class ScatterCellViewer(QDialog):
         self.row_idx = row_idx
         self.setWindowTitle(f"Cell Viewer - Scatter Plot: {well_label}")
         self._load_cell_data()
+
+
+def open_scatter_cell_viewer(
+    app,
+    well_label: str,
+    filename: str,
+    nuclear_id: str,
+    row_idx: int,
+) -> None:
+    """Open or update the scatter cell viewer window."""
+    from well_viewer.scatter_callbacks import ScatterCellViewer
+
+    existing = getattr(app, "_scatter_cell_viewer", None)
+    if existing is None or not existing.isVisible():
+        app._scatter_cell_viewer = ScatterCellViewer(
+            app,
+            app,
+            well_label,
+            filename,
+            nuclear_id,
+            row_idx,
+        )
+        app._scatter_cell_viewer.show()
+    else:
+        existing.update_cell(well_label, filename, nuclear_id, row_idx)
+        existing.raise_()
+        existing.activateWindow()
+

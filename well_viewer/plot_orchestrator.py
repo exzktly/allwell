@@ -5,6 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+from well_viewer.ui_helpers import refresh_plot_empty_states
+from well_viewer.plot_style import apply_ax_style
+from well_viewer.data_loading import _all_fluor_values
+from ui.theme import WARN
 
 
 
@@ -179,3 +183,44 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
         plot_bg=plot_bg,
         canvas=getattr(app, "_scatter_agg_canvas", None),
     )
+
+
+def redraw_app(app) -> None:
+    # Keep the EmptyState/figure stacks in sync with the current data
+    # state before any matplotlib work. When no data is loaded the plot
+    # is hidden behind the EmptyState page, so we can skip the actual
+    # redraw — but ``redraw`` still tolerates the empty state via its
+    # own no-data branch.
+    from well_viewer import status_signal as _status_signal
+    from well_viewer.lineplot_controller import redraw_line_plots
+    from well_viewer.data_loading import _all_fluor_values, _all_fluor_values_filtered
+
+    refresh_plot_empty_states(app)
+    # ``redraw`` fans out across the default-scope tabs (line /
+    # distribution / heat map). Bar / scatter / scatter-aggregate are
+    # scope-specific and re-render through their own per-tab shims.
+    with _status_signal.warn_scope():
+        try:
+            redraw(
+                app,
+                lineplot_redraw=redraw_line_plots,
+                apply_ax_style=apply_ax_style,
+                all_fluor_values=_all_fluor_values,
+                all_fluor_values_filtered=_all_fluor_values_filtered,
+                warn=WARN,
+            )
+        except Exception:
+            _status_signal.signal_failed()
+            raise
+    from well_viewer.figure_export_editor import apply_export_style_to_current
+    apply_export_style_to_current(app, app._line_fig, getattr(app, "_line_canvas", None))
+
+    # Keep the Export Configurator's line-order lists in sync with the
+    # current selection / replicate sets when the sidebar is open.
+    for sb in (getattr(app, "_export_style_sidebars", {}) or {}).values():
+        try:
+            if getattr(sb, "_is_line_fig", lambda: False)():
+                sb._refresh_line_order_lists()
+        except Exception:
+            pass
+

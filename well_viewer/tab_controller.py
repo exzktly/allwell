@@ -13,6 +13,7 @@ from well_viewer.image_table_controller import image_table_repopulate_dropdowns
 from well_viewer.review_image_renderer import refresh_review_image
 from well_viewer.review_image_renderer import update_preview
 from well_viewer.scatter_controller import update_scatter_menus
+import logging
 
 
 def on_tab_change(app, _e=None) -> None:
@@ -181,3 +182,38 @@ def on_notebook_current_changed(app, _idx) -> None:
         return
     app._tab_history.append(title)
     app._tab_history_idx = len(app._tab_history) - 1
+
+
+def run_tab_switch_smoke_checks(
+    app,
+    prev_tab: Optional[str],
+    tab: str,
+    prev_selected: set,
+) -> None:
+    """Debug guardrails for Line/Bar/Batch sidebar continuity."""
+    watched = {"Line Graphs", "Bar Plots", "Batch Export"}
+    if tab not in watched:
+        return
+
+    # Batch Export should share the same in-memory selection objects used by
+    # the line/bar/scatter render paths.
+    expected_ids = (
+        id(app._app_state.selection.selected_wells),
+        id(app._app_state.selection.selections),
+    )
+    if not hasattr(app, "_selection_model_identity"):
+        app._selection_model_identity = expected_ids
+    elif app._selection_model_identity != expected_ids:
+        _logger.warning(
+            "Selection model identity changed across tab switch: "
+            "_selected_wells/_selections should be shared."
+        )
+
+    # UI smoke check: switching among Line/Bar/Batch must not mutate the
+    # current per-well selection by itself.
+    if prev_tab in watched and prev_selected != app._app_state.selection.selected_wells:
+        _logger.warning(
+            "Tab switch altered selected wells unexpectedly: %s -> %s",
+            prev_tab, tab,
+        )
+

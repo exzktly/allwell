@@ -846,41 +846,8 @@ class WellViewerApp(QWidget):
             self._sel_select(sels[idx].get("id"))
 
     def _rep_add(self) -> None:
-        """Open dialog to create a new named ReplicateSet."""
-        dlg = QDialog(self)
-        dlg.setWindowTitle("New Replicate Set")
-        dlg.setModal(True)
-        v = QVBoxLayout(dlg)
-        v.addWidget(QLabel("Name:"))
-        name_edit = QLineEdit(f"Rep {len(self._app_state.selection.selections)+1}")
-        v.addWidget(name_edit)
-        v.addWidget(QLabel("Select wells:"))
-        available = sorted(self._app_state.dataset.well_paths.keys(),
-                           key=lambda l: self._parse_rc(l))
-        lb = _wells_multiselect_listbox(dlg, available)
-        v.addWidget(lb, 1)
-        btn_row = QHBoxLayout()
-        v.addLayout(btn_row)
-        ok_btn = QPushButton("Create")
-        ok_btn.setProperty("variant", "primary")
-        cancel_btn = QPushButton("Cancel")
-        btn_row.addWidget(ok_btn)
-        btn_row.addWidget(cancel_btn)
-        btn_row.addStretch(1)
-
-        def _ok():
-            sel = _selected_list_values(lb)
-            if not sel:
-                QMessageBox.warning(dlg, "No wells", "Select at least one well.")
-                return
-            name = name_edit.text().strip() or f"Rep {len(self._app_state.selection.selections) + 1}"
-            dlg.accept()
-            # _sel_add enforces well-exclusivity (the new group takes the wells).
-            self._sel_add(name, list(sel), replicates=[list(sel)], source="rep_set")
-
-        ok_btn.clicked.connect(_ok)
-        cancel_btn.clicked.connect(dlg.reject)
-        dlg.exec()
+        from well_viewer.grouping_controller import rep_add
+        return rep_add(self)
 
     def _rep_clear_all(self) -> None:
         if not self._app_state.selection.selections:
@@ -1306,40 +1273,8 @@ class WellViewerApp(QWidget):
 
 
     def _update_tophat_controls(self, preloaded: Optional[bool] = None) -> None:
-        """Sync the top-hat row UI to the actual preload state.
-
-        *preloaded* = True  → tophat images were loaded from disk for this FOV;
-                              lock controls, show badge, display filtered images.
-        *preloaded* = False → no preloaded images; enable manual filtering.
-        *preloaded* = None  → read from self._montage_tophat_preloaded (default).
-
-        This is the single source of truth for the tophat control state.
-        Called from _refresh_preview_montage (after FOV-level coverage is known)
-        and from _update_preview (to reset before a new well loads).
-        """
-        if not hasattr(self, "_th_checkbox"):
-            return
-        if preloaded is None:
-            preloaded = getattr(self, "_montage_tophat_preloaded", False)
-
-        # Block toggled() so the programmatic state sync doesn't re-kick off
-        # the tophat filter thread via _montage_tophat_toggled.
-        _prev = self._th_checkbox.blockSignals(True)
-        try:
-            if preloaded:
-                self._th_checkbox.setChecked(True)
-                self._th_checkbox.setEnabled(False)
-                self._th_checkbox.setText("Top-hat background subtraction")
-                self._th_radius_entry.setEnabled(False)
-                self._th_preload_badge.setText("\u25cf from output zip")
-            else:
-                self._th_checkbox.setChecked(False)
-                self._th_checkbox.setEnabled(True)
-                self._th_checkbox.setText("Top-hat background subtraction")
-                self._th_radius_entry.setEnabled(True)
-                self._th_preload_badge.setText("")
-        finally:
-            self._th_checkbox.blockSignals(_prev)
+        from well_viewer.montage_controller import update_tophat_controls
+        return update_tophat_controls(self, preloaded)
 
 
 
@@ -1544,130 +1479,8 @@ class WellViewerApp(QWidget):
         QTimer.singleShot(0, self._refresh_sidebar_map_now)
 
     def _refresh_sidebar_map_now(self) -> None:
-        """Push current selection / rep-set state onto the sidebar plate widget.
-
-        Rep-set mode: each set's wells take that set's colour (muted when the
-        set is hidden); the plate runs in "passive" mode so clicks toggle a
-        set's visibility. Per-well mode: selected wells take the accent colour
-        and the plate runs in "select" mode (drag-to-select). Wells with no
-        loaded data are disabled. The count / group-hint labels are updated
-        exactly as before.
-        """
-        plate = getattr(self, "_sidebar_plate", None)
-        if plate is None:
-            self._sidebar_map_refresh_pending = False
-            return
-
-        # Some tabs need per-well selection even when groups exist:
-        # Sample Definitions (Cell Gating / Add Prefix / Add Suffix all
-        # need user-chosen wells), and Review CSV (the user has to pick
-        # which wells' rows to load). For those tabs the plate stays in
-        # ``select`` mode and ``_selected_wells`` is honoured.
-        try:
-            tab_name = self._current_centre_tab()
-        except Exception:
-            tab_name = ""
-        per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        rep_mode = bool(self._app_state.selection.selections) and not per_well_tab
-
-        colors: Dict[str, object] = {}
-        if rep_mode:
-            for s in self._app_state.selection.selections:
-                full_c = self._sel_color(s)
-                shade = self._mute_color(full_c) if s.get("hidden") else full_c
-                for tok in (s.get("wells") or []):
-                    if tok in self._app_state.dataset.well_paths:
-                        colors[tok] = shade
-        else:
-            for tok in self._app_state.selection.selected_wells:
-                if tok in self._app_state.dataset.well_paths:
-                    colors[tok] = self._rank_color_well(tok)
-
-        # smFISH suppresses row/col header selection and forces single-well.
-        smfish = False
-        nb = getattr(self, "_notebook", None)
-        if nb is not None:
-            try:
-                # smFISH is now a sub-tab inside the Segmentation parent,
-                # so the top-level current name reads as "Segmentation"
-                # whether the user is on the Segmentation or smFISH sub-
-                # tab. Descend via ``_current_centre_tab`` to recover the
-                # leaf name.
-                smfish = self._current_centre_tab() == "smFISH"
-            except Exception:
-                smfish = False
-
-        plate.setEnabledWells(list(self._app_state.dataset.well_paths.keys()))
-        plate.setSelectionMode("passive" if rep_mode else "select")
-        plate.setRowColumnSelectable(not smfish)
-        plate.setSingleSelectionMode(smfish and not rep_mode)
-        plate.clearWellColors()
-        plate.setWellColors(colors)
-        # Plotting tabs in rep-mode still honour ``_selected_wells`` so a
-        # click on a well in a saved group promotes that group's wells to
-        # the raised + bright (``_paint_lit``) look. Other rep-mode tabs
-        # (Image Table / smFISH / etc) keep the legacy "no per-well
-        # selection" override.
-        plotting_tab = tab_name in self._PLOTTING_TABS
-        if rep_mode and not plotting_tab:
-            plate.setSelectedWellIds([])
-        elif rep_mode and plotting_tab:
-            # In rep-mode on a plotting tab the "active" set is exactly the
-            # union of every non-hidden group's wells. ``_selected_wells``
-            # is not used here — clicks toggle each group's ``hidden`` flag
-            # so the visual state and the plot's ``_rep_sets_active()``
-            # filter stay in lock-step. Solo wells (not in any group) live
-            # in ``_active_solo_wells``.
-            visible_wells = {
-                w for s in self._app_state.selection.selections if not s.get("hidden")
-                for w in (s.get("wells") or []) if w in self._app_state.dataset.well_paths
-            }
-            visible_wells |= {
-                w for w in (self._app_state.selection.active_solo_wells or set())
-                if w in self._app_state.dataset.well_paths
-            }
-            plate.setSelectedWellIds(list(visible_wells))
-        else:
-            plate.setSelectedWellIds(list(self._app_state.selection.selected_wells))
-
-        # Count label / hint
-        loaded  = self._rep_sets_loaded() if rep_mode else []
-        n_vis   = len(self._rep_sets_active()) if rep_mode else len(self._app_state.selection.selected_wells)
-        n_loaded = len(loaded)
-        if hasattr(self, "_sel_count_lbl"):
-            if rep_mode:
-                n_hid = n_loaded - n_vis
-                self._sel_count_lbl.setText((f"{n_vis}/{n_loaded} set(s) visible"
-                          if n_hid else f"{n_loaded} set(s) — all visible"))
-            else:
-                self._sel_count_lbl.setText((f"{n_vis} well{'s' if n_vis != 1 else ''} selected"
-                          if n_vis else "No wells selected"))
-        if hasattr(self, "_sel_count_chip"):
-            total = len(self._app_state.dataset.well_paths) if True else 96
-            if rep_mode:
-                # Count *wells* across every visible group + active solo
-                # well, not groups. Earlier we showed group count here,
-                # which read as "1 / 96" for a group with 4 members.
-                active_wells: set = set()
-                for s in self._app_state.selection.selections:
-                    if s.get("hidden"):
-                        continue
-                    for w in (s.get("wells") or []):
-                        if w in self._app_state.dataset.well_paths:
-                            active_wells.add(w)
-                for w in (self._app_state.selection.active_solo_wells or set()):
-                    if w in self._app_state.dataset.well_paths:
-                        active_wells.add(w)
-                self._sel_count_chip.setText(f"{len(active_wells)} / {total or 96}")
-            else:
-                self._sel_count_chip.setText(f"{n_vis} / {total or 96}")
-        if hasattr(self, "_line_group_hint"):
-            if rep_mode:
-                self._line_group_hint.setText("Click a well to toggle its set's visibility on the plot.")
-            else:
-                self._line_group_hint.setText("")
-
-        self._sidebar_map_refresh_pending = False
+        from well_viewer.selection_controller import refresh_sidebar_map_now
+        refresh_sidebar_map_now(self)
 
     # ── v2 plate-widget bridge (WellPlateSelector ↔ WellViewerApp state) ──────
     # The left-rail plate is now a single ``widgets.WellPlateSelector`` instead
@@ -1779,71 +1592,17 @@ class WellViewerApp(QWidget):
                 pass
 
     def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None:
-        """Replace the ratio list and rebuild the index + UI."""
-        self._app_state.channel.ratio_metrics = list(ratios)
-        self._rebuild_ratio_index()
-        panel = getattr(self, "_ratio_panel", None)
-        if panel is not None:
-            try:
-                panel.refresh_from_app()
-            except Exception:
-                pass
-        # Cell Gating shows one row per fluor channel + one per ratio. Pull
-        # the ratio rows into the table whenever the ratio set changes.
-        if hasattr(self, "_cell_gating_area_edit"):
-            try:
-                from well_viewer.tabs.cell_gating_tab_view import cell_gating_load_cell_areas
-                cell_gating_load_cell_areas(self)
-            except Exception:
-                pass
-        # Ratio additions become virtual channel entries in every plot-tab
-        # combo (including the global ctxbar chip), so refresh those now —
-        # otherwise the new ratio doesn't appear in the dropdown until the
-        # next dataset reload.
-        if hasattr(self, "_update_channel_selector"):
-            try:
-                update_channel_selector(self)
-            except Exception:
-                pass
+        from well_viewer.channel_state_controller import set_ratio_metrics
+        return set_ratio_metrics(self, ratios)
 
     # ── Active channel ───────────────────────────────────────────────────────
 
 
 
 
-    def _on_plot_channel_selected(self, source=None) -> None:
-        """Channel-switch handler for line/bar/distribution/heatmap plot tabs.
-
-        Each plot tab connects its channel combobox via a lambda that
-        captures the source combobox and passes it as ``source`` here.
-        ``QObject.sender()`` is unreliable when the slot is a Python
-        lambda in PySide6, and ``self._plot_chan_var`` is bound to the
-        line-tab combobox only — so falling back to either of those
-        leaks the line-tab value when other tabs change channels and
-        ``_set_active_channel`` short-circuits because the "new" channel
-        equals the current one. Prefer the explicit ``source`` widget.
-        """
-        label = ""
-        if source is not None and hasattr(source, "currentText"):
-            try:
-                label = str(source.currentText() or "")
-            except Exception:
-                label = ""
-        if not label:
-            try:
-                sender = self.sender()
-            except Exception:
-                sender = None
-            if sender is not None and hasattr(sender, "currentText"):
-                try:
-                    label = str(sender.currentText() or "")
-                except Exception:
-                    label = ""
-        if not label:
-            label = self._plot_chan_var.currentText()
-        # Route real channels and ratios via the label→key map so ratio
-        # selections (e.g. "GFP/MCHERRY") resolve to a ``ratio:<name>`` key.
-        set_active_channel(self, self._channel_key_for_label(label))
+    def _on_plot_channel_selected(self, source = None) -> None:
+        from well_viewer.channel_state_controller import on_plot_channel_selected
+        return on_plot_channel_selected(self, source)
 
     def _on_preview_channel_selected(self, _e=None) -> None:
         """Channel-switch handler for the Movie Montage tab."""
@@ -2008,29 +1767,8 @@ class WellViewerApp(QWidget):
         return raw
 
     def _review_row_keys(self, row: dict) -> Tuple[str, str, str]:
-        def _norm(v: object) -> str:
-            s = str(v or "").strip()
-            if not s:
-                return ""
-            try:
-                return f"{float(s):g}"
-            except Exception:
-                return s
-        def _pick(*names: str) -> object:
-            for name in names:
-                if name in row:
-                    return row.get(name, "")
-            lowered = {str(k).lower(): v for k, v in row.items()}
-            for name in names:
-                key = name.lower()
-                if key in lowered:
-                    return lowered[key]
-            return ""
-        return (
-            _norm(_pick("fov", "FOV")),
-            self._norm_timepoint(_pick("timepoint", "tp", "time", "time_h", "timepoint_hours")),
-            _norm(_pick("nucleus_id", "nucleus id", "nucleusId", "nucleusID")),
-        )
+        from well_viewer.review_image_controller import review_row_keys
+        return review_row_keys(self, row)
 
 
     @staticmethod
@@ -2051,27 +1789,8 @@ class WellViewerApp(QWidget):
         return (1, 0.0, str(tp))
 
     def _review_collect_timepoints(self, fov: str) -> list:
-        """Sorted list of timepoints available for ``fov`` (fluor + pipeline)."""
-        _norm = self._review_norm_fov
-        tp_values = sorted(
-            {
-                self._norm_timepoint(tp)
-                for (f, tp) in self._app_state.preview.fluor.keys()
-                if _norm(f) == fov and self._norm_timepoint(tp)
-            },
-            key=self._review_tp_sort_key,
-        )
-        pipeline_tp_values = sorted(
-            {
-                self._norm_timepoint(tp)
-                for tp in (self._app_state.dataset.pipeline_info or {}).get("available_timepoints", [])
-                if self._norm_timepoint(tp)
-            },
-            key=self._review_tp_sort_key,
-        )
-        if pipeline_tp_values:
-            tp_values = sorted(set(tp_values) | set(pipeline_tp_values), key=self._review_tp_sort_key)
-        return tp_values
+        from well_viewer.review_image_controller import review_collect_timepoints
+        return review_collect_timepoints(self, fov)
 
 
     def _toggle_review_image_source(self) -> None:
@@ -2355,42 +2074,8 @@ class WellViewerApp(QWidget):
     # ── Plotting ──────────────────────────────────────────────────────────────
 
     def _redraw(self) -> None:
-        # Keep the EmptyState/figure stacks in sync with the current data
-        # state before any matplotlib work. When no data is loaded the
-        # plot is hidden behind the EmptyState page, so we can skip the
-        # actual redraw — but `_plot_redraw_orchestrator` still tolerates
-        # the empty state via its own no-data branch.
-        from well_viewer import status_signal as _status_signal
-        refresh_plot_empty_states(self)
-        # `_plot_redraw_orchestrator` fans out across the default-scope
-        # tabs (line / distribution / heat map). Bar / scatter /
-        # scatter-aggregate are scope-specific and re-render through
-        # their own per-tab shims — see `plot_orchestrator.redraw`'s
-        # docstring for the contract.
-        with _status_signal.warn_scope():
-            try:
-                _plot_redraw_orchestrator(
-                    self,
-                    lineplot_redraw=_lineplot_redraw,
-                    apply_ax_style=apply_ax_style,
-                    all_fluor_values=_all_fluor_values,
-                    all_fluor_values_filtered=_all_fluor_values_filtered,
-                    warn=WARN,
-                )
-            except Exception:
-                _status_signal.signal_failed()
-                raise
-        from well_viewer.figure_export_editor import apply_export_style_to_current
-        apply_export_style_to_current(self, self._line_fig, getattr(self, "_line_canvas", None))
-
-        # Keep the Export Configurator's line-order lists in sync with the
-        # current selection / replicate sets when the sidebar is open.
-        for sb in (getattr(self, "_export_style_sidebars", {}) or {}).values():
-            try:
-                if getattr(sb, "_is_line_fig", lambda: False)():
-                    sb._refresh_line_order_lists()
-            except Exception:
-                pass
+        from well_viewer.plot_orchestrator import redraw_app
+        return redraw_app(self)
 
     # ── Bar plot tab ──────────────────────────────────────────────────────────
 
@@ -2456,62 +2141,12 @@ class WellViewerApp(QWidget):
             # correct enabled state per well.
 
     def _sync_preview_well_for_image_tabs(self) -> None:
-        """Keep current preview well unless the active selection supplies one."""
-        cur_sel = self._sel_by_id(self._app_state.selection.current_selection_id)
-        sel_wells = (cur_sel.get("wells") or []) if cur_sel else []
+        from well_viewer.preview_controller import sync_preview_well_for_image_tabs
+        return sync_preview_well_for_image_tabs(self)
 
-        # Preserve explicit user choice when still valid.
-        current = self._app_state.preview.selected_well
-        if current in self._app_state.dataset.well_paths:
-            # If the active selection has wells, prefer its first loaded well.
-            for tok in sel_wells:
-                if tok in self._app_state.dataset.well_paths:
-                    self._app_state.preview.selected_well = tok
-                    return
-            return
-
-        # If no valid current well, use the active selection's first loaded well.
-        for tok in sel_wells:
-            if tok in self._app_state.dataset.well_paths:
-                self._app_state.preview.selected_well = tok
-                return
-
-        # Final fallback: keep previous behavior of choosing first available well.
-        if self._app_state.dataset.well_paths:
-            self._app_state.preview.selected_well = sorted(self._app_state.dataset.well_paths.keys(), key=self._parse_rc)[0]
-
-    def _run_tab_switch_smoke_checks(
-        self,
-        prev_tab: Optional[str],
-        tab: str,
-        prev_selected: set,
-    ) -> None:
-        """Debug guardrails for Line/Bar/Batch sidebar continuity."""
-        watched = {"Line Graphs", "Bar Plots", "Batch Export"}
-        if tab not in watched:
-            return
-
-        # Batch Export should share the same in-memory selection objects used by
-        # the line/bar/scatter render paths.
-        expected_ids = (
-            id(self._app_state.selection.selected_wells),
-            id(self._app_state.selection.selections),
-        )
-        if not hasattr(self, "_selection_model_identity"):
-            self._selection_model_identity = expected_ids
-        elif self._selection_model_identity != expected_ids:
-            _logger.warning(
-                "Selection model identity changed across tab switch: "
-                "_selected_wells/_selections should be shared."
-            )
-
-        # UI smoke check: switching among Line/Bar/Batch must not mutate the
-        # current per-well selection by itself.
-        if prev_tab in watched and prev_selected != self._app_state.selection.selected_wells:
-            _logger.warning(
-                "Tab switch altered selected wells unexpectedly: %s -> %s",
-                prev_tab, tab,
-            )
+    def _run_tab_switch_smoke_checks(self, prev_tab: Optional[str], tab: str, prev_selected: set) -> None:
+        from well_viewer.tab_controller import run_tab_switch_smoke_checks
+        return run_tab_switch_smoke_checks(self, prev_tab, tab, prev_selected)
 
     def _show_line_sidebar(self) -> None:
         """No-op: the unified well picker is always visible for plot tabs."""
@@ -2562,37 +2197,8 @@ class WellViewerApp(QWidget):
         return df.to_dict("records")
 
     def _update_bar_tp_menu(self) -> None:
-        """
-        Populate the timepoint dropdown with the union of all timepoints
-        present across all loaded wells.
-
-        The available timepoints are always drawn from the full loaded dataset,
-        not from the current selection — the selection controls what is plotted,
-        but the dropdown must remain usable even when nothing is selected yet.
-        """
-        if not self._app_state.dataset.well_paths:
-            _set_combo_values(self._bar_tp_cb, ["—"])
-            self._bar_tp_cb.setCurrentText("—")
-            return
-
-        all_tps: set = set(self._app_state.dataset.all_timepoints_cache)
-
-        # If no timepoints were found the schema had no timepoint field.
-        # Use 0.0 as a single synthetic timepoint so bar plots remain usable.
-        if not all_tps and self._app_state.dataset.well_paths:
-            all_tps.add(0.0)
-
-        sorted_tps = sorted(all_tps)
-        tp_strs    = [f"{t:.4g}" for t in sorted_tps]
-
-        cur = self._bar_tp_cb.currentText()
-        _set_combo_values(self._bar_tp_cb, tp_strs)
-        if cur in tp_strs:
-            self._bar_tp_cb.setCurrentText(cur)
-        elif tp_strs:
-            self._bar_tp_cb.setCurrentText(tp_strs[0])
-        else:
-            self._bar_tp_cb.setCurrentText("—")
+        from well_viewer.barplot_controller import update_bar_tp_menu
+        return update_bar_tp_menu(self)
 
     # ── Bar drag-and-drop reordering ─────────────────────────────────────────
     # Implementations live in ``well_viewer.barplot_controller``.
@@ -2664,33 +2270,9 @@ class WellViewerApp(QWidget):
             return _extract_well_token(lbl) or disp
         return disp
 
-    def _replicate_display_label(self, rset: "ReplicateSet") -> str:
-        """Human-friendly x-axis label for a replicate set.
-
-        If the replicate set name appears auto-generated (e.g. ``"1"``,
-        ``"Replicate 2"``, ``"R3"``), use member well labels so the x-axis
-        remains interpretable.
-        """
-        name = str(getattr(rset, "name", "") or "").strip()
-        if not name:
-            name = "Replicate"
-
-        generic_name = bool(
-            re.match(
-                r"^(?:\d+|r\s*\d+|rep(?:licate)?\s*\d+|group\s*\d+|set\s*\d+|batch\s*\d+)$",
-                name,
-                re.I,
-            )
-        )
-        if not generic_name:
-            return name
-
-        wells = [self._well_display_label(w) for w in rset.wells if w in self._app_state.dataset.well_paths]
-        if not wells:
-            return name
-        if len(wells) <= 3:
-            return ",".join(wells)
-        return f"{','.join(wells[:3])} +{len(wells)-3}"
+    def _replicate_display_label(self, rset: 'ReplicateSet') -> str:
+        from well_viewer.grouping_controller import replicate_display_label
+        return replicate_display_label(self, rset)
 
     def _rep_sets_loaded(self) -> "List[ReplicateSet]":
         """One ReplicateSet per selection that has ≥1 loaded well (ignores hidden),
@@ -2958,26 +2540,8 @@ class WellViewerApp(QWidget):
         redraw_scatter_agg_orchestrate(self)
 
     def _sync_scatter_agg_stat_combos(self) -> None:
-        """Mirror the new per-axis (channel, metric) state into the legacy
-        ``_scatter_agg_stat_x/y_cb`` string combos so any code path that still
-        reads them (export_service, save-figure) sees a valid stat string.
-        """
-        for axis in ("x", "y"):
-            stat_cb = getattr(self, f"_scatter_agg_stat_{axis}_cb", None)
-            if stat_cb is None:
-                continue
-            ch_cb = getattr(self, f"_scatter_agg_ch_{axis}_cb", None)
-            m_cb = getattr(self, f"_scatter_agg_metric_{axis}_cb", None)
-            channel = str(ch_cb.currentText() if ch_cb else "")
-            metric_label = str(m_cb.currentText() if m_cb else "Mean Intensity")
-            stat_str = self._compose_scatter_agg_stat(channel, metric_label)
-            blocked = stat_cb.blockSignals(True)
-            try:
-                if stat_cb.findText(stat_str) < 0:
-                    stat_cb.addItem(stat_str)
-                stat_cb.setCurrentText(stat_str)
-            finally:
-                stat_cb.blockSignals(blocked)
+        from well_viewer.scatter_controller import sync_scatter_agg_stat_combos
+        return sync_scatter_agg_stat_combos(self)
 
     def _compose_scatter_agg_stat(self, channel_entry: str, metric_label: str) -> str:
         """Build the legacy stat-string from a (channel, metric) pair.
@@ -3023,31 +2587,9 @@ class WellViewerApp(QWidget):
 
 
 
-    def _open_scatter_cell_viewer(
-        self,
-        well_label: str,
-        filename: str,
-        nuclear_id: str,
-        row_idx: int,
-    ) -> None:
-        """Open or update the scatter cell viewer window."""
-        from well_viewer.scatter_callbacks import ScatterCellViewer
-
-        existing = getattr(self, "_scatter_cell_viewer", None)
-        if existing is None or not existing.isVisible():
-            self._scatter_cell_viewer = ScatterCellViewer(
-                self,
-                self,
-                well_label,
-                filename,
-                nuclear_id,
-                row_idx,
-            )
-            self._scatter_cell_viewer.show()
-        else:
-            existing.update_cell(well_label, filename, nuclear_id, row_idx)
-            existing.raise_()
-            existing.activateWindow()
+    def _open_scatter_cell_viewer(self, well_label: str, filename: str, nuclear_id: str, row_idx: int) -> None:
+        from well_viewer.scatter_callbacks import open_scatter_cell_viewer
+        return open_scatter_cell_viewer(self, well_label, filename, nuclear_id, row_idx)
 
 
     def _save_scatter_figure(self) -> None:

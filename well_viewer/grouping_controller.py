@@ -98,3 +98,72 @@ def rep_quick_pairs(app) -> None:
     app._app_state.selection.selections = sels
     app._app_state.selection.current_selection_id = sels[0]["id"] if sels else None
     app._rebuild_all()
+
+
+def rep_add(app) -> None:
+    """Open dialog to create a new named ReplicateSet."""
+    dlg = QDialog(app)
+    dlg.setWindowTitle("New Replicate Set")
+    dlg.setModal(True)
+    v = QVBoxLayout(dlg)
+    v.addWidget(QLabel("Name:"))
+    name_edit = QLineEdit(f"Rep {len(app._app_state.selection.selections)+1}")
+    v.addWidget(name_edit)
+    v.addWidget(QLabel("Select wells:"))
+    available = sorted(app._app_state.dataset.well_paths.keys(),
+                       key=lambda l: app._parse_rc(l))
+    lb = _wells_multiselect_listbox(dlg, available)
+    v.addWidget(lb, 1)
+    btn_row = QHBoxLayout()
+    v.addLayout(btn_row)
+    ok_btn = QPushButton("Create")
+    ok_btn.setProperty("variant", "primary")
+    cancel_btn = QPushButton("Cancel")
+    btn_row.addWidget(ok_btn)
+    btn_row.addWidget(cancel_btn)
+    btn_row.addStretch(1)
+
+    def _ok():
+        sel = _selected_list_values(lb)
+        if not sel:
+            QMessageBox.warning(dlg, "No wells", "Select at least one well.")
+            return
+        name = name_edit.text().strip() or f"Rep {len(app._app_state.selection.selections) + 1}"
+        dlg.accept()
+        # _sel_add enforces well-exclusivity (the new group takes the wells).
+        app._sel_add(name, list(sel), replicates=[list(sel)], source="rep_set")
+
+    ok_btn.clicked.connect(_ok)
+    cancel_btn.clicked.connect(dlg.reject)
+    dlg.exec()
+
+
+
+def replicate_display_label(app, rset: "ReplicateSet") -> str:
+    """Human-friendly x-axis label for a replicate set.
+
+    If the replicate set name appears auto-generated (e.g. ``"1"``,
+    ``"Replicate 2"``, ``"R3"``), use member well labels so the x-axis
+    remains interpretable.
+    """
+    name = str(getattr(rset, "name", "") or "").strip()
+    if not name:
+        name = "Replicate"
+
+    generic_name = bool(
+        re.match(
+            r"^(?:\d+|r\s*\d+|rep(?:licate)?\s*\d+|group\s*\d+|set\s*\d+|batch\s*\d+)$",
+            name,
+            re.I,
+        )
+    )
+    if not generic_name:
+        return name
+
+    wells = [app._well_display_label(w) for w in rset.wells if w in app._app_state.dataset.well_paths]
+    if not wells:
+        return name
+    if len(wells) <= 3:
+        return ",".join(wells)
+    return f"{','.join(wells[:3])} +{len(wells)-3}"
+

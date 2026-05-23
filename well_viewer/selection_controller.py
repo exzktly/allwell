@@ -446,3 +446,131 @@ def update_active_group_label(app) -> None:
             f"font-weight: 700; }}"
         )
 
+
+
+def refresh_sidebar_map_now(app) -> None:
+    """Push current selection / rep-set state onto the sidebar plate widget.
+
+    Rep-set mode: each set's wells take that set's colour (muted when the
+    set is hidden); the plate runs in "passive" mode so clicks toggle a
+    set's visibility. Per-well mode: selected wells take the accent colour
+    and the plate runs in "select" mode (drag-to-select). Wells with no
+    loaded data are disabled. The count / group-hint labels are updated
+    exactly as before.
+    """
+    plate = getattr(app, "_sidebar_plate", None)
+    if plate is None:
+        app._sidebar_map_refresh_pending = False
+        return
+
+    # Some tabs need per-well selection even when groups exist:
+    # Sample Definitions (Cell Gating / Add Prefix / Add Suffix all
+    # need user-chosen wells), and Review CSV (the user has to pick
+    # which wells' rows to load). For those tabs the plate stays in
+    # ``select`` mode and ``_selected_wells`` is honoured.
+    try:
+        tab_name = app._current_centre_tab()
+    except Exception:
+        tab_name = ""
+    per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
+    rep_mode = bool(app._app_state.selection.selections) and not per_well_tab
+
+    colors: Dict[str, object] = {}
+    if rep_mode:
+        for s in app._app_state.selection.selections:
+            full_c = app._sel_color(s)
+            shade = app._mute_color(full_c) if s.get("hidden") else full_c
+            for tok in (s.get("wells") or []):
+                if tok in app._app_state.dataset.well_paths:
+                    colors[tok] = shade
+    else:
+        for tok in app._app_state.selection.selected_wells:
+            if tok in app._app_state.dataset.well_paths:
+                colors[tok] = app._rank_color_well(tok)
+
+    # smFISH suppresses row/col header selection and forces single-well.
+    smfish = False
+    nb = getattr(app, "_notebook", None)
+    if nb is not None:
+        try:
+            # smFISH is now a sub-tab inside the Segmentation parent,
+            # so the top-level current name reads as "Segmentation"
+            # whether the user is on the Segmentation or smFISH sub-
+            # tab. Descend via ``_current_centre_tab`` to recover the
+            # leaf name.
+            smfish = app._current_centre_tab() == "smFISH"
+        except Exception:
+            smfish = False
+
+    plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
+    plate.setSelectionMode("passive" if rep_mode else "select")
+    plate.setRowColumnSelectable(not smfish)
+    plate.setSingleSelectionMode(smfish and not rep_mode)
+    plate.clearWellColors()
+    plate.setWellColors(colors)
+    # Plotting tabs in rep-mode still honour ``_selected_wells`` so a
+    # click on a well in a saved group promotes that group's wells to
+    # the raised + bright (``_paint_lit``) look. Other rep-mode tabs
+    # (Image Table / smFISH / etc) keep the legacy "no per-well
+    # selection" override.
+    plotting_tab = tab_name in app._PLOTTING_TABS
+    if rep_mode and not plotting_tab:
+        plate.setSelectedWellIds([])
+    elif rep_mode and plotting_tab:
+        # In rep-mode on a plotting tab the "active" set is exactly the
+        # union of every non-hidden group's wells. ``_selected_wells``
+        # is not used here — clicks toggle each group's ``hidden`` flag
+        # so the visual state and the plot's ``_rep_sets_active()``
+        # filter stay in lock-step. Solo wells (not in any group) live
+        # in ``_active_solo_wells``.
+        visible_wells = {
+            w for s in app._app_state.selection.selections if not s.get("hidden")
+            for w in (s.get("wells") or []) if w in app._app_state.dataset.well_paths
+        }
+        visible_wells |= {
+            w for w in (app._app_state.selection.active_solo_wells or set())
+            if w in app._app_state.dataset.well_paths
+        }
+        plate.setSelectedWellIds(list(visible_wells))
+    else:
+        plate.setSelectedWellIds(list(app._app_state.selection.selected_wells))
+
+    # Count label / hint
+    loaded  = app._rep_sets_loaded() if rep_mode else []
+    n_vis   = len(app._rep_sets_active()) if rep_mode else len(app._app_state.selection.selected_wells)
+    n_loaded = len(loaded)
+    if hasattr(app, "_sel_count_lbl"):
+        if rep_mode:
+            n_hid = n_loaded - n_vis
+            app._sel_count_lbl.setText((f"{n_vis}/{n_loaded} set(s) visible"
+                      if n_hid else f"{n_loaded} set(s) — all visible"))
+        else:
+            app._sel_count_lbl.setText((f"{n_vis} well{'s' if n_vis != 1 else ''} selected"
+                      if n_vis else "No wells selected"))
+    if hasattr(app, "_sel_count_chip"):
+        total = len(app._app_state.dataset.well_paths) if True else 96
+        if rep_mode:
+            # Count *wells* across every visible group + active solo
+            # well, not groups. Earlier we showed group count here,
+            # which read as "1 / 96" for a group with 4 members.
+            active_wells: set = set()
+            for s in app._app_state.selection.selections:
+                if s.get("hidden"):
+                    continue
+                for w in (s.get("wells") or []):
+                    if w in app._app_state.dataset.well_paths:
+                        active_wells.add(w)
+            for w in (app._app_state.selection.active_solo_wells or set()):
+                if w in app._app_state.dataset.well_paths:
+                    active_wells.add(w)
+            app._sel_count_chip.setText(f"{len(active_wells)} / {total or 96}")
+        else:
+            app._sel_count_chip.setText(f"{n_vis} / {total or 96}")
+    if hasattr(app, "_line_group_hint"):
+        if rep_mode:
+            app._line_group_hint.setText("Click a well to toggle its set's visibility on the plot.")
+        else:
+            app._line_group_hint.setText("")
+
+    app._sidebar_map_refresh_pending = False
+

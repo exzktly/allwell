@@ -292,3 +292,30 @@ def open_imgref_as_array(
     except Exception as exc:
         logger.warning("open_imgref_as_array failed for %s: %s", ref.name, exc)
         return None
+
+
+def sync_preview_well_for_image_tabs(app) -> None:
+    """Keep current preview well unless the active selection supplies one."""
+    cur_sel = app._sel_by_id(app._app_state.selection.current_selection_id)
+    sel_wells = (cur_sel.get("wells") or []) if cur_sel else []
+
+    # Preserve explicit user choice when still valid.
+    current = app._app_state.preview.selected_well
+    if current in app._app_state.dataset.well_paths:
+        # If the active selection has wells, prefer its first loaded well.
+        for tok in sel_wells:
+            if tok in app._app_state.dataset.well_paths:
+                app._app_state.preview.selected_well = tok
+                return
+        return
+
+    # If no valid current well, use the active selection's first loaded well.
+    for tok in sel_wells:
+        if tok in app._app_state.dataset.well_paths:
+            app._app_state.preview.selected_well = tok
+            return
+
+    # Final fallback: keep previous behavior of choosing first available well.
+    if app._app_state.dataset.well_paths:
+        app._app_state.preview.selected_well = sorted(app._app_state.dataset.well_paths.keys(), key=app._parse_rc)[0]
+

@@ -1052,3 +1052,27 @@ def update_scatter_menus(app) -> None:
 
     app._update_tp_selection_display()
 
+
+
+def sync_scatter_agg_stat_combos(app) -> None:
+    """Mirror the new per-axis (channel, metric) state into the legacy
+    ``_scatter_agg_stat_x/y_cb`` string combos so any code path that still
+    reads them (export_service, save-figure) sees a valid stat string.
+    """
+    for axis in ("x", "y"):
+        stat_cb = getattr(app, f"_scatter_agg_stat_{axis}_cb", None)
+        if stat_cb is None:
+            continue
+        ch_cb = getattr(app, f"_scatter_agg_ch_{axis}_cb", None)
+        m_cb = getattr(app, f"_scatter_agg_metric_{axis}_cb", None)
+        channel = str(ch_cb.currentText() if ch_cb else "")
+        metric_label = str(m_cb.currentText() if m_cb else "Mean Intensity")
+        stat_str = app._compose_scatter_agg_stat(channel, metric_label)
+        blocked = stat_cb.blockSignals(True)
+        try:
+            if stat_cb.findText(stat_str) < 0:
+                stat_cb.addItem(stat_str)
+            stat_cb.setCurrentText(stat_str)
+        finally:
+            stat_cb.blockSignals(blocked)
+

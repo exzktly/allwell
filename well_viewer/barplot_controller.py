@@ -15,6 +15,7 @@ from well_viewer.stats_compute import compute_rep_per_fov_stats
 from well_viewer.stats_compute import compute_rep_n_above
 from well_viewer.stats_compute import aggregate_well
 from well_viewer.stats_compute import aggregate_group
+from well_viewer.ui_helpers import set_combo_values as _set_combo_values
 
 
 
@@ -731,3 +732,38 @@ def on_bar_drag_release(app, event) -> None:
     app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)
     from well_viewer.barplot_renderer import redraw_bars
     redraw_bars(app)
+
+
+def update_bar_tp_menu(app) -> None:
+    """
+    Populate the timepoint dropdown with the union of all timepoints
+    present across all loaded wells.
+
+    The available timepoints are always drawn from the full loaded dataset,
+    not from the current selection — the selection controls what is plotted,
+    but the dropdown must remain usable even when nothing is selected yet.
+    """
+    if not app._app_state.dataset.well_paths:
+        _set_combo_values(app._bar_tp_cb, ["—"])
+        app._bar_tp_cb.setCurrentText("—")
+        return
+
+    all_tps: set = set(app._app_state.dataset.all_timepoints_cache)
+
+    # If no timepoints were found the schema had no timepoint field.
+    # Use 0.0 as a single synthetic timepoint so bar plots remain usable.
+    if not all_tps and app._app_state.dataset.well_paths:
+        all_tps.add(0.0)
+
+    sorted_tps = sorted(all_tps)
+    tp_strs    = [f"{t:.4g}" for t in sorted_tps]
+
+    cur = app._bar_tp_cb.currentText()
+    _set_combo_values(app._bar_tp_cb, tp_strs)
+    if cur in tp_strs:
+        app._bar_tp_cb.setCurrentText(cur)
+    elif tp_strs:
+        app._bar_tp_cb.setCurrentText(tp_strs[0])
+    else:
+        app._bar_tp_cb.setCurrentText("—")
+

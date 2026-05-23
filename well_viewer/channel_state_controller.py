@@ -611,3 +611,69 @@ def refresh_stats_property_combo(app) -> None:
         m_cb, channel_entry=channel, smfish_channel=smf_base,
     )
 
+
+
+def on_plot_channel_selected(app, source=None) -> None:
+    """Channel-switch handler for line/bar/distribution/heatmap plot tabs.
+
+    Each plot tab connects its channel combobox via a lambda that
+    captures the source combobox and passes it as ``source`` here.
+    ``QObject.sender()`` is unreliable when the slot is a Python
+    lambda in PySide6, and ``app._plot_chan_var`` is bound to the
+    line-tab combobox only — so falling back to either of those
+    leaks the line-tab value when other tabs change channels and
+    ``_set_active_channel`` short-circuits because the "new" channel
+    equals the current one. Prefer the explicit ``source`` widget.
+    """
+    label = ""
+    if source is not None and hasattr(source, "currentText"):
+        try:
+            label = str(source.currentText() or "")
+        except Exception:
+            label = ""
+    if not label:
+        try:
+            sender = app.sender()
+        except Exception:
+            sender = None
+        if sender is not None and hasattr(sender, "currentText"):
+            try:
+                label = str(sender.currentText() or "")
+            except Exception:
+                label = ""
+    if not label:
+        label = app._plot_chan_var.currentText()
+    # Route real channels and ratios via the label→key map so ratio
+    # selections (e.g. "GFP/MCHERRY") resolve to a ``ratio:<name>`` key.
+    set_active_channel(app, app._channel_key_for_label(label))
+
+
+
+def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
+    """Replace the ratio list and rebuild the index + UI."""
+    app._app_state.channel.ratio_metrics = list(ratios)
+    app._rebuild_ratio_index()
+    panel = getattr(app, "_ratio_panel", None)
+    if panel is not None:
+        try:
+            panel.refresh_from_app()
+        except Exception:
+            pass
+    # Cell Gating shows one row per fluor channel + one per ratio. Pull
+    # the ratio rows into the table whenever the ratio set changes.
+    if hasattr(app, "_cell_gating_area_edit"):
+        try:
+            from well_viewer.tabs.cell_gating_tab_view import cell_gating_load_cell_areas
+            cell_gating_load_cell_areas(app)
+        except Exception:
+            pass
+    # Ratio additions become virtual channel entries in every plot-tab
+    # combo (including the global ctxbar chip), so refresh those now —
+    # otherwise the new ratio doesn't appear in the dropdown until the
+    # next dataset reload.
+    if hasattr(app, "_update_channel_selector"):
+        try:
+            update_channel_selector(app)
+        except Exception:
+            pass
+

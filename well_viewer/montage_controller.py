@@ -647,3 +647,41 @@ def draw_montage_thumbs(app, tp_list: list) -> None:
     app._montage_status.setText(
         f"{n} timepoint(s)  \u00b7  {n_ov} overlay(s)")
 
+
+
+def update_tophat_controls(app, preloaded: Optional[bool] = None) -> None:
+    """Sync the top-hat row UI to the actual preload state.
+
+    *preloaded* = True  → tophat images were loaded from disk for this FOV;
+                          lock controls, show badge, display filtered images.
+    *preloaded* = False → no preloaded images; enable manual filtering.
+    *preloaded* = None  → read from app._montage_tophat_preloaded (default).
+
+    This is the single source of truth for the tophat control state.
+    Called from _refresh_preview_montage (after FOV-level coverage is known)
+    and from _update_preview (to reset before a new well loads).
+    """
+    if not hasattr(app, "_th_checkbox"):
+        return
+    if preloaded is None:
+        preloaded = getattr(app, "_montage_tophat_preloaded", False)
+
+    # Block toggled() so the programmatic state sync doesn't re-kick off
+    # the tophat filter thread via _montage_tophat_toggled.
+    _prev = app._th_checkbox.blockSignals(True)
+    try:
+        if preloaded:
+            app._th_checkbox.setChecked(True)
+            app._th_checkbox.setEnabled(False)
+            app._th_checkbox.setText("Top-hat background subtraction")
+            app._th_radius_entry.setEnabled(False)
+            app._th_preload_badge.setText("\u25cf from output zip")
+        else:
+            app._th_checkbox.setChecked(False)
+            app._th_checkbox.setEnabled(True)
+            app._th_checkbox.setText("Top-hat background subtraction")
+            app._th_radius_entry.setEnabled(True)
+            app._th_preload_badge.setText("")
+    finally:
+        app._th_checkbox.blockSignals(_prev)
+

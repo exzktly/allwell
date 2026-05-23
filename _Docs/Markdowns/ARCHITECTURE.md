@@ -108,7 +108,7 @@ well_viewer/
 │   ├── channel_state.py, dataset_state.py, plot_state.py, selection_state.py
 │   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
 │   ├── widget_registry.py
-│   ├── bus_wiring.py, redraw_coordinator.py
+│   ├── bus_wiring.py, redraw_coordinator.py, scope_registry.py
 │   ├── load_controller.py, tab_controller.py, selection_controller.py,
 │   │   channel_state_controller.py
 │   ├── plot_orchestrator.py, plot_style.py
@@ -237,8 +237,8 @@ layers:
 │              channel_state_controller                                │
 │           ── plot dispatch / styling: plot_orchestrator, plot_style  │
 │           ── runtime plumbing: event_bus, app_state, bus_wiring,     │
-│              redraw_coordinator, widget_registry, status_signal,     │
-│              debug_flags, ui_helpers                                 │
+│              redraw_coordinator, scope_registry, widget_registry,    │
+│              status_signal, debug_flags, ui_helpers                  │
 │           ── cross-cutting typed state: channel_state,               │
 │              dataset_state, plot_state, selection_state              │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -432,6 +432,7 @@ Cross-cutting controllers (in `well_viewer/core/`):
 | `core/plot_orchestrator.py` | Default-scope fan-out (line + distribution + heat map). Per-tab scopes (bar / scatter / scatter-agg) have their own entry points that consume scope-specific state. |
 | `core/plot_style.py` | `apply_ax_style` — token-aware axes styling for matplotlib. |
 | `core/bus_wiring.py`, `core/redraw_coordinator.py` | Wire the `EventBus` signals to the redraw coalescer. |
+| `core/scope_registry.py` | Register each feature's fold-change scope with its redraw callable (`features.barplot.renderer.redraw_bars`, `core.plot_orchestrator.redraw_app`). Called once from `wire_event_bus` during construction so the domain-layer `fold_change_scopes` module stays free of `features/` imports. |
 | `core/ui_helpers.py` | Cross-cutting widget helpers (combo population, button factories, theme application). |
 
 Per-feature controllers / renderers (under `well_viewer/features/`):
@@ -896,7 +897,7 @@ selection_controller.on_plate_sel_change(app)
         ├── snapshots prev_sel / last_sel
         └── _refresh_after_selection_change(app)
               ├── dispatches by active tab name:
-              │     Bar Plots      → app._redraw_bars()
+              │     Bar Plots      → redraw_bars(app)
               │     Scatter Plot   → scatter_redraw_active(app)
               │     Review CSV     → app._refresh_review_csv()
               │     smFISH         → smfish_sync_from_app(app)
@@ -921,7 +922,11 @@ WellViewerApp._on_plot_channel_selected(source=ctxbar)
               ├── sync every per-renderer combo
               │     (each tab keeps a hidden _chan_cb_<x> for back-compat)
               ├── app._recalculate_threshold()
-              └── app._redraw()        + _redraw_bars() if Bar tab exists
+              └── bus.channel_changed.emit(channel_state)
+                    ↳ RedrawCoordinator → redraw_scopes_or_defer(app):
+                       runs the visible scope's redraw callable
+                       (line: redraw_app, bar: redraw_bars) and
+                       marks the rest dirty for redraw on tab switch
 
 WellViewerApp._update_channel_selector() (called from _recalculate_threshold)
         ├── populates every channel combo from app._fluor_channels + ratios
@@ -948,8 +953,9 @@ Each per-tab redraw ends with:
 
 Bar Plots, Scatter Plot, and Scatter Aggregate redraws are *not* invoked
 from `plot_orchestrator.redraw` — they have their own entry points
-(`app._redraw_bars()`, `scatter_redraw_active(app)`) called from the
-selection / channel / tab-change paths.
+(`features.barplot.renderer.redraw_bars`, `scatter_redraw_active`)
+called from the selection path directly and from the channel-change
+path via the fold-change scope registry (see §5.9 "Scope registry").
 ```
 
 ### 9.5 Applying fold-change normalization
@@ -996,9 +1002,11 @@ User → Control combo  ─→    app._fc_control_label   ─┼─→ fold_chan
                             app._fc_vs_t0_on        ─┘
 User → Baseline combo ─→ (sets _fc_vs_t0_on)
 
-tabs/fold_change_controls.set_fold_change_state(app, *, …, initiating_scope)
-        │   mirrors the shape of runtime_app._set_active_channel:
-        │   updates state → _sync_widgets_to_state → _redraw_bars + _redraw
+domain/fold_change_controls.set_fold_change_state(app, *, …, initiating_scope)
+        │   mirrors the shape of channel_state_controller.set_active_channel:
+        │   updates state → _sync_widgets_to_state →
+        │     redraw_scopes_or_defer(app) (scope coalescer: visible scope's
+        │     callable runs now, the rest are marked dirty)
         ▼
 Line tab — lineplot_controller.redraw_line_plots(…) →
             collect_line_series(app, …) → list[LineSeries]
@@ -1079,7 +1087,7 @@ CSV output (additive in both line and bar paths):
 
 Cross-tab widget sync:
    Each tab installs its own QComboBox instances via
-   tabs/fold_change_controls.install_fold_change_controls(scope=…).
+   domain/fold_change_controls.install_fold_change_controls(scope=…).
    The combo handlers funnel every state mutation through
    set_fold_change_state, which calls _sync_widgets_to_state to
    mirror the new state into the other tab's widget set (with
@@ -1089,24 +1097,40 @@ Cross-tab widget sync:
 
    Scope registry. Each tab that owns a fold-change combo set
    declares itself via a FoldChangeScope (name, ctrl combo attr,
-   baseline combo attr, redraw method, tab name). The two scopes
-   today are bar and line; adding a third (e.g. distribution /
-   scatter) is a single register_fold_change_scope call —
-   _sync_widgets_to_state and set_fold_change_state iterate the
-   registry rather than hard-coding scope names. The registry lives
-   in the pure-logic ``well_viewer.fold_change_scopes`` module so
-   the helpers can be unit-tested without Qt.
+   baseline combo attr, redraw callable, tab names). The dataclass
+   plus dispatch primitives (register_fold_change_scope,
+   redraw_scopes_or_defer, flush_dirty_scopes) live in the
+   pure-logic ``well_viewer.domain.fold_change_scopes`` module
+   so the helpers can be unit-tested without Qt — and so the
+   domain layer stays free of imports from ``features/``.
+
+   Registration of the two default scopes (bar, line) lives in
+   ``well_viewer.core.scope_registry.register_default_scopes``,
+   which imports the actual redraw callables
+   (``features.barplot.renderer.redraw_bars``,
+   ``core.plot_orchestrator.redraw_app``) and binds them to the
+   scopes. It is called once from ``core/bus_wiring.wire_event_bus``
+   during construction. Adding a third scope (e.g. distribution /
+   scatter) is a single register_fold_change_scope call inside that
+   function — ``_sync_widgets_to_state`` and ``set_fold_change_state``
+   iterate the registry rather than hard-coding scope names. The
+   callable-valued ``redraw`` field replaced a string method name
+   in PR #284 — the previous string-dispatch silently no-op'd when
+   a referenced shim was deleted from the runtime app, which broke
+   the bar redraw on channel change for the duration of the bug.
 
    Redraw deferral. State mutations route through
    ``redraw_scopes_or_defer(app)``: the currently-visible scope's
-   redraw method runs immediately, every other scope is marked
-   dirty. ``_on_notebook_current_changed`` calls
-   ``flush_dirty_scopes(app)``, which redraws any dirty scope whose
-   tab just became visible. ``WellViewerApp._set_active_channel``
-   uses the same chokepoint, so the two former 'redraw both
-   eagerly' paths now share one consistent visibility-aware
-   policy. The dirty set is stored on the app under
-   ``_fc_dirty_scopes`` (auto-created on first use).
+   ``redraw`` callable runs immediately, every other scope is
+   marked dirty. ``tab_controller.on_notebook_current_changed``
+   calls ``flush_dirty_scopes(app)``, which redraws any dirty
+   scope whose tab just became visible.
+   ``channel_state_controller.set_active_channel`` and
+   ``set_fold_change_state`` both route through the bus, whose
+   ``RedrawCoordinator`` calls this same chokepoint — so every
+   redraw-triggering action shares one consistent visibility-aware
+   policy. The dirty set lives on ``PlotState.fc_dirty_scopes``
+   (``app._app_state.plot.fc_dirty_scopes``).
 
 When a rep-set name collides with a loaded well token, the well's
 combo entry is suffixed with " (well)"; resolve_control_wells

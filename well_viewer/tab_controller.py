@@ -12,6 +12,7 @@ from well_viewer.image_table_controller import image_table_refresh_picker
 from well_viewer.image_table_controller import image_table_repopulate_dropdowns
 from well_viewer.review_image_renderer import refresh_review_image
 from well_viewer.review_image_renderer import update_preview
+from well_viewer.scatter_controller import update_scatter_menus
 
 
 def on_tab_change(app, _e=None) -> None:
@@ -113,7 +114,7 @@ def on_tab_change(app, _e=None) -> None:
             app._update_bar_tp_menu()
             redraw_bars(app)
         elif tab == "Scatter Plot":
-            app._update_scatter_menus()
+            update_scatter_menus(app)
             from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
             scatter_redraw_active(app)
         else:

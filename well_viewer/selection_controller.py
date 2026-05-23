@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject
 from well_viewer.barplot_renderer import redraw_bars
+from well_viewer.scatter_controller import update_scatter_menus
 
 
 def _active_tab(app) -> str:
@@ -42,7 +43,7 @@ def apply_selection_refresh(app) -> None:
         app._update_bar_tp_menu()
         redraw_bars(app)
     elif tab == "Scatter Plot":
-        app._update_scatter_menus()
+        update_scatter_menus(app)
         from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
         scatter_redraw_active(app)
     elif tab == "Review CSV":

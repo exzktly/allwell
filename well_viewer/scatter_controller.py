@@ -956,3 +956,97 @@ def redraw_scatter_agg_orchestrate(app) -> None:
     )
     from well_viewer.figure_export_editor import apply_export_style_to_current
     apply_export_style_to_current(app, app._scatter_agg_fig, getattr(app, "_scatter_agg_canvas", None))
+
+
+def update_scatter_menus(app) -> None:
+    """Populate scatter plot dropdowns with available channels and timepoints."""
+    # Channel options for both scatter tabs: real fluor channels +
+    # ratio labels. Drops the legacy "(spots)" channel variants — the
+    # per-axis Property combo now expresses smFISH count via the
+    # ``smFISH Count`` metric entry, so we no longer overload the
+    # channel column with aggregation flavour.
+    channels = list(app._app_state.channel.fluor_channels) if app._app_state.channel.fluor_channels else ["gfp"]
+    ratio_labels = app._ratio_dropdown_labels()
+    scatter_ch_options = list(channels) + ratio_labels
+
+    _set_combo_values(app._scatter_ch_x_cb, scatter_ch_options)
+    _set_combo_values(app._scatter_ch_y_cb, scatter_ch_options)
+
+    if scatter_ch_options:
+        if app._scatter_ch_x_var.currentText() not in scatter_ch_options:
+            app._scatter_ch_x_var.setCurrentText(scatter_ch_options[0])
+        if app._scatter_ch_y_var.currentText() not in scatter_ch_options:
+            app._scatter_ch_y_var.setCurrentText(scatter_ch_options[0 if len(scatter_ch_options) == 1 else 1])
+
+    # Refresh per-axis metric combo enable state to match the
+    # currently-selected channels.
+    for axis in ("x", "y"):
+        app._refresh_scatter_metric_for_axis(axis)
+
+    # Update timepoint dropdown for cells scatter
+    timepoints = list(app._app_state.dataset.all_timepoints_cache) or _scatter_get_timepoints(app)
+    tp_strs = [f"{tp:.1f}" for tp in timepoints] if timepoints else ["0"]
+    _set_combo_values(app._scatter_tp_cb, tp_strs)
+
+    if tp_strs and app._scatter_tp_var.currentText() not in tp_strs:
+        app._scatter_tp_var.setCurrentText(tp_strs[0])
+
+    # Repopulate the multi-tp picker. Mirrors the aggregate scatter's
+    # behaviour: every refresh resets every tp to checked, so a fresh
+    # dataset load lands in the same "everything visible" state.
+    if hasattr(app, "_scatter_tp_selections"):
+        app._scatter_tp_selections.clear()
+    else:
+        app._scatter_tp_selections = {}
+    for tp_str in tp_strs:
+        app._scatter_tp_selections[tp_str] = True
+    app._update_scatter_tp_selection_display()
+
+    # Aggregate scatter — propagate the same channel list to its own
+    # per-axis Channel combo.
+    for cb_attr in ("_scatter_agg_ch_x_cb", "_scatter_agg_ch_y_cb"):
+        cb = getattr(app, cb_attr, None)
+        if cb is None:
+            continue
+        current = cb.currentText()
+        _set_combo_values(cb, scatter_ch_options)
+        if current and current in scatter_ch_options:
+            cb.setCurrentText(current)
+        else:
+            default_idx = 0 if cb_attr.endswith("_x_cb") else (1 if len(scatter_ch_options) > 1 else 0)
+            cb.setCurrentText(scatter_ch_options[default_idx])
+    for axis in ("x", "y"):
+        app._refresh_scatter_agg_metric_for_axis(axis)
+
+    # Legacy stat-string combos — kept hidden but in sync so old
+    # exporters and the save-figure helpers continue to work.
+    statistics: List[str] = []
+    for ch in channels:
+        statistics.append(f"Mean Fluorescence {ch.upper()}")
+        statistics.append(f"Fraction On {ch.upper()}")
+        if ch in app._app_state.channel.smfish_channels:
+            statistics.append(f"smFISH Count {ch.upper()}")
+    for ratio_label in ratio_labels:
+        statistics.append(f"Mean Ratio {ratio_label}")
+    for cb_attr in ("_scatter_agg_stat_x_cb", "_scatter_agg_stat_y_cb"):
+        cb = getattr(app, cb_attr, None)
+        if cb is None:
+            continue
+        _set_combo_values(cb, statistics or ["Mean Fluorescence GFP"])
+    # Sync the legacy stat combos to whatever the new per-axis combos
+    # express right now.
+    app._sync_scatter_agg_stat_combos()
+
+    # Update timepoint selections for aggregate scatter; all default checked.
+    if hasattr(app, '_scatter_agg_tp_selections'):
+        prev_selected = {tp_str for tp_str, v in app._scatter_agg_tp_selections.items() if v}
+        app._scatter_agg_tp_selections.clear()
+    else:
+        prev_selected = set()
+        app._scatter_agg_tp_selections = {}
+
+    for tp_str in tp_strs:
+        app._scatter_agg_tp_selections[tp_str] = True
+
+    app._update_tp_selection_display()
+

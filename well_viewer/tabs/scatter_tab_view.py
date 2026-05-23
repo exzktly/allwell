@@ -24,6 +24,7 @@ from well_viewer.tabs.scatter_agg_tab_view import build_scatter_agg_tab
 from well_viewer.tabs.scatter_cells_tab_view import build_scatter_cells_tab
 from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
 from well_viewer.scatter_controller import redraw_scatter_orchestrate
+from well_viewer.scatter_controller import update_scatter_menus
 
 
 _MODE_CELLS = "cells"
@@ -67,7 +68,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
                 tab_widget.setCurrentIndex(1)
             ctx.app._scatter_mode = _MODE_AGG
             try:
-                ctx.app._update_scatter_menus()
+                update_scatter_menus(ctx.app)
             except Exception:
                 pass
             try:
@@ -79,7 +80,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
                 tab_widget.setCurrentIndex(0)
             ctx.app._scatter_mode = _MODE_CELLS
             try:
-                ctx.app._update_scatter_menus()
+                update_scatter_menus(ctx.app)
             except Exception:
                 pass
             try:

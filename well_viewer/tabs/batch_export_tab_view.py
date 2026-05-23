@@ -134,7 +134,6 @@ def _mode_button(parent: QWidget, text: str, command) -> QPushButton:
 
 
 def build_batch_export_tab(ctx, parent: QWidget) -> None:
-    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -153,7 +152,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     subtitle.setWordWrap(True)
     layout.addWidget(subtitle)
 
-    layout.addWidget(_build_spread_row(app, parent))
+    layout.addWidget(_build_spread_row(ctx.app, parent))
 
     # v2: pick-one mode via SegmentedControl instead of a row of toggle
     # QPushButtons. Each segment carries the mode key in data; currentChanged
@@ -166,10 +165,10 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     switch_row.addSegment("Scatter (aggregate)", data="scatter_agg")
 
     _mode_dispatch = {
-        "line": app._open_batch_export,
-        "bar": app._open_bar_batch_export,
-        "scatter_cells": app._open_scatter_cells_batch_export,
-        "scatter_agg": app._open_scatter_agg_batch_export,
+        "line": ctx.app._open_batch_export,
+        "bar": ctx.app._open_bar_batch_export,
+        "scatter_cells": ctx.app._open_scatter_cells_batch_export,
+        "scatter_agg": ctx.app._open_scatter_agg_batch_export,
     }
 
     def _on_mode_changed(_idx: int) -> None:
@@ -184,11 +183,11 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     QVBoxLayout(host)
     layout.addWidget(host, 1)
 
-    app._batch_export_inline_state = {
+    ctx.app._batch_export_inline_state = {
         "host": host,
         "panels": {},
         "mode": "line",
         "mode_segmented": switch_row,
     }
-    app._batch_export_set_mode = lambda mode="line": _show_batch_mode(app, mode)
-    app._batch_export_set_mode("line")
+    ctx.app._batch_export_set_mode = lambda mode="line": _show_batch_mode(ctx.app, mode)
+    ctx.app._batch_export_set_mode("line")

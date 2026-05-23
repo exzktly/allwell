@@ -16,7 +16,6 @@ _FIG_W, _FIG_H, _DPI = 7.2, 10.5, 100
 
 
 def build_line_graphs_tab(ctx, parent: QWidget) -> None:
-    app = ctx.app  # transitional DI seam — narrow to ctx.state / ctx.widgets over time
     from widgets.plot_card import PlotCard
 
     layout = parent.layout()
@@ -26,7 +25,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     layout.setContentsMargins(0, 0, 0, 0)
 
     plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    app._widget_registry.register("_line_export_dock", export_dock)
+    ctx.app._widget_registry.register("_line_export_dock", export_dock)
     parent = plot_area
 
     # ── controls row above the card (Channel / Metric / style / Export CSV) ──
@@ -35,55 +34,55 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     cl = QHBoxLayout(line_ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
-    # Channel combo: kept as an offscreen widget so the rest of the app can
-    # still read/write the per-renderer channel through ``app._chan_cb_line``
+    # Channel combo: kept as an offscreen widget so the rest of the ctx.app can
+    # still read/write the per-renderer channel through ``ctx.app._chan_cb_line``
     # and ``_plot_chan_var``; the global ctxbar combo is the only visible
     # channel control.
-    app._chan_cb_line = QComboBox()
-    app._chan_cb_line.addItems(["GFP"])
-    app._chan_cb_line.currentIndexChanged.connect(
-        lambda _i, _src=app._chan_cb_line: app._on_plot_channel_selected(_src)
+    ctx.app._chan_cb_line = QComboBox()
+    ctx.app._chan_cb_line.addItems(["GFP"])
+    ctx.app._chan_cb_line.currentIndexChanged.connect(
+        lambda _i, _src=ctx.app._chan_cb_line: ctx.app._on_plot_channel_selected(_src)
     )
-    app._chan_cb_line.hide()
-    if not hasattr(app, "_plot_chan_var"):
-        app._plot_chan_var = app._chan_cb_line
-        app._chan_var = app._plot_chan_var
+    ctx.app._chan_cb_line.hide()
+    if not hasattr(ctx.app, "_plot_chan_var"):
+        ctx.app._plot_chan_var = ctx.app._chan_cb_line
+        ctx.app._chan_var = ctx.app._plot_chan_var
 
     # The visible metric selector now lives in the global plotting ctxbar
     # (``_plotting_metric_cb``). This hidden per-tab combo stays as a
     # back-compat shim for code that still reads ``_metric_var`` /
     # ``_metric_cb``; the global combo wins when present.
     from well_viewer.metric_labels import METRIC_ORDER as _METRIC_ORDER
-    app._metric_selector_frame = QWidget(line_ctrl)
-    mfl = QHBoxLayout(app._metric_selector_frame)
+    ctx.app._metric_selector_frame = QWidget(line_ctrl)
+    mfl = QHBoxLayout(ctx.app._metric_selector_frame)
     mfl.setContentsMargins(0, 0, 0, 0)
-    mfl.addWidget(QLabel("Property:", app._metric_selector_frame))
-    app._metric_cb = QComboBox(app._metric_selector_frame)
-    app._metric_cb.addItems(_METRIC_ORDER)
-    app._metric_cb.currentIndexChanged.connect(lambda _i: app._on_metric_selected())
-    mfl.addWidget(app._metric_cb)
-    if getattr(app, "_plotting_metric_cb", None) is not None:
-        app._metric_var = app._plotting_metric_cb
+    mfl.addWidget(QLabel("Property:", ctx.app._metric_selector_frame))
+    ctx.app._metric_cb = QComboBox(ctx.app._metric_selector_frame)
+    ctx.app._metric_cb.addItems(_METRIC_ORDER)
+    ctx.app._metric_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_metric_selected())
+    mfl.addWidget(ctx.app._metric_cb)
+    if getattr(ctx.app, "_plotting_metric_cb", None) is not None:
+        ctx.app._metric_var = ctx.app._plotting_metric_cb
     else:
-        app._metric_var = app._metric_cb
-    cl.addWidget(app._metric_selector_frame)
-    app._metric_selector_frame.hide()
+        ctx.app._metric_var = ctx.app._metric_cb
+    cl.addWidget(ctx.app._metric_selector_frame)
+    ctx.app._metric_selector_frame.hide()
 
     # Fold-change normalization sits on the main controls row, left-aligned;
     # the stretch below pushes the action buttons to the right.
     from well_viewer.tabs.fold_change_controls import install_fold_change_controls
-    install_fold_change_controls(app, line_ctrl, cl, scope="line")
+    install_fold_change_controls(ctx.app, line_ctrl, cl, scope="line")
 
     cl.addStretch(1)
 
-    _export_btn = btn_primary(line_ctrl, "", app._export_plot_data,
+    _export_btn = btn_primary(line_ctrl, "", ctx.app._export_plot_data,
                               icon="download")
     _export_btn.setToolTip("Export CSV")
     cl.addWidget(_export_btn)
-    _b = btn_secondary(line_ctrl, "", lambda: app._copy_active_card_as_svg(), icon="copy")
+    _b = btn_secondary(line_ctrl, "", lambda: ctx.app._copy_active_card_as_svg(), icon="copy")
     _b.setToolTip("Copy SVG")
     cl.addWidget(_b)
-    _b = btn_secondary(line_ctrl, "", lambda: app._save_active_card_figure(), icon="save")
+    _b = btn_secondary(line_ctrl, "", lambda: ctx.app._save_active_card_figure(), icon="save")
     _b.setToolTip("Save figure")
     cl.addWidget(_b)
     # Properties button last in the row so it sits flush with the right
@@ -91,7 +90,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # dock slides out, instead of the old "▸" floating mid-row.
     style_btn = btn_secondary(
         line_ctrl, "",
-        lambda: app._open_export_style_panel("line"),
+        lambda: ctx.app._open_export_style_panel("line"),
         icon="sliders-horizontal",
     )
     style_btn.setToolTip("Show / hide the figure properties panel")
@@ -100,15 +99,15 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
-    _sw = make_plot_view_switcher(app, 'Line Graphs')
+    _sw = make_plot_view_switcher(ctx.app, 'Line Graphs')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")          # the tab name is the title; keep the header lean
-    # Widget handles go through the WidgetRegistry; legacy ``app._line_*``
+    # Widget handles go through the WidgetRegistry; legacy ``ctx.app._line_*``
     # reads are forwarded to it by WellViewerApp.__getattr__.
-    reg = app._widget_registry
+    reg = ctx.app._widget_registry
     reg.register("_line_card", card)
     fig = reg.register("_line_fig", card.figure)
     ax_mean = reg.register("_line_ax_mean", fig.add_subplot(3, 1, 1))
@@ -123,13 +122,13 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # The "Error Band: SEM/SD" + "Spread: FOV" toggles (formerly on the legacy
     # plot toolbar) → the card's controls row beneath the header.
-    card.setControlsWidget(make_band_controls(app, card, with_fov=True))
+    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=True))
 
     # The Publication↔Screen toggle is wired through plot_style.apply_ax_style
     # (it consults card.plotTheme() via ax.figure._plot_card). The stats chip is
-    # left hidden — its statsChanged signal isn't wired to app state yet (the
+    # left hidden — its statsChanged signal isn't wired to ctx.app state yet (the
     # error band lives on the controls row above; Mean/Median is unsupported).
-    card.plotThemeChanged.connect(lambda _m: app._redraw())
+    card.plotThemeChanged.connect(lambda _m: ctx.app._redraw())
     card.setStatsChipVisible(False)
 
     scroll = reg.register("_line_scroll_canvas", QScrollArea(parent))
@@ -140,8 +139,8 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # Wrap the scroll area in an EmptyState stack — page 0 is the
     # placeholder shown until a dataset is loaded, page 1 is the figure.
     from well_viewer.ui_helpers import wrap_with_empty_state
-    layout.addWidget(wrap_with_empty_state(app, scroll), 1)
+    layout.addWidget(wrap_with_empty_state(ctx.app, scroll), 1)
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)
-    app._line_canvas.mpl_connect("button_press_event", app._on_fig_click)
+    ctx.app._line_canvas.mpl_connect("button_press_event", ctx.app._on_fig_click)

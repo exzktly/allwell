@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
 
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
-    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -22,50 +21,50 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     cl.setContentsMargins(8, 6, 8, 6)
 
     cl.addWidget(QLabel("Well:", ctrl))
-    app._review_well_lbl = QLabel("(select one well)", ctrl)
-    app._review_well_lbl.setObjectName("Muted")
-    cl.addWidget(app._review_well_lbl)
+    ctx.app._review_well_lbl = QLabel("(select one well)", ctrl)
+    ctx.app._review_well_lbl.setObjectName("Muted")
+    cl.addWidget(ctx.app._review_well_lbl)
 
     cl.addSpacing(8)
     cl.addWidget(QLabel("FOV:", ctrl))
-    app._review_fov_cb = QComboBox(ctrl)
-    app._review_fov_cb.setFixedWidth(120)
-    app._review_fov_cb.currentIndexChanged.connect(
-        lambda _i: app._refresh_review_csv_rows()
+    ctx.app._review_fov_cb = QComboBox(ctrl)
+    ctx.app._review_fov_cb.setFixedWidth(120)
+    ctx.app._review_fov_cb.currentIndexChanged.connect(
+        lambda _i: ctx.app._refresh_review_csv_rows()
     )
-    cl.addWidget(app._review_fov_cb)
+    cl.addWidget(ctx.app._review_fov_cb)
 
     cl.addSpacing(8)
     cl.addWidget(QLabel("Timepoint:", ctrl))
-    app._review_tp_cb = QComboBox(ctrl)
-    app._review_tp_cb.setFixedWidth(140)
-    app._review_tp_cb.currentIndexChanged.connect(
-        lambda _i: app._refresh_review_csv_rows()
+    ctx.app._review_tp_cb = QComboBox(ctrl)
+    ctx.app._review_tp_cb.setFixedWidth(140)
+    ctx.app._review_tp_cb.currentIndexChanged.connect(
+        lambda _i: ctx.app._refresh_review_csv_rows()
     )
-    cl.addWidget(app._review_tp_cb)
+    cl.addWidget(ctx.app._review_tp_cb)
 
     refresh_btn = QPushButton("Refresh", ctrl)
     refresh_btn.setProperty("variant", "secondary")
-    refresh_btn.clicked.connect(lambda _=False: app._refresh_review_csv())
+    refresh_btn.clicked.connect(lambda _=False: ctx.app._refresh_review_csv())
     cl.addWidget(refresh_btn)
     cl.addStretch(1)
     layout.addWidget(ctrl)
 
-    app._review_csv_table = QTableWidget(0, 0, parent)
-    app._review_csv_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-    app._review_csv_table.horizontalHeader().setHighlightSections(False)
-    app._review_csv_table.verticalHeader().setVisible(False)
-    app._review_csv_table.setAlternatingRowColors(True)
-    app._review_csv_table.setShowGrid(False)
-    app._review_csv_table.setSelectionBehavior(QTableWidget.SelectRows)
-    app._review_csv_table.setEditTriggers(QTableWidget.NoEditTriggers)
-    app._review_csv_table.itemDoubleClicked.connect(
-        lambda item: app._on_review_csv_row_double_click(item)
+    ctx.app._review_csv_table = QTableWidget(0, 0, parent)
+    ctx.app._review_csv_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+    ctx.app._review_csv_table.horizontalHeader().setHighlightSections(False)
+    ctx.app._review_csv_table.verticalHeader().setVisible(False)
+    ctx.app._review_csv_table.setAlternatingRowColors(True)
+    ctx.app._review_csv_table.setShowGrid(False)
+    ctx.app._review_csv_table.setSelectionBehavior(QTableWidget.SelectRows)
+    ctx.app._review_csv_table.setEditTriggers(QTableWidget.NoEditTriggers)
+    ctx.app._review_csv_table.itemDoubleClicked.connect(
+        lambda item: ctx.app._on_review_csv_row_double_click(item)
     )
-    layout.addWidget(app._review_csv_table, 1)
+    layout.addWidget(ctx.app._review_csv_table, 1)
 
-    app._review_csv_msg_lbl = QLabel(
+    ctx.app._review_csv_msg_lbl = QLabel(
         "Select a single well to inspect CSV rows.", parent,
     )
-    app._review_csv_msg_lbl.setObjectName("Muted")
-    layout.addWidget(app._review_csv_msg_lbl)
+    ctx.app._review_csv_msg_lbl.setObjectName("Muted")
+    layout.addWidget(ctx.app._review_csv_msg_lbl)

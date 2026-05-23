@@ -48,7 +48,10 @@ _HARD_FAIL = True
 # _stats_refresh_colors, _on_review_image_channel_selected.
 # Phase 9b moved _on_tab_change + _on_notebook_current_changed bodies into
 # new tab_controller (with the centre-stack dispatch + notebook history).
-RUNTIME_APP_LINE_BUDGET = 5266
+# Phase 10 deleted the legacy __getattr__ widget forwarder; WidgetRegistry now
+# stamps registered widgets directly onto the bound app, so plain attribute
+# lookup resolves them and the forwarder is no longer needed.
+RUNTIME_APP_LINE_BUDGET = 5248
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 RUNTIME_APP_ATTR_BUDGET = 71
@@ -58,7 +61,7 @@ RUNTIME_APP_ATTR_BUDGET = 71
 # ratchet down. A PR that adds a parallel implementation trips one of these.
 RUNTIME_APP_GETATTR_BUDGET = 206        # defensive getattr/hasattr probes
 RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 0   # save/load persistence wrappers
-TAB_CTX_APP_UNWRAP_BUDGET = 12          # `app = ctx.app` unwraps in tabs/
+TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phase 6+7 collapsed)
 
 
 def _enforce(ok: bool, message: str) -> None:

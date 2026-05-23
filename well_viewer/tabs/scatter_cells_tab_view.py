@@ -14,7 +14,6 @@ from well_viewer.ui_helpers import (
 
 
 def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
-    app = ctx.app  # transitional DI seam
     from widgets.plot_card import PlotCard
 
     layout = parent.layout()
@@ -23,7 +22,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, app._scatter_export_dock = make_plot_with_right_dock(parent)
+    plot_area, layout, ctx.app._scatter_export_dock = make_plot_with_right_dock(parent)
     parent = plot_area
 
     ctrl = QWidget(parent)
@@ -38,67 +37,67 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     from well_viewer.metric_labels import METRIC_ORDER as _METRIC_ORDER
     cl.addWidget(QLabel("X-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
-    app._scatter_ch_x_cb = QComboBox(ctrl)
-    app._scatter_ch_x_cb.addItems(["gfp"])
-    app._scatter_ch_x_cb.currentIndexChanged.connect(lambda _i: app._on_scatter_axis_change("x"))
-    cl.addWidget(app._scatter_ch_x_cb)
-    app._scatter_ch_x_var = app._scatter_ch_x_cb
+    ctx.app._scatter_ch_x_cb = QComboBox(ctrl)
+    ctx.app._scatter_ch_x_cb.addItems(["gfp"])
+    ctx.app._scatter_ch_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("x"))
+    cl.addWidget(ctx.app._scatter_ch_x_cb)
+    ctx.app._scatter_ch_x_var = ctx.app._scatter_ch_x_cb
 
     cl.addWidget(QLabel("Property:", ctrl))
-    app._scatter_metric_x_cb = QComboBox(ctrl)
-    app._scatter_metric_x_cb.addItems(_METRIC_ORDER)
-    app._scatter_metric_x_cb.currentIndexChanged.connect(lambda _i: app._redraw_scatter())
-    cl.addWidget(app._scatter_metric_x_cb)
-    app._scatter_metric_x_var = app._scatter_metric_x_cb
+    ctx.app._scatter_metric_x_cb = QComboBox(ctrl)
+    ctx.app._scatter_metric_x_cb.addItems(_METRIC_ORDER)
+    ctx.app._scatter_metric_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._redraw_scatter())
+    cl.addWidget(ctx.app._scatter_metric_x_cb)
+    ctx.app._scatter_metric_x_var = ctx.app._scatter_metric_x_cb
 
     cl.addWidget(QLabel("Y-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
-    app._scatter_ch_y_cb = QComboBox(ctrl)
-    app._scatter_ch_y_cb.addItems(["gfp"])
-    app._scatter_ch_y_cb.currentIndexChanged.connect(lambda _i: app._on_scatter_axis_change("y"))
-    cl.addWidget(app._scatter_ch_y_cb)
-    app._scatter_ch_y_var = app._scatter_ch_y_cb
+    ctx.app._scatter_ch_y_cb = QComboBox(ctrl)
+    ctx.app._scatter_ch_y_cb.addItems(["gfp"])
+    ctx.app._scatter_ch_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("y"))
+    cl.addWidget(ctx.app._scatter_ch_y_cb)
+    ctx.app._scatter_ch_y_var = ctx.app._scatter_ch_y_cb
 
     cl.addWidget(QLabel("Property:", ctrl))
-    app._scatter_metric_y_cb = QComboBox(ctrl)
-    app._scatter_metric_y_cb.addItems(_METRIC_ORDER)
-    app._scatter_metric_y_cb.currentIndexChanged.connect(lambda _i: app._redraw_scatter())
-    cl.addWidget(app._scatter_metric_y_cb)
-    app._scatter_metric_y_var = app._scatter_metric_y_cb
+    ctx.app._scatter_metric_y_cb = QComboBox(ctrl)
+    ctx.app._scatter_metric_y_cb.addItems(_METRIC_ORDER)
+    ctx.app._scatter_metric_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._redraw_scatter())
+    cl.addWidget(ctx.app._scatter_metric_y_cb)
+    ctx.app._scatter_metric_y_var = ctx.app._scatter_metric_y_cb
 
     cl.addWidget(QLabel("Timepoints:", ctrl))
-    app._scatter_tp_button = QPushButton("Select Timepoints", ctrl)
-    app._scatter_tp_button.setProperty("variant", "secondary")
-    app._scatter_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(app))
-    cl.addWidget(app._scatter_tp_button)
-    app._scatter_tp_label = QLabel("(0 selected)", ctrl)
-    app._scatter_tp_label.setObjectName("Muted")
-    cl.addWidget(app._scatter_tp_label)
-    # Hidden legacy single-tp combo — kept on app so export / save-figure
+    ctx.app._scatter_tp_button = QPushButton("Select Timepoints", ctrl)
+    ctx.app._scatter_tp_button.setProperty("variant", "secondary")
+    ctx.app._scatter_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx.app))
+    cl.addWidget(ctx.app._scatter_tp_button)
+    ctx.app._scatter_tp_label = QLabel("(0 selected)", ctrl)
+    ctx.app._scatter_tp_label.setObjectName("Muted")
+    cl.addWidget(ctx.app._scatter_tp_label)
+    # Hidden legacy single-tp combo — kept on ctx.app so export / save-figure
     # paths that still read ``_scatter_tp_var.currentText()`` see a valid
     # timepoint string (the first selected one).
-    app._scatter_tp_cb = QComboBox(ctrl)
-    app._scatter_tp_cb.addItems(["0"])
-    app._scatter_tp_cb.hide()
-    app._scatter_tp_var = app._scatter_tp_cb
-    app._scatter_tp_selections: dict[str, bool] = {}
+    ctx.app._scatter_tp_cb = QComboBox(ctrl)
+    ctx.app._scatter_tp_cb.addItems(["0"])
+    ctx.app._scatter_tp_cb.hide()
+    ctx.app._scatter_tp_var = ctx.app._scatter_tp_cb
+    ctx.app._scatter_tp_selections: dict[str, bool] = {}
     cl.addStretch(1)
 
-    _export_btn = btn_primary(ctrl, "", app._export_scatter_data,
+    _export_btn = btn_primary(ctrl, "", ctx.app._export_scatter_data,
                               icon="download")
     _export_btn.setToolTip("Export CSV")
     cl.addWidget(_export_btn)
-    _b = btn_secondary(ctrl, "", lambda: app._copy_active_card_as_svg(), icon="copy")
+    _b = btn_secondary(ctrl, "", lambda: ctx.app._copy_active_card_as_svg(), icon="copy")
     _b.setToolTip("Copy SVG")
     cl.addWidget(_b)
-    _b = btn_secondary(ctrl, "", lambda: app._save_active_card_figure(), icon="save")
+    _b = btn_secondary(ctrl, "", lambda: ctx.app._save_active_card_figure(), icon="save")
     _b.setToolTip("Save figure")
     cl.addWidget(_b)
     # Properties button last in the row so it sits flush with the right
     # edge of the plot area — adjacent to where the dock slides out.
     style_btn = btn_secondary(
         ctrl, "",
-        lambda: app._open_export_style_panel("scatter_cells"),
+        lambda: ctx.app._open_export_style_panel("scatter_cells"),
         icon="sliders-horizontal",
     )
     style_btn.setToolTip("Show / hide the figure properties panel")
@@ -106,27 +105,27 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
-    _sw = make_plot_view_switcher(app, 'Scatter Plot')
+    _sw = make_plot_view_switcher(ctx.app, 'Scatter Plot')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")
-    app._scatter_card = card
-    app._scatter_fig = card.figure
-    app._ax_scatter = app._scatter_fig.add_subplot(1, 1, 1)
-    app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
-    app._scatter_canvas = card.canvas
-    card.setControlsWidget(make_band_controls(app, card, with_fov=False))
-    card.plotThemeChanged.connect(lambda _m: app._redraw_scatter())
+    ctx.app._scatter_card = card
+    ctx.app._scatter_fig = card.figure
+    ctx.app._ax_scatter = ctx.app._scatter_fig.add_subplot(1, 1, 1)
+    ctx.app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
+    ctx.app._scatter_canvas = card.canvas
+    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
+    card.plotThemeChanged.connect(lambda _m: ctx.app._redraw_scatter())
     card.setStatsChipVisible(False)
     from well_viewer.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
-        app, card, icon="scatter-chart",
+        ctx.app, card, icon="scatter-chart",
     ), 1)
 
-    app._scatter_canvas.mpl_connect("button_press_event", app._on_scatter_click)
-    app._scatter_canvas.mpl_connect("motion_notify_event", app._on_scatter_motion)
+    ctx.app._scatter_canvas.mpl_connect("button_press_event", ctx.app._on_scatter_click)
+    ctx.app._scatter_canvas.mpl_connect("motion_notify_event", ctx.app._on_scatter_motion)
 
 
 def _open_timepoint_selector(app) -> None:

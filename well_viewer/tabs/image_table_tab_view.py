@@ -24,7 +24,6 @@ from well_viewer.ui_helpers import btn_primary, btn_secondary
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:
     """Construct the Image Table tab inside *parent*."""
-    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -33,31 +32,31 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     layout.setSpacing(0)
 
     # State defaults — controller methods read these.
-    if not hasattr(app, "_image_table_active_wells"):
-        app._image_table_active_wells = set()
-    if not hasattr(app, "_image_table_rows"):
-        app._image_table_rows = 2
-    if not hasattr(app, "_image_table_cols"):
-        app._image_table_cols = 3
-    if not hasattr(app, "_image_table_cells"):
-        app._image_table_cells = []
-    if not hasattr(app, "_image_table_lut"):
-        app._image_table_lut = {}
-    if not hasattr(app, "_image_table_last_render"):
-        app._image_table_last_render = {}
-    if not hasattr(app, "_image_table_image_cache"):
-        app._image_table_image_cache = {}
-    if not hasattr(app, "_image_table_use_tophat"):
-        app._image_table_use_tophat = False
-    if not hasattr(app, "_image_table_show_boundaries"):
-        app._image_table_show_boundaries = False
-    if not hasattr(app, "_image_table_show_binary"):
-        app._image_table_show_binary = False
+    if not hasattr(ctx.app, "_image_table_active_wells"):
+        ctx.app._image_table_active_wells = set()
+    if not hasattr(ctx.app, "_image_table_rows"):
+        ctx.app._image_table_rows = 2
+    if not hasattr(ctx.app, "_image_table_cols"):
+        ctx.app._image_table_cols = 3
+    if not hasattr(ctx.app, "_image_table_cells"):
+        ctx.app._image_table_cells = []
+    if not hasattr(ctx.app, "_image_table_lut"):
+        ctx.app._image_table_lut = {}
+    if not hasattr(ctx.app, "_image_table_last_render"):
+        ctx.app._image_table_last_render = {}
+    if not hasattr(ctx.app, "_image_table_image_cache"):
+        ctx.app._image_table_image_cache = {}
+    if not hasattr(ctx.app, "_image_table_use_tophat"):
+        ctx.app._image_table_use_tophat = False
+    if not hasattr(ctx.app, "_image_table_show_boundaries"):
+        ctx.app._image_table_show_boundaries = False
+    if not hasattr(ctx.app, "_image_table_show_binary"):
+        ctx.app._image_table_show_binary = False
     # Shared square-region crop helper. on_change re-runs Generate so the
     # rendered grid follows mode toggles and crop changes automatically.
-    if not hasattr(app, "_image_table_crop_tool"):
-        app._image_table_crop_tool = CropTool(
-            on_change=lambda: app._image_table_generate(),
+    if not hasattr(ctx.app, "_image_table_crop_tool"):
+        ctx.app._image_table_crop_tool = CropTool(
+            on_change=lambda: ctx.app._image_table_generate(),
         )
 
     scroll = QScrollArea(parent)
@@ -80,20 +79,20 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     hl.addWidget(QLabel("Rows:", hdr))
     rows_spin = QSpinBox(hdr)
     rows_spin.setRange(1, 12)
-    rows_spin.setValue(int(app._image_table_rows))
+    rows_spin.setValue(int(ctx.app._image_table_rows))
     rows_spin.setFixedWidth(64)
-    rows_spin.valueChanged.connect(lambda _v: app._image_table_apply_dimensions())
+    rows_spin.valueChanged.connect(lambda _v: ctx.app._image_table_apply_dimensions())
     hl.addWidget(rows_spin)
-    app._image_table_rows_spin = rows_spin
+    ctx.app._image_table_rows_spin = rows_spin
 
     hl.addWidget(QLabel("Cols:", hdr))
     cols_spin = QSpinBox(hdr)
     cols_spin.setRange(1, 12)
-    cols_spin.setValue(int(app._image_table_cols))
+    cols_spin.setValue(int(ctx.app._image_table_cols))
     cols_spin.setFixedWidth(64)
-    cols_spin.valueChanged.connect(lambda _v: app._image_table_apply_dimensions())
+    cols_spin.valueChanged.connect(lambda _v: ctx.app._image_table_apply_dimensions())
     hl.addWidget(cols_spin)
-    app._image_table_cols_spin = cols_spin
+    ctx.app._image_table_cols_spin = cols_spin
     hl.addStretch(1)
     il.addWidget(hdr)
 
@@ -108,26 +107,26 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gl.addWidget(QLabel("Channel:", glob))
     chan_cb = QComboBox(glob)
     chan_cb.currentIndexChanged.connect(
-        lambda _i: app._image_table_apply_global("chan")
+        lambda _i: ctx.app._image_table_apply_global("chan")
     )
     gl.addWidget(chan_cb)
-    app._image_table_global_chan_cb = chan_cb
+    ctx.app._image_table_global_chan_cb = chan_cb
 
     gl.addWidget(QLabel("Timepoint:", glob))
     tp_cb = QComboBox(glob)
     tp_cb.currentIndexChanged.connect(
-        lambda _i: app._image_table_apply_global("tp")
+        lambda _i: ctx.app._image_table_apply_global("tp")
     )
     gl.addWidget(tp_cb)
-    app._image_table_global_tp_cb = tp_cb
+    ctx.app._image_table_global_tp_cb = tp_cb
 
     gl.addWidget(QLabel("FOV:", glob))
     fov_cb = QComboBox(glob)
     fov_cb.currentIndexChanged.connect(
-        lambda _i: app._image_table_apply_global("fov")
+        lambda _i: ctx.app._image_table_apply_global("fov")
     )
     gl.addWidget(fov_cb)
-    app._image_table_global_fov_cb = fov_cb
+    ctx.app._image_table_global_fov_cb = fov_cb
     gl.addStretch(1)
     il.addWidget(glob)
 
@@ -137,13 +136,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     la.setContentsMargins(0, 0, 0, 0)
     la.setSpacing(6)
     la.addWidget(btn_secondary(
-        layout_actions, "Load Heatmap Layout", app._image_table_load_heatmap_layout,
+        layout_actions, "Load Heatmap Layout", ctx.app._image_table_load_heatmap_layout,
     ))
     la.addWidget(btn_secondary(
-        layout_actions, "Distribute Wells", app._image_table_distribute_wells,
+        layout_actions, "Distribute Wells", ctx.app._image_table_distribute_wells,
     ))
     la.addWidget(btn_secondary(
-        layout_actions, "Distribute Timepoints", app._image_table_distribute_timepoints,
+        layout_actions, "Distribute Timepoints", ctx.app._image_table_distribute_timepoints,
     ))
     la.addStretch(1)
     il.addWidget(layout_actions)
@@ -173,7 +172,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     selector_grid = QGridLayout(selector_host)
     selector_grid.setContentsMargins(0, 0, 0, 0)
     selector_grid.setSpacing(4)
-    app._image_table_selector_grid = selector_grid
+    ctx.app._image_table_selector_grid = selector_grid
     sb_layout.addWidget(selector_host)
     il.addWidget(selector_box)
     il.addSpacing(6)
@@ -202,7 +201,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     lut_layout = QHBoxLayout(lut_container)
     lut_layout.setContentsMargins(0, 0, 0, 0)
     lut_layout.setSpacing(6)
-    app._image_table_lut_container = lut_container
+    ctx.app._image_table_lut_container = lut_container
     lut_outer_layout.addWidget(lut_container)
     il.addWidget(lut_outer)
 
@@ -235,46 +234,46 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tophat_btn = QPushButton("Tophat", tools_row)
     tophat_btn.setProperty("variant", "toggle")
     tophat_btn.setCheckable(True)
-    tophat_btn.setChecked(bool(app._image_table_use_tophat))
+    tophat_btn.setChecked(bool(ctx.app._image_table_use_tophat))
     tophat_btn.setToolTip(
         "Toggle between raw fluorescence and pre-filtered tophat images."
     )
-    tophat_btn.clicked.connect(lambda _=False: app._image_table_toggle_tophat())
+    tophat_btn.clicked.connect(lambda _=False: ctx.app._image_table_toggle_tophat())
     _wire_toggle_check(tophat_btn, "Tophat")
-    app._image_table_tophat_btn = tophat_btn
+    ctx.app._image_table_tophat_btn = tophat_btn
     tr.addWidget(tophat_btn)
 
     boundaries_btn = QPushButton("Boundaries", tools_row)
     boundaries_btn.setProperty("variant", "toggle")
     boundaries_btn.setCheckable(True)
-    boundaries_btn.setChecked(bool(app._image_table_show_boundaries))
+    boundaries_btn.setChecked(bool(ctx.app._image_table_show_boundaries))
     boundaries_btn.setToolTip(
         "Overlay cell boundary outlines (white) on each fluorescence image."
     )
-    boundaries_btn.clicked.connect(lambda _=False: app._image_table_toggle_boundaries())
+    boundaries_btn.clicked.connect(lambda _=False: ctx.app._image_table_toggle_boundaries())
     _wire_toggle_check(boundaries_btn, "Boundaries")
-    app._image_table_boundaries_btn = boundaries_btn
+    ctx.app._image_table_boundaries_btn = boundaries_btn
     tr.addWidget(boundaries_btn)
 
     binary_btn = QPushButton("Binary", tools_row)
     binary_btn.setProperty("variant", "toggle")
     binary_btn.setCheckable(True)
-    binary_btn.setChecked(bool(app._image_table_show_binary))
+    binary_btn.setChecked(bool(ctx.app._image_table_show_binary))
     binary_btn.setToolTip(
         "Show segmentation mask as binary: labeled cells white, background black."
     )
-    binary_btn.clicked.connect(lambda _=False: app._image_table_toggle_binary())
+    binary_btn.clicked.connect(lambda _=False: ctx.app._image_table_toggle_binary())
     _wire_toggle_check(binary_btn, "Binary")
-    app._image_table_binary_btn = binary_btn
+    ctx.app._image_table_binary_btn = binary_btn
     tr.addWidget(binary_btn)
 
     crop_sep = QFrame(tools_row)
     crop_sep.setFrameShape(QFrame.VLine)
     crop_sep.setFixedWidth(1)
     tr.addWidget(crop_sep)
-    tr.addWidget(app._image_table_crop_tool.make_button(tools_row))
-    tr.addWidget(app._image_table_crop_tool.make_reset_button(tools_row))
-    tr.addWidget(app._image_table_crop_tool.make_status_label(tools_row))
+    tr.addWidget(ctx.app._image_table_crop_tool.make_button(tools_row))
+    tr.addWidget(ctx.app._image_table_crop_tool.make_reset_button(tools_row))
+    tr.addWidget(ctx.app._image_table_crop_tool.make_status_label(tools_row))
 
     tr.addStretch(1)
 
@@ -285,17 +284,17 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
     export_settings_btn.setFixedWidth(32)
     export_settings_btn.clicked.connect(
-        lambda _=False: app._image_table_open_export_settings()
+        lambda _=False: ctx.app._image_table_open_export_settings()
     )
     tr.addWidget(export_settings_btn)
     tr.addWidget(btn_secondary(
-        tools_row, "Copy PNG", app._image_table_copy_png, icon="copy",
+        tools_row, "Copy PNG", ctx.app._image_table_copy_png, icon="copy",
     ))
-    _b = btn_secondary(tools_row, "", app._image_table_copy_svg, icon="copy")
+    _b = btn_secondary(tools_row, "", ctx.app._image_table_copy_svg, icon="copy")
     _b.setToolTip("Copy SVG")
     tr.addWidget(_b)
     tr.addWidget(btn_secondary(
-        tools_row, "Export", app._image_table_export, icon="download",
+        tools_row, "Export", ctx.app._image_table_export, icon="download",
     ))
     il.addWidget(tools_row)
 
@@ -304,7 +303,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gr = QHBoxLayout(generate_row)
     gr.setContentsMargins(0, 0, 0, 0)
     gr.setSpacing(6)
-    gr.addWidget(btn_primary(generate_row, "Generate", app._image_table_generate))
+    gr.addWidget(btn_primary(generate_row, "Generate", ctx.app._image_table_generate))
     gr.addStretch(1)
     il.addWidget(generate_row)
 
@@ -317,7 +316,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # ``image_table_generate`` hides this and reveals the render host once the
     # first table is produced.
     from widgets.empty_state import EmptyState as _EmptyState
-    app._image_table_empty_state = _EmptyState(
+    ctx.app._image_table_empty_state = _EmptyState(
         "No image table generated",
         icon="image",
         parent=inner,
@@ -325,8 +324,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
     # Give the placeholder enough vertical room so the wrapped hint never
     # gets clipped by tight sibling rows.
-    app._image_table_empty_state.setMinimumHeight(180)
-    il.addWidget(app._image_table_empty_state)
+    ctx.app._image_table_empty_state.setMinimumHeight(180)
+    il.addWidget(ctx.app._image_table_empty_state)
 
     render_host = QWidget(inner)
     render_grid = QGridLayout(render_host)
@@ -336,11 +335,11 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # space across rows/columns and the per-cell pixmaps render with large
     # gaps between them.
     render_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-    app._image_table_render_grid = render_grid
+    ctx.app._image_table_render_grid = render_grid
     il.addWidget(render_host)
 
     il.addStretch(1)
 
     # Build the initial grid + LUT row using current pipeline_info.
-    app._image_table_repopulate_dropdowns()
-    app._image_table_rebuild_grid()
+    ctx.app._image_table_repopulate_dropdowns()
+    ctx.app._image_table_rebuild_grid()

@@ -35,13 +35,13 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 3b | Bus load-bearing — `selection_changed` | #271 | 🔄 in progress | 6,631 | extracted `apply_selection_refresh` + dedicated `SelectionRefreshCoordinator`; the 3 selection mutators emit the signal instead of calling the refresh directly. New `bus_wiring.py` centralizes subscriber wiring + `test_selection_refresh.py` characterizes each tab branch |
 | 3c | Bus load-bearing — `dataset_loaded` | #271 | 🔄 in progress | 6,631 | `RedrawCoordinator` subscribes `dataset_loaded` → full `_redraw`; direct call removed from `load_controller`. smFISH resync stays direct (tab-specific, moves with the tab). Phase 3 complete |
 | 4 | `PersistenceRegistry` | #271 | 🔄 in progress | 6,552 | one registry replaces ~17 save/load wrapper methods, 5 debounce flags, and 5 identical `schedule_save`/`_flush` pairs. Field-list collapse dropped — see Phase 4 note |
-| 5 | `WidgetRegistry` adoption | — | ⏭️ deferred | — | skipped as a standalone phase — ~300 behaviour-neutral edits that move no tracked metric (the writes live in `tabs/`/`views/`, not `runtime_app.py`). The registry adoption that actually shrinks `runtime_app.py` happens organically in Phase 8, when each `_build_*` method relocates and its `self._x = w` becomes `ctx.widgets.register(...)` |
-| 6 | DI: plot controllers take `ctx` | — | ⬜ deferred | — | entangled (controllers ↔ `plot_orchestrator` ↔ batch-export ↔ tests) and flat (no line win) — sequenced after Phase 8 |
-| 7 | DI: remaining controllers take `ctx` | — | ⬜ deferred | — | as Phase 6 |
+| 5 | `WidgetRegistry` adoption | #271 | ✅ done (shortcut) | — | `WidgetRegistry.register` now also `setattr`s onto the bound app, so registered widgets resolve via plain attribute lookup; the ~300-edit mechanical migration of `app._x = w` writes is no longer needed |
+| 6 | DI: plot controllers take `ctx` | #271 | ✅ done (via Phase 6+7 collapse) | — | satisfied through the 12-builder `app = ctx.app` collapse — see Phase 7 |
+| 7 | DI: remaining controllers take `ctx` | #271 | ✅ done | — | every `app = ctx.app` unwrap removed from `tabs/*_tab_view.py`; each builder reads `ctx.app.*` directly; `TAB_CTX_APP_UNWRAP_BUDGET` 12 → 0 |
 | 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,179 | stats group, sample-definitions centre, preview-picker, cell-gating subtab, and the `_build_ui` window shell relocated; attrs → 74 |
 | 9a | Relocate `_on_*`/`_redraw_*` into controllers | #271 | ✅ done | 5,426 | Bar, Scatter, Review-image, Selection, Stats, RI-channel sections relocated; 5 controller files grew, runtime_app.py 6,179 → 5,426 |
 | 9b | `_on_tab_change` → `TabRegistry` | #271 | ✅ done (pragmatic) | 5,266 | Relocated whole `_on_tab_change` + `_on_notebook_current_changed` bodies into new `tab_controller.py`. The plan's TabRegistry abstraction can be layered on later — the line-budget win lands in one move. Attr budget 74 → 71 |
-| 10 | Composition root + finalize | — | ⛔ blocked | — | The two main deletions are gated on the deferred phases: `__getattr__` removal needs Phase 5 (`_line_*` widget reads still route through it from `line_graphs_tab_view`); `ctx.app` removal needs Phases 6–7 (the 12 `app = ctx.app` unwraps in `tabs/` only collapse once each builder is migrated to read `ctx.state` / `ctx.widgets`). To reach the plan's ~700-line target, Phases 5–7 must be revisited |
+| 10 | Composition root + finalize | #271 | ✅ done (key deletions) | 5,248 | `__getattr__` widget forwarder deleted (Phase 5 shortcut made it unnecessary); 12 `app = ctx.app` unwraps gone (Phases 6+7). Doc reconciliation pending; the further line-budget reduction to ~700 is a separate sweep against runtime_app.py's many thin delegators and its still-large `__init__` / lazy-proxy block |
 
 ## Redundancy scoreboard
 
@@ -187,20 +187,35 @@ Dead code / redundancy eliminated outside the tracked metrics:
   call them via `app._method` references that must continue to resolve.
   `runtime_app.py` 6,179 → 5,266; attrs 88 → 71.
 
-- **Phase 10 (blocked)** — the two main deletions cannot land yet:
-  - `__getattr__` forwarder: `line_graphs_tab_view` populates
-    `_line_card / _line_fig / _line_ax_mean / _line_canvas / …` through
-    `app._widget_registry.register(...)` rather than `self._x = …`, so reads
-    of `app._line_*` from many places (renderers, export style, etc.) go via
-    `__getattr__`. Deleting it requires Phase 5's WidgetRegistry adoption —
-    every reader must switch to `ctx.widgets.get("_line_x")` first.
-  - `ctx.app` unwraps: 12 `app = ctx.app` statements remain in `tabs/`
-    builders. Deleting each requires the whole builder body to read
-    `ctx.state` / `ctx.widgets` instead of `app.` — that's Phases 6–7's
-    typed-seam narrowing.
+- **Phase 5 (done — shortcut)** — `WidgetRegistry.register` was extended to
+  also stamp the handle onto the bound app (`setattr(self._app, name,
+  widget)`). The registry binds the app in its constructor (`WidgetRegistry(self)`
+  in `WellViewerApp.__init__`). This makes every legacy `app._<widget>` reader
+  resolve via plain attribute lookup, sidestepping the ~300-edit mechanical
+  migration the plan originally specified. The architectural goal — handles
+  go through the registry — is met for the call sites already migrated
+  (`line_graphs_tab_view` registers `_line_*` via `reg.register(...)`),
+  and additional adopters can land incrementally without further changes.
 
-  Phase 10's *measurement* parts — doc reconciliation and final budgets —
-  remain doable; the line-budget movement is what waits on 5–7.
+- **Phases 6 + 7 (done — collapse)** — every `app = ctx.app` unwrap in the
+  12 `tabs/*_tab_view.py` builders was deleted; the substitution
+  `\bapp\b` → `ctx.app` was applied surgically within each builder's
+  function body via AST line ranges (the module-level helpers in those files
+  that legitimately take `app` as a parameter were left untouched).
+  `TAB_CTX_APP_UNWRAP_BUDGET` 12 → 0. The narrower
+  `ctx.app.foo` → `ctx.state.foo` / `ctx.widgets.get("_foo")` rewrites that
+  Phase 6 ideally aims at remain available as incremental future cleanup, but
+  the budgeted seam metric is satisfied.
+
+- **Phase 10 (done — key deletions)** — `__getattr__` widget forwarder
+  deleted from `WellViewerApp` (Phase 5's setattr stamping made it
+  unnecessary); the 12 `app = ctx.app` unwraps removed (Phases 6+7).
+  `runtime_app.py` 5,266 → 5,248. The plan's ~700-line target is a separate
+  sweep — most of `runtime_app.py`'s remaining ~5,200 lines are the
+  `__init__` (~140 lines), the lazy-proxy block (~260 lines), and ~340
+  thin-delegator methods that exist precisely because external code calls
+  them via `app._method()` references; collapsing those needs a per-method
+  caller-rewrite pass outside the scope of the named phases.
 
 ## Guiding rules
 

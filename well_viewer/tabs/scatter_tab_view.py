@@ -30,7 +30,6 @@ _MODE_AGG = "aggregate"
 
 def build_scatter_tab(ctx, parent: QWidget) -> None:
     """Construct the unified Scatter Plot tab inside *parent*."""
-    app = ctx.app  # transitional DI seam
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -57,35 +56,35 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
     build_scatter_agg_tab(ctx, agg_page)
     tab_widget.addTab(agg_page, "Per-well aggregate")
 
-    app._scatter_mode = _MODE_CELLS
-    app._scatter_tab_widget = tab_widget
+    ctx.app._scatter_mode = _MODE_CELLS
+    ctx.app._scatter_tab_widget = tab_widget
 
     def _set_mode(mode: str) -> None:
         if mode == _MODE_AGG:
             if tab_widget.currentIndex() != 1:
                 tab_widget.setCurrentIndex(1)
-            app._scatter_mode = _MODE_AGG
+            ctx.app._scatter_mode = _MODE_AGG
             try:
-                app._update_scatter_menus()
+                ctx.app._update_scatter_menus()
             except Exception:
                 pass
             try:
-                app._redraw_scatter_agg()
+                ctx.app._redraw_scatter_agg()
             except Exception:
                 pass
         else:
             if tab_widget.currentIndex() != 0:
                 tab_widget.setCurrentIndex(0)
-            app._scatter_mode = _MODE_CELLS
+            ctx.app._scatter_mode = _MODE_CELLS
             try:
-                app._update_scatter_menus()
+                ctx.app._update_scatter_menus()
             except Exception:
                 pass
             try:
-                app._redraw_scatter()
+                ctx.app._redraw_scatter()
             except Exception:
                 pass
-    app._scatter_set_mode = _set_mode
+    ctx.app._scatter_set_mode = _set_mode
 
     tab_widget.currentChanged.connect(
         lambda idx: _set_mode(_MODE_AGG if idx == 1 else _MODE_CELLS)

@@ -7,10 +7,11 @@ stashes on the app so other code can reach them later.
 
 ``WidgetRegistry`` is the name-keyed store those handles move into. A tab builder
 calls ``registry.register("_line_fig", fig)`` instead of ``app._line_fig = fig``;
-``WellViewerApp.__getattr__`` forwards a legacy ``app._line_fig`` read to the
-registry, so reader call sites are untouched during the migration.
+``register`` also stamps the handle onto the bound app as ``app._line_fig`` so
+legacy ``app._<widget>`` readers resolve via ordinary attribute lookup — no
+``__getattr__`` forwarder required.
 
-Deliberately Qt-free and dependency-free — it only holds references.
+Deliberately Qt-free — it only holds references.
 """
 
 from __future__ import annotations
@@ -22,17 +23,22 @@ class WidgetRegistry:
     """A ``name -> widget`` store for Qt widget handles.
 
     Names keep their legacy leading underscore (``"_line_fig"``) so the
-    transitional ``WellViewerApp.__getattr__`` forwarder can match an attribute
-    name against the registry directly.
+    legacy ``app._line_fig`` reader continues to resolve via plain attribute
+    lookup on the bound app.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, app: Any = None) -> None:
         self._widgets: dict[str, Any] = {}
+        self._app = app
 
     def register(self, name: str, widget: Any) -> Any:
-        """Store *widget* under *name* and return it (so a builder can write
-        ``ax = registry.register("_line_ax", fig.add_subplot(...))``)."""
+        """Store *widget* under *name*, also stamping it onto the bound app
+        as ``app.<name>`` so legacy attribute readers resolve directly.
+        Returns *widget* so a builder can write
+        ``ax = registry.register("_line_ax", fig.add_subplot(...))``."""
         self._widgets[name] = widget
+        if self._app is not None:
+            setattr(self._app, name, widget)
         return widget
 
     def get(self, name: str) -> Any:

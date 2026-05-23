@@ -25,7 +25,6 @@ _SCALE_OPTIONS = ["Auto", "Fixed"]
 
 
 def build_heatmap_tab(ctx, parent: QWidget) -> None:
-    app = ctx.app  # transitional DI seam
     # Defer matplotlib + heatmap_controller imports until the tab actually
     # builds. heatmap_controller pulls in matplotlib.patches and numpy at
     # module load, so importing it lazily keeps utility entry points like
@@ -37,7 +36,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, app._heatmap_export_dock = make_plot_with_right_dock(parent)
+    plot_area, layout, ctx.app._heatmap_export_dock = make_plot_with_right_dock(parent)
     parent = plot_area
 
     # ── Control row 1: channel / metric ─────────────────────────────────────
@@ -51,41 +50,41 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     # Channel combo hidden — global ctxbar combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
-    app._chan_cb_heatmap = QComboBox()
-    app._chan_cb_heatmap.addItems(["GFP"])
-    app._chan_cb_heatmap.setMinimumWidth(220)
-    app._chan_cb_heatmap.currentIndexChanged.connect(
-        lambda _i, _src=app._chan_cb_heatmap: app._on_plot_channel_selected(_src)
+    ctx.app._chan_cb_heatmap = QComboBox()
+    ctx.app._chan_cb_heatmap.addItems(["GFP"])
+    ctx.app._chan_cb_heatmap.setMinimumWidth(220)
+    ctx.app._chan_cb_heatmap.currentIndexChanged.connect(
+        lambda _i, _src=ctx.app._chan_cb_heatmap: ctx.app._on_plot_channel_selected(_src)
     )
-    app._chan_cb_heatmap.hide()
+    ctx.app._chan_cb_heatmap.hide()
 
     # The global ctxbar Property combo is the single source of truth for
     # which CSV column drives the heatmap — the per-tab Property combo
     # used to live here, but the duplicate (one in the ctxbar, one in
     # this row) was confusing. Only the Aggregation combo stays local.
     cl1.addWidget(QLabel("Aggregation:", ctrl1))
-    app._heatmap_metric_cb = QComboBox(ctrl1)
-    app._heatmap_metric_cb.addItems(METRIC_OPTIONS)
-    app._heatmap_metric_cb.currentIndexChanged.connect(lambda _i: _redraw(app))
-    cl1.addWidget(app._heatmap_metric_cb)
+    ctx.app._heatmap_metric_cb = QComboBox(ctrl1)
+    ctx.app._heatmap_metric_cb.addItems(METRIC_OPTIONS)
+    ctx.app._heatmap_metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx.app))
+    cl1.addWidget(ctx.app._heatmap_metric_cb)
 
     cl1.addStretch(1)
 
-    _export_btn = btn_primary(ctrl1, "", app._export_heatmap_data,
+    _export_btn = btn_primary(ctrl1, "", ctx.app._export_heatmap_data,
                               icon="download")
     _export_btn.setToolTip("Export CSV")
     cl1.addWidget(_export_btn)
-    _b = btn_secondary(ctrl1, "", lambda: app._copy_active_card_as_svg(), icon="copy")
+    _b = btn_secondary(ctrl1, "", lambda: ctx.app._copy_active_card_as_svg(), icon="copy")
     _b.setToolTip("Copy SVG")
     cl1.addWidget(_b)
-    _b = btn_secondary(ctrl1, "", lambda: app._save_active_card_figure(), icon="save")
+    _b = btn_secondary(ctrl1, "", lambda: ctx.app._save_active_card_figure(), icon="save")
     _b.setToolTip("Save figure")
     cl1.addWidget(_b)
     # Properties button last in the row so it sits flush with the right
     # edge of the plot area — adjacent to where the dock slides out.
     style_btn = btn_secondary(
         ctrl1, "",
-        lambda: app._open_export_style_panel("heatmap"),
+        lambda: ctx.app._open_export_style_panel("heatmap"),
         icon="sliders-horizontal",
     )
     style_btn.setToolTip("Show / hide the figure properties panel")
@@ -102,63 +101,63 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # v2: LutSelector (gradient strip + name + searchable popover + reverse-LUT
     # button) in place of the legacy QComboBox of mpl colormap names.
     from widgets.lut_selector import LutSelector
-    app._heatmap_cmap_cb = LutSelector(ctrl2)
+    ctx.app._heatmap_cmap_cb = LutSelector(ctrl2)
     # Seed with the first option (matches the legacy default).
     _initial_cmap = _CMAP_OPTIONS[0] if _CMAP_OPTIONS else "viridis"
     _initial_rev = _initial_cmap.endswith("_r")
-    app._heatmap_cmap_cb.setLut(_initial_cmap[:-2] if _initial_rev else _initial_cmap,
+    ctx.app._heatmap_cmap_cb.setLut(_initial_cmap[:-2] if _initial_rev else _initial_cmap,
                                 reversed=_initial_rev)
-    app._heatmap_cmap_cb.setMaximumWidth(220)
-    app._heatmap_cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(app))
-    cl2.addWidget(app._heatmap_cmap_cb)
+    ctx.app._heatmap_cmap_cb.setMaximumWidth(220)
+    ctx.app._heatmap_cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx.app))
+    cl2.addWidget(ctx.app._heatmap_cmap_cb)
 
     cl2.addWidget(QLabel("Scale:", ctrl2))
-    app._heatmap_scale_cb = QComboBox(ctrl2)
-    app._heatmap_scale_cb.addItems(_SCALE_OPTIONS)
-    app._heatmap_scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(app))
-    cl2.addWidget(app._heatmap_scale_cb)
-    app._heatmap_scale_mode = "Auto"
+    ctx.app._heatmap_scale_cb = QComboBox(ctrl2)
+    ctx.app._heatmap_scale_cb.addItems(_SCALE_OPTIONS)
+    ctx.app._heatmap_scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx.app))
+    cl2.addWidget(ctx.app._heatmap_scale_cb)
+    ctx.app._heatmap_scale_mode = "Auto"
 
     cl2.addWidget(QLabel("vmin:", ctrl2))
-    app._heatmap_vmin_edit = QLineEdit(ctrl2)
-    app._heatmap_vmin_edit.setFixedWidth(70)
-    app._heatmap_vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(app))
-    cl2.addWidget(app._heatmap_vmin_edit)
+    ctx.app._heatmap_vmin_edit = QLineEdit(ctrl2)
+    ctx.app._heatmap_vmin_edit.setFixedWidth(70)
+    ctx.app._heatmap_vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx.app))
+    cl2.addWidget(ctx.app._heatmap_vmin_edit)
 
     cl2.addWidget(QLabel("vmax:", ctrl2))
-    app._heatmap_vmax_edit = QLineEdit(ctrl2)
-    app._heatmap_vmax_edit.setFixedWidth(70)
-    app._heatmap_vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(app))
-    cl2.addWidget(app._heatmap_vmax_edit)
+    ctx.app._heatmap_vmax_edit = QLineEdit(ctrl2)
+    ctx.app._heatmap_vmax_edit.setFixedWidth(70)
+    ctx.app._heatmap_vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx.app))
+    cl2.addWidget(ctx.app._heatmap_vmax_edit)
 
     transpose_btn = QPushButton("⇄ Transpose", ctrl2)
     transpose_btn.setProperty("variant", "secondary")
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
-    transpose_btn.clicked.connect(lambda _=False: _on_transpose(app))
+    transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx.app))
     cl2.addWidget(transpose_btn)
 
-    app._heatmap_repset_avg_cb = QCheckBox("Rep-set avg", ctrl2)
-    app._heatmap_repset_avg_cb.setToolTip(
+    ctx.app._heatmap_repset_avg_cb = QCheckBox("Rep-set avg", ctrl2)
+    ctx.app._heatmap_repset_avg_cb.setToolTip(
         "When checked, cells whose well belongs to a rep-set show the "
         "average of the whole rep-set instead of the single well."
     )
-    app._heatmap_repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(app))
-    cl2.addWidget(app._heatmap_repset_avg_cb)
-    app._heatmap_repset_avg = False
+    ctx.app._heatmap_repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(ctx.app))
+    cl2.addWidget(ctx.app._heatmap_repset_avg_cb)
+    ctx.app._heatmap_repset_avg = False
 
-    app._heatmap_log_scale_cb = QCheckBox("Log scale", ctrl2)
-    app._heatmap_log_scale_cb.setToolTip(
+    ctx.app._heatmap_log_scale_cb = QCheckBox("Log scale", ctrl2)
+    ctx.app._heatmap_log_scale_cb.setToolTip(
         "Color the heatmap on a log scale (values ≤ 0 are masked)."
     )
-    app._heatmap_log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(app))
-    cl2.addWidget(app._heatmap_log_scale_cb)
-    app._heatmap_log_scale = False
+    ctx.app._heatmap_log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx.app))
+    cl2.addWidget(ctx.app._heatmap_log_scale_cb)
+    ctx.app._heatmap_log_scale = False
 
     cl2.addStretch(1)
 
-    app._heatmap_status_lbl = QLabel("", ctrl2)
-    app._heatmap_status_lbl.setObjectName("Muted")
-    cl2.addWidget(app._heatmap_status_lbl)
+    ctx.app._heatmap_status_lbl = QLabel("", ctrl2)
+    ctx.app._heatmap_status_lbl.setObjectName("Muted")
+    cl2.addWidget(ctx.app._heatmap_status_lbl)
 
     layout.addWidget(ctrl2)
 
@@ -169,14 +168,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     sl.setContentsMargins(10, 4, 10, 6)
     sl.addWidget(QLabel("t (h):", slider_row))
     from widgets.styled_slider import StyledSlider as _StyledSlider
-    app._heatmap_tp_slider = _StyledSlider(Qt.Horizontal, slider_row)
-    app._heatmap_tp_slider.setMinimum(0)
-    app._heatmap_tp_slider.setMaximum(0)
-    app._heatmap_tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(app))
-    sl.addWidget(app._heatmap_tp_slider, 1)
-    app._heatmap_tp_label = QLabel("—", slider_row)
-    app._heatmap_tp_label.setMinimumWidth(80)
-    sl.addWidget(app._heatmap_tp_label)
+    ctx.app._heatmap_tp_slider = _StyledSlider(Qt.Horizontal, slider_row)
+    ctx.app._heatmap_tp_slider.setMinimum(0)
+    ctx.app._heatmap_tp_slider.setMaximum(0)
+    ctx.app._heatmap_tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx.app))
+    sl.addWidget(ctx.app._heatmap_tp_slider, 1)
+    ctx.app._heatmap_tp_label = QLabel("—", slider_row)
+    ctx.app._heatmap_tp_label.setMinimumWidth(80)
+    sl.addWidget(ctx.app._heatmap_tp_label)
     layout.addWidget(slider_row)
 
     sep = QFrame(parent)
@@ -187,28 +186,28 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # ── Figure (in a v2 PlotCard — card chrome + MplToolbar) ────────────────
     from widgets.plot_card import PlotCard
     card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False)
-    _sw = make_plot_view_switcher(app, 'Heat Map')
+    _sw = make_plot_view_switcher(ctx.app, 'Heat Map')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")
-    app._heatmap_card = card
-    app._heatmap_fig = card.figure
-    app._heatmap_ax = app._heatmap_fig.add_subplot(1, 1, 1)
+    ctx.app._heatmap_card = card
+    ctx.app._heatmap_fig = card.figure
+    ctx.app._heatmap_ax = ctx.app._heatmap_fig.add_subplot(1, 1, 1)
     # Reserve top margin for the (sometimes long) title so it doesn't get
     # cropped — the default ``top=0.9`` clipped titles like
     # "MCHERRY Mean Intensity — Mean above threshold — t = 12 h".
-    app._heatmap_fig.subplots_adjust(top=0.88, bottom=0.10, left=0.10, right=0.94)
+    ctx.app._heatmap_fig.subplots_adjust(top=0.88, bottom=0.10, left=0.10, right=0.94)
     # Reserve a persistent colorbar axes via make_axes_locatable so each
     # redraw can refill it in place. Letting fig.colorbar(im, ax=ax)
     # allocate a fresh axes every redraw was the cause of the heatmap
     # plot shrinking and drifting left on every refresh — matplotlib does
     # not restore the original ax position when the colorbar is removed.
     from mpl_toolkits.axes_grid1 import make_axes_locatable
-    divider = make_axes_locatable(app._heatmap_ax)
-    app._heatmap_cax = divider.append_axes("right", size="4%", pad=0.08)
-    app._heatmap_canvas = card.canvas
+    divider = make_axes_locatable(ctx.app._heatmap_ax)
+    ctx.app._heatmap_cax = divider.append_axes("right", size="4%", pad=0.08)
+    ctx.app._heatmap_canvas = card.canvas
     # Heatmap never draws error bands or per-FOV spread — it shows a
     # single aggregated value per grid cell. The shared band controls
     # would only mislead the user, so leave the card's controls row
@@ -221,25 +220,25 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     card.setStatsChipVisible(False)
     from well_viewer.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
-        app, card, icon="layout-grid",
+        ctx.app, card, icon="layout-grid",
     ), 1)
 
     # ── Mouse hooks ─────────────────────────────────────────────────────────
     # Unified press handler: label-drag first, then double-click rename, then
     # normal cell selection.  A single connection keeps ordering deterministic.
-    app._heatmap_canvas.mpl_connect("button_press_event",
-                                     lambda evt: _on_canvas_press(app, evt))
-    app._heatmap_canvas.mpl_connect("motion_notify_event",
-                                     lambda evt: _on_canvas_motion(app, evt))
-    app._heatmap_canvas.mpl_connect("button_release_event",
-                                     lambda evt: _on_canvas_release(app, evt))
+    ctx.app._heatmap_canvas.mpl_connect("button_press_event",
+                                     lambda evt: _on_canvas_press(ctx.app, evt))
+    ctx.app._heatmap_canvas.mpl_connect("motion_notify_event",
+                                     lambda evt: _on_canvas_motion(ctx.app, evt))
+    ctx.app._heatmap_canvas.mpl_connect("button_release_event",
+                                     lambda evt: _on_canvas_release(ctx.app, evt))
 
-    refresh_heatmap_timepoints(app)
+    refresh_heatmap_timepoints(ctx.app)
 
     # Push any settings loaded from heatmap_layouts.json into the widgets.
     try:
         from well_viewer.persistence.heatmap_layouts import apply_persisted_settings
-        apply_persisted_settings(app)
+        apply_persisted_settings(ctx.app)
     except Exception:
         pass
 
@@ -249,23 +248,23 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # collapse it to ``Calculated Val``; non-MFI properties grey out
     # threshold-based aggregations).
     try:
-        if hasattr(app, "_refresh_metric_combo_for_channel"):
-            app._refresh_metric_combo_for_channel()
-        if hasattr(app, "_refresh_heatmap_aggregation_options"):
-            app._refresh_heatmap_aggregation_options()
+        if hasattr(ctx.app, "_refresh_metric_combo_for_channel"):
+            ctx.app._refresh_metric_combo_for_channel()
+        if hasattr(ctx.app, "_refresh_heatmap_aggregation_options"):
+            ctx.app._refresh_heatmap_aggregation_options()
     except Exception:
         pass
     # Bust any caches that might hold a stale "no values" result from
     # before the tab was fully built (data load timing can leave the
     # global colormap range cache populated with NaNs, which produced
     # empty cells until the user wiggled the channel).
-    app._heatmap_global_range_cache = None
-    if hasattr(app, "_invalidate_stats_cache"):
+    ctx.app._heatmap_global_range_cache = None
+    if hasattr(ctx.app, "_invalidate_stats_cache"):
         try:
-            app._invalidate_stats_cache()
+            ctx.app._invalidate_stats_cache()
         except Exception:
             pass
-    _redraw(app)
+    _redraw(ctx.app)
 
 
 # ── helpers attached or referenced from runtime_app ─────────────────────────

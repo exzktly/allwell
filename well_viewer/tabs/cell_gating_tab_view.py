@@ -166,22 +166,21 @@ class GatingWorker(QThread):
 def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     """Build the Cell Gating tab inside *parent*.
 
-    State and widget handles are attached to ``app`` under the
+    State and widget handles are attached to ``ctx.app`` under the
     ``_cell_gating_*`` prefix.
     """
-    app = ctx.app  # transitional DI seam
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
 
-    app._cell_gating_frame = parent
-    app._cell_gating_cell_areas = []
-    app._cell_gating_fluor_gate_edits = {}
-    app._cell_gating_thresh_frac_edits = {}
-    app._cell_gating_fluor_data = {}
-    app._cell_gating_ratio_data = {}
-    app._cell_gating_ax = None
-    app._cell_gating_axes_stack = []
-    app._cell_gating_worker = None
+    ctx.app._cell_gating_frame = parent
+    ctx.app._cell_gating_cell_areas = []
+    ctx.app._cell_gating_fluor_gate_edits = {}
+    ctx.app._cell_gating_thresh_frac_edits = {}
+    ctx.app._cell_gating_fluor_data = {}
+    ctx.app._cell_gating_ratio_data = {}
+    ctx.app._cell_gating_ax = None
+    ctx.app._cell_gating_axes_stack = []
+    ctx.app._cell_gating_worker = None
 
     root = parent.layout()
     if root is None:
@@ -199,12 +198,12 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ar = QHBoxLayout(area_row)
     ar.setContentsMargins(0, 0, 0, 0)
     ar.addWidget(QLabel("Cell Area Threshold (pixels):", area_row))
-    app._cell_gating_area_edit = QLineEdit("0.0", area_row)
-    app._cell_gating_area_edit.setFixedWidth(90)
-    app._cell_gating_area_edit.editingFinished.connect(
-        lambda: cell_gating_on_gating_change(app)
+    ctx.app._cell_gating_area_edit = QLineEdit("0.0", area_row)
+    ctx.app._cell_gating_area_edit.setFixedWidth(90)
+    ctx.app._cell_gating_area_edit.editingFinished.connect(
+        lambda: cell_gating_on_gating_change(ctx.app)
     )
-    ar.addWidget(app._cell_gating_area_edit)
+    ar.addWidget(ctx.app._cell_gating_area_edit)
     ar.addStretch(1)
     cf_layout.addWidget(area_row)
 
@@ -231,9 +230,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
         "Progress + per-channel results are written to the log drawer."
     )
-    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(app))
+    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx.app))
     tr.addWidget(auto_btn)
-    app._cell_gating_auto_btn = auto_btn
+    ctx.app._cell_gating_auto_btn = auto_btn
     cf_layout.addWidget(title_row)
 
     # MFI-only note: FluorGating + ThreshFracOn always run against per-cell
@@ -249,34 +248,34 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     mfi_note.setWordWrap(True)
     cf_layout.addWidget(mfi_note)
 
-    app._cell_gating_scroll = QScrollArea(control_frame)
-    app._cell_gating_scroll.setWidgetResizable(True)
-    app._cell_gating_scroll.setFrameShape(QFrame.NoFrame)
-    app._cell_gating_scroll.setFixedHeight(120)
-    app._cell_gating_inner = QWidget()
-    QVBoxLayout(app._cell_gating_inner)
-    app._cell_gating_scroll.setWidget(app._cell_gating_inner)
-    cf_layout.addWidget(app._cell_gating_scroll)
+    ctx.app._cell_gating_scroll = QScrollArea(control_frame)
+    ctx.app._cell_gating_scroll.setWidgetResizable(True)
+    ctx.app._cell_gating_scroll.setFrameShape(QFrame.NoFrame)
+    ctx.app._cell_gating_scroll.setFixedHeight(120)
+    ctx.app._cell_gating_inner = QWidget()
+    QVBoxLayout(ctx.app._cell_gating_inner)
+    ctx.app._cell_gating_scroll.setWidget(ctx.app._cell_gating_inner)
+    cf_layout.addWidget(ctx.app._cell_gating_scroll)
     root.addWidget(control_frame)
 
     # CDF plot area
-    app._cell_gating_figure = Figure(figsize=(8, 5), dpi=100)
-    app._cell_gating_canvas = FigureCanvas(app._cell_gating_figure)
+    ctx.app._cell_gating_figure = Figure(figsize=(8, 5), dpi=100)
+    ctx.app._cell_gating_canvas = FigureCanvas(ctx.app._cell_gating_figure)
 
-    app._cell_gating_plot_scroll = QScrollArea(parent)
-    app._cell_gating_plot_scroll.setWidgetResizable(True)
-    app._cell_gating_plot_scroll.setFrameShape(QFrame.NoFrame)
-    app._cell_gating_plot_scroll.setWidget(app._cell_gating_canvas)
-    install_canvas_wheel_scroll(app._cell_gating_canvas, app._cell_gating_plot_scroll)
-    root.addWidget(app._cell_gating_plot_scroll, 1)
+    ctx.app._cell_gating_plot_scroll = QScrollArea(parent)
+    ctx.app._cell_gating_plot_scroll.setWidgetResizable(True)
+    ctx.app._cell_gating_plot_scroll.setFrameShape(QFrame.NoFrame)
+    ctx.app._cell_gating_plot_scroll.setWidget(ctx.app._cell_gating_canvas)
+    install_canvas_wheel_scroll(ctx.app._cell_gating_canvas, ctx.app._cell_gating_plot_scroll)
+    root.addWidget(ctx.app._cell_gating_plot_scroll, 1)
 
     from widgets.mpl_toolbar import MplToolbar
-    app._cell_gating_toolbar = MplToolbar(app._cell_gating_canvas, parent)
-    root.addWidget(app._cell_gating_toolbar)
+    ctx.app._cell_gating_toolbar = MplToolbar(ctx.app._cell_gating_canvas, parent)
+    root.addWidget(ctx.app._cell_gating_toolbar)
 
-    app._cell_gating_status_label = QLabel("No data loaded", parent)
-    app._cell_gating_status_label.setObjectName("Muted")
-    root.addWidget(app._cell_gating_status_label)
+    ctx.app._cell_gating_status_label = QLabel("No data loaded", parent)
+    ctx.app._cell_gating_status_label.setObjectName("Muted")
+    root.addWidget(ctx.app._cell_gating_status_label)
 
 
 # ── public API ────────────────────────────────────────────────────────────

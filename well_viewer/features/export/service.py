@@ -729,6 +729,13 @@ def export_scatter_agg_data(app) -> None:
     """Export aggregate scatter plot data to CSV."""
     from well_viewer.features.scatter.controller import collect_scatter_agg_data as _scatter_collect_agg_data
 
+    # Keep the legacy stat combos in sync with the new per-axis
+    # (channel, property) state — the export reads from those.
+    try:
+        app._sync_scatter_agg_stat_combos()
+    except Exception:
+        pass
+
     try:
         stat_x = app._scatter_agg_stat_x_cb.currentText()
         stat_y = app._scatter_agg_stat_y_cb.currentText()
@@ -921,16 +928,4 @@ def export_distribution_data(app) -> None:
     except OSError as exc:
         _error(app, "Export failed", str(exc))
 
-
-def export_scatter_agg_data(app) -> None:
-    """Export aggregate scatter plot data to CSV."""
-    from well_viewer.features.export.service import export_scatter_agg_data as _export_scatter_agg_data
-    # Keep the legacy stat combos in sync with the new per-axis
-    # (channel, property) state — the export reads from those.
-    try:
-        app._sync_scatter_agg_stat_combos()
-    except Exception:
-        pass
-
-    _export_scatter_agg_data(app)
 

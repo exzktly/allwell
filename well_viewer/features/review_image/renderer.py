@@ -611,26 +611,6 @@ def apply_review_image_cursor(app) -> None:
 
 
 
-def draw_review_image(
-    app,
-    fluor_arr,
-    mask_arr,
-    include_by_nid: Dict[int, bool],
-    *,
-    fit_lut: bool = False,
-    preserve_view: bool = False,
-    boundary=None,
-    above_by_nid: Optional[Dict[int, bool]] = None,
-) -> None:
-    from well_viewer.features.review_image.renderer import draw_review_image
-    draw_review_image(
-        app, fluor_arr, mask_arr, include_by_nid,
-        fit_lut=fit_lut, preserve_view=preserve_view, boundary=boundary,
-        above_by_nid=above_by_nid,
-    )
-
-
-
 def refresh_review_image_binary_btn(app) -> None:
     btn = getattr(app, "_review_image_binary_btn", None)
     if btn is None:

@@ -56,6 +56,8 @@ import math
 from typing import Dict, List, Optional, Set, Tuple
 from well_viewer.stats_compute import compute_rep_stats
 from well_viewer.stats_compute import compute_rep_per_fov_stats
+from well_viewer.stats_compute import aggregate_well
+from well_viewer.stats_compute import aggregate_group
 
 
 CONTROL_NONE = ""
@@ -350,7 +352,7 @@ def control_pts_for_line(app, control_label: str, *, threshold: float,
     wells = resolve_control_wells(app, control_label)
     if not wells:
         return []
-    return app._aggregate_group(
+    return aggregate_group(app, 
         wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         cell_area_threshold=cell_area_threshold,
@@ -432,7 +434,7 @@ def member_mean_series(
         # only to enumerate the timepoint axis.
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = app._aggregate_well(
+            pts = aggregate_well(app, 
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 cell_area_threshold=cell_area_threshold,
@@ -456,7 +458,7 @@ def member_mean_series(
         return out
     # Bare well token.
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = app._aggregate_well(
+        pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,
@@ -601,7 +603,7 @@ def member_stats_series(
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = app._aggregate_well(
+            pts = aggregate_well(app, 
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 cell_area_threshold=cell_area_threshold,
@@ -627,7 +629,7 @@ def member_stats_series(
                 out[t] = (float(gm), spread)
         return out
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = app._aggregate_well(
+        pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,

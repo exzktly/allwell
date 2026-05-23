@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+from well_viewer.stats_compute import aggregate_well
 
 
 _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
@@ -307,7 +308,7 @@ def export_plot_data(app) -> None:
 
     rows_out = []
     for label in selected:
-        pts = app._aggregate_well(
+        pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=app._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,

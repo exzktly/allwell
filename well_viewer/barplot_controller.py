@@ -13,6 +13,8 @@ from . import fold_change as _fc
 from well_viewer.stats_compute import compute_rep_stats
 from well_viewer.stats_compute import compute_rep_per_fov_stats
 from well_viewer.stats_compute import compute_rep_n_above
+from well_viewer.stats_compute import aggregate_well
+from well_viewer.stats_compute import aggregate_group
 
 
 
@@ -251,7 +253,7 @@ def collect_bar_items(
             continue
         color = app._rank_color_well(label)
         display = app._bar_well_display_label(label)
-        pts = app._aggregate_well(
+        pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=app._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
@@ -399,7 +401,7 @@ def collect_bar_items_for_group(
 
     for i, (key, display, wells) in enumerate(members):
         color = _WELL_COLORS[i % len(_WELL_COLORS)]
-        pts = app._aggregate_group(
+        pts = aggregate_group(app, 
             wells, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,

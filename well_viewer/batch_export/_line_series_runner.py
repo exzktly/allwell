@@ -26,6 +26,8 @@ from well_viewer.batch_models import BarGroup
 from well_viewer.lineplot_controller import (
     LinePoint, LineSeries, _aggpoint_to_linepoint,
 )
+from well_viewer.stats_compute import aggregate_well
+from well_viewer.stats_compute import aggregate_group
 
 
 def collect_line_series_for_group(
@@ -83,7 +85,7 @@ def collect_line_series_for_group(
         valid_wells = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
         if not valid_wells:
             continue
-        pts = app._aggregate_group(
+        pts = aggregate_group(app, 
             valid_wells, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,
@@ -105,7 +107,7 @@ def collect_line_series_for_group(
     for w in group.solo_wells:
         if w not in app._app_state.dataset.well_paths:
             continue
-        pts = app._aggregate_well(
+        pts = aggregate_well(app, 
             w, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,

@@ -10,6 +10,7 @@ from . import fold_change as _fc
 from .barplot_controller import FC_STATE_OFF
 from well_viewer.stats_compute import compute_rep_stats
 from well_viewer.stats_compute import compute_rep_per_fov_stats
+from well_viewer.stats_compute import aggregate_well
 
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
@@ -215,7 +216,7 @@ def collect_line_series(
             all_tps: set = set()
             cdf_vals: list = []
             for lbl in valid_wells:
-                for t, *_ in app._aggregate_well(
+                for t, *_ in aggregate_well(app, 
                     lbl, threshold=threshold, use_sem=False,
                     val_col=val_col,
                     cell_area_threshold=cell_area_threshold,
@@ -272,7 +273,7 @@ def collect_line_series(
     )
     for label in ordered_selected:
         color = app._rank_color_well(label)
-        pts = app._aggregate_well(
+        pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,

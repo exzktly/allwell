@@ -27,6 +27,7 @@ from well_viewer.heatmap_models import (
     make_plate_layout,
 )
 from well_viewer.ratio_models import is_ratio_key
+from well_viewer.stats_compute import aggregate_group
 
 
 METRIC_MEAN = "Mean above threshold"
@@ -189,7 +190,7 @@ def _cell_value(
 
     if metric == METRIC_COUNT:
         # Use aggregate to apply gate logic consistently, then read n_total.
-        pts = app._aggregate_group(
+        pts = aggregate_group(app, 
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,
@@ -199,7 +200,7 @@ def _cell_value(
         return float(matched[0][5]) if matched else 0.0
 
     if metric == METRIC_FRACTION:
-        pts = app._aggregate_group(
+        pts = aggregate_group(app, 
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,
@@ -242,7 +243,7 @@ def _cell_value(
         )
 
     # METRIC_MEAN (and fallback)
-    pts = app._aggregate_group(
+    pts = aggregate_group(app, 
         valid_wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         cell_area_threshold=cell_area_threshold,

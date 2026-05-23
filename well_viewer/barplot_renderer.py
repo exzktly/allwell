@@ -35,6 +35,7 @@ from well_viewer.data_loading import (
     resolve_value_series,
 )
 from well_viewer.plot_style import apply_ax_style, tokens_for
+from well_viewer.stats_compute import aggregate_well
 
 
 NO_SELECTION_MSG = (
@@ -589,7 +590,7 @@ def draw_per_well_n_bars(
     n = len(wells)
     bar_w = min(0.6, 5.0 / max(n, 1))
     for i, lbl in enumerate(wells):
-        pts = app._aggregate_well(
+        pts = aggregate_well(app, 
             lbl, threshold=threshold, use_sem=use_sem,
             val_col=app._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,

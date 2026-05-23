@@ -10,6 +10,13 @@ imports surface, breaks the cycle.
 
 from __future__ import annotations
 
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from well_viewer.data_loading import aggregate_with_threshold_df
+
 
 def well_aggregate_stats(
     app,
@@ -317,5 +324,79 @@ def compute_group_stats(
     result = (gm, g_err_m, gf, g_err_f)
     app._app_state.stats.cache[cache_key] = result
     return result
+
+
+def aggregate_well(
+    app,
+    label: str,
+    threshold: float,
+    use_sem: bool,
+    val_col: str,
+    cell_area_threshold: float,
+    fluor_gates: Optional[Dict[str, float]] = None,
+    per_fov_spread: bool = False,
+    tp_col: str = "timepoint_hours",
+):
+    """Aggregate a single well via the vectorized DataFrame path."""
+    return aggregate_with_threshold_df(
+        app._get_rows(label),
+        threshold=threshold,
+        use_sem=use_sem,
+        tp_col=tp_col,
+        val_col=val_col,
+        cell_area_threshold=cell_area_threshold,
+        fluor_gates=fluor_gates or {},
+        per_fov_spread=per_fov_spread,
+        ratios=app._app_state.channel.ratio_index,
+    )
+
+
+def aggregate_group(
+    app,
+    wells: List[str],
+    threshold: float,
+    use_sem: bool,
+    val_col: str,
+    cell_area_threshold: float,
+    fluor_gates: Optional[Dict[str, float]] = None,
+    per_fov_spread: bool = False,
+    tp_col: str = "timepoint_hours",
+):
+    """Aggregate a list of wells via the vectorized path (concatenated when len>1)."""
+    valid = [w for w in wells if w in app._app_state.dataset.well_paths]
+    if not valid:
+        return []
+    if len(valid) == 1:
+        return app._aggregate_well(
+            valid[0], threshold=threshold, use_sem=use_sem,
+            val_col=val_col, cell_area_threshold=cell_area_threshold,
+            fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
+            tp_col=tp_col,
+        )
+    frames = []
+    for w in valid:
+        sub = app._get_rows(w)
+        if per_fov_spread and len(sub) > 0:
+            # Prefix FOV ids with the well label so identical FOV numbers
+            # across replicate wells stay distinct when pooled.
+            if "fov" in sub.columns:
+                fov_str = (sub["fov"].fillna("1").astype(str)
+                           .str.strip().replace("", "1"))
+            else:
+                fov_str = pd.Series(["1"] * len(sub), index=sub.index)
+            sub = sub.assign(fov=(w + "::" + fov_str).to_numpy())
+        frames.append(sub)
+    df = pd.concat(frames, ignore_index=True)
+    return aggregate_with_threshold_df(
+        df,
+        threshold=threshold,
+        use_sem=use_sem,
+        tp_col=tp_col,
+        val_col=val_col,
+        cell_area_threshold=cell_area_threshold,
+        fluor_gates=fluor_gates or {},
+        per_fov_spread=per_fov_spread,
+        ratios=app._app_state.channel.ratio_index,
+    )
 
 

@@ -2126,77 +2126,7 @@ class WellViewerApp(QWidget):
             self._app_state.dataset.cache[label] = load_well_csv(self._app_state.dataset.well_paths[label])
         return self._app_state.dataset.cache[label]
 
-    def _aggregate_well(
-        self,
-        label: str,
-        threshold: float,
-        use_sem: bool,
-        val_col: str,
-        cell_area_threshold: float,
-        fluor_gates: Optional[Dict[str, float]] = None,
-        per_fov_spread: bool = False,
-        tp_col: str = "timepoint_hours",
-    ):
-        """Aggregate a single well via the vectorized DataFrame path."""
-        return aggregate_with_threshold_df(
-            self._get_rows(label),
-            threshold=threshold,
-            use_sem=use_sem,
-            tp_col=tp_col,
-            val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
-            fluor_gates=fluor_gates or {},
-            per_fov_spread=per_fov_spread,
-            ratios=self._app_state.channel.ratio_index,
-        )
 
-    def _aggregate_group(
-        self,
-        wells: List[str],
-        threshold: float,
-        use_sem: bool,
-        val_col: str,
-        cell_area_threshold: float,
-        fluor_gates: Optional[Dict[str, float]] = None,
-        per_fov_spread: bool = False,
-        tp_col: str = "timepoint_hours",
-    ):
-        """Aggregate a list of wells via the vectorized path (concatenated when len>1)."""
-        valid = [w for w in wells if w in self._app_state.dataset.well_paths]
-        if not valid:
-            return []
-        if len(valid) == 1:
-            return self._aggregate_well(
-                valid[0], threshold=threshold, use_sem=use_sem,
-                val_col=val_col, cell_area_threshold=cell_area_threshold,
-                fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
-                tp_col=tp_col,
-            )
-        frames = []
-        for w in valid:
-            sub = self._get_rows(w)
-            if per_fov_spread and len(sub) > 0:
-                # Prefix FOV ids with the well label so identical FOV numbers
-                # across replicate wells stay distinct when pooled.
-                if "fov" in sub.columns:
-                    fov_str = (sub["fov"].fillna("1").astype(str)
-                               .str.strip().replace("", "1"))
-                else:
-                    fov_str = pd.Series(["1"] * len(sub), index=sub.index)
-                sub = sub.assign(fov=(w + "::" + fov_str).to_numpy())
-            frames.append(sub)
-        df = pd.concat(frames, ignore_index=True)
-        return aggregate_with_threshold_df(
-            df,
-            threshold=threshold,
-            use_sem=use_sem,
-            tp_col=tp_col,
-            val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
-            fluor_gates=fluor_gates or {},
-            per_fov_spread=per_fov_spread,
-            ratios=self._app_state.channel.ratio_index,
-        )
 
     # ── Preview panel ─────────────────────────────────────────────────────────
 
@@ -3479,53 +3409,6 @@ class WellViewerApp(QWidget):
             self, target_t, fc_state=fc_state, miss_sink=miss_sink,
         )
 
-    def _render_bar_figure(self, target_t: float, tp_str: str) -> "Figure":
-        """
-        Render a standalone bar figure for *target_t* (not embedded in the UI).
-        Mirrors _redraw_bars drawing logic onto an off-screen Figure.
-        """
-        from matplotlib.figure import Figure as _Figure
-
-        use_sem   = self._app_state.plot.use_sem
-        band_lbl  = "SEM" if use_sem else "SD"
-        threshold = self._get_thresh_frac_on(self._app_state.channel.active_channel)
-
-        fig = _Figure(figsize=(8, 10), dpi=300, facecolor=PLOT_BG)
-        ax_mean = fig.add_subplot(3, 1, 1)
-        ax_frac = fig.add_subplot(3, 1, 2)
-        ax_n = fig.add_subplot(3, 1, 3)
-        fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.10, left=0.13, right=0.97)
-
-        _ch = self._app_state.channel.active_channel.upper()
-        apply_ax_style(ax_mean, f"Mean {_ch} (above threshold) ± {band_lbl}  —  t = {tp_str} h",
-                       f"Mean {_ch}")
-        apply_ax_style(ax_frac, f"Fraction above threshold  —  t = {tp_str} h", "Fraction")
-        if self._use_fov_spread_active():
-            apply_ax_style(
-                ax_n,
-                f"Mean events above threshold per FOV ± {band_lbl}  —  t = {tp_str} h",
-                "N(above)/FOV",
-            )
-        else:
-            apply_ax_style(ax_n, f"Events above threshold (N)  —  t = {tp_str} h", "N(above)")
-        ax_frac.set_ylim(-0.05, 1.05)
-
-        use_groups, items, _ = self._collect_bar_items(target_t)
-        _bar_render_items(
-            ax_mean=ax_mean,
-            ax_frac=ax_frac,
-            ax_n=ax_n,
-            use_groups=use_groups,
-            items=items,
-            threshold=threshold,
-            warn_color=WARN,
-            border_color=BORDER,
-            placeholder_color=CLR_PLACEHOLDER,
-            disabled_well_color=CLR_MUTED_DISABLED,
-            err_bar_color=CLR_ERR_BAR,
-        )
-        self._apply_bar_ylims(ax_mean, ax_frac, ax_n=ax_n)
-        return fig
 
 
 

@@ -279,8 +279,11 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             cur_ls = ln.get_linestyle()
             cur_mk = ln.get_marker()
             scatter_only = (
-                cur_ls in ("None", "none", "", " ") and
-                cur_mk not in ("None", "none", "", None)
+                getattr(ln, "_scatter_only_artist", False)
+                or (
+                    cur_ls in ("None", "none", "", " ") and
+                    cur_mk not in ("None", "none", "", None)
+                )
             )
             if line_style and line_style != "keep" and not scatter_only:
                 ln.set_linestyle(line_style if line_style != "none" else "None")

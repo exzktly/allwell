@@ -330,6 +330,9 @@ def redraw_scatter(
                 markersize=6,
                 markeredgecolor='none',
             )
+            # Tag as scatter-only so the export-style hook never overrides
+            # the markers-only linestyle with a connecting line.
+            line._scatter_only_artist = True
             # matplotlib forwards ``gid`` to the SVG ``id`` attribute on
             # the artist's enclosing <g>. Tag every well's <g> with a
             # stable, human-readable id so Illustrator's layer / selection
@@ -696,7 +699,7 @@ def redraw_scatter_agg(
             y_err_seq = data.get('y_err') or []
             xerr = x_err_seq if any(_finite_positive(e) for e in x_err_seq) else None
             yerr = y_err_seq if any(_finite_positive(e) for e in y_err_seq) else None
-            app._ax_scatter_agg.errorbar(
+            container = app._ax_scatter_agg.errorbar(
                 data['x'],
                 data['y'],
                 xerr=xerr,
@@ -710,6 +713,12 @@ def redraw_scatter_agg(
                 capthick=1.5,
                 alpha=0.7,
             )
+            # Tag the data line so the export-style hook can't add a
+            # connecting line between aggregate points.
+            try:
+                container.lines[0]._scatter_only_artist = True
+            except Exception:
+                pass
 
         # Format axes
         app._ax_scatter_agg.set_xlabel(stat_x)

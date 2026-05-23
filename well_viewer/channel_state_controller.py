@@ -116,8 +116,14 @@ def recalculate_threshold(app) -> None:
             _logger.exception("Heatmap timepoint refresh failed")
     if hasattr(app, "_scatter_ch_x_cb"):
         try:
-            from well_viewer.scatter_controller import update_scatter_menus
+            from well_viewer.scatter_controller import (
+                update_scatter_menus,
+                redraw_scatter_orchestrate,
+                redraw_scatter_agg_orchestrate,
+            )
             update_scatter_menus(app)
+            redraw_scatter_orchestrate(app)
+            redraw_scatter_agg_orchestrate(app)
         except Exception:
             _logger.exception("Scatter menu refresh failed")
 

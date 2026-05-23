@@ -806,7 +806,7 @@ def redraw_scatter_orchestrate(app) -> None:
     col_x = app._col_for_scatter_axis(ch_x_entry, metric_x)
     col_y = app._col_for_scatter_axis(ch_y_entry, metric_y)
 
-    from ui.theme import WELL_COLORS
+    from well_viewer.plate_layout import WELL_COLORS
     redraw_scatter(
         app,
         col_x,
@@ -956,7 +956,7 @@ def redraw_scatter_agg_orchestrate(app) -> None:
     except (ValueError, AttributeError):
         return
 
-    from ui.theme import WELL_COLORS
+    from well_viewer.plate_layout import WELL_COLORS
     redraw_scatter_agg(
         app,
         stat_x,

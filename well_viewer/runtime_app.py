@@ -2496,42 +2496,8 @@ class WellViewerApp(QWidget):
     # selection onto the widget, and the handlers below take user actions back.
 
     def _on_sidebar_plate_selection_changed(self, ids) -> None:
-        # Fires per-cell during a drag and once for a click; also fires when
-        # ``_refresh_sidebar_map_now`` calls ``setSelectedWellIds`` /
-        # ``setEnabledWells`` (those corrections converge harmlessly).
-        #
-        # Sample Definitions exception: even when groups exist (rep-set mode),
-        # this tab needs per-well selection so Add Prefix / Add Suffix can act
-        # on user-chosen wells. We let the click through and update
-        # ``_selected_wells`` normally; ``_refresh_sidebar_map_now`` mirrors the
-        # same exception so the painted selection doesn't get wiped on the next
-        # refresh tick. Review CSV gets the same exception so the user can pick
-        # which wells' rows to load even when groups are defined.
-        try:
-            tab_name = self._current_centre_tab()
-        except Exception:
-            tab_name = ""
-        per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        if self._app_state.selection.selections and not per_well_tab:
-            return  # rep-set mode: the plate is passive; its selection is unused
-        # Keep the invariant ``_selected_wells ⊆ _well_paths`` — downstream
-        # code (e.g. redraw_line_plots → _get_rows) assumes it.
-        new_set = {w for w in ids if w in self._app_state.dataset.well_paths}
-        if new_set == self._app_state.selection.selected_wells:
-            return
-        self._app_state.selection.selected_wells = new_set
-        self._refresh_sidebar_map()
-        # Coalesce the commit. A drag through 96 cells fires this handler
-        # 96 times in one event-loop tick; without coalescing each one
-        # triggered a full bar/scatter/line redraw and an export-style
-        # reapply (architecture §9.2 documents the paint-vs-commit split).
-        # The deferred call fires once at the end of the tick — and
-        # `_on_sidebar_plate_drag_finished` already commits at drag end
-        # too, so this matters mostly for single-click mode (smFISH /
-        # Segmentation tabs) where no drag_finished signal fires.
-        if not self._app_state.selection.plate_commit_pending:
-            self._app_state.selection.plate_commit_pending = True
-            QTimer.singleShot(0, self._plate_commit_deferred)
+        from well_viewer.selection_controller import on_sidebar_plate_selection_changed
+        on_sidebar_plate_selection_changed(self, ids)
 
     def _plate_commit_deferred(self) -> None:
         """Run the deferred commit scheduled by a paint event. No-op if
@@ -2564,85 +2530,28 @@ class WellViewerApp(QWidget):
             self._on_plate_sel_change()
 
     def _on_sidebar_plate_drag_finished(self) -> None:
-        try:
-            tab_name = self._current_centre_tab()
-        except Exception:
-            tab_name = ""
-        per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
-        if self._app_state.selection.selections and not per_well_tab:
-            return
-        # Cancel any pending deferred commit from the paint events that
-        # led here — we're committing right now.
-        self._app_state.selection.plate_commit_pending = False
-        self._on_plate_sel_change()
+        from well_viewer.selection_controller import on_sidebar_plate_drag_finished
+        on_sidebar_plate_drag_finished(self)
 
     _PLOTTING_TABS = frozenset({
         "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
     })
 
     def _on_sidebar_plate_well_activated(self, well_id: str) -> None:
-        # On a plotting tab, a single click on a well "activates" that well
-        # and (if it belongs to a saved group) every other well in the same
-        # group — ``_selected_wells`` is rewritten to the group's wells so
-        # the plate's three-state painter promotes those wells to the raised
-        # + bright (``_paint_lit``) look and the plot refocuses. Other groups
-        # stay in the recessed-with-tint state.
-        if well_id not in self._app_state.dataset.well_paths:
-            return
-        try:
-            tab = self._current_centre_tab()
-        except Exception:
-            tab = ""
-        if tab in self._PLOTTING_TABS:
-            # Click a group's well → toggle that group's visibility.
-            # Click a solo well → toggle its membership in
-            # ``_active_solo_wells``. Either path leaves every other
-            # group's active state untouched.
-            sid = self._sel_id_for_well(well_id)
-            if sid is not None:
-                self._sel_toggle_hidden(sid)
-                return
-            if not True:
-                self._app_state.selection.active_solo_wells = set()
-            if well_id in self._app_state.selection.active_solo_wells:
-                self._app_state.selection.active_solo_wells.discard(well_id)
-            else:
-                self._app_state.selection.active_solo_wells.add(well_id)
-            self._refresh_sidebar_map()
-            self._on_plate_sel_change()
-            return
-        # Legacy fallback for non-plotting tabs that still receive
-        # wellActivated in rep-set mode (Image Table / smFISH / etc):
-        # toggle the clicked group's visibility.
-        if not self._app_state.selection.selections:
-            return
-        sid = self._sel_id_for_well(well_id)
-        if sid is None:
-            return
-        self._sel_toggle_hidden(sid)
+        from well_viewer.selection_controller import on_sidebar_plate_well_activated
+        on_sidebar_plate_well_activated(self, well_id)
 
     def _on_sidebar_plate_row_activated(self, row: str) -> None:
-        if self._app_state.selection.selections:
-            self._select_row(row)            # rep-set-aware toggle + refresh
-        else:
-            # The widget already toggled the row and synced ``_selected_wells``
-            # via the preceding ``selectionChanged``; do the heavy refresh once.
-            self._on_plate_sel_change()
+        from well_viewer.selection_controller import on_sidebar_plate_row_activated
+        on_sidebar_plate_row_activated(self, row)
 
     def _on_sidebar_plate_col_activated(self, col: str) -> None:
-        if self._app_state.selection.selections:
-            self._select_col(col)
-        else:
-            self._on_plate_sel_change()
+        from well_viewer.selection_controller import on_sidebar_plate_col_activated
+        on_sidebar_plate_col_activated(self, col)
 
     def _on_sidebar_plate_well_dropped(self, well_id: str, token: str) -> None:
-        if not token:
-            return
-        try:
-            from well_viewer.views.heatmap_layout_sidebar_view import _on_drop_event
-            _on_drop_event(self, "palette", None, token)
-        except Exception:
-            _logger.exception("Heat map well drop handling failed")
+        from well_viewer.selection_controller import on_sidebar_plate_well_dropped
+        on_sidebar_plate_well_dropped(self, well_id, token)
 
     def _on_plate_sel_change(self) -> None:
         from well_viewer.selection_controller import on_plate_sel_change as _on_plate_sel_change

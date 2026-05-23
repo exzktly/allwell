@@ -42,7 +42,9 @@ _HARD_FAIL = True
 # _redraw_scatter_agg bodies into scatter_controller, _on_fig_click into lineplot_controller.
 # Phase 9 (Review-image) moved 6 _on_review_image_* handler bodies into
 # review_image_controller (wheel / press / drag / release / move / hover).
-RUNTIME_APP_LINE_BUDGET = 5585
+# Phase 9 (Selection) moved 6 _on_sidebar_plate_* handler bodies into
+# selection_controller.
+RUNTIME_APP_LINE_BUDGET = 5494
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 RUNTIME_APP_ATTR_BUDGET = 74

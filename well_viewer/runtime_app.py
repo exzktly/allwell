@@ -809,58 +809,12 @@ class WellViewerApp(QWidget):
         stats_sync_from_app(self)
 
     def _stats_on_test_change(self) -> None:
-        """Clear results when test changes; update UI hints."""
-        self._stats_write_result("")
-        # Keep the stats Property combo in sync with the channel (ratio
-        # channels collapse the metric set to ``Calculated Val``).
-        try:
-            self._refresh_stats_property_combo()
-        except Exception:
-            pass
+        from well_viewer.stats_controller import stats_on_test_change
+        stats_on_test_change(self)
 
     def _stats_update_tp_menu(self) -> None:
-        """Populate the timepoint, channel, and statistic dropdowns."""
-        all_tps: set = set()
-        for label in self._app_state.dataset.well_paths:
-            df = self._get_rows(label)
-            if df is None or "timepoint_hours" not in df.columns:
-                continue
-            tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").dropna().unique()
-            all_tps.update(float(t) for t in tp)
-        sorted_tps = sorted(all_tps)
-        tp_strs    = [f"{t:.4g}" for t in sorted_tps]
-        _set_combo_values(self._stats_tp_cb, tp_strs or ["—"])
-        if hasattr(self._stats_tp_cb, "setCurrentText"):
-            self._stats_tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
-
-        # Channel dropdown — list every measurement column so the user can pick
-        # any value to compare. Mirrors the scatter-tab dropdown construction
-        # so labels and the _col_for_scatter_entry mapping are reused.
-        channels = list(self._app_state.channel.fluor_channels) if self._app_state.channel.fluor_channels else []
-        ch_options: List[str] = []
-        for ch in channels:
-            ch_options.append(ch)
-            if ch in self._app_state.channel.smfish_channels:
-                ch_options.append(f"{ch} (spots)")
-        ch_options.extend(self._ratio_dropdown_labels())
-        if not ch_options:
-            ch_options = ["—"]
-        if hasattr(self, "_stats_channel_cb") and self._stats_channel_cb is not None:
-            current_ch = self._stats_channel_cb.currentText()
-            _set_combo_values(self._stats_channel_cb, ch_options)
-            if current_ch in ch_options:
-                self._stats_channel_cb.setCurrentText(current_ch)
-            else:
-                # Default to the active channel when possible to match the
-                # bar/line plots' current selection.
-                active = self._app_state.channel.active_channel if self._app_state.channel.active_channel in ch_options else ch_options[0]
-                self._stats_channel_cb.setCurrentText(active)
-        # Channel may now resolve to a ratio key — refresh the Property
-        # combo's item set accordingly.
-        try:
-            self._refresh_stats_property_combo()
-        except Exception:
-            pass
+        from well_viewer.stats_controller import stats_update_tp_menu
+        stats_update_tp_menu(self)
 
     def _stats_write_result(self, text: str) -> None:
         self._stats_result_text.setReadOnly(False)
@@ -868,17 +822,8 @@ class WellViewerApp(QWidget):
         self._stats_result_text.setReadOnly(True)
 
     def _stats_refresh_colors(self) -> None:
-        """Refresh matplotlib figure facecolor on theme change.
-
-        Widget colours are driven by the app-level QSS stylesheet; only the
-        embedded matplotlib figure needs an explicit repaint.
-        """
-        from ui.theme import get_color
-
-        if hasattr(self, "_stats_fig"):
-            self._stats_fig.set_facecolor(get_color("BG_APP"))
-        if hasattr(self, "_stats_canvas_widget"):
-            self._stats_canvas_widget.draw()
+        from well_viewer.stats_controller import stats_refresh_colors
+        stats_refresh_colors(self)
 
     def _stats_collect_group_values(
         self, grp: BarGroup, target_t: float
@@ -2730,21 +2675,8 @@ class WellViewerApp(QWidget):
             )
 
     def _on_review_image_channel_selected(self, _e=None) -> None:
-        """Channel-switch handler that preserves Review Image zoom/pan view."""
-        if _debug_flags.review_image_channel_switch_debug_enabled():
-            _logger.debug("[RI-CHSW step 1] Review Image channel ComboboxSelected event received")
-        selected_ui_value = ""
-        if getattr(self, "_review_image_chan_cb", None) is not None:
-            selected_ui_value = str(self._review_image_chan_cb.currentText() or "").strip()
-        if not selected_ui_value and hasattr(self, "_review_image_chan_var"):
-            selected_ui_value = self._review_image_chan_var.currentText()
-        if _debug_flags.review_image_channel_switch_debug_enabled():
-            _logger.debug(
-                "[RI-CHSW step 2] review_image_channel_selected ui_value=%r active_before=%r",
-                selected_ui_value,
-                self._app_state.channel.active_image_channel,
-            )
-        self._set_active_image_channel(selected_ui_value.lower(), preserve_review_view=True)
+        from well_viewer.review_image_controller import on_review_image_channel_selected
+        on_review_image_channel_selected(self, _e)
 
     def _on_plot_channel_selected(self, source=None) -> None:
         """Channel-switch handler for line/bar/distribution/heatmap plot tabs.

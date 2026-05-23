@@ -44,7 +44,9 @@ _HARD_FAIL = True
 # review_image_controller (wheel / press / drag / release / move / hover).
 # Phase 9 (Selection) moved 6 _on_sidebar_plate_* handler bodies into
 # selection_controller.
-RUNTIME_APP_LINE_BUDGET = 5494
+# Phase 9 (Stats/RI-channel) moved _stats_on_test_change, _stats_update_tp_menu,
+# _stats_refresh_colors, _on_review_image_channel_selected.
+RUNTIME_APP_LINE_BUDGET = 5426
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 RUNTIME_APP_ATTR_BUDGET = 74

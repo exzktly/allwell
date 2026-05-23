@@ -546,3 +546,75 @@ def stats_grp_clear_all(app) -> None:
 def stats_sync_from_app(app) -> None:
     app._app_state.stats.set_groups(_copy.deepcopy(app._groups_from_rep_sets()))
     stats_refresh_group_list(app)
+
+
+def stats_on_test_change(app) -> None:
+    """Clear results when test changes; update UI hints."""
+    app._stats_write_result("")
+    # Keep the stats Property combo in sync with the channel (ratio
+    # channels collapse the metric set to "Calculated Val").
+    try:
+        app._refresh_stats_property_combo()
+    except Exception:
+        pass
+
+
+def stats_update_tp_menu(app) -> None:
+    """Populate the timepoint, channel, and statistic dropdowns."""
+    from well_viewer.ui_helpers import set_combo_values
+
+    all_tps: set = set()
+    for label in app._app_state.dataset.well_paths:
+        df = app._get_rows(label)
+        if df is None or "timepoint_hours" not in df.columns:
+            continue
+        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").dropna().unique()
+        all_tps.update(float(t) for t in tp)
+    sorted_tps = sorted(all_tps)
+    tp_strs = [f"{t:.4g}" for t in sorted_tps]
+    set_combo_values(app._stats_tp_cb, tp_strs or ["—"])
+    if hasattr(app._stats_tp_cb, "setCurrentText"):
+        app._stats_tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
+
+    # Channel dropdown -- list every measurement column so the user can
+    # pick any value to compare. Mirrors the scatter-tab dropdown so the
+    # _col_for_scatter_entry mapping is reused.
+    channels = list(app._app_state.channel.fluor_channels) if app._app_state.channel.fluor_channels else []
+    ch_options: List[str] = []
+    for ch in channels:
+        ch_options.append(ch)
+        if ch in app._app_state.channel.smfish_channels:
+            ch_options.append(f"{ch} (spots)")
+    ch_options.extend(app._ratio_dropdown_labels())
+    if not ch_options:
+        ch_options = ["—"]
+    if hasattr(app, "_stats_channel_cb") and app._stats_channel_cb is not None:
+        current_ch = app._stats_channel_cb.currentText()
+        set_combo_values(app._stats_channel_cb, ch_options)
+        if current_ch in ch_options:
+            app._stats_channel_cb.setCurrentText(current_ch)
+        else:
+            # Default to the active channel when possible to match the
+            # bar/line plots' current selection.
+            active = app._app_state.channel.active_channel if app._app_state.channel.active_channel in ch_options else ch_options[0]
+            app._stats_channel_cb.setCurrentText(active)
+    # Channel may now resolve to a ratio key -- refresh the Property
+    # combo's item set accordingly.
+    try:
+        app._refresh_stats_property_combo()
+    except Exception:
+        pass
+
+
+def stats_refresh_colors(app) -> None:
+    """Refresh matplotlib figure facecolor on theme change.
+
+    Widget colours are driven by the app-level QSS stylesheet; only the
+    embedded matplotlib figure needs an explicit repaint.
+    """
+    from ui.theme import get_color
+
+    if hasattr(app, "_stats_fig"):
+        app._stats_fig.set_facecolor(get_color("BG_APP"))
+    if hasattr(app, "_stats_canvas_widget"):
+        app._stats_canvas_widget.draw()

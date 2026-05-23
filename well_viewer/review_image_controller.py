@@ -425,3 +425,24 @@ def on_review_image_hover(app, event) -> None:
         f"{app._app_state.channel.active_image_channel.upper()}",
         label=app._review_image_label,
     )
+
+
+def on_review_image_channel_selected(app, _e=None) -> None:
+    """Channel-switch handler that preserves Review Image zoom/pan view."""
+    import logging
+    from well_viewer import debug_flags as _debug_flags
+    logger = logging.getLogger(__name__)
+    if _debug_flags.review_image_channel_switch_debug_enabled():
+        logger.debug("[RI-CHSW step 1] Review Image channel ComboboxSelected event received")
+    selected_ui_value = ""
+    if getattr(app, "_review_image_chan_cb", None) is not None:
+        selected_ui_value = str(app._review_image_chan_cb.currentText() or "").strip()
+    if not selected_ui_value and hasattr(app, "_review_image_chan_var"):
+        selected_ui_value = app._review_image_chan_var.currentText()
+    if _debug_flags.review_image_channel_switch_debug_enabled():
+        logger.debug(
+            "[RI-CHSW step 2] review_image_channel_selected ui_value=%r active_before=%r",
+            selected_ui_value,
+            app._app_state.channel.active_image_channel,
+        )
+    app._set_active_image_channel(selected_ui_value.lower(), preserve_review_view=True)

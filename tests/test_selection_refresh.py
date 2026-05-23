@@ -62,20 +62,26 @@ def test_on_plate_sel_change_triggers_refresh(loaded_app):
 
 # ── Per-tab dispatch branches ────────────────────────────────────────────────
 
-def test_bar_plots_branch_redraws_bars(loaded_app):
+def test_bar_plots_branch_redraws_bars(loaded_app, monkeypatch):
+    calls = {"bars": 0, "redraw": 0}
+    monkeypatch.setattr("well_viewer.selection_controller.redraw_bars",
+                        lambda app: calls.__setitem__("bars", calls["bars"] + 1))
+    counter = _CallCounter(loaded_app, ["_redraw"])
     _show_plotting_tab(loaded_app, "Bar Plots")
-    counter = _CallCounter(loaded_app, ["_redraw", "_redraw_bars"])
     select_none(loaded_app)
-    assert counter.counts["_redraw_bars"] == 1
+    assert calls["bars"] == 1
     assert counter.counts["_redraw"] == 0
 
 
-def test_line_graphs_branch_redraws_line(loaded_app):
+def test_line_graphs_branch_redraws_line(loaded_app, monkeypatch):
+    calls = {"bars": 0}
+    monkeypatch.setattr("well_viewer.selection_controller.redraw_bars",
+                        lambda app: calls.__setitem__("bars", calls["bars"] + 1))
     _show_plotting_tab(loaded_app, "Line Graphs")
-    counter = _CallCounter(loaded_app, ["_redraw", "_redraw_bars"])
+    counter = _CallCounter(loaded_app, ["_redraw"])
     select_all(loaded_app)
     assert counter.counts["_redraw"] == 1
-    assert counter.counts["_redraw_bars"] == 0
+    assert calls["bars"] == 0
 
 
 def test_review_csv_branch_refreshes_csv(loaded_app):

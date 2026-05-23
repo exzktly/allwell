@@ -1,9 +1,21 @@
 """Controller helpers for Review Image <-> Review CSV interactions."""
 
 from __future__ import annotations
+
+from typing import List, Optional
+
+import logging
+
+from PySide6.QtWidgets import QTableWidgetItem
+
 from well_viewer.review_image_renderer import refresh_review_image
 from well_viewer.review_image_renderer import update_preview
 from well_viewer.channel_state_controller import set_active_image_channel
+from well_viewer.ui_helpers import set_combo_values as _set_combo_values
+from well_viewer.data_loading import parse_timepoint_hours
+
+_logger = logging.getLogger(__name__)
+
 
 
 def _select_tab_by_text(notebook, text: str) -> None:
@@ -851,4 +863,155 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
             except (TypeError, ValueError):
                 return 1 if str(val).strip() == "1" else 0
         df.loc[mask, "Included"] = override_for_row[mask].map(_coerce).astype(int)
+
+
+
+def refresh_review_csv(app) -> None:
+    if not hasattr(app, "_review_csv_table"):
+        return
+    sels = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
+    # When the user has no explicit picks but rep-sets exist, fall back
+    # to every well in the active groups so the table populates on first
+    # visit. Previously this path took the "Select one or more wells"
+    # branch and left Review CSV empty whenever groups were defined.
+    if not sels and app._app_state.selection.selections:
+        seen: set = set()
+        for rset in app._rep_sets_active():
+            for w in rset.wells:
+                if w in app._app_state.dataset.well_paths and w not in seen:
+                    seen.add(w)
+        sels = sorted(seen, key=app._parse_rc)
+    if not sels:
+        app._review_well_lbl.setText("(select well(s))")
+        _set_combo_values(app._review_fov_cb, [])
+        _set_combo_values(app._review_tp_cb, [])
+        app._review_fov_cb.setCurrentText("")
+        app._review_tp_cb.setCurrentText("")
+        app._refresh_review_csv_rows([])
+        app._review_csv_msg_lbl.setText("Select one or more wells in the picker.")
+        return
+
+    app._review_well_lbl.setText(
+        ", ".join(sels[:3]) + (f" (+{len(sels) - 3} more)" if len(sels) > 3 else "")
+    )
+    rows: List[dict] = []
+    for label in sels:
+        rows.extend(app._review_load_rows(label))
+    if not rows:
+        _set_combo_values(app._review_fov_cb, [])
+        _set_combo_values(app._review_tp_cb, [])
+        app._review_fov_cb.setCurrentText("")
+        app._review_tp_cb.setCurrentText("")
+        app._refresh_review_csv_rows([])
+        app._review_csv_msg_lbl.setText("No CSV rows loaded for selected well(s).")
+        return
+
+    fovs = sorted({
+        str(r.get("fov", r.get("FOV", ""))).strip()
+        for r in rows
+        if str(r.get("fov", r.get("FOV", ""))).strip()
+    })
+    tps: list[str] = []
+    seen_tps: set[str] = set()
+    for row in rows:
+        raw_tp = str(row.get("timepoint", row.get("tp", row.get("time", "")))).strip()
+        norm_tp = app._norm_timepoint(raw_tp)
+        if not norm_tp or norm_tp in seen_tps:
+            continue
+        seen_tps.add(norm_tp)
+        tps.append(norm_tp)
+    tps.sort(key=lambda tp: (parse_timepoint_hours(tp) is None, parse_timepoint_hours(tp) or 0.0, tp))
+    _set_combo_values(app._review_fov_cb, fovs)
+    _set_combo_values(app._review_tp_cb, tps)
+    if fovs and app._review_fov_cb.currentText() not in fovs:
+        app._review_fov_cb.setCurrentText(fovs[0])
+    if tps and app._review_tp_cb.currentText() not in tps:
+        app._review_tp_cb.setCurrentText(tps[0])
+    app._refresh_review_csv_rows(rows)
+
+
+
+def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
+    if not hasattr(app, "_review_csv_table"):
+        return
+    table = app._review_csv_table
+    table.setRowCount(0)
+
+    if rows is None:
+        sels = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
+        rows = []
+        for label in sels:
+            rows.extend(app._review_load_rows(label))
+
+    def _norm(v: object) -> str:
+        s = str(v or "").strip()
+        if not s:
+            return ""
+        try:
+            return f"{float(s):g}"
+        except Exception:
+            return s
+
+    fov_sel = _norm(app._review_fov_cb.currentText()) if hasattr(app, "_review_fov_cb") else ""
+    tp_sel = app._norm_timepoint(app._review_tp_cb.currentText()) if hasattr(app, "_review_tp_cb") else ""
+    filtered = []
+    for row in rows:
+        row_fov = _norm(row.get("fov", row.get("FOV", "")))
+        row_tp = app._norm_timepoint(row.get("timepoint", row.get("tp", row.get("time", ""))))
+        if fov_sel and row_fov != fov_sel:
+            continue
+        if tp_sel and row_tp != tp_sel:
+            continue
+        filtered.append(row)
+
+    if not filtered:
+        _logger.warning(
+            "No Review CSV rows matched filters: selected_wells=%s fov=%s tp=%s total_rows=%d",
+            sorted(app._app_state.selection.selected_wells, key=app._parse_rc),
+            fov_sel, tp_sel, len(rows),
+        )
+        if not rows:
+            table.setColumnCount(0)
+            app._review_csv_msg_lbl.setText("No rows are available for the selected well(s).")
+            return
+        # Fallback: if the filters are mismatched for any reason, still
+        # show all loaded rows from selected well(s) instead of an empty table.
+        filtered = list(rows)
+        app._review_csv_msg_lbl.setText(
+            "No exact Well/FOV/Timepoint match. Showing all selected rows instead."
+        )
+        ctx = getattr(app, "_review_csv_lookup_context", {}) or {}
+        ctx_txt = (
+            f" well={ctx.get('well','')} fov={ctx.get('fov','')} tp={ctx.get('tp','')} nucleus_id={ctx.get('nucleus_id','')}"
+            if ctx else ""
+        )
+        app._set_status(
+            f"Review CSV fallback active: no exact match for FOV={fov_sel}, TP={tp_sel}; showing {len(filtered)} row(s).{ctx_txt}"
+        )
+
+    cols = list(filtered[0].keys())
+    table.setColumnCount(len(cols))
+    table.setHorizontalHeaderLabels(cols)
+    for ci in range(len(cols)):
+        table.setColumnWidth(ci, 120)
+    # Rows are now references into the per-well row caches (no deep copy),
+    # so row['Included'] reflects the gating-computed value, not any user
+    # override applied via the Review Image tab. Compute the effective
+    # value at display time so the table mirrors what the image overlay
+    # shows.
+    try:
+        included_col = cols.index("Included")
+    except ValueError:
+        included_col = -1
+    for row in filtered:
+        r = table.rowCount()
+        table.insertRow(r)
+        well_label = str(row.get("well", "") or "")
+        for ci, c in enumerate(cols):
+            if ci == included_col and well_label:
+                value = app._review_effective_included(well_label, row)
+            else:
+                value = row.get(c, "")
+            table.setItem(r, ci, QTableWidgetItem(str(value)))
+    app._review_csv_msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
 

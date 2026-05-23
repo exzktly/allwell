@@ -12,6 +12,7 @@ import pandas as pd
 from . import debug_flags
 from .data_loading import df_included_mask, resolve_value_series
 from well_viewer.stats_compute import well_aggregate_stats
+from well_viewer.ui_helpers import set_combo_values as _set_combo_values
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 

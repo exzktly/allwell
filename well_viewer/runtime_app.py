@@ -376,6 +376,21 @@ from well_viewer.views.image_panel_view import _ImagePanel
 # =============================================================================
 
 from well_viewer.views.status_view import _GUILogHandler
+from well_viewer.barplot_renderer import redraw_bars
+from well_viewer.grouping_controller import rep_quick_pairs
+from well_viewer.montage_controller import on_montage_fluor_motion
+from well_viewer.montage_controller import on_montage_shift_wheel
+from well_viewer.montage_controller import on_montage_wheel
+from well_viewer.review_image_renderer import refresh_review_image
+from well_viewer.review_image_renderer import update_preview
+from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
+from well_viewer.scatter_controller import redraw_scatter_orchestrate
+from well_viewer.selection_controller import on_plate_sel_change
+from well_viewer.stats_controller import stats_refresh_colors
+from well_viewer.stats_controller import stats_refresh_map
+from well_viewer.ui_helpers import refresh_plot_empty_states
+from well_viewer.views.grouping_view import rep_panel_refresh
+from well_viewer.views.label_grid_view import label_grid_refresh
 
 class WellViewerApp(QWidget):
 
@@ -711,11 +726,8 @@ class WellViewerApp(QWidget):
 
 
     def _stats_refresh_single_btn(self, tok: str) -> None:
-        self._stats_refresh_map()
-
-    def _stats_refresh_map(self) -> None:
-        from well_viewer.stats_controller import stats_refresh_map
         stats_refresh_map(self)
+
 
 
 
@@ -737,9 +749,6 @@ class WellViewerApp(QWidget):
         self._stats_result_text.setPlainText(text or "")
         self._stats_result_text.setReadOnly(True)
 
-    def _stats_refresh_colors(self) -> None:
-        from well_viewer.stats_controller import stats_refresh_colors
-        stats_refresh_colors(self)
 
     def _stats_collect_group_values(
         self, grp: BarGroup, target_t: float
@@ -827,41 +836,17 @@ class WellViewerApp(QWidget):
 
     # ── Image Table tab ───────────────────────────────────────────────────────
 
-    def _image_table_refresh_picker(self) -> None:
-        _it_refresh_picker(self)
 
-    def _image_table_select_all(self) -> None:
-        _it_select_all(self)
 
-    def _image_table_clear_active(self) -> None:
-        _it_clear_active(self)
 
-    def _image_table_repopulate_dropdowns(self) -> None:
-        _it_repopulate_dropdowns(self)
 
-    def _image_table_apply_dimensions(self) -> None:
-        _it_apply_dimensions(self)
 
-    def _image_table_rebuild_grid(self) -> None:
-        _it_rebuild_grid(self)
 
-    def _image_table_apply_global(self, field: str) -> None:
-        _it_apply_global(self, field)
 
-    def _image_table_apply_row_channel(self, row_idx: int) -> None:
-        _it_apply_row_channel(self, row_idx)
 
-    def _image_table_apply_row_well(self, row_idx: int) -> None:
-        _it_apply_row_well(self, row_idx)
 
-    def _image_table_toggle_tophat(self) -> None:
-        _it_toggle_tophat(self)
 
-    def _image_table_toggle_boundaries(self) -> None:
-        _it_toggle_boundaries(self)
 
-    def _image_table_toggle_binary(self) -> None:
-        _it_toggle_binary(self)
 
     def _image_table_distribute_wells(self) -> None:
         _it_distribute_wells(self)
@@ -875,8 +860,6 @@ class WellViewerApp(QWidget):
     def _image_table_generate(self) -> None:
         _it_generate(self)
 
-    def _image_table_auto_lut(self, channel: str) -> None:
-        _it_auto_lut(self, channel)
 
     def _image_table_export(self) -> None:
         _it_export(self)
@@ -922,10 +905,6 @@ class WellViewerApp(QWidget):
         cur_wells = [w for w in (cur.get("wells") or []) if w in self._app_state.dataset.well_paths] if cur else []
         plate.setSelectedWellIds(cur_wells)
 
-    def _rep_panel_refresh(self) -> None:
-        from well_viewer.views.grouping_view import rep_panel_refresh as _rep_panel_refresh_view
-
-        _rep_panel_refresh_view(self)
 
     def _rep_select(self, idx: int) -> None:
         # Legacy bridge: select the idx-th rep_set-source selection.
@@ -993,14 +972,11 @@ class WellViewerApp(QWidget):
     # ─────────────────────────────────────────────────────────────────────────
 
 
-    def _label_panel_refresh(self) -> None:
-        from well_viewer.views.label_grid_view import label_grid_refresh as _v
-        _v(self)
 
     def _labels_clear_all(self) -> None:
         if self._app_state.dataset.well_labels:
             self._app_state.dataset.well_labels.clear()
-            self._label_panel_refresh()
+            label_grid_refresh(self)
             self._invalidate_stats_cache()
 
     def _labels_apply_affix(self, *, where: str) -> None:
@@ -1049,7 +1025,7 @@ class WellViewerApp(QWidget):
                 self._app_state.dataset.well_labels.pop(tok, None)
 
         self._invalidate_stats_cache()
-        self._label_panel_refresh()
+        label_grid_refresh(self)
         self._set_status(
             f"Added {where} '{text}' to {len(selected)} well label{plural}."
         )
@@ -1277,8 +1253,8 @@ class WellViewerApp(QWidget):
                 pass
 
         if tab_visible:
-            self._rep_panel_refresh()
-            self._label_panel_refresh()
+            rep_panel_refresh(self)
+            label_grid_refresh(self)
         self._rep_refresh_map()
         self._update_active_group_label()
 
@@ -1328,7 +1304,7 @@ class WellViewerApp(QWidget):
         self._invalidate_stats_cache()
         self._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
         self._refresh_sidebar_map()            # line-graph picker: rep colours
-        self._redraw_bars()
+        redraw_bars(self)
         self._redraw()
         try:
             from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
@@ -1344,16 +1320,13 @@ class WellViewerApp(QWidget):
     def _rep_quick_row_pairs(self) -> None:
         self._rep_quick_pair_dir = "row"
         self._rep_quick_iter_order = "row"
-        self._rep_quick_pairs()
+        rep_quick_pairs(self)
 
     def _rep_quick_col_pairs(self) -> None:
         self._rep_quick_pair_dir = "col"
         self._rep_quick_iter_order = "col"
-        self._rep_quick_pairs()
-
-    def _rep_quick_pairs(self) -> None:
-        from well_viewer.grouping_controller import rep_quick_pairs
         rep_quick_pairs(self)
+
 
     def _rep_quick_pairs_from_dropdowns(self) -> None:
         """Read dropdown values and update state, then call _rep_quick_pairs()."""
@@ -1364,7 +1337,7 @@ class WellViewerApp(QWidget):
         iter_order_display = self._rep_quick_iter_order_var.currentText()
         self._rep_quick_iter_order = "row" if "Across" in iter_order_display else "col"
 
-        self._rep_quick_pairs()
+        rep_quick_pairs(self)
 
     # ── Bar group persistence (delegates to well_viewer.persistence.bar_groups)
 
@@ -1799,9 +1772,9 @@ class WellViewerApp(QWidget):
         def _install_montage_events(w, is_fluor):
             def _wheel(ev):
                 if ev.modifiers() & Qt.ShiftModifier:
-                    self._on_montage_shift_wheel(ev)
+                    on_montage_shift_wheel(self, ev)
                 else:
-                    self._on_montage_wheel(ev)
+                    on_montage_wheel(self, ev)
             w.wheelEvent = _wheel
             if is_fluor:
                 def _move(ev):
@@ -1814,7 +1787,7 @@ class WellViewerApp(QWidget):
                     ):
                         self._on_montage_crop_drag(ev)
                         return
-                    self._on_montage_fluor_motion(ev)
+                    on_montage_fluor_motion(self, ev)
                 def _press(ev):
                     if getattr(self, "_montage_crop_mode", False):
                         self._on_montage_crop_press(w, ev)
@@ -2013,28 +1986,18 @@ class WellViewerApp(QWidget):
     def _montage_auto_lut(self, redraw: bool = True, force: bool = True) -> None:
         _montage_auto_lut_controller(self, redraw=redraw, force=force)
 
-    def _on_montage_canvas_resize(self, _e=None) -> None:
-        _on_montage_canvas_resize_controller(self, _e)
 
     def _montage_resize_deferred(self) -> None:
         _montage_resize_deferred_controller(self)
 
-    def _on_montage_fluor_motion(self, e) -> None:
-        _on_montage_fluor_motion_controller(self, e)
 
     # ── Montage zoom helpers ──────────────────────────────────────────────────
 
-    def _montage_zoom_step(self, direction: int) -> None:
-        _montage_zoom_step_controller(self, direction)
 
     def _montage_zoom_fit(self) -> None:
         _montage_zoom_fit_controller(self)
 
-    def _on_montage_wheel(self, event) -> None:
-        _on_montage_wheel_controller(self, event)
 
-    def _on_montage_shift_wheel(self, event) -> None:
-        _on_montage_shift_wheel_controller(self, event)
 
     def _montage_redraw_at_zoom(self) -> None:
         _montage_redraw_at_zoom_controller(self)
@@ -2063,9 +2026,9 @@ class WellViewerApp(QWidget):
         self._apply_theme()
 
         if hasattr(self, '_rep_cards_frame') and self._rep_cards_frame:
-            self._rep_panel_refresh()
+            rep_panel_refresh(self)
         if hasattr(self, '_stats_fig') and self._stats_fig:
-            self._stats_refresh_colors()
+            stats_refresh_colors(self)
         if hasattr(self, "_sidebar_btns"):
             self._sidebar_map_refresh_pending = False
             self._refresh_sidebar_map_now()
@@ -2098,21 +2061,13 @@ class WellViewerApp(QWidget):
             raise
         finally:
             _status_signal.busy_pop()
-        self._refresh_plot_empty_states()
+        refresh_plot_empty_states(self)
 
     def _load_directory(self, d: Path, label: Optional[str] = None) -> None:
         self._drain_pending_centre_builders()
         _load_directory_controller(self, d, label=label)
-        self._refresh_plot_empty_states()
-
-    def _refresh_plot_empty_states(self) -> None:
-        """Flip every plot tab's EmptyState/figure QStackedWidget to the
-        right page based on whether a dataset is loaded. Called after
-        ``_load_path`` / ``_load_directory`` so the placeholders disappear
-        as soon as data lands, and from the per-plot redraw paths so the
-        placeholder comes back if the dataset is cleared."""
-        from well_viewer.ui_helpers import refresh_plot_empty_states
         refresh_plot_empty_states(self)
+
 
     def _drain_pending_centre_builders(self) -> None:
         """Force-build any centre tab whose body was deferred at startup.
@@ -2159,9 +2114,6 @@ class WellViewerApp(QWidget):
             return None, None
         return m.group(1).upper(), f"{int(m.group(2)):02d}"
 
-    def _build_tok_to_label(self) -> None:
-        """Rebuild the token→label map after data is loaded."""
-        _load_build_tok_to_label(self)
 
     def _rebuild_all_timepoints_cache(self) -> None:
         """Recompute the canonical timepoint list (delegates to DatasetState)."""
@@ -2340,7 +2292,7 @@ class WellViewerApp(QWidget):
         if not self._app_state.selection.plate_commit_pending:
             return
         self._app_state.selection.plate_commit_pending = False
-        self._on_plate_sel_change()
+        on_plate_sel_change(self)
 
     def _set_selected_wells(self, new_set, *, commit: bool = True) -> None:
         """Single mutation point for ``_selected_wells``.
@@ -2361,7 +2313,7 @@ class WellViewerApp(QWidget):
         if hasattr(self, "_refresh_sidebar_map"):
             self._refresh_sidebar_map()
         if commit and hasattr(self, "_on_plate_sel_change"):
-            self._on_plate_sel_change()
+            on_plate_sel_change(self)
 
     def _on_sidebar_plate_drag_finished(self) -> None:
         from well_viewer.selection_controller import on_sidebar_plate_drag_finished
@@ -2387,10 +2339,6 @@ class WellViewerApp(QWidget):
         from well_viewer.selection_controller import on_sidebar_plate_well_dropped
         on_sidebar_plate_well_dropped(self, well_id, token)
 
-    def _on_plate_sel_change(self) -> None:
-        from well_viewer.selection_controller import on_plate_sel_change as _on_plate_sel_change
-
-        _on_plate_sel_change(self)
 
 
 
@@ -2516,7 +2464,7 @@ class WellViewerApp(QWidget):
             if preserve_review_view:
                 self._app_state.review_image.preserve_view_on_refresh = True
                 if self._app_state.preview.selected_well:
-                    self._refresh_review_image()
+                    refresh_review_image(self)
             if channel_switch_debug:
                 _logger.debug(
                     "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
@@ -2547,7 +2495,7 @@ class WellViewerApp(QWidget):
                     "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
                     self._app_state.preview.selected_well,
                 )
-            self._update_preview(self._app_state.preview.selected_well)
+            update_preview(self, self._app_state.preview.selected_well)
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
@@ -2676,7 +2624,7 @@ class WellViewerApp(QWidget):
         self._invalidate_stats_cache()
         self._redraw()
         if hasattr(self, "_bar_tp_cb"):
-            self._redraw_bars()
+            redraw_bars(self)
 
     def _refresh_heatmap_aggregation_options(self) -> None:
         """Grey out threshold-based heatmap aggregations for non-MFI properties.
@@ -2830,7 +2778,7 @@ class WellViewerApp(QWidget):
                 pass
         self._redraw()
         if self._current_centre_tab() == "Bar Plots":
-            self._redraw_bars()
+            redraw_bars(self)
         # _toggle_sem stays off the bus until Phase 9 relocates it (see teardown doc).
 
     # ── Per-FOV-replicates toggle ────────────────────────────────────────────
@@ -2851,7 +2799,7 @@ class WellViewerApp(QWidget):
         self._refresh_fov_btn_state()
         self._redraw()
         if self._current_centre_tab() == "Bar Plots":
-            self._redraw_bars()
+            redraw_bars(self)
 
     def _refresh_fov_btn_state(self) -> None:
         """Sync every per-FOV toggle button's text/variant state."""
@@ -2892,7 +2840,7 @@ class WellViewerApp(QWidget):
         # Re-use the standard refresh path the click handlers go through.
         self._refresh_sidebar_map()
         if hasattr(self, "_on_plate_sel_change"):
-            self._on_plate_sel_change()
+            on_plate_sel_change(self)
 
     def _selected_labels(self) -> List[str]:
         """Return labels in a stable order (sorted) for consistent plot colours."""
@@ -2977,9 +2925,6 @@ class WellViewerApp(QWidget):
 
     # ── Preview panel ─────────────────────────────────────────────────────────
 
-    def _update_preview(self, well_label: Optional[str]) -> None:
-        from well_viewer.review_image_renderer import update_preview
-        update_preview(self, well_label)
 
     def _on_preview_sel_change(self, _e=None) -> None:
         self._refresh_preview_montage()
@@ -3139,7 +3084,7 @@ class WellViewerApp(QWidget):
             del self._app_state.review_image.lut_by_channel[chan]
         self._refresh_review_image_source_btn()
         self._app_state.review_image.preserve_view_on_refresh = True
-        self._refresh_review_image()
+        refresh_review_image(self)
 
     def _refresh_review_image_source_btn(self) -> None:
         """Sync the raw/top-hat toggle button's caption + variant with state."""
@@ -3178,7 +3123,7 @@ class WellViewerApp(QWidget):
         setattr(self, attr, rgb_clamped)
         self._review_image_refresh_color_swatch(which)
         self._app_state.review_image.preserve_view_on_refresh = True
-        self._refresh_review_image()
+        refresh_review_image(self)
 
     def _review_image_refresh_color_swatch(self, which: str) -> None:
         swatches = getattr(self, "_review_image_color_swatches", {}) or {}
@@ -3231,7 +3176,7 @@ class WellViewerApp(QWidget):
             setattr(self, f"_review_image_{which}_color", tuple(default))
             self._review_image_refresh_color_swatch(which)
         self._app_state.review_image.preserve_view_on_refresh = True
-        self._refresh_review_image()
+        refresh_review_image(self)
 
     # ── Binary mask toggle ────────────────────────────────────────────────
 
@@ -3242,7 +3187,7 @@ class WellViewerApp(QWidget):
         )
         self._refresh_review_image_binary_btn()
         self._app_state.review_image.preserve_view_on_refresh = True
-        self._refresh_review_image()
+        refresh_review_image(self)
 
     def _refresh_review_image_binary_btn(self) -> None:
         btn = getattr(self, "_review_image_binary_btn", None)
@@ -3267,7 +3212,7 @@ class WellViewerApp(QWidget):
         )
         self._refresh_review_image_outline_btn()
         self._app_state.review_image.preserve_view_on_refresh = True
-        self._refresh_review_image()
+        refresh_review_image(self)
 
     def _refresh_review_image_outline_btn(self) -> None:
         btn = getattr(self, "_review_image_outline_btn", None)
@@ -3370,9 +3315,6 @@ class WellViewerApp(QWidget):
                 above_by_nid[nid] = bool(ok)
         return above_by_nid
 
-    def _refresh_review_image(self) -> None:
-        from well_viewer.review_image_renderer import refresh_review_image
-        refresh_review_image(self)
 
     def _draw_review_image(
         self,
@@ -3431,7 +3373,7 @@ class WellViewerApp(QWidget):
             self._review_lmin_entry.setText(f"{lo:.0f}")
             self._review_lmax_entry.setText(f"{hi:.0f}")
         self._app_state.review_image.preserve_view_on_refresh = True
-        self._refresh_review_image()
+        refresh_review_image(self)
 
     def _review_image_commit_lut(self) -> None:
         arr = self._app_state.review_image.last_fluor_arr
@@ -3442,7 +3384,7 @@ class WellViewerApp(QWidget):
             self._review_lmin_entry.setText(f"{lo:.0f}")
             self._review_lmax_entry.setText(f"{hi:.0f}")
         self._app_state.review_image.preserve_view_on_refresh = True
-        self._refresh_review_image()
+        refresh_review_image(self)
 
     def _review_image_zoom_step(self, direction: int) -> None:
         steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
@@ -3545,7 +3487,7 @@ class WellViewerApp(QWidget):
         # per click was the dominant memory leak. The table reads the effective
         # Included via override on the next refresh (combobox change / Refresh
         # button / well-selection change), so the value is never lost.
-        self._refresh_review_image()
+        refresh_review_image(self)
         self._app_state.review_image.zoom = prev_zoom
         self._app_state.review_image.pan_x = prev_pan_x
         self._app_state.review_image.pan_y = prev_pan_y
@@ -3587,7 +3529,7 @@ class WellViewerApp(QWidget):
         prev_zoom = float(self._app_state.review_image.zoom)
         prev_pan_x = float(self._app_state.review_image.pan_x)
         prev_pan_y = float(self._app_state.review_image.pan_y)
-        self._refresh_review_image()
+        refresh_review_image(self)
         self._app_state.review_image.zoom = prev_zoom
         self._app_state.review_image.pan_x = prev_pan_x
         self._app_state.review_image.pan_y = prev_pan_y
@@ -3667,8 +3609,6 @@ class WellViewerApp(QWidget):
         self._app_state.review_image.pan_y = (nh / 2.0) - (cy * scale)
         self._render_review_image_display()
 
-    def _on_review_csv_row_double_click(self, event) -> None:
-        _on_review_csv_row_double_click_controller(self, event)
 
     # ── Export ────────────────────────────────────────────────────────────────
 
@@ -3700,7 +3640,7 @@ class WellViewerApp(QWidget):
         # actual redraw — but `_plot_redraw_orchestrator` still tolerates
         # the empty state via its own no-data branch.
         from well_viewer import status_signal as _status_signal
-        self._refresh_plot_empty_states()
+        refresh_plot_empty_states(self)
         # `_plot_redraw_orchestrator` fans out across the default-scope
         # tabs (line / distribution / heat map). Bar / scatter /
         # scatter-aggregate are scope-specific and re-render through
@@ -4156,7 +4096,7 @@ class WellViewerApp(QWidget):
             self._bar_violin = False
             self._violin_btn.setChecked(False)
             self._violin_slider.setEnabled(False)
-        self._redraw_bars()
+        redraw_bars(self)
 
     def _toggle_violin(self) -> None:
         """Toggle violin / bar mode and update the button appearance."""
@@ -4168,11 +4108,8 @@ class WellViewerApp(QWidget):
             # Mutually exclusive with beeswarm
             self._bar_swarm = False
             self._swarm_btn.setChecked(False)
-        self._redraw_bars()
-
-    def _redraw_bars(self) -> None:
-        from well_viewer.barplot_renderer import redraw_bars
         redraw_bars(self)
+
 
 
     # ── Bar plot export ───────────────────────────────────────────────────────
@@ -4833,11 +4770,11 @@ class WellViewerApp(QWidget):
 
     def _on_scatter_axis_change(self, axis: str) -> None:
         self._refresh_scatter_metric_for_axis(axis)
-        self._redraw_scatter()
+        redraw_scatter_orchestrate(self)
 
     def _on_scatter_agg_axis_change(self, axis: str) -> None:
         self._refresh_scatter_agg_metric_for_axis(axis)
-        self._redraw_scatter_agg()
+        redraw_scatter_agg_orchestrate(self)
 
     def _sync_scatter_agg_stat_combos(self) -> None:
         """Mirror the new per-axis (channel, metric) state into the legacy
@@ -4993,9 +4930,6 @@ class WellViewerApp(QWidget):
         if hasattr(self, "_scatter_tp_label") and self._scatter_tp_label is not None:
             self._scatter_tp_label.setText(label_text)
 
-    def _redraw_scatter(self) -> None:
-        from well_viewer.scatter_controller import redraw_scatter_orchestrate
-        redraw_scatter_orchestrate(self)
 
     def _on_scatter_click(self, event) -> None:
         from well_viewer.scatter_controller import on_scatter_click
@@ -5043,9 +4977,6 @@ class WellViewerApp(QWidget):
 
         _plot_save_scatter_figure_orchestrator(self, plot_bg=PLOT_BG)
 
-    def _redraw_scatter_agg(self) -> None:
-        from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
-        redraw_scatter_agg_orchestrate(self)
 
     def _export_scatter_agg_data(self) -> None:
         """Export aggregate scatter plot data to CSV."""

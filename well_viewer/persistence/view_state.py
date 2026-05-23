@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from well_viewer.persistence import _doc
+from well_viewer.image_table_controller import image_table_apply_dimensions
 
 _logger = logging.getLogger("well_viewer")
 
@@ -446,7 +447,7 @@ def _apply_image_table(app, state: dict) -> None:
                 pass
         if changed and hasattr(app, "_image_table_apply_dimensions"):
             try:
-                app._image_table_apply_dimensions()
+                image_table_apply_dimensions(app)
             except Exception:
                 _logger.debug("image_table: apply_dimensions failed", exc_info=True)
 

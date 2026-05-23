@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from well_viewer.image_table_controller import image_table_clear_active
+from well_viewer.image_table_controller import image_table_refresh_picker
+from well_viewer.image_table_controller import image_table_select_all
 
 
 def build_image_table_picker(app, parent: QWidget) -> None:
@@ -43,7 +46,7 @@ def build_image_table_picker(app, parent: QWidget) -> None:
         if new == app._image_table_active_wells:
             return
         app._image_table_active_wells = new
-        app._image_table_refresh_picker()
+        image_table_refresh_picker(app)
     plate.selectionChanged.connect(_on_plate_changed)
 
     btn_row = QWidget(parent)
@@ -53,12 +56,12 @@ def build_image_table_picker(app, parent: QWidget) -> None:
 
     select_all = QPushButton("Select All", btn_row)
     select_all.setProperty("variant", "secondary")
-    select_all.clicked.connect(lambda _=False: app._image_table_select_all())
+    select_all.clicked.connect(lambda _=False: image_table_select_all(app))
     bl.addWidget(select_all)
 
     clear_btn = QPushButton("Clear", btn_row)
     clear_btn.setProperty("variant", "secondary")
-    clear_btn.clicked.connect(lambda _=False: app._image_table_clear_active())
+    clear_btn.clicked.connect(lambda _=False: image_table_clear_active(app))
     bl.addWidget(clear_btn)
     bl.addStretch(1)
     layout.addWidget(btn_row)
@@ -78,4 +81,4 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     help_lbl.setWordWrap(True)
     layout.addWidget(help_lbl)
 
-    app._image_table_refresh_picker()
+    image_table_refresh_picker(app)

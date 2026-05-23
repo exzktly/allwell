@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 
 from well_viewer.tabs.scatter_agg_tab_view import build_scatter_agg_tab
 from well_viewer.tabs.scatter_cells_tab_view import build_scatter_cells_tab
+from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
+from well_viewer.scatter_controller import redraw_scatter_orchestrate
 
 
 _MODE_CELLS = "cells"
@@ -69,7 +71,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
             except Exception:
                 pass
             try:
-                ctx.app._redraw_scatter_agg()
+                redraw_scatter_agg_orchestrate(ctx.app)
             except Exception:
                 pass
         else:
@@ -81,7 +83,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
             except Exception:
                 pass
             try:
-                ctx.app._redraw_scatter()
+                redraw_scatter_orchestrate(ctx.app)
             except Exception:
                 pass
     ctx.app._scatter_set_mode = _set_mode
@@ -100,7 +102,7 @@ def scatter_redraw_active(app) -> None:
     """Redraw whichever scatter mode is currently visible."""
     if scatter_active_mode(app) == _MODE_AGG:
         if hasattr(app, "_redraw_scatter_agg"):
-            app._redraw_scatter_agg()
+            redraw_scatter_agg_orchestrate(app)
     else:
         if hasattr(app, "_redraw_scatter"):
-            app._redraw_scatter()
+            redraw_scatter_orchestrate(app)

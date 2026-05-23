@@ -7,6 +7,11 @@ Relocated from ``runtime_app.py`` (teardown Phase 9).
 from __future__ import annotations
 from well_viewer.stats_controller import stats_sync_from_app
 from well_viewer.stats_controller import stats_update_tp_menu
+from well_viewer.barplot_renderer import redraw_bars
+from well_viewer.image_table_controller import image_table_refresh_picker
+from well_viewer.image_table_controller import image_table_repopulate_dropdowns
+from well_viewer.review_image_renderer import refresh_review_image
+from well_viewer.review_image_renderer import update_preview
 
 
 def on_tab_change(app, _e=None) -> None:
@@ -44,14 +49,14 @@ def on_tab_change(app, _e=None) -> None:
         app._sync_preview_well_for_image_tabs()
         app._sidebar_preview_frame.setVisible(True)
         app._refresh_preview_picker()
-        app._update_preview(app._app_state.preview.selected_well)
-        app._refresh_review_image()
+        update_preview(app, app._app_state.preview.selected_well)
+        refresh_review_image(app)
 
     elif tab == "Image Table":
         if hasattr(app, "_sidebar_image_table_frame"):
             app._sidebar_image_table_frame.setVisible(True)
-        app._image_table_repopulate_dropdowns()
-        app._image_table_refresh_picker()
+        image_table_repopulate_dropdowns(app)
+        image_table_refresh_picker(app)
 
     elif tab == "Sample Definitions":
         app._sidebar_sample_frame.setVisible(True)
@@ -106,7 +111,7 @@ def on_tab_change(app, _e=None) -> None:
         app._refresh_sidebar_map()
         if tab == "Bar Plots":
             app._update_bar_tp_menu()
-            app._redraw_bars()
+            redraw_bars(app)
         elif tab == "Scatter Plot":
             app._update_scatter_menus()
             from well_viewer.tabs.scatter_tab_view import scatter_redraw_active

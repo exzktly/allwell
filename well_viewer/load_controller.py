@@ -7,6 +7,9 @@ import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
+from well_viewer.image_table_controller import image_table_refresh_picker
+from well_viewer.image_table_controller import image_table_repopulate_dropdowns
+from well_viewer.views.label_grid_view import label_grid_refresh
 
 
 def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
@@ -118,7 +121,7 @@ def load_directory(app, d: Path, label=None) -> None:
     app._hide_progress()
     app._rebuild_all_timepoints_cache()
     app._rebuild_all_fovs_cache()
-    app._build_tok_to_label()
+    build_tok_to_label(app)
     # Apply any sample_definitions persisted inside pipeline_info.json before
     # we prune groups against the loaded well set, so saved replicate-set and
     # group state is hydrated and then validated by the same pruning pass that
@@ -149,11 +152,11 @@ def load_directory(app, d: Path, label=None) -> None:
         app._refresh_preview_picker()
     if hasattr(app, "_image_table_refresh_picker"):
         try:
-            app._image_table_repopulate_dropdowns()
-            app._image_table_refresh_picker()
+            image_table_repopulate_dropdowns(app)
+            image_table_refresh_picker(app)
         except Exception:
             pass
-    app._label_panel_refresh()
+    label_grid_refresh(app)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
     # appear without requiring a tab switch.
     if hasattr(app, "_groups_centre_refresh"):

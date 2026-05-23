@@ -35,6 +35,9 @@ from well_viewer.figure_export_editor import (
 import theme
 from widgets.collapsible_section import CollapsibleSection
 from widgets.toggle_switch import ToggleSwitch
+from well_viewer.barplot_renderer import redraw_bars
+from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
+from well_viewer.scatter_controller import redraw_scatter_orchestrate
 
 
 #: Single source of truth for the style-panel width — read by both the
@@ -872,13 +875,13 @@ class ExportStyleSidebar(QWidget):
                 app._redraw()
                 return
             if getattr(app, "_bar_fig", None) is self._fig and hasattr(app, "_redraw_bars"):
-                app._redraw_bars()
+                redraw_bars(app)
                 return
             if getattr(app, "_scatter_fig", None) is self._fig and hasattr(app, "_redraw_scatter"):
-                app._redraw_scatter()
+                redraw_scatter_orchestrate(app)
                 return
             if getattr(app, "_scatter_agg_fig", None) is self._fig and hasattr(app, "_redraw_scatter_agg"):
-                app._redraw_scatter_agg()
+                redraw_scatter_agg_orchestrate(app)
                 return
             if hasattr(app, "_redraw"):
                 app._redraw()

@@ -169,7 +169,7 @@ def update_preview(app, well_label: Optional[str]) -> None:
             pass
     if channel_switch_debug:
         _logger.debug("[RI-CHSW step 4->6] triggering refresh_review_image after preview reload")
-    app._refresh_review_image()
+    refresh_review_image(app)
 
 
 def refresh_review_image(app) -> None:

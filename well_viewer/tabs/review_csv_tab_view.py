@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
     QVBoxLayout, QWidget,
 )
+from well_viewer.review_image_controller import on_review_csv_row_double_click
 
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
@@ -59,7 +60,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     ctx.app._review_csv_table.setSelectionBehavior(QTableWidget.SelectRows)
     ctx.app._review_csv_table.setEditTriggers(QTableWidget.NoEditTriggers)
     ctx.app._review_csv_table.itemDoubleClicked.connect(
-        lambda item: ctx.app._on_review_csv_row_double_click(item)
+        lambda item: on_review_csv_row_double_click(ctx.app, item)
     )
     layout.addWidget(ctx.app._review_csv_table, 1)
 

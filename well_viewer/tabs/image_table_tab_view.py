@@ -21,6 +21,13 @@ from PySide6.QtWidgets import (
 from well_viewer.crop_tool import CropTool
 from well_viewer.ui_helpers import btn_primary, btn_secondary
 from well_viewer.image_table_controller import image_table_open_export_settings
+from well_viewer.image_table_controller import image_table_apply_dimensions
+from well_viewer.image_table_controller import image_table_apply_global
+from well_viewer.image_table_controller import image_table_rebuild_grid
+from well_viewer.image_table_controller import image_table_repopulate_dropdowns
+from well_viewer.image_table_controller import image_table_toggle_binary
+from well_viewer.image_table_controller import image_table_toggle_boundaries
+from well_viewer.image_table_controller import image_table_toggle_tophat
 
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:
@@ -82,7 +89,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     rows_spin.setRange(1, 12)
     rows_spin.setValue(int(ctx.app._image_table_rows))
     rows_spin.setFixedWidth(64)
-    rows_spin.valueChanged.connect(lambda _v: ctx.app._image_table_apply_dimensions())
+    rows_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
     hl.addWidget(rows_spin)
     ctx.app._image_table_rows_spin = rows_spin
 
@@ -91,7 +98,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     cols_spin.setRange(1, 12)
     cols_spin.setValue(int(ctx.app._image_table_cols))
     cols_spin.setFixedWidth(64)
-    cols_spin.valueChanged.connect(lambda _v: ctx.app._image_table_apply_dimensions())
+    cols_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
     hl.addWidget(cols_spin)
     ctx.app._image_table_cols_spin = cols_spin
     hl.addStretch(1)
@@ -108,7 +115,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gl.addWidget(QLabel("Channel:", glob))
     chan_cb = QComboBox(glob)
     chan_cb.currentIndexChanged.connect(
-        lambda _i: ctx.app._image_table_apply_global("chan")
+        lambda _i: image_table_apply_global(ctx.app, "chan")
     )
     gl.addWidget(chan_cb)
     ctx.app._image_table_global_chan_cb = chan_cb
@@ -116,7 +123,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gl.addWidget(QLabel("Timepoint:", glob))
     tp_cb = QComboBox(glob)
     tp_cb.currentIndexChanged.connect(
-        lambda _i: ctx.app._image_table_apply_global("tp")
+        lambda _i: image_table_apply_global(ctx.app, "tp")
     )
     gl.addWidget(tp_cb)
     ctx.app._image_table_global_tp_cb = tp_cb
@@ -124,7 +131,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gl.addWidget(QLabel("FOV:", glob))
     fov_cb = QComboBox(glob)
     fov_cb.currentIndexChanged.connect(
-        lambda _i: ctx.app._image_table_apply_global("fov")
+        lambda _i: image_table_apply_global(ctx.app, "fov")
     )
     gl.addWidget(fov_cb)
     ctx.app._image_table_global_fov_cb = fov_cb
@@ -239,7 +246,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tophat_btn.setToolTip(
         "Toggle between raw fluorescence and pre-filtered tophat images."
     )
-    tophat_btn.clicked.connect(lambda _=False: ctx.app._image_table_toggle_tophat())
+    tophat_btn.clicked.connect(lambda _=False: image_table_toggle_tophat(ctx.app))
     _wire_toggle_check(tophat_btn, "Tophat")
     ctx.app._image_table_tophat_btn = tophat_btn
     tr.addWidget(tophat_btn)
@@ -251,7 +258,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     boundaries_btn.setToolTip(
         "Overlay cell boundary outlines (white) on each fluorescence image."
     )
-    boundaries_btn.clicked.connect(lambda _=False: ctx.app._image_table_toggle_boundaries())
+    boundaries_btn.clicked.connect(lambda _=False: image_table_toggle_boundaries(ctx.app))
     _wire_toggle_check(boundaries_btn, "Boundaries")
     ctx.app._image_table_boundaries_btn = boundaries_btn
     tr.addWidget(boundaries_btn)
@@ -263,7 +270,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     binary_btn.setToolTip(
         "Show segmentation mask as binary: labeled cells white, background black."
     )
-    binary_btn.clicked.connect(lambda _=False: ctx.app._image_table_toggle_binary())
+    binary_btn.clicked.connect(lambda _=False: image_table_toggle_binary(ctx.app))
     _wire_toggle_check(binary_btn, "Binary")
     ctx.app._image_table_binary_btn = binary_btn
     tr.addWidget(binary_btn)
@@ -342,5 +349,5 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.addStretch(1)
 
     # Build the initial grid + LUT row using current pipeline_info.
-    ctx.app._image_table_repopulate_dropdowns()
-    ctx.app._image_table_rebuild_grid()
+    image_table_repopulate_dropdowns(ctx.app)
+    image_table_rebuild_grid(ctx.app)

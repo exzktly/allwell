@@ -17,6 +17,7 @@ from well_viewer.stats_controller import stats_apply_drag
 from well_viewer.stats_controller import stats_on_test_change
 from well_viewer.stats_controller import stats_refresh_group_list
 from well_viewer.stats_controller import stats_update_tp_menu
+from well_viewer.stats_controller import stats_refresh_map
 
 
 def build_stats_tab(app, parent: QWidget) -> None:
@@ -71,7 +72,7 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
     def _commit_plate_to_group(*_a) -> None:
         grp = app._stats_active_group()
         if grp is None:
-            app._stats_refresh_map()        # no active group — revert the click
+            stats_refresh_map(app)        # no active group — revert the click
             return
         new = {w for w in plate.selectedWellIds() if w in app._app_state.dataset.well_paths}
         old = {w for w in grp.wells if w in app._app_state.dataset.well_paths}
@@ -88,7 +89,7 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
             app._app_state.stats.drag_adding = False
             app._app_state.stats.drag_visited = set()
             stats_apply_drag(app, tok)
-        app._stats_refresh_map()
+        stats_refresh_map(app)
         stats_refresh_group_list(app)
     # selectionDragFinished fires once per click *and* once at the end of a drag.
     plate.selectionDragFinished.connect(_commit_plate_to_group)
@@ -112,7 +113,7 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
     help_lbl.setWordWrap(True)
     layout.addWidget(help_lbl)
 
-    app._stats_refresh_map()
+    stats_refresh_map(app)
     stats_refresh_group_list(app)
 
 

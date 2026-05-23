@@ -12,6 +12,7 @@ from well_viewer.ui_helpers import (
     btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
 from well_viewer.barplot_controller import bar_reset_order
+from well_viewer.barplot_renderer import redraw_bars
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -108,7 +109,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     sl.addWidget(QLabel("Timepoint:", shape_ctrl))
     ctx.app._bar_tp_cb = QComboBox(shape_ctrl)
     ctx.app._bar_tp_cb.addItems(["—"])
-    ctx.app._bar_tp_cb.currentIndexChanged.connect(lambda _i: ctx.app._redraw_bars())
+    ctx.app._bar_tp_cb.currentIndexChanged.connect(lambda _i: redraw_bars(ctx.app))
     sl.addWidget(ctx.app._bar_tp_cb)
     ctx.app._bar_tp_var = ctx.app._bar_tp_cb
 
@@ -133,7 +134,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._violin_slider.setValue(100)
     ctx.app._violin_slider.setFixedWidth(80)
     ctx.app._violin_slider.valueChanged.connect(
-        lambda _v: (ctx.app._redraw_bars() if ctx.app._bar_violin else None)
+        lambda _v: (redraw_bars(ctx.app) if ctx.app._bar_violin else None)
     )
     ctx.app._violin_slider.setEnabled(False)
     sl.addWidget(ctx.app._violin_slider)
@@ -162,7 +163,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)
 
     card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=True))
-    card.plotThemeChanged.connect(lambda _m: ctx.app._redraw_bars())
+    card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx.app))
     card.setStatsChipVisible(False)
 
     ctx.app._bar_scroll_canvas = QScrollArea(bar_right)

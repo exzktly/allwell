@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from well_viewer.ui_helpers import (
     btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
+from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
 
 
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
@@ -50,7 +51,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("Property:", ctrl))
     ctx.app._scatter_agg_metric_x_cb = QComboBox(ctrl)
     ctx.app._scatter_agg_metric_x_cb.addItems(AGG_METRIC_ORDER)
-    ctx.app._scatter_agg_metric_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._redraw_scatter_agg())
+    ctx.app._scatter_agg_metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx.app))
     cl.addWidget(ctx.app._scatter_agg_metric_x_cb)
 
     cl.addWidget(QLabel("Y-axis:", ctrl))
@@ -63,7 +64,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("Property:", ctrl))
     ctx.app._scatter_agg_metric_y_cb = QComboBox(ctrl)
     ctx.app._scatter_agg_metric_y_cb.addItems(AGG_METRIC_ORDER)
-    ctx.app._scatter_agg_metric_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._redraw_scatter_agg())
+    ctx.app._scatter_agg_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx.app))
     cl.addWidget(ctx.app._scatter_agg_metric_y_cb)
 
     # Legacy stat combos — hidden, kept in sync for back-compat. Export
@@ -121,7 +122,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_agg_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
     ctx.app._scatter_agg_canvas = card.canvas
     card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
-    card.plotThemeChanged.connect(lambda _m: ctx.app._redraw_scatter_agg())
+    card.plotThemeChanged.connect(lambda _m: redraw_scatter_agg_orchestrate(ctx.app))
     card.setStatsChipVisible(False)
     from well_viewer.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
@@ -143,7 +144,7 @@ def _open_timepoint_selector(app) -> None:
             def on_toggled(checked: bool) -> None:
                 app._scatter_agg_tp_selections[tp] = bool(checked)
                 app._update_tp_selection_display()
-                app._redraw_scatter_agg()
+                redraw_scatter_agg_orchestrate(app)
             return on_toggled
 
         cb.toggled.connect(_make_handler())
@@ -162,7 +163,7 @@ def _open_timepoint_selector(app) -> None:
                 cb.blockSignals(False)
             app._scatter_agg_tp_selections[tp_str] = value
         app._update_tp_selection_display()
-        app._redraw_scatter_agg()
+        redraw_scatter_agg_orchestrate(app)
 
     all_action = QAction("All", menu)
     all_action.triggered.connect(lambda _=False: _set_all(True))

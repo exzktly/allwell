@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject
+from well_viewer.barplot_renderer import redraw_bars
 
 
 def _active_tab(app) -> str:
@@ -39,7 +40,7 @@ def apply_selection_refresh(app) -> None:
     tab = _active_tab(app)
     if tab == "Bar Plots":
         app._update_bar_tp_menu()
-        app._redraw_bars()
+        redraw_bars(app)
     elif tab == "Scatter Plot":
         app._update_scatter_menus()
         from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
@@ -151,7 +152,7 @@ def select_row(app, row: str) -> None:
             app._app_state.selection.selected_wells.update(row_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(row_labels)
-        app._on_plate_sel_change()
+        on_plate_sel_change(app)
 
 
 def select_col(app, col: str) -> None:
@@ -172,7 +173,7 @@ def select_col(app, col: str) -> None:
             app._app_state.selection.selected_wells.update(col_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(col_labels)
-        app._on_plate_sel_change()
+        on_plate_sel_change(app)
 
 
 def select_all(app) -> None:
@@ -236,7 +237,7 @@ def on_sidebar_plate_drag_finished(app) -> None:
     # Cancel any pending deferred commit from the paint events that
     # led here -- we're committing right now.
     app._app_state.selection.plate_commit_pending = False
-    app._on_plate_sel_change()
+    on_plate_sel_change(app)
 
 
 def on_sidebar_plate_well_activated(app, well_id: str) -> None:
@@ -259,7 +260,7 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
         else:
             app._app_state.selection.active_solo_wells.add(well_id)
         app._refresh_sidebar_map()
-        app._on_plate_sel_change()
+        on_plate_sel_change(app)
         return
     # Legacy fallback for non-plotting tabs that still receive
     # wellActivated in rep-set mode (Image Table / smFISH / etc):
@@ -274,18 +275,18 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
 
 def on_sidebar_plate_row_activated(app, row: str) -> None:
     if app._app_state.selection.selections:
-        app._select_row(row)
+        select_row(app, row)
     else:
         # The widget already toggled the row and synced _selected_wells via
         # the preceding selectionChanged; do the heavy refresh once.
-        app._on_plate_sel_change()
+        on_plate_sel_change(app)
 
 
 def on_sidebar_plate_col_activated(app, col: str) -> None:
     if app._app_state.selection.selections:
         app._select_col(col)
     else:
-        app._on_plate_sel_change()
+        on_plate_sel_change(app)
 
 
 def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:

@@ -12,6 +12,7 @@ from . import debug_flags
 from . import fold_change as _fc
 
 
+
 @dataclass
 class BarItem:
     """One bar in the bar-plot view, post-normalization.
@@ -640,7 +641,8 @@ def bar_reset_order(app) -> None:
     app._bar_reset_order_btn.setProperty("variant", "toggle_muted")
     app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
     app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)
-    app._redraw_bars()
+    from well_viewer.barplot_renderer import redraw_bars
+    redraw_bars(app)
 
 
 def on_bar_drag_press(app, event) -> None:
@@ -722,4 +724,5 @@ def on_bar_drag_release(app, event) -> None:
     app._bar_reset_order_btn.setProperty("variant", "toggle_accent")
     app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
     app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)
-    app._redraw_bars()
+    from well_viewer.barplot_renderer import redraw_bars
+    redraw_bars(app)

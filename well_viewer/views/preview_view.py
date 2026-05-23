@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from well_viewer.review_image_renderer import update_preview
 
 
 def build_preview_picker(app, parent: QWidget) -> None:
@@ -44,7 +45,7 @@ def build_preview_picker(app, parent: QWidget) -> None:
             return
         app._app_state.preview.selected_well = tok
         app._refresh_preview_picker()
-        app._update_preview(tok)
+        update_preview(app, tok)
     plate.selectionChanged.connect(_on_plate_changed)
 
     app._preview_sel_lbl = QLabel("No well selected", parent)

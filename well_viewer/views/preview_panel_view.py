@@ -13,6 +13,9 @@ from PySide6.QtWidgets import (
 from well_viewer.ui_helpers import btn_card, btn_secondary
 from well_viewer.preview_callbacks import montage_tophat_toggled
 from well_viewer.review_image_controller import on_review_image_channel_selected
+from well_viewer.montage_controller import montage_zoom_step
+from well_viewer.montage_controller import on_montage_shift_wheel
+from well_viewer.review_image_renderer import refresh_review_image
 
 
 def build_right_panel(self, parent: QWidget) -> None:
@@ -122,11 +125,11 @@ def build_right_panel(self, parent: QWidget) -> None:
     self._mon_ov_lmax_edit = self._mon_ov_lmax_entry
 
     lr.addWidget(QLabel("Zoom:", lut_row))
-    lr.addWidget(btn_card(lut_row, "−", lambda: self._montage_zoom_step(-1)))
+    lr.addWidget(btn_card(lut_row, "−", lambda: montage_zoom_step(self, -1)))
     self._montage_zoom_lbl = QLabel("100%", lut_row)
     self._montage_zoom_lbl.setFixedWidth(50)
     lr.addWidget(self._montage_zoom_lbl)
-    lr.addWidget(btn_card(lut_row, "+", lambda: self._montage_zoom_step(+1)))
+    lr.addWidget(btn_card(lut_row, "+", lambda: montage_zoom_step(self, +1)))
     lr.addWidget(btn_secondary(lut_row, "Fit", self._montage_zoom_fit))
 
     # Region-of-interest crop controls (built by the shared CropTool).
@@ -183,11 +186,11 @@ def build_right_panel(self, parent: QWidget) -> None:
         delta = event.angleDelta().y()
         if event.modifiers() & Qt.ShiftModifier:
             if hasattr(self, "_on_montage_shift_wheel"):
-                self._on_montage_shift_wheel(event)
+                on_montage_shift_wheel(self, event)
         elif delta > 0:
-            self._montage_zoom_step(+1)
+            montage_zoom_step(self, +1)
         elif delta < 0:
-            self._montage_zoom_step(-1)
+            montage_zoom_step(self, -1)
 
     self._montage_canvas.wheelEvent = _wheel
 
@@ -223,7 +226,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_fov_menu = QComboBox(ctrl)
     self._review_image_fov_menu.addItems(["—"])
     self._review_image_fov_menu.currentIndexChanged.connect(
-        lambda _i: self._refresh_review_image()
+        lambda _i: refresh_review_image(self)
     )
     cl.addWidget(self._review_image_fov_menu)
 
@@ -231,7 +234,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_tp_menu = QComboBox(ctrl)
     self._review_image_tp_menu.addItems(["—"])
     self._review_image_tp_menu.currentIndexChanged.connect(
-        lambda _i: self._refresh_review_image()
+        lambda _i: refresh_review_image(self)
     )
     cl.addWidget(self._review_image_tp_menu)
     self._review_image_tp_var = self._review_image_tp_menu

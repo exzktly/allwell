@@ -7,6 +7,9 @@ import logging
 from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QToolTip, QVBoxLayout, QWidget
+from well_viewer.montage_controller import on_montage_fluor_motion
+from well_viewer.montage_controller import on_montage_shift_wheel
+from well_viewer.montage_controller import on_montage_wheel
 
 _logger = logging.getLogger("well_viewer")
 
@@ -72,7 +75,7 @@ class _MontageThumbLabel(QLabel):
     def mouseMoveEvent(self, event):
         # Delegate to montage controller's tooltip helper
         if hasattr(self._app, "_on_montage_fluor_motion"):
-            self._app._on_montage_fluor_motion(event)
+            on_montage_fluor_motion(self._app, event)
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):
@@ -83,10 +86,10 @@ class _MontageThumbLabel(QLabel):
         mods = event.modifiers()
         if mods & Qt.ShiftModifier:
             if hasattr(self._app, "_on_montage_shift_wheel"):
-                self._app._on_montage_shift_wheel(event)
+                on_montage_shift_wheel(self._app, event)
         else:
             if hasattr(self._app, "_on_montage_wheel"):
-                self._app._on_montage_wheel(event)
+                on_montage_wheel(self._app, event)
         event.accept()
 
 

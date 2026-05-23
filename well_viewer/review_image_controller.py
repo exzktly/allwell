@@ -1,6 +1,8 @@
 """Controller helpers for Review Image <-> Review CSV interactions."""
 
 from __future__ import annotations
+from well_viewer.review_image_renderer import refresh_review_image
+from well_viewer.review_image_renderer import update_preview
 
 
 def _select_tab_by_text(notebook, text: str) -> None:
@@ -62,7 +64,7 @@ def on_review_image_click(app, event, logger) -> None:
         return
     app._app_state.review_image.selected_nucleus = nid
     app._app_state.review_image.preserve_view_on_refresh = True
-    app._refresh_review_image()
+    refresh_review_image(app)
     app._select_review_csv_row_for_cell(fov, tp, str(nid))
 
 
@@ -264,7 +266,7 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
             app._app_state.review_image.selected_nucleus = None
 
     app._app_state.preview.selected_well = key
-    app._update_preview(key)
+    update_preview(app, key)
 
     # _preview_fov_var drives _refresh_review_image; force the target FOV
     # before repopulating the TP menu. The combo only exists once the
@@ -275,7 +277,7 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
         if fov_cb is not None:
             fov_cb.setCurrentText(fov)
     if hasattr(app, "_refresh_review_image"):
-        app._refresh_review_image()
+        refresh_review_image(app)
 
     # TP menu now holds the target FOV's timepoints. Selecting the TP here
     # triggers _refresh_review_image via currentIndexChanged, which renders

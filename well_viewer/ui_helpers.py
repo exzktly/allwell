@@ -642,7 +642,7 @@ def selected_list_values(lb) -> list:
     return [lb.item(i).text() for i in range(lb.count()) if lb.item(i).isSelected()]
 
 
-def _mute_color(hex_color: str, factor: float = 0.5) -> str:
+def mute_color(hex_color: str, factor: float = 0.5) -> str:
     """Blend *hex_color* 50% toward a neutral mid-grey (#94A3B8).
 
     Used to dim hidden rep-sets on the plate map so they are visually

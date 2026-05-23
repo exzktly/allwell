@@ -16,6 +16,13 @@ from well_viewer.review_image_controller import on_review_image_channel_selected
 from well_viewer.montage_controller import montage_zoom_step
 from well_viewer.montage_controller import on_montage_shift_wheel
 from well_viewer.review_image_renderer import refresh_review_image
+from functools import partial
+from well_viewer.export_service import save_montage_figure
+from well_viewer.montage_controller import montage_redraw_at_zoom
+from well_viewer.montage_controller import montage_zoom_fit
+from well_viewer.review_image_controller import on_review_image_move
+from well_viewer.review_image_controller import on_review_image_press
+from well_viewer.review_image_controller import on_review_image_release
 
 
 def build_right_panel(self, parent: QWidget) -> None:
@@ -58,7 +65,7 @@ def build_right_panel(self, parent: QWidget) -> None:
     self._preview_fov_var = self._fov_menu
     self._preview_fov_cb = self._fov_menu  # alias used by preview / export callers
     cl.addStretch(1)
-    cl.addWidget(btn_secondary(ctrl, "Save Montage…", self._save_montage_figure))
+    cl.addWidget(btn_secondary(ctrl, "Save Montage…", partial(save_montage_figure, self)))
     il.addWidget(ctrl)
 
     sep = QFrame(inner)
@@ -91,14 +98,14 @@ def build_right_panel(self, parent: QWidget) -> None:
 
     self._mon_lmin_entry = QLineEdit("auto", lut_row)
     self._mon_lmin_entry.setFixedWidth(80)
-    self._mon_lmin_entry.editingFinished.connect(self._montage_redraw_at_zoom)
+    self._mon_lmin_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
     lr.addWidget(self._mon_lmin_entry)
     self._mon_lmin_edit = self._mon_lmin_entry  # alias used by montage / export callers
 
     lr.addWidget(QLabel("max:", lut_row))
     self._mon_lmax_entry = QLineEdit("auto", lut_row)
     self._mon_lmax_entry.setFixedWidth(80)
-    self._mon_lmax_entry.editingFinished.connect(self._montage_redraw_at_zoom)
+    self._mon_lmax_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
     lr.addWidget(self._mon_lmax_entry)
     self._mon_lmax_edit = self._mon_lmax_entry  # alias used by montage / export callers
 
@@ -113,14 +120,14 @@ def build_right_panel(self, parent: QWidget) -> None:
     lr.addWidget(QLabel("Overlay LUT min:", lut_row))
     self._mon_ov_lmin_entry = QLineEdit("auto", lut_row)
     self._mon_ov_lmin_entry.setFixedWidth(80)
-    self._mon_ov_lmin_entry.editingFinished.connect(self._montage_redraw_at_zoom)
+    self._mon_ov_lmin_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
     lr.addWidget(self._mon_ov_lmin_entry)
     self._mon_ov_lmin_edit = self._mon_ov_lmin_entry
 
     lr.addWidget(QLabel("max:", lut_row))
     self._mon_ov_lmax_entry = QLineEdit("auto", lut_row)
     self._mon_ov_lmax_entry.setFixedWidth(80)
-    self._mon_ov_lmax_entry.editingFinished.connect(self._montage_redraw_at_zoom)
+    self._mon_ov_lmax_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
     lr.addWidget(self._mon_ov_lmax_entry)
     self._mon_ov_lmax_edit = self._mon_ov_lmax_entry
 
@@ -130,7 +137,7 @@ def build_right_panel(self, parent: QWidget) -> None:
     self._montage_zoom_lbl.setFixedWidth(50)
     lr.addWidget(self._montage_zoom_lbl)
     lr.addWidget(btn_card(lut_row, "+", lambda: montage_zoom_step(self, +1)))
-    lr.addWidget(btn_secondary(lut_row, "Fit", self._montage_zoom_fit))
+    lr.addWidget(btn_secondary(lut_row, "Fit", partial(montage_zoom_fit, self)))
 
     # Region-of-interest crop controls (built by the shared CropTool).
     # The Crop toggle puts the next click-drag on a fluorescence thumbnail
@@ -164,7 +171,7 @@ def build_right_panel(self, parent: QWidget) -> None:
     tr.addWidget(QLabel("   radius:", th_row))
     self._th_radius_entry = QLineEdit("50", th_row)
     self._th_radius_entry.setFixedWidth(60)
-    self._th_radius_entry.editingFinished.connect(self._montage_redraw_at_zoom)
+    self._th_radius_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
     tr.addWidget(self._th_radius_entry)
     self._mon_tophat_radius_edit = self._th_radius_entry  # alias used by montage / export callers
     tr.addWidget(QLabel("px", th_row))
@@ -387,9 +394,9 @@ def build_review_image_panel(self, parent: QWidget) -> None:
         elif delta < 0:
             self._review_image_zoom_step(-1)
     self._review_image_label.wheelEvent = _wheel
-    self._review_image_label.mousePressEvent = self._on_review_image_press
-    self._review_image_label.mouseMoveEvent = self._on_review_image_move
-    self._review_image_label.mouseReleaseEvent = self._on_review_image_release
+    self._review_image_label.mousePressEvent = partial(on_review_image_press, self)
+    self._review_image_label.mouseMoveEvent = partial(on_review_image_move, self)
+    self._review_image_label.mouseReleaseEvent = partial(on_review_image_release, self)
 
     def _leave(_ev):
         try:

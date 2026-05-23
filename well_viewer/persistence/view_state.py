@@ -19,6 +19,7 @@ from typing import Any
 
 from well_viewer.persistence import _doc
 from well_viewer.image_table_controller import image_table_apply_dimensions
+from well_viewer.channel_state_controller import set_active_channel
 
 _logger = logging.getLogger("well_viewer")
 
@@ -285,7 +286,7 @@ def restore(app, state: dict) -> None:
         and hasattr(app, "_set_active_channel")
     ):
         try:
-            app._set_active_channel(ch)
+            set_active_channel(app, ch)
         except Exception:
             _logger.debug("view_state: _set_active_channel failed", exc_info=True)
 

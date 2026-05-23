@@ -10,6 +10,9 @@ from PySide6.QtWidgets import (
 from well_viewer.ui_helpers import (
     btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
+from functools import partial
+from well_viewer.export_service import export_plot_data
+from well_viewer.lineplot_controller import on_fig_click
 
 # The Line Graphs figure: three stacked subplots (mean / fraction / CDF).
 _FIG_W, _FIG_H, _DPI = 7.2, 10.5, 100
@@ -75,7 +78,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     cl.addStretch(1)
 
-    _export_btn = btn_primary(line_ctrl, "", ctx.app._export_plot_data,
+    _export_btn = btn_primary(line_ctrl, "", partial(export_plot_data, ctx.app),
                               icon="download")
     _export_btn.setToolTip("Export CSV")
     cl.addWidget(_export_btn)
@@ -143,4 +146,4 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)
-    ctx.app._line_canvas.mpl_connect("button_press_event", ctx.app._on_fig_click)
+    ctx.app._line_canvas.mpl_connect("button_press_event", partial(on_fig_click, ctx.app))

@@ -284,7 +284,7 @@ def on_sidebar_plate_row_activated(app, row: str) -> None:
 
 def on_sidebar_plate_col_activated(app, col: str) -> None:
     if app._app_state.selection.selections:
-        app._select_col(col)
+        select_col(app, col)
     else:
         on_plate_sel_change(app)
 

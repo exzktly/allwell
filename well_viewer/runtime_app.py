@@ -391,6 +391,13 @@ from well_viewer.stats_controller import stats_refresh_map
 from well_viewer.ui_helpers import refresh_plot_empty_states
 from well_viewer.views.grouping_view import rep_panel_refresh
 from well_viewer.views.label_grid_view import label_grid_refresh
+from functools import partial
+from well_viewer.channel_state_controller import recalculate_threshold
+from well_viewer.channel_state_controller import refresh_metric_combo_for_channel
+from well_viewer.channel_state_controller import set_active_channel
+from well_viewer.channel_state_controller import update_channel_selector
+from well_viewer.montage_controller import montage_redraw_at_zoom
+from well_viewer.tab_controller import on_notebook_current_changed
 
 class WellViewerApp(QWidget):
 
@@ -523,7 +530,7 @@ class WellViewerApp(QWidget):
         # the montage redraw, etc.) keep working.
         from well_viewer.crop_tool import CropTool as _CropTool
         self._montage_crop_tool = _CropTool(
-            on_change=lambda: self._montage_redraw_at_zoom(),
+            on_change=lambda: montage_redraw_at_zoom(self),
         )
         self._montage_crop_btn = None
         self._montage_crop_status_lbl = None
@@ -644,7 +651,7 @@ class WellViewerApp(QWidget):
         # changes the index (deferred builders, programmatic select_by_text).
         self._sync_section_nav_from_notebook()
         self._section_nav.currentChanged.connect(self._on_section_nav_changed)
-        self._notebook.currentChanged.connect(self._on_notebook_current_changed)
+        self._notebook.currentChanged.connect(partial(on_notebook_current_changed, self))
 
     # ── Phase 10 (A1) section-nav <-> notebook bridge ─────────────────────
     _SECTION_ICONS = {
@@ -681,9 +688,6 @@ class WellViewerApp(QWidget):
             return
         self._notebook.setCurrentByName(key)
 
-    def _on_notebook_current_changed(self, _idx: int) -> None:
-        from well_viewer.tab_controller import on_notebook_current_changed
-        on_notebook_current_changed(self, _idx)
 
     def _tab_history_back(self) -> None:
         hist = getattr(self, "_tab_history", None)
@@ -731,15 +735,9 @@ class WellViewerApp(QWidget):
 
 
 
-    def _stats_grp_add(self) -> None:
-        from well_viewer.stats_controller import stats_grp_add
-        stats_grp_add(self)
 
 
 
-    def _stats_grp_clear_all(self) -> None:
-        from well_viewer.stats_controller import stats_grp_clear_all
-        stats_grp_clear_all(self)
 
 
 
@@ -848,33 +846,13 @@ class WellViewerApp(QWidget):
 
 
 
-    def _image_table_distribute_wells(self) -> None:
-        _it_distribute_wells(self)
-
-    def _image_table_load_heatmap_layout(self) -> None:
-        _it_load_heatmap_layout(self)
-
-    def _image_table_distribute_timepoints(self) -> None:
-        _it_distribute_timepoints(self)
-
-    def _image_table_generate(self) -> None:
-        _it_generate(self)
 
 
-    def _image_table_export(self) -> None:
-        _it_export(self)
 
-    def _image_table_copy_png(self) -> None:
-        from well_viewer.image_table_controller import (
-            image_table_copy_png as _it_copy_png,
-        )
-        _it_copy_png(self)
 
-    def _image_table_copy_svg(self) -> None:
-        from well_viewer.image_table_controller import (
-            image_table_copy_svg as _it_copy_svg,
-        )
-        _it_copy_svg(self)
+
+
+
 
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1987,20 +1965,14 @@ class WellViewerApp(QWidget):
         _montage_auto_lut_controller(self, redraw=redraw, force=force)
 
 
-    def _montage_resize_deferred(self) -> None:
-        _montage_resize_deferred_controller(self)
 
 
     # ── Montage zoom helpers ──────────────────────────────────────────────────
 
 
-    def _montage_zoom_fit(self) -> None:
-        _montage_zoom_fit_controller(self)
 
 
 
-    def _montage_redraw_at_zoom(self) -> None:
-        _montage_redraw_at_zoom_controller(self)
 
 
     def _apply_theme(self) -> None:
@@ -2281,9 +2253,6 @@ class WellViewerApp(QWidget):
     # stays the source of truth; ``_refresh_sidebar_map_now`` pushes appearance /
     # selection onto the widget, and the handlers below take user actions back.
 
-    def _on_sidebar_plate_selection_changed(self, ids) -> None:
-        from well_viewer.selection_controller import on_sidebar_plate_selection_changed
-        on_sidebar_plate_selection_changed(self, ids)
 
     def _plate_commit_deferred(self) -> None:
         """Run the deferred commit scheduled by a paint event. No-op if
@@ -2315,43 +2284,20 @@ class WellViewerApp(QWidget):
         if commit and hasattr(self, "_on_plate_sel_change"):
             on_plate_sel_change(self)
 
-    def _on_sidebar_plate_drag_finished(self) -> None:
-        from well_viewer.selection_controller import on_sidebar_plate_drag_finished
-        on_sidebar_plate_drag_finished(self)
 
     _PLOTTING_TABS = frozenset({
         "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
     })
 
-    def _on_sidebar_plate_well_activated(self, well_id: str) -> None:
-        from well_viewer.selection_controller import on_sidebar_plate_well_activated
-        on_sidebar_plate_well_activated(self, well_id)
 
-    def _on_sidebar_plate_row_activated(self, row: str) -> None:
-        from well_viewer.selection_controller import on_sidebar_plate_row_activated
-        on_sidebar_plate_row_activated(self, row)
 
-    def _on_sidebar_plate_col_activated(self, col: str) -> None:
-        from well_viewer.selection_controller import on_sidebar_plate_col_activated
-        on_sidebar_plate_col_activated(self, col)
 
-    def _on_sidebar_plate_well_dropped(self, well_id: str, token: str) -> None:
-        from well_viewer.selection_controller import on_sidebar_plate_well_dropped
-        on_sidebar_plate_well_dropped(self, well_id, token)
 
 
 
 
     # ── Threshold ─────────────────────────────────────────────────────────────
 
-    def _recalculate_threshold(self) -> None:
-        """Channel detection + threshold range recompute.
-
-        Body lives in :mod:`well_viewer.channel_state_controller` — see
-        the controller for the full docstring.
-        """
-        from well_viewer.channel_state_controller import recalculate_threshold
-        recalculate_threshold(self)
 
     # ── Ratio metric helpers ─────────────────────────────────────────────────
 
@@ -2402,7 +2348,7 @@ class WellViewerApp(QWidget):
             self._app_state.channel.active_channel = fallback
             self._app_state.channel.active_val_col = f"{fallback}_{self._app_state.channel.active_metric}"
         if hasattr(self, "_update_channel_selector"):
-            self._update_channel_selector()
+            update_channel_selector(self)
         self._invalidate_stats_cache()
         if hasattr(self, "_redraw"):
             try:
@@ -2434,19 +2380,12 @@ class WellViewerApp(QWidget):
         # next dataset reload.
         if hasattr(self, "_update_channel_selector"):
             try:
-                self._update_channel_selector()
+                update_channel_selector(self)
             except Exception:
                 pass
 
     # ── Active channel ───────────────────────────────────────────────────────
 
-    def _set_active_channel(self, channel: str) -> None:
-        """Switch the active fluorescent channel and trigger a redraw.
-
-        Body lives in :mod:`well_viewer.channel_state_controller`.
-        """
-        from well_viewer.channel_state_controller import set_active_channel
-        set_active_channel(self, channel)
 
     def _set_active_image_channel(self, channel: str, *, preserve_review_view: bool = False) -> None:
         """Switch image-display channel for Movie Montage and Review Image."""
@@ -2536,7 +2475,7 @@ class WellViewerApp(QWidget):
             label = self._plot_chan_var.currentText()
         # Route real channels and ratios via the label→key map so ratio
         # selections (e.g. "GFP/MCHERRY") resolve to a ``ratio:<name>`` key.
-        self._set_active_channel(self._channel_key_for_label(label))
+        set_active_channel(self, self._channel_key_for_label(label))
 
     def _on_preview_channel_selected(self, _e=None) -> None:
         """Channel-switch handler for the Movie Montage tab."""
@@ -2618,9 +2557,9 @@ class WellViewerApp(QWidget):
                 cb.setCurrentIndex(idx)
             finally:
                 cb.blockSignals(blocked)
-        self._refresh_metric_combo_for_channel()
+        refresh_metric_combo_for_channel(self)
         self._refresh_heatmap_aggregation_options()
-        self._recalculate_threshold()
+        recalculate_threshold(self)
         self._invalidate_stats_cache()
         self._redraw()
         if hasattr(self, "_bar_tp_cb"):
@@ -2732,13 +2671,6 @@ class WellViewerApp(QWidget):
         finally:
             cb.blockSignals(blocked)
 
-    def _refresh_metric_combo_for_channel(self) -> None:
-        """Reshape every Property combo to match the active channel.
-
-        Body lives in :mod:`well_viewer.channel_state_controller`.
-        """
-        from well_viewer.channel_state_controller import refresh_metric_combo_for_channel
-        refresh_metric_combo_for_channel(self)
 
     def _refresh_stats_property_combo(self) -> None:
         """Reshape the stats Property combo to match the stats channel combo."""
@@ -2753,13 +2685,6 @@ class WellViewerApp(QWidget):
             m_cb, channel_entry=channel, smfish_channel=smf_base,
         )
 
-    def _update_channel_selector(self) -> None:
-        """Refresh the channel dropdown values and selection to match loaded data.
-
-        Body lives in :mod:`well_viewer.channel_state_controller`.
-        """
-        from well_viewer.channel_state_controller import update_channel_selector
-        update_channel_selector(self)
 
     def _toggle_sem(self) -> None:
         self._invalidate_stats_cache()
@@ -3401,18 +3326,9 @@ class WellViewerApp(QWidget):
         self._render_review_image_display()
 
 
-    def _on_review_image_press(self, event) -> None:
-        from well_viewer.review_image_controller import on_review_image_press
-        on_review_image_press(self, event)
 
 
-    def _on_review_image_release(self, event) -> None:
-        from well_viewer.review_image_controller import on_review_image_release
-        on_review_image_release(self, event)
 
-    def _on_review_image_move(self, event: Any) -> None:
-        from well_viewer.review_image_controller import on_review_image_move
-        on_review_image_move(self, event)
 
 
     def _on_review_image_click(self, event: Any) -> None:
@@ -3612,10 +3528,6 @@ class WellViewerApp(QWidget):
 
     # ── Export ────────────────────────────────────────────────────────────────
 
-    def _export_plot_data(self) -> None:
-        from well_viewer.export_service import export_plot_data as _export_plot_data
-
-        _export_plot_data(self)
 
 
     # ── Batch export ──────────────────────────────────────────────────────────
@@ -4065,17 +3977,11 @@ class WellViewerApp(QWidget):
         return bar_idx_at_x(xdata, n)
 
 
-    def _on_bar_drag_press(self, event) -> None:
-        from well_viewer.barplot_controller import on_bar_drag_press
-        on_bar_drag_press(self, event)
 
     def _on_bar_drag_motion(self, event) -> None:
         from well_viewer.barplot_controller import on_bar_drag_motion
         on_bar_drag_motion(self, event, accent_color=ACCENT)
 
-    def _on_bar_drag_release(self, event) -> None:
-        from well_viewer.barplot_controller import on_bar_drag_release
-        on_bar_drag_release(self, event)
 
     def _apply_bar_ylims(
         self,
@@ -4569,20 +4475,8 @@ class WellViewerApp(QWidget):
         self._apply_bar_ylims(ax_mean, ax_frac, ax_n=ax_n)
         return fig
 
-    def _export_bar_plot_data(self) -> None:
-        from well_viewer.export_service import export_bar_plot_data as _export_bar_plot_data
 
-        _export_bar_plot_data(self)
 
-    def _export_heatmap_data(self) -> None:
-        from well_viewer.export_service import export_heatmap_data as _export_heatmap_data
-
-        _export_heatmap_data(self)
-
-    def _export_distribution_data(self) -> None:
-        from well_viewer.export_service import export_distribution_data as _export_distribution_data
-
-        _export_distribution_data(self)
 
     def _open_bar_batch_export(self) -> None:
         """Switch Batch Export tab to the inline bar-plot export builder."""
@@ -4931,13 +4825,7 @@ class WellViewerApp(QWidget):
             self._scatter_tp_label.setText(label_text)
 
 
-    def _on_scatter_click(self, event) -> None:
-        from well_viewer.scatter_controller import on_scatter_click
-        on_scatter_click(self, event)
 
-    def _on_scatter_motion(self, event) -> None:
-        from well_viewer.scatter_controller import on_scatter_motion
-        on_scatter_motion(self, event)
 
     def _open_scatter_cell_viewer(
         self,
@@ -4965,11 +4853,6 @@ class WellViewerApp(QWidget):
             existing.raise_()
             existing.activateWindow()
 
-    def _export_scatter_data(self) -> None:
-        """Export scatter plot data to CSV."""
-        from well_viewer.export_service import export_scatter_data as _export_scatter_data
-
-        _export_scatter_data(self)
 
     def _save_scatter_figure(self) -> None:
         """Save the current Scatter plot figure at high resolution."""
@@ -4996,16 +4879,9 @@ class WellViewerApp(QWidget):
 
         _plot_save_scatter_agg_figure_orchestrator(self, plot_bg=PLOT_BG)
 
-    def _save_montage_figure(self) -> None:
-        from well_viewer.export_service import save_montage_figure as _save_montage_figure
-
-        _save_montage_figure(self)
 
     # ── Legend interaction ────────────────────────────────────────────────────
 
-    def _on_fig_click(self, event) -> None:
-        from well_viewer.lineplot_controller import on_fig_click
-        on_fig_click(self, event)
 
     # ── Log / status helpers ──────────────────────────────────────────────────
 

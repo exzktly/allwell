@@ -42,6 +42,7 @@ from well_viewer.smfish_controller import (
 from well_viewer.smfish_worker import apply_global_threshold_async
 from well_viewer.ui_helpers import attach_plot_toolbar
 from well_viewer.viewer_state import make_schema_extractor
+from well_viewer.channel_state_controller import recalculate_threshold
 
 logger = logging.getLogger("smfish_tab")
 
@@ -707,5 +708,5 @@ def _smfish_refresh_app_cache(app) -> None:
     for label, path in app._app_state.dataset.well_paths.items():
         if label in app._app_state.dataset.cache:
             app._app_state.dataset.cache[label] = app._load_well_csv(path)
-    app._recalculate_threshold()
+    recalculate_threshold(app)
     app._redraw()

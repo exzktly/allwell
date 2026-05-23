@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QMessageBox
 from well_viewer.image_table_controller import image_table_refresh_picker
 from well_viewer.image_table_controller import image_table_repopulate_dropdowns
 from well_viewer.views.label_grid_view import label_grid_refresh
+from well_viewer.channel_state_controller import recalculate_threshold
 
 
 def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
@@ -204,7 +205,7 @@ def load_directory(app, d: Path, label=None) -> None:
     display = label or str(d)
     app._dir_label.setText(display)
     app._set_status(f"Loaded {n} well(s) — {display}")
-    app._recalculate_threshold()
+    recalculate_threshold(app)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from
     # _recalculate_threshold, which fires on every channel/metric switch)

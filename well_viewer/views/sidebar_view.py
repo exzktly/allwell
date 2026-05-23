@@ -8,6 +8,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
+from functools import partial
+from well_viewer.selection_controller import on_sidebar_plate_col_activated
+from well_viewer.selection_controller import on_sidebar_plate_drag_finished
+from well_viewer.selection_controller import on_sidebar_plate_row_activated
+from well_viewer.selection_controller import on_sidebar_plate_selection_changed
+from well_viewer.selection_controller import on_sidebar_plate_well_activated
+from well_viewer.selection_controller import on_sidebar_plate_well_dropped
 
 
 def _drag_info(tok, pos):
@@ -83,12 +90,12 @@ def build_sidebar(app, parent: QWidget) -> None:
     app._sidebar_btns = {f"{r}{c}": None for r in _PLATE_ROWS for c in _PLATE_COLS}
 
     # Wire the plate to the app's selection / replicate-set / heat-map handlers.
-    plate.selectionChanged.connect(app._on_sidebar_plate_selection_changed)
-    plate.selectionDragFinished.connect(app._on_sidebar_plate_drag_finished)
-    plate.wellActivated.connect(app._on_sidebar_plate_well_activated)
-    plate.rowHeaderActivated.connect(app._on_sidebar_plate_row_activated)
-    plate.columnHeaderActivated.connect(app._on_sidebar_plate_col_activated)
-    plate.wellDropped.connect(app._on_sidebar_plate_well_dropped)
+    plate.selectionChanged.connect(partial(on_sidebar_plate_selection_changed, app))
+    plate.selectionDragFinished.connect(partial(on_sidebar_plate_drag_finished, app))
+    plate.wellActivated.connect(partial(on_sidebar_plate_well_activated, app))
+    plate.rowHeaderActivated.connect(partial(on_sidebar_plate_row_activated, app))
+    plate.columnHeaderActivated.connect(partial(on_sidebar_plate_col_activated, app))
+    plate.wellDropped.connect(partial(on_sidebar_plate_well_dropped, app))
 
     # User request: All 96 / Invert / Clear quick-select buttons removed
     # from the sidebar — row and column header clicks on the plate cover

@@ -12,6 +12,10 @@ from well_viewer.ui_helpers import (
     btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
 from well_viewer.scatter_controller import redraw_scatter_orchestrate
+from functools import partial
+from well_viewer.export_service import export_scatter_data
+from well_viewer.scatter_controller import on_scatter_click
+from well_viewer.scatter_controller import on_scatter_motion
 
 
 def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
@@ -84,7 +88,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_tp_selections: dict[str, bool] = {}
     cl.addStretch(1)
 
-    _export_btn = btn_primary(ctrl, "", ctx.app._export_scatter_data,
+    _export_btn = btn_primary(ctrl, "", partial(export_scatter_data, ctx.app),
                               icon="download")
     _export_btn.setToolTip("Export CSV")
     cl.addWidget(_export_btn)
@@ -125,8 +129,8 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
         ctx.app, card, icon="scatter-chart",
     ), 1)
 
-    ctx.app._scatter_canvas.mpl_connect("button_press_event", ctx.app._on_scatter_click)
-    ctx.app._scatter_canvas.mpl_connect("motion_notify_event", ctx.app._on_scatter_motion)
+    ctx.app._scatter_canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx.app))
+    ctx.app._scatter_canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx.app))
 
 
 def _open_timepoint_selector(app) -> None:

@@ -28,6 +28,14 @@ from well_viewer.image_table_controller import image_table_repopulate_dropdowns
 from well_viewer.image_table_controller import image_table_toggle_binary
 from well_viewer.image_table_controller import image_table_toggle_boundaries
 from well_viewer.image_table_controller import image_table_toggle_tophat
+from functools import partial
+from well_viewer.image_table_controller import image_table_copy_png
+from well_viewer.image_table_controller import image_table_copy_svg
+from well_viewer.image_table_controller import image_table_distribute_timepoints
+from well_viewer.image_table_controller import image_table_distribute_wells
+from well_viewer.image_table_controller import image_table_export
+from well_viewer.image_table_controller import image_table_generate
+from well_viewer.image_table_controller import image_table_load_heatmap_layout
 
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:
@@ -64,7 +72,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # rendered grid follows mode toggles and crop changes automatically.
     if not hasattr(ctx.app, "_image_table_crop_tool"):
         ctx.app._image_table_crop_tool = CropTool(
-            on_change=lambda: ctx.app._image_table_generate(),
+            on_change=lambda: image_table_generate(ctx.app),
         )
 
     scroll = QScrollArea(parent)
@@ -144,13 +152,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     la.setContentsMargins(0, 0, 0, 0)
     la.setSpacing(6)
     la.addWidget(btn_secondary(
-        layout_actions, "Load Heatmap Layout", ctx.app._image_table_load_heatmap_layout,
+        layout_actions, "Load Heatmap Layout", partial(image_table_load_heatmap_layout, ctx.app),
     ))
     la.addWidget(btn_secondary(
-        layout_actions, "Distribute Wells", ctx.app._image_table_distribute_wells,
+        layout_actions, "Distribute Wells", partial(image_table_distribute_wells, ctx.app),
     ))
     la.addWidget(btn_secondary(
-        layout_actions, "Distribute Timepoints", ctx.app._image_table_distribute_timepoints,
+        layout_actions, "Distribute Timepoints", partial(image_table_distribute_timepoints, ctx.app),
     ))
     la.addStretch(1)
     il.addWidget(layout_actions)
@@ -296,13 +304,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
     tr.addWidget(export_settings_btn)
     tr.addWidget(btn_secondary(
-        tools_row, "Copy PNG", ctx.app._image_table_copy_png, icon="copy",
+        tools_row, "Copy PNG", partial(image_table_copy_png, ctx.app), icon="copy",
     ))
-    _b = btn_secondary(tools_row, "", ctx.app._image_table_copy_svg, icon="copy")
+    _b = btn_secondary(tools_row, "", partial(image_table_copy_svg, ctx.app), icon="copy")
     _b.setToolTip("Copy SVG")
     tr.addWidget(_b)
     tr.addWidget(btn_secondary(
-        tools_row, "Export", ctx.app._image_table_export, icon="download",
+        tools_row, "Export", partial(image_table_export, ctx.app), icon="download",
     ))
     il.addWidget(tools_row)
 
@@ -311,7 +319,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gr = QHBoxLayout(generate_row)
     gr.setContentsMargins(0, 0, 0, 0)
     gr.setSpacing(6)
-    gr.addWidget(btn_primary(generate_row, "Generate", ctx.app._image_table_generate))
+    gr.addWidget(btn_primary(generate_row, "Generate", partial(image_table_generate, ctx.app)))
     gr.addStretch(1)
     il.addWidget(generate_row)
 

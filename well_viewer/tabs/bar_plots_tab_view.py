@@ -13,6 +13,10 @@ from well_viewer.ui_helpers import (
     make_plot_with_right_dock, make_plot_view_switcher)
 from well_viewer.barplot_controller import bar_reset_order
 from well_viewer.barplot_renderer import redraw_bars
+from functools import partial
+from well_viewer.barplot_controller import on_bar_drag_press
+from well_viewer.barplot_controller import on_bar_drag_release
+from well_viewer.export_service import export_bar_plot_data
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -77,7 +81,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx.app))
     cl.addWidget(ctx.app._bar_reset_order_btn)
 
-    _export_btn = btn_primary(bar_ctrl, "", ctx.app._export_bar_plot_data,
+    _export_btn = btn_primary(bar_ctrl, "", partial(export_bar_plot_data, ctx.app),
                               icon="download")
     _export_btn.setToolTip("Export CSV")
     cl.addWidget(_export_btn)
@@ -178,6 +182,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Drag-to-reorder bars
     ctx.app._bar_drag_state = {"active": False, "src_idx": -1, "cur_idx": -1}
-    ctx.app._bar_canvas.mpl_connect("button_press_event", ctx.app._on_bar_drag_press)
+    ctx.app._bar_canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx.app))
     ctx.app._bar_canvas.mpl_connect("motion_notify_event", ctx.app._on_bar_drag_motion)
-    ctx.app._bar_canvas.mpl_connect("button_release_event", ctx.app._on_bar_drag_release)
+    ctx.app._bar_canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx.app))

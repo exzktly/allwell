@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 from well_viewer.ui_helpers import (
     btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
+from functools import partial
+from well_viewer.export_service import export_distribution_data
 
 
 _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)"]
@@ -102,7 +104,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     cl.addStretch(1)
 
-    _export_btn = btn_primary(ctrl, "", ctx.app._export_distribution_data,
+    _export_btn = btn_primary(ctrl, "", partial(export_distribution_data, ctx.app),
                               icon="download")
     _export_btn.setToolTip("Export CSV")
     cl.addWidget(_export_btn)

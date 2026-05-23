@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QTimer
 from PySide6.QtWidgets import QToolTip
+from functools import partial
 
 
 def montage_tophat_done(app, filtered_arrays: list, partial: bool = False) -> None:
@@ -105,7 +106,7 @@ def on_montage_canvas_resize(app, _e=None) -> None:
     if app._montage_fluor_arrays:
         t = QTimer()
         t.setSingleShot(True)
-        t.timeout.connect(app._montage_resize_deferred)
+        t.timeout.connect(partial(montage_resize_deferred, app))
         t.start(150)
         app._montage_resize_timer = t
 
@@ -196,7 +197,7 @@ def montage_zoom_step(app, direction: int) -> None:
         app._montage_zoom = min(16.0, cur * factor)
     elif direction < 0:
         app._montage_zoom = max(0.05, cur / factor)
-    app._montage_redraw_at_zoom()
+    montage_redraw_at_zoom(app)
 
 
 def montage_zoom_steps(app, steps: int) -> None:
@@ -204,12 +205,12 @@ def montage_zoom_steps(app, steps: int) -> None:
         return
     cur = float(getattr(app, "_montage_zoom", 1.0) or 1.0)
     app._montage_zoom = min(16.0, max(0.05, cur * (1.15 ** steps)))
-    app._montage_redraw_at_zoom()
+    montage_redraw_at_zoom(app)
 
 
 def montage_zoom_fit(app) -> None:
     app._montage_zoom = 1.0
-    app._montage_redraw_at_zoom()
+    montage_redraw_at_zoom(app)
 
 
 def on_montage_wheel(app, event) -> None:

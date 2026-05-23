@@ -18,6 +18,9 @@ from well_viewer.stats_controller import stats_on_test_change
 from well_viewer.stats_controller import stats_refresh_group_list
 from well_viewer.stats_controller import stats_update_tp_menu
 from well_viewer.stats_controller import stats_refresh_map
+from functools import partial
+from well_viewer.stats_controller import stats_grp_add
+from well_viewer.stats_controller import stats_grp_clear_all
 
 
 def build_stats_tab(app, parent: QWidget) -> None:
@@ -60,8 +63,8 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
         parent,
         "COMPARISON GROUPS",
         buttons=(
-            btn_secondary(parent, "Clear All", app._stats_grp_clear_all),
-            btn_primary(parent, "+ Add", app._stats_grp_add),
+            btn_secondary(parent, "Clear All", partial(stats_grp_clear_all, app)),
+            btn_primary(parent, "+ Add", partial(stats_grp_add, app)),
         ),
     )
     layout.addWidget(hdr)

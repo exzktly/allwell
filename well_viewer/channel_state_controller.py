@@ -35,6 +35,7 @@ from well_viewer.data_loading import (
 from well_viewer.ratio_models import is_ratio_key
 from well_viewer.ui_helpers import set_combo_values
 from well_viewer.stats_controller import stats_update_tp_menu
+from functools import partial
 
 _logger = logging.getLogger("well_viewer")
 
@@ -46,7 +47,7 @@ def recalculate_threshold(app) -> None:
     """Re-detect channels from the loaded CSVs, sync combos, and rebuild
     the (lo, hi) intensity range used by the threshold sliders.
 
-    Replaces ``WellViewerApp._recalculate_threshold``.
+    Replaces ``partial(recalculate_threshold, WellViewerApp)``.
     """
     sample_df = next(
         (app._get_rows(lbl) for lbl in app._app_state.dataset.well_paths),
@@ -80,7 +81,7 @@ def recalculate_threshold(app) -> None:
     app._app_state.channel.review_image_channels = detect_review_image_channels(
         sample_df, app._app_state.channel.fluor_channels, seg_tok,
     )
-    app._update_channel_selector()
+    update_channel_selector(app)
 
     # Update smFISH channels, then let ChannelState re-assert its invariants:
     # drop a stale smfish_count metric the new channel can't support, and
@@ -159,7 +160,7 @@ def set_active_channel(app, channel: str) -> None:
     key (``"ratio:<name>"``). Ratios bypass the per-channel metric
     selector and route reads through ``resolve_value``.
 
-    Replaces ``WellViewerApp._set_active_channel``.
+    Replaces ``partial(set_active_channel, WellViewerApp)``.
     """
     if not channel or channel == "—":
         return
@@ -218,9 +219,9 @@ def set_active_channel(app, channel: str) -> None:
             finally:
                 cb.blockSignals(blocked)
     # Reset threshold to the range of the new channel.
-    app._recalculate_threshold()
+    recalculate_threshold(app)
     app._invalidate_stats_cache()
-    app._refresh_metric_combo_for_channel()
+    refresh_metric_combo_for_channel(app)
     # Announce on the bus. The RedrawCoordinator subscriber coalesces the
     # redraw — visible scope now, the other marked dirty for redraw on tab
     # switch (see redraw_coordinator.py / fold_change_scopes.py).
@@ -242,7 +243,7 @@ def refresh_metric_combo_for_channel(app) -> None:
     with ``smFISH Count`` greyed out when the channel isn't an smFISH
     one. Per-tab combos (heatmap / stats) follow the global channel.
 
-    Replaces ``WellViewerApp._refresh_metric_combo_for_channel``.
+    Replaces ``partial(refresh_metric_combo_for_channel, WellViewerApp)``.
     """
     try:
         channel_label = app._active_channel_label()
@@ -265,7 +266,7 @@ def refresh_metric_combo_for_channel(app) -> None:
 def update_channel_selector(app) -> None:
     """Refresh the channel dropdown values and selection to match loaded data.
 
-    Replaces ``WellViewerApp._update_channel_selector``.
+    Replaces ``partial(update_channel_selector, WellViewerApp)``.
     """
     real_labels = [ch.upper() for ch in app._app_state.channel.fluor_channels]
     ratio_labels = app._ratio_dropdown_labels()
@@ -329,7 +330,7 @@ def update_channel_selector(app) -> None:
     # Keep active channel anchored to a valid plot channel.
     if active_label not in labels:
         if plot_label != "—":
-            app._set_active_channel(app._channel_key_for_label(plot_label))
+            set_active_channel(app, app._channel_key_for_label(plot_label))
         else:
             # No valid plot channel — clear active state explicitly.
             app._app_state.channel.active_channel = ""
@@ -358,7 +359,7 @@ def update_channel_selector(app) -> None:
                     global_cb.blockSignals(blocked)
     # Refresh the global Property combo's per-item enable state now that
     # the channel list has changed.
-    app._refresh_metric_combo_for_channel()
+    refresh_metric_combo_for_channel(app)
 
     # Same trick for the Segmentation tab's channel combo and the
     # back-compat Movie Montage combo — _pick_valid above preserves

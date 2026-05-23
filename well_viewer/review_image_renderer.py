@@ -514,3 +514,88 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
             "[RI-CHSW step 7] render_review_image_display done img=%sx%s shown=%sx%s scale=%.4f rebuild=%s",
             iw, ih, nw, nh, scale, rebuild,
         )
+
+
+def review_image_resolve_lut(app, arr) -> Tuple[float, float]:
+    chan = str(app._app_state.channel.active_image_channel or "").lower()
+    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
+        try:
+            lo = float(app._review_lmin_entry.text().strip())
+            hi = float(app._review_lmax_entry.text().strip())
+            if hi > lo:
+                app._app_state.review_image.lut_by_channel[chan] = (lo, hi)
+                return lo, hi
+        except Exception:
+            pass
+    saved = app._app_state.review_image.lut_by_channel.get(chan)
+    if saved is not None and saved[1] > saved[0]:
+        return saved
+    lo = float(arr.min())
+    hi = float(arr.max())
+    if hi <= lo:
+        hi = lo + 1.0
+    app._app_state.review_image.lut_by_channel[chan] = (lo, hi)
+    return lo, hi
+
+
+
+def refresh_review_image_source_btn(app) -> None:
+    """Sync the raw/top-hat toggle button's caption + variant with state."""
+    btn = getattr(app, "_review_image_raw_btn", None)
+    if btn is None:
+        return
+    on = bool(app._app_state.review_image.show_raw)
+    btn.setChecked(on)
+    btn.setText("Raw" if on else "Top-hat")
+    btn.setProperty("variant", "toggle")
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
+    btn.setToolTip(
+        "Showing the unprocessed fluorescence frame.\n"
+        "Click to switch back to the top-hat-filtered image."
+        if on else
+        "Showing the top-hat-filtered fluorescence frame (default).\n"
+        "Click to switch to the unprocessed raw image."
+    )
+
+
+
+def apply_review_image_cursor(app) -> None:
+    """Set the Review Image cursor based on include-edit mode.
+
+    ForbiddenCursor (the ⊘ 'no entry' icon) indicates remove-cell mode;
+    PointingHandCursor indicates normal select/highlight mode. Applied
+    to both the label and the scroll viewport so it does not flicker
+    back to the arrow over scrollbar gutters or padding.
+    """
+    enabled = bool(app._app_state.review_image.include_edit_mode)
+    cursor = Qt.CrossCursor if enabled else Qt.PointingHandCursor
+    if hasattr(app, "_review_image_label"):
+        app._review_image_label.setCursor(cursor)
+    canvas = getattr(app, "_review_image_canvas", None)
+    if canvas is not None:
+        canvas.setCursor(cursor)
+        vp = canvas.viewport()
+        if vp is not None:
+            vp.setCursor(cursor)
+
+
+
+def draw_review_image(
+    app,
+    fluor_arr,
+    mask_arr,
+    include_by_nid: Dict[int, bool],
+    *,
+    fit_lut: bool = False,
+    preserve_view: bool = False,
+    boundary=None,
+    above_by_nid: Optional[Dict[int, bool]] = None,
+) -> None:
+    from well_viewer.review_image_renderer import draw_review_image
+    draw_review_image(
+        app, fluor_arr, mask_arr, include_by_nid,
+        fit_lut=fit_lut, preserve_view=preserve_view, boundary=boundary,
+        above_by_nid=above_by_nid,
+    )
+

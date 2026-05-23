@@ -217,3 +217,84 @@ def run_tab_switch_smoke_checks(
             prev_tab, tab,
         )
 
+
+
+def current_centre_tab(app) -> str:
+    """Return the effective current tab name.
+
+    When the "Plotting" or "Segmentation" top-level tab is active
+    the real content lives in a nested QStackedWidget. This helper
+    resolves that one level of indirection so callers can always
+    compare against leaf names like "Bar Plots", "Heat Map",
+    "Segmentation", or "smFISH". (The Segmentation parent and its
+    default leaf share the same name; descending is still correct —
+    the inner stack returns "Segmentation" or "smFISH" depending on
+    which sub-tab is active.)
+    """
+    nb = getattr(app, "_notebook", None)
+    if nb is None:
+        return ""
+    try:
+        tab = nb.currentName()
+    except Exception:
+        return ""
+    if tab == "Plotting":
+        plotting_nb = getattr(app, "_plotting_notebook", None)
+        if plotting_nb is not None and plotting_nb.count() > 0:
+            try:
+                return plotting_nb.currentName()
+            except Exception:
+                pass
+    elif tab == "Segmentation":
+        cs_nb = getattr(app, "_cell_segmentation_notebook", None)
+        if cs_nb is not None and cs_nb.count() > 0:
+            try:
+                return cs_nb.currentName()
+            except Exception:
+                pass
+    return tab
+
+
+
+def sync_heatmap_well_drag_mode(app, enable: bool) -> None:
+    """Toggle WELL_MIME drag/drop on the sidebar plate widget.
+
+    When *enable* is True, the plate exports the well under the pointer via
+    the WELL_MIME format on left-button drag (clicks stop toggling
+    selection) and accepts dropped tokens as a "return to palette" action
+    that unassigns the well from the active heat-map layout (handled by
+    ``_on_sidebar_plate_well_dropped``). When False, drag/drop is disabled
+    and the plate reverts to plain selection behaviour.
+    """
+    plate = getattr(app, "_sidebar_plate", None)
+    if plate is None:
+        return
+    from well_viewer.views.heatmap_layout_sidebar_view import WELL_MIME
+    if enable:
+        plate.setDragMime(WELL_MIME)
+        plate.setAcceptDropMime(WELL_MIME)
+    else:
+        plate.setDragMime(None)
+        plate.setAcceptDropMime(None)
+
+
+
+def sync_section_nav_from_notebook(app) -> None:
+    nav = getattr(app, "_section_nav", None)
+    nb = getattr(app, "_notebook", None)
+    if nav is None or nb is None:
+        return
+    app._section_nav_building = True
+    try:
+        existing = set(nav.items())
+        for title in nb.pageNames():
+            if title in existing:
+                continue
+            nav.addItem(title, icon=app._SECTION_ICONS.get(title), key=title)
+            app._section_nav_keys.append(title)
+        cur = nb.currentName() if nb.count() else None
+        if cur:
+            nav.setCurrentKey(cur)
+    finally:
+        app._section_nav_building = False
+

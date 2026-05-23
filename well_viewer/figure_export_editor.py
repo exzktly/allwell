@@ -472,3 +472,43 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
         QMessageBox.warning(app if isinstance(app, QWidget) else None,
                             "Export editor unavailable", str(exc))
         return None
+
+
+def open_export_style_panel(app, plot_key: str) -> None:
+    """Open the floating Export Style sidebar for ``plot_key``'s figure.
+
+    Each plot tab (line / bar / scatter cells / scatter agg /
+    distribution / heatmap) pre-allocates a right-side dock when its
+    view is built. This routes the per-card "▸" style button to the
+    ExportStyleSidebar mounted in that dock.
+    """
+    mapping = {
+        "line":          ("_line_fig",         "_line_canvas",         "line_figure"),
+        "bar":           ("_bar_fig",          "_bar_canvas",          "bar_figure"),
+        "scatter_cells": ("_scatter_fig",      "_scatter_canvas",      "scatter_figure"),
+        "scatter_agg":   ("_scatter_agg_fig",  "_scatter_agg_canvas",  "scatter_agg_figure"),
+        "distribution":  ("_distribution_fig", "_distribution_canvas", "distribution_figure"),
+        "heatmap":       ("_heatmap_fig",      "_heatmap_canvas",      "heatmap_figure"),
+    }
+    spec = mapping.get(plot_key)
+    if spec is None:
+        app._set_status(f"Unknown export panel: {plot_key}")
+        return
+    fig_attr, canvas_attr, default_name = spec
+    fig = getattr(app, fig_attr, None)
+    canvas = getattr(app, canvas_attr, None)
+    if fig is None:
+        app._set_status("Plot is not ready yet.")
+        return
+    # If a sidebar for this figure is already open, toggle it off so
+    # the button behaves as an open/close affordance.
+    existing = (getattr(app, "_export_style_sidebars", {}) or {}).get(id(fig))
+    if existing is not None and existing.isVisible():
+        try:
+            existing._close_dock()
+        except Exception:
+            pass
+        return
+    from well_viewer.figure_export_editor import launch_export_editor
+    launch_export_editor(app, fig, default_name, plot_bg=PLOT_BG, canvas=canvas)
+

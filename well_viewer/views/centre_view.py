@@ -758,3 +758,24 @@ def build_centre(app, parent: QWidget) -> None:
             QTimer.singleShot(0, _drain)
 
     QTimer.singleShot(0, _drain)
+
+
+def drain_pending_centre_builders(app) -> None:
+    """Force-build any centre tab whose body was deferred at startup.
+
+    Tabs marked lazy-only (Cell Gating, smFISH) are intentionally
+    skipped — they construct only when the user actually clicks the
+    tab. The tab-switch handler in ``centre_view`` builds them inline
+    on first access.
+    """
+    pending = getattr(app, "_centre_pending_builders", None)
+    build = getattr(app, "_centre_build_pending", None)
+    if not pending or build is None:
+        return
+    lazy_only = getattr(app, "_centre_lazy_only_titles", frozenset())
+    # Snapshot keys — _centre_build_pending mutates the dict.
+    for title in list(pending.keys()):
+        if title in lazy_only:
+            continue
+        build(title)
+

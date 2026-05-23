@@ -524,3 +524,24 @@ def on_fig_click(app, event) -> None:
         app._line_canvas.draw_idle()
     state = "shown" if app._app_state.plot.legend_visible[key] else "hidden"
     app._set_status(f"Legend for '{key}' plot {state}  (right-click to toggle)")
+
+
+def toggle_sem(app) -> None:
+    app._invalidate_stats_cache()
+    is_sem = app._app_state.plot.toggle_sem()
+    text = "SEM" if is_sem else "SD"
+    variant = "sem" if is_sem else "sem_warn"
+    for btn in list(getattr(app, "_sem_btns", []) or []):
+        btn.setText(text)
+        btn.setProperty("variant", variant)
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+    for obs in list(getattr(app, "_sem_observers", []) or []):
+        try:
+            obs(is_sem)
+        except Exception:
+            pass
+    app._redraw()
+    if app._current_centre_tab() == "Bar Plots":
+        redraw_bars(app)
+

@@ -5,6 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import QObject
 from well_viewer.barplot_renderer import redraw_bars
 from well_viewer.scatter_controller import update_scatter_menus
+from well_viewer.views.grouping_view import rep_panel_refresh
+from well_viewer.views.label_grid_view import label_grid_refresh
 
 
 def _active_tab(app) -> str:
@@ -573,4 +575,164 @@ def refresh_sidebar_map_now(app) -> None:
             app._line_group_hint.setText("")
 
     app._sidebar_map_refresh_pending = False
+
+
+
+def sel_export_one(app, sid) -> None:
+    """Export a single saved selection (by id) to a standalone JSON file."""
+    s = app._sel_by_id(sid)
+    if s is None:
+        return
+    from PySide6.QtWidgets import QFileDialog
+    import json as _json
+    default_name = f"{s.get('name') or 'selection'}.json"
+    path, _ = QFileDialog.getSaveFileName(
+        app, "Export selection", default_name, "JSON (*.json)"
+    )
+    if not path:
+        return
+    try:
+        from well_viewer.selections_model import to_block
+        block = to_block([s], current_id=s.get("id"))
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(block, f, indent=2)
+        app._toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
+    except Exception as exc:
+        app._toast(f"Export failed: {exc}", kind="danger", msec=6000)
+
+
+
+def sel_strip_wells(app, wells, *, keep_id=None) -> None:
+    """A well belongs to ≤1 group: remove ``wells`` from every selection but
+    ``keep_id``, pruning their replicates to the survivors. Also drop the
+    same wells from ``app._app_state.selection.selected_wells`` so the plotting tabs don't
+    keep treating them as solo wells once they've joined a group (the
+    sidebar plate becomes passive in rep_mode and the user can't update
+    the set themselves)."""
+    from well_viewer.selections_model import _deoverlap_replicates
+    wset = set(wells or [])
+    if not wset:
+        return
+    for s in app._app_state.selection.selections:
+        if s.get("id") == keep_id:
+            continue
+        nw = [w for w in (s.get("wells") or []) if w not in wset]
+        if nw != s.get("wells"):
+            s["wells"] = nw
+            s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(nw))
+    if wset & app._app_state.selection.selected_wells:
+        app._app_state.selection.selected_wells = app._app_state.selection.selected_wells - wset
+
+
+
+def sel_set_color(app, sid, color) -> None:
+    """Recolour a saved selection. ``color`` is a ``#RRGGBB`` hex string
+    (or anything accepted by QColor); empty / falsy clears the override
+    and lets the rank-based colour fall back through."""
+    s = app._sel_by_id(sid)
+    if s is None:
+        return
+    try:
+        from PySide6.QtGui import QColor
+        qc = QColor(color) if color else QColor()
+        new = qc.name(QColor.HexRgb).upper() if qc.isValid() else ""
+    except Exception:
+        new = str(color or "").strip()
+    if (s.get("color") or "") == new:
+        return
+    if new:
+        s["color"] = new
+    else:
+        s.pop("color", None)
+    app._rebuild_all()
+
+
+
+def groups_centre_refresh(app) -> None:
+    """Refresh all Sample Definitions panels.
+
+    Card lists are only rebuilt when the tab is active (expensive).
+    Plate maps are always updated (cheap).
+    """
+    app._enforce_well_exclusivity()
+    tab_visible = False
+    nb = getattr(app, "_notebook", None)
+    if nb is not None:
+        try:
+            tab_visible = nb.currentName() == "Sample Definitions"
+        except Exception:
+            pass
+
+    if tab_visible:
+        rep_panel_refresh(app)
+        label_grid_refresh(app)
+    app._rep_refresh_map()
+    update_active_group_label(app)
+
+
+
+def set_selected_wells(app, new_set, *, commit: bool = True) -> None:
+    """Single mutation point for ``_selected_wells``.
+
+    Callers that mutated the set directly (heatmap drag, smFISH tab
+    activation, batch-export panels) bypassed ``_prev_sel`` tracking
+    and the redraw fan-out, so the next selection diff in
+    ``selection_controller.on_plate_sel_change`` mis-attributed
+    additions / removals across tabs. Funnel everything through here.
+    """
+    new_set = set(new_set or [])
+    if new_set == app._app_state.selection.selected_wells:
+        return
+    # Snapshot the previous selection so on_plate_sel_change can
+    # compute an accurate diff if it runs after this.
+    app._app_state.selection.prev_sel = set(app._app_state.selection.selected_wells)
+    app._app_state.selection.selected_wells = new_set
+    if hasattr(app, "_refresh_sidebar_map"):
+        app._refresh_sidebar_map()
+    if commit and hasattr(app, "_on_plate_sel_change"):
+        on_plate_sel_change(app)
+
+
+
+def enforce_well_exclusivity(app) -> None:
+    """Invariant: a well belongs to **at most one group**. Keep each well in
+    the first selection that has it; strip it from the rest. The edit
+    helpers already enforce this (edited group wins); this is a safety net
+    and cleans up pre-existing overlaps from old saved data."""
+    seen: set = set()
+    for s in app._app_state.selection.selections:
+        if not isinstance(s, dict):
+            continue
+        kept = []
+        for w in (s.get("wells") or []):
+            if w in seen:
+                continue
+            seen.add(w)
+            kept.append(w)
+        if kept != s.get("wells"):
+            from well_viewer.selections_model import _deoverlap_replicates
+            s["wells"] = kept
+            s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(kept))
+
+
+
+def rebuild_all(app) -> None:
+    """
+    Single authoritative refresh called after ANY data change.
+    Always synchronous — no debounce — because it is only called on
+    explicit user actions (button clicks / dialog OK), never during drag.
+    """
+    app._invalidate_stats_cache()
+    app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
+    app._refresh_sidebar_map()            # line-graph picker: rep colours
+    redraw_bars(app)
+    app._redraw()
+    try:
+        from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
+        scatter_redraw_active(app)
+    except Exception:
+        _logger.exception("Scatter redraw failed")
+    if hasattr(app, "_notebook"):
+        if app._current_centre_tab() == "Line Graphs":
+            app._show_line_sidebar()
 

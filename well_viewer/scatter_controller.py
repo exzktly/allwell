@@ -1076,3 +1076,70 @@ def sync_scatter_agg_stat_combos(app) -> None:
         finally:
             stat_cb.blockSignals(blocked)
 
+
+
+def col_for_scatter_entry(app, entry: str) -> str:
+    """Legacy single-string entry → column resolver (kept for stats/export back-compat).
+
+    "gfp" -> "gfp_mean_intensity"
+    "gfp (spots)" -> "gfp_smfish_count"
+    "GFP/MCHERRY" (a ratio dropdown label) -> "ratio:GFP/MCHERRY"
+    """
+    ratio_key = (getattr(app, "_label_to_channel_key", None) or {}).get(entry)
+    if ratio_key and is_ratio_key(ratio_key):
+        return ratio_key
+    if entry.endswith(" (spots)"):
+        ch = entry[:-8]  # Remove " (spots)"
+        return f"{ch}_smfish_count"
+    else:
+        metric = app._app_state.channel.active_metric or "mean_intensity"
+        if metric == "smfish_count":
+            # The scatter dropdown uses the " (spots)" suffix for smfish;
+            # fall back to mean intensity for the plain channel entry.
+            metric = "mean_intensity"
+        return f"{entry}_{metric}"
+
+
+
+def col_for_scatter_axis(app, channel_entry: str, metric_key: str) -> str:
+    """Map a scatter (channel_entry, metric_key) pair to a CSV column or ratio key.
+
+    Ratio channels collapse to the ratio key regardless of metric (ratios
+    don't carry a metric suffix). Otherwise builds ``<channel>_<metric>``.
+    ``metric_key`` may be ``fraction_above_threshold`` for the agg scatter
+    — that's a synthetic key that downstream aggregation code treats as a
+    Fraction-On aggregation against the channel's mean-intensity column.
+    """
+    ratio_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    if ratio_key and is_ratio_key(ratio_key):
+        return ratio_key
+    if metric_key in ("fraction_above_threshold", "smfish_count"):
+        # Fraction-on uses MFI as the underlying value column; smFISH
+        # uses the dedicated count column.
+        if metric_key == "smfish_count":
+            return f"{channel_entry}_smfish_count"
+        return f"{channel_entry}_mean_intensity"
+    return f"{channel_entry}_{metric_key}"
+
+
+
+def compose_scatter_agg_stat(app, channel_entry: str, metric_label: str) -> str:
+    """Build the legacy stat-string from a (channel, metric) pair.
+
+    Mirrors ``parse_statistic`` in scatter_controller: keeps the same
+    prefix vocabulary so older callers and the savefile naming still
+    recognise the result.
+    """
+    ratio_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    if ratio_key and is_ratio_key(ratio_key):
+        return f"Mean Ratio {channel_entry}"
+    ch_upper = (channel_entry or "").upper()
+    if metric_label == "Fraction above threshold":
+        return f"Fraction On {ch_upper}"
+    if metric_label == "smFISH Count":
+        return f"smFISH Count {ch_upper}"
+    # All intensity flavours map to the per-cell mean of values above
+    # threshold via _aggregate_group; surface a metric-aware suffix so
+    # axes/titles reflect the selected property.
+    return f"Mean Fluorescence {ch_upper} ({metric_label})"
+

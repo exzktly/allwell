@@ -167,3 +167,26 @@ def replicate_display_label(app, rset: "ReplicateSet") -> str:
         return ",".join(wells)
     return f"{','.join(wells[:3])} +{len(wells)-3}"
 
+
+
+def rep_refresh_map(app) -> None:
+    """Push selection state onto the GROUPS-panel plate (a WellPlateSelector):
+    every selection's wells take that selection's rank colour; the *current*
+    selection's wells are shown as the plate's selection (sunken/accent), which
+    is also what a drag on the plate edits."""
+    plate = getattr(app, "_rep_map_plate", None)
+    if plate is None:
+        return
+    plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
+    colors: Dict[str, str] = {}
+    for s in app._app_state.selection.selections:
+        c = app._sel_color(s)
+        for tok in (s.get("wells") or []):
+            if tok in app._app_state.dataset.well_paths:
+                colors[tok] = c
+    plate.clearWellColors()
+    plate.setWellColors(colors)
+    cur = app._sel_by_id(app._app_state.selection.current_selection_id)
+    cur_wells = [w for w in (cur.get("wells") or []) if w in app._app_state.dataset.well_paths] if cur else []
+    plate.setSelectedWellIds(cur_wells)
+

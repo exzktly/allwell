@@ -410,3 +410,28 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # Default cursor reflects the initial Include-edit-mode state
     # (ForbiddenCursor when remove-cell mode is active).
     self._apply_review_image_cursor()
+
+
+def refresh_fov_btn_state(app) -> None:
+    """Sync every per-FOV toggle button's text/variant state."""
+    is_on = bool(app._app_state.plot.use_fov_replicates)
+    text = "FOV ✓" if is_on else "FOV"
+    variant = "toggle_active" if is_on else "toggle"
+    tooltip = (
+        "Compute error bands across per-FOV means.\n"
+        "With replicate sets active, FOVs are pooled across all wells in each set;\n"
+        "otherwise FOVs are pooled within each well. Pairs with the SEM/SD toggle."
+    )
+    for btn in list(getattr(app, "_fov_btns", []) or []):
+        btn.setEnabled(True)
+        btn.setText(text)
+        btn.setToolTip(tooltip)
+        btn.setProperty("variant", variant)
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+    for obs in list(getattr(app, "_fov_observers", []) or []):
+        try:
+            obs(is_on)
+        except Exception:
+            pass
+

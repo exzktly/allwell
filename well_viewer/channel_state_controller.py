@@ -772,3 +772,67 @@ def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
     from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_thresh_frac_on
     return cell_gating_get_thresh_frac_on(app, channel)
 
+
+
+def get_cell_area_threshold(app) -> float:
+    """Get cell area threshold from the Cell Gating tab."""
+    edit = getattr(app, "_cell_gating_area_edit", None)
+    if edit is not None:
+        try:
+            return float(edit.text())
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+
+def get_fluor_gate(app, channel: str) -> float:
+    """Get FluorGating threshold for a channel."""
+    if hasattr(app, "_cell_gating_area_edit"):
+        from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_fluor_gate
+        return cell_gating_get_fluor_gate(app, channel)
+    return 0.0
+
+
+
+def active_channel_label(app) -> str:
+    """Return the dropdown label corresponding to the active channel."""
+    if is_ratio_key(app._app_state.channel.active_val_col):
+        ratio_name = ratio_name_from_key(app._app_state.channel.active_val_col)
+        for r in app._app_state.channel.ratio_metrics:
+            if r.name == ratio_name:
+                return app._ratio_label_for(r)
+        return ratio_name.upper()
+    return app._app_state.channel.active_channel.upper()
+
+
+
+def ratio_label_for(app, ratio: RatioMetric) -> str:
+    """Return the dropdown label for a ratio (e.g. ``"GFP/MCHERRY"``).
+
+    Disambiguates by appending ``[name]`` if two ratios share a label.
+    """
+    base = ratio.display_label()
+    same_base = [r for r in app._app_state.channel.ratio_metrics if r.display_label() == base]
+    if len(same_base) > 1:
+        return f"{base} [{ratio.name}]"
+    return base
+
+
+
+def on_metric_selected(app) -> None:
+    """Handle the per-tab (legacy hidden) metric selector change."""
+    from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
+    metric_label = app._metric_var.currentText()
+    metric = METRIC_LABEL_TO_KEY.get(metric_label, "mean_intensity")
+    set_active_metric(app, metric)
+
+
+
+def open_ratio_panel(app) -> None:
+    """Bring the Sample Definitions tab forward — the ratio editor lives there now."""
+    nb = getattr(app, "_notebook", None)
+    if nb is None:
+        return
+    nb.setCurrentByName("Sample Definitions")
+

@@ -636,3 +636,75 @@ def stats_active_threshold(app) -> float:
         return float(app._get_thresh_frac_on(channel))
     return float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
 
+
+
+def stats_collect_group_values_shim(
+    app, grp: BarGroup, target_t: float
+) -> List[float]:
+    return _stats_collect_group_values(
+        app, grp, target_t,
+        val_col=app._stats_active_val_col(),
+        threshold=app._stats_active_threshold(),
+        statistic=app._stats_active_statistic(),
+    )
+
+
+
+def stats_active_val_col(app) -> str:
+    """Resolve the selected channel-dropdown entry to a value-column key."""
+    entry = app._stats_active_channel_entry()
+    if not entry:
+        return app._app_state.channel.active_val_col
+    try:
+        return app._col_for_scatter_entry(entry)
+    except Exception:
+        return app._app_state.channel.active_val_col
+
+
+
+def stats_active_channel_entry(app) -> str:
+    cb = getattr(app, "_stats_channel_cb", None)
+    if cb is None:
+        return app._app_state.channel.active_channel or ""
+    text = cb.currentText().strip()
+    return text if text and text != "—" else (app._app_state.channel.active_channel or "")
+
+
+
+def stats_active_statistic(app) -> str:
+    cb = getattr(app, "_stats_statistic_cb", None)
+    if cb is None:
+        return "mean"
+    return app._STATS_STATISTIC_KEYS.get(cb.currentText(), "mean")
+
+
+
+def stats_run_shim(app) -> None:
+    _stats_run_controller(
+        app,
+        collect_group_values_fn=app._stats_collect_group_values,
+        draw_ks_cdf_fn=app._stats_draw_ks_cdf,
+    )
+
+
+
+def stats_draw_ks_cdf_shim(
+    app,
+    group_vals: List[Tuple[str, List[float]]],
+    tp_str: str,
+) -> None:
+    _stats_draw_ks_cdf(app, group_vals, tp_str, WELL_COLORS)
+
+
+
+def on_stats_property_change(app) -> None:
+    """Stats tab's per-tab Property combo → propagate to global state."""
+    from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
+    cb = getattr(app, "_stats_property_cb", None)
+    if cb is None:
+        return
+    metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
+    if metric == "smfish_count" and app._app_state.channel.active_channel not in app._app_state.channel.smfish_channels:
+        metric = "mean_intensity"
+    set_active_metric(app, metric)
+

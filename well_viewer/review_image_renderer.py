@@ -682,3 +682,92 @@ def set_review_image_include_mode(app, enabled: bool) -> None:
     else:
         app._set_status("Delete mode OFF.")
 
+
+
+def review_image_commit_lut(app) -> None:
+    arr = app._app_state.review_image.last_fluor_arr
+    if arr is None:
+        return
+    lo, hi = app._review_image_resolve_lut(_np.asarray(arr, dtype=_np.float32))
+    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
+        app._review_lmin_entry.setText(f"{lo:.0f}")
+        app._review_lmax_entry.setText(f"{hi:.0f}")
+    app._app_state.review_image.preserve_view_on_refresh = True
+    refresh_review_image(app)
+
+
+
+def refresh_review_image_outline_btn(app) -> None:
+    btn = getattr(app, "_review_image_outline_btn", None)
+    if btn is None:
+        return
+    on = bool(app._app_state.review_image.show_outline)
+    btn.setChecked(on)
+    btn.setText("Outline: On" if on else "Outline: Off")
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
+
+
+
+def invalidate_review_image_frame_cache(app) -> None:
+    """Drop the decoded fluor / mask / boundary cache.
+
+    Call on data load (well paths change) and on dataset re-scan so the
+    next refresh re-decodes from disk.
+    """
+    app._app_state.review_image.frame_cache = None
+    app._app_state.review_image.include_cache.clear()
+    app._app_state.review_image.override_version += 1
+
+
+
+def toggle_review_image_binary_mask(app) -> None:
+    """Flip the binary-mask overlay on/off and refresh the canvas."""
+    app._app_state.review_image.binary_mask = not bool(
+        app._app_state.review_image.binary_mask
+    )
+    app._refresh_review_image_binary_btn()
+    app._app_state.review_image.preserve_view_on_refresh = True
+    refresh_review_image(app)
+
+
+
+def toggle_review_image_outline(app) -> None:
+    """Flip the cell-outline overlay on/off and refresh the canvas."""
+    app._app_state.review_image.show_outline = not bool(
+        app._app_state.review_image.show_outline
+    )
+    app._refresh_review_image_outline_btn()
+    app._app_state.review_image.preserve_view_on_refresh = True
+    refresh_review_image(app)
+
+
+
+def review_image_set_color(app, which: str, rgb: Tuple[int, int, int]) -> None:
+    attr = f"_review_image_{which}_color"
+    rgb_clamped = tuple(max(0, min(255, int(c))) for c in rgb)
+    setattr(app, attr, rgb_clamped)
+    app._review_image_refresh_color_swatch(which)
+    app._app_state.review_image.preserve_view_on_refresh = True
+    refresh_review_image(app)
+
+
+
+def reset_review_image_colors(app) -> None:
+    """Restore the default colors for boundary / selection / tint."""
+    for which, default in app._REVIEW_IMAGE_COLOR_DEFAULTS.items():
+        setattr(app, f"_review_image_{which}_color", tuple(default))
+        app._review_image_refresh_color_swatch(which)
+    app._app_state.review_image.preserve_view_on_refresh = True
+    refresh_review_image(app)
+
+
+
+def review_image_zoom_step(app, direction: int) -> None:
+    steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+    cur = app._app_state.review_image.zoom
+    idx = min(range(len(steps)), key=lambda i: abs(steps[i] - cur))
+    idx = max(0, min(len(steps) - 1, idx + direction))
+    app._app_state.review_image.zoom = steps[idx]
+    app._render_review_image_display()
+

@@ -826,3 +826,22 @@ def rep_sets_active(app) -> "List[ReplicateSet]":
             out.append(ReplicateSet(s.get("name") or "", list(wells)))
     return out
 
+
+
+def bar_well_display_label(app, lbl: str) -> str:
+    """Bar-plot-safe well label that avoids numeric-only tick text."""
+    disp = str(app._well_display_label(lbl))
+    if re.match(r"^\s*\d+\s*$", disp):
+        return _extract_well_token(lbl) or disp
+    return disp
+
+
+
+def toggle_fov_replicates(app) -> None:
+    app._app_state.plot.toggle_fov_replicates()
+    app._invalidate_stats_cache()
+    app._refresh_fov_btn_state()
+    app._redraw()
+    if app._current_centre_tab() == "Bar Plots":
+        redraw_bars(app)
+

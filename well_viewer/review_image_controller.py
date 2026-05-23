@@ -1102,3 +1102,14 @@ def review_effective_included(app, label: str, row: dict) -> str:
             return ovr
     return str(row.get("Included", "1"))
 
+
+
+def review_norm_fov(v: object) -> str:
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    try:
+        return f"{float(s):g}"
+    except Exception:
+        return s
+

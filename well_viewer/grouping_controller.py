@@ -204,3 +204,47 @@ def rank_color_rset(app, rset) -> str:
                 return app._sel_color(s)
     return app._rank_color_wells(getattr(rset, "wells", None))
 
+
+
+def rep_quick_pairs_from_dropdowns(app) -> None:
+    """Read dropdown values and update state, then call _rep_quick_pairs()."""
+    # Map dropdown display values to internal values
+    pair_dir_display = app._rep_quick_pair_dir_var.currentText()
+    app._rep_quick_pair_dir = "row" if "Rows" in pair_dir_display else "col"
+
+    iter_order_display = app._rep_quick_iter_order_var.currentText()
+    app._rep_quick_iter_order = "row" if "Across" in iter_order_display else "col"
+
+    rep_quick_pairs(app)
+
+
+
+def rep_sets_loaded(app) -> "List[ReplicateSet]":
+    """One ReplicateSet per selection that has ≥1 loaded well (ignores hidden),
+    in ``_selections`` order — derived straight from the unified model."""
+    out: "List[ReplicateSet]" = []
+    for s in app._app_state.selection.selections:
+        wells = s.get("wells") or []
+        if any(w in app._app_state.dataset.well_paths for w in wells):
+            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+    return out
+
+
+
+def rep_color_for(app, lbl: str) -> Optional[str]:
+    """Return the colour for the selection that owns *lbl*, or None if the
+    well is not in any selection."""
+    for s in app._app_state.selection.selections:
+        if lbl in (s.get("wells") or []):
+            return app._sel_color(s)
+    return None
+
+
+
+def rank_color_wells(app, wells) -> str:
+    """Colour for a set of wells — the rank colour of its lowest well, so all
+    of its wells (and its line/bar trace) share one colour."""
+    ranks = [_sel_well_rank(w) for w in (wells or [])]
+    ranks = [r for r in ranks if r < (1 << 30)]
+    return WELL_COLORS[(min(ranks) if ranks else 0) % len(WELL_COLORS)]
+

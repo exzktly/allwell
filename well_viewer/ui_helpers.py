@@ -7,10 +7,11 @@ from typing import Any, Callable, List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
+    QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
+from well_viewer.data_loading import parse_timepoint_hours
 
 
 def set_combo_values(combo: object, values: List[str]) -> None:
@@ -693,4 +694,75 @@ def apply_theme(app) -> None:
             app.setStyleSheet(theme.qss())
     except Exception:
         pass
+
+
+
+def toast(app, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
+    """Show a transient v2 Toast over the main window.
+
+    ``kind`` matches widgets.toast.Toast: 'info' / 'success' / 'warn' /
+    'danger'. Falls back to _set_status if anything goes wrong so the
+    message is never silently lost.
+    """
+    try:
+        from widgets.toast import Toast
+        Toast.show_message(app, msg, kind=kind, msec=msec)
+    except Exception:
+        pass
+    app._set_status(msg)
+
+
+
+def show_progress(app, maximum: int, msg: str = "") -> None:
+    """Display the progress bar and set its maximum value."""
+    app._progress_bar.setValue(0)
+    app._progress_bar.setMaximum(max(1, maximum))
+    app._progress_bar.setVisible(True)
+    if msg:
+        app._set_status(msg)
+    QApplication.processEvents()
+
+
+
+def step_progress(app, value: int, msg: str = "") -> None:
+    """Advance the progress bar to *value* and repaint immediately."""
+    app._progress_bar.setValue(value)
+    if msg:
+        app._set_status(msg)
+    QApplication.processEvents()
+
+
+
+def toggle_log(app) -> None:
+    app._log_visible = not app._log_visible
+    if app._log_visible:
+        app._log_frame.setVisible(True)
+        app._log_btn.setText("Log ▼")
+    else:
+        app._log_frame.setVisible(False)
+        app._log_btn.setText("Log ▲")
+
+
+
+def notes_schedule_save(app) -> None:
+    """Capture the Notes text and queue a debounced save.
+
+    The widget read must stay here (the registry never touches widgets);
+    the debounce + disk write live in the PersistenceRegistry.
+    """
+    edit = getattr(app, "_notes_edit", None)
+    if edit is not None:
+        app._notes_text = edit.toPlainText()
+    app._persistence.schedule_save("notes")
+
+
+
+def norm_timepoint(app, value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    parsed = parse_timepoint_hours(raw)
+    if parsed is not None:
+        return f"{parsed:g}"
+    return raw
 

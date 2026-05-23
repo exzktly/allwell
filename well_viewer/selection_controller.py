@@ -812,3 +812,122 @@ def invalidate_stats_cache(app) -> None:
     # while reusing the cached image arrays + boundary mask (expensive).
     app._app_state.review_image.override_version += 1
 
+
+
+def rep_clear_all(app) -> None:
+    if not app._app_state.selection.selections:
+        return
+    resp = QMessageBox.question(
+        app, "Clear all groups?",
+        f"Remove all {len(app._app_state.selection.selections)} group(s)?",
+        QMessageBox.Yes | QMessageBox.No,
+    )
+    if resp == QMessageBox.Yes:
+        app._sel_clear_all()
+
+
+
+def sel_rename(app, sid, name) -> None:
+    from well_viewer.selections_model import _unique_name as _uq
+    s = app._sel_by_id(sid)
+    if s is None:
+        return
+    new = _uq(name, {x.get("name") for x in app._app_state.selection.selections if x.get("id") != sid})
+    if new == s.get("name"):
+        return
+    s["name"] = new
+    app._rebuild_all()
+
+
+
+def sel_delete(app, sid) -> None:
+    i = app._sel_index_of(sid)
+    if i < 0:
+        return
+    app._app_state.selection.selections.pop(i)
+    if app._app_state.selection.current_selection_id == sid:
+        app._app_state.selection.current_selection_id = (
+            app._app_state.selection.selections[min(i, len(app._app_state.selection.selections) - 1)].get("id")
+            if app._app_state.selection.selections else None)
+    app._rebuild_all()
+
+
+
+def sel_select(app, sid) -> None:
+    if sid not in {s.get("id") for s in app._app_state.selection.selections}:
+        return
+    if sid == app._app_state.selection.current_selection_id:
+        return
+    app._app_state.selection.current_selection_id = sid
+    app._groups_centre_refresh()
+    app._refresh_sidebar_map()
+
+
+
+def sel_reorder(app, ids) -> None:
+    by_id = {s.get("id"): s for s in app._app_state.selection.selections}
+    new = [by_id[i] for i in ids if i in by_id]
+    for s in app._app_state.selection.selections:
+        if s not in new:
+            new.append(s)
+    if new != app._app_state.selection.selections:
+        app._app_state.selection.selections = new
+        app._rebuild_all()
+
+
+
+def sel_duplicate(app, sid):
+    s = app._sel_by_id(sid)
+    if s is None:
+        return None
+    return app._sel_add(name=f"{s.get('name', 'Selection')} copy",
+                         wells=[], replicates=None, source="user")
+
+
+
+def sel_by_id(app, sid):
+    for s in app._app_state.selection.selections:
+        if s.get("id") == sid:
+            return s
+    return None
+
+
+
+def sel_color(app, s) -> str:
+    """Effective colour for a selection dict: explicit ``color`` override
+    first, otherwise the rank-based fallback so groups without a user-set
+    colour stay consistent with their wells."""
+    if not isinstance(s, dict):
+        return app._rank_color_wells(getattr(s, "wells", None))
+    c = s.get("color")
+    if isinstance(c, str) and c.strip():
+        return c.strip()
+    return app._rank_color_wells(s.get("wells"))
+
+
+
+def plate_commit_deferred(app) -> None:
+    """Run the deferred commit scheduled by a paint event. No-op if
+    a drag_finished handler already cleared the pending flag (which
+    means it already committed in the same tick)."""
+    if not app._app_state.selection.plate_commit_pending:
+        return
+    app._app_state.selection.plate_commit_pending = False
+    on_plate_sel_change(app)
+
+
+
+def labels_clear_all(app) -> None:
+    if app._app_state.dataset.well_labels:
+        app._app_state.dataset.well_labels.clear()
+        label_grid_refresh(app)
+        app._invalidate_stats_cache()
+
+
+
+def rep_select(app, idx: int) -> None:
+    # Legacy bridge: select the idx-th rep_set-source selection.
+    sels = [s for s in app._app_state.selection.selections if s.get("source") == "rep_set"]
+    if 0 <= idx < len(sels):
+        app._sel_select(sels[idx].get("id"))
+

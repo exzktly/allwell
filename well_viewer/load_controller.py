@@ -12,6 +12,7 @@ from well_viewer.image_table_controller import image_table_repopulate_dropdowns
 from well_viewer.views.label_grid_view import label_grid_refresh
 from well_viewer.channel_state_controller import recalculate_threshold
 from well_viewer.review_image_controller import apply_review_overrides_to_cache
+from well_viewer.ui_helpers import refresh_plot_empty_states
 
 
 def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
@@ -269,3 +270,21 @@ def _looks_like_well_measurement_csv(path: Path) -> bool:
 
 def build_tok_to_label(app) -> None:
     app._app_state.dataset.tok_to_label = {tok: p.stem for tok, p in app._app_state.dataset.well_paths.items()}
+
+
+def load_path_shim(app, path):
+    # Drain any pending deferred tab builds so post-load redraw paths
+    # (e.g., _redraw_bars in _recalculate_threshold call sites) hit
+    # fully-constructed tabs instead of unbuilt placeholders.
+    from well_viewer import status_signal as _status_signal
+    app._drain_pending_centre_builders()
+    _status_signal.busy_push()
+    try:
+        load_path(app, path)
+    except Exception:
+        _status_signal.signal_failed()
+        raise
+    finally:
+        _status_signal.busy_pop()
+    refresh_plot_empty_states(app)
+

@@ -1193,3 +1193,26 @@ def update_scatter_tp_selection_display(app) -> None:
     if hasattr(app, "_scatter_tp_label") and app._scatter_tp_label is not None:
         app._scatter_tp_label.setText(label_text)
 
+
+
+def refresh_scatter_metric_for_axis(app, axis: str) -> None:
+    """Reshape the cells-scatter Property combo for the selected channel."""
+    ch_cb = getattr(app, f"_scatter_ch_{axis}_cb", None)
+    m_cb = getattr(app, f"_scatter_metric_{axis}_cb", None)
+    if ch_cb is None or m_cb is None:
+        return
+    channel = str(ch_cb.currentText() or "")
+    populate_metric_combo(app, 
+        m_cb, channel_entry=channel, smfish_channel=channel,
+    )
+
+
+
+def update_tp_selection_display(app) -> None:
+    """Update the aggregate scatter label showing selected timepoints."""
+    count = sum(1 for v in app._scatter_agg_tp_selections.values() if v)
+    total = len(app._scatter_agg_tp_selections)
+    label_text = f"(All {count} selected)" if count == total else f"({count}/{total} selected)"
+    if hasattr(app, "_scatter_agg_tp_label") and app._scatter_agg_tp_label is not None:
+        app._scatter_agg_tp_label.setText(label_text)
+

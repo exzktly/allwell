@@ -224,3 +224,50 @@ def redraw_app(app) -> None:
         except Exception:
             pass
 
+
+
+def open_bar_batch_export_shim(app) -> None:
+    """Switch Batch Export tab to the inline bar-plot export builder."""
+    if not app._app_state.dataset.well_paths:
+        QMessageBox.warning(app, "No data", "Load data before opening Bar Batch Export.")
+        return
+    if hasattr(app, "_notebook"):
+        app._notebook.setCurrentByName("Batch Export")
+    if hasattr(app, "_batch_export_set_mode"):
+        app._batch_export_set_mode("bar")
+
+
+
+def open_scatter_cells_batch_export_shim(app) -> None:
+    """Switch Batch Export tab to the inline scatter-cells export builder."""
+    if not app._app_state.dataset.well_paths:
+        QMessageBox.warning(app, "No data", "Load data before opening Scatter Cells Batch Export.")
+        return
+    if hasattr(app, "_notebook"):
+        app._notebook.setCurrentByName("Batch Export")
+    if hasattr(app, "_batch_export_set_mode"):
+        app._batch_export_set_mode("scatter_cells")
+
+
+
+def open_scatter_agg_batch_export_shim(app) -> None:
+    """Switch Batch Export tab to the inline aggregate-scatter export builder."""
+    if not app._app_state.dataset.well_paths:
+        QMessageBox.warning(app, "No data", "Load data before opening Scatter Aggregate Batch Export.")
+        return
+    if hasattr(app, "_notebook"):
+        app._notebook.setCurrentByName("Batch Export")
+    if hasattr(app, "_batch_export_set_mode"):
+        app._batch_export_set_mode("scatter_agg")
+
+
+
+def open_batch_export_shim(app) -> None:
+    if not app._app_state.dataset.well_paths:
+        QMessageBox.warning(app, "No data", "Load data before opening Batch Export.")
+        return
+    if hasattr(app, "_notebook"):
+        app._notebook.setCurrentByName("Batch Export")
+    if hasattr(app, "_batch_export_set_mode"):
+        app._batch_export_set_mode("line")
+

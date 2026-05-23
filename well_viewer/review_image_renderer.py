@@ -599,3 +599,86 @@ def draw_review_image(
         above_by_nid=above_by_nid,
     )
 
+
+
+def refresh_review_image_binary_btn(app) -> None:
+    btn = getattr(app, "_review_image_binary_btn", None)
+    if btn is None:
+        return
+    on = bool(app._app_state.review_image.binary_mask)
+    btn.setChecked(on)
+    btn.setText("Binary: On" if on else "Binary: Off")
+    btn.setToolTip(
+        "Binary mask: cells above the active threshold are drawn white,\n"
+        "cells below are drawn black, on a black background.\n"
+        "Uses the same gating as the bar plots, filtered to the\n"
+        "displayed FOV/timepoint."
+    )
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
+
+
+
+def review_image_auto_lut(app) -> None:
+    arr = app._app_state.review_image.last_fluor_arr
+    if arr is None or not _NP_AVAILABLE:
+        return
+    arr_np = _np.asarray(arr, dtype=_np.float32)
+    lo = float(arr_np.min())
+    hi = float(arr_np.max())
+    if hi <= lo:
+        hi = lo + 1.0
+    app._app_state.review_image.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
+    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
+        app._review_lmin_entry.setText(f"{lo:.0f}")
+        app._review_lmax_entry.setText(f"{hi:.0f}")
+    app._app_state.review_image.preserve_view_on_refresh = True
+    refresh_review_image(app)
+
+
+
+def review_image_refresh_color_swatch(app, which: str) -> None:
+    swatches = getattr(app, "_review_image_color_swatches", {}) or {}
+    btn = swatches.get(which)
+    if btn is None:
+        return
+    r, g, b = app._review_image_get_color(which)
+    # Explicit border-radius on every side so the bottom corners stay
+    # rounded — the global QSS rule was being clipped by the swatch's
+    # tight fixed size, leaving square lower corners.
+    btn.setStyleSheet(
+        f"QPushButton {{ background-color: rgb({r},{g},{b}); "
+        f"border: 1px solid #444; border-radius: 4px; "
+        f"min-width: 28px; min-height: 18px; padding: 0; }}"
+    )
+
+
+
+def toggle_review_image_source(app) -> None:
+    """Flip raw vs top-hat preference for the Review Image fluorescence channel."""
+    app._app_state.review_image.show_raw = not bool(app._app_state.review_image.show_raw)
+    # The LUT range for raw vs top-hat differs significantly, so drop the
+    # cached LUT for the active channel so the new image gets a fresh
+    # auto-fit instead of a stale clip.
+    chan = str(app._app_state.channel.active_image_channel or "").lower()
+    if chan in app._app_state.review_image.lut_by_channel:
+        del app._app_state.review_image.lut_by_channel[chan]
+    app._refresh_review_image_source_btn()
+    app._app_state.review_image.preserve_view_on_refresh = True
+    refresh_review_image(app)
+
+
+
+def set_review_image_include_mode(app, enabled: bool) -> None:
+    app._app_state.review_image.include_edit_mode = bool(enabled)
+    app._apply_review_image_cursor()
+    btn = getattr(app, "_review_image_delete_btn", None)
+    if btn is not None:
+        btn.setChecked(bool(enabled))
+    if enabled:
+        app._set_status(
+            "Delete mode ON — click a cell to exclude it, or drag a rectangle to bulk-exclude."
+        )
+    else:
+        app._set_status("Delete mode OFF.")
+

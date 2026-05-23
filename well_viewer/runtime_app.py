@@ -527,26 +527,12 @@ class WellViewerApp(QWidget):
         return 0.0
 
     def _get_all_fluor_gates(self) -> Dict[str, float]:
-        """Get FluorGating thresholds for all loaded channels.
-
-        Returns a dict mapping channel name -> gate threshold, e.g., {"gfp": 10.0, "mcherry": 20.0}.
-        Used by aggregate_with_threshold_df to apply consistent gating across all channels.
-        """
-        gates = {}
-        for channel in self._app_state.channel.fluor_channels:
-            gates[channel] = self._get_fluor_gate(channel)
-        return gates
+        from well_viewer.channel_state_controller import get_all_fluor_gates
+        return get_all_fluor_gates(self)
 
     def _get_thresh_frac_on(self, channel: Optional[str] = None) -> float:
-        """Get ThreshFracOn threshold. Uses active channel if not specified."""
-        if channel is None:
-            channel = self._app_state.channel.active_channel
-        # _redraw can fire before the cell-gating tab is built (e.g. from
-        # sidebar releases during early load); fall back to the default.
-        if not hasattr(self, "_cell_gating_thresh_frac_edits"):
-            return self._app_state.channel.threshold
-        from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_thresh_frac_on
-        return cell_gating_get_thresh_frac_on(self, channel)
+        from well_viewer.channel_state_controller import get_thresh_frac_on
+        return get_thresh_frac_on(self, channel)
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -587,26 +573,12 @@ class WellViewerApp(QWidget):
         return "analyze" if stack.currentIndex() == 1 else "review"
 
     def _on_central_pane_changed(self, idx: int) -> None:
-        # Mode-seg lives in all_well's titlebar; emit modeChanged so the
-        # shell can re-sync its own seg without poking widgets here.
-        mode = "analyze" if idx == 1 else "review"
-        # Hide the section / well-picker sidebar when Analyze is active —
-        # it carries Review-only affordances. Show it again on Review.
-        sidebar = getattr(self, "_sidebar_root", None)
-        if sidebar is not None:
-            sidebar.setVisible(mode == "review")
-        self.modeChanged.emit(mode)
+        from well_viewer.tab_controller import on_central_pane_changed
+        return on_central_pane_changed(self, idx)
 
     def _build_centre(self, parent) -> None:
-        from well_viewer.views.centre_view import build_centre as _build_centre_view
-        _build_centre_view(self, parent)
-        # Phase 10 (A1): mirror the notebook's tab list into the rail nav.
-        # The nav drives the (hidden-tab-bar) QTabWidget; the QTabWidget's
-        # currentChanged signal keeps the nav in sync if anything else
-        # changes the index (deferred builders, programmatic select_by_text).
-        self._sync_section_nav_from_notebook()
-        self._section_nav.currentChanged.connect(self._on_section_nav_changed)
-        self._notebook.currentChanged.connect(partial(on_notebook_current_changed, self))
+        from well_viewer.tab_controller import build_centre_shim
+        return build_centre_shim(self, parent)
 
     # ── Phase 10 (A1) section-nav <-> notebook bridge ─────────────────────
     _SECTION_ICONS = {
@@ -630,32 +602,12 @@ class WellViewerApp(QWidget):
 
 
     def _tab_history_back(self) -> None:
-        hist = getattr(self, "_tab_history", None)
-        if not hist:
-            return
-        idx = self._tab_history_idx - 1
-        if idx < 0:
-            return
-        self._tab_history_idx = idx
-        self._tab_history_replaying = True
-        try:
-            self._notebook.setCurrentByName(hist[idx])
-        finally:
-            self._tab_history_replaying = False
+        from well_viewer.tab_controller import tab_history_back
+        return tab_history_back(self)
 
     def _tab_history_forward(self) -> None:
-        hist = getattr(self, "_tab_history", None)
-        if not hist:
-            return
-        idx = self._tab_history_idx + 1
-        if idx >= len(hist):
-            return
-        self._tab_history_idx = idx
-        self._tab_history_replaying = True
-        try:
-            self._notebook.setCurrentByName(hist[idx])
-        finally:
-            self._tab_history_replaying = False
+        from well_viewer.tab_controller import tab_history_forward
+        return tab_history_forward(self)
 
     # ── Statistics tab ────────────────────────────────────────────────────────
     # Tab / panel construction lives in ``views/stats_view.py`` — callers invoke
@@ -723,19 +675,8 @@ class WellViewerApp(QWidget):
             return self._app_state.channel.active_val_col
 
     def _stats_active_threshold(self) -> float:
-        """Use the per-channel ThreshFracOn from the Cell Gating tab.
-
-        For ratio columns the channel-specific threshold doesn't apply; fall
-        back to the global threshold so a sensible cutoff still exists.
-        """
-        val_col = self._stats_active_val_col()
-        if is_ratio_key(val_col):
-            return float(self._app_state.channel.threshold)
-        # val_col is "<channel>_mean_intensity" or "<channel>_smfish_count".
-        if "_" in val_col:
-            channel = val_col.split("_", 1)[0]
-            return float(self._get_thresh_frac_on(channel))
-        return float(self._get_thresh_frac_on(self._app_state.channel.active_channel))
+        from well_viewer.stats_controller import stats_active_threshold
+        return stats_active_threshold(self)
 
     def _stats_active_statistic(self) -> str:
         cb = getattr(self, "_stats_statistic_cb", None)
@@ -760,17 +701,8 @@ class WellViewerApp(QWidget):
     # ── Preview sidebar picker ────────────────────────────────────────────────
 
     def _refresh_preview_picker(self) -> None:
-        from ui.theme import get_color
-        _refresh_preview_picker_view(
-            self,
-            button_bg=get_color("button_bg"),
-            button_text=get_color("button_text"),
-            button_text_disabled=get_color("button_text_disabled"),
-            accent=get_color("ACCENT"),
-            clr_white=get_color("CLR_WHITE"),
-            clr_accent_dark=get_color("ACCENT_DARK"),
-            extract_well_token_fn=_extract_well_token,
-        )
+        from well_viewer.preview_controller import refresh_preview_picker_shim
+        return refresh_preview_picker_shim(self)
 
     # ── Image Table tab ───────────────────────────────────────────────────────
 
@@ -878,20 +810,9 @@ class WellViewerApp(QWidget):
         from well_viewer.selection_controller import sel_strip_wells
         return sel_strip_wells(self, wells, keep_id=keep_id)
 
-    def _sel_add(self, name=None, wells=None, replicates=None, source="user",
-                 *, make_current=True):
-        from well_viewer.selections_model import make_selection
-        used_names = {s.get("name") for s in self._app_state.selection.selections}
-        used_ids = {s.get("id") for s in self._app_state.selection.selections}
-        sel = make_selection(name=name, wells=wells, replicates=replicates,
-                             source=source, used_names=used_names, used_ids=used_ids,
-                             fallback_color_idx=len(self._app_state.selection.selections))
-        self._sel_strip_wells(sel["wells"], keep_id=sel["id"])
-        self._app_state.selection.selections.append(sel)
-        if make_current:
-            self._app_state.selection.current_selection_id = sel["id"]
-        self._rebuild_all()
-        return sel["id"]
+    def _sel_add(self, name = None, wells = None, replicates = None, source = 'user', *, make_current = True):
+        from well_viewer.selection_controller import sel_add
+        return sel_add(self, name, wells, replicates, source, make_current=make_current)
 
     def _sel_rename(self, sid, name) -> None:
         from well_viewer.selections_model import _unique_name as _uq
@@ -915,17 +836,9 @@ class WellViewerApp(QWidget):
                 if self._app_state.selection.selections else None)
         self._rebuild_all()
 
-    def _sel_set_hidden(self, sid, hidden, *, light=False) -> None:
-        s = self._sel_by_id(sid)
-        if s is None:
-            return
-        if bool(s.get("hidden")) == bool(hidden):
-            return
-        s["hidden"] = bool(hidden)
-        if light:
-            self._refresh_sidebar_map()
-        else:
-            self._rebuild_all()
+    def _sel_set_hidden(self, sid, hidden, *, light = False) -> None:
+        from well_viewer.selection_controller import sel_set_hidden
+        return sel_set_hidden(self, sid, hidden, light=light)
 
     def _sel_set_color(self, sid, color) -> None:
         from well_viewer.selection_controller import sel_set_color
@@ -940,17 +853,9 @@ class WellViewerApp(QWidget):
         if s is not None:
             self._sel_set_hidden(sid, not bool(s.get("hidden")))
 
-    def _sel_set_composition(self, sid, wells=None, replicates=None) -> None:
-        from well_viewer.selections_model import _clean_wells, _deoverlap_replicates
-        s = self._sel_by_id(sid)
-        if s is None:
-            return
-        if wells is not None:
-            s["wells"] = _clean_wells(wells)
-            self._sel_strip_wells(s["wells"], keep_id=sid)
-        src = replicates if replicates is not None else s.get("replicates")
-        s["replicates"] = _deoverlap_replicates(src, allowed=set(s.get("wells") or []))
-        self._rebuild_all()
+    def _sel_set_composition(self, sid, wells = None, replicates = None) -> None:
+        from well_viewer.selection_controller import sel_set_composition
+        return sel_set_composition(self, sid, wells, replicates)
 
     def _sel_select(self, sid) -> None:
         if sid not in {s.get("id") for s in self._app_state.selection.selections}:
@@ -1118,16 +1023,8 @@ class WellViewerApp(QWidget):
         return self._rank_color_wells(s.get("wells"))
 
     def _rank_color_rset(self, rset) -> str:
-        """Colour for a ReplicateSet / BarGroup (or anything with a ``wells``
-        attribute) — honours the per-selection ``color`` override when an entry
-        in ``_selections`` shares its ``name``, otherwise falls back to the
-        rank colour of its lowest well."""
-        name = getattr(rset, "name", None)
-        if name:
-            for s in self._app_state.selection.selections:
-                if s.get("name") == name:
-                    return self._sel_color(s)
-        return self._rank_color_wells(getattr(rset, "wells", None))
+        from well_viewer.grouping_controller import rank_color_rset
+        return rank_color_rset(self, rset)
 
     def _rep_color_for(self, lbl: str) -> Optional[str]:
         """Return the colour for the selection that owns *lbl*, or None if the
@@ -1200,39 +1097,12 @@ class WellViewerApp(QWidget):
 
 
     def _apply_theme(self) -> None:
-        """Apply the application-wide stylesheet.
-
-        Single source of truth is the repo-root ``theme`` module. Previously
-        this re-applied the legacy ``ui/theme`` per-theme QSS, which clobbered
-        ``theme.qss()`` whenever a ``WellViewerApp`` was constructed (including
-        embedded under AllWell).
-        """
-        try:
-            import theme  # type: ignore
-            app = QApplication.instance()
-            if app is not None:
-                app.setStyleSheet(theme.qss())
-        except Exception:
-            pass
+        from well_viewer.ui_helpers import apply_theme
+        return apply_theme(self)
 
     def _on_theme_change(self, theme_name: str = None) -> None:
-        """Re-apply QSS stylesheet when theme switches."""
-        new_theme = theme_name or self._theme_name
-        self._theme_name = new_theme
-        self._apply_theme()
-
-        if hasattr(self, '_rep_cards_frame') and self._rep_cards_frame:
-            rep_panel_refresh(self)
-        if hasattr(self, '_stats_fig') and self._stats_fig:
-            stats_refresh_colors(self)
-        if hasattr(self, "_sidebar_btns"):
-            self._sidebar_map_refresh_pending = False
-            self._refresh_sidebar_map_now()
-        try:
-            from well_viewer.ui_helpers import refresh_plot_toolbar_icons
-            refresh_plot_toolbar_icons(self)
-        except Exception:
-            pass
+        from well_viewer.ui_helpers import on_theme_change
+        return on_theme_change(self, theme_name)
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -1305,19 +1175,9 @@ class WellViewerApp(QWidget):
         self._app_state.dataset.rebuild_fovs()
 
     @staticmethod
-    def _mute_color(hex_color: str, factor: float = 0.5) -> str:
-        """Blend *hex_color* 50% toward a neutral mid-grey (#94A3B8).
-
-        Used to dim hidden rep-sets on the plate map so they are visually
-        distinct from visible ones while still showing their hue.
-        """
-        grey = (0x94, 0xA3, 0xB8)
-        h = hex_color.lstrip("#")
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        mr = int(r + (grey[0] - r) * factor)
-        mg = int(g + (grey[1] - g) * factor)
-        mb = int(b + (grey[2] - b) * factor)
-        return f"#{mr:02X}{mg:02X}{mb:02X}"
+    def _mute_color(self, factor: float = 0.5) -> str:
+        from well_viewer.ui_helpers import mute_color
+        return mute_color(self, factor)
 
     def _rep_visible_sets(self) -> "List[ReplicateSet]":
         """Alias for _rep_sets_active — visible (non-hidden) loaded rep-sets."""
@@ -1386,17 +1246,8 @@ class WellViewerApp(QWidget):
         return [self._ratio_label_for(r) for r in self._app_state.channel.ratio_metrics]
 
     def _channel_key_for_label(self, label: str) -> str:
-        """Map a dropdown label back to the ``_set_active_channel`` argument.
-
-        Real channels return their lowercase token; ratios return their
-        ``ratio:<name>`` key.
-        """
-        mapping = getattr(self, "_label_to_channel_key", None) or {}
-        if label in mapping:
-            return mapping[label]
-        # Fallback when the dropdown was populated before the mapping was
-        # built — assume real channel and lowercase the label.
-        return str(label or "").lower()
+        from well_viewer.channel_state_controller import channel_key_for_label
+        return channel_key_for_label(self, label)
 
     def _active_channel_label(self) -> str:
         """Return the dropdown label corresponding to the active channel."""
@@ -1409,22 +1260,8 @@ class WellViewerApp(QWidget):
         return self._app_state.channel.active_channel.upper()
 
     def _rebuild_ratio_index(self) -> None:
-        """Refresh the resolver-friendly ratio index and any dependent UI."""
-        self._app_state.channel.ratio_index = build_ratio_index(self._app_state.channel.ratio_metrics)
-        # If the active val_col references a deleted ratio, fall back to the
-        # first real fluorescence channel so plots stay valid.
-        if is_ratio_key(self._app_state.channel.active_val_col) and self._app_state.channel.active_val_col not in self._app_state.channel.ratio_index:
-            fallback = (self._app_state.channel.fluor_channels or ["gfp"])[0]
-            self._app_state.channel.active_channel = fallback
-            self._app_state.channel.active_val_col = f"{fallback}_{self._app_state.channel.active_metric}"
-        if hasattr(self, "_update_channel_selector"):
-            update_channel_selector(self)
-        self._invalidate_stats_cache()
-        if hasattr(self, "_redraw"):
-            try:
-                self._redraw()
-            except Exception:
-                pass
+        from well_viewer.channel_state_controller import rebuild_ratio_index
+        return rebuild_ratio_index(self)
 
     def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None:
         from well_viewer.channel_state_controller import set_ratio_metrics
@@ -1439,20 +1276,9 @@ class WellViewerApp(QWidget):
         from well_viewer.channel_state_controller import on_plot_channel_selected
         return on_plot_channel_selected(self, source)
 
-    def _on_preview_channel_selected(self, _e=None) -> None:
-        """Channel-switch handler for the Movie Montage tab."""
-        selected_ui_value = ""
-        if hasattr(self, "_chan_cb_preview"):
-            selected_ui_value = str(self._chan_cb_preview.currentText() or "").strip()
-        if not selected_ui_value and hasattr(self, "_montage_chan_var"):
-            selected_ui_value = self._montage_chan_var.currentText()
-        if _debug_flags.movie_montage_debug_enabled():
-            _logger.debug(
-                "preview_channel_selected ui_value=%r active_before=%r",
-                selected_ui_value,
-                self._app_state.channel.active_image_channel,
-            )
-        set_active_image_channel(self, selected_ui_value.lower())
+    def _on_preview_channel_selected(self, _e = None) -> None:
+        from well_viewer.channel_state_controller import on_preview_channel_selected
+        return on_preview_channel_selected(self, _e)
 
     def _on_metric_selected(self) -> None:
         """Handle the per-tab (legacy hidden) metric selector change."""
@@ -1462,19 +1288,8 @@ class WellViewerApp(QWidget):
         set_active_metric(self, metric)
 
     def _on_metric_selected_global(self) -> None:
-        """Handle the global Property combo (ctxbar) change."""
-        from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
-        cb = getattr(self, "_plotting_metric_cb", None)
-        if cb is None:
-            return
-        metric_label = str(cb.currentText() or "")
-        metric = METRIC_LABEL_TO_KEY.get(metric_label, "mean_intensity")
-        # smFISH count only makes sense on smfish channels; gracefully fall
-        # back to mean intensity so the user sees a redraw instead of an
-        # empty plot.
-        if metric == "smfish_count" and self._app_state.channel.active_channel not in self._app_state.channel.smfish_channels:
-            metric = "mean_intensity"
-        set_active_metric(self, metric)
+        from well_viewer.channel_state_controller import on_metric_selected_global
+        return on_metric_selected_global(self)
 
     def _on_stats_property_change(self) -> None:
         """Stats tab's per-tab Property combo → propagate to global state."""
@@ -1528,18 +1343,8 @@ class WellViewerApp(QWidget):
 
 
     def _select_invert(self) -> None:
-        """Phase 13 (B7): flip the current selection — every loaded well that
-        was selected becomes unselected, and vice versa. Only wells with data
-        (``_well_paths``) participate."""
-        if not True:
-            return
-        cur = set(self._app_state.selection.selected_wells)
-        new = {w for w in self._app_state.dataset.well_paths.keys() if w not in cur}
-        self._app_state.selection.selected_wells = new
-        # Re-use the standard refresh path the click handlers go through.
-        self._refresh_sidebar_map()
-        if hasattr(self, "_on_plate_sel_change"):
-            on_plate_sel_change(self)
+        from well_viewer.selection_controller import select_invert
+        return select_invert(self)
 
     def _selected_labels(self) -> List[str]:
         """Return labels in a stable order (sorted) for consistent plot colours."""
@@ -1595,17 +1400,8 @@ class WellViewerApp(QWidget):
 
 
     def _toggle_review_image_source(self) -> None:
-        """Flip raw vs top-hat preference for the Review Image fluorescence channel."""
-        self._app_state.review_image.show_raw = not bool(self._app_state.review_image.show_raw)
-        # The LUT range for raw vs top-hat differs significantly, so drop the
-        # cached LUT for the active channel so the new image gets a fresh
-        # auto-fit instead of a stale clip.
-        chan = str(self._app_state.channel.active_image_channel or "").lower()
-        if chan in self._app_state.review_image.lut_by_channel:
-            del self._app_state.review_image.lut_by_channel[chan]
-        self._refresh_review_image_source_btn()
-        self._app_state.review_image.preserve_view_on_refresh = True
-        refresh_review_image(self)
+        from well_viewer.review_image_renderer import toggle_review_image_source
+        return toggle_review_image_source(self)
 
     def _refresh_review_image_source_btn(self) -> None:
         from well_viewer.review_image_renderer import refresh_review_image_source_btn
@@ -1632,19 +1428,8 @@ class WellViewerApp(QWidget):
         refresh_review_image(self)
 
     def _review_image_refresh_color_swatch(self, which: str) -> None:
-        swatches = getattr(self, "_review_image_color_swatches", {}) or {}
-        btn = swatches.get(which)
-        if btn is None:
-            return
-        r, g, b = self._review_image_get_color(which)
-        # Explicit border-radius on every side so the bottom corners stay
-        # rounded — the global QSS rule was being clipped by the swatch's
-        # tight fixed size, leaving square lower corners.
-        btn.setStyleSheet(
-            f"QPushButton {{ background-color: rgb({r},{g},{b}); "
-            f"border: 1px solid #444; border-radius: 4px; "
-            f"min-width: 28px; min-height: 18px; padding: 0; }}"
-        )
+        from well_viewer.review_image_renderer import review_image_refresh_color_swatch
+        return review_image_refresh_color_swatch(self, which)
 
 
     def _reset_review_image_colors(self) -> None:
@@ -1667,20 +1452,8 @@ class WellViewerApp(QWidget):
         refresh_review_image(self)
 
     def _refresh_review_image_binary_btn(self) -> None:
-        btn = getattr(self, "_review_image_binary_btn", None)
-        if btn is None:
-            return
-        on = bool(self._app_state.review_image.binary_mask)
-        btn.setChecked(on)
-        btn.setText("Binary: On" if on else "Binary: Off")
-        btn.setToolTip(
-            "Binary mask: cells above the active threshold are drawn white,\n"
-            "cells below are drawn black, on a black background.\n"
-            "Uses the same gating as the bar plots, filtered to the\n"
-            "displayed FOV/timepoint."
-        )
-        btn.style().unpolish(btn)
-        btn.style().polish(btn)
+        from well_viewer.review_image_renderer import refresh_review_image_binary_btn
+        return refresh_review_image_binary_btn(self)
 
     def _toggle_review_image_outline(self) -> None:
         """Flip the cell-outline overlay on/off and refresh the canvas."""
@@ -1717,20 +1490,8 @@ class WellViewerApp(QWidget):
         return review_image_resolve_lut(self, arr)
 
     def _review_image_auto_lut(self) -> None:
-        arr = self._app_state.review_image.last_fluor_arr
-        if arr is None or not _NP_AVAILABLE:
-            return
-        arr_np = _np.asarray(arr, dtype=_np.float32)
-        lo = float(arr_np.min())
-        hi = float(arr_np.max())
-        if hi <= lo:
-            hi = lo + 1.0
-        self._app_state.review_image.lut_by_channel[str(self._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
-        if hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
-            self._review_lmin_entry.setText(f"{lo:.0f}")
-            self._review_lmax_entry.setText(f"{hi:.0f}")
-        self._app_state.review_image.preserve_view_on_refresh = True
-        refresh_review_image(self)
+        from well_viewer.review_image_renderer import review_image_auto_lut
+        return review_image_auto_lut(self)
 
     def _review_image_commit_lut(self) -> None:
         arr = self._app_state.review_image.last_fluor_arr
@@ -1774,17 +1535,8 @@ class WellViewerApp(QWidget):
         _select_review_csv_row_for_cell_controller(self, fov, tp, nucleus_id, _logger)
 
     def _set_review_image_include_mode(self, enabled: bool) -> None:
-        self._app_state.review_image.include_edit_mode = bool(enabled)
-        self._apply_review_image_cursor()
-        btn = getattr(self, "_review_image_delete_btn", None)
-        if btn is not None:
-            btn.setChecked(bool(enabled))
-        if enabled:
-            self._set_status(
-                "Delete mode ON — click a cell to exclude it, or drag a rectangle to bulk-exclude."
-            )
-        else:
-            self._set_status("Delete mode OFF.")
+        from well_viewer.review_image_renderer import set_review_image_include_mode
+        return set_review_image_include_mode(self, enabled)
 
     def _toggle_selected_review_cell(self) -> None:
         self._set_review_image_include_mode(not self._app_state.review_image.include_edit_mode)
@@ -1857,36 +1609,13 @@ class WellViewerApp(QWidget):
         refresh_review_csv_rows(self, rows)
 
     def _review_effective_included(self, label: str, row: dict) -> str:
-        """Effective Included value for a cached row.
-
-        User overrides set via the Review Image tab take precedence over the
-        gating-computed ``Included`` field stored on the cached row. Overrides
-        are kept in a separate dict so they survive subsequent gating recomputes
-        (which rewrite the canonical row['Included']).
-        """
-        fov, tp, nid = self._review_row_keys(row)
-        if fov and tp and nid:
-            ovr = self._review_included_overrides.get((label, fov, tp, nid))
-            if ovr is not None:
-                return ovr
-        return str(row.get("Included", "1"))
+        from well_viewer.review_image_controller import review_effective_included
+        return review_effective_included(self, label, row)
 
 
     def _review_load_rows(self, label: str) -> List[dict]:
-        """Materialize the cached DataFrame for ``label`` as a list of row dicts.
-
-        Used by the Review CSV table widget and the Review Image overlay
-        builders. Mutations to returned dicts are local — write back to the
-        canonical store via ``_apply_review_overrides_to_cache`` (which
-        updates the cached DataFrame's ``Included`` column directly).
-        """
-        try:
-            df = self._get_rows(label)
-        except Exception:
-            return []
-        if df is None or df.empty:
-            return []
-        return df.to_dict("records")
+        from well_viewer.review_image_controller import review_load_rows
+        return review_load_rows(self, label)
 
     def _update_bar_tp_menu(self) -> None:
         from well_viewer.barplot_controller import update_bar_tp_menu
@@ -1923,28 +1652,12 @@ class WellViewerApp(QWidget):
         _bar_apply_ylims(self, ax_mean, ax_frac, ax_n=ax_n)
 
     def _toggle_swarm(self) -> None:
-        """Toggle beeswarm / bar mode and update the button appearance."""
-        self._bar_swarm = not self._bar_swarm
-        on = self._bar_swarm
-        self._swarm_btn.setChecked(on)
-        if on and self._bar_violin:
-            # Swarm and violin are mutually exclusive
-            self._bar_violin = False
-            self._violin_btn.setChecked(False)
-            self._violin_slider.setEnabled(False)
-        redraw_bars(self)
+        from well_viewer.barplot_controller import toggle_swarm
+        return toggle_swarm(self)
 
     def _toggle_violin(self) -> None:
-        """Toggle violin / bar mode and update the button appearance."""
-        self._bar_violin = not self._bar_violin
-        on = self._bar_violin
-        self._violin_btn.setChecked(on)
-        self._violin_slider.setEnabled(on)
-        if on and self._bar_swarm:
-            # Mutually exclusive with beeswarm
-            self._bar_swarm = False
-            self._swarm_btn.setChecked(False)
-        redraw_bars(self)
+        from well_viewer.barplot_controller import toggle_violin
+        return toggle_violin(self)
 
 
 
@@ -1980,34 +1693,17 @@ class WellViewerApp(QWidget):
         """One BarGroup per loaded selection (each wrapping its ReplicateSet)."""
         return [BarGroup(r.name, members=[r]) for r in self._rep_sets_loaded()]
 
-    def _rep_sets_active(self) -> "List[ReplicateSet]":
-        """One ReplicateSet per visible (non-hidden) selection with ≥1 loaded
-        well — these are exactly the traces drawn on the plots."""
-        out: "List[ReplicateSet]" = []
-        for s in self._app_state.selection.selections:
-            if s.get("hidden"):
-                continue
-            wells = s.get("wells") or []
-            if any(w in self._app_state.dataset.well_paths for w in wells):
-                out.append(ReplicateSet(s.get("name") or "", list(wells)))
-        return out
+    def _rep_sets_active(self) -> 'List[ReplicateSet]':
+        from well_viewer.barplot_controller import rep_sets_active
+        return rep_sets_active(self)
 
 
 
 
 
     def _invalidate_stats_cache(self) -> None:
-        """Discard cached group statistics. Call whenever group definitions change."""
-        self._app_state.stats.cache: dict = {}
-        # Replicate-set visibility may have shifted, so re-check whether the
-        # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
-        if hasattr(self, "_refresh_fov_btn_state"):
-            self._refresh_fov_btn_state()
-        # Cell gating writes new ``Included`` flags onto cached rows, which
-        # the Review Image include map mirrors. Bumping the version key
-        # forces the next refresh to recompute the include map (cheap)
-        # while reusing the cached image arrays + boundary mask (expensive).
-        self._app_state.review_image.override_version += 1
+        from well_viewer.selection_controller import invalidate_stats_cache
+        return invalidate_stats_cache(self)
 
     def _invalidate_review_image_frame_cache(self) -> None:
         """Drop the decoded fluor / mask / boundary cache.
@@ -2020,20 +1716,9 @@ class WellViewerApp(QWidget):
         self._app_state.review_image.override_version += 1
 
 
-    def _collect_bar_items(self, target_t: float, *,
-                           fc_state=None, miss_sink=None) -> tuple:
-        """Return ``(use_groups, list[BarItem], band_lbl)`` for *target_t*.
-
-        Thin wrapper around :func:`barplot_controller.collect_bar_items`.
-        ``fc_state`` lets the on-tab CSV exporter request raw items (pass
-        ``FC_STATE_OFF``) alongside the normalized items the renderer
-        consumes. ``miss_sink`` collects timepoints where a vs-control
-        denominator couldn't be resolved so the caller can surface a
-        single status warning at the end of the redraw.
-        """
-        return _bar_collect_items(
-            self, target_t, fc_state=fc_state, miss_sink=miss_sink,
-        )
+    def _collect_bar_items(self, target_t: float, *, fc_state = None, miss_sink = None) -> tuple:
+        from well_viewer.barplot_controller import collect_bar_items_for_app
+        return collect_bar_items_for_app(self, target_t, fc_state=fc_state, miss_sink=miss_sink)
 
 
 
@@ -2114,20 +1799,9 @@ class WellViewerApp(QWidget):
 
     _SCATTER_AGG_METRIC_EXTRA = {"Fraction above threshold": "fraction_above_threshold"}
 
-    def _scatter_axis_metric_key(self, axis: str, *, agg: bool = False) -> str:
-        """Return the metric key for axis ``x``/``y`` on the active scatter tab."""
-        from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
-        attr = (
-            f"_scatter_agg_metric_{axis}_cb" if agg
-            else f"_scatter_metric_{axis}_cb"
-        )
-        cb = getattr(self, attr, None)
-        if cb is None:
-            return "mean_intensity"
-        label = str(cb.currentText() or "")
-        if agg and label in self._SCATTER_AGG_METRIC_EXTRA:
-            return self._SCATTER_AGG_METRIC_EXTRA[label]
-        return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
+    def _scatter_axis_metric_key(self, axis: str, *, agg = False) -> str:
+        from well_viewer.scatter_controller import scatter_axis_metric_key
+        return scatter_axis_metric_key(self, axis, agg=agg)
 
     def _refresh_scatter_metric_for_axis(self, axis: str) -> None:
         """Reshape the cells-scatter Property combo for the selected channel."""
@@ -2141,20 +1815,8 @@ class WellViewerApp(QWidget):
         )
 
     def _refresh_scatter_agg_metric_for_axis(self, axis: str) -> None:
-        """Reshape the agg-scatter Property combo for the selected channel.
-
-        Real channels get the full intensity set plus ``Fraction above
-        threshold``; ratio channels collapse to ``Calculated Val``.
-        """
-        ch_cb = getattr(self, f"_scatter_agg_ch_{axis}_cb", None)
-        m_cb = getattr(self, f"_scatter_agg_metric_{axis}_cb", None)
-        if ch_cb is None or m_cb is None:
-            return
-        channel = str(ch_cb.currentText() or "")
-        populate_metric_combo(self, 
-            m_cb, channel_entry=channel, smfish_channel=channel,
-            include_fraction=True,
-        )
+        from well_viewer.scatter_controller import refresh_scatter_agg_metric_for_axis
+        return refresh_scatter_agg_metric_for_axis(self, axis)
 
     def _on_scatter_axis_change(self, axis: str) -> None:
         self._refresh_scatter_metric_for_axis(axis)
@@ -2182,16 +1844,8 @@ class WellViewerApp(QWidget):
             self._scatter_agg_tp_label.setText(label_text)
 
     def _update_scatter_tp_selection_display(self) -> None:
-        """Update the per-cell scatter label showing selected timepoints.
-
-        Mirrors _update_tp_selection_display so the two pickers behave
-        identically (label format included).
-        """
-        count = sum(1 for v in self._scatter_tp_selections.values() if v)
-        total = len(self._scatter_tp_selections)
-        label_text = f"(All {count} selected)" if count == total else f"({count}/{total} selected)"
-        if hasattr(self, "_scatter_tp_label") and self._scatter_tp_label is not None:
-            self._scatter_tp_label.setText(label_text)
+        from well_viewer.scatter_controller import update_scatter_tp_selection_display
+        return update_scatter_tp_selection_display(self)
 
 
 
@@ -2209,16 +1863,8 @@ class WellViewerApp(QWidget):
 
 
     def _export_scatter_agg_data(self) -> None:
-        """Export aggregate scatter plot data to CSV."""
-        from well_viewer.export_service import export_scatter_agg_data as _export_scatter_agg_data
-        # Keep the legacy stat combos in sync with the new per-axis
-        # (channel, property) state — the export reads from those.
-        try:
-            self._sync_scatter_agg_stat_combos()
-        except Exception:
-            pass
-
-        _export_scatter_agg_data(self)
+        from well_viewer.export_service import export_scatter_agg_data
+        return export_scatter_agg_data(self)
 
     def _save_scatter_agg_figure(self) -> None:
         """Save the current aggregate scatter plot figure at high resolution."""

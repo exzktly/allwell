@@ -619,3 +619,20 @@ def stats_refresh_colors(app) -> None:
         app._stats_fig.set_facecolor(get_color("BG_APP"))
     if hasattr(app, "_stats_canvas_widget"):
         app._stats_canvas_widget.draw()
+
+
+def stats_active_threshold(app) -> float:
+    """Use the per-channel ThreshFracOn from the Cell Gating tab.
+
+    For ratio columns the channel-specific threshold doesn't apply; fall
+    back to the global threshold so a sensible cutoff still exists.
+    """
+    val_col = app._stats_active_val_col()
+    if is_ratio_key(val_col):
+        return float(app._app_state.channel.threshold)
+    # val_col is "<channel>_mean_intensity" or "<channel>_smfish_count".
+    if "_" in val_col:
+        channel = val_col.split("_", 1)[0]
+        return float(app._get_thresh_frac_on(channel))
+    return float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
+

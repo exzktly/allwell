@@ -736,3 +736,79 @@ def rebuild_all(app) -> None:
         if app._current_centre_tab() == "Line Graphs":
             app._show_line_sidebar()
 
+
+
+def sel_add(app, name=None, wells=None, replicates=None, source="user",
+             *, make_current=True):
+    from well_viewer.selections_model import make_selection
+    used_names = {s.get("name") for s in app._app_state.selection.selections}
+    used_ids = {s.get("id") for s in app._app_state.selection.selections}
+    sel = make_selection(name=name, wells=wells, replicates=replicates,
+                         source=source, used_names=used_names, used_ids=used_ids,
+                         fallback_color_idx=len(app._app_state.selection.selections))
+    app._sel_strip_wells(sel["wells"], keep_id=sel["id"])
+    app._app_state.selection.selections.append(sel)
+    if make_current:
+        app._app_state.selection.current_selection_id = sel["id"]
+    app._rebuild_all()
+    return sel["id"]
+
+
+
+def sel_set_hidden(app, sid, hidden, *, light=False) -> None:
+    s = app._sel_by_id(sid)
+    if s is None:
+        return
+    if bool(s.get("hidden")) == bool(hidden):
+        return
+    s["hidden"] = bool(hidden)
+    if light:
+        app._refresh_sidebar_map()
+    else:
+        app._rebuild_all()
+
+
+
+def sel_set_composition(app, sid, wells=None, replicates=None) -> None:
+    from well_viewer.selections_model import _clean_wells, _deoverlap_replicates
+    s = app._sel_by_id(sid)
+    if s is None:
+        return
+    if wells is not None:
+        s["wells"] = _clean_wells(wells)
+        app._sel_strip_wells(s["wells"], keep_id=sid)
+    src = replicates if replicates is not None else s.get("replicates")
+    s["replicates"] = _deoverlap_replicates(src, allowed=set(s.get("wells") or []))
+    app._rebuild_all()
+
+
+
+def select_invert(app) -> None:
+    """Phase 13 (B7): flip the current selection — every loaded well that
+    was selected becomes unselected, and vice versa. Only wells with data
+    (``_well_paths``) participate."""
+    if not True:
+        return
+    cur = set(app._app_state.selection.selected_wells)
+    new = {w for w in app._app_state.dataset.well_paths.keys() if w not in cur}
+    app._app_state.selection.selected_wells = new
+    # Re-use the standard refresh path the click handlers go through.
+    app._refresh_sidebar_map()
+    if hasattr(app, "_on_plate_sel_change"):
+        on_plate_sel_change(app)
+
+
+
+def invalidate_stats_cache(app) -> None:
+    """Discard cached group statistics. Call whenever group definitions change."""
+    app._app_state.stats.cache: dict = {}
+    # Replicate-set visibility may have shifted, so re-check whether the
+    # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
+    if hasattr(app, "_refresh_fov_btn_state"):
+        app._refresh_fov_btn_state()
+    # Cell gating writes new ``Included`` flags onto cached rows, which
+    # the Review Image include map mirrors. Bumping the version key
+    # forces the next refresh to recompute the include map (cheap)
+    # while reusing the cached image arrays + boundary mask (expensive).
+    app._app_state.review_image.override_version += 1
+

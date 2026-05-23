@@ -767,3 +767,62 @@ def update_bar_tp_menu(app) -> None:
     else:
         app._bar_tp_cb.setCurrentText("—")
 
+
+
+def collect_bar_items_for_app(app, target_t: float, *,
+                       fc_state=None, miss_sink=None) -> tuple:
+    """Return ``(use_groups, list[BarItem], band_lbl)`` for *target_t*.
+
+    Thin wrapper around :func:`barplot_controller.collect_bar_items`.
+    ``fc_state`` lets the on-tab CSV exporter request raw items (pass
+    ``FC_STATE_OFF``) alongside the normalized items the renderer
+    consumes. ``miss_sink`` collects timepoints where a vs-control
+    denominator couldn't be resolved so the caller can surface a
+    single status warning at the end of the redraw.
+    """
+    return _bar_collect_items(
+        app, target_t, fc_state=fc_state, miss_sink=miss_sink,
+    )
+
+
+
+def toggle_swarm(app) -> None:
+    """Toggle beeswarm / bar mode and update the button appearance."""
+    app._bar_swarm = not app._bar_swarm
+    on = app._bar_swarm
+    app._swarm_btn.setChecked(on)
+    if on and app._bar_violin:
+        # Swarm and violin are mutually exclusive
+        app._bar_violin = False
+        app._violin_btn.setChecked(False)
+        app._violin_slider.setEnabled(False)
+    redraw_bars(app)
+
+
+
+def toggle_violin(app) -> None:
+    """Toggle violin / bar mode and update the button appearance."""
+    app._bar_violin = not app._bar_violin
+    on = app._bar_violin
+    app._violin_btn.setChecked(on)
+    app._violin_slider.setEnabled(on)
+    if on and app._bar_swarm:
+        # Mutually exclusive with beeswarm
+        app._bar_swarm = False
+        app._swarm_btn.setChecked(False)
+    redraw_bars(app)
+
+
+
+def rep_sets_active(app) -> "List[ReplicateSet]":
+    """One ReplicateSet per visible (non-hidden) selection with ≥1 loaded
+    well — these are exactly the traces drawn on the plots."""
+    out: "List[ReplicateSet]" = []
+    for s in app._app_state.selection.selections:
+        if s.get("hidden"):
+            continue
+        wells = s.get("wells") or []
+        if any(w in app._app_state.dataset.well_paths for w in wells):
+            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+    return out
+

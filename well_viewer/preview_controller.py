@@ -319,3 +319,20 @@ def sync_preview_well_for_image_tabs(app) -> None:
     if app._app_state.dataset.well_paths:
         app._app_state.preview.selected_well = sorted(app._app_state.dataset.well_paths.keys(), key=app._parse_rc)[0]
 
+
+
+def refresh_preview_picker_shim(app) -> None:
+    from well_viewer.views.preview_view import refresh_preview_picker as _refresh_preview_picker_view
+    from well_viewer.data_loading import extract_well_token as _extract_well_token
+    from ui.theme import get_color
+    _refresh_preview_picker_view(
+        app,
+        button_bg=get_color("button_bg"),
+        button_text=get_color("button_text"),
+        button_text_disabled=get_color("button_text_disabled"),
+        accent=get_color("ACCENT"),
+        clr_white=get_color("CLR_WHITE"),
+        clr_accent_dark=get_color("ACCENT_DARK"),
+        extract_well_token_fn=_extract_well_token,
+    )
+

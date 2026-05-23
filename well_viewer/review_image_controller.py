@@ -1067,3 +1067,38 @@ def review_collect_timepoints(app, fov: str) -> list:
         tp_values = sorted(set(tp_values) | set(pipeline_tp_values), key=app._review_tp_sort_key)
     return tp_values
 
+
+
+def review_load_rows(app, label: str) -> List[dict]:
+    """Materialize the cached DataFrame for ``label`` as a list of row dicts.
+
+    Used by the Review CSV table widget and the Review Image overlay
+    builders. Mutations to returned dicts are local — write back to the
+    canonical store via ``_apply_review_overrides_to_cache`` (which
+    updates the cached DataFrame's ``Included`` column directly).
+    """
+    try:
+        df = app._get_rows(label)
+    except Exception:
+        return []
+    if df is None or df.empty:
+        return []
+    return df.to_dict("records")
+
+
+
+def review_effective_included(app, label: str, row: dict) -> str:
+    """Effective Included value for a cached row.
+
+    User overrides set via the Review Image tab take precedence over the
+    gating-computed ``Included`` field stored on the cached row. Overrides
+    are kept in a separate dict so they survive subsequent gating recomputes
+    (which rewrite the canonical row['Included']).
+    """
+    fov, tp, nid = app._review_row_keys(row)
+    if fov and tp and nid:
+        ovr = app._review_included_overrides.get((label, fov, tp, nid))
+        if ovr is not None:
+            return ovr
+    return str(row.get("Included", "1"))
+

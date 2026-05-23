@@ -677,3 +677,98 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
         except Exception:
             pass
 
+
+
+def on_preview_channel_selected(app, _e=None) -> None:
+    """Channel-switch handler for the Movie Montage tab."""
+    selected_ui_value = ""
+    if hasattr(app, "_chan_cb_preview"):
+        selected_ui_value = str(app._chan_cb_preview.currentText() or "").strip()
+    if not selected_ui_value and hasattr(app, "_montage_chan_var"):
+        selected_ui_value = app._montage_chan_var.currentText()
+    if _debug_flags.movie_montage_debug_enabled():
+        _logger.debug(
+            "preview_channel_selected ui_value=%r active_before=%r",
+            selected_ui_value,
+            app._app_state.channel.active_image_channel,
+        )
+    set_active_image_channel(app, selected_ui_value.lower())
+
+
+
+def on_metric_selected_global(app) -> None:
+    """Handle the global Property combo (ctxbar) change."""
+    from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
+    cb = getattr(app, "_plotting_metric_cb", None)
+    if cb is None:
+        return
+    metric_label = str(cb.currentText() or "")
+    metric = METRIC_LABEL_TO_KEY.get(metric_label, "mean_intensity")
+    # smFISH count only makes sense on smfish channels; gracefully fall
+    # back to mean intensity so the user sees a redraw instead of an
+    # empty plot.
+    if metric == "smfish_count" and app._app_state.channel.active_channel not in app._app_state.channel.smfish_channels:
+        metric = "mean_intensity"
+    set_active_metric(app, metric)
+
+
+
+def channel_key_for_label(app, label: str) -> str:
+    """Map a dropdown label back to the ``_set_active_channel`` argument.
+
+    Real channels return their lowercase token; ratios return their
+    ``ratio:<name>`` key.
+    """
+    mapping = getattr(app, "_label_to_channel_key", None) or {}
+    if label in mapping:
+        return mapping[label]
+    # Fallback when the dropdown was populated before the mapping was
+    # built — assume real channel and lowercase the label.
+    return str(label or "").lower()
+
+
+
+def rebuild_ratio_index(app) -> None:
+    """Refresh the resolver-friendly ratio index and any dependent UI."""
+    app._app_state.channel.ratio_index = build_ratio_index(app._app_state.channel.ratio_metrics)
+    # If the active val_col references a deleted ratio, fall back to the
+    # first real fluorescence channel so plots stay valid.
+    if is_ratio_key(app._app_state.channel.active_val_col) and app._app_state.channel.active_val_col not in app._app_state.channel.ratio_index:
+        fallback = (app._app_state.channel.fluor_channels or ["gfp"])[0]
+        app._app_state.channel.active_channel = fallback
+        app._app_state.channel.active_val_col = f"{fallback}_{app._app_state.channel.active_metric}"
+    if hasattr(app, "_update_channel_selector"):
+        update_channel_selector(app)
+    app._invalidate_stats_cache()
+    if hasattr(app, "_redraw"):
+        try:
+            app._redraw()
+        except Exception:
+            pass
+
+
+
+def get_all_fluor_gates(app) -> Dict[str, float]:
+    """Get FluorGating thresholds for all loaded channels.
+
+    Returns a dict mapping channel name -> gate threshold, e.g., {"gfp": 10.0, "mcherry": 20.0}.
+    Used by aggregate_with_threshold_df to apply consistent gating across all channels.
+    """
+    gates = {}
+    for channel in app._app_state.channel.fluor_channels:
+        gates[channel] = app._get_fluor_gate(channel)
+    return gates
+
+
+
+def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
+    """Get ThreshFracOn threshold. Uses active channel if not specified."""
+    if channel is None:
+        channel = app._app_state.channel.active_channel
+    # _redraw can fire before the cell-gating tab is built (e.g. from
+    # sidebar releases during early load); fall back to the default.
+    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
+        return app._app_state.channel.threshold
+    from well_viewer.tabs.cell_gating_tab_view import cell_gating_get_thresh_frac_on
+    return cell_gating_get_thresh_frac_on(app, channel)
+

@@ -13,6 +13,7 @@ from . import debug_flags
 from .data_loading import df_included_mask, resolve_value_series
 from well_viewer.stats_compute import well_aggregate_stats
 from well_viewer.ui_helpers import set_combo_values as _set_combo_values
+from well_viewer.channel_state_controller import populate_metric_combo
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -1142,4 +1143,53 @@ def compose_scatter_agg_stat(app, channel_entry: str, metric_label: str) -> str:
     # threshold via _aggregate_group; surface a metric-aware suffix so
     # axes/titles reflect the selected property.
     return f"Mean Fluorescence {ch_upper} ({metric_label})"
+
+
+
+def refresh_scatter_agg_metric_for_axis(app, axis: str) -> None:
+    """Reshape the agg-scatter Property combo for the selected channel.
+
+    Real channels get the full intensity set plus ``Fraction above
+    threshold``; ratio channels collapse to ``Calculated Val``.
+    """
+    ch_cb = getattr(app, f"_scatter_agg_ch_{axis}_cb", None)
+    m_cb = getattr(app, f"_scatter_agg_metric_{axis}_cb", None)
+    if ch_cb is None or m_cb is None:
+        return
+    channel = str(ch_cb.currentText() or "")
+    populate_metric_combo(app, 
+        m_cb, channel_entry=channel, smfish_channel=channel,
+        include_fraction=True,
+    )
+
+
+
+def scatter_axis_metric_key(app, axis: str, *, agg: bool = False) -> str:
+    """Return the metric key for axis ``x``/``y`` on the active scatter tab."""
+    from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
+    attr = (
+        f"_scatter_agg_metric_{axis}_cb" if agg
+        else f"_scatter_metric_{axis}_cb"
+    )
+    cb = getattr(app, attr, None)
+    if cb is None:
+        return "mean_intensity"
+    label = str(cb.currentText() or "")
+    if agg and label in app._SCATTER_AGG_METRIC_EXTRA:
+        return app._SCATTER_AGG_METRIC_EXTRA[label]
+    return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
+
+
+
+def update_scatter_tp_selection_display(app) -> None:
+    """Update the per-cell scatter label showing selected timepoints.
+
+    Mirrors _update_tp_selection_display so the two pickers behave
+    identically (label format included).
+    """
+    count = sum(1 for v in app._scatter_tp_selections.values() if v)
+    total = len(app._scatter_tp_selections)
+    label_text = f"(All {count} selected)" if count == total else f"({count}/{total} selected)"
+    if hasattr(app, "_scatter_tp_label") and app._scatter_tp_label is not None:
+        app._scatter_tp_label.setText(label_text)
 

@@ -917,3 +917,17 @@ def export_distribution_data(app) -> None:
         app._set_status(f"Exported {len(combined)} cell(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(app, "Export failed", str(exc))
+
+
+def export_scatter_agg_data(app) -> None:
+    """Export aggregate scatter plot data to CSV."""
+    from well_viewer.export_service import export_scatter_agg_data as _export_scatter_agg_data
+    # Keep the legacy stat combos in sync with the new per-axis
+    # (channel, property) state — the export reads from those.
+    try:
+        app._sync_scatter_agg_stat_combos()
+    except Exception:
+        pass
+
+    _export_scatter_agg_data(app)
+

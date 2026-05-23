@@ -14,6 +14,7 @@ from well_viewer.review_image_renderer import refresh_review_image
 from well_viewer.review_image_renderer import update_preview
 from well_viewer.scatter_controller import update_scatter_menus
 import logging
+from functools import partial
 
 
 def on_tab_change(app, _e=None) -> None:
@@ -297,4 +298,62 @@ def sync_section_nav_from_notebook(app) -> None:
             nav.setCurrentKey(cur)
     finally:
         app._section_nav_building = False
+
+
+
+def tab_history_back(app) -> None:
+    hist = getattr(app, "_tab_history", None)
+    if not hist:
+        return
+    idx = app._tab_history_idx - 1
+    if idx < 0:
+        return
+    app._tab_history_idx = idx
+    app._tab_history_replaying = True
+    try:
+        app._notebook.setCurrentByName(hist[idx])
+    finally:
+        app._tab_history_replaying = False
+
+
+
+def tab_history_forward(app) -> None:
+    hist = getattr(app, "_tab_history", None)
+    if not hist:
+        return
+    idx = app._tab_history_idx + 1
+    if idx >= len(hist):
+        return
+    app._tab_history_idx = idx
+    app._tab_history_replaying = True
+    try:
+        app._notebook.setCurrentByName(hist[idx])
+    finally:
+        app._tab_history_replaying = False
+
+
+
+def on_central_pane_changed(app, idx: int) -> None:
+    # Mode-seg lives in all_well's titlebar; emit modeChanged so the
+    # shell can re-sync its own seg without poking widgets here.
+    mode = "analyze" if idx == 1 else "review"
+    # Hide the section / well-picker sidebar when Analyze is active —
+    # it carries Review-only affordances. Show it again on Review.
+    sidebar = getattr(app, "_sidebar_root", None)
+    if sidebar is not None:
+        sidebar.setVisible(mode == "review")
+    app.modeChanged.emit(mode)
+
+
+
+def build_centre_shim(app, parent) -> None:
+    from well_viewer.views.centre_view import build_centre as _build_centre_view
+    _build_centre_view(app, parent)
+    # Phase 10 (A1): mirror the notebook's tab list into the rail nav.
+    # The nav drives the (hidden-tab-bar) QTabWidget; the QTabWidget's
+    # currentChanged signal keeps the nav in sync if anything else
+    # changes the index (deferred builders, programmatic select_by_text).
+    app._sync_section_nav_from_notebook()
+    app._section_nav.currentChanged.connect(app._on_section_nav_changed)
+    app._notebook.currentChanged.connect(partial(on_notebook_current_changed, app))
 

@@ -639,3 +639,58 @@ def wells_multiselect_listbox(parent, available, preselect=None) -> QListWidget:
 def selected_list_values(lb) -> list:
     """Return the current selected item text list from a QListWidget."""
     return [lb.item(i).text() for i in range(lb.count()) if lb.item(i).isSelected()]
+
+
+def _mute_color(hex_color: str, factor: float = 0.5) -> str:
+    """Blend *hex_color* 50% toward a neutral mid-grey (#94A3B8).
+
+    Used to dim hidden rep-sets on the plate map so they are visually
+    distinct from visible ones while still showing their hue.
+    """
+    grey = (0x94, 0xA3, 0xB8)
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    mr = int(r + (grey[0] - r) * factor)
+    mg = int(g + (grey[1] - g) * factor)
+    mb = int(b + (grey[2] - b) * factor)
+    return f"#{mr:02X}{mg:02X}{mb:02X}"
+
+
+
+def on_theme_change(app, theme_name: str = None) -> None:
+    """Re-apply QSS stylesheet when theme switches."""
+    new_theme = theme_name or app._theme_name
+    app._theme_name = new_theme
+    app._apply_theme()
+
+    if hasattr(app, '_rep_cards_frame') and app._rep_cards_frame:
+        rep_panel_refresh(app)
+    if hasattr(app, '_stats_fig') and app._stats_fig:
+        stats_refresh_colors(app)
+    if hasattr(app, "_sidebar_btns"):
+        app._sidebar_map_refresh_pending = False
+        app._refresh_sidebar_map_now()
+    try:
+        from well_viewer.ui_helpers import refresh_plot_toolbar_icons
+        refresh_plot_toolbar_icons(app)
+    except Exception:
+        pass
+
+
+
+def apply_theme(app) -> None:
+    """Apply the application-wide stylesheet.
+
+    Single source of truth is the repo-root ``theme`` module. Previously
+    this re-applied the legacy ``ui/theme`` per-theme QSS, which clobbered
+    ``theme.qss()`` whenever a ``WellViewerApp`` was constructed (including
+    embedded under AllWell).
+    """
+    try:
+        import theme  # type: ignore
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(theme.qss())
+    except Exception:
+        pass
+

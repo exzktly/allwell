@@ -190,3 +190,17 @@ def rep_refresh_map(app) -> None:
     cur_wells = [w for w in (cur.get("wells") or []) if w in app._app_state.dataset.well_paths] if cur else []
     plate.setSelectedWellIds(cur_wells)
 
+
+
+def rank_color_rset(app, rset) -> str:
+    """Colour for a ReplicateSet / BarGroup (or anything with a ``wells``
+    attribute) — honours the per-selection ``color`` override when an entry
+    in ``_selections`` shares its ``name``, otherwise falls back to the
+    rank colour of its lowest well."""
+    name = getattr(rset, "name", None)
+    if name:
+        for s in app._app_state.selection.selections:
+            if s.get("name") == name:
+                return app._sel_color(s)
+    return app._rank_color_wells(getattr(rset, "wells", None))
+

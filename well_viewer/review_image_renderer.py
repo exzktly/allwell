@@ -38,7 +38,7 @@ def update_preview(app, well_label: Optional[str]) -> None:
     # Local imports keep this module standalone-importable without paying
     # the cost of dragging in runtime_app at module load time.
     from well_viewer.image_discovery import find_well_images_and_masks
-    from well_viewer.runtime_app import _clear_layout, _set_combo_values
+    from well_viewer.ui_helpers import clear_layout as _clear_layout, set_combo_values as _set_combo_values
 
     channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
     if well_label is None:
@@ -175,7 +175,7 @@ def update_preview(app, well_label: Optional[str]) -> None:
 def refresh_review_image(app) -> None:
     """Reload the Review Image canvas for the active well/FOV/timepoint."""
     from well_viewer.image_discovery import open_imgref_as_array
-    from well_viewer.runtime_app import _set_combo_values
+    from well_viewer.ui_helpers import set_combo_values as _set_combo_values
 
     if not hasattr(app, "_review_image_label"):
         return

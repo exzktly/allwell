@@ -36,58 +36,24 @@ from __future__ import annotations
 # keep exported names stable for package imports and entrypoints.
 
 import argparse
-import copy
 import logging
-import json
-import math
 import re
 import shutil
-import statistics
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QPainter, QPen, QPixmap
+from PySide6.QtCore import (
+    Qt, QTimer, Signal,
+)
 from PySide6.QtWidgets import (
-    QApplication,
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QFileDialog,
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QInputDialog,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QMenu,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QRubberBand,
-    QScrollArea,
-    QSizePolicy,
-    QSlider,
-    QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
-    QTabWidget,
-    QTextEdit,
-    QToolButton,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QVBoxLayout,
-    QWidget,
+    QApplication, QFileDialog, QMainWindow, QPushButton, QRubberBand, QWidget,
 )
 
 import matplotlib
-import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 from well_viewer.batch_models import BarGroup, ReplicateSet
-from well_viewer import debug_flags as _debug_flags
 from well_viewer.state import AppState, EventBus
 from well_viewer.bus_wiring import wire_event_bus
 from well_viewer.persistence.registry import build_persistence_registry
@@ -116,23 +82,15 @@ def _lazy(module_path: str, attr: str):
 
 
 _bar_apply_ylims = _lazy("well_viewer.barplot_controller", "apply_bar_ylims")
-_bar_collect_items = _lazy("well_viewer.barplot_controller", "collect_bar_items")
 _bar_ordered_keys = _lazy("well_viewer.barplot_controller", "ordered_bar_keys")
-_bar_render_items = _lazy("well_viewer.barplot_controller", "render_bar_items")
 
 
-_resolve_ref_by_fov_tp = _lazy("well_viewer.image_resolver", "resolve_ref_by_fov_tp")
-
-_refresh_preview_picker_view = _lazy("well_viewer.views.preview_view", "refresh_preview_picker")
 
 
-_lineplot_redraw = _lazy("well_viewer.lineplot_controller", "redraw_line_plots")
-_scatter_get_timepoints = _lazy("well_viewer.scatter_controller", "get_all_timepoints")
+
 
 _load_directory_controller = _lazy("well_viewer.load_controller", "load_directory")
-_load_path_controller = _lazy("well_viewer.load_controller", "load_path")
 
-_plot_redraw_orchestrator = _lazy("well_viewer.plot_orchestrator", "redraw")
 _plot_save_bar_figure_orchestrator = _lazy("well_viewer.plot_orchestrator", "save_bar_figure")
 _plot_save_line_figure_orchestrator = _lazy("well_viewer.plot_orchestrator", "save_line_figure")
 _plot_save_matplotlib_fig_orchestrator = _lazy("well_viewer.plot_orchestrator", "save_matplotlib_fig")
@@ -145,88 +103,13 @@ _select_review_csv_row_for_cell_controller = _lazy("well_viewer.review_image_con
 
 _stats_collect_group_values = _lazy("well_viewer.stats_controller", "collect_group_values")
 _stats_draw_ks_cdf = _lazy("well_viewer.stats_controller", "draw_ks_cdf")
-_stats_run_controller = _lazy("well_viewer.stats_controller", "run_stats")
 
 from well_viewer.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.ui_helpers import (
-    ask_name_dialog as _ui_ask_name_dialog,
-    bind_drag as _bind_drag,
-    btn_card as _btn_card,
-    btn_danger as _btn_danger,
-    btn_primary as _btn_primary,
-    btn_secondary as _btn_secondary,
-    clear_layout as _clear_layout,
-    make_fluor_thumb,
-    make_overlay_thumb,
-    make_scrollable_canvas as _ui_make_scrollable_canvas,
-    safe_int_or_none as _safe_int_or_none,
-    selected_list_values as _selected_list_values,
-    wells_multiselect_listbox as _wells_multiselect_listbox,
+    ask_name_dialog as _ui_ask_name_dialog, make_fluor_thumb, make_overlay_thumb,
 )
 from ui.theme import (
-    ACCENT,
-    ACCENT_DARK,
-    BG_APP,
-    BG_CELL,
-    BG_HOVER,
-    BG_PANEL,
-    BG_SIDE,
-    BORDER,
-    button_bg,
-    button_text,
-    button_text_disabled,
-    CLR_AVAIL_HOVER,
-    CLR_AVAIL_WELL,
-    CLR_DANGER,
-    CLR_DANGER_DARK,
-    CLR_DANGER_BG,
-    CLR_DANGER_HOVER,
-    CLR_ERR_BAR,
-    CLR_ERROR_BG_DARK,
-    CLR_ERROR_TEXT_SOFT,
-    CLR_MUTED_DISABLED,
-    CLR_MUTED_TEXT_SOFT,
-    CLR_OFF_WHITE,
-    CLR_PLACEHOLDER,
-    CLR_SLATE_BG,
-    CLR_SLATE_TEXT,
-    CLR_SUCCESS,
-    CLR_SUCCESS_BG_DARK,
-    CLR_SUCCESS_DARK,
-    CLR_SUCCESS_TEXT_SOFT,
-    CLR_WARN_BG,
-    CLR_WARN_DARK,
-    CLR_WARN_TEXT,
-    CLR_WHITE,
-    FM_BOLD,
-    FM_MONO,
-    FM_TINY,
-    FM_TITLE,
-    FM_UI,
-    PLOT_BG,
-    PLOT_GRD,
-    PLOT_SPN,
-    PLOT_TXT,
-    TAB_BG,
-    TAB_BG_ACTIVE,
-    TAB_BORDER,
-    TAB_FG,
-    TAB_FG_ACTIVE,
-    TOOLTIP_BG,
-    TOOLTIP_FG,
-    TXT_MUT,
-    TXT_PRI,
-    TXT_SEC,
-    WARN,
-    WELL_COLOR_1,
-    WELL_COLOR_2,
-    WELL_COLOR_3,
-    WELL_COLOR_4,
-    WELL_COLOR_5,
-    WELL_COLOR_6,
-    WELL_COLOR_7,
-    WELL_COLOR_8,
-    WELL_COLOR_9,
+    ACCENT, ACCENT_DARK, PLOT_BG,
 )
 
 
@@ -270,42 +153,14 @@ from well_viewer.ui_helpers import set_combo_values as _set_combo_values  # noqa
 
 
 
-from well_viewer.plot_style import apply_ax_style
 
 
 from well_viewer.data_loading import (
-    AggPoint,
-    _all_fluor_values,
-    _all_fluor_values_filtered,
-    _beeswarm_jitter,
-    aggregate_with_threshold_df,
-    detect_fluor_channels,
-    detect_nuclear_channel_token,
-    detect_review_image_channels,
-    detect_smfish_channels,
-    df_included_mask,
-    load_well_csv,
-    merge_fluor_channels,
-    normalize_channel_tokens,
-    parse_timepoint_hours,
-    parse_well_token,
-    resolve_value_series,
+    load_well_csv, parse_timepoint_hours,
 )
-from well_viewer.ratio_models import (
-    RatioMetric,
-    build_ratio_index,
-    is_ratio_key,
-    ratio_name_from_key,
-    ratios_from_dict,
-    ratios_to_dict,
-)
+from well_viewer.ratio_models import RatioMetric
 
 
-from well_viewer.image_discovery import (
-    ImgRef,
-    find_well_images_and_masks,
-    open_imgref_as_array,
-)
 
 # Aliased to avoid collision with the WellViewerApp._extract_well_token method below.
 from well_viewer.data_loading import extract_well_token as _extract_well_token  # noqa: F401
@@ -325,34 +180,15 @@ from well_viewer.data_loading import extract_well_token as _extract_well_token  
 # GUI log handler  (canonical: well_viewer/views/status_view.py)
 # =============================================================================
 
-from well_viewer.barplot_renderer import redraw_bars
 from well_viewer.grouping_controller import rep_quick_pairs
-from well_viewer.montage_controller import on_montage_fluor_motion
-from well_viewer.montage_controller import on_montage_shift_wheel
-from well_viewer.montage_controller import on_montage_wheel
-from well_viewer.review_image_renderer import refresh_review_image
-from well_viewer.review_image_renderer import update_preview
 from well_viewer.scatter_controller import redraw_scatter_agg_orchestrate
 from well_viewer.scatter_controller import redraw_scatter_orchestrate
-from well_viewer.selection_controller import on_plate_sel_change
-from well_viewer.stats_controller import stats_refresh_colors
 from well_viewer.stats_controller import stats_refresh_map
 from well_viewer.ui_helpers import refresh_plot_empty_states
-from well_viewer.views.grouping_view import rep_panel_refresh
-from well_viewer.views.label_grid_view import label_grid_refresh
 from functools import partial
-from well_viewer.channel_state_controller import recalculate_threshold
-from well_viewer.channel_state_controller import refresh_metric_combo_for_channel
-from well_viewer.channel_state_controller import set_active_channel
-from well_viewer.channel_state_controller import update_channel_selector
 from well_viewer.montage_controller import montage_redraw_at_zoom
-from well_viewer.tab_controller import on_notebook_current_changed
 from well_viewer.montage_controller import refresh_preview_montage
-from well_viewer.channel_state_controller import set_active_image_channel
-from well_viewer.channel_state_controller import set_active_metric
-from well_viewer.channel_state_controller import populate_metric_combo
 from well_viewer.selection_controller import labels_apply_affix
-from well_viewer.selection_controller import update_active_group_label
 
 class WellViewerApp(QWidget):
 

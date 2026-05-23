@@ -35,6 +35,20 @@ except ImportError:
 
 def update_preview(app, well_label: Optional[str]) -> None:
     """Load images for *well_label* and render the inline montage."""
+    # Same re-entry guard as refresh_review_image: update_preview drives
+    # the FOV combo, whose signal handler calls back into the review-image
+    # refresh path, which can re-enter update_preview through the channel
+    # / well plate callbacks.
+    if getattr(app, "_update_preview_in_progress", False):
+        return
+    app._update_preview_in_progress = True
+    try:
+        _update_preview_impl(app, well_label)
+    finally:
+        app._update_preview_in_progress = False
+
+
+def _update_preview_impl(app, well_label: Optional[str]) -> None:
     # Local imports keep this module standalone-importable without paying
     # the cost of dragging in runtime_app at module load time.
     from well_viewer.image_discovery import find_well_images_and_masks
@@ -179,8 +193,22 @@ def refresh_review_image(app) -> None:
 
     if not hasattr(app, "_review_image_label"):
         return
-    channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
-    image_load_debug = _debug_flags.review_image_load_debug_enabled()
+    # Re-entry guard: refresh_review_image programmatically updates the
+    # FOV / TP combos, whose currentIndexChanged signal re-invokes this
+    # function. Without the guard, a Review-CSV double-click that walks
+    # tab/sub-tab/FOV/TP all at once can stack signal callbacks deep
+    # enough to trip RecursionError. Skip the nested call -- the outer
+    # invocation will redraw with the final state.
+    if getattr(app, "_refresh_review_image_in_progress", False):
+        return
+    app._refresh_review_image_in_progress = True
+    try:
+        _refresh_review_image_impl(app, _set_combo_values, channel_switch_debug=_debug_flags.review_image_channel_switch_debug_enabled(), image_load_debug=_debug_flags.review_image_load_debug_enabled())
+    finally:
+        app._refresh_review_image_in_progress = False
+
+
+def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: bool, image_load_debug: bool) -> None:
     well = app._app_state.preview.selected_well
     if well is None:
         if channel_switch_debug:

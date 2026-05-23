@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from well_viewer.batch_export._common import (
+from well_viewer.features.batch_export._common import (
     PLOT_BG,
     PLOT_SPN,
     WARN,
@@ -63,7 +63,7 @@ from well_viewer.batch_export._common import (
     _CLR_ERR_BAR,
     _CLR_WHITE,
 )
-from well_viewer.batch_export.well_grid_button import _WellGridButton
+from well_viewer.features.batch_export.well_grid_button import _WellGridButton
 
 
 def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
@@ -1329,7 +1329,7 @@ class BatchExportPanel(QWidget):
             fig_path = out_dir / f"batch_{safe}.{fmt}"
 
             try:
-                from well_viewer.batch_export._line_series_runner import (
+                from well_viewer.features.batch_export._line_series_runner import (
                     collect_line_series_for_group,
                 )
                 from well_viewer.features.export.service import (
@@ -1512,7 +1512,7 @@ class BatchExportPanel(QWidget):
         _val_col = self._export_val_col_for("_line_channel_cb")
         _cell_area_threshold = self._app._get_cell_area_threshold()
         _fluor_gates = self._app._get_all_fluor_gates()
-        from well_viewer.batch_export._line_series_runner import (
+        from well_viewer.features.batch_export._line_series_runner import (
             collect_line_series_for_group,
         )
         fc_state_for_fig = (

@@ -662,7 +662,7 @@ def build_centre(app, parent: QWidget) -> None:
         build_sample_definitions_centre(app, tab_groups)
 
     def _build_batch_export() -> None:
-        from well_viewer.batch_export.tab_view import build_batch_export_tab
+        from well_viewer.features.batch_export.tab_view import build_batch_export_tab
         build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [

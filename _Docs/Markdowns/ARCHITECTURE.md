@@ -137,9 +137,11 @@ well_viewer/
 │   ├── grouping/     controller.py, view.py, label_grid_view.py,
 │   │                 label_editor_view.py, replicate_panel_view.py,
 │   │                 cell_gating_tab_view.py
-│   └── export/       service.py, style.py, sidebar_view.py
-├── persistence/                   ← JSON read/write, debounced save registry
-└── batch_export/                  ← batch CSV / figure export panels + tab
+│   ├── export/       service.py, style.py, sidebar_view.py
+│   └── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
+│                     scatter_panel.py, _common.py, _line_series_runner.py,
+│                     well_grid_button.py
+└── persistence/                   ← JSON read/write, debounced save registry
 ```
 
 A few rules of thumb so you know where to put something new:
@@ -1006,7 +1008,7 @@ Line tab — lineplot_controller.redraw_line_plots(…) →
       is applied before the per-trace work.
    4. The renderer just iterates the resulting LineSeries and calls
       ax.plot. The batch line CSV / figure go through
-      ``batch_export._line_series_runner.collect_line_series_for_group``
+      ``features.batch_export._line_series_runner.collect_line_series_for_group``
       — same data shape, pool-of-cells stat for the batch
       numerator (matches the prior batch behaviour).
    5. After redraw, app._set_status(…) surfaces a one-line warning
@@ -1046,8 +1048,8 @@ CSV output (additive in both line and bar paths):
      export_service.export_plot_data        (line)
      export_service.export_bar_plot_data    (bar)
    Batch:
-     batch_export/base_panel._run_group     (line)
-     batch_export/bar_panel._run_batch      (bar)
+     features/batch_export/base_panel._run_group     (line)
+     features/batch_export/bar_panel._run_batch      (bar)
 
    The mean_<ch>_<metric> / err_<band>_<ch>_<metric> columns always
    carry the RAW values. When fold-change is active, four columns are

@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from well_viewer.batch_export._common import (
+from well_viewer.features.batch_export._common import (
     PLOT_BG,
     PLOT_SPN,
     WARN,
@@ -62,8 +62,8 @@ from well_viewer.batch_export._common import (
     _CLR_ERR_BAR,
     _CLR_WHITE,
 )
-from well_viewer.batch_export.base_panel import BatchExportPanel
-from well_viewer.batch_export.well_grid_button import _WellGridButton
+from well_viewer.features.batch_export.base_panel import BatchExportPanel
+from well_viewer.features.batch_export.well_grid_button import _WellGridButton
 
 
 class ScatterBatchExportPanel(BatchExportPanel):

@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from ui.theme import get_color
 from well_viewer import debug_flags as _debug_flags
 from well_viewer.ui_helpers import attach_plot_toolbar, install_canvas_wheel_scroll
+from well_viewer.review_image_controller import apply_review_overrides_to_cache
 
 
 logger = logging.getLogger("well_viewer.gating_worker")
@@ -145,7 +146,7 @@ class GatingWorker(QThread):
             # so per-cell curation in the Segmentation tab is not clobbered by
             # threshold-based recomputes.
             try:
-                self._app._apply_review_overrides_to_cache()
+                apply_review_overrides_to_cache(self._app, )
             except Exception:
                 pass
             # CRITICAL: Only invalidate stats cache, NOT _refresh_review_csv_rows.

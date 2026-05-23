@@ -2168,43 +2168,6 @@ class WellViewerApp(QWidget):
             _norm(_pick("nucleus_id", "nucleus id", "nucleusId", "nucleusID")),
         )
 
-    def _review_row_keys_series(self, df: pd.DataFrame) -> Optional[pd.Series]:
-        """Vectorized counterpart of ``_review_row_keys`` for a DataFrame.
-
-        Returns a Series of ``(fov, tp_norm, nid_norm)`` tuples aligned with
-        ``df.index``, or ``None`` if no usable identifier columns are present.
-        """
-        if df is None or df.empty:
-            return None
-
-        def _resolve_col(*names: str) -> Optional[str]:
-            lowered = {str(c).lower(): c for c in df.columns}
-            for name in names:
-                if name in df.columns:
-                    return name
-                key = name.lower()
-                if key in lowered:
-                    return lowered[key]
-            return None
-
-        def _norm_token(s: pd.Series) -> pd.Series:
-            s = s.fillna("").astype(str).str.strip()
-            num = pd.to_numeric(s, errors="coerce")
-            return s.where(num.isna(), num.map(lambda f: f"{f:g}" if pd.notna(f) else ""))
-
-        fov_col = _resolve_col("fov", "FOV")
-        tp_col = _resolve_col("timepoint", "tp", "time", "time_h", "timepoint_hours")
-        nid_col = _resolve_col("nucleus_id", "nucleus id", "nucleusId", "nucleusID")
-        if fov_col is None and tp_col is None and nid_col is None:
-            return None
-
-        fov = (_norm_token(df[fov_col]) if fov_col else
-               pd.Series([""] * len(df), index=df.index))
-        tp = (df[tp_col].map(self._norm_timepoint) if tp_col else
-              pd.Series([""] * len(df), index=df.index))
-        nid = (_norm_token(df[nid_col]) if nid_col else
-               pd.Series([""] * len(df), index=df.index))
-        return pd.Series(list(zip(fov, tp, nid)), index=df.index)
 
     @staticmethod
     def _review_norm_fov(v: object) -> str:
@@ -2246,37 +2209,6 @@ class WellViewerApp(QWidget):
             tp_values = sorted(set(tp_values) | set(pipeline_tp_values), key=self._review_tp_sort_key)
         return tp_values
 
-    def _review_resolve_image_refs(self, *, fov_raw: str, tp_raw: str):
-        """Resolve (fluor_ref, mask_ref).
-
-        Honors ``_review_image_show_raw``: when True, prefer the unprocessed
-        fluorescence channel and fall back to the top-hat-filtered output if
-        the raw frame is unavailable; when False (default), prefer top-hat
-        and fall back to raw — the original behaviour. Falling back rather
-        than failing keeps Review Image usable on datasets that only ship
-        one of the two image kinds for a given FOV/timepoint.
-        """
-        raw_first = bool(self._app_state.review_image.show_raw)
-        tophat_map = getattr(self, "_preview_tophat_fluor", {})
-        raw_map = self._app_state.preview.fluor
-        if raw_first:
-            primary, fallback = raw_map, tophat_map
-        else:
-            primary, fallback = tophat_map, raw_map
-        fluor_ref = _resolve_ref_by_fov_tp(
-            primary, fov_raw=fov_raw, tp_raw=tp_raw,
-            norm_timepoint=self._norm_timepoint,
-        )
-        if fluor_ref is None:
-            fluor_ref = _resolve_ref_by_fov_tp(
-                fallback, fov_raw=fov_raw, tp_raw=tp_raw,
-                norm_timepoint=self._norm_timepoint,
-            )
-        mask_ref = _resolve_ref_by_fov_tp(
-            self._app_state.preview.mask, fov_raw=fov_raw, tp_raw=tp_raw,
-            norm_timepoint=self._norm_timepoint,
-        )
-        return fluor_ref, mask_ref
 
     def _toggle_review_image_source(self) -> None:
         """Flip raw vs top-hat preference for the Review Image fluorescence channel."""
@@ -2345,35 +2277,6 @@ class WellViewerApp(QWidget):
             f"min-width: 28px; min-height: 18px; padding: 0; }}"
         )
 
-    def _pick_review_image_color(self, which: str) -> None:
-        """Open a v2 ColorSwatchRow popover anchored at the swatch button."""
-        from PySide6.QtGui import QColor
-
-        from widgets.color_swatch_row import ColorSwatchRow
-        from widgets.popover import Popover
-
-        anchor = (getattr(self, "_review_image_color_swatches", {}) or {}).get(which)
-        if anchor is None:
-            return
-
-        r, g, b = self._review_image_get_color(which)
-        recents = list(getattr(self, "_review_image_color_recents", []) or [])
-
-        pop = Popover(anchor)
-        row = ColorSwatchRow(allow_custom=True, recents=recents)
-        row.setCurrentColor(QColor(int(r), int(g), int(b)))
-
-        def _apply(c: QColor, _which=which, _pop=pop, _row=row) -> None:
-            if not c.isValid():
-                return
-            self._review_image_set_color(_which, (c.red(), c.green(), c.blue()))
-            rec = [c] + [QColor(x) for x in (getattr(self, "_review_image_color_recents", []) or [])
-                         if QColor(x).rgb() != c.rgb()]
-            self._review_image_color_recents = rec[:8]
-
-        row.colorPicked.connect(_apply)
-        pop.setContentWidget(row)
-        pop.popup(anchor, side="bottom", align="start")
 
     def _reset_review_image_colors(self) -> None:
         """Restore the default colors for boundary / selection / tint."""
@@ -2429,96 +2332,7 @@ class WellViewerApp(QWidget):
         btn.style().unpolish(btn)
         btn.style().polish(btn)
 
-    def _review_build_include_map(
-        self, mask_arr, well: str, fov: str, tp: str,
-    ) -> Dict[int, bool]:
-        """Build {nid: is_included} for all labels in ``mask_arr``."""
-        center = _np.asarray(mask_arr)
-        include_by_nid: Dict[int, bool] = {
-            int(nid): True for nid in _np.unique(center) if int(nid) > 0
-        }
-        df = self._get_rows(well)
-        if df is not None and not df.empty:
-            keys = self._review_row_keys_series(df)
-            if keys is not None:
-                target = (fov, tp, None)
-                fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
-                sub = df.loc[fov_eq.fillna(False).to_numpy()]
-                if not sub.empty:
-                    sub_keys = keys.loc[sub.index]
-                    nids = sub_keys.map(lambda k: k[2]).map(_safe_int_or_none)
-                    incl = sub["Included"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
-                    overrides = self._review_included_overrides
-                    for nid, base_incl in zip(nids, incl):
-                        if nid is None:
-                            continue
-                        ovr = overrides.get((well, fov, tp, str(nid)))
-                        if ovr is not None:
-                            include_by_nid[nid] = (str(ovr).strip() != "0")
-                        elif nid in include_by_nid:
-                            include_by_nid[nid] = bool(base_incl)
-        # Apply overrides for cells present in the mask but without a CSV row
-        # (e.g. when no pipeline results are loaded yet).
-        for (ovr_well, ovr_fov, ovr_tp, ovr_nid), val in self._review_included_overrides.items():
-            if ovr_well != well or ovr_fov != fov or ovr_tp != tp:
-                continue
-            nid = _safe_int_or_none(ovr_nid)
-            if nid is None:
-                continue
-            if nid in include_by_nid:
-                include_by_nid[nid] = (val.strip() != "0")
-        return include_by_nid
 
-    def _review_build_threshold_map(
-        self, mask_arr, well: str, fov: str, tp: str,
-    ) -> Dict[int, bool]:
-        """Build {nid: above_threshold} for cells in the displayed FOV/timepoint.
-
-        Mirrors the bar plot's gating logic: a cell is "above threshold" only
-        when it passes (a) cell-area gating, (b) every fluorescence gate, and
-        (c) ``row[active_val_col] > thresh_frac_on``.
-        """
-        center = _np.asarray(mask_arr)
-        cell_area_threshold = self._get_cell_area_threshold()
-        fluor_gates = self._get_all_fluor_gates()
-        threshold = self._get_thresh_frac_on()
-        val_col = self._app_state.channel.active_val_col
-        ratios = self._app_state.channel.ratio_index
-        above_by_nid: Dict[int, bool] = {
-            int(nid): False for nid in _np.unique(center) if int(nid) > 0
-        }
-        df = self._get_rows(well)
-        if df is None or df.empty:
-            return above_by_nid
-        keys = self._review_row_keys_series(df)
-        if keys is None:
-            return above_by_nid
-        sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").fillna(False).to_numpy()
-        sub = df.loc[sel]
-        if sub.empty:
-            return above_by_nid
-
-        mask = df_included_mask(sub).to_numpy(copy=True)
-        if "area_px" in sub.columns:
-            area = pd.to_numeric(sub["area_px"], errors="coerce").to_numpy()
-            with np.errstate(invalid="ignore"):
-                mask &= np.isfinite(area) & (area > cell_area_threshold)
-        for chan, gate in fluor_gates.items():
-            col = f"{chan}_mean_intensity"
-            if col not in sub.columns:
-                mask[:] = False
-                break
-            v = pd.to_numeric(sub[col], errors="coerce").to_numpy()
-            mask &= np.isfinite(v) & (v > gate)
-        val = resolve_value_series(sub, val_col, ratios).to_numpy()
-        mask &= np.isfinite(val) & (val > threshold)
-
-        sub_keys = keys.loc[sub.index]
-        for k, ok in zip(sub_keys, mask):
-            nid = _safe_int_or_none(k[2])
-            if nid is not None and nid in above_by_nid:
-                above_by_nid[nid] = bool(ok)
-        return above_by_nid
 
 
     def _draw_review_image(
@@ -2652,158 +2466,9 @@ class WellViewerApp(QWidget):
     def _toggle_selected_review_cell(self) -> None:
         self._set_review_image_include_mode(not self._app_state.review_image.include_edit_mode)
 
-    def _set_review_cell_included(self, fov: str, tp: str, nid: str, included: str) -> None:
-        if self._app_state.preview.selected_well is None:
-            return
-        fov_n, tp_n, nid_n = self._review_row_keys({"fov": fov, "tp": tp, "nucleus_id": nid})
-        if not (fov_n and tp_n and nid_n):
-            return
-        key = (self._app_state.preview.selected_well, fov_n, tp_n, nid_n)
-        self._review_included_overrides[key] = str(included).strip() or "1"
-        # Project the override onto the cached row immediately so other tabs
-        # (Bar/Line/Distribution/Stats/Heatmap) honor it without waiting for
-        # the next gating recompute, then invalidate the stats cache.
-        self._apply_review_overrides_to_cache(self._app_state.preview.selected_well)
-        if hasattr(self, "_invalidate_stats_cache"):
-            try:
-                self._invalidate_stats_cache()
-            except Exception:
-                pass
-        # Persist to disk (debounced) so curation survives between sessions.
-        self._persistence.schedule_save("cell_overrides")
-        # Bump the override version so the include-map cache is bypassed
-        # on the next refresh; the frame cache (decoded image + boundary)
-        # remains valid because the underlying mask label image is unchanged.
-        self._app_state.review_image.override_version += 1
-        prev_zoom = float(self._app_state.review_image.zoom)
-        prev_pan_x = float(self._app_state.review_image.pan_x)
-        prev_pan_y = float(self._app_state.review_image.pan_y)
-        # Skip a full Review CSV table rebuild here — the user is on the
-        # Review Image tab and rebuilding tens of thousands of QTableWidgetItems
-        # per click was the dominant memory leak. The table reads the effective
-        # Included via override on the next refresh (combobox change / Refresh
-        # button / well-selection change), so the value is never lost.
-        refresh_review_image(self)
-        self._app_state.review_image.zoom = prev_zoom
-        self._app_state.review_image.pan_x = prev_pan_x
-        self._app_state.review_image.pan_y = prev_pan_y
-        self._render_review_image_display()
 
-    def _set_review_cells_included_batch(
-        self, items: List[Tuple[str, str, str, str]]
-    ) -> None:
-        """Apply many (fov, tp, nid, included) overrides with a single redraw.
 
-        Mirrors _set_review_cell_included but coalesces the per-call
-        cache-projection, stats invalidation, save-schedule, and image
-        refresh — otherwise a 100-cell box delete would redraw 100 times.
-        """
-        if self._app_state.preview.selected_well is None or not items:
-            return
-        well = self._app_state.preview.selected_well
-        any_changed = False
-        for fov, tp, nid, included in items:
-            fov_n, tp_n, nid_n = self._review_row_keys(
-                {"fov": fov, "tp": tp, "nucleus_id": nid}
-            )
-            if not (fov_n and tp_n and nid_n):
-                continue
-            self._review_included_overrides[(well, fov_n, tp_n, nid_n)] = (
-                str(included).strip() or "1"
-            )
-            any_changed = True
-        if not any_changed:
-            return
-        self._apply_review_overrides_to_cache(well)
-        if hasattr(self, "_invalidate_stats_cache"):
-            try:
-                self._invalidate_stats_cache()
-            except Exception:
-                pass
-        self._persistence.schedule_save("cell_overrides")
-        self._app_state.review_image.override_version += 1
-        prev_zoom = float(self._app_state.review_image.zoom)
-        prev_pan_x = float(self._app_state.review_image.pan_x)
-        prev_pan_y = float(self._app_state.review_image.pan_y)
-        refresh_review_image(self)
-        self._app_state.review_image.zoom = prev_zoom
-        self._app_state.review_image.pan_x = prev_pan_x
-        self._app_state.review_image.pan_y = prev_pan_y
-        self._render_review_image_display()
 
-    def _apply_box_delete(self, x0: int, y0: int, x1: int, y1: int) -> None:
-        """Mark every cell with any pixel in mask[y0:y1, x0:x1] as Included=0.
-
-        Coordinates are in mask-array pixel space (already converted from
-        label-local pixels by _on_review_image_release using the current
-        _review_image_scale, so window position, scroll, and zoom are
-        already accounted for).
-        """
-        label = getattr(self, "_review_image_label", None)
-        mask = getattr(label, "_mask_arr", None) if label is not None else None
-        if mask is None or self._app_state.preview.selected_well is None:
-            return
-        h, w = int(mask.shape[0]), int(mask.shape[1])
-        xa, xb = sorted((max(0, min(w, int(x0))), max(0, min(w, int(x1)))))
-        ya, yb = sorted((max(0, min(h, int(y0))), max(0, min(h, int(y1)))))
-        if xb - xa < 1 or yb - ya < 1:
-            return
-        sub = mask[ya:yb, xa:xb]
-        nids = [int(n) for n in _np.unique(sub) if int(n) > 0]
-        if not nids:
-            self._set_status("Box selection: no cells inside rectangle.")
-            return
-        fov_cb = getattr(self, "_review_image_fov_menu", None) or getattr(self, "_preview_fov_cb", None)
-        if fov_cb is None:
-            return
-        fov = fov_cb.currentText().strip()
-        tp_cb = getattr(self, "_review_image_tp_cb", None)
-        tp = tp_cb.currentText().strip() if tp_cb is not None else ""
-        self._set_review_cells_included_batch(
-            [(fov, tp, str(nid), "0") for nid in nids]
-        )
-        self._set_status(
-            f"Box delete: marked {len(nids)} cell(s) Included=0."
-        )
-
-    def _zoom_review_image_to_selected_nucleus(self, zoom: float = 3.0) -> None:
-        if not hasattr(self, "_review_image_label") or not hasattr(self, "_review_image_canvas"):
-            return
-        nid = self._app_state.review_image.selected_nucleus
-        mask_arr = getattr(self._review_image_label, "_mask_arr", None)
-        if nid is None or mask_arr is None:
-            return
-        ys, xs = _np.where(mask_arr == int(nid))
-        if len(xs) == 0 or len(ys) == 0:
-            return
-        cx = float(xs.mean())
-        cy = float(ys.mean())
-        self._app_state.review_image.zoom = float(max(1.0, zoom))
-        rgb = getattr(self, "_review_image_base_rgb", None)
-        if rgb is not None:
-            ih, iw = rgb.shape[:2]
-        else:
-            img = self._app_state.review_image.base_pil
-            if img is None:
-                return
-            iw, ih = img.size
-        vp = self._review_image_canvas.viewport()
-        cw = max(1, vp.width())
-        ch = max(1, vp.height())
-        fit = min(cw / max(iw, 1), ch / max(ih, 1))
-        scale = max(0.05, fit * max(0.1, float(self._app_state.review_image.zoom)))
-        nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
-        # The renderer derives the scrollbar value as
-        #     scroll = max(0, (max(nw, cw) - cw) // 2) - int(pan)
-        # and the QLabel host's pixmap sits at x=0 inside it when the
-        # scaled image exceeds the viewport (nw > cw), so the centring
-        # formula has to be pan = nw/2 - cx*scale (and likewise for y).
-        # The old `cw/2 - base_x - cx*scale` form mis-offset the pan by
-        # roughly (nw - cw)/2 px once you zoomed in, which is why the
-        # yellow nucleus ended up off-screen.
-        self._app_state.review_image.pan_x = (nw / 2.0) - (cx * scale)
-        self._app_state.review_image.pan_y = (nh / 2.0) - (cy * scale)
-        self._render_review_image_display()
 
 
     # ── Export ────────────────────────────────────────────────────────────────
@@ -3154,44 +2819,6 @@ class WellViewerApp(QWidget):
                 return ovr
         return str(row.get("Included", "1"))
 
-    def _apply_review_overrides_to_cache(self, label: Optional[str] = None) -> None:
-        """Project overrides onto cached row['Included'] so non-Review tabs see them.
-
-        The override dict is the source of truth; this projects values onto the
-        cached rows so every controller using row_is_included(row) automatically
-        respects user toggles. Called after gating recomputes (which rewrite
-        row['Included'] from thresholds), after patch-file load, and on toggle.
-        """
-        if not self._review_included_overrides:
-            return
-        by_label: Dict[str, Dict[Tuple[str, str, str], str]] = {}
-        for (lbl, fov, tp, nid), val in self._review_included_overrides.items():
-            if label is not None and lbl != label:
-                continue
-            by_label.setdefault(lbl, {})[(fov, tp, nid)] = val
-        for lbl, lookup in by_label.items():
-            if lbl not in self._app_state.dataset.well_paths:
-                continue
-            try:
-                df = self._get_rows(lbl)
-            except Exception:
-                continue
-            if df is None or df.empty:
-                continue
-            keys = self._review_row_keys_series(df)
-            if keys is None:
-                continue
-            override_map = pd.Series(lookup)
-            override_for_row = keys.map(override_map)
-            mask = override_for_row.notna()
-            if not mask.any():
-                continue
-            def _coerce(val: object) -> int:
-                try:
-                    return int(float(str(val).strip() or "1"))
-                except (TypeError, ValueError):
-                    return 1 if str(val).strip() == "1" else 0
-            df.loc[mask, "Included"] = override_for_row[mask].map(_coerce).astype(int)
 
     def _review_load_rows(self, label: str) -> List[dict]:
         """Materialize the cached DataFrame for ``label`` as a list of row dicts.

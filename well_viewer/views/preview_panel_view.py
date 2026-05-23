@@ -24,6 +24,7 @@ from well_viewer.montage_controller import montage_zoom_fit
 from well_viewer.review_image_controller import on_review_image_move
 from well_viewer.review_image_controller import on_review_image_press
 from well_viewer.review_image_controller import on_review_image_release
+from well_viewer.review_image_controller import pick_review_image_color
 
 
 def build_right_panel(self, parent: QWidget) -> None:
@@ -329,7 +330,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
         sw.setFixedSize(28, 18)
         sw.setToolTip(tooltip)
         sw.clicked.connect(
-            lambda _=False, k=key: self._pick_review_image_color(k)
+            lambda _=False, k=key: pick_review_image_color(self, k)
         )
         cr.addWidget(sw)
         self._review_image_color_swatches[key] = sw

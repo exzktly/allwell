@@ -11,6 +11,7 @@ from well_viewer.image_table_controller import image_table_refresh_picker
 from well_viewer.image_table_controller import image_table_repopulate_dropdowns
 from well_viewer.views.label_grid_view import label_grid_refresh
 from well_viewer.channel_state_controller import recalculate_threshold
+from well_viewer.review_image_controller import apply_review_overrides_to_cache
 
 
 def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
@@ -138,7 +139,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # when no patch file exists.
     try:
         app._persistence.load("cell_overrides")
-        app._apply_review_overrides_to_cache()
+        apply_review_overrides_to_cache(app)
     except Exception:
         pass
     # Hydrate user-defined line-plot draw order (line_order.json).

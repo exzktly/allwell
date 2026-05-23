@@ -39,9 +39,9 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 6 | DI: plot controllers take `ctx` | — | ⬜ deferred | — | entangled (controllers ↔ `plot_orchestrator` ↔ batch-export ↔ tests) and flat (no line win) — sequenced after Phase 8 |
 | 7 | DI: remaining controllers take `ctx` | — | ⬜ deferred | — | as Phase 6 |
 | 8 | Relocate `_build_*` into `views/` | #271 | 🔄 in progress | 6,179 | stats group, sample-definitions centre, preview-picker, cell-gating subtab, and the `_build_ui` window shell relocated; attrs → 74 |
-| 9a | Relocate `_on_*`/`_redraw_*` into controllers | — | ⬜ | — | one PR per section |
-| 9b | `_on_tab_change` → `TabRegistry` | — | ⬜ | — | |
-| 10 | Composition root + finalize | — | ⬜ | — | drop `__getattr__` / `ctx.app` |
+| 9a | Relocate `_on_*`/`_redraw_*` into controllers | #271 | ✅ done | 5,426 | Bar, Scatter, Review-image, Selection, Stats, RI-channel sections relocated; 5 controller files grew, runtime_app.py 6,179 → 5,426 |
+| 9b | `_on_tab_change` → `TabRegistry` | #271 | ✅ done (pragmatic) | 5,266 | Relocated whole `_on_tab_change` + `_on_notebook_current_changed` bodies into new `tab_controller.py`. The plan's TabRegistry abstraction can be layered on later — the line-budget win lands in one move. Attr budget 74 → 71 |
+| 10 | Composition root + finalize | — | ⛔ blocked | — | The two main deletions are gated on the deferred phases: `__getattr__` removal needs Phase 5 (`_line_*` widget reads still route through it from `line_graphs_tab_view`); `ctx.app` removal needs Phases 6–7 (the 12 `app = ctx.app` unwraps in `tabs/` only collapse once each builder is migrated to read `ctx.state` / `ctx.widgets`). To reach the plan's ~700-line target, Phases 5–7 must be revisited |
 
 ## Redundancy scoreboard
 
@@ -152,6 +152,55 @@ Dead code / redundancy eliminated outside the tracked metrics:
   function directly), never to add another layer. `_build_sidebar` /
   `_build_centre` / `_build_bottom` are 3-line delegators; removing them is
   near line-neutral, so they are low priority.
+
+- **Phase 9 (done)** — relocated the inline behaviour out of `runtime_app.py`
+  into existing controllers and one new module:
+
+  - **Bar** → `barplot_renderer.py`: `draw_bar_empty_state`,
+    `resolve_bar_timepoint`, `selected_bar_wells`, `draw_per_cell_bar_mode`,
+    `draw_per_well_n_bars` added; `_draw_violin` / `_draw_beeswarm` /
+    `_draw_grouped_bar_mode` delegators deleted (zero callers left). −248
+    lines.
+  - **Scatter** → `scatter_controller.py`: `redraw_scatter_orchestrate`,
+    `on_scatter_click`, `on_scatter_motion`, `redraw_scatter_agg_orchestrate`
+    added; `_on_fig_click` body moved to `lineplot_controller.on_fig_click`
+    (line-graphs handler despite the name). −243 lines.
+  - **Review-image** → `review_image_controller.py`: `on_review_image_wheel`,
+    `on_review_image_press`, `on_review_image_drag`, `on_review_image_release`,
+    `on_review_image_move`, `on_review_image_hover`,
+    `on_review_image_channel_selected`. −103 + −9 lines.
+  - **Selection** → `selection_controller.py`: six `on_sidebar_plate_*`
+    handlers (`selection_changed` / `drag_finished` / `well_activated` /
+    `row_activated` / `col_activated` / `well_dropped`). A dead `if not True:`
+    branch was dropped in the move. −91 lines.
+  - **Stats** → `stats_controller.py`: `stats_on_test_change`,
+    `stats_update_tp_menu`, `stats_refresh_colors`. −59 lines.
+  - **Phase 9b** → new `tab_controller.py`: `on_tab_change` (the centre-stack
+    dispatcher, 125 lines) and `on_notebook_current_changed` (43 lines,
+    notebook history + section-nav mirror). The plan's TabRegistry split was
+    not built — relocating the bodies wholesale captures the line-budget win;
+    a registry could be layered on later. Three attrs left with the bodies
+    (`_tab_history`, `_tab_history_idx`, `_last_tab_name`). −160 lines.
+
+  All sections leave the WellViewerApp method as a 3-line delegator because
+  the matplotlib / Qt event hookups + the export-style sidebar + the tab views
+  call them via `app._method` references that must continue to resolve.
+  `runtime_app.py` 6,179 → 5,266; attrs 88 → 71.
+
+- **Phase 10 (blocked)** — the two main deletions cannot land yet:
+  - `__getattr__` forwarder: `line_graphs_tab_view` populates
+    `_line_card / _line_fig / _line_ax_mean / _line_canvas / …` through
+    `app._widget_registry.register(...)` rather than `self._x = …`, so reads
+    of `app._line_*` from many places (renderers, export style, etc.) go via
+    `__getattr__`. Deleting it requires Phase 5's WidgetRegistry adoption —
+    every reader must switch to `ctx.widgets.get("_line_x")` first.
+  - `ctx.app` unwraps: 12 `app = ctx.app` statements remain in `tabs/`
+    builders. Deleting each requires the whole builder body to read
+    `ctx.state` / `ctx.widgets` instead of `app.` — that's Phases 6–7's
+    typed-seam narrowing.
+
+  Phase 10's *measurement* parts — doc reconciliation and final budgets —
+  remain doable; the line-budget movement is what waits on 5–7.
 
 ## Guiding rules
 

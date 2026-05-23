@@ -10,6 +10,9 @@ from typing import Callable, List, Optional, Tuple
 from .batch_models import BarGroup, ReplicateSet
 from . import debug_flags
 from . import fold_change as _fc
+from well_viewer.stats_compute import compute_rep_stats
+from well_viewer.stats_compute import compute_rep_per_fov_stats
+from well_viewer.stats_compute import compute_rep_n_above
 
 
 
@@ -198,13 +201,13 @@ def collect_bar_items(
                 # Pool every FOV across all wells in the rep set; SD/SEM is
                 # across that pooled set of per-FOV means/fractions/counts.
                 gm, g_err_m, gf, g_err_f, n_above_pf_mean, n_above_pf_spread = (
-                    app._compute_rep_per_fov_stats(rset, target_t, threshold, use_sem)
+                    compute_rep_per_fov_stats(app, rset, target_t, threshold, use_sem)
                 )
                 n_above_val = float(n_above_pf_mean)
                 n_above_err = float(n_above_pf_spread)
             else:
-                gm, g_err_m, gf, g_err_f = app._compute_rep_stats(rset, target_t, threshold, use_sem)
-                n_above_val = float(app._compute_rep_n_above(rset, target_t))
+                gm, g_err_m, gf, g_err_f = compute_rep_stats(app, rset, target_t, threshold, use_sem)
+                n_above_val = float(compute_rep_n_above(app, rset, target_t))
                 n_above_err = 0.0
             t0_mean = None
             t0_spread = None

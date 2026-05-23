@@ -11,6 +11,7 @@ import pandas as pd
 
 from . import debug_flags
 from .data_loading import df_included_mask, resolve_value_series
+from well_viewer.stats_compute import well_aggregate_stats
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -558,7 +559,7 @@ def collect_scatter_agg_data(
         """
         if not val_col:
             return float("nan"), 0.0
-        gm, gerr, gf, ferr = app._well_aggregate_stats(
+        gm, gerr, gf, ferr = well_aggregate_stats(app, 
             wells, tp,
             threshold=threshold,
             val_col=val_col,

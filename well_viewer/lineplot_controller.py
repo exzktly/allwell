@@ -8,6 +8,8 @@ from typing import List, Optional, Set, Tuple
 
 from . import fold_change as _fc
 from .barplot_controller import FC_STATE_OFF
+from well_viewer.stats_compute import compute_rep_stats
+from well_viewer.stats_compute import compute_rep_per_fov_stats
 
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
@@ -231,11 +233,11 @@ def collect_line_series(
             _raw_pts: list = []
             for t in sorted(all_tps):
                 if rep_per_fov:
-                    gm, gerr, gf, _, _, _ = app._compute_rep_per_fov_stats(
+                    gm, gerr, gf, _, _, _ = compute_rep_per_fov_stats(app, 
                         rset, t, threshold, use_sem,
                     )
                 else:
-                    gm, gerr, gf, _ = app._compute_rep_stats(
+                    gm, gerr, gf, _ = compute_rep_stats(app, 
                         rset, t, threshold, use_sem,
                     )
                 if not (isinstance(gm, float) and math.isnan(gm)):

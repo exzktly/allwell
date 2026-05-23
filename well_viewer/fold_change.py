@@ -54,6 +54,8 @@ from __future__ import annotations
 
 import math
 from typing import Dict, List, Optional, Set, Tuple
+from well_viewer.stats_compute import compute_rep_stats
+from well_viewer.stats_compute import compute_rep_per_fov_stats
 
 
 CONTROL_NONE = ""
@@ -442,11 +444,11 @@ def member_mean_series(
         out: Dict[float, float] = {}
         for t in tps:
             if per_fov_spread:
-                gm, *_ = app._compute_rep_per_fov_stats(
+                gm, *_ = compute_rep_per_fov_stats(app, 
                     rset, t, threshold, use_sem,
                 )
             else:
-                gm, *_ = app._compute_rep_stats(
+                gm, *_ = compute_rep_stats(app, 
                     rset, t, threshold, use_sem,
                 )
             if math.isfinite(gm):
@@ -611,11 +613,11 @@ def member_stats_series(
         out: Dict[float, Tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
-                gm, gerr, *_ = app._compute_rep_per_fov_stats(
+                gm, gerr, *_ = compute_rep_per_fov_stats(app, 
                     rset, t, threshold, use_sem,
                 )
             else:
-                gm, gerr, *_ = app._compute_rep_stats(
+                gm, gerr, *_ = compute_rep_stats(app, 
                     rset, t, threshold, use_sem,
                 )
             if math.isfinite(gm):

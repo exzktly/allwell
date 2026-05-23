@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 import pytest
+from well_viewer.stats_compute import compute_rep_stats
 
 
 # ── AggPoint helpers ────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ class MockApp:
 
     def _compute_rep_per_fov_stats(self, rset, target_t: float,
                                    threshold: float, use_sem: bool) -> tuple:
-        gm, gerr, gf, ferr = self._compute_rep_stats(
+        gm, gerr, gf, ferr = compute_rep_stats(self, 
             rset, target_t, threshold, use_sem,
         )
         return (gm, gerr, gf, ferr, 5.0, 0.0)

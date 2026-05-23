@@ -34,6 +34,7 @@ from well_viewer.data_loading import (
 )
 from well_viewer.ratio_models import is_ratio_key
 from well_viewer.ui_helpers import set_combo_values
+from well_viewer.stats_controller import stats_update_tp_menu
 
 _logger = logging.getLogger("well_viewer")
 
@@ -99,7 +100,7 @@ def recalculate_threshold(app) -> None:
     if hasattr(app, "_bar_tp_cb"):
         app._update_bar_tp_menu()
     if hasattr(app, "_stats_tp_cb"):
-        app._stats_update_tp_menu()
+        stats_update_tp_menu(app)
     if hasattr(app, "_distribution_tp_cb"):
         try:
             from well_viewer.tabs.distribution_tab_view import refresh_distribution_timepoints

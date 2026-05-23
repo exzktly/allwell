@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from well_viewer.ui_helpers import (
     btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
+from well_viewer.barplot_controller import bar_reset_order
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -72,7 +73,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     ctx.app._bar_reset_order_btn = QPushButton("Reset Order", bar_ctrl)
     ctx.app._bar_reset_order_btn.setProperty("variant", "toggle_muted")
-    ctx.app._bar_reset_order_btn.clicked.connect(lambda _=False: ctx.app._bar_reset_order())
+    ctx.app._bar_reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx.app))
     cl.addWidget(ctx.app._bar_reset_order_btn)
 
     _export_btn = btn_primary(bar_ctrl, "", ctx.app._export_bar_plot_data,

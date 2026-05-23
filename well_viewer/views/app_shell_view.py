@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from well_viewer.views.sidebar_view import build_sidebar
+from well_viewer.views.status_view import build_bottom
 
 
 def build_ui(app) -> None:
@@ -111,7 +113,7 @@ def build_ui(app) -> None:
 
     app._h_pane.addWidget(sidebar)
     app._sidebar_root = sidebar  # so mode toggles can hide/show the whole rail
-    app._build_sidebar(app._sidebar_main_frame)
+    build_sidebar(app, app._sidebar_main_frame)
 
     # Centre stack — wraps the existing plots widget so all_well can
     # mount the Analyze pane as a peer page. The mode-seg in the sidebar
@@ -141,4 +143,4 @@ def build_ui(app) -> None:
     # sliders IconButton). Nothing to install here.
 
     # Status + log — packed last so it sits below the splitter.
-    app._build_bottom()
+    build_bottom(app)

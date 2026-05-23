@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.ui_helpers import btn_primary, btn_secondary
+from well_viewer.views.label_grid_view import build_label_grid
 
 
 def build_replicate_panel(app, parent: QWidget) -> None:
@@ -293,7 +294,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     # Sub-tab 1: Well Labels only
     labels_tab = _QWidget(sub_tabs)
     _QVBoxLayout(labels_tab).setContentsMargins(0, 0, 0, 0)
-    app._build_label_editor(labels_tab)
+    build_label_grid(app, labels_tab)
     sub_tabs.addTab(labels_tab, "Well Labels")
 
     # Sub-tab 2: Ratio Metrics only

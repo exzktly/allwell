@@ -5,6 +5,8 @@ and the notebook page-changed listener (``on_notebook_current_changed``).
 Relocated from ``runtime_app.py`` (teardown Phase 9).
 """
 from __future__ import annotations
+from well_viewer.stats_controller import stats_sync_from_app
+from well_viewer.stats_controller import stats_update_tp_menu
 
 
 def on_tab_change(app, _e=None) -> None:
@@ -59,9 +61,9 @@ def on_tab_change(app, _e=None) -> None:
         app._sidebar_stats_frame.setVisible(True)
         # Auto-populate from rep-sets on first visit
         if not app._app_state.stats.groups and hasattr(app, "_stats_grp_inner"):
-            app._stats_sync_from_app()
+            stats_sync_from_app(app)
         if hasattr(app, "_stats_tp_cb"):
-            app._stats_update_tp_menu()
+            stats_update_tp_menu(app)
 
     elif tab == "Batch Export":
         app._sidebar_main_frame.setVisible(True)

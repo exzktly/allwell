@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.ui_helpers import btn_card, btn_secondary
+from well_viewer.preview_callbacks import montage_tophat_toggled
+from well_viewer.review_image_controller import on_review_image_channel_selected
 
 
 def build_right_panel(self, parent: QWidget) -> None:
@@ -151,7 +153,7 @@ def build_right_panel(self, parent: QWidget) -> None:
     tr.setContentsMargins(8, 2, 8, 2)
     self._th_checkbox = QCheckBox("Top-hat background subtraction", th_row)
     self._th_checkbox.toggled.connect(
-        lambda _b: self._montage_tophat_toggled()
+        lambda _b: montage_tophat_toggled(self)
     )
     tr.addWidget(self._th_checkbox)
     self._mon_tophat_cb = self._th_checkbox  # alias used by montage / export callers
@@ -212,7 +214,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_chan_cb = QComboBox(ctrl)
     self._review_image_chan_cb.addItems(["GFP"])
     self._review_image_chan_cb.currentIndexChanged.connect(
-        lambda _i: self._on_review_image_channel_selected(None)
+        lambda _i: on_review_image_channel_selected(self, None)
     )
     cl.addWidget(self._review_image_chan_cb)
     self._review_image_chan_var = self._review_image_chan_cb

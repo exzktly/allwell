@@ -42,6 +42,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 9a | Relocate `_on_*`/`_redraw_*` into controllers | #271 | ✅ done | 5,426 | Bar, Scatter, Review-image, Selection, Stats, RI-channel sections relocated; 5 controller files grew, runtime_app.py 6,179 → 5,426 |
 | 9b | `_on_tab_change` → `TabRegistry` | #271 | ✅ done (pragmatic) | 5,266 | Relocated whole `_on_tab_change` + `_on_notebook_current_changed` bodies into new `tab_controller.py`. The plan's TabRegistry abstraction can be layered on later — the line-budget win lands in one move. Attr budget 74 → 71 |
 | 10 | Composition root + finalize | #271 | ✅ done (key deletions) | 5,248 | `__getattr__` widget forwarder deleted (Phase 5 shortcut made it unnecessary); 12 `app = ctx.app` unwraps gone (Phases 6+7). Doc reconciliation pending; the further line-budget reduction to ~700 is a separate sweep against runtime_app.py's many thin delegators and its still-large `__init__` / lazy-proxy block |
+| 11 | Delegator collapse — final sweep | #271 | 🔄 in progress | — | rewrite every external `app._method(...)` call to invoke the controller function directly, then delete the thin delegator from `runtime_app.py`. ~116 pure-passthrough 3-line delegator methods identified. Scope: callers in `well_viewer/tabs/`, `well_viewer/views/`, `well_viewer/<controller>.py`, plus the smaller set of self-calls inside `runtime_app.py` |
 
 ## Redundancy scoreboard
 

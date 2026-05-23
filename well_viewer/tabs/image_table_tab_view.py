@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.crop_tool import CropTool
 from well_viewer.ui_helpers import btn_primary, btn_secondary
+from well_viewer.image_table_controller import image_table_open_export_settings
 
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:
@@ -284,7 +285,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
     export_settings_btn.setFixedWidth(32)
     export_settings_btn.clicked.connect(
-        lambda _=False: ctx.app._image_table_open_export_settings()
+        lambda _=False: image_table_open_export_settings(ctx.app)
     )
     tr.addWidget(export_settings_btn)
     tr.addWidget(btn_secondary(

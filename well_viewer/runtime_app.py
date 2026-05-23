@@ -573,9 +573,6 @@ class WellViewerApp(QWidget):
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
-    def _build_sidebar(self, parent) -> None:
-        from well_viewer.views.sidebar_view import build_sidebar as _build_sidebar_view
-        _build_sidebar_view(self, parent)
 
     # ── Mode (Review / Analyze) plumbing ─────────────────────────────────
     modeChanged = Signal(str)   # emitted with "review" or "analyze"
@@ -712,9 +709,6 @@ class WellViewerApp(QWidget):
         from well_viewer.stats_controller import stats_active_group
         return stats_active_group(self)
 
-    def _stats_apply_drag(self, tok: str) -> None:
-        from well_viewer.stats_controller import stats_apply_drag
-        stats_apply_drag(self, tok)
 
     def _stats_refresh_single_btn(self, tok: str) -> None:
         self._stats_refresh_map()
@@ -723,41 +717,20 @@ class WellViewerApp(QWidget):
         from well_viewer.stats_controller import stats_refresh_map
         stats_refresh_map(self)
 
-    def _stats_refresh_group_list(self) -> None:
-        from well_viewer.stats_controller import stats_refresh_group_list
-        stats_refresh_group_list(self)
 
-    def _stats_select_grp(self, idx: int) -> None:
-        from well_viewer.stats_controller import stats_select_grp
-        stats_select_grp(self, idx)
 
     def _stats_grp_add(self) -> None:
         from well_viewer.stats_controller import stats_grp_add
         stats_grp_add(self)
 
-    def _stats_grp_delete(self, idx: int) -> None:
-        from well_viewer.stats_controller import stats_grp_delete
-        stats_grp_delete(self, idx)
 
-    def _stats_grp_rename(self, idx: int) -> None:
-        from well_viewer.stats_controller import stats_grp_rename
-        stats_grp_rename(self, idx)
 
     def _stats_grp_clear_all(self) -> None:
         from well_viewer.stats_controller import stats_grp_clear_all
         stats_grp_clear_all(self)
 
-    def _stats_sync_from_app(self) -> None:
-        from well_viewer.stats_controller import stats_sync_from_app
-        stats_sync_from_app(self)
 
-    def _stats_on_test_change(self) -> None:
-        from well_viewer.stats_controller import stats_on_test_change
-        stats_on_test_change(self)
 
-    def _stats_update_tp_menu(self) -> None:
-        from well_viewer.stats_controller import stats_update_tp_menu
-        stats_update_tp_menu(self)
 
     def _stats_write_result(self, text: str) -> None:
         self._stats_result_text.setReadOnly(False)
@@ -920,19 +893,11 @@ class WellViewerApp(QWidget):
         )
         _it_copy_svg(self)
 
-    def _image_table_open_export_settings(self) -> None:
-        from well_viewer.image_table_controller import (
-            image_table_open_export_settings as _it_open_export_settings,
-        )
-        _it_open_export_settings(self)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Replicate panel
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _build_replicate_panel(self, parent) -> None:
-        from well_viewer.views.replicate_panel_view import build_replicate_panel as _v
-        _v(self, parent)
 
     # ── Replicate-panel plate map ─────────────────────────────────────────────
 
@@ -1027,9 +992,6 @@ class WellViewerApp(QWidget):
     # Well-label editor
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _build_label_editor(self, parent) -> None:
-        from well_viewer.views.label_grid_view import build_label_grid as _v
-        _v(self, parent)
 
     def _label_panel_refresh(self) -> None:
         from well_viewer.views.label_grid_view import label_grid_refresh as _v
@@ -1573,15 +1535,7 @@ class WellViewerApp(QWidget):
                 return self._sel_color(s)
         return None
 
-    def _build_right_panel(self, parent) -> None:
-        from well_viewer.views.preview_panel_view import build_right_panel as _build_right_panel_view
 
-        _build_right_panel_view(self, parent)
-
-    def _build_review_image_panel(self, parent) -> None:
-        from well_viewer.views.preview_panel_view import build_review_image_panel as _build_review_image_panel_view
-
-        _build_review_image_panel_view(self, parent)
 
     def _update_tophat_controls(self, preloaded: Optional[bool] = None) -> None:
         """Sync the top-hat row UI to the actual preload state.
@@ -2052,10 +2006,6 @@ class WellViewerApp(QWidget):
     def _refresh_montage_crop_indicator(self) -> None:
         self._montage_crop_tool._refresh_indicator()
 
-    def _montage_tophat_toggled(self) -> None:
-        from well_viewer.preview_callbacks import montage_tophat_toggled as _montage_tophat_toggled
-
-        _montage_tophat_toggled(self)
 
     def _montage_tophat_done(self, filtered_arrays: list, partial: bool = False) -> None:
         _montage_tophat_done_controller(self, filtered_arrays, partial=partial)
@@ -2089,10 +2039,6 @@ class WellViewerApp(QWidget):
     def _montage_redraw_at_zoom(self) -> None:
         _montage_redraw_at_zoom_controller(self)
 
-    def _build_bottom(self) -> None:
-        from well_viewer.views.status_view import build_bottom as _build_bottom_view
-
-        _build_bottom_view(self)
 
     def _apply_theme(self) -> None:
         """Apply the application-wide stylesheet.
@@ -2446,15 +2392,7 @@ class WellViewerApp(QWidget):
 
         _on_plate_sel_change(self)
 
-    def _select_row(self, row: str) -> None:
-        from well_viewer.selection_controller import select_row as _select_row
 
-        _select_row(self, row)
-
-    def _select_col(self, col: str) -> None:
-        from well_viewer.selection_controller import select_col as _select_col
-
-        _select_col(self, col)
 
     # ── Threshold ─────────────────────────────────────────────────────────────
 
@@ -2617,9 +2555,6 @@ class WellViewerApp(QWidget):
                 self._app_state.channel.active_image_channel,
             )
 
-    def _on_review_image_channel_selected(self, _e=None) -> None:
-        from well_viewer.review_image_controller import on_review_image_channel_selected
-        on_review_image_channel_selected(self, _e)
 
     def _on_plot_channel_selected(self, source=None) -> None:
         """Channel-switch handler for line/bar/distribution/heatmap plot tabs.
@@ -2943,15 +2878,7 @@ class WellViewerApp(QWidget):
 
     # ── Well selection (plate-map backed) ─────────────────────────────────────
 
-    def _select_all(self) -> None:
-        from well_viewer.selection_controller import select_all as _select_all
 
-        _select_all(self)
-
-    def _select_none(self) -> None:
-        from well_viewer.selection_controller import select_none as _select_none
-
-        _select_none(self)
 
     def _select_invert(self) -> None:
         """Phase 13 (B7): flip the current selection — every loaded well that
@@ -3531,17 +3458,11 @@ class WellViewerApp(QWidget):
         self._app_state.review_image.pan_y = 0.0
         self._render_review_image_display()
 
-    def _on_review_image_wheel(self, event) -> None:
-        from well_viewer.review_image_controller import on_review_image_wheel
-        on_review_image_wheel(self, event)
 
     def _on_review_image_press(self, event) -> None:
         from well_viewer.review_image_controller import on_review_image_press
         on_review_image_press(self, event)
 
-    def _on_review_image_drag(self, event) -> None:
-        from well_viewer.review_image_controller import on_review_image_drag
-        on_review_image_drag(self, event)
 
     def _on_review_image_release(self, event) -> None:
         from well_viewer.review_image_controller import on_review_image_release
@@ -3551,9 +3472,6 @@ class WellViewerApp(QWidget):
         from well_viewer.review_image_controller import on_review_image_move
         on_review_image_move(self, event)
 
-    def _on_review_image_hover(self, event: Any) -> None:
-        from well_viewer.review_image_controller import on_review_image_hover
-        on_review_image_hover(self, event)
 
     def _on_review_image_click(self, event: Any) -> None:
         _on_review_image_click_controller(self, event, _logger)
@@ -3759,10 +3677,6 @@ class WellViewerApp(QWidget):
 
         _export_plot_data(self)
 
-    def _export_raw_data_csv(self) -> None:
-        from well_viewer.export_service import export_raw_data_csv as _export_raw_data_csv
-
-        _export_raw_data_csv(self)
 
     # ── Batch export ──────────────────────────────────────────────────────────
 
@@ -3854,9 +3768,6 @@ class WellViewerApp(QWidget):
                     pass
         return tab
 
-    def _on_tab_change(self, _e=None) -> None:
-        from well_viewer.tab_controller import on_tab_change
-        on_tab_change(self, _e)
 
     def _sync_heatmap_well_drag_mode(self, enable: bool) -> None:
         """Toggle WELL_MIME drag/drop on the sidebar plate widget.
@@ -4213,9 +4124,6 @@ class WellViewerApp(QWidget):
         from well_viewer.barplot_controller import bar_idx_at_x
         return bar_idx_at_x(xdata, n)
 
-    def _bar_reset_order(self) -> None:
-        from well_viewer.barplot_controller import bar_reset_order
-        bar_reset_order(self)
 
     def _on_bar_drag_press(self, event) -> None:
         from well_viewer.barplot_controller import on_bar_drag_press

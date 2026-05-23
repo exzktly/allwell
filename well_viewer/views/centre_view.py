@@ -31,6 +31,9 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
+from well_viewer.tab_controller import on_tab_change
+from well_viewer.views.preview_panel_view import build_review_image_panel
+from well_viewer.views.replicate_panel_view import build_replicate_panel
 
 
 _logger = logging.getLogger("well_viewer.centre_view")
@@ -155,7 +158,7 @@ def build_centre(app, parent: QWidget) -> None:
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
     from well_viewer.views.preview_view import build_preview_picker
-    app._build_replicate_panel(app._sidebar_sample_frame)
+    build_replicate_panel(app, app._sidebar_sample_frame)
     build_preview_picker(app, app._sidebar_preview_frame)
 
     # Stable name -> tab QWidget map for builder closures to reach into.
@@ -364,7 +367,7 @@ def build_centre(app, parent: QWidget) -> None:
             sub_title = plotting_nb.currentName()
             if sub_title in pending:
                 _build_pending(sub_title)
-            app._on_tab_change(None)
+            on_tab_change(app, None)
             _refresh_channel_chip(sub_title)
             # Properties rail retired — its scope picker followed the
             # active sub-tab. Per-plot styling now happens through the
@@ -593,7 +596,7 @@ def build_centre(app, parent: QWidget) -> None:
         # activation (it pulls heavy deps).
         seg_page = QWidget()
         QVBoxLayout(seg_page).setContentsMargins(0, 0, 0, 0)
-        app._build_review_image_panel(seg_page)
+        build_review_image_panel(app, seg_page)
         sub_stack.addPage("Segmentation", seg_page)
 
         smfish_page = QWidget()
@@ -625,7 +628,7 @@ def build_centre(app, parent: QWidget) -> None:
             name = sub_stack.currentName()
             if name == "smFISH":
                 _ensure_smfish_built()
-            app._on_tab_change(None)
+            on_tab_change(app, None)
             if sub_seg.currentData() != name:
                 blocked = sub_seg.blockSignals(True)
                 try:
@@ -731,7 +734,7 @@ def build_centre(app, parent: QWidget) -> None:
         title = app._notebook.currentName()
         if title in pending:
             _build_pending(title)
-        app._on_tab_change(None)
+        on_tab_change(app, None)
 
     app._notebook.currentChanged.connect(_on_tab_change)
 

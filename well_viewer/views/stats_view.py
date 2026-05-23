@@ -13,6 +13,10 @@ from PySide6.QtWidgets import (
 from well_viewer.ui_helpers import (
     btn_primary, btn_secondary, build_hline_separator, build_section_header,
 )
+from well_viewer.stats_controller import stats_apply_drag
+from well_viewer.stats_controller import stats_on_test_change
+from well_viewer.stats_controller import stats_refresh_group_list
+from well_viewer.stats_controller import stats_update_tp_menu
 
 
 def build_stats_tab(app, parent: QWidget) -> None:
@@ -79,13 +83,13 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
         for tok in added:
             app._app_state.stats.drag_adding = True
             app._app_state.stats.drag_visited = set()
-            app._stats_apply_drag(tok)
+            stats_apply_drag(app, tok)
         for tok in removed:
             app._app_state.stats.drag_adding = False
             app._app_state.stats.drag_visited = set()
-            app._stats_apply_drag(tok)
+            stats_apply_drag(app, tok)
         app._stats_refresh_map()
-        app._stats_refresh_group_list()
+        stats_refresh_group_list(app)
     # selectionDragFinished fires once per click *and* once at the end of a drag.
     plate.selectionDragFinished.connect(_commit_plate_to_group)
 
@@ -109,7 +113,7 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
     layout.addWidget(help_lbl)
 
     app._stats_refresh_map()
-    app._stats_refresh_group_list()
+    stats_refresh_group_list(app)
 
 
 def build_stats_results_panel(app, parent: QWidget) -> None:
@@ -147,7 +151,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     ])
     app._stats_test_cb.setCurrentText("t-test (Fisher)")
     app._stats_test_cb.currentIndexChanged.connect(
-        lambda _i: app._stats_on_test_change()
+        lambda _i: stats_on_test_change(app)
     )
     cl.addWidget(app._stats_test_cb, 0, 1, Qt.AlignLeft)
 
@@ -164,7 +168,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     app._stats_channel_cb = QComboBox(app._stats_ctrl)
     app._stats_channel_cb.addItems(["—"])
     app._stats_channel_cb.currentIndexChanged.connect(
-        lambda _i: app._stats_on_test_change()
+        lambda _i: stats_on_test_change(app)
     )
     cl.addWidget(app._stats_channel_cb, 2, 1, Qt.AlignLeft)
 
@@ -193,7 +197,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     ])
     app._stats_statistic_cb.setCurrentText("Mean (above threshold)")
     app._stats_statistic_cb.currentIndexChanged.connect(
-        lambda _i: app._stats_on_test_change()
+        lambda _i: stats_on_test_change(app)
     )
     cl.addWidget(app._stats_statistic_cb, 4, 1, Qt.AlignLeft)
 
@@ -234,7 +238,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     layout.addWidget(app._stats_res_frame, 1)
 
     if hasattr(app, "_stats_update_tp_menu"):
-        app._stats_update_tp_menu()
+        stats_update_tp_menu(app)
 
     # Reshape the per-tab Property combo to match the currently-selected
     # stats channel (ratio channels collapse to ``Calculated Val``); then

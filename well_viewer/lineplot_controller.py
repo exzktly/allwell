@@ -499,3 +499,25 @@ def redraw_line_plots(
     except Exception:  # pragma: no cover - never let style restore break a draw
         pass
     app._line_canvas.draw_idle()
+
+
+def on_fig_click(app, event) -> None:
+    """Right-click on a Line-Graphs axes -> toggle that axes' legend."""
+    if event.inaxes is None or event.button != 3:
+        return
+    ax_map = {
+        id(app._line_ax_mean): "mean",
+        id(app._line_ax_frac): "frac",
+        id(app._line_ax_cdf):  "cdf",
+    }
+    clicked_ax = event.inaxes
+    key = ax_map.get(id(clicked_ax))
+    if key is None:
+        return
+    app._app_state.plot.legend_visible[key] = not app._app_state.plot.legend_visible[key]
+    leg = clicked_ax.get_legend()
+    if leg is not None:
+        leg.set_visible(app._app_state.plot.legend_visible[key])
+        app._line_canvas.draw_idle()
+    state = "shown" if app._app_state.plot.legend_visible[key] else "hidden"
+    app._set_status(f"Legend for '{key}' plot {state}  (right-click to toggle)")

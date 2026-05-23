@@ -720,3 +720,239 @@ def redraw_scatter_agg(
     except Exception:  # pragma: no cover
         pass
     app._scatter_agg_canvas.draw()
+
+
+def redraw_scatter_orchestrate(app) -> None:
+    """Redraw the scatter plot with current selections.
+
+    Mirrors redraw_scatter_agg_orchestrate's empty-state handling: no
+    timepoints available -> "No timepoints available." placeholder;
+    none selected -> "Please select timepoints to plot."
+    """
+    # Scatter Plot: Cells tab body is built lazily -- bail out if the
+    # user triggers a redraw before that builder has run.
+    if not hasattr(app, "_scatter_ch_x_var"):
+        return
+    try:
+        ch_x_entry = app._scatter_ch_x_var.currentText()
+        ch_y_entry = app._scatter_ch_y_var.currentText()
+    except ValueError:
+        return
+
+    if not hasattr(app, "_scatter_tp_selections") or not app._scatter_tp_selections:
+        if hasattr(app, "_ax_scatter"):
+            app._ax_scatter.clear()
+            app._ax_scatter.text(
+                0.5, 0.5, "No timepoints available.",
+                ha='center', va='center',
+                transform=app._ax_scatter.transAxes,
+                fontsize=10, color='gray',
+            )
+            if hasattr(app, "_scatter_canvas"):
+                app._scatter_canvas.draw()
+        return
+
+    tps_h: list = []
+    for tp_str, on in app._scatter_tp_selections.items():
+        if not on:
+            continue
+        try:
+            tps_h.append(float(tp_str))
+        except (TypeError, ValueError):
+            continue
+    if not tps_h:
+        if hasattr(app, "_ax_scatter"):
+            app._ax_scatter.clear()
+            app._ax_scatter.text(
+                0.5, 0.5, "Please select timepoints to plot.",
+                ha='center', va='center',
+                transform=app._ax_scatter.transAxes,
+                fontsize=10, color='gray',
+            )
+            if hasattr(app, "_scatter_canvas"):
+                app._scatter_canvas.draw()
+        return
+
+    # Mirror the first selected tp into the legacy combo so the
+    # save-figure / export-CSV paths that still read it see a value.
+    if getattr(app, "_scatter_tp_cb", None) is not None:
+        first_str = f"{tps_h[0]:.1f}"
+        if app._scatter_tp_cb.findText(first_str) >= 0:
+            blocked = app._scatter_tp_cb.blockSignals(True)
+            try:
+                app._scatter_tp_cb.setCurrentText(first_str)
+            finally:
+                app._scatter_tp_cb.blockSignals(blocked)
+
+    ch_x_base = ch_x_entry.split(" ")[0]
+    ch_y_base = ch_y_entry.split(" ")[0]
+
+    cell_area_threshold = app._get_cell_area_threshold()
+    fluor_gate_x = app._get_fluor_gate(ch_x_base)
+    fluor_gate_y = app._get_fluor_gate(ch_y_base)
+
+    metric_x = app._scatter_axis_metric_key("x")
+    metric_y = app._scatter_axis_metric_key("y")
+    col_x = app._col_for_scatter_axis(ch_x_entry, metric_x)
+    col_y = app._col_for_scatter_axis(ch_y_entry, metric_y)
+
+    from ui.theme import WELL_COLORS
+    redraw_scatter(
+        app,
+        col_x,
+        col_y,
+        tps_h,
+        well_colors=WELL_COLORS,
+        cell_area_threshold=cell_area_threshold,
+        fluor_gate_x=fluor_gate_x,
+        fluor_gate_y=fluor_gate_y,
+    )
+    from well_viewer.figure_export_editor import apply_export_style_to_current
+    apply_export_style_to_current(app, app._scatter_fig, getattr(app, "_scatter_canvas", None))
+
+
+def on_scatter_click(app, event) -> None:
+    """Handle click events on scatter plot datapoints."""
+    if event.inaxes is not app._ax_scatter or event.xdata is None or event.ydata is None:
+        return
+
+    if event.button != 1:
+        return
+
+    try:
+        interaction_cache = getattr(app, "_scatter_interaction_cache", None) or {}
+        points = interaction_cache.get("points", [])
+        if not points:
+            return
+
+        min_dist = float('inf')
+        nearest_well = None
+        nearest_filename = None
+        nearest_nuclear_id = None
+        nearest_row_idx = None
+
+        for x, y, meta in points:
+            dx = x - event.xdata
+            dy = y - event.ydata
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx = meta
+
+        if nearest_well is not None:
+            app._open_scatter_cell_viewer(nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx)
+
+    except Exception as e:
+        # The user clicked expecting a popup -- surface the failure instead of
+        # swallowing it into a fleeting status line.
+        import logging
+        import traceback
+        from PySide6.QtWidgets import QMessageBox
+        logging.getLogger(__name__).exception("Error handling scatter-plot cell click")
+        tb = traceback.format_exc()
+        app._set_status(f"Could not open cell viewer: {e}")
+        try:
+            box = QMessageBox(app)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("Cell viewer error")
+            box.setText("Could not open the cell-image viewer for the clicked point.")
+            box.setInformativeText(str(e))
+            box.setDetailedText(tb)
+            box.exec()
+        except Exception:
+            pass
+
+
+def on_scatter_motion(app, event) -> None:
+    """Handle hover events on scatter plot to show tooltips."""
+    if event.inaxes is not app._ax_scatter or event.xdata is None or event.ydata is None:
+        return
+
+    try:
+        interaction_cache = getattr(app, "_scatter_interaction_cache", None) or {}
+        points = interaction_cache.get("points", [])
+        if not points:
+            return
+
+        min_dist = float('inf')
+        nearest_info = None
+        threshold = 0.5
+
+        for x, y, meta in points:
+            dx = x - event.xdata
+            dy = y - event.ydata
+            dist = (dx * dx + dy * dy) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                nearest_info = meta
+
+        if min_dist < threshold and nearest_info:
+            well_label, filename, nuclear_id, row_idx = nearest_info
+            tooltip_text = f"File: {filename} | Nuclear ID: {nuclear_id}"
+            app._set_status(tooltip_text)
+        else:
+            app._set_status("")
+
+    except Exception:
+        pass
+
+
+def redraw_scatter_agg_orchestrate(app) -> None:
+    """Redraw the aggregate scatter plot with current selections."""
+    if not hasattr(app, "_scatter_agg_stat_x_var"):
+        return
+    # Sync the hidden stat-string combos with the new per-axis
+    # (channel, metric) state so downstream code (export_service,
+    # save-figure helpers) sees a coherent view.
+    app._sync_scatter_agg_stat_combos()
+    try:
+        stat_x = app._scatter_agg_stat_x_var.currentText()
+        stat_y = app._scatter_agg_stat_y_var.currentText()
+
+        if not hasattr(app, '_scatter_agg_tp_selections') or not app._scatter_agg_tp_selections:
+            app._ax_scatter_agg.clear()
+            app._ax_scatter_agg.text(
+                0.5, 0.5,
+                "No timepoints available.",
+                ha='center', va='center',
+                transform=app._ax_scatter_agg.transAxes,
+                fontsize=10,
+                color='gray'
+            )
+            app._scatter_agg_canvas.draw()
+            return
+
+        selected_timepoints = []
+        for tp_str, selected in app._scatter_agg_tp_selections.items():
+            if selected:
+                try:
+                    selected_timepoints.append(float(tp_str))
+                except ValueError:
+                    pass
+
+        if not selected_timepoints:
+            app._ax_scatter_agg.clear()
+            app._ax_scatter_agg.text(
+                0.5, 0.5,
+                "Please select timepoints to plot.",
+                ha='center', va='center',
+                transform=app._ax_scatter_agg.transAxes,
+                fontsize=10,
+                color='gray'
+            )
+            app._scatter_agg_canvas.draw()
+            return
+
+    except (ValueError, AttributeError):
+        return
+
+    from ui.theme import WELL_COLORS
+    redraw_scatter_agg(
+        app,
+        stat_x,
+        stat_y,
+        selected_timepoints,
+        well_colors=WELL_COLORS,
+    )
+    from well_viewer.figure_export_editor import apply_export_style_to_current
+    apply_export_style_to_current(app, app._scatter_agg_fig, getattr(app, "_scatter_agg_canvas", None))

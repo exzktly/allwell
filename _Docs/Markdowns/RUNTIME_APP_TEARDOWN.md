@@ -42,7 +42,7 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 9a | Relocate `_on_*`/`_redraw_*` into controllers | #271 | ✅ done | 5,426 | Bar, Scatter, Review-image, Selection, Stats, RI-channel sections relocated; 5 controller files grew, runtime_app.py 6,179 → 5,426 |
 | 9b | `_on_tab_change` → `TabRegistry` | #271 | ✅ done (pragmatic) | 5,266 | Relocated whole `_on_tab_change` + `_on_notebook_current_changed` bodies into new `tab_controller.py`. The plan's TabRegistry abstraction can be layered on later — the line-budget win lands in one move. Attr budget 74 → 71 |
 | 10 | Composition root + finalize | #271 | ✅ done (key deletions) | 5,248 | `__getattr__` widget forwarder deleted (Phase 5 shortcut made it unnecessary); 12 `app = ctx.app` unwraps gone (Phases 6+7). Doc reconciliation pending; the further line-budget reduction to ~700 is a separate sweep against runtime_app.py's many thin delegators and its still-large `__init__` / lazy-proxy block |
-| 11 | Delegator collapse — final sweep | #271 | 🔄 in progress | — | rewrite every external `app._method(...)` call to invoke the controller function directly, then delete the thin delegator from `runtime_app.py`. ~116 pure-passthrough 3-line delegator methods identified. Scope: callers in `well_viewer/tabs/`, `well_viewer/views/`, `well_viewer/<controller>.py`, plus the smaller set of self-calls inside `runtime_app.py` |
+| 11 | Delegator collapse — final sweep | #271 | ✅ done (call-form sweep) | 5,087 | 59 pure-passthrough delegators removed in two batches (27 + 32). Each removed delegator had only direct-call references (`<obj>._method(args)`); rewrites pointed callers at the controller function directly with the needed import. 37 delegators still remain because their references are *method-reference* uses — signal connects, button callbacks, `mpl_connect` slot assignments — that would need per-site lambda wrapping. Those are deliberately left in place; collapsing them is a future micro-sweep, not a structural concern |
 
 ## Redundancy scoreboard
 
@@ -211,12 +211,25 @@ Dead code / redundancy eliminated outside the tracked metrics:
 - **Phase 10 (done — key deletions)** — `__getattr__` widget forwarder
   deleted from `WellViewerApp` (Phase 5's setattr stamping made it
   unnecessary); the 12 `app = ctx.app` unwraps removed (Phases 6+7).
-  `runtime_app.py` 5,266 → 5,248. The plan's ~700-line target is a separate
-  sweep — most of `runtime_app.py`'s remaining ~5,200 lines are the
-  `__init__` (~140 lines), the lazy-proxy block (~260 lines), and ~340
-  thin-delegator methods that exist precisely because external code calls
-  them via `app._method()` references; collapsing those needs a per-method
-  caller-rewrite pass outside the scope of the named phases.
+  `runtime_app.py` 5,266 → 5,248.
+
+- **Phase 11 (done — call-form sweep)** — collapsed 59 pure-passthrough
+  delegators in two batches. Each removed delegator had only direct-call
+  references; an AST-driven script identified safe candidates (no
+  method-reference uses, pure arg-passthrough), rewrote each
+  `<obj>._X(args)` site as `target_fn(<obj>, args)` with the appropriate
+  import added at the top of each caller file, and deleted the method
+  from `WellViewerApp`. Two follow-up fixes were needed:
+  (1) a misplaced-import pass for the four files where the script inserted
+  the new `from … import …` line inside a still-open parenthesized import
+  block, and (2) a circular-import resolution in `barplot_controller.py`
+  (now imports `redraw_bars` lazily at the call site instead of at module
+  load). Of the original 114 pure-passthrough delegators identified, 37
+  remain because their callers reference them as *callables*
+  (`signal.connect(app._X)`, `btn_primary(..., app._X)`, `mpl_connect("…",
+  app._X)`, slot assignments). Collapsing each of those requires lambda
+  wrapping or controller redesign per case — out of scope for a safe
+  automated sweep. `runtime_app.py` 5,248 → 5,087.
 
 ## Guiding rules
 

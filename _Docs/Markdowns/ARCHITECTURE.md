@@ -219,37 +219,45 @@ The Review pane is the bulk of the codebase. Treat the package as four
 layers:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  views/   ← Qt widget trees / layouts (no business logic)       │
-│           ── centre_view (the page stack)                       │
-│           ── sidebar_view (the left rail body)                  │
-│           ── …other panel-shaped pieces (preview, stats, etc.)  │
-├─────────────────────────────────────────────────────────────────┤
-│  tabs/    ← builders for each centre page's body                │
-│           ── line_graphs_tab_view, bar_plots_tab_view, …        │
-│           ── one module per top- or sub-tab                     │
-├─────────────────────────────────────────────────────────────────┤
-│  controllers (top-level *.py)  ← all stateful behaviour          │
-│           ── load_controller, selection_controller,             │
-│              lineplot_controller, barplot_controller,           │
-│              scatter_controller, heatmap_controller,            │
-│              stats_controller, distribution_controller,         │
-│              image_table_controller, montage_controller,        │
-│              smfish_controller, review_image_controller,        │
-│              plot_orchestrator, …                                │
-├─────────────────────────────────────────────────────────────────┤
-│  data + persistence                                              │
-│  data_loading, image_discovery, image_resolver,                  │
-│  selections_model, viewer_state, plate_layout,                   │
-│  sample_definitions, gating_state, auto_threshold,               │
-│  batch_models, heatmap_models, ratio_models                      │
-│  persistence/  ← JSON file I/O (one module per file)            │
-└─────────────────────────────────────────────────────────────────┘
-
-state/  ← typed runtime state: AppState, EventBus, WidgetRegistry,
-          ViewerContext — import-safe, injected via ViewerContext (§5.9)
+┌──────────────────────────────────────────────────────────────────────┐
+│  features/<feature>/                                                  │
+│         ← Per-feature packages. Each owns the full vertical slice    │
+│           for one tab / feature: controller(s), renderer(s) where    │
+│           applicable, local state, and the tab_view / panel_view    │
+│           modules that build its Qt widgets.                         │
+│         ── barplot, lineplot, scatter, distribution, heatmap, stats, │
+│            preview, review_image, smfish, image_table, grouping,    │
+│            export, batch_export                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│  core/    ← Cross-cutting infrastructure, no single feature owns it. │
+│           ── shell views: app_shell_view, centre_view, sidebar_view, │
+│              status_view                                             │
+│           ── cross-cutting controllers: load_controller,             │
+│              selection_controller, tab_controller,                   │
+│              channel_state_controller                                │
+│           ── plot dispatch / styling: plot_orchestrator, plot_style  │
+│           ── runtime plumbing: event_bus, app_state, bus_wiring,     │
+│              redraw_coordinator, widget_registry, status_signal,     │
+│              debug_flags, ui_helpers                                 │
+│           ── cross-cutting typed state: channel_state,               │
+│              dataset_state, plot_state, selection_state              │
+├──────────────────────────────────────────────────────────────────────┤
+│  data/    ← IO + decode (Qt-free where practical)                    │
+│           ── data_loading, image_discovery, image_resolver,          │
+│              zipfile_cache, auto_threshold, crop_tool, metric_labels │
+├──────────────────────────────────────────────────────────────────────┤
+│  domain/  ← Qt-free models + pure logic, shared by multiple features │
+│           ── batch_models, ratio_models, selections_model,           │
+│              plate_layout, gating_state, sample_definitions,         │
+│              viewer_state, stats_compute, fold_change,               │
+│              fold_change_scopes, fold_change_controls                │
+├──────────────────────────────────────────────────────────────────────┤
+│  persistence/  ← JSON read/write + debounced save registry           │
+│                  (one module per on-disk file)                       │
+└──────────────────────────────────────────────────────────────────────┘
 
 runtime_app.WellViewerApp  ← composition root that wires it all together
+viewer_context.ViewerContext  ← DI bundle (state / bus / widgets / app)
 ```
 
 ### 5.1 `runtime_app.WellViewerApp`
@@ -477,15 +485,16 @@ The relevant modules:
 
 | Module | Job |
 |--------|-----|
-| `data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. |
-| `image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
-| `image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
-| `viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
-| `plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 48-colour well palette. |
-| `selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract lives in `Markdowns/SELECTIONS_MODEL_CONTRACT.md`. |
-| `sample_definitions.py` | Read / write the `sample_definitions` block inside `pipeline_info.json`. |
-| `batch_models.py` | `BarGroup` + `ReplicateSet` — plain dataclasses used by every plot tab + batch export. |
-| `ratio_models.py` | Channel-ratio definitions (`gfp/mcherry`-style virtual channels). |
+| `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. |
+| `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
+| `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
+| `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
+| `domain/plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 48-colour well palette. |
+| `domain/selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract lives in `Markdowns/SELECTIONS_MODEL_CONTRACT.md`. |
+| `domain/sample_definitions.py` | Read / write the `sample_definitions` block inside `pipeline_info.json`. |
+| `domain/batch_models.py` | `BarGroup` + `ReplicateSet` — plain dataclasses used by every plot tab + batch export. |
+| `domain/ratio_models.py` | Channel-ratio definitions (`gfp/mcherry`-style virtual channels). |
+| `features/heatmap/models.py` | Heat-map-specific layout dataclasses (used by the heatmap controller + persistence). |
 
 ### 5.7 Persistence
 
@@ -1294,9 +1303,9 @@ In order of probability:
 
 `process_microscopy.py` writes `pipeline_info.json` with `fluor_tokens`,
 `schema`, `separator`, and `available_timepoints`. The viewer reads those
-in `viewer_state.read_pipeline_info`. If the file is missing, the viewer
+in `domain/viewer_state.read_pipeline_info`. If the file is missing, the viewer
 falls back to detecting channels from a sample CSV's column names
-(`data_loading.detect_fluor_channels`). Check both:
+(`data/data_loading.detect_fluor_channels`). Check both:
 
 ```bash
 cat <data>/pipeline_info.json | python -m json.tool | grep -A1 fluor_tokens
@@ -1305,7 +1314,7 @@ head -1 <data>/<one>_measurements.csv
 
 ### 12.4 "Auto-threshold reports 'timepoint unknown'"
 
-`well_viewer/preview_controller.classify_member` parses `(fov, tp)` from
+`well_viewer/features/preview/controller.classify_member` parses `(fov, tp)` from
 each image filename. It prefers the schema-derived fields from
 `pipeline_info.json` (`pipeline_fields_extractor`) and only falls back to
 the legacy 5-field regex when those are absent. If you see "unknown", the

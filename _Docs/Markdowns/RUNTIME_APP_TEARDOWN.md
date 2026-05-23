@@ -46,6 +46,93 @@ Status: ⬜ not started · 🔄 in progress · ✅ merged
 | 11+ | Post-Phase 11 cleanups (round 1) | #271 | ✅ done | 4,222 | dead-lazy-proxy + unused-import sweep (-51); relocated `_refresh_preview_montage` + `_draw_montage_thumbs` (395 inline lines) into `montage_controller` (-394); `_update_scatter_menus` (91 lines) into `scatter_controller` (-91); `_set_active_image_channel` (54 lines) into `channel_state_controller` (-53); the metric/channel-UI cluster — `_set_active_metric`, `_populate_metric_combo`, `_refresh_heatmap_aggregation_options`, `_refresh_stats_property_combo` (~190 lines) — into `channel_state_controller` (-152). Cumulative: 4,963 → 4,222 |
 | 11+ | Post-Phase 11 cleanups (round 2) | #271 | ✅ done | 3,159 | stats-compute cluster (`_well_aggregate_stats`, `_compute_rep_stats`, `_compute_rep_per_fov_stats`, `_compute_rep_n_above`, `_compute_group_stats`, `_aggregate_well`, `_aggregate_group`) → new `well_viewer/stats_compute.py` sibling module that breaks the stats_controller circular-import dependency (-415); dead `_render_bar_figure` deleted; review-image edit cluster (10 methods: `_review_row_keys_series`, `_review_resolve_image_refs`, `_pick_review_image_color`, `_review_build_include_map`, `_review_build_threshold_map`, `_set_review_cell_included`, `_set_review_cells_included_batch`, `_apply_box_delete`, `_zoom_review_image_to_selected_nucleus`, `_apply_review_overrides_to_cache`) → `review_image_controller` (-373); selection / label / group helpers (`_import_selections_from_json`, `_labels_apply_affix`, `_update_active_group_label`) → `selection_controller` (-136); `_refresh_review_csv` + `_refresh_review_csv_rows` bodies → `review_image_controller` (kept 3-line delegators on app for the `_CallCounter` test) (-139); updated `test_selection_refresh.py` to monkey-patch `selection_controller.redraw_bars` instead of the now-relocated `app._redraw_bars`. Cumulative: 4,222 → 3,159 |
 
+## What still remains in `runtime_app.py` (as of HEAD = 3,159 lines)
+
+Audited 2026-05-23. The file breaks down as:
+
+| Category | Lines | Notes |
+|---|---|---|
+| Imports + module-level helpers + `_lazy` + `main` | ~877 | the composition root proper |
+| `WellViewerApp.__init__` | 140 | constructor — structurally cannot relocate to a sibling module; could be **inlined into helpers** to shrink (~70 lines of `self._X = …` widget pre-allocations could be pushed into the relevant builders) |
+| `_refresh_sidebar_map_now` (one big method) | 125 | the sidebar plate-map painter — used via `QTimer.singleShot(0, self._refresh_sidebar_map_now)` as a method reference, so collapsing requires the `partial(...)` wrap |
+| 44 medium methods (15–49 lines each) | ~974 | per-row break-down below |
+| 165 small methods (<15 lines each) | ~1,043 | mostly thin delegators that were skipped because their references are callable-style (button callbacks, `mpl_connect`, signal connect, `getattr(app, …)` probes) |
+
+### Concrete next-batch targets (medium methods, ordered by size)
+
+Each is independent and can be tackled in isolation. Several share a destination
+controller so they batch naturally:
+
+| Method | Lines | Destination | Notes |
+|---|---|---|---|
+| `_redraw` | 37 | `plot_orchestrator` | core redraw fan-out — the renderers it calls already live in controllers |
+| `_open_export_style_panel` | 37 | new `figure_export_editor` helper | resolves the per-plot Export Style sidebar |
+| `_rep_add` | 36 | `grouping_controller` | called as `app._rep_add` from `replicate_panel_view` (method-ref → `partial`) |
+| `_update_tophat_controls` | 35 | `montage_controller` | sync top-hat row UI to actual preload state |
+| `_current_centre_tab` | 34 | `tab_controller` | the leaf-tab resolver — heavy reach into nested notebooks |
+| `_on_plot_channel_selected` | 33 | `channel_state_controller` | channel-combo signal handler (method-ref) |
+| `_run_tab_switch_smoke_checks` | 32 | `tab_controller` | post-tab-switch sanity probe |
+| `_update_bar_tp_menu` | 32 | `barplot_controller` | timepoint combo populate |
+| `_set_ratio_metrics` | 27 | `channel_state_controller` | ratio-metric toggle |
+| `_replicate_display_label` | 27 | `grouping_controller` | replicate-set display label resolver |
+| `_open_scatter_cell_viewer` | 25 | `scatter_callbacks` | already-existing scatter cell viewer harness |
+| `_review_row_keys` | 24 | `review_image_controller` | wrapper around `review_row_keys_series` |
+| `_sync_preview_well_for_image_tabs` | 24 | `preview_controller` | preview/segmentation tab sync |
+| `_refresh_fov_btn_state` | 22 | `preview_panel_view` (already a view module) | FOV-button enable/disable state |
+| `_review_collect_timepoints` | 22 | `review_image_controller` | timepoint set for current well |
+| `_sync_scatter_agg_stat_combos` | 21 | `scatter_controller` | legacy stat-combo back-compat |
+| `_sel_export_one` | 21 | `selection_controller` | export-one-group dialog |
+| `_sel_strip_wells` / `_sel_set_color` | 20 / 20 | `selection_controller` | selection mutators |
+| `_rep_refresh_map` | 20 | `grouping_controller` | rep-panel plate-map refresh |
+| `_groups_centre_refresh` | 20 | `selection_controller` | sample-defs centre refresh |
+| `_set_selected_wells` | 20 | `selection_controller` | central selection-set mutator (method-ref usage) |
+| `_review_image_resolve_lut` | 20 | `review_image_renderer` | LUT min/max resolver |
+| 22 further methods (16-19 lines each) | ~370 | various | mostly the same controllers above |
+
+Doing this batch would drop another ~770 lines (medium methods sum ~974, less
+~3-line delegators left behind where method-references force shims).
+
+### Why the long tail of 165 small methods stays around
+
+Each of these is a **thin shim that exists because external code holds a method
+reference**:
+
+  ```python
+  signal.connect(app._handler)
+  btn_primary(parent, "Label", app._handler)
+  canvas.mpl_connect("press_event", app._handler)
+  widget.eventFilter = self._handler
+  ```
+
+Collapsing them requires per-site `functools.partial(handler, app)` wraps at every
+caller; Phase 11 batch 3 already did the "trivial" wave (37 of them). What's left is
+either inside generated code (e.g. lazy-build closures) or inside `__init__`'s
+construction sequence where the lambda would shadow the bound method. Each is
+*safe* to keep — runtime-app at the current size is a thin assembly point — but
+"complete to ~700" requires either:
+
+1. **Touching `__init__`** — push the 14-attr / ~70-line widget pre-allocation
+   block down into the builders that actually need those attributes, leaving
+   `__init__` as just bus / coordinator wiring. Saves ~70 lines.
+2. **Collapsing `_refresh_sidebar_map_now`** — relocate body to
+   `selection_controller`, replace the `QTimer.singleShot(self._refresh_…)` site
+   with `singleShot(partial(refresh_sidebar_map_now, app))`. Saves ~120 lines.
+3. **Aggressively `partial`-collapsing the 165 small shims** — the per-site
+   work is real (each needs to know the signal's arg count), but the line-budget
+   prize is ~1,000 lines. Best done one controller-folder at a time.
+
+### Realistic floor
+
+After (1) + (2) + the 44-method medium batch + the small-shim collapse, the file
+lands at roughly **1,000–1,200 lines**: composition root + lazy proxies +
+non-collapsible structural surface (init, build-ui call, ~30 truly-needed
+methods like `closeEvent`, `mountAnalyzePane`, `setMode`, `currentMode`, the
+Qt signal declarations, the `__getattr__`-less attribute documentation, etc.).
+The plan's original ≈700-line aspiration would need a second pass that
+eliminates the lazy proxies entirely (replacing every `_FOO_REDRAW = _lazy(...)`
+with direct local imports at every call site) and converts `WellViewerApp`
+into a true builder-only class.
+
 ## Redundancy scoreboard
 
 Updated by every PR. Each metric may only fall. The first three are enforced by

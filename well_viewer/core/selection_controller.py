@@ -689,7 +689,7 @@ def set_selected_wells(app, new_set, *, commit: bool = True) -> None:
     app._app_state.selection.selected_wells = new_set
     if hasattr(app, "_refresh_sidebar_map"):
         app._refresh_sidebar_map()
-    if commit and hasattr(app, "_on_plate_sel_change"):
+    if commit:
         on_plate_sel_change(app)
 
 
@@ -794,8 +794,7 @@ def select_invert(app) -> None:
     app._app_state.selection.selected_wells = new
     # Re-use the standard refresh path the click handlers go through.
     app._refresh_sidebar_map()
-    if hasattr(app, "_on_plate_sel_change"):
-        on_plate_sel_change(app)
+    on_plate_sel_change(app)
 
 
 

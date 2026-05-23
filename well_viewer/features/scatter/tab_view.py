@@ -102,8 +102,6 @@ def scatter_active_mode(app) -> str:
 def scatter_redraw_active(app) -> None:
     """Redraw whichever scatter mode is currently visible."""
     if scatter_active_mode(app) == _MODE_AGG:
-        if hasattr(app, "_redraw_scatter_agg"):
-            redraw_scatter_agg_orchestrate(app)
+        redraw_scatter_agg_orchestrate(app)
     else:
-        if hasattr(app, "_redraw_scatter"):
-            redraw_scatter_orchestrate(app)
+        redraw_scatter_orchestrate(app)

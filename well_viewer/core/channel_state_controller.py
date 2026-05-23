@@ -750,8 +750,7 @@ def rebuild_ratio_index(app) -> None:
         fallback = (app._app_state.channel.fluor_channels or ["gfp"])[0]
         app._app_state.channel.active_channel = fallback
         app._app_state.channel.active_val_col = f"{fallback}_{app._app_state.channel.active_metric}"
-    if hasattr(app, "_update_channel_selector"):
-        update_channel_selector(app)
+    update_channel_selector(app)
     app._invalidate_stats_cache()
     if hasattr(app, "_redraw"):
         try:

@@ -242,15 +242,13 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     rl.addWidget(app._stats_result_text)
     layout.addWidget(app._stats_res_frame, 1)
 
-    if hasattr(app, "_stats_update_tp_menu"):
-        stats_update_tp_menu(app)
+    stats_update_tp_menu(app)
 
     # Reshape the per-tab Property combo to match the currently-selected
     # stats channel (ratio channels collapse to ``Calculated Val``); then
     # sync the selection to the canonical ``_active_metric``.
     try:
-        if hasattr(app, "_refresh_stats_property_combo"):
-            refresh_stats_property_combo(app)
+        refresh_stats_property_combo(app)
         from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
         label = METRIC_KEY_TO_LABEL.get(
             app._app_state.channel.active_metric, "Mean Intensity"

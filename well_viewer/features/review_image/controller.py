@@ -296,19 +296,17 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
         fov_cb = getattr(app, "_preview_fov_cb", None)
         if fov_cb is not None:
             fov_cb.setCurrentText(fov)
-    if hasattr(app, "_refresh_review_image"):
-        refresh_review_image(app)
+    refresh_review_image(app)
 
     # TP menu now holds the target FOV's timepoints. Selecting the TP here
-    # triggers _refresh_review_image via currentIndexChanged, which renders
+    # triggers refresh_review_image via currentIndexChanged, which renders
     # the correct frame with the highlight already in place.
     if tp:
         tp_cb = getattr(app, "_review_image_tp_cb", None)
         if tp_cb is not None:
             tp_cb.setCurrentText(tp)
 
-    if hasattr(app, "_zoom_review_image_to_selected_nucleus"):
-        zoom_review_image_to_selected_nucleus(app,)
+    zoom_review_image_to_selected_nucleus(app)
 
 
 def on_review_image_wheel(app, event) -> None:

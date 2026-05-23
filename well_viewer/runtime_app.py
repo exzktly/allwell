@@ -348,6 +348,7 @@ from well_viewer.channel_state_controller import update_channel_selector
 from well_viewer.montage_controller import montage_redraw_at_zoom
 from well_viewer.tab_controller import on_notebook_current_changed
 from well_viewer.montage_controller import refresh_preview_montage
+from well_viewer.channel_state_controller import set_active_image_channel
 
 class WellViewerApp(QWidget):
 
@@ -1942,60 +1943,6 @@ class WellViewerApp(QWidget):
     # ── Active channel ───────────────────────────────────────────────────────
 
 
-    def _set_active_image_channel(self, channel: str, *, preserve_review_view: bool = False) -> None:
-        """Switch image-display channel for Movie Montage and Review Image."""
-        channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
-        if channel_switch_debug:
-            _logger.debug(
-                "[RI-CHSW step 3] set_active_image_channel requested=%r current=%r preserve_review_view=%s",
-                channel,
-                self._app_state.channel.active_image_channel,
-                preserve_review_view,
-            )
-        if not channel or channel == "—":
-            return
-        if channel == self._app_state.channel.active_image_channel:
-            if preserve_review_view:
-                self._app_state.review_image.preserve_view_on_refresh = True
-                if self._app_state.preview.selected_well:
-                    refresh_review_image(self)
-            if channel_switch_debug:
-                _logger.debug(
-                    "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
-                    self._app_state.channel.active_image_channel,
-                    preserve_review_view,
-                )
-            return
-        prev_channel = self._app_state.channel.active_image_channel
-        self._app_state.channel.active_image_channel = channel
-        ch_upper = channel.upper()
-        if hasattr(self, "_montage_chan_var"):
-            self._montage_chan_var.setCurrentText(ch_upper)
-        if hasattr(self, "_review_image_chan_var"):
-            self._review_image_chan_var.setCurrentText(ch_upper)
-        if hasattr(self, "_mon_lut_chan_lbl"):
-            self._mon_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
-        if hasattr(self, "_review_lut_chan_lbl"):
-            self._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
-        saved_review_lut = self._app_state.review_image.lut_by_channel.get(channel)
-        if saved_review_lut and hasattr(self, "_review_lmin_entry") and hasattr(self, "_review_lmax_entry"):
-            self._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
-            self._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
-        if preserve_review_view:
-            self._app_state.review_image.preserve_view_on_refresh = True
-        if self._app_state.preview.selected_well:
-            if channel_switch_debug:
-                _logger.debug(
-                    "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
-                    self._app_state.preview.selected_well,
-                )
-            update_preview(self, self._app_state.preview.selected_well)
-        if channel_switch_debug:
-            _logger.debug(
-                "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
-                prev_channel,
-                self._app_state.channel.active_image_channel,
-            )
 
 
     def _on_plot_channel_selected(self, source=None) -> None:
@@ -2045,7 +1992,7 @@ class WellViewerApp(QWidget):
                 selected_ui_value,
                 self._app_state.channel.active_image_channel,
             )
-        self._set_active_image_channel(selected_ui_value.lower())
+        set_active_image_channel(self, selected_ui_value.lower())
 
     def _on_metric_selected(self) -> None:
         """Handle the per-tab (legacy hidden) metric selector change."""

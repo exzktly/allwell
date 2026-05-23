@@ -3,6 +3,7 @@
 from __future__ import annotations
 from well_viewer.review_image_renderer import refresh_review_image
 from well_viewer.review_image_renderer import update_preview
+from well_viewer.channel_state_controller import set_active_image_channel
 
 
 def _select_tab_by_text(notebook, text: str) -> None:
@@ -447,4 +448,4 @@ def on_review_image_channel_selected(app, _e=None) -> None:
             selected_ui_value,
             app._app_state.channel.active_image_channel,
         )
-    app._set_active_image_channel(selected_ui_value.lower(), preserve_review_view=True)
+    set_active_image_channel(app, selected_ui_value.lower(), preserve_review_view=True)

@@ -36,6 +36,7 @@ from well_viewer.ratio_models import is_ratio_key
 from well_viewer.ui_helpers import set_combo_values
 from well_viewer.stats_controller import stats_update_tp_menu
 from functools import partial
+from well_viewer.review_image_renderer import refresh_review_image, update_preview
 
 _logger = logging.getLogger("well_viewer")
 
@@ -325,7 +326,7 @@ def update_channel_selector(app) -> None:
     if active_image_label not in montage_labels and active_image_label not in review_labels:
         fallback_image_label = montage_label if montage_label != "—" else review_label
         if fallback_image_label != "—":
-            app._set_active_image_channel(fallback_image_label.lower())
+            set_active_image_channel(app, fallback_image_label.lower())
 
     # Keep active channel anchored to a valid plot channel.
     if active_label not in labels:
@@ -386,3 +387,60 @@ def update_channel_selector(app) -> None:
             app._chan_var.setCurrentText(review_label)
         else:
             app._chan_var.setCurrentText(plot_label)
+
+
+def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = False) -> None:
+    """Switch image-display channel for Movie Montage and Review Image."""
+    channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
+    if channel_switch_debug:
+        _logger.debug(
+            "[RI-CHSW step 3] set_active_image_channel requested=%r current=%r preserve_review_view=%s",
+            channel,
+            app._app_state.channel.active_image_channel,
+            preserve_review_view,
+        )
+    if not channel or channel == "—":
+        return
+    if channel == app._app_state.channel.active_image_channel:
+        if preserve_review_view:
+            app._app_state.review_image.preserve_view_on_refresh = True
+            if app._app_state.preview.selected_well:
+                refresh_review_image(app)
+        if channel_switch_debug:
+            _logger.debug(
+                "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
+                app._app_state.channel.active_image_channel,
+                preserve_review_view,
+            )
+        return
+    prev_channel = app._app_state.channel.active_image_channel
+    app._app_state.channel.active_image_channel = channel
+    ch_upper = channel.upper()
+    if hasattr(app, "_montage_chan_var"):
+        app._montage_chan_var.setCurrentText(ch_upper)
+    if hasattr(app, "_review_image_chan_var"):
+        app._review_image_chan_var.setCurrentText(ch_upper)
+    if hasattr(app, "_mon_lut_chan_lbl"):
+        app._mon_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
+    if hasattr(app, "_review_lut_chan_lbl"):
+        app._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
+    saved_review_lut = app._app_state.review_image.lut_by_channel.get(channel)
+    if saved_review_lut and hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
+        app._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
+        app._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
+    if preserve_review_view:
+        app._app_state.review_image.preserve_view_on_refresh = True
+    if app._app_state.preview.selected_well:
+        if channel_switch_debug:
+            _logger.debug(
+                "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
+                app._app_state.preview.selected_well,
+            )
+        update_preview(app, app._app_state.preview.selected_well)
+    if channel_switch_debug:
+        _logger.debug(
+            "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
+            prev_channel,
+            app._app_state.channel.active_image_channel,
+        )
+

@@ -509,6 +509,7 @@ def open_export_style_panel(app, plot_key: str) -> None:
         except Exception:
             pass
         return
+    from ui.theme import PLOT_BG
     from well_viewer.figure_export_editor import launch_export_editor
     launch_export_editor(app, fig, default_name, plot_bg=PLOT_BG, canvas=canvas)
 

@@ -13,6 +13,13 @@ from well_viewer.review_image_renderer import update_preview
 from well_viewer.channel_state_controller import set_active_image_channel
 from well_viewer.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.data_loading import parse_timepoint_hours
+from well_viewer.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
+from well_viewer.ui_helpers import safe_int_or_none as _safe_int_or_none
+import numpy as _np
+import numpy as np
+import pandas as pd
+
+from well_viewer.data_loading import df_included_mask, resolve_value_series
 
 _logger = logging.getLogger(__name__)
 
@@ -72,7 +79,7 @@ def on_review_image_click(app, event, logger) -> None:
     tp_cb = getattr(app, "_review_image_tp_cb", None)
     tp = tp_cb.currentText().strip() if tp_cb is not None else ""
     if app._app_state.review_image.include_edit_mode:
-        app._set_review_cell_included(fov, tp, str(nid), "0")
+        set_review_cell_included(app,fov, tp, str(nid), "0")
         app._set_status(f"Set Included=0 for nucleus {nid} at FOV {fov}, TP {tp}.")
         return
     app._app_state.review_image.selected_nucleus = nid
@@ -301,7 +308,7 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
             tp_cb.setCurrentText(tp)
 
     if hasattr(app, "_zoom_review_image_to_selected_nucleus"):
-        app._zoom_review_image_to_selected_nucleus()
+        zoom_review_image_to_selected_nucleus(app,)
 
 
 def on_review_image_wheel(app, event) -> None:
@@ -404,7 +411,7 @@ def on_review_image_release(app, event) -> None:
                 off_y = max(0, (label.height() - pm.height()) // 2)
         mx0, mx1 = int((ax - off_x) / scale), int((rx - off_x) / scale)
         my0, my1 = int((ay - off_y) / scale), int((ry - off_y) / scale)
-        app._apply_box_delete(mx0, my0, mx1, my1)
+        apply_box_delete(app,mx0, my0, mx1, my1)
         return
     was_dragging = app._app_state.review_image.dragging
     moved = app._app_state.review_image.drag_moved
@@ -579,7 +586,7 @@ def review_build_include_map(
     }
     df = app._get_rows(well)
     if df is not None and not df.empty:
-        keys = app._review_row_keys_series(df)
+        keys = review_row_keys_series(app,df)
         if keys is not None:
             target = (fov, tp, None)
             fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
@@ -632,7 +639,7 @@ def review_build_threshold_map(
     df = app._get_rows(well)
     if df is None or df.empty:
         return above_by_nid
-    keys = app._review_row_keys_series(df)
+    keys = review_row_keys_series(app,df)
     if keys is None:
         return above_by_nid
     sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").fillna(False).to_numpy()
@@ -675,7 +682,7 @@ def set_review_cell_included(app, fov: str, tp: str, nid: str, included: str) ->
     # Project the override onto the cached row immediately so other tabs
     # (Bar/Line/Distribution/Stats/Heatmap) honor it without waiting for
     # the next gating recompute, then invalidate the stats cache.
-    app._apply_review_overrides_to_cache(app._app_state.preview.selected_well)
+    apply_review_overrides_to_cache(app,app._app_state.preview.selected_well)
     if hasattr(app, "_invalidate_stats_cache"):
         try:
             app._invalidate_stats_cache()
@@ -728,7 +735,7 @@ def set_review_cells_included_batch(
         any_changed = True
     if not any_changed:
         return
-    app._apply_review_overrides_to_cache(well)
+    apply_review_overrides_to_cache(app,well)
     if hasattr(app, "_invalidate_stats_cache"):
         try:
             app._invalidate_stats_cache()
@@ -775,7 +782,7 @@ def apply_box_delete(app, x0: int, y0: int, x1: int, y1: int) -> None:
     fov = fov_cb.currentText().strip()
     tp_cb = getattr(app, "_review_image_tp_cb", None)
     tp = tp_cb.currentText().strip() if tp_cb is not None else ""
-    app._set_review_cells_included_batch(
+    set_review_cells_included_batch(app,
         [(fov, tp, str(nid), "0") for nid in nids]
     )
     app._set_status(
@@ -849,7 +856,7 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
             continue
         if df is None or df.empty:
             continue
-        keys = app._review_row_keys_series(df)
+        keys = review_row_keys_series(app,df)
         if keys is None:
             continue
         override_map = pd.Series(lookup)

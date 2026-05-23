@@ -405,7 +405,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 
 from well_viewer.plate_layout import WELL_COLORS
 from well_viewer.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
-from well_viewer.channel_state_controller import refresh_stats_property_combo
+from well_viewer.channel_state_controller import refresh_stats_property_combo, set_active_metric
 
 
 def stats_active_group(app):
@@ -641,7 +641,7 @@ def stats_active_threshold(app) -> float:
 def stats_collect_group_values_shim(
     app, grp: BarGroup, target_t: float
 ) -> List[float]:
-    return _stats_collect_group_values(
+    return collect_group_values(
         app, grp, target_t,
         val_col=app._stats_active_val_col(),
         threshold=app._stats_active_threshold(),
@@ -680,7 +680,7 @@ def stats_active_statistic(app) -> str:
 
 
 def stats_run_shim(app) -> None:
-    _stats_run_controller(
+    run_stats(
         app,
         collect_group_values_fn=app._stats_collect_group_values,
         draw_ks_cdf_fn=app._stats_draw_ks_cdf,
@@ -693,7 +693,7 @@ def stats_draw_ks_cdf_shim(
     group_vals: List[Tuple[str, List[float]]],
     tp_str: str,
 ) -> None:
-    _stats_draw_ks_cdf(app, group_vals, tp_str, WELL_COLORS)
+    draw_ks_cdf(app, group_vals, tp_str, WELL_COLORS)
 
 
 

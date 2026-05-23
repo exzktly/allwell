@@ -731,7 +731,7 @@ def rebuild_all(app) -> None:
         from well_viewer.tabs.scatter_tab_view import scatter_redraw_active
         scatter_redraw_active(app)
     except Exception:
-        _logger.exception("Scatter redraw failed")
+        __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
     if hasattr(app, "_notebook"):
         if app._current_centre_tab() == "Line Graphs":
             app._show_line_sidebar()
@@ -815,6 +815,7 @@ def invalidate_stats_cache(app) -> None:
 
 
 def rep_clear_all(app) -> None:
+    from PySide6.QtWidgets import QMessageBox
     if not app._app_state.selection.selections:
         return
     resp = QMessageBox.question(

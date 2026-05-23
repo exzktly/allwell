@@ -16,6 +16,8 @@ from well_viewer.scatter_controller import update_scatter_menus
 import logging
 from functools import partial
 
+_logger = logging.getLogger("well_viewer.runtime_app")
+
 
 def on_tab_change(app, _e=None) -> None:
     """Show/hide the sidebar and refresh whichever tab is now active."""

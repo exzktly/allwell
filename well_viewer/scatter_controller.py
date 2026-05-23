@@ -14,6 +14,7 @@ from .data_loading import df_included_mask, resolve_value_series
 from well_viewer.stats_compute import well_aggregate_stats
 from well_viewer.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.channel_state_controller import populate_metric_combo
+from well_viewer.ratio_models import is_ratio_key
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -82,7 +83,7 @@ def collect_scatter_data(
         target_tps = [float(t) for t in (timepoints_h or [])]
     target_arr = np.asarray(target_tps, dtype=float)
 
-    def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, list]]:
+    def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, list]]:
         df = app._get_rows(well_label)
         if df is None or df.empty:
             return None
@@ -121,7 +122,7 @@ def collect_scatter_data(
             print(f"DEBUG scatter_controller: filename={filenames[0]!r}, nuclear_id={nuclear_ids[0]!r}")
         metadata = [(well_label, fn, nid, int(ri))
                     for fn, nid, ri in zip(filenames, nuclear_ids, row_idx)]
-        return x[mask], y[mask], metadata
+        return x[mask], y[mask], tp[mask], metadata
 
     # Use active replicate sets if defined, otherwise fall back to selected wells
     active_rsets = app._rep_sets_active()
@@ -138,6 +139,7 @@ def collect_scatter_data(
             color = app._rank_color_rset(rset)  # decision #1: colour by well-position rank
             xs: List[np.ndarray] = []
             ys: List[np.ndarray] = []
+            tps: List[np.ndarray] = []
             metadata: List[Tuple[str, str, str, int]] = []
             # Per-well breakdown so the SVG renderer can emit one
             # Line2D per well (each becomes its own ``<g>`` group). The
@@ -150,17 +152,19 @@ def collect_scatter_data(
                 got = _collect_well(well_label)
                 if got is None:
                     continue
-                wx, wy, wmeta = got
-                xs.append(wx); ys.append(wy); metadata.extend(wmeta)
+                wx, wy, wtp, wmeta = got
+                xs.append(wx); ys.append(wy); tps.append(wtp); metadata.extend(wmeta)
                 wells_breakdown[well_label] = {
                     'x': wx.tolist(),
                     'y': wy.tolist(),
+                    'tp': wtp.tolist(),
                     'metadata': wmeta,
                 }
             if xs:
                 scatter_data[group_name] = {
                     'x': np.concatenate(xs).tolist(),
                     'y': np.concatenate(ys).tolist(),
+                    'tp': np.concatenate(tps).tolist(),
                     'color': color,
                     'metadata': metadata,
                     'wells': wells_breakdown,
@@ -181,12 +185,14 @@ def collect_scatter_data(
             got = _collect_well(well_label)
             if got is None:
                 continue
-            wx, wy, wmeta = got
+            wx, wy, wtp, wmeta = got
             wx_list = wx.tolist()
             wy_list = wy.tolist()
+            wtp_list = wtp.tolist()
             scatter_data[well_label] = {
                 'x': wx_list,
                 'y': wy_list,
+                'tp': wtp_list,
                 'color': color,
                 'metadata': wmeta,
                 # Single-well groups still expose a 'wells' breakdown so
@@ -195,6 +201,7 @@ def collect_scatter_data(
                     well_label: {
                         'x': wx_list,
                         'y': wy_list,
+                        'tp': wtp_list,
                         'metadata': wmeta,
                     },
                 },
@@ -987,7 +994,7 @@ def update_scatter_menus(app) -> None:
         app._refresh_scatter_metric_for_axis(axis)
 
     # Update timepoint dropdown for cells scatter
-    timepoints = list(app._app_state.dataset.all_timepoints_cache) or _scatter_get_timepoints(app)
+    timepoints = list(app._app_state.dataset.all_timepoints_cache) or get_all_timepoints(app)
     tp_strs = [f"{tp:.1f}" for tp in timepoints] if timepoints else ["0"]
     _set_combo_values(app._scatter_tp_cb, tp_strs)
 

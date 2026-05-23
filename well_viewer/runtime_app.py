@@ -357,11 +357,6 @@ class WellViewerApp(QWidget):
     def _position_root_on_screen(root, *, preferred_w: int, preferred_h: int) -> None:
         """Qt: no-op; window placement handled by QMainWindow / QWidget defaults."""
         return
-        w = min(preferred_w, max(1000, sw - margin))
-        h = min(preferred_h, max(800, sh - margin))
-        x = max(0, (sw - w) // 2)
-        y = max(0, (sh - h) // 2)
-        root.geometry(f"{w}x{h}+{x}+{y}")
 
     # ── Threshold helpers ─────────────────────────────────────────────────────
 

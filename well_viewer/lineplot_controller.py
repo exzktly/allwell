@@ -543,5 +543,6 @@ def toggle_sem(app) -> None:
             pass
     app._redraw()
     if app._current_centre_tab() == "Bar Plots":
+        from well_viewer.barplot_renderer import redraw_bars
         redraw_bars(app)
 

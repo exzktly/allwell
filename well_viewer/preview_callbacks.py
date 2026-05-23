@@ -11,6 +11,7 @@ from well_viewer.montage_controller import on_montage_fluor_motion
 from well_viewer.montage_controller import draw_montage_thumbs
 from well_viewer.montage_controller import on_montage_shift_wheel
 from well_viewer.montage_controller import on_montage_wheel
+from well_viewer.image_discovery import open_imgref_as_array as _open_imgref_as_array
 
 _logger = logging.getLogger("well_viewer")
 
@@ -157,8 +158,8 @@ def refresh_preview_montage(app) -> None:
 
     app._montage_fluor_refs = [ref for _, ref in fluor_refs]
     app._montage_overlay_refs = [ov_map.get(tp) for tp, _ in fluor_refs]
-    app._montage_fluor_arrays = [app._open_imgref_as_array(ref, greyscale=True) for ref in app._montage_fluor_refs]
-    app._montage_overlay_arrays = [(app._open_imgref_as_array(ref) if ref else None) for ref in app._montage_overlay_refs]
+    app._montage_fluor_arrays = [_open_imgref_as_array(ref, greyscale=True) for ref in app._montage_fluor_refs]
+    app._montage_overlay_arrays = [(_open_imgref_as_array(ref) if ref else None) for ref in app._montage_overlay_refs]
 
     if used_tophat_as_primary:
         app._montage_fluor_display_arrays = list(app._montage_fluor_arrays)
@@ -170,7 +171,7 @@ def refresh_preview_montage(app) -> None:
         for tp, _ in fluor_refs:
             th_ref = tophat_refs.get((fov, tp))
             if th_ref is not None:
-                app._montage_fluor_display_arrays.append(app._open_imgref_as_array(th_ref, greyscale=True))
+                app._montage_fluor_display_arrays.append(_open_imgref_as_array(th_ref, greyscale=True))
                 used_any_tophat = True
             else:
                 app._montage_fluor_display_arrays.append(raw_by_tp[tp])

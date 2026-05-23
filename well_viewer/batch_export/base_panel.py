@@ -1426,6 +1426,17 @@ class BatchExportPanel(QWidget):
                 return f"{grp.name} CSV: {exc}"
 
             try:
+                from well_viewer import fold_change as _fc
+                fc_control_means: dict = {}
+                if fc_vs_ctrl and fc_ctrl_lbl:
+                    fc_control_means = _fc.pts_to_mean_by_t(
+                        _fc.control_pts_for_line(
+                            self._app, fc_ctrl_lbl, threshold=threshold,
+                            val_col=_val_col,
+                            cell_area_threshold=_cell_area_threshold,
+                            fluor_gates=_fluor_gates,
+                        )
+                    )
                 # ``_render_group_figure`` calls helpers (notably
                 # ``_compute_rep_stats``) that read ``app._app_state.channel.active_val_col``
                 # directly. Swap it for the duration of the render so a

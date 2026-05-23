@@ -32,7 +32,7 @@ from well_viewer.data_loading import (
     merge_fluor_channels,
     normalize_channel_tokens,
 )
-from well_viewer.ratio_models import is_ratio_key
+from well_viewer.ratio_models import build_ratio_index, is_ratio_key, ratio_name_from_key
 from well_viewer.ui_helpers import set_combo_values
 from functools import partial
 
@@ -484,6 +484,7 @@ def set_active_metric(app, metric: str) -> None:
     app._invalidate_stats_cache()
     app._redraw()
     if hasattr(app, "_bar_tp_cb"):
+        from well_viewer.barplot_renderer import redraw_bars
         redraw_bars(app)
 
 

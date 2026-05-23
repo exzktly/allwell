@@ -5,11 +5,20 @@ via ``WellViewerApp._sel_set_composition`` directly — no controller helpers.)"
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMessageBox
+import re
+
+from PySide6.QtWidgets import (
+    QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
+)
 
 from well_viewer.batch_models import ReplicateSet
 from well_viewer.viewer_state import extract_well_token as _extract_well_token
-from well_viewer.plate_layout import PLATE_COLS, PLATE_ROWS
+from well_viewer.plate_layout import PLATE_COLS, PLATE_ROWS, WELL_COLORS
+from well_viewer.ui_helpers import (
+    wells_multiselect_listbox as _wells_multiselect_listbox,
+    selected_list_values as _selected_list_values,
+)
+from well_viewer.selections_model import well_rank as _sel_well_rank
 
 
 def make_replicate_pairs(toks, prefix: str):

@@ -690,24 +690,27 @@ def export_scatter_data(app) -> None:
     for label, data in scatter_data.items():
         x_vals = data['x']
         y_vals = data['y']
+        tp_vals = data.get('tp') or [float('nan')] * len(x_vals)
         well_name = well_name_for(label, well_labels,
                                   well_paths=well_paths, strict=True)
-        for x, y in zip(x_vals, y_vals):
+        for x, y, tp in zip(x_vals, y_vals, tp_vals):
             rows_out.append({
                 "group_well": label,
                 "well_name": well_name,
                 f"{col_x}": f"{x:.6f}",
                 f"{col_y}": f"{y:.6f}",
-                "timepoint_h": f"{timepoint_h:.4f}",
+                "timepoint_h": f"{tp:.4f}",
             })
 
     if not rows_out:
         _warn(app, "Export", "No data to export for the current selection.")
         return
 
+    tp_tag = (f"t{timepoints_h[0]:g}" if len(timepoints_h) == 1
+              else f"t{min(timepoints_h):g}-{max(timepoints_h):g}")
     out_path = _ask_save_csv(
         app, "Export scatter plot data",
-        f"scatter_{ch_x_base}_vs_{ch_y_base}_t{timepoint_h}.csv",
+        f"scatter_{ch_x_base}_vs_{ch_y_base}_{tp_tag}.csv",
     )
     if not out_path:
         return

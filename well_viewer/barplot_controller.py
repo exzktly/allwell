@@ -16,6 +16,7 @@ from well_viewer.stats_compute import compute_rep_n_above
 from well_viewer.stats_compute import aggregate_well
 from well_viewer.stats_compute import aggregate_group
 from well_viewer.ui_helpers import set_combo_values as _set_combo_values
+from well_viewer.data_loading import extract_well_token as _extract_well_token
 
 
 
@@ -780,7 +781,7 @@ def collect_bar_items_for_app(app, target_t: float, *,
     denominator couldn't be resolved so the caller can surface a
     single status warning at the end of the redraw.
     """
-    return _bar_collect_items(
+    return collect_bar_items(
         app, target_t, fc_state=fc_state, miss_sink=miss_sink,
     )
 
@@ -788,6 +789,7 @@ def collect_bar_items_for_app(app, target_t: float, *,
 
 def toggle_swarm(app) -> None:
     """Toggle beeswarm / bar mode and update the button appearance."""
+    from well_viewer.barplot_renderer import redraw_bars
     app._bar_swarm = not app._bar_swarm
     on = app._bar_swarm
     app._swarm_btn.setChecked(on)
@@ -802,6 +804,7 @@ def toggle_swarm(app) -> None:
 
 def toggle_violin(app) -> None:
     """Toggle violin / bar mode and update the button appearance."""
+    from well_viewer.barplot_renderer import redraw_bars
     app._bar_violin = not app._bar_violin
     on = app._bar_violin
     app._violin_btn.setChecked(on)
@@ -838,6 +841,7 @@ def bar_well_display_label(app, lbl: str) -> str:
 
 
 def toggle_fov_replicates(app) -> None:
+    from well_viewer.barplot_renderer import redraw_bars
     app._app_state.plot.toggle_fov_replicates()
     app._invalidate_stats_cache()
     app._refresh_fov_btn_state()

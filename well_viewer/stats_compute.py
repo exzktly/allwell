@@ -10,6 +10,8 @@ imports surface, breaks the cycle.
 
 from __future__ import annotations
 
+import math
+import statistics
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -55,7 +57,8 @@ def well_aggregate_stats(
     for lbl in wells:
         if lbl not in app._app_state.dataset.well_paths:
             continue
-        pts = app._aggregate_well(
+        pts = aggregate_well(
+            app,
             lbl, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             cell_area_threshold=cell_area_threshold,
@@ -133,7 +136,8 @@ def compute_rep_stats(
     if cache_key in app._app_state.stats.cache:
         return app._app_state.stats.cache[cache_key]
 
-    gm, gerr, gf, ferr = app._well_aggregate_stats(
+    gm, gerr, gf, ferr = well_aggregate_stats(
+        app,
         rset.wells, target_t,
         threshold=threshold,
         val_col=app._app_state.channel.active_val_col,
@@ -243,7 +247,8 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
     for lbl in rset.wells:
         if lbl not in app._app_state.dataset.well_paths:
             continue
-        pts = app._aggregate_well(
+        pts = aggregate_well(
+            app,
             lbl, threshold=threshold, use_sem=False,
             val_col=app._app_state.channel.active_val_col,
             cell_area_threshold=cell_area_threshold,
@@ -289,7 +294,8 @@ def compute_group_stats(
         for lbl in rset:
             if lbl not in app._app_state.dataset.well_paths:
                 continue
-            pts = app._aggregate_well(
+            pts = aggregate_well(
+                app,
                 lbl, threshold=threshold, use_sem=False,
                 val_col=app._app_state.channel.active_val_col,
                 cell_area_threshold=cell_area_threshold,
@@ -367,7 +373,8 @@ def aggregate_group(
     if not valid:
         return []
     if len(valid) == 1:
-        return app._aggregate_well(
+        return aggregate_well(
+            app,
             valid[0], threshold=threshold, use_sem=use_sem,
             val_col=val_col, cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,

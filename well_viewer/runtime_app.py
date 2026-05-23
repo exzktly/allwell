@@ -37,8 +37,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import csv
-import io
 import logging
 import json
 import math
@@ -46,9 +44,6 @@ import re
 import shutil
 import statistics
 import sys
-import threading
-import zipfile
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -92,13 +87,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
 from well_viewer.batch_models import BarGroup, ReplicateSet
-from well_viewer.viewer_state import groups_with_loaded_wells as _groups_with_loaded_wells
-from well_viewer.viewer_state import selected_listbox_values as _selected_listbox_values
 from well_viewer import debug_flags as _debug_flags
-from well_viewer.image_resolver import (
-    normalize_well_token as _normalize_well_token,
-    output_suffixes_for_kind as _output_suffixes_for_kind,
-)
 from well_viewer.state import AppState, EventBus
 from well_viewer.bus_wiring import wire_event_bus
 from well_viewer.persistence.registry import build_persistence_registry
@@ -131,41 +120,15 @@ _bar_collect_items = _lazy("well_viewer.barplot_controller", "collect_bar_items"
 _bar_ordered_keys = _lazy("well_viewer.barplot_controller", "ordered_bar_keys")
 _bar_render_items = _lazy("well_viewer.barplot_controller", "render_bar_items")
 
-_preview_classify_member = _lazy("well_viewer.preview_controller", "classify_member")
-_preview_open_imgref_as_array = _lazy("well_viewer.preview_controller", "open_imgref_as_array")
-_preview_read_member_bytes = _lazy("well_viewer.preview_controller", "read_member_bytes")
-_preview_scan_zip_members = _lazy("well_viewer.preview_controller", "scan_zip_members")
 
-_find_well_subfolder_path = _lazy("well_viewer.image_resolver", "find_well_subfolder_path")
 _resolve_ref_by_fov_tp = _lazy("well_viewer.image_resolver", "resolve_ref_by_fov_tp")
-_well_token_matches_text = _lazy("well_viewer.image_resolver", "well_token_matches_text")
 
 _refresh_preview_picker_view = _lazy("well_viewer.views.preview_view", "refresh_preview_picker")
 
-_it_apply_dimensions = _lazy("well_viewer.image_table_controller", "image_table_apply_dimensions")
-_it_apply_global = _lazy("well_viewer.image_table_controller", "image_table_apply_global")
-_it_apply_row_channel = _lazy("well_viewer.image_table_controller", "image_table_apply_row_channel")
-_it_apply_row_well = _lazy("well_viewer.image_table_controller", "image_table_apply_row_well")
-_it_toggle_tophat = _lazy("well_viewer.image_table_controller", "image_table_toggle_tophat")
-_it_toggle_boundaries = _lazy("well_viewer.image_table_controller", "image_table_toggle_boundaries")
-_it_toggle_binary = _lazy("well_viewer.image_table_controller", "image_table_toggle_binary")
-_it_auto_lut = _lazy("well_viewer.image_table_controller", "image_table_auto_lut")
-_it_clear_active = _lazy("well_viewer.image_table_controller", "image_table_clear_active")
-_it_distribute_timepoints = _lazy("well_viewer.image_table_controller", "image_table_distribute_timepoints")
-_it_distribute_wells = _lazy("well_viewer.image_table_controller", "image_table_distribute_wells")
-_it_load_heatmap_layout = _lazy("well_viewer.image_table_controller", "image_table_load_heatmap_layout")
-_it_export = _lazy("well_viewer.image_table_controller", "image_table_export")
-_it_generate = _lazy("well_viewer.image_table_controller", "image_table_generate")
-_it_rebuild_grid = _lazy("well_viewer.image_table_controller", "image_table_rebuild_grid")
-_it_refresh_picker = _lazy("well_viewer.image_table_controller", "image_table_refresh_picker")
-_it_repopulate_dropdowns = _lazy("well_viewer.image_table_controller", "image_table_repopulate_dropdowns")
-_it_select_all = _lazy("well_viewer.image_table_controller", "image_table_select_all")
 
 _lineplot_redraw = _lazy("well_viewer.lineplot_controller", "redraw_line_plots")
 _scatter_get_timepoints = _lazy("well_viewer.scatter_controller", "get_all_timepoints")
-_scatter_redraw = _lazy("well_viewer.scatter_controller", "redraw_scatter")
 
-_load_build_tok_to_label = _lazy("well_viewer.load_controller", "build_tok_to_label")
 _load_directory_controller = _lazy("well_viewer.load_controller", "load_directory")
 _load_path_controller = _lazy("well_viewer.load_controller", "load_path")
 
@@ -175,18 +138,8 @@ _plot_save_line_figure_orchestrator = _lazy("well_viewer.plot_orchestrator", "sa
 _plot_save_matplotlib_fig_orchestrator = _lazy("well_viewer.plot_orchestrator", "save_matplotlib_fig")
 
 _montage_auto_lut_controller = _lazy("well_viewer.montage_controller", "montage_auto_lut")
-_montage_redraw_at_zoom_controller = _lazy("well_viewer.montage_controller", "montage_redraw_at_zoom")
-_montage_resize_deferred_controller = _lazy("well_viewer.montage_controller", "montage_resize_deferred")
 _montage_tophat_done_controller = _lazy("well_viewer.montage_controller", "montage_tophat_done")
-_montage_zoom_fit_controller = _lazy("well_viewer.montage_controller", "montage_zoom_fit")
-_montage_zoom_step_controller = _lazy("well_viewer.montage_controller", "montage_zoom_step")
-_on_montage_canvas_resize_controller = _lazy("well_viewer.montage_controller", "on_montage_canvas_resize")
-_on_montage_fluor_motion_controller = _lazy("well_viewer.montage_controller", "on_montage_fluor_motion")
-_on_montage_shift_wheel_controller = _lazy("well_viewer.montage_controller", "on_montage_shift_wheel")
-_on_montage_wheel_controller = _lazy("well_viewer.montage_controller", "on_montage_wheel")
-_show_image_pixel_tooltip_controller = _lazy("well_viewer.montage_controller", "_show_image_pixel_tooltip")
 
-_on_review_csv_row_double_click_controller = _lazy("well_viewer.review_image_controller", "on_review_csv_row_double_click")
 _on_review_image_click_controller = _lazy("well_viewer.review_image_controller", "on_review_image_click")
 _select_review_csv_row_for_cell_controller = _lazy("well_viewer.review_image_controller", "select_review_csv_row_for_cell")
 
@@ -194,7 +147,6 @@ _stats_collect_group_values = _lazy("well_viewer.stats_controller", "collect_gro
 _stats_draw_ks_cdf = _lazy("well_viewer.stats_controller", "draw_ks_cdf")
 _stats_run_controller = _lazy("well_viewer.stats_controller", "run_stats")
 
-from well_viewer.viewer_state import make_schema_extractor as _make_schema_extractor
 from well_viewer.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.ui_helpers import (
     ask_name_dialog as _ui_ask_name_dialog,
@@ -363,19 +315,16 @@ from well_viewer.data_loading import extract_well_token as _extract_well_token  
 # Categorical label colourmap  (canonical: well_viewer/views/image_panel_view.py)
 # =============================================================================
 
-from well_viewer.views.image_panel_view import _label_to_rgb
 
 # =============================================================================
 # Reusable image panel  (canonical: well_viewer/views/image_panel_view.py)
 # =============================================================================
 
-from well_viewer.views.image_panel_view import _ImagePanel
 
 # =============================================================================
 # GUI log handler  (canonical: well_viewer/views/status_view.py)
 # =============================================================================
 
-from well_viewer.views.status_view import _GUILogHandler
 from well_viewer.barplot_renderer import redraw_bars
 from well_viewer.grouping_controller import rep_quick_pairs
 from well_viewer.montage_controller import on_montage_fluor_motion

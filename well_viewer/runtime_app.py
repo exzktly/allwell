@@ -349,6 +349,8 @@ from well_viewer.montage_controller import montage_redraw_at_zoom
 from well_viewer.tab_controller import on_notebook_current_changed
 from well_viewer.montage_controller import refresh_preview_montage
 from well_viewer.channel_state_controller import set_active_image_channel
+from well_viewer.channel_state_controller import set_active_metric
+from well_viewer.channel_state_controller import populate_metric_combo
 
 class WellViewerApp(QWidget):
 
@@ -1999,7 +2001,7 @@ class WellViewerApp(QWidget):
         from well_viewer.metric_labels import METRIC_LABEL_TO_KEY
         metric_label = self._metric_var.currentText()
         metric = METRIC_LABEL_TO_KEY.get(metric_label, "mean_intensity")
-        self._set_active_metric(metric)
+        set_active_metric(self, metric)
 
     def _on_metric_selected_global(self) -> None:
         """Handle the global Property combo (ctxbar) change."""
@@ -2014,7 +2016,7 @@ class WellViewerApp(QWidget):
         # empty plot.
         if metric == "smfish_count" and self._app_state.channel.active_channel not in self._app_state.channel.smfish_channels:
             metric = "mean_intensity"
-        self._set_active_metric(metric)
+        set_active_metric(self, metric)
 
     def _on_stats_property_change(self) -> None:
         """Stats tab's per-tab Property combo → propagate to global state."""
@@ -2025,167 +2027,13 @@ class WellViewerApp(QWidget):
         metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
         if metric == "smfish_count" and self._app_state.channel.active_channel not in self._app_state.channel.smfish_channels:
             metric = "mean_intensity"
-        self._set_active_metric(metric)
+        set_active_metric(self, metric)
         # Stats display refreshes on its own when run; nothing to redraw here.
 
-    def _set_active_metric(self, metric: str) -> None:
-        """Switch the active intensity property and redraw."""
-        if metric == self._app_state.channel.active_metric:
-            return
-        from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
-        self._app_state.channel.active_metric = metric
-        if not is_ratio_key(self._app_state.channel.active_val_col):
-            self._app_state.channel.active_val_col = f"{self._app_state.channel.active_channel}_{self._app_state.channel.active_metric}"
-        label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
-        # Sync every metric combo (per-tab hidden legacy combos + the
-        # global ctxbar combo + the stats per-tab Property combo) without
-        # retriggering this handler.
-        for attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
-                     "_plotting_metric_cb", "_stats_property_cb"):
-            cb = getattr(self, attr, None)
-            if cb is None:
-                continue
-            try:
-                current = str(cb.currentText() or "")
-            except Exception:
-                continue
-            if current == label:
-                continue
-            idx = cb.findText(label)
-            if idx < 0:
-                continue
-            blocked = cb.blockSignals(True)
-            try:
-                cb.setCurrentIndex(idx)
-            finally:
-                cb.blockSignals(blocked)
-        refresh_metric_combo_for_channel(self)
-        self._refresh_heatmap_aggregation_options()
-        recalculate_threshold(self)
-        self._invalidate_stats_cache()
-        self._redraw()
-        if hasattr(self, "_bar_tp_cb"):
-            redraw_bars(self)
-
-    def _refresh_heatmap_aggregation_options(self) -> None:
-        """Grey out threshold-based heatmap aggregations for non-MFI properties.
-
-        The ThreshFracOn cut is defined against mean fluorescence intensity
-        (see Cell Gating tab), so "Mean above threshold" and "Fraction above
-        threshold" only make sense when the active Property is MFI. When the
-        user picks Total / Max / Min / Std / smFISH Count, those options
-        disable so they're not silently misapplied.
-        """
-        cb = getattr(self, "_heatmap_metric_cb", None)
-        if cb is None:
-            return
-        from well_viewer.heatmap_controller import (
-            METRIC_MEAN, METRIC_FRACTION,
-        )
-        is_mfi = self._app_state.channel.active_metric == "mean_intensity"
-        model = cb.model()
-        if model is None:
-            return
-        for label in (METRIC_MEAN, METRIC_FRACTION):
-            idx = cb.findText(label)
-            if idx < 0:
-                continue
-            item = model.item(idx)
-            if item is not None:
-                item.setEnabled(is_mfi)
-        # If the currently selected aggregation just went unavailable, fall
-        # back to "Mean (all cells)" so the heatmap stays valid.
-        if not is_mfi:
-            current = str(cb.currentText() or "")
-            if current in (METRIC_MEAN, METRIC_FRACTION):
-                from well_viewer.heatmap_controller import METRIC_MEAN_ALL
-                alt = cb.findText(METRIC_MEAN_ALL)
-                if alt >= 0:
-                    blocked = cb.blockSignals(True)
-                    try:
-                        cb.setCurrentIndex(alt)
-                    finally:
-                        cb.blockSignals(blocked)
-
-    def _populate_metric_combo(
-        self,
-        cb,
-        *,
-        channel_entry: str,
-        smfish_channel: Optional[str] = None,
-        include_fraction: bool = False,
-    ) -> None:
-        """Repopulate a Property combo to match the channel context.
-
-        Ratio channels (resolved via ``_label_to_channel_key``) collapse the
-        combo to a single ``Calculated Val`` entry — ratios are a single
-        computed value per cell, so the intensity flavours don't exist for
-        them. Real channels get the full ``METRIC_ORDER`` set (optionally
-        appended with ``Fraction above threshold`` for the agg-scatter
-        combos) with ``smFISH Count`` greyed out unless ``smfish_channel``
-        names a channel in ``_smfish_channels``.
-
-        The current selection is preserved when the previous label still
-        exists in the new item list; otherwise we fall back to the label
-        for ``_active_metric``.
-        """
-        if cb is None:
-            return
-        from well_viewer.metric_labels import (
-            METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
-        )
-        ratio_key = (getattr(self, "_label_to_channel_key", None) or {}).get(channel_entry)
-        is_ratio = bool(ratio_key and is_ratio_key(ratio_key))
-
-        prev = str(cb.currentText() or "")
-        blocked = cb.blockSignals(True)
-        try:
-            cb.clear()
-            if is_ratio:
-                cb.addItem(CALCULATED_VAL_LABEL)
-                cb.setCurrentIndex(0)
-                cb.setEnabled(True)
-                return
-            items = list(METRIC_ORDER)
-            if include_fraction:
-                items.append("Fraction above threshold")
-            cb.addItems(items)
-            cb.setEnabled(True)
-            if prev in items:
-                cb.setCurrentText(prev)
-            else:
-                fallback = METRIC_KEY_TO_LABEL.get(
-                    self._app_state.channel.active_metric, "Mean Intensity"
-                )
-                idx = cb.findText(fallback)
-                if idx >= 0:
-                    cb.setCurrentIndex(idx)
-            sm_idx = cb.findText("smFISH Count")
-            if sm_idx >= 0:
-                model = cb.model()
-                item = model.item(sm_idx) if model is not None else None
-                if item is not None:
-                    smf_ok = (
-                        smfish_channel is not None
-                        and smfish_channel in self._app_state.channel.smfish_channels
-                    )
-                    item.setEnabled(smf_ok)
-        finally:
-            cb.blockSignals(blocked)
 
 
-    def _refresh_stats_property_combo(self) -> None:
-        """Reshape the stats Property combo to match the stats channel combo."""
-        ch_cb = getattr(self, "_stats_channel_cb", None)
-        m_cb = getattr(self, "_stats_property_cb", None)
-        if m_cb is None:
-            return
-        channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
-        # Strip the " (spots)" suffix so smfish-enable matching works.
-        smf_base = channel.split(" ")[0] if channel else self._app_state.channel.active_channel
-        self._populate_metric_combo(
-            m_cb, channel_entry=channel, smfish_channel=smf_base,
-        )
+
+
 
 
     def _toggle_sem(self) -> None:
@@ -4144,7 +3992,7 @@ class WellViewerApp(QWidget):
         if ch_cb is None or m_cb is None:
             return
         channel = str(ch_cb.currentText() or "")
-        self._populate_metric_combo(
+        populate_metric_combo(self, 
             m_cb, channel_entry=channel, smfish_channel=channel,
         )
 
@@ -4159,7 +4007,7 @@ class WellViewerApp(QWidget):
         if ch_cb is None or m_cb is None:
             return
         channel = str(ch_cb.currentText() or "")
-        self._populate_metric_combo(
+        populate_metric_combo(self, 
             m_cb, channel_entry=channel, smfish_channel=channel,
             include_fraction=True,
         )

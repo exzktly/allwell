@@ -21,6 +21,7 @@ from well_viewer.ui_helpers import (
 from functools import partial
 from well_viewer.channel_state_controller import refresh_metric_combo_for_channel
 from well_viewer.export_service import export_heatmap_data
+from well_viewer.channel_state_controller import refresh_heatmap_aggregation_options
 
 
 _CMAP_OPTIONS = ["viridis", "magma", "coolwarm", "RdYlBu_r", "Greys"]
@@ -254,7 +255,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         if hasattr(ctx.app, "_refresh_metric_combo_for_channel"):
             refresh_metric_combo_for_channel(ctx.app)
         if hasattr(ctx.app, "_refresh_heatmap_aggregation_options"):
-            ctx.app._refresh_heatmap_aggregation_options()
+            refresh_heatmap_aggregation_options(ctx.app, )
     except Exception:
         pass
     # Bust any caches that might hold a stale "no values" result from

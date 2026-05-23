@@ -405,6 +405,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 
 from well_viewer.plate_layout import WELL_COLORS
 from well_viewer.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
+from well_viewer.channel_state_controller import refresh_stats_property_combo
 
 
 def stats_active_group(app):
@@ -554,7 +555,7 @@ def stats_on_test_change(app) -> None:
     # Keep the stats Property combo in sync with the channel (ratio
     # channels collapse the metric set to "Calculated Val").
     try:
-        app._refresh_stats_property_combo()
+        refresh_stats_property_combo(app)
     except Exception:
         pass
 
@@ -601,7 +602,7 @@ def stats_update_tp_menu(app) -> None:
     # Channel may now resolve to a ratio key -- refresh the Property
     # combo's item set accordingly.
     try:
-        app._refresh_stats_property_combo()
+        refresh_stats_property_combo(app)
     except Exception:
         pass
 

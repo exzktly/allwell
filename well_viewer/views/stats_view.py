@@ -21,6 +21,7 @@ from well_viewer.stats_controller import stats_refresh_map
 from functools import partial
 from well_viewer.stats_controller import stats_grp_add
 from well_viewer.stats_controller import stats_grp_clear_all
+from well_viewer.channel_state_controller import refresh_stats_property_combo
 
 
 def build_stats_tab(app, parent: QWidget) -> None:
@@ -249,7 +250,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     # sync the selection to the canonical ``_active_metric``.
     try:
         if hasattr(app, "_refresh_stats_property_combo"):
-            app._refresh_stats_property_combo()
+            refresh_stats_property_combo(app)
         from well_viewer.metric_labels import METRIC_KEY_TO_LABEL
         label = METRIC_KEY_TO_LABEL.get(
             app._app_state.channel.active_metric, "Mean Intensity"

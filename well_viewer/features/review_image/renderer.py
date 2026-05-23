@@ -209,6 +209,8 @@ def refresh_review_image(app) -> None:
 
 
 def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: bool, image_load_debug: bool) -> None:
+    from well_viewer.data.image_discovery import open_imgref_as_array
+
     well = app._app_state.preview.selected_well
     if well is None:
         if channel_switch_debug:

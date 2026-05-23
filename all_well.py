@@ -848,11 +848,11 @@ class AllWellApp(QMainWindow):
                 self._review._redraw()
             except Exception:
                 pass
-        if hasattr(self._review, "_redraw_bars"):
-            try:
-                self._review._redraw_bars()
-            except Exception:
-                pass
+        try:
+            from well_viewer.barplot_renderer import redraw_bars
+            redraw_bars(self._review)
+        except Exception:
+            pass
 
     def _qsettings(self):
         from PySide6.QtCore import QSettings
@@ -898,9 +898,9 @@ class AllWellApp(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_window_state()
-        if self._review is not None and hasattr(self._review, "_view_state_save_to_data_dir"):
+        if self._review is not None and hasattr(self._review, "_persistence"):
             try:
-                self._review._view_state_save_to_data_dir()
+                self._review._persistence.save("view_state")
             except Exception:
                 pass
         if self._review is not None and hasattr(self._review, "_cleanup_tmp"):

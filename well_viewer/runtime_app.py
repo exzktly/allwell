@@ -3748,131 +3748,28 @@ class WellViewerApp(QWidget):
         self._render_review_image_display()
 
     def _on_review_image_wheel(self, event) -> None:
-        try:
-            dy = int(event.angleDelta().y())
-        except Exception:
-            dy = 0
-        direction = +1 if dy > 0 else -1 if dy < 0 else 0
-        if direction:
-            self._review_image_zoom_step(direction)
+        from well_viewer.review_image_controller import on_review_image_wheel
+        on_review_image_wheel(self, event)
 
     def _on_review_image_press(self, event) -> None:
-        # In include-edit mode, LMB drag draws a rubber-band rectangle for
-        # bulk delete instead of panning. We record the anchor in label-local
-        # pixels (event.position()) so it is invariant to window position
-        # and scrollbar state.
-        if self._app_state.review_image.include_edit_mode:
-            pos = event.position()
-            ax, ay = float(pos.x()), float(pos.y())
-            self._app_state.review_image.box_anchor = (ax, ay)
-            self._app_state.review_image.box_active = True
-            label = getattr(self, "_review_image_label", None)
-            if label is not None:
-                rb = self._review_image_rubber_band
-                if rb is None:
-                    rb = QRubberBand(QRubberBand.Rectangle, label)
-                    self._review_image_rubber_band = rb
-                rb.setGeometry(QRect(int(ax), int(ay), 1, 1))
-                rb.show()
-            return
-        self._app_state.review_image.dragging = True
-        self._app_state.review_image.drag_moved = False
-        gp = event.globalPosition().toPoint()
-        self._app_state.review_image.drag_last_xy = (int(gp.x()), int(gp.y()))
+        from well_viewer.review_image_controller import on_review_image_press
+        on_review_image_press(self, event)
 
     def _on_review_image_drag(self, event) -> None:
-        # Rubber-band update path: stay anchored in label-local pixels.
-        if self._app_state.review_image.box_active:
-            anchor = self._app_state.review_image.box_anchor
-            rb = self._review_image_rubber_band
-            if anchor is None or rb is None:
-                return
-            ax, ay = anchor
-            pos = event.position()
-            cx, cy = float(pos.x()), float(pos.y())
-            x0 = int(min(ax, cx))
-            y0 = int(min(ay, cy))
-            w = max(1, int(abs(cx - ax)))
-            h = max(1, int(abs(cy - ay)))
-            rb.setGeometry(QRect(x0, y0, w, h))
-            return
-        if not self._app_state.review_image.dragging:
-            return
-        gp = event.globalPosition().toPoint()
-        gx, gy = int(gp.x()), int(gp.y())
-        lx, ly = self._app_state.review_image.drag_last_xy
-        dx = gx - lx
-        dy = gy - ly
-        if dx or dy:
-            self._app_state.review_image.drag_moved = True
-        self._app_state.review_image.pan_x = float(self._app_state.review_image.pan_x + dx)
-        self._app_state.review_image.pan_y = float(self._app_state.review_image.pan_y + dy)
-        self._app_state.review_image.drag_last_xy = (gx, gy)
-        # Pan reuses the existing pixmap; only the scrollbars need to move.
-        self._render_review_image_display(pan_only=True)
+        from well_viewer.review_image_controller import on_review_image_drag
+        on_review_image_drag(self, event)
 
     def _on_review_image_release(self, event) -> None:
-        # Rubber-band finalize path. A drag shorter than this many label-local
-        # pixels in either axis falls through to the existing single-cell
-        # click handler, so quick taps in edit mode still toggle one cell.
-        _CLICK_PX_THRESH = 3
-        if self._app_state.review_image.box_active:
-            anchor = self._app_state.review_image.box_anchor
-            rb = self._review_image_rubber_band
-            self._app_state.review_image.box_active = False
-            self._app_state.review_image.box_anchor = None
-            if rb is not None:
-                rb.hide()
-            if anchor is None:
-                return
-            ax, ay = anchor
-            pos = event.position()
-            rx, ry = float(pos.x()), float(pos.y())
-            if abs(rx - ax) < _CLICK_PX_THRESH and abs(ry - ay) < _CLICK_PX_THRESH:
-                self._on_review_image_click(event)
-                return
-            scale = float(getattr(self, "_review_image_scale", 1.0) or 1.0)
-            label = getattr(self, "_review_image_label", None)
-            off_x, off_y = 0, 0
-            if label is not None:
-                pm = label.pixmap()
-                if pm is not None and not pm.isNull():
-                    off_x = max(0, (label.width() - pm.width()) // 2)
-                    off_y = max(0, (label.height() - pm.height()) // 2)
-            mx0, mx1 = int((ax - off_x) / scale), int((rx - off_x) / scale)
-            my0, my1 = int((ay - off_y) / scale), int((ry - off_y) / scale)
-            self._apply_box_delete(mx0, my0, mx1, my1)
-            return
-        was_dragging = self._app_state.review_image.dragging
-        moved = self._app_state.review_image.drag_moved
-        self._app_state.review_image.dragging = False
-        self._app_state.review_image.drag_moved = False
-        if was_dragging and not moved:
-            self._on_review_image_click(event)
+        from well_viewer.review_image_controller import on_review_image_release
+        on_review_image_release(self, event)
 
     def _on_review_image_move(self, event: Any) -> None:
-        """Unified mouseMove handler: drag when LMB held, otherwise hover."""
-        if event.buttons() & Qt.LeftButton:
-            self._on_review_image_drag(event)
-        else:
-            self._on_review_image_hover(event)
+        from well_viewer.review_image_controller import on_review_image_move
+        on_review_image_move(self, event)
 
     def _on_review_image_hover(self, event: Any) -> None:
-        if not hasattr(self, "_review_image_label"):
-            return
-        pm = self._review_image_label.pixmap()
-        if pm is not None and not pm.isNull():
-            self._review_image_label._sz_w = int(pm.width())  # type: ignore[attr-defined]
-            self._review_image_label._sz_h = int(pm.height())  # type: ignore[attr-defined]
-        else:
-            self._review_image_label._sz_w = int(self._review_image_label.width())  # type: ignore[attr-defined]
-            self._review_image_label._sz_h = int(self._review_image_label.height())  # type: ignore[attr-defined]
-        _show_image_pixel_tooltip_controller(
-            self,
-            event,
-            f"{self._app_state.channel.active_image_channel.upper()}",
-            label=self._review_image_label,
-        )
+        from well_viewer.review_image_controller import on_review_image_hover
+        on_review_image_hover(self, event)
 
     def _on_review_image_click(self, event: Any) -> None:
         _on_review_image_click_controller(self, event, _logger)

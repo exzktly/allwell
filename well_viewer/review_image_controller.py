@@ -287,3 +287,141 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
 
     if hasattr(app, "_zoom_review_image_to_selected_nucleus"):
         app._zoom_review_image_to_selected_nucleus()
+
+
+def on_review_image_wheel(app, event) -> None:
+    try:
+        dy = int(event.angleDelta().y())
+    except Exception:
+        dy = 0
+    direction = +1 if dy > 0 else -1 if dy < 0 else 0
+    if direction:
+        app._review_image_zoom_step(direction)
+
+
+def on_review_image_press(app, event) -> None:
+    # In include-edit mode, LMB drag draws a rubber-band rectangle for
+    # bulk delete instead of panning. We record the anchor in label-local
+    # pixels (event.position()) so it is invariant to window position
+    # and scrollbar state.
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QRubberBand
+    if app._app_state.review_image.include_edit_mode:
+        pos = event.position()
+        ax, ay = float(pos.x()), float(pos.y())
+        app._app_state.review_image.box_anchor = (ax, ay)
+        app._app_state.review_image.box_active = True
+        label = getattr(app, "_review_image_label", None)
+        if label is not None:
+            rb = app._review_image_rubber_band
+            if rb is None:
+                rb = QRubberBand(QRubberBand.Rectangle, label)
+                app._review_image_rubber_band = rb
+            rb.setGeometry(QRect(int(ax), int(ay), 1, 1))
+            rb.show()
+        return
+    app._app_state.review_image.dragging = True
+    app._app_state.review_image.drag_moved = False
+    gp = event.globalPosition().toPoint()
+    app._app_state.review_image.drag_last_xy = (int(gp.x()), int(gp.y()))
+
+
+def on_review_image_drag(app, event) -> None:
+    # Rubber-band update path: stay anchored in label-local pixels.
+    from PySide6.QtCore import QRect
+    if app._app_state.review_image.box_active:
+        anchor = app._app_state.review_image.box_anchor
+        rb = app._review_image_rubber_band
+        if anchor is None or rb is None:
+            return
+        ax, ay = anchor
+        pos = event.position()
+        cx, cy = float(pos.x()), float(pos.y())
+        x0 = int(min(ax, cx))
+        y0 = int(min(ay, cy))
+        w = max(1, int(abs(cx - ax)))
+        h = max(1, int(abs(cy - ay)))
+        rb.setGeometry(QRect(x0, y0, w, h))
+        return
+    if not app._app_state.review_image.dragging:
+        return
+    gp = event.globalPosition().toPoint()
+    gx, gy = int(gp.x()), int(gp.y())
+    lx, ly = app._app_state.review_image.drag_last_xy
+    dx = gx - lx
+    dy = gy - ly
+    if dx or dy:
+        app._app_state.review_image.drag_moved = True
+    app._app_state.review_image.pan_x = float(app._app_state.review_image.pan_x + dx)
+    app._app_state.review_image.pan_y = float(app._app_state.review_image.pan_y + dy)
+    app._app_state.review_image.drag_last_xy = (gx, gy)
+    # Pan reuses the existing pixmap; only the scrollbars need to move.
+    app._render_review_image_display(pan_only=True)
+
+
+def on_review_image_release(app, event) -> None:
+    # Rubber-band finalize path. A drag shorter than this many label-local
+    # pixels in either axis falls through to the existing single-cell
+    # click handler, so quick taps in edit mode still toggle one cell.
+    _CLICK_PX_THRESH = 3
+    if app._app_state.review_image.box_active:
+        anchor = app._app_state.review_image.box_anchor
+        rb = app._review_image_rubber_band
+        app._app_state.review_image.box_active = False
+        app._app_state.review_image.box_anchor = None
+        if rb is not None:
+            rb.hide()
+        if anchor is None:
+            return
+        ax, ay = anchor
+        pos = event.position()
+        rx, ry = float(pos.x()), float(pos.y())
+        if abs(rx - ax) < _CLICK_PX_THRESH and abs(ry - ay) < _CLICK_PX_THRESH:
+            app._on_review_image_click(event)
+            return
+        scale = float(getattr(app, "_review_image_scale", 1.0) or 1.0)
+        label = getattr(app, "_review_image_label", None)
+        off_x, off_y = 0, 0
+        if label is not None:
+            pm = label.pixmap()
+            if pm is not None and not pm.isNull():
+                off_x = max(0, (label.width() - pm.width()) // 2)
+                off_y = max(0, (label.height() - pm.height()) // 2)
+        mx0, mx1 = int((ax - off_x) / scale), int((rx - off_x) / scale)
+        my0, my1 = int((ay - off_y) / scale), int((ry - off_y) / scale)
+        app._apply_box_delete(mx0, my0, mx1, my1)
+        return
+    was_dragging = app._app_state.review_image.dragging
+    moved = app._app_state.review_image.drag_moved
+    app._app_state.review_image.dragging = False
+    app._app_state.review_image.drag_moved = False
+    if was_dragging and not moved:
+        app._on_review_image_click(event)
+
+
+def on_review_image_move(app, event) -> None:
+    """Unified mouseMove handler: drag when LMB held, otherwise hover."""
+    from PySide6.QtCore import Qt
+    if event.buttons() & Qt.LeftButton:
+        on_review_image_drag(app, event)
+    else:
+        on_review_image_hover(app, event)
+
+
+def on_review_image_hover(app, event) -> None:
+    if not hasattr(app, "_review_image_label"):
+        return
+    pm = app._review_image_label.pixmap()
+    if pm is not None and not pm.isNull():
+        app._review_image_label._sz_w = int(pm.width())
+        app._review_image_label._sz_h = int(pm.height())
+    else:
+        app._review_image_label._sz_w = int(app._review_image_label.width())
+        app._review_image_label._sz_h = int(app._review_image_label.height())
+    from well_viewer.montage_controller import _show_image_pixel_tooltip
+    _show_image_pixel_tooltip(
+        app,
+        event,
+        f"{app._app_state.channel.active_image_channel.upper()}",
+        label=app._review_image_label,
+    )

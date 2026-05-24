@@ -459,11 +459,45 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
 
 
 
+def sync_metric_combos(app, metric: str) -> None:
+    """Push *metric* (an ``active_metric`` key like ``"smfish_count"``) into
+    every metric-combo widget the app knows about, without retriggering the
+    change handler.
+
+    Used by ``set_active_metric`` after a real metric change and by
+    ``persistence.view_state.apply_state`` after a restore-time direct
+    assignment. The latter bypasses ``set_active_metric``'s early-return
+    when the field is already at the target value, so without this helper
+    the dropdown reverts to the combo's default ("Mean Intensity") on app
+    reopen and the user has to "wiggle" the dropdown to force a sync.
+    """
+    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
+    label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
+    for attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
+                 "_plotting_metric_cb", "_stats_property_cb"):
+        cb = getattr(app, attr, None)
+        if cb is None:
+            continue
+        try:
+            current = str(cb.currentText() or "")
+        except Exception:
+            continue
+        if current == label:
+            continue
+        idx = cb.findText(label)
+        if idx < 0:
+            continue
+        blocked = cb.blockSignals(True)
+        try:
+            cb.setCurrentIndex(idx)
+        finally:
+            cb.blockSignals(blocked)
+
+
 def set_active_metric(app, metric: str) -> None:
     """Switch the active intensity property and redraw."""
     if metric == app._app_state.channel.active_metric:
         return
-    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
     app._app_state.channel.active_metric = metric
     if not is_ratio_key(app._app_state.channel.active_val_col):
         app._app_state.channel.active_val_col = f"{app._app_state.channel.active_channel}_{app._app_state.channel.active_metric}"
@@ -489,29 +523,7 @@ def set_active_metric(app, metric: str) -> None:
             )
             if hasattr(app, "_invalidate_dataset_cache"):
                 app._invalidate_dataset_cache()
-    label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
-    # Sync every metric combo (per-tab hidden legacy combos + the
-    # global ctxbar combo + the stats per-tab Property combo) without
-    # retriggering this handler.
-    for attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
-                 "_plotting_metric_cb", "_stats_property_cb"):
-        cb = getattr(app, attr, None)
-        if cb is None:
-            continue
-        try:
-            current = str(cb.currentText() or "")
-        except Exception:
-            continue
-        if current == label:
-            continue
-        idx = cb.findText(label)
-        if idx < 0:
-            continue
-        blocked = cb.blockSignals(True)
-        try:
-            cb.setCurrentIndex(idx)
-        finally:
-            cb.blockSignals(blocked)
+    sync_metric_combos(app, metric)
     refresh_metric_combo_for_channel(app)
     refresh_heatmap_aggregation_options(app)
     recalculate_threshold(app)

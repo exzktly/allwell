@@ -78,25 +78,27 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     cl.addStretch(1)
 
-    _export_btn = btn_primary(line_ctrl, "", partial(export_plot_data, ctx.app),
-                              icon="download")
-    _export_btn.setToolTip("Export CSV")
+    # IconButton (QToolButton subclass) matches the Sample Definitions
+    # top toolbar style — compact, auto-raise icon-only buttons rather
+    # than the pill-style btn_primary / btn_secondary used pre-v2.
+    from widgets.icon_button import IconButton as _IconButton
+    _export_btn = _IconButton("download", line_ctrl, tooltip="Export CSV")
+    _export_btn.clicked.connect(lambda _=False: export_plot_data(ctx.app))
     cl.addWidget(_export_btn)
-    _b = btn_secondary(line_ctrl, "", lambda: ctx.app._copy_active_card_as_svg(), icon="copy")
-    _b.setToolTip("Copy SVG")
-    cl.addWidget(_b)
-    _b = btn_secondary(line_ctrl, "", lambda: ctx.app._save_active_card_figure(), icon="save")
-    _b.setToolTip("Save figure")
-    cl.addWidget(_b)
+    _copy_btn = _IconButton("copy", line_ctrl, tooltip="Copy SVG")
+    _copy_btn.clicked.connect(lambda _=False: ctx.app._copy_active_card_as_svg())
+    cl.addWidget(_copy_btn)
+    _save_btn = _IconButton("save", line_ctrl, tooltip="Save figure")
+    _save_btn.clicked.connect(lambda _=False: ctx.app._save_active_card_figure())
+    cl.addWidget(_save_btn)
     # Properties button last in the row so it sits flush with the right
     # edge of the plot area — adjacent to where the figure-properties
     # dock slides out, instead of the old "▸" floating mid-row.
-    style_btn = btn_secondary(
-        line_ctrl, "",
-        lambda: ctx.app._open_export_style_panel("line"),
-        icon="sliders-horizontal",
+    style_btn = _IconButton(
+        "sliders-horizontal", line_ctrl,
+        tooltip="Show / hide the figure properties panel",
     )
-    style_btn.setToolTip("Show / hide the figure properties panel")
+    style_btn.clicked.connect(lambda _=False: ctx.app._open_export_style_panel("line"))
     cl.addWidget(style_btn)
     layout.addWidget(line_ctrl)
 

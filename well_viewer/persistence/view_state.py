@@ -292,7 +292,23 @@ def restore(app, state: dict) -> None:
 
     metric = state.get("active_metric")
     if isinstance(metric, str) and metric:
+        # Direct field assignment so tabs built lazily after this point
+        # pick up the saved metric for their initial render.
         app._app_state.channel.active_metric = metric
+        # Push the value into every metric combo widget that exists right
+        # now (e.g. the global ctxbar's _plotting_metric_cb, built early
+        # during centre-view construction). Without this the dropdown
+        # reverts to its default first item ("Mean Intensity") on app
+        # reopen because set_active_metric — which usually drives the
+        # combo sync — early-returns when the field is already at the
+        # target value. The user then has to "wiggle" the dropdown to
+        # force the sync, which was particularly visible when smFISH
+        # count was the last-selected metric.
+        try:
+            from well_viewer.core.channel_state_controller import sync_metric_combos
+            sync_metric_combos(app, metric)
+        except Exception:
+            _logger.debug("view_state: metric combo sync failed", exc_info=True)
 
     # Stash per-tab state for deferred apply on first tab visit.
     tabs = state.get("tabs") or {}

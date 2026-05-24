@@ -321,7 +321,22 @@ def smfish_sync_from_app(app) -> None:
     app._smfish_channel_cb.addItems(channels)
     app._smfish_channel_cb.blockSignals(False)
     if channels:
-        app._smfish_channel_cb.setCurrentIndex(0)
+        # Prefer a channel that has a saved threshold so the spinbox
+        # shows the previously-applied value the moment the tab opens
+        # — without this, the combo defaulted to channels[0], and if
+        # the user had applied a threshold to a different channel the
+        # spinbox showed the hardcoded "1500" default until they
+        # manually switched the combo. The saved value still wins
+        # later (via apply_saved_to_spinbox below), but the *visible*
+        # selection now matches the applied configuration on reopen.
+        saved = getattr(app, "_smfish_thresholds_saved", {}) or {}
+        preferred_idx = 0
+        if saved:
+            for i, ch in enumerate(channels):
+                if str(ch).strip().lower() in saved:
+                    preferred_idx = i
+                    break
+        app._smfish_channel_cb.setCurrentIndex(preferred_idx)
     # Restore the saved threshold for the now-current channel before
     # the FOV / TP combos finish populating; otherwise the first
     # _smfish_redraw uses the stale hardcoded "1500" default.

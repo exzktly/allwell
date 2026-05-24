@@ -88,24 +88,21 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     cl.addStretch(1)
 
-    _export_btn = btn_primary(ctrl, "", ctx.app._export_scatter_agg_data,
-                              icon="download")
-    _export_btn.setToolTip("Export CSV")
+    from widgets.icon_button import IconButton as _IconButton
+    _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")
+    _export_btn.clicked.connect(lambda _=False: ctx.app._export_scatter_agg_data())
     cl.addWidget(_export_btn)
-    _b = btn_secondary(ctrl, "", lambda: ctx.app._copy_active_card_as_svg(), icon="copy")
-    _b.setToolTip("Copy SVG")
-    cl.addWidget(_b)
-    _b = btn_secondary(ctrl, "", lambda: ctx.app._save_active_card_figure(), icon="save")
-    _b.setToolTip("Save figure")
-    cl.addWidget(_b)
-    # Properties button last in the row so it sits flush with the right
-    # edge of the plot area — adjacent to where the dock slides out.
-    style_btn = btn_secondary(
-        ctrl, "",
-        lambda: ctx.app._open_export_style_panel("scatter_agg"),
-        icon="sliders-horizontal",
+    _copy_btn = _IconButton("copy", ctrl, tooltip="Copy SVG")
+    _copy_btn.clicked.connect(lambda _=False: ctx.app._copy_active_card_as_svg())
+    cl.addWidget(_copy_btn)
+    _save_btn = _IconButton("save", ctrl, tooltip="Save figure")
+    _save_btn.clicked.connect(lambda _=False: ctx.app._save_active_card_figure())
+    cl.addWidget(_save_btn)
+    style_btn = _IconButton(
+        "sliders-horizontal", ctrl,
+        tooltip="Show / hide the figure properties panel",
     )
-    style_btn.setToolTip("Show / hide the figure properties panel")
+    style_btn.clicked.connect(lambda _=False: ctx.app._open_export_style_panel("scatter_agg"))
     cl.addWidget(style_btn)
     layout.addWidget(ctrl)
 

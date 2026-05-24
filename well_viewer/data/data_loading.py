@@ -88,15 +88,17 @@ _METRIC_SUFFIXES = (
 )
 
 
+from well_viewer.data.image_identity import (  # noqa: E402  (after _METRIC_SUFFIXES decl)
+    normalize_fov_series as _normalize_fov_series,
+)
+
+
 def normalize_fov_series(fov: pd.Series) -> pd.Series:
-    """Coerce a CSV ``fov`` column to the app-wide convention: stripped
-    strings, with empty/``"-1"`` rendered as ``"1"``. Single-FOV pipelines
-    write the column blank; the rest of the app treats blank as FOV ``"1"``
-    so plots, gating, and the smFISH apply-global writer all agree on which
-    rows belong to which image. Shared by ``load_well_csv`` and the smFISH
-    writer's lookup-key construction."""
-    s = fov.astype(str).str.strip()
-    return s.where(~s.isin({"", "-1"}), "1")
+    """Re-exported from :mod:`well_viewer.data.image_identity` — the
+    single source of truth for FOV normalisation. Empty/``"-1"`` → ``"1"``
+    matches the single-FOV-extractor convention so plots, gating, and the
+    smFISH apply-global writer agree on which rows belong to which image."""
+    return _normalize_fov_series(fov)
 
 
 def load_well_csv(path: Path) -> pd.DataFrame:

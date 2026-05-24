@@ -104,15 +104,10 @@ def read_image_arrays(sm_ref: SmfishImgRef, mk_ref: SmfishImgRef):
     return log_img, labels, sorted_vals
 
 
-def normalize_well_token(well: str) -> str:
-    m = re.match(r"([A-Ha-h])(\d{1,2})$", well.strip())
-    if not m:
-        return well.strip().upper()
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}"
-
-
-def normalize_id(value: str) -> str:
-    t = (value or "").strip()
-    if t.isdigit():
-        return str(int(t))
-    return t
+# Re-exports — the canonical implementations now live in image_identity.
+# Kept here so existing callers `from well_viewer.features.smfish.controller
+# import normalize_well_token, normalize_id` keep working without churn.
+from well_viewer.data.image_identity import (  # noqa: E402
+    normalize_well_token,
+    normalize_id,
+)

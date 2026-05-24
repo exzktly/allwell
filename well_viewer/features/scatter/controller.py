@@ -83,6 +83,12 @@ def collect_scatter_data(
         target_tps = [float(t) for t in (timepoints_h or [])]
     target_arr = np.asarray(target_tps, dtype=float)
 
+    # smFISH counts are integer spot tallies, not fluorescence intensities,
+    # so the per-channel fluor-gate (an intensity floor like 50–1500) would
+    # gate out every count cell. Bypass the gate on count axes.
+    is_count_x = isinstance(col_x, str) and col_x.endswith("_smfish_count")
+    is_count_y = isinstance(col_y, str) and col_y.endswith("_smfish_count")
+
     def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, list]]:
         df = app._get_rows(well_label)
         if df is None or df.empty:
@@ -106,7 +112,9 @@ def collect_scatter_data(
             mask &= np.isfinite(area) & (area > cell_area_threshold)
         x = resolve_value_series(df, col_x, ratios).to_numpy()
         y = resolve_value_series(df, col_y, ratios).to_numpy()
-        mask &= np.isfinite(x) & np.isfinite(y) & (x > fluor_gate_x) & (y > fluor_gate_y)
+        gate_x_mask = np.ones_like(x, dtype=bool) if is_count_x else (x > fluor_gate_x)
+        gate_y_mask = np.ones_like(y, dtype=bool) if is_count_y else (y > fluor_gate_y)
+        mask &= np.isfinite(x) & np.isfinite(y) & gate_x_mask & gate_y_mask
         if not mask.any():
             return None
         sel = df.loc[mask]
@@ -537,7 +545,9 @@ def collect_scatter_agg_data(
     # smfish / ratio).
     if metric_x == "smfish":
         val_col_x = f"{ch_x}_smfish_count"
-        threshold_x = 0  # No threshold for smfish counts (all spots)
+        # -1.0 (not 0) so zero-spot cells are counted. Matches the
+        # bar/line/heatmap convention in data_loading.aggregate_with_threshold_df.
+        threshold_x = -1.0
     elif metric_x == "ratio":
         val_col_x = label_to_key.get(ch_x, "")
     elif metric_x == "frac":
@@ -550,7 +560,8 @@ def collect_scatter_agg_data(
 
     if metric_y == "smfish":
         val_col_y = f"{ch_y}_smfish_count"
-        threshold_y = 0  # No threshold for smfish counts (all spots)
+        # See threshold_x comment above.
+        threshold_y = -1.0
     elif metric_y == "ratio":
         val_col_y = label_to_key.get(ch_y, "")
     elif metric_y == "frac":

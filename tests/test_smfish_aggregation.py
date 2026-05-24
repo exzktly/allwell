@@ -92,19 +92,28 @@ def test_resolve_value_series_missing_column_returns_nan(caplog):
     # the WARN regardless of test-order interactions with other suites that
     # may have already emitted (and dedup-suppressed) the same key.
     _dl._missing_col_warned.clear()
-    caplog.set_level(logging.WARNING, logger="well_viewer")
-    out = resolve_value_series(df, "w4gfp_smfish_count", {})
-    assert len(out) == 3
-    assert out.isna().all()
-    # The Step 1 diagnostic must fire so the next 'empty plot' report
-    # carries the missing-column name to the log drawer.
-    # rec.getMessage() interpolates %-args; rec.message is only set after a
-    # formatter touches the record and is unreliable across test orderings.
-    assert any(
-        "resolve_value_series" in rec.getMessage()
-        and "w4gfp_smfish_count" in rec.getMessage()
-        for rec in caplog.records
-    )
+    # status_view sets `propagate = False` on the "well_viewer" logger when a
+    # WellViewerApp is constructed (so GUI log records do not double-print on
+    # the root handler). caplog attaches to the root, so after any test that
+    # builds an app this WARN never reaches it. Re-enable propagation for the
+    # duration of this test.
+    _wv_logger = logging.getLogger("well_viewer")
+    _prev_propagate = _wv_logger.propagate
+    _wv_logger.propagate = True
+    try:
+        caplog.set_level(logging.WARNING, logger="well_viewer")
+        out = resolve_value_series(df, "w4gfp_smfish_count", {})
+        assert len(out) == 3
+        assert out.isna().all()
+        # rec.getMessage() interpolates %-args; rec.message is only set after
+        # a formatter touches the record and is unreliable across test orderings.
+        assert any(
+            "resolve_value_series" in rec.getMessage()
+            and "w4gfp_smfish_count" in rec.getMessage()
+            for rec in caplog.records
+        )
+    finally:
+        _wv_logger.propagate = _prev_propagate
 
 
 def test_resolve_value_series_case_folded_fallback():

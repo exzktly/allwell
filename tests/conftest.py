@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 import pytest
+from well_viewer.domain.stats_compute import compute_rep_stats
 
 
 # ── AggPoint helpers ────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ class MockApp:
 
     def _compute_rep_per_fov_stats(self, rset, target_t: float,
                                    threshold: float, use_sem: bool) -> tuple:
-        gm, gerr, gf, ferr = self._compute_rep_stats(
+        gm, gerr, gf, ferr = compute_rep_stats(self, 
             rset, target_t, threshold, use_sem,
         )
         return (gm, gerr, gf, ferr, 5.0, 0.0)
@@ -169,7 +170,7 @@ class MockApp:
         test that mutates a MockApp field after construction (e.g.
         ``fc_vs_control_on``) is reflected the next time a controller reads it.
         """
-        from well_viewer.state import AppState
+        from well_viewer.core.app_state import AppState
         st = AppState()
         st.channel.active_channel = "gfp"
         st.channel.active_val_col = "gfp_mean_intensity"
@@ -191,7 +192,7 @@ class MockApp:
         return set(self.per_well_pts)
 
     def _rep_sets_active(self):
-        from well_viewer.batch_models import ReplicateSet
+        from well_viewer.domain.batch_models import ReplicateSet
         out = []
         for s in self.selections:
             if s.get("hidden"):

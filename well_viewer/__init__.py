@@ -1,6 +1,6 @@
 """All-Well viewer package."""
 
-from . import debug_flags
+from .core import debug_flags
 
 
 def __getattr__(name):  # PEP 562 lazy import so pure-service modules don't pull GUI

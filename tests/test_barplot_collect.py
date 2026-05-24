@@ -14,10 +14,10 @@ import math
 
 import pytest
 
-from well_viewer.barplot_controller import (
+from well_viewer.features.barplot.controller import (
     BarItem, FC_STATE_OFF, collect_bar_items, collect_bar_items_for_group,
 )
-from well_viewer.batch_models import BarGroup, ReplicateSet
+from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 
 
 def test_collect_bar_items_emits_bar_item_for_each_repset(mock_app):

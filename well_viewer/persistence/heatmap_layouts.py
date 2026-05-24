@@ -10,8 +10,6 @@ from __future__ import annotations
 import logging
 import math
 
-from PySide6.QtCore import QTimer
-
 from well_viewer.persistence import _doc
 
 _logger = logging.getLogger("well_viewer")
@@ -44,37 +42,20 @@ def save_to_data_dir(app) -> None:
     _doc.set_section(app, "heatmap_layouts", payload)
 
 
-def schedule_save(app) -> None:
-    """Debounced autosave — heatmap layout drag-and-drop fires save per
-    drop event; without debouncing, dragging wells around the layout
-    table writes the JSON dozens of times per second on a fast user."""
-    if getattr(app, "_heatmap_layouts_save_pending", False):
-        return
-    if not app._app_state.dataset.data_dir:
-        return
-    app._heatmap_layouts_save_pending = True
-    QTimer.singleShot(500, lambda: _flush(app))
-
-
-def _flush(app) -> None:
-    app._heatmap_layouts_save_pending = False
-    save_to_data_dir(app)
-
-
 def load_from_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
     data = _doc.get_section(app, "heatmap_layouts")
     if not isinstance(data, dict):
         return
-    from well_viewer.heatmap_models import layouts_from_dict
+    from well_viewer.features.heatmap.models import layouts_from_dict
     app._heatmap_layouts = layouts_from_dict(data.get("layouts", []) or [])
     settings = data.get("settings", {}) or {}
     if isinstance(settings, dict):
         app._heatmap_persisted_settings = settings
     if hasattr(app, "_heatmap_sidebar_table"):
         try:
-            from well_viewer.views.heatmap_layout_sidebar_view import (
+            from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
             refresh_heatmap_layout_sidebar(app)

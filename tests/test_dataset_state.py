@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from well_viewer.state.dataset import DatasetState
+from well_viewer.core.dataset_state import DatasetState
 
 
 def _df(timepoints, fovs=None) -> pd.DataFrame:

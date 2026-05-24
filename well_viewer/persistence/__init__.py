@@ -1,8 +1,10 @@
 """Persistence layer for WellViewerApp state.
 
 Each module owns one save/load domain that previously lived as a method
-cluster on ``WellViewerApp`` inside ``runtime_app.py``. Runtime methods now
-delegate to these so the GUI class stops carrying disk-I/O implementations.
+cluster on ``WellViewerApp`` inside ``runtime_app.py``. The data-dir-JSON
+domains register with the ``PersistenceRegistry`` (``registry.py``), which
+``WellViewerApp`` holds as ``app._persistence`` — call sites save / load /
+schedule-save by domain name, and the registry owns the one debounce path.
 
 ``ratios``, ``heatmap_layouts``, and ``line_order`` share a single
 ``persistence.json`` sidecar managed by ``_doc``; legacy per-domain JSON
@@ -10,6 +12,8 @@ files are migrated on first read. ``cell_overrides`` and the bar-group
 file-picker stay separate.
 
 Modules:
+    registry           ``PersistenceRegistry`` — name-keyed save/load dispatch
+                       + the one shared debounced-save path.
     _doc               Shared ``persistence.json`` reader/writer + migration.
     bar_groups         JSON file picker for the bar/replicate-group state.
     ratios             ``persistence.json["ratios"]``.

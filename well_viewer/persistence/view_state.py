@@ -18,6 +18,8 @@ import logging
 from typing import Any
 
 from well_viewer.persistence import _doc
+from well_viewer.features.image_table.controller import image_table_apply_dimensions
+from well_viewer.core.channel_state_controller import set_active_channel
 
 _logger = logging.getLogger("well_viewer")
 
@@ -261,7 +263,7 @@ def restore(app, state: dict) -> None:
         # read app._fc_* directly — so this only matters for combos that
         # exist at restore time (e.g. Line, built eagerly).
         try:
-            from well_viewer.tabs.fold_change_controls import _sync_widgets_to_state
+            from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
             _sync_widgets_to_state(app)
         except Exception:
             _logger.debug("view_state: fold-change combo sync failed", exc_info=True)
@@ -284,7 +286,7 @@ def restore(app, state: dict) -> None:
         and hasattr(app, "_set_active_channel")
     ):
         try:
-            app._set_active_channel(ch)
+            set_active_channel(app, ch)
         except Exception:
             _logger.debug("view_state: _set_active_channel failed", exc_info=True)
 
@@ -446,7 +448,7 @@ def _apply_image_table(app, state: dict) -> None:
                 pass
         if changed and hasattr(app, "_image_table_apply_dimensions"):
             try:
-                app._image_table_apply_dimensions()
+                image_table_apply_dimensions(app)
             except Exception:
                 _logger.debug("image_table: apply_dimensions failed", exc_info=True)
 
@@ -589,7 +591,7 @@ def reset(app) -> None:
     app._app_state.plot.fc_control_label = ""
     app._app_state.plot.fc_vs_t0_on = False
     try:
-        from well_viewer.tabs.fold_change_controls import _sync_widgets_to_state
+        from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
         _sync_widgets_to_state(app)
     except Exception:
         _logger.debug("reset: fold-change sync failed", exc_info=True)
@@ -605,15 +607,18 @@ def reset(app) -> None:
             _doc.set_section(app, "view_state", None)
         except Exception:
             _logger.debug("reset: persistence.json update failed", exc_info=True)
-    # Force a redraw on whatever tab is active.
-    for fn_name in ("_redraw", "_redraw_bars", "_redraw_scatter",
-                    "_redraw_scatter_agg"):
-        fn = getattr(app, fn_name, None)
-        if callable(fn):
-            try:
-                fn()
-            except Exception:
-                pass
+    # Force a redraw on whatever tab is active. The scope coalescer redraws
+    # the visible fold-change tab (bar / line) and marks the rest dirty; the
+    # default-scope _redraw() handles line / distribution / heat map.
+    from well_viewer.domain.fold_change_scopes import redraw_scopes_or_defer
+    try:
+        redraw_scopes_or_defer(app)
+    except Exception:
+        _logger.debug("reset: scope redraw failed", exc_info=True)
+    try:
+        app._redraw()
+    except Exception:
+        _logger.debug("reset: default redraw failed", exc_info=True)
 
 
 def _reset_bar(app) -> None:

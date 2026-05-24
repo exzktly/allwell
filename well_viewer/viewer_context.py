@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from well_viewer.state import AppState, EventBus
-from well_viewer.views.widget_registry import WidgetRegistry
+from well_viewer.core.app_state import AppState
+from well_viewer.core.event_bus import EventBus
+from well_viewer.core.widget_registry import WidgetRegistry
 
 
 @dataclass(frozen=True)

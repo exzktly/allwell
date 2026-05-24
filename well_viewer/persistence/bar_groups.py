@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from well_viewer import selections_model as _sel
+from well_viewer.domain import selections_model as _sel
 from well_viewer.persistence._io import atomic_write_json
 
 _logger = logging.getLogger("well_viewer")

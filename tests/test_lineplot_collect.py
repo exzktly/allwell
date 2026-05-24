@@ -13,8 +13,8 @@ import math
 
 import pytest
 
-from well_viewer.barplot_controller import FC_STATE_OFF
-from well_viewer.lineplot_controller import (
+from well_viewer.features.barplot.controller import FC_STATE_OFF
+from well_viewer.features.lineplot.controller import (
     LinePoint, LineSeries, collect_line_series,
 )
 
@@ -134,7 +134,7 @@ def test_collect_line_series_includes_n_wells_in_display(mock_app):
 def test_linepoint_as_aggpoint_round_trip():
     """LinePoint → AggPoint tuple → preserves all fields needed by line_metric_row."""
     pt = (1.5, 100.0, 10.0, 0.5, 5, 10, 0.05, 1.0, 0.2)
-    from well_viewer.lineplot_controller import _aggpoint_to_linepoint
+    from well_viewer.features.lineplot.controller import _aggpoint_to_linepoint
     lp = _aggpoint_to_linepoint(pt)
     out = lp.as_aggpoint()
     assert out[0] == pt[0]

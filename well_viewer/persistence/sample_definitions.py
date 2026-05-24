@@ -10,18 +10,34 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
-from well_viewer.data_loading import extract_well_token
+from well_viewer.data.data_loading import extract_well_token
 from well_viewer.persistence import (
     cell_gating as _cell_gating,
     ratios as _ratios,
 )
+from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 
 _logger = logging.getLogger("well_viewer")
 
 
+def save_notes(app) -> None:
+    """Debounced-autosave entry for the Notes sub-tab.
+
+    Registered as the ``notes`` persistence domain. Tolerates a missing
+    ``pipeline_info.json`` — the Notes text stays in memory (``app._notes_text``)
+    until a dataset that has one is loaded.
+    """
+    try:
+        save_to_pipeline_info(app)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        _logger.exception("Notes auto-save failed")
+
+
 def save_to_pipeline_info(app) -> None:
     """Merge well labels + the unified ``selections`` model into pipeline_info.json."""
-    from well_viewer.sample_definitions import (
+    from well_viewer.domain.sample_definitions import (
         build_sample_definitions_v2,
         save_to_pipeline_info as _write_block,
     )
@@ -75,7 +91,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
     failure: logs, leaves the existing state alone, disables v2 writes for the
     session, and returns ``(False, {})``.
     """
-    from well_viewer import selections_model as _sel
+    from well_viewer.domain import selections_model as _sel
     tok_to_label = app._app_state.dataset.tok_to_label
     # Mixed v1+v2 payload (both rep_sets/groups *and* a selections list
     # with content) — refuse to migrate. Either path would silently drop
@@ -156,7 +172,7 @@ def load_from_pipeline_info(app) -> bool:
     migrated state is persisted, with a one-time backup, on the next Save).
     Returns True when a block was found and applied.
     """
-    from well_viewer.sample_definitions import read_sample_definitions
+    from well_viewer.domain.sample_definitions import read_sample_definitions
     if not app._app_state.dataset.data_dir:
         return False
     block = read_sample_definitions(app._app_state.dataset.data_dir)
@@ -209,6 +225,11 @@ def load_all(app) -> None:
         _cell_gating.load_from_pipeline_info(app)
     except Exception:
         _logger.exception("Gating load during combined Load failed")
+    try:
+        from well_viewer.persistence import smfish as _smfish_persist
+        _smfish_persist.load_from_pipeline_info(app)
+    except Exception:
+        _logger.exception("smFISH threshold load during combined Load failed")
     if hasattr(app, "_groups_centre_refresh"):
         try:
             app._groups_centre_refresh()
@@ -242,7 +263,7 @@ def clear_all(app) -> None:
     app._app_state.dataset.well_labels.clear()
     if hasattr(app, "_label_panel_refresh"):
         try:
-            app._label_panel_refresh()
+            label_grid_refresh(app)
         except Exception:
             pass
 
@@ -262,7 +283,7 @@ def clear_all(app) -> None:
 
     if hasattr(app, "_cell_gating_area_edit"):
         try:
-            from well_viewer.tabs.cell_gating_tab_view import (
+            from well_viewer.features.grouping.cell_gating_tab_view import (
                 cell_gating_on_gating_change,
                 cell_gating_on_threshold_frac_on_change,
             )

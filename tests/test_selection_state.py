@@ -7,7 +7,7 @@ helpers that compose ``selections_model``.
 
 from __future__ import annotations
 
-from well_viewer.state.selection import SelectionState
+from well_viewer.core.selection_state import SelectionState
 
 
 # ── saved selections ─────────────────────────────────────────────────────────

@@ -98,8 +98,11 @@ def test_resolve_value_series_missing_column_returns_nan(caplog):
     assert out.isna().all()
     # The Step 1 diagnostic must fire so the next 'empty plot' report
     # carries the missing-column name to the log drawer.
+    # rec.getMessage() interpolates %-args; rec.message is only set after a
+    # formatter touches the record and is unreliable across test orderings.
     assert any(
-        "resolve_value_series" in rec.message and "w4gfp_smfish_count" in rec.message
+        "resolve_value_series" in rec.getMessage()
+        and "w4gfp_smfish_count" in rec.getMessage()
         for rec in caplog.records
     )
 

@@ -329,7 +329,13 @@ def redraw_line_plots(
 
     use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
+    # smFISH counts are integer spot counts; the channel's mean-intensity
+    # threshold gates them all out. Treat 'above threshold' as 'has at
+    # least one spot' for smfish_count (matches scatter's convention).
+    if app._app_state.channel.active_metric == "smfish_count":
+        threshold = 0.0
+    else:
+        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     selected = app._selected_labels()
 
     # Fold-change state read once for the axis title suffix. The actual

@@ -365,8 +365,9 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
             except Exception:
                 pass
 
-    # Threshold marker for non-violin modes.
-    if mode != "Violin (per group)":
+    # Threshold marker for non-violin modes. Suppressed for smfish_count —
+    # the channel's intensity threshold doesn't map onto a spot-count axis.
+    if mode != "Violin (per group)" and app._app_state.channel.active_metric != "smfish_count":
         try:
             threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
             if math.isfinite(threshold):
@@ -390,10 +391,13 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h) -> None:
     edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
     grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
 
-    try:
-        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-    except Exception:
+    if app._app_state.channel.active_metric == "smfish_count":
         threshold = float("nan")
+    else:
+        try:
+            threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
+        except Exception:
+            threshold = float("nan")
     show_threshold = math.isfinite(threshold)
 
     last_idx = len(groups) - 1

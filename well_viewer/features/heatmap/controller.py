@@ -381,7 +381,12 @@ def redraw_heatmap(app) -> None:
 
     metric = _selected_metric(app)
     val_col = app._app_state.channel.active_val_col
-    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
+    # smFISH counts use a 0 'above-threshold' floor (matches scatter / bar /
+    # line); the channel's intensity threshold doesn't apply to spot counts.
+    if app._app_state.channel.active_metric == "smfish_count":
+        threshold = 0.0
+    else:
+        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     ratios = app._app_state.channel.ratio_index

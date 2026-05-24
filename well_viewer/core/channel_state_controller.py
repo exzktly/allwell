@@ -86,7 +86,7 @@ def recalculate_threshold(app) -> None:
     # drop a stale smfish_count metric the new channel can't support, and
     # re-derive the value column (a no-op while a ratio is active).
     channel_state = app._app_state.channel
-    channel_state.smfish_channels = set(detected_smfish)
+    channel_state.smfish_channels = set(normalize_channel_tokens(detected_smfish))
     channel_state.normalize_metric()
     channel_state.sync_val_col()
 

@@ -77,13 +77,25 @@ def parse_timepoint_hours(tp: str) -> Optional[float]:
 # Columns kept as strings (not coerced to float)
 _STRING_COLS = {"filename", "experiment", "channel", "well", "fov", "timepoint"}
 
+# Per-channel measurement column suffixes — the prefix is a channel token,
+# which the rest of the app handles in lower-case (normalize_channel_tokens).
+# Lower-casing these at read time keeps the CSV-on-disk schema (where casing
+# depends on whatever wrote the column — pipeline, smFISH worker, hand edit)
+# in sync with the lower-case convention every downstream lookup uses.
+_METRIC_SUFFIXES = (
+    "_mean_intensity", "_total_intensity", "_max_intensity",
+    "_min_intensity", "_std_intensity", "_smfish_count",
+)
+
 
 def load_well_csv(path: Path) -> pd.DataFrame:
     """Load a per-well CSV into a DataFrame.
 
     String columns (``_STRING_COLS``) stay as object dtype; any other column
     is coerced via ``pd.to_numeric(errors="coerce")``. Non-canonical casings
-    of the string columns ("FOV" → "fov") are renamed. The ``Included`` column
+    of the string columns ("FOV" → "fov") are renamed, as are per-channel
+    measurement columns whose channel-prefix uses upper-case
+    ("W3Cy5_smfish_count" → "w3cy5_smfish_count"). The ``Included`` column
     is added with default value 1 if missing. Empty/"-1" FOVs are normalised
     to "1".
     """
@@ -91,10 +103,16 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     if df.empty:
         return df
 
+    def _should_lower(col: str) -> bool:
+        lc = str(col).strip().lower()
+        if lc in _STRING_COLS:
+            return True
+        return any(lc.endswith(suf) for suf in _METRIC_SUFFIXES)
+
     rename = {
         col: str(col).strip().lower()
         for col in df.columns
-        if str(col).strip().lower() in _STRING_COLS and col != str(col).strip().lower()
+        if _should_lower(col) and col != str(col).strip().lower()
     }
     if rename:
         df = df.rename(columns=rename)
@@ -235,7 +253,15 @@ def resolve_value_series(
         return pd.Series(val, index=df.index)
 
     if key not in df.columns:
-        return pd.Series(np.nan, index=df.index)
+        # Case-insensitive fallback: load_well_csv now normalises measurement
+        # columns to lower-case, but older cached frames or upstream callers
+        # may still hold mixed-case headers. Resolve by case-folded match
+        # before declaring the column missing.
+        lc = key.lower()
+        match = next((c for c in df.columns if c.lower() == lc), None)
+        if match is None:
+            return pd.Series(np.nan, index=df.index)
+        key = match
     v = pd.to_numeric(df[key], errors="coerce")
     return v.where(np.isfinite(v), np.nan)
 

@@ -380,7 +380,12 @@ def redraw_bars(app) -> None:
 
     use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
+    # smfish_count: include zero-spot cells in the mean / beeswarm / violin
+    # population (see barplot/controller.py for the full rationale).
+    if app._app_state.channel.active_metric == "smfish_count":
+        threshold = -1.0
+    else:
+        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
 
     active_rsets = app._rep_sets_active()
     bar_selected = selected_bar_wells(app, active_rsets)

@@ -144,6 +144,38 @@ well_viewer/
 └── persistence/                   ← JSON read/write, debounced save registry
 ```
 
+### File-name suffix conventions
+
+The codebase uses a suffix-based scheme so the file name tells the reader the role. Within a feature directory the suffixes also indicate which layer the file belongs to (Qt builder vs. pure-math vs. data-only).
+
+| Suffix | Role | Examples |
+|---|---|---|
+| `controller.py` / `_controller.py` | Orchestrator: event handlers, business logic, state mutation. Owns the feature's behaviour. | `features/barplot/controller.py`, `core/load_controller.py`, `core/channel_state_controller.py` |
+| `renderer.py` | Pure matplotlib drawing. Decoupled from Qt — takes a figure / axes and a state snapshot. | `features/barplot/renderer.py`, `features/review_image/renderer.py` |
+| `tab_view.py` | Qt builder for a feature's main tab page (returns the assembled `QWidget`). | every `features/*/tab_view.py` |
+| `*_view.py` | Qt builder for a sub-panel, sidebar, or sub-dialog. | `sidebar_view.py`, `panel_view.py`, `csv_tab_view.py`, `picker_view.py`, `core/app_shell_view.py` |
+| `state.py` / `_state.py` | Dataclass state container; no logic, only fields + defaults. | `core/app_state.py`, `core/channel_state.py`, `features/stats/state.py` |
+| `_coordinator.py` | EventBus subscriber — subscribes signals and fans them out to controllers. | `core/redraw_coordinator.py` |
+| `_registry.py` | Registry pattern (deferred lookup, debounced save, etc.). | `core/widget_registry.py`, `core/scope_registry.py`, `persistence/registry.py` |
+| `_orchestrator.py` | Fan-out helper across multiple features. | `core/plot_orchestrator.py` |
+| `_models.py` | Plain dataclasses (no behaviour). | `domain/batch_models.py`, `domain/ratio_models.py` |
+| `_compute.py` | Pure-math layer shared across plot controllers. | `domain/stats_compute.py` |
+| `service.py` | Non-Qt service entry point. | `features/export/service.py` |
+| `callbacks.py` | Matplotlib click / interaction handlers for a feature. | `features/scatter/callbacks.py`, `features/preview/callbacks.py` |
+| `worker.py` | Background `QThread` worker. | `features/smfish/worker.py` |
+| `_panel.py` | Per-plot-type panel (only inside `features/batch_export/`). | `features/batch_export/bar_panel.py`, `scatter_panel.py` |
+| `_` prefix | Private helper module (not part of the package's public surface). | `persistence/_doc.py`, `_io.py`, `features/batch_export/_common.py`, `_line_series_runner.py` |
+
+**Known exceptions** (legacy or single-purpose modules that don't fit the grid; do not propagate these naming choices to new files):
+
+- `features/grouping/view.py` and `features/stats/view.py` use bare `view.py` instead of `tab_view.py` — both predate the convention.
+- `features/preview/montage.py` is a feature-internal helper that doesn't fit a suffix.
+- `features/heatmap/models.py` is the only `models.py` in `features/` (the convention under `domain/` is `_models.py`).
+- `data/` modules use bare names (`data_loading.py`, `auto_threshold.py`, `crop_tool.py`, `image_discovery.py`, `image_resolver.py`, `metric_labels.py`, `zipfile_cache.py`) — each is one self-contained utility, no internal suffix scheme.
+- `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `gating_state`) and bare (`fold_change.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
+- `persistence/` modules are named for the `pipeline_info.json` block they persist (`bar_groups.py`, `ratios.py`, `cell_gating.py`) — no `_persistence.py` suffix.
+- `runtime_app.py`, `viewer_context.py` — top-level singletons; no suffix.
+
 A few rules of thumb so you know where to put something new:
 
 - **It runs the pipeline →** put it in / next to `process_microscopy.py`. Keep

@@ -927,6 +927,8 @@ class WellViewerApp(QWidget):
             self._app_state.dataset.cache[label] = load_well_csv(self._app_state.dataset.well_paths[label])
         return self._app_state.dataset.cache[label]
 
+    def _invalidate_dataset_cache(self) -> None: self._app_state.dataset.cache.clear()
+
 
 
     # ── Preview panel ─────────────────────────────────────────────────────────

@@ -471,16 +471,24 @@ def set_active_metric(app, metric: str) -> None:
     if not is_ratio_key(active_val_col):
         cache = getattr(app._app_state.dataset, "cache", {}) or {}
         first_df = next(iter(cache.values()), None)
-        if first_df is not None and active_val_col not in first_df.columns:
+        if (
+            first_df is not None
+            and active_val_col not in first_df.columns
+            and not any(c.lower() == active_val_col.lower() for c in first_df.columns)
+        ):
             _logger.warning(
                 "set_active_metric: active_val_col=%r not present in first "
-                "cached well DataFrame (channel=%r, metric=%r). Per-cell "
-                "lookups will return NaN. Cached columns: %s",
+                "cached well DataFrame (channel=%r, metric=%r). Dropping "
+                "the per-well DataFrame cache and re-reading from disk to "
+                "recover from a stale cache (e.g. pre-normalisation "
+                "mixed-case headers). Cached columns were: %s",
                 active_val_col,
                 app._app_state.channel.active_channel,
                 metric,
                 sorted(first_df.columns.tolist()),
             )
+            if hasattr(app, "_invalidate_dataset_cache"):
+                app._invalidate_dataset_cache()
     label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
     # Sync every metric combo (per-tab hidden legacy combos + the
     # global ctxbar combo + the stats per-tab Property combo) without

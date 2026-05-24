@@ -723,6 +723,10 @@ def _smfish_apply_to_all(app) -> None:
     else:
         app._smfish_cancel_event.clear()
 
+    # well_to_csv is the same map the app's loader populated, so the
+    # writer hits the exact files the rest of the app reads from — no
+    # silent glob mismatches on datasets whose CSVs are named e.g.
+    # "<well>.csv" with no underscore prefix.
     apply_global_threshold_async(
         out_dir=app._smfish_out_dir,
         well_to_zip=app._smfish_well_to_zip,
@@ -735,6 +739,7 @@ def _smfish_apply_to_all(app) -> None:
         after_csv_cb=_after_csv,
         cancel_event=app._smfish_cancel_event,
         expected_data_dir=app._smfish_out_dir,
+        well_to_csv=dict(app._app_state.dataset.well_paths),
     )
 
 

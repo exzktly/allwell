@@ -66,26 +66,63 @@ def _process_well(
     return counts
 
 
+def _resolve_csv_path(
+    well: str,
+    well_to_csv: dict[str, Path] | None,
+    out_dir: Path,
+) -> Path | None:
+    """Resolve the per-well CSV path for *well*. Prefers the explicit
+    ``well_to_csv`` map (the same one the app's loader populated) so a
+    silent glob mismatch can't drop wells whose CSVs are named
+    ``<well>.csv`` rather than ``<prefix>_<well>.csv``. Falls back to
+    the legacy ``*_{well}.csv`` glob only when the map is unavailable."""
+    if well_to_csv is not None:
+        path = well_to_csv.get(well)
+        if path is None:
+            return None
+        return Path(path)
+    csv_matches = list(out_dir.glob(f"*_{well}.csv"))
+    if not csv_matches:
+        return None
+    if len(csv_matches) > 1:
+        logger.warning(
+            "Multiple CSV candidates for well %s in %s: %s — skipping to "
+            "avoid writing to the wrong file. Resolve the ambiguity by "
+            "removing or renaming duplicates.",
+            well, out_dir, [p.name for p in csv_matches],
+        )
+        return None
+    return csv_matches[0]
+
+
+def _drop_case_equivalent_columns(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    """Remove any column whose lowercase form equals *target* before the
+    writer reassigns *target*. Without this an upstream CSV that used
+    e.g. ``W3Cy5_smfish_count`` would survive alongside the freshly
+    written ``w3cy5_smfish_count`` — readers that case-fold then hit a
+    duplicate-column collision, and case-sensitive readers keep seeing
+    the stale pre-apply counts."""
+    target_lc = target.lower()
+    drop = [c for c in df.columns
+            if str(c).lower() == target_lc and c != target]
+    if drop:
+        df = df.drop(columns=drop)
+    return df
+
+
 def _write_counts_to_csvs(
     out_dir: Path,
     well_to_zip: dict[str, Path],
     counts: dict[tuple[str, str, str, str], int],
     column: str,
+    well_to_csv: dict[str, Path] | None = None,
 ) -> None:
     for well in sorted(well_to_zip):
-        csv_matches = list(out_dir.glob(f"*_{well}.csv"))
-        if not csv_matches:
+        csv_path = _resolve_csv_path(well, well_to_csv, out_dir)
+        if csv_path is None:
             continue
-        if len(csv_matches) > 1:
-            logger.warning(
-                "Multiple CSV candidates for well %s in %s: %s — skipping to "
-                "avoid writing to the wrong file. Resolve the ambiguity by "
-                "removing or renaming duplicates.",
-                well, out_dir, [p.name for p in csv_matches],
-            )
-            continue
-        csv_path = csv_matches[0]
         df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+        df = _drop_case_equivalent_columns(df, column)
 
         well_series = (df["well"] if "well" in df.columns
                        else pd.Series([""] * len(df), index=df.index)).fillna("")
@@ -126,6 +163,7 @@ def apply_global_threshold_async(
     after_csv_cb: Callable[[], None] | None = None,
     cancel_event: threading.Event | None = None,
     expected_data_dir: Path | None = None,
+    well_to_csv: dict[str, Path] | None = None,
 ) -> threading.Thread:
     """Launch the apply-to-all worker on a daemon thread.
 
@@ -198,7 +236,7 @@ def apply_global_threshold_async(
                 "the run was started."
             )
             return
-        _write_counts_to_csvs(out_dir, well_to_zip, counts, column)
+        _write_counts_to_csvs(out_dir, well_to_zip, counts, column, well_to_csv)
         if after_csv_cb is not None:
             after_csv_cb()
         done_cb("Apply to All complete. Line/Bar plots refreshed.")

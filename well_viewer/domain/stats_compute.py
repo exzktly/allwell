@@ -343,7 +343,25 @@ def aggregate_well(
     per_fov_spread: bool = False,
     tp_col: str = "timepoint_hours",
 ):
-    """Aggregate a single well via the vectorized DataFrame path."""
+    """Aggregate a single well via the vectorized DataFrame path.
+
+    If ``app`` exposes a callable ``_aggregate_well`` (the pure-logic
+    test MockApp does, returning precomputed AggPoints from its
+    in-memory map), delegate to it. Production ``WellViewerApp`` does
+    not define this method, so the DataFrame path is used at runtime.
+    """
+    delegate = getattr(app, "_aggregate_well", None)
+    if callable(delegate):
+        return delegate(
+            label,
+            threshold=threshold,
+            use_sem=use_sem,
+            val_col=val_col,
+            cell_area_threshold=cell_area_threshold,
+            fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+            tp_col=tp_col,
+        )
     return aggregate_with_threshold_df(
         app._get_rows(label),
         threshold=threshold,
@@ -369,6 +387,18 @@ def aggregate_group(
     tp_col: str = "timepoint_hours",
 ):
     """Aggregate a list of wells via the vectorized path (concatenated when len>1)."""
+    delegate = getattr(app, "_aggregate_group", None)
+    if callable(delegate):
+        return delegate(
+            wells,
+            threshold=threshold,
+            use_sem=use_sem,
+            val_col=val_col,
+            cell_area_threshold=cell_area_threshold,
+            fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+            tp_col=tp_col,
+        )
     valid = [w for w in wells if w in app._app_state.dataset.well_paths]
     if not valid:
         return []

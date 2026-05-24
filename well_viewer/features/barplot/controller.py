@@ -154,12 +154,16 @@ def collect_bar_items(
     """
     use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    # smFISH counts are integer spot counts (0..~100), so the channel's
-    # mean-intensity threshold (~50..1500) gates everything out. Match
-    # the scatter convention and treat 'above threshold' as 'has at
-    # least one spot' for smfish_count.
+    # smFISH counts are integer spot counts (0..~100). The channel's
+    # mean-intensity threshold (~50..1500) gates everything out; even
+    # threshold=0 drops cells with no detected spots, which collapses
+    # the mean to NaN when most/all cells are zero. Use a negative
+    # floor so every finite count contributes to the mean — that's the
+    # standard 'mean spots per cell across the whole population'
+    # (fraction-above-threshold loses meaning at this floor; the title
+    # helpers acknowledge this with 'thresholds ignored').
     if app._app_state.channel.active_metric == "smfish_count":
-        threshold = 0.0
+        threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     active_rsets = app._rep_sets_active()

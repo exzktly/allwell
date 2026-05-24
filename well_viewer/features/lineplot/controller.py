@@ -329,11 +329,12 @@ def redraw_line_plots(
 
     use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    # smFISH counts are integer spot counts; the channel's mean-intensity
-    # threshold gates them all out. Treat 'above threshold' as 'has at
-    # least one spot' for smfish_count (matches scatter's convention).
+    # smFISH counts: use a negative floor so cells with zero detected
+    # spots still contribute to the mean (see barplot/controller.py for
+    # the full rationale — at threshold=0 an all-zero population yields
+    # NaN means and the plot stays empty).
     if app._app_state.channel.active_metric == "smfish_count":
-        threshold = 0.0
+        threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     selected = app._selected_labels()

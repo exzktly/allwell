@@ -113,7 +113,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("Channel:", ctrl))
     ctx.app._smfish_channel_cb = QComboBox(ctrl)
     ctx.app._smfish_channel_cb.currentIndexChanged.connect(
-        lambda _i: _smfish_refresh_fov_tp_values(ctx.app)
+        lambda _i: _smfish_on_channel_changed(ctx.app)
     )
     cl.addWidget(ctx.app._smfish_channel_cb)
 
@@ -305,6 +305,30 @@ def smfish_sync_from_app(app) -> None:
     app._smfish_channel_cb.blockSignals(False)
     if channels:
         app._smfish_channel_cb.setCurrentIndex(0)
+    # Restore the saved threshold for the now-current channel before
+    # the FOV / TP combos finish populating; otherwise the first
+    # _smfish_redraw uses the stale hardcoded "1500" default.
+    try:
+        from well_viewer.persistence import smfish as _smfish_persist
+        _smfish_persist.apply_saved_to_spinbox(app)
+    except Exception:
+        logging.getLogger("well_viewer").exception(
+            "smFISH threshold restore on channel populate failed"
+        )
+    _smfish_refresh_fov_tp_values(app)
+
+
+def _smfish_on_channel_changed(app) -> None:
+    """Channel combo handler: restore the saved threshold for the
+    new channel (so the spinbox matches the spot counts already in
+    the CSVs), then run the standard FOV/TP refresh."""
+    try:
+        from well_viewer.persistence import smfish as _smfish_persist
+        _smfish_persist.apply_saved_to_spinbox(app)
+    except Exception:
+        logging.getLogger("well_viewer").exception(
+            "smFISH threshold restore on channel change failed"
+        )
     _smfish_refresh_fov_tp_values(app)
 
 
@@ -674,6 +698,16 @@ def _smfish_apply_to_all(app) -> None:
     frame = app._smfish_frame
 
     def _after_csv() -> None:
+        # Persist the just-applied threshold so the next session opens
+        # this dataset with the value that matches the spot counts now
+        # baked into the per-well CSVs.
+        try:
+            from well_viewer.persistence import smfish as _smfish_persist
+            _smfish_persist.save_threshold(app, channel, thr)
+        except Exception:
+            logging.getLogger("well_viewer").exception(
+                "smFISH threshold persistence failed"
+            )
         QTimer.singleShot(0, lambda: _smfish_refresh_app_cache(app))
         QTimer.singleShot(
             0,
@@ -709,4 +743,21 @@ def _smfish_refresh_app_cache(app) -> None:
         if label in app._app_state.dataset.cache:
             app._app_state.dataset.cache[label] = app._load_well_csv(path)
     recalculate_threshold(app)
+    # The per-well DataFrames now carry new smfish_count values; the
+    # stats cache keys do not include CSV content, so without an
+    # explicit invalidation every line / bar / scatter aggregate keeps
+    # returning the pre-apply numbers.
+    if hasattr(app, "_invalidate_stats_cache"):
+        app._invalidate_stats_cache()
     app._redraw()
+    # Refresh the Review CSV table so the smfish_count column on the
+    # active well reflects the new counts. The plot redraw above does
+    # not touch the Review CSV widget — it lives outside the plot fan-out.
+    refresh_review_csv = getattr(app, "_refresh_review_csv", None)
+    if callable(refresh_review_csv):
+        try:
+            refresh_review_csv()
+        except Exception:
+            logging.getLogger("well_viewer").exception(
+                "Review CSV refresh after Apply Global Threshold failed"
+            )

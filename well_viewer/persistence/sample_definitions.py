@@ -225,6 +225,11 @@ def load_all(app) -> None:
         _cell_gating.load_from_pipeline_info(app)
     except Exception:
         _logger.exception("Gating load during combined Load failed")
+    try:
+        from well_viewer.persistence import smfish as _smfish_persist
+        _smfish_persist.load_from_pipeline_info(app)
+    except Exception:
+        _logger.exception("smFISH threshold load during combined Load failed")
     if hasattr(app, "_groups_centre_refresh"):
         try:
             app._groups_centre_refresh()

@@ -479,7 +479,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. |
 | `features/image_table/controller.py` | Image Table grid: per-cell config, distribute, export. |
 | `features/preview/{controller,callbacks,montage}.py` | Preview-panel helpers; `montage.py` is the legacy Movie Montage popout, folded into Image Table — kept for image-LUT helpers. |
-| `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. |
+| `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. |
 | `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
@@ -537,6 +537,7 @@ Every "save state into the dataset folder" path lives under
 | File on disk | Module | What it holds |
 |--------------|--------|---------------|
 | `pipeline_info.json::cell_gating` | `cell_gating.py` | Cell-area + per-channel `fluor_gates` + `thresh_frac_on`. |
+| `pipeline_info.json::smfish_thresholds` | `smfish.py` | Per-channel smFISH spot-detection threshold (`{channel: float}`). Saved only on a successful Apply Global Threshold so the value the spinbox shows matches the spot counts baked into the per-well CSVs. Restored on dataset open and on channel-combo switch. |
 | `pipeline_info.json::sample_definitions` | `sample_definitions.py` (top level) | Saved selections (`_selections`). |
 | `persistence.json::ratios` | `ratios.py` | User-defined ratio channels. |
 | `persistence.json::heatmap_layouts` | `heatmap_layouts.py` | Saved heatmap layouts + cmap/scale state. |

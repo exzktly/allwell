@@ -187,6 +187,18 @@ def load_directory(app, d: Path, label=None) -> None:
             logging.getLogger("well_viewer").exception(
                 "Eager Cell Gating load from pipeline_info failed"
             )
+    # Hydrate saved smFISH thresholds so the spinbox shows the value
+    # that matches the spot counts already baked into the per-well CSVs.
+    # The smFISH tab is built lazily, so this primarily populates the
+    # in-memory cache (app._smfish_thresholds_saved); the spinbox itself
+    # is restored when the tab populates its channel combo.
+    try:
+        from well_viewer.persistence import smfish as _smfish_persist
+        _smfish_persist.load_from_pipeline_info(app)
+    except Exception:
+        logging.getLogger("well_viewer").exception(
+            "Eager smFISH threshold load from pipeline_info failed"
+        )
     app._persistence.load("heatmap_layouts")
     # Hydrate view-state (active tab, selected wells, channel, fold-change
     # scopes, per-tab combos) — must come after the cross-cutting state

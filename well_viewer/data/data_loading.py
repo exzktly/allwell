@@ -260,6 +260,14 @@ def resolve_value_series(
         lc = key.lower()
         match = next((c for c in df.columns if c.lower() == lc), None)
         if match is None:
+            warn_key = f"resolve_value_series::{id(df)}::{key}"
+            if warn_key not in _missing_col_warned:
+                _missing_col_warned.add(warn_key)
+                _logger.warning(
+                    "resolve_value_series: column %r not found in DataFrame "
+                    "(id=%s, %d cols); returning NaN-filled series. Columns: %s",
+                    key, id(df), len(df.columns), sorted(df.columns.tolist()),
+                )
             return pd.Series(np.nan, index=df.index)
         key = match
     v = pd.to_numeric(df[key], errors="coerce")

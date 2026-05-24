@@ -471,40 +471,23 @@ def on_review_image_channel_selected(app, _e=None) -> None:
 def review_row_keys_series(app, df: pd.DataFrame) -> Optional[pd.Series]:
     """Vectorized counterpart of ``_review_row_keys`` for a DataFrame.
 
-    Returns a Series of ``(fov, tp_norm, nid_norm)`` tuples aligned with
+    Returns a ``Series`` of ``(fov, tp, nid)`` tuples aligned with
     ``df.index``, or ``None`` if no usable identifier columns are present.
-    """
+
+    Built on :func:`image_identity.cell_keys_for_dataframe` so this side
+    of the lookup uses the same well/fov/tp/nid normalisation chain the
+    smFISH writer and ``cell_overrides`` use — no more drift between the
+    review-image overrides side (used to use ``:g`` float format) and the
+    smFISH writer side (used to strip only)."""
     if df is None or df.empty:
         return None
-
-    def _resolve_col(*names: str) -> Optional[str]:
-        lowered = {str(c).lower(): c for c in df.columns}
-        for name in names:
-            if name in df.columns:
-                return name
-            key = name.lower()
-            if key in lowered:
-                return lowered[key]
+    from well_viewer.data.image_identity import cell_keys_for_dataframe
+    keys = cell_keys_for_dataframe(df)
+    if keys.empty:
         return None
-
-    def _norm_token(s: pd.Series) -> pd.Series:
-        s = s.fillna("").astype(str).str.strip()
-        num = pd.to_numeric(s, errors="coerce")
-        return s.where(num.isna(), num.map(lambda f: f"{f:g}" if pd.notna(f) else ""))
-
-    fov_col = _resolve_col("fov", "FOV")
-    tp_col = _resolve_col("timepoint", "tp", "time", "time_h", "timepoint_hours")
-    nid_col = _resolve_col("nucleus_id", "nucleus id", "nucleusId", "nucleusID")
-    if fov_col is None and tp_col is None and nid_col is None:
-        return None
-
-    fov = (_norm_token(df[fov_col]) if fov_col else
-           pd.Series([""] * len(df), index=df.index))
-    tp = (df[tp_col].map(app._norm_timepoint) if tp_col else
-          pd.Series([""] * len(df), index=df.index))
-    nid = (_norm_token(df[nid_col]) if nid_col else
-           pd.Series([""] * len(df), index=df.index))
-    return pd.Series(list(zip(fov, tp, nid)), index=df.index)
+    # Strip the well token — historical callers want a 3-tuple
+    # (fov, tp, nid) keyed off the active well selection separately.
+    return pd.Series([(k.fov, k.tp, k.nid) for k in keys], index=df.index)
 
 
 

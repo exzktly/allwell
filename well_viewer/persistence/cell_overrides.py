@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
+from well_viewer.data.image_identity import CellKey
 from well_viewer.persistence._io import atomic_write_json
 
 _logger = logging.getLogger("well_viewer")
@@ -129,12 +130,17 @@ def load_from_data_dir(app) -> None:
                 continue
         else:
             legacy_unfingerprinted += 1
-        fov_n, tp_n, nid_n = app._review_row_keys(
-            {"fov": fov, "tp": tp, "nucleus_id": nid}
+        # Build the lookup key via CellKey — the single source of truth.
+        # Previously this strip-only path silently disagreed with the
+        # smFISH writer's empty-FOV → "1" rule, so on single-FOV datasets
+        # the override was unreachable. CellKey applies the same chain
+        # both sides use.
+        key = CellKey.from_row(
+            {"fov": fov, "timepoint": tp, "nucleus_id": nid}, well=well,
         )
-        if not (fov_n and tp_n and nid_n):
+        if not (key.fov and key.tp and key.nid):
             continue
-        new_map[(well, fov_n, tp_n, nid_n)] = inc
+        new_map[key.as_tuple()] = inc
     if dropped_stale:
         _logger.warning(
             "cell_overrides: dropped %d override(s) whose segmentation "

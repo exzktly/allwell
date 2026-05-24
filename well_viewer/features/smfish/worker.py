@@ -17,13 +17,14 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from well_viewer.data.data_loading import normalize_fov_series
+from well_viewer.data.image_identity import (
+    CellKey, cell_keys_for_dataframe,
+    normalize_fov, normalize_nucleus_id, normalize_tp, normalize_well,
+)
 from well_viewer.persistence._io import atomic_write_text
 from well_viewer.features.preview.controller import read_member_bytes
 from well_viewer.features.smfish.controller import (
     SmfishImgRef,
-    normalize_id,
-    normalize_well_token,
     scan_well_zip,
 )
 
@@ -62,8 +63,23 @@ def _process_well(
         hits = labels[(labels > 0) & (log_img > threshold)].astype(np.int64, copy=False)
         if hits.size:
             hit_counts = np.bincount(hits)
+            # Build the counts dict's keys via CellKey so the producer
+            # side matches the consumer side (CSV lookup) byte-for-byte:
+            # same well/fov/tp/nid normalisation, no possibility of drift.
+            # Normalise the filename-derived tokens via the same rules
+            # CellKey.from_row uses on the CSV side — that's the whole
+            # point of the unified module: producer and consumer keys
+            # go through identical normalisation, no possibility of drift.
+            fov_n = normalize_fov(key[0])
+            tp_n = normalize_tp(key[1])
             for nid in np.nonzero(hit_counts)[0]:
-                counts[(well, key[0], key[1], str(int(nid)))] = int(hit_counts[nid])
+                k = CellKey(
+                    well=normalize_well(well),
+                    fov=fov_n,
+                    tp=tp_n,
+                    nid=normalize_nucleus_id(int(nid)),
+                )
+                counts[k.as_tuple()] = int(hit_counts[nid])
     return counts
 
 
@@ -125,31 +141,12 @@ def _write_counts_to_csvs(
         df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
         df = _drop_case_equivalent_columns(df, column)
 
-        well_series = (df["well"] if "well" in df.columns
-                       else pd.Series([""] * len(df), index=df.index)).fillna("")
-        r_well = well_series.where(well_series != "", well).map(normalize_well_token)
-        # Apply the same empty/-1 → "1" convention load_well_csv uses
-        # (data_loading.normalize_fov_series). Without this, single-FOV
-        # datasets — whose CSV `fov` column is blank — get a lookup key
-        # of ("", …) while _process_well's single-FOV extractor synthesises
-        # FOV="1", and counts.get(...) misses every row.
-        fov_raw = (df.get("fov", df.get("FOV", pd.Series([""] * len(df), index=df.index)))
-                   .fillna("").astype(str))
-        fov_raw = normalize_fov_series(fov_raw)
-        fov = fov_raw.map(normalize_id)
-        tp_raw_cols = [c for c in ("timepoint", "tp", "time") if c in df.columns]
-        if tp_raw_cols:
-            tp_raw = df[tp_raw_cols[0]]
-            for c in tp_raw_cols[1:]:
-                tp_raw = tp_raw.where(tp_raw.fillna("") != "", df[c])
-        else:
-            tp_raw = pd.Series([""] * len(df), index=df.index)
-        tp = tp_raw.fillna("").astype(str).map(normalize_id)
-        nid = ((df["nucleus_id"] if "nucleus_id" in df.columns
-                else pd.Series([""] * len(df), index=df.index))
-               .fillna("").astype(str).str.strip())
-
-        keys = list(zip(r_well, fov, tp, nid))
+        # Build lookup keys via the single source of truth — CellKey applies
+        # the same well/fov/tp/nid normalisation chain the producer side
+        # uses, so the (well, fov, tp, nid) tuples in `counts` and the CSV
+        # lookup keys are constructed by the same code path.
+        cell_keys = cell_keys_for_dataframe(df, default_well=well)
+        keys = [ck.as_tuple() for ck in cell_keys]
         df[column] = [str(counts.get(k, 0)) for k in keys]
 
         # Diagnostic: when every lookup misses we'd otherwise silently

@@ -1,6 +1,6 @@
 """Regression tests for ``well_viewer.features.smfish.worker._write_counts_to_csvs``.
 
-Pins three writer bugs that made Apply Global Threshold appear to do nothing:
+Pins four writer bugs that made Apply Global Threshold appear to do nothing:
 
 1. **Column-case collision.** The writer wrote the column name as
    ``f"{channel.lower()}_smfish_count"``, but if the upstream CSV used
@@ -20,12 +20,15 @@ Pins three writer bugs that made Apply Global Threshold appear to do nothing:
 3. **Empty-FOV ⇄ single-FOV-extractor key drift.** ``load_well_csv``
    normalises an empty / ``"-1"`` ``fov`` column to ``"1"`` so the rest
    of the app and the smFISH single-FOV extractor (which synthesises
-   FOV=``"1"``) agree. The writer used to read the CSV raw via
-   ``pd.read_csv`` and never applied that rule, so lookup keys had
-   ``fov=""`` while counts keys had ``fov="1"``. Every cell got a
-   missed lookup → column filled with ``"0"`` → file mtime updated
-   with no visible change. ``data_loading.normalize_fov_series`` is
-   now shared between both call sites.
+   FOV=``"1"``) agree.
+
+4. **Cross-axis normalisation via `CellKey`.** Producer (``_process_well``)
+   and consumer (``_write_counts_to_csvs``) both build keys via
+   ``image_identity.CellKey`` so well/fov/tp/nid normalisation is
+   guaranteed to match — empty-fov, ``"-1"``, letter-prefixed tp like
+   ``"T01"``, padding like ``"001"``, and ``.0`` float artefacts on nid
+   all collapse identically on both sides. Test counts dicts mirror
+   what ``_process_well`` actually produces (post-``CellKey``).
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from well_viewer.data.image_identity import normalize_tp
 from well_viewer.features.smfish.worker import (
     _drop_case_equivalent_columns,
     _resolve_csv_path,
@@ -85,7 +89,10 @@ def test_writer_overwrites_existing_mixed_case_column(tmp_path):
         "nucleus_id": ["1", "2"],
         "W3Cy5_smfish_count": ["999", "999"],  # pre-apply, will be replaced
     }))
-    counts = {("B02", "1", "24h", "1"): 5, ("B02", "1", "24h", "2"): 7}
+    counts = {
+        ("B02", "1", normalize_tp("24h"), "1"): 5,
+        ("B02", "1", normalize_tp("24h"), "2"): 7,
+    }
 
     _write_counts_to_csvs(
         out_dir=tmp_path,
@@ -114,7 +121,7 @@ def test_writer_uses_well_to_csv_map_over_glob(tmp_path):
         "nucleus_id": ["1"],
         "w3cy5_smfish_count": ["999"],
     }))
-    counts = {("B02", "1", "24h", "1"): 42}
+    counts = {("B02", "1", normalize_tp("24h"), "1"): 42}
 
     _write_counts_to_csvs(
         out_dir=tmp_path,
@@ -140,7 +147,10 @@ def test_writer_skipped_well_does_not_corrupt_other_csvs(tmp_path):
     # well_to_zip mentions C03 but the well_to_csv map omits it (the well
     # has no CSV loaded). The writer must skip C03 silently and still
     # write B02 correctly.
-    counts = {("B02", "1", "24h", "1"): 7, ("C03", "1", "24h", "1"): 9}
+    counts = {
+        ("B02", "1", normalize_tp("24h"), "1"): 7,
+        ("C03", "1", normalize_tp("24h"), "1"): 9,
+    }
 
     _write_counts_to_csvs(
         out_dir=tmp_path,
@@ -166,7 +176,7 @@ def test_writer_zero_count_cells_get_zero_not_missing(tmp_path):
         "nucleus_id": ["1", "2"],
         "w3cy5_smfish_count": ["100", "200"],  # both will be replaced
     }))
-    counts = {("B02", "1", "24h", "1"): 5}  # cell 2 has no spots above the new threshold
+    counts = {("B02", "1", normalize_tp("24h"), "1"): 5}  # cell 2 has no spots above the new threshold
 
     _write_counts_to_csvs(
         out_dir=tmp_path,
@@ -181,12 +191,12 @@ def test_writer_zero_count_cells_get_zero_not_missing(tmp_path):
 
 
 def test_writer_matches_single_fov_dataset(tmp_path):
-    """Reproduces the user's reported bug. Single-FOV pipeline writes
-    a blank ``fov`` column; the smFISH tab's _single_fov_extractor
-    synthesises FOV='1' from the zip filename. Without the
-    normalize_fov_series fix, the lookup key was ('A02', '', 'T01', '1')
-    while the counts key was ('A02', '1', 'T01', '1') — every cell got
-    "0" written to the column."""
+    """Reproduces the user's reported bug. Single-FOV pipeline writes a
+    blank ``fov`` column. Both the producer (``_process_well``) and the
+    consumer (``_write_counts_to_csvs``) now build keys via ``CellKey``
+    so ``fov=""`` on the CSV side and the parser's synthesised ``fov="1"``
+    collapse to the same key, and ``tp="T01"`` normalises identically on
+    both sides (``normalize_tp("T01") == "1"``)."""
     csv_path = tmp_path / "A02.csv"
     _write_csv(csv_path, pd.DataFrame({
         "well": ["A02"],
@@ -195,7 +205,7 @@ def test_writer_matches_single_fov_dataset(tmp_path):
         "nucleus_id": ["1"],
         "w2turq_smfish_count": ["0"],
     }))
-    counts = {("A02", "1", "T01", "1"): 42}
+    counts = {("A02", "1", normalize_tp("T01"), "1"): 42}
 
     _write_counts_to_csvs(
         out_dir=tmp_path,
@@ -221,7 +231,7 @@ def test_writer_normalises_fov_minus_one_to_one(tmp_path):
         "nucleus_id": ["3"],
         "w3cy5_smfish_count": ["999"],
     }))
-    counts = {("B02", "1", "T02", "3"): 7}
+    counts = {("B02", "1", normalize_tp("T02"), "3"): 7}
 
     _write_counts_to_csvs(
         out_dir=tmp_path,
@@ -234,11 +244,10 @@ def test_writer_normalises_fov_minus_one_to_one(tmp_path):
     assert list(_read_csv(csv_path)["w3cy5_smfish_count"]) == ["7"]
 
 
-def test_writer_letter_prefixed_tp_passes_through(tmp_path):
-    """Confirms no over-normalisation: timepoint ``"T01"`` is the same
-    string on both sides (extractor returns it from the zip filename,
-    CSV stores it literally), so normalize_id leaves it alone and
-    lookups match without any letter-prefix-stripping."""
+def test_writer_letter_prefixed_tp_normalises_uniformly(tmp_path):
+    """Letter-prefixed timepoints (``T01``/``T05``) collapse via
+    ``normalize_tp`` to ``"1"``/``"5"`` on both producer and consumer
+    sides — the unified module's canonical form."""
     csv_path = tmp_path / "A02.csv"
     _write_csv(csv_path, pd.DataFrame({
         "well": ["A02", "A02"],
@@ -248,8 +257,8 @@ def test_writer_letter_prefixed_tp_passes_through(tmp_path):
         "w2turq_smfish_count": ["0", "0"],
     }))
     counts = {
-        ("A02", "1", "T01", "1"): 12,
-        ("A02", "1", "T05", "1"): 34,
+        ("A02", "1", normalize_tp("T01"), "1"): 12,
+        ("A02", "1", normalize_tp("T05"), "1"): 34,
     }
 
     _write_counts_to_csvs(
@@ -275,7 +284,10 @@ def test_writer_logs_zero_match_diagnostic(tmp_path, caplog):
         "nucleus_id": ["1"],
         "w2turq_smfish_count": ["0"],
     }))
-    counts = {("A02", "1", "T01", "1"): 99}
+    # Counts key uses the canonical normalised form (matches what the
+    # production worker now produces via CellKey). The deliberate fov="2"
+    # in the CSV provokes the miss.
+    counts = {("A02", "1", normalize_tp("T01"), "1"): 99}
 
     caplog.set_level(logging.WARNING, logger="smfish_tab")
     _write_counts_to_csvs(
@@ -290,7 +302,7 @@ def test_writer_logs_zero_match_diagnostic(tmp_path, caplog):
     assert any(
         "wrote 0 matched rows" in m
         and "w2turq_smfish_count" in m
-        and "('A02', '1', 'T01', '1')" in m  # the counts-side sample
+        and f"('A02', '1', '{normalize_tp('T01')}', '1')" in m  # counts-side sample
         for m in msgs
     )
     # The column is still written (preserves the file mtime semantics);

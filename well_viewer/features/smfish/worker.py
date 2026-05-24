@@ -17,6 +17,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
+from well_viewer.data.data_loading import normalize_fov_series
 from well_viewer.persistence._io import atomic_write_text
 from well_viewer.features.preview.controller import read_member_bytes
 from well_viewer.features.smfish.controller import (
@@ -127,8 +128,14 @@ def _write_counts_to_csvs(
         well_series = (df["well"] if "well" in df.columns
                        else pd.Series([""] * len(df), index=df.index)).fillna("")
         r_well = well_series.where(well_series != "", well).map(normalize_well_token)
+        # Apply the same empty/-1 → "1" convention load_well_csv uses
+        # (data_loading.normalize_fov_series). Without this, single-FOV
+        # datasets — whose CSV `fov` column is blank — get a lookup key
+        # of ("", …) while _process_well's single-FOV extractor synthesises
+        # FOV="1", and counts.get(...) misses every row.
         fov_raw = (df.get("fov", df.get("FOV", pd.Series([""] * len(df), index=df.index)))
                    .fillna("").astype(str))
+        fov_raw = normalize_fov_series(fov_raw)
         fov = fov_raw.map(normalize_id)
         tp_raw_cols = [c for c in ("timepoint", "tp", "time") if c in df.columns]
         if tp_raw_cols:
@@ -144,6 +151,22 @@ def _write_counts_to_csvs(
 
         keys = list(zip(r_well, fov, tp, nid))
         df[column] = [str(counts.get(k, 0)) for k in keys]
+
+        # Diagnostic: when every lookup misses we'd otherwise silently
+        # write a column of zeros and only the file mtime would change.
+        # Surface this so the next drift mode (e.g. nucleus_id format,
+        # tp parser drift) reports itself without code-reading.
+        matched = sum(1 for k in keys if k in counts)
+        if matched == 0 and len(keys) > 0 and len(counts) > 0:
+            sample_csv = keys[:3]
+            sample_counts = list(counts.keys())[:3]
+            logger.warning(
+                "smFISH apply-global: %s wrote 0 matched rows out of %d for "
+                "column %r. Sample CSV lookup keys=%s ; sample counts keys=%s "
+                "— likely a (fov, timepoint, nucleus_id) format drift between "
+                "the per-well CSV and the *_out.zip filenames.",
+                csv_path.name, len(keys), column, sample_csv, sample_counts,
+            )
 
         # Atomic write — a concurrent Review-CSV read or a crash mid-write
         # must not be able to observe a truncated CSV.

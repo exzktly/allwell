@@ -1,6 +1,6 @@
 """Regression tests for ``well_viewer.features.smfish.worker._write_counts_to_csvs``.
 
-Pins two writer bugs that made Apply Global Threshold appear to do nothing:
+Pins three writer bugs that made Apply Global Threshold appear to do nothing:
 
 1. **Column-case collision.** The writer wrote the column name as
    ``f"{channel.lower()}_smfish_count"``, but if the upstream CSV used
@@ -16,11 +16,22 @@ Pins two writer bugs that made Apply Global Threshold appear to do nothing:
    writer now accepts the explicit ``well_to_csv`` map the app's
    loader populates, so it always hits the same files the rest of the
    app reads from.
+
+3. **Empty-FOV ⇄ single-FOV-extractor key drift.** ``load_well_csv``
+   normalises an empty / ``"-1"`` ``fov`` column to ``"1"`` so the rest
+   of the app and the smFISH single-FOV extractor (which synthesises
+   FOV=``"1"``) agree. The writer used to read the CSV raw via
+   ``pd.read_csv`` and never applied that rule, so lookup keys had
+   ``fov=""`` while counts keys had ``fov="1"``. Every cell got a
+   missed lookup → column filled with ``"0"`` → file mtime updated
+   with no visible change. ``data_loading.normalize_fov_series`` is
+   now shared between both call sites.
 """
 
 from __future__ import annotations
 
 import io
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -167,6 +178,124 @@ def test_writer_zero_count_cells_get_zero_not_missing(tmp_path):
 
     written = _read_csv(csv_path)
     assert list(written["w3cy5_smfish_count"]) == ["5", "0"]
+
+
+def test_writer_matches_single_fov_dataset(tmp_path):
+    """Reproduces the user's reported bug. Single-FOV pipeline writes
+    a blank ``fov`` column; the smFISH tab's _single_fov_extractor
+    synthesises FOV='1' from the zip filename. Without the
+    normalize_fov_series fix, the lookup key was ('A02', '', 'T01', '1')
+    while the counts key was ('A02', '1', 'T01', '1') — every cell got
+    "0" written to the column."""
+    csv_path = tmp_path / "A02.csv"
+    _write_csv(csv_path, pd.DataFrame({
+        "well": ["A02"],
+        "fov": [""],          # blank — this is the smoking gun
+        "timepoint": ["T01"],
+        "nucleus_id": ["1"],
+        "w2turq_smfish_count": ["0"],
+    }))
+    counts = {("A02", "1", "T01", "1"): 42}
+
+    _write_counts_to_csvs(
+        out_dir=tmp_path,
+        well_to_zip={"A02": Path("ignored")},
+        counts=counts,
+        column="w2turq_smfish_count",
+        well_to_csv={"A02": csv_path},
+    )
+
+    written = _read_csv(csv_path)
+    assert list(written["w2turq_smfish_count"]) == ["42"]
+
+
+def test_writer_normalises_fov_minus_one_to_one(tmp_path):
+    """``"-1"`` is the other sentinel load_well_csv folds to ``"1"``.
+    The writer must do the same so a CSV that survived an older
+    pipeline still matches the single-FOV-extractor key."""
+    csv_path = tmp_path / "B02.csv"
+    _write_csv(csv_path, pd.DataFrame({
+        "well": ["B02"],
+        "fov": ["-1"],
+        "timepoint": ["T02"],
+        "nucleus_id": ["3"],
+        "w3cy5_smfish_count": ["999"],
+    }))
+    counts = {("B02", "1", "T02", "3"): 7}
+
+    _write_counts_to_csvs(
+        out_dir=tmp_path,
+        well_to_zip={"B02": Path("ignored")},
+        counts=counts,
+        column="w3cy5_smfish_count",
+        well_to_csv={"B02": csv_path},
+    )
+
+    assert list(_read_csv(csv_path)["w3cy5_smfish_count"]) == ["7"]
+
+
+def test_writer_letter_prefixed_tp_passes_through(tmp_path):
+    """Confirms no over-normalisation: timepoint ``"T01"`` is the same
+    string on both sides (extractor returns it from the zip filename,
+    CSV stores it literally), so normalize_id leaves it alone and
+    lookups match without any letter-prefix-stripping."""
+    csv_path = tmp_path / "A02.csv"
+    _write_csv(csv_path, pd.DataFrame({
+        "well": ["A02", "A02"],
+        "fov": ["1", "1"],
+        "timepoint": ["T01", "T05"],
+        "nucleus_id": ["1", "1"],
+        "w2turq_smfish_count": ["0", "0"],
+    }))
+    counts = {
+        ("A02", "1", "T01", "1"): 12,
+        ("A02", "1", "T05", "1"): 34,
+    }
+
+    _write_counts_to_csvs(
+        out_dir=tmp_path,
+        well_to_zip={"A02": Path("ignored")},
+        counts=counts,
+        column="w2turq_smfish_count",
+        well_to_csv={"A02": csv_path},
+    )
+
+    assert list(_read_csv(csv_path)["w2turq_smfish_count"]) == ["12", "34"]
+
+
+def test_writer_logs_zero_match_diagnostic(tmp_path, caplog):
+    """When every lookup misses, the writer must emit a WARN naming
+    the (matched, total) and sample keys from both sides so the next
+    drift mode reports itself instead of silently writing zeros."""
+    csv_path = tmp_path / "A02.csv"
+    _write_csv(csv_path, pd.DataFrame({
+        "well": ["A02"],
+        "fov": ["2"],        # deliberately not "1" — provokes a miss
+        "timepoint": ["T01"],
+        "nucleus_id": ["1"],
+        "w2turq_smfish_count": ["0"],
+    }))
+    counts = {("A02", "1", "T01", "1"): 99}
+
+    caplog.set_level(logging.WARNING, logger="smfish_tab")
+    _write_counts_to_csvs(
+        out_dir=tmp_path,
+        well_to_zip={"A02": Path("ignored")},
+        counts=counts,
+        column="w2turq_smfish_count",
+        well_to_csv={"A02": csv_path},
+    )
+
+    msgs = [rec.getMessage() for rec in caplog.records]
+    assert any(
+        "wrote 0 matched rows" in m
+        and "w2turq_smfish_count" in m
+        and "('A02', '1', 'T01', '1')" in m  # the counts-side sample
+        for m in msgs
+    )
+    # The column is still written (preserves the file mtime semantics);
+    # every cell gets the miss value "0".
+    assert list(_read_csv(csv_path)["w2turq_smfish_count"]) == ["0"]
 
 
 def test_resolve_csv_path_uses_map_when_provided(tmp_path):

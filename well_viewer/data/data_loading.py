@@ -88,6 +88,17 @@ _METRIC_SUFFIXES = (
 )
 
 
+def normalize_fov_series(fov: pd.Series) -> pd.Series:
+    """Coerce a CSV ``fov`` column to the app-wide convention: stripped
+    strings, with empty/``"-1"`` rendered as ``"1"``. Single-FOV pipelines
+    write the column blank; the rest of the app treats blank as FOV ``"1"``
+    so plots, gating, and the smFISH apply-global writer all agree on which
+    rows belong to which image. Shared by ``load_well_csv`` and the smFISH
+    writer's lookup-key construction."""
+    s = fov.astype(str).str.strip()
+    return s.where(~s.isin({"", "-1"}), "1")
+
+
 def load_well_csv(path: Path) -> pd.DataFrame:
     """Load a per-well CSV into a DataFrame.
 
@@ -118,8 +129,7 @@ def load_well_csv(path: Path) -> pd.DataFrame:
         df = df.rename(columns=rename)
 
     if "fov" in df.columns:
-        fov = df["fov"].astype(str).str.strip()
-        df["fov"] = fov.where(~fov.isin({"", "-1"}), "1")
+        df["fov"] = normalize_fov_series(df["fov"])
 
     if "Included" not in df.columns:
         df["Included"] = 1

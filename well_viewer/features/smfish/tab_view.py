@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
@@ -48,9 +48,21 @@ logger = logging.getLogger("smfish_tab")
 
 
 class _WorkerBridge(QObject):
-    """Marshal worker-thread status messages back to the GUI thread."""
+    """Marshal worker-thread status messages back to the GUI thread.
+
+    The worker's daemon thread has no Qt event loop, so anything that
+    touches widgets — including ``QTimer.singleShot(0, …)`` — must
+    cross threads via a queued ``Signal``. ``status`` / ``done`` update
+    the status label; ``after_csv`` carries the post-write callback
+    that refreshes the dataset cache, recalculates the threshold, and
+    shows the completion message. Without this signal the after-csv
+    work silently dropped on the floor (timer created in a thread with
+    no event loop never fires) and the UI showed stale counts until
+    the app was restarted.
+    """
     status = Signal(str)
     done = Signal(str)
+    after_csv = Signal(object)
 
 
 _NO_SMFISH_MESSAGE = (
@@ -95,6 +107,11 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     bridge = _WorkerBridge(parent)
     bridge.status.connect(lambda text: _smfish_set_status(ctx.app, text))
     bridge.done.connect(lambda text: _smfish_set_status(ctx.app, text))
+    # The bridge lives on the GUI thread, so any callable emitted from
+    # the worker thread runs here when the signal is delivered. This is
+    # the only safe way to schedule widget-touching work from the
+    # apply-global worker daemon.
+    bridge.after_csv.connect(lambda cb: cb())
     ctx.app._smfish_bridge = bridge
 
     # ── layout ────────────────────────────────────────────────────────────
@@ -698,9 +715,10 @@ def _smfish_apply_to_all(app) -> None:
     frame = app._smfish_frame
 
     def _after_csv() -> None:
-        # Persist the just-applied threshold so the next session opens
-        # this dataset with the value that matches the spot counts now
-        # baked into the per-well CSVs.
+        # Runs on the GUI thread via _WorkerBridge.after_csv — see the
+        # bridge docstring for why this can't be invoked directly from
+        # the worker. Safe to touch widgets and call the refresh chain
+        # synchronously.
         try:
             from well_viewer.persistence import smfish as _smfish_persist
             _smfish_persist.save_threshold(app, channel, thr)
@@ -708,11 +726,8 @@ def _smfish_apply_to_all(app) -> None:
             logging.getLogger("well_viewer").exception(
                 "smFISH threshold persistence failed"
             )
-        QTimer.singleShot(0, lambda: _smfish_refresh_app_cache(app))
-        QTimer.singleShot(
-            0,
-            lambda: QMessageBox.information(frame, "smFISH", "Apply to All finished."),
-        )
+        _smfish_refresh_app_cache(app)
+        QMessageBox.information(frame, "smFISH", "Apply to All finished.")
 
     # Cancel event used by load_controller / app shutdown to abort
     # the in-flight smFISH run before it overwrites CSVs from a
@@ -736,7 +751,11 @@ def _smfish_apply_to_all(app) -> None:
         fov_tp_extractor=app._smfish_fov_tp_extractor,
         status_cb=app._smfish_bridge.status.emit,
         done_cb=app._smfish_bridge.done.emit,
-        after_csv_cb=_after_csv,
+        # Route the after-csv callback through the bridge so it runs on
+        # the GUI thread, not the worker daemon thread. Calling _after_csv
+        # directly here would leave QTimer.singleShot + widget access in
+        # the worker thread where they silently no-op.
+        after_csv_cb=lambda: app._smfish_bridge.after_csv.emit(_after_csv),
         cancel_event=app._smfish_cancel_event,
         expected_data_dir=app._smfish_out_dir,
         well_to_csv=dict(app._app_state.dataset.well_paths),

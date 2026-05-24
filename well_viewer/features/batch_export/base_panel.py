@@ -1492,14 +1492,18 @@ class BatchExportPanel(QWidget):
         legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none",
                          edgecolor=PLOT_SPN, labelcolor=get_color("PLOT_TXT"))
         _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
-        from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+        from well_viewer.data.metric_labels import (
+            METRIC_KEY_TO_LABEL as _MLB,
+            threshold_qualifier, fraction_title,
+        )
         _metric_key = self._selected_export_metric_key("_line_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
+        _thr_q = threshold_qualifier(_metric_key)
         _fc_suffix = _fc.fold_change_suffix(
             bool(fc_control_means), bool(fc_vs_t0), self._fc_control_label,
         ) if fc_active else ""
-        apply_ax_style(ax_mean, f"{_ch} {_metric_label} (above threshold) \u00b1 {band_lbl}{_fc_suffix}", f"{_ch} {_metric_label}{_fc_suffix}")
-        apply_ax_style(ax_frac, "Fraction of Cells Above Threshold", "Fraction")
+        apply_ax_style(ax_mean, f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}", f"{_ch} {_metric_label}{_fc_suffix}")
+        apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
         apply_ax_style(ax_cdf, f"{_ch} {_metric_label} CDF", "Cumulative fraction")
         ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
         ax_frac.set_ylim(-0.05, 1.05)

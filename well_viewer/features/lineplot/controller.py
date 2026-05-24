@@ -355,8 +355,10 @@ def redraw_line_plots(
 
     _ch = app._app_state.channel.active_channel.upper()
     _fc_suffix = _fc.fold_change_suffix(fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl)
-    apply_ax_style(app._line_ax_mean, f"{_ch} {metric_label} (above threshold) ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)
-    apply_ax_style(app._line_ax_frac, "Fraction of Cells Above Threshold", "Fraction")
+    from well_viewer.data.metric_labels import threshold_qualifier, fraction_title
+    _thr_q = threshold_qualifier(app._app_state.channel.active_metric)
+    apply_ax_style(app._line_ax_mean, f"{_ch} {metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)
+    apply_ax_style(app._line_ax_frac, fraction_title(app._app_state.channel.active_metric), "Fraction")
     cdf_lbl = (f"{_ch} {metric_label} CDF (all wells per replicate set)" if app._rep_sets_active() else f"{_ch} {metric_label} CDF (all selected wells)")
     apply_ax_style(app._line_ax_cdf, cdf_lbl, "Cumulative fraction")
     app._line_ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)

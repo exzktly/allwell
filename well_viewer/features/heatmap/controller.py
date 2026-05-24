@@ -604,15 +604,19 @@ def _metric_axis_label(metric: str, app) -> str:
     label = app._active_channel_label() if hasattr(app, "_active_channel_label") else ""
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
     prop_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
+    is_smfish = app._app_state.channel.active_metric == "smfish_count"
     if metric == METRIC_COUNT:
         return "Cell count"
     if metric == METRIC_FRACTION:
-        return f"{label} fraction above threshold"
+        return (f"{label} fraction with detected spots" if is_smfish
+                else f"{label} fraction above threshold")
     if metric == METRIC_RATIO:
         return f"{label} (mean ratio)"
     if metric == METRIC_MEAN_ALL:
         return f"{label} {prop_label} (mean of all cells)"
-    return f"{label} {prop_label} (mean above threshold)"
+    return (f"{label} {prop_label} (mean of cells with spots, thresholds ignored)"
+            if is_smfish
+            else f"{label} {prop_label} (mean above threshold)")
 
 
 # ── Click + hover handlers ───────────────────────────────────────────────────

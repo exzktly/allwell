@@ -66,3 +66,41 @@ def split_metric_col(col: str) -> Optional[Tuple[str, str, str]]:
             ch = col[: -len(suf)]
             return ch, key, f"{ch.upper()} {METRIC_KEY_TO_LABEL[key]}"
     return None
+
+
+# ── Title qualifiers ────────────────────────────────────────────────────────
+#
+# Plot titles say things like "(above threshold)" / "Fraction above threshold"
+# because the bar / line / heat-map data path filters cells via the channel's
+# cell-gating threshold. For smfish_count we use threshold=0 — every cell
+# with at least one detected spot counts — so the "above threshold" phrasing
+# is misleading. These helpers centralise the per-metric wording so every
+# title and axis label stays in sync.
+
+
+def threshold_qualifier(metric_key: str) -> str:
+    """Suffix for the mean-axis title (' (above threshold)' / ' (all spots)')."""
+    if metric_key == "smfish_count":
+        return " (all spots, thresholds ignored)"
+    return " (above threshold)"
+
+
+def fraction_title(metric_key: str) -> str:
+    """Title for the fraction-of-cells axis."""
+    if metric_key == "smfish_count":
+        return "Fraction of Cells with Detected Spots"
+    return "Fraction of Cells Above Threshold"
+
+
+def events_per_fov_title(metric_key: str, band_lbl: str) -> str:
+    """Title for the per-FOV events axis."""
+    if metric_key == "smfish_count":
+        return f"Cells with detected spots per FOV ± {band_lbl}"
+    return f"Mean events above threshold per FOV ± {band_lbl}"
+
+
+def events_total_title(metric_key: str) -> str:
+    """Title for the per-timepoint total events axis."""
+    if metric_key == "smfish_count":
+        return "Cells with detected spots (N)"
+    return "Events above threshold (N)"

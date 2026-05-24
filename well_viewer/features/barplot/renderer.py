@@ -159,7 +159,7 @@ def draw_violin(
         ax.set_xlim(-0.6, n - 0.4)
     ax_frac.set_ylim(-0.05, 1.05)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
-    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
@@ -169,7 +169,7 @@ def draw_violin(
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"Fraction above threshold  —  t = {tp_str} h",
+        f"{fraction_title(app._app_state.channel.active_metric)}  —  t = {tp_str} h",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -267,17 +267,21 @@ def draw_beeswarm(
         ax.set_xlim(-0.6, n - 0.4)
     ax_frac.set_ylim(-0.05, 1.05)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
-    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+    from well_viewer.data.metric_labels import (
+        METRIC_KEY_TO_LABEL as _MLB,
+        threshold_qualifier, fraction_title,
+    )
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
+    _thr_q = threshold_qualifier(app._app_state.channel.active_metric)
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
     _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl) if cell_scale else ""
     ax_mean.set_title(
-        f"{app._app_state.channel.active_channel.upper()} {_metric_label} per cell (above threshold){_fc_suffix}  —  t = {tp_str} h",
+        f"{app._app_state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  t = {tp_str} h",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"Fraction above threshold  —  t = {tp_str} h",
+        f"{fraction_title(app._app_state.channel.active_metric)}  —  t = {tp_str} h",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -321,28 +325,34 @@ def draw_grouped_bar_mode(
     )
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = app._app_state.channel.active_channel.upper()
-    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+    from well_viewer.data.metric_labels import (
+        METRIC_KEY_TO_LABEL as _MLB,
+        threshold_qualifier, fraction_title,
+        events_per_fov_title, events_total_title,
+    )
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
+    _metric_key = app._app_state.channel.active_metric
+    _thr_q = threshold_qualifier(_metric_key)
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
     _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl)
     ax_mean.set_title(
-        f"{_ch} {_metric_label} (above threshold) ± {band_lbl}{_fc_suffix}  —  t = {tp_str} h",
+        f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}  —  t = {tp_str} h",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6,
     )
     ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"Fraction above threshold  —  t = {tp_str} h",
+        f"{fraction_title(_metric_key)}  —  t = {tp_str} h",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6,
     )
     if ax_n is not None:
         fov_active = app._use_fov_spread_active()
         if fov_active:
-            n_title = f"Events above threshold per FOV ± {band_lbl}  —  t = {tp_str} h"
-            n_ylabel = "N(above)/FOV"
+            n_title = f"{events_per_fov_title(_metric_key, band_lbl)}  —  t = {tp_str} h"
+            n_ylabel = "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV"
         else:
-            n_title = f"Events above threshold (N)  —  t = {tp_str} h"
-            n_ylabel = "N(above)"
+            n_title = f"{events_total_title(_metric_key)}  —  t = {tp_str} h"
+            n_ylabel = "N(spots)" if _metric_key == "smfish_count" else "N(above)"
         ax_n.set_title(
             n_title, color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold", pad=6,
         )
@@ -376,27 +386,34 @@ def redraw_bars(app) -> None:
     bar_selected = selected_bar_wells(app, active_rsets)
 
     _ch = app._app_state.channel.active_channel.upper()
-    from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+    from well_viewer.data.metric_labels import (
+        METRIC_KEY_TO_LABEL as _MLB,
+        threshold_qualifier, fraction_title,
+        events_per_fov_title, events_total_title,
+    )
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
+    _metric_key = app._app_state.channel.active_metric
+    _thr_q = threshold_qualifier(_metric_key)
     _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
     _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl)
     apply_ax_style(ax_mean,
-                   f"{_ch} {_metric_label} (above threshold) ± {band_lbl}{_fc_suffix}",
+                   f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}",
                    f"{_ch} {_metric_label}{_fc_suffix}")
-    apply_ax_style(ax_frac,
-                   "Fraction of Cells Above Threshold",
-                   "Fraction")
+    apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
     if ax_n is not None:
         fov_active = app._use_fov_spread_active()
         if fov_active:
             apply_ax_style(
                 ax_n,
-                f"Events above threshold per FOV ± {band_lbl}",
-                "N(above)/FOV",
+                events_per_fov_title(_metric_key, band_lbl),
+                "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV",
             )
         else:
-            apply_ax_style(ax_n, "Events above threshold (N)", "N(above)")
+            apply_ax_style(
+                ax_n, events_total_title(_metric_key),
+                "N(spots)" if _metric_key == "smfish_count" else "N(above)",
+            )
     ax_frac.set_ylim(-0.05, 1.05)
 
     if not app._app_state.dataset.well_paths:

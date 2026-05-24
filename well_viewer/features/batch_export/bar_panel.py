@@ -315,20 +315,31 @@ class BarBatchExportPanel(BatchExportPanel):
         fig.suptitle(f"{grp.name}  \u2014  t = {tp_str} h",
                      fontsize=10, fontweight="bold", color=get_color("PLOT_TXT"), y=0.97)
         _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
-        from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
+        from well_viewer.data.metric_labels import (
+            METRIC_KEY_TO_LABEL as _MLB,
+            threshold_qualifier, fraction_title,
+            events_per_fov_title, events_total_title,
+        )
         _metric_key = self._selected_export_metric_key("_bar_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
+        _thr_q = threshold_qualifier(_metric_key)
         _fc_suffix = _fc.fold_change_suffix(
             fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
         ) if fc_active else ""
         apply_ax_style(ax_mean,
-                       f"{_ch} {_metric_label} (above threshold) \u00b1 {band_lbl}{_fc_suffix}",
+                       f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}",
                        f"{_ch} {_metric_label}{_fc_suffix}")
-        apply_ax_style(ax_frac, "Fraction of Cells Above Threshold", "Fraction")
+        apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
         if self._app._use_fov_spread_active():
-            apply_ax_style(ax_n, f"Mean events above threshold per FOV ± {band_lbl}", "N(above)/FOV")
+            apply_ax_style(
+                ax_n, events_per_fov_title(_metric_key, band_lbl),
+                "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV",
+            )
         else:
-            apply_ax_style(ax_n, "Events above threshold (N)", "N(above)")
+            apply_ax_style(
+                ax_n, events_total_title(_metric_key),
+                "N(spots)" if _metric_key == "smfish_count" else "N(above)",
+            )
         ax_frac.set_ylim(-0.05, 1.05)
 
         draw_items = collect_bar_items_for_group(

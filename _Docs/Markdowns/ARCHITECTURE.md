@@ -441,7 +441,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 |-----------------|------|
 | `features/lineplot/controller.py` | Line Graphs: redraw the 3-stacked-subplot figure. |
 | `features/barplot/{controller,renderer}.py` | Bar Plots: redraw + bar-draw math (split because batch export reuses the math). |
-| `features/scatter/{controller,callbacks}.py` | Scatter Plot (cells + aggregate). |
+| `features/scatter/{controller,callbacks}.py` | Scatter Plot (cells + aggregate). The per-axis fluor-gate (`fluor_gate_x` / `fluor_gate_y`) is bypassed when an axis column ends with `_smfish_count` — the gate is a fluorescence-intensity floor and would strip every integer-count cell on a count axis. The mixed-axis case (one count, one intensity) still gates the intensity axis. |
 | `features/heatmap/{controller,models}.py` | Heat Map: layout + redraw. |
 | `features/distribution/controller.py` | Distribution tab: histogram / KDE / violin. |
 | `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. |
@@ -457,7 +457,7 @@ Shared domain helpers (under `well_viewer/domain/`):
 | Module | Role |
 |--------|------|
 | `domain/fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by line / bar plot, batch export, and `features/export/service.py`. |
-| `domain/stats_compute.py` | `well_aggregate_stats`, `compute_rep_stats`, `aggregate_well`, `aggregate_group` — the pure-math layer the bar / line / scatter controllers share. |
+| `domain/stats_compute.py` | `well_aggregate_stats`, `compute_rep_stats`, `aggregate_well`, `aggregate_group` — the pure-math layer the bar / line / scatter controllers share. `aggregate_well` / `aggregate_group` delegate to `app._aggregate_well` / `app._aggregate_group` when those methods exist, which is the hook the pure-logic test `MockApp` uses to short-circuit aggregation; the production `WellViewerApp` does not define them, so the DataFrame path is taken at runtime. |
 | `domain/batch_models.py`, `domain/ratio_models.py`, `domain/selections_model.py` | Plain dataclass models. |
 
 Data-layer helpers (under `well_viewer/data/`):
@@ -486,7 +486,7 @@ The relevant modules:
 
 | Module | Job |
 |--------|-----|
-| `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. |
+| `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. Measurement columns are normalised to lower-case at read time so per-channel lookups are case-insensitive; for `smfish_count` metrics the bar / line / heatmap / scatter-aggregate paths pass `threshold=-1.0` (not `0`) so zero-spot cells contribute to the mean and the population count. `resolve_value_series` emits a deduped WARN naming the missing column when both the direct and case-folded lookups miss, surfacing schema-mismatch bugs that would otherwise show up as silently-empty plots. |
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
 | `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |

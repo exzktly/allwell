@@ -220,10 +220,14 @@ def build_centre(app, parent: QWidget) -> None:
         contracts so we don't regress functionality. Phase 11b will collapse
         them into a single shared PlotCanvas.
         """
-        from widgets.segmented_control import SegmentedControl as _SegmentedControl
+        from PySide6.QtWidgets import QTabBar
         from widgets.icon_button import IconButton as _IconButton
 
-        # ── ctxbar ─ Row 1 (plot-type SegmentedControl, full width) ──────
+        # ── ctxbar ─ Row 1 (plot-type QTabBar, matching Sample Definitions style) ──
+        # Switched from SegmentedControl (pill style) to a styled QTabBar so
+        # the plot-type switcher matches the Sample Definitions sub-tabs.
+        # The bar is wired to ``plotting_nb`` (NamedPageStack) so the page
+        # stack still owns the actual content; the bar is purely a selector.
         ctxbar = QWidget(plotting_container)
         ctxbar.setObjectName("PlottingCtxbar")
         ctxbar.setAttribute(Qt.WA_StyledBackground, True)
@@ -236,10 +240,18 @@ def build_centre(app, parent: QWidget) -> None:
         cbl.setContentsMargins(_S.md, 6, _S.md, 6)
         cbl.setSpacing(_S.sm)
 
-        sub_seg = _SegmentedControl()
+        # A standalone QTabBar with the SampleDefinitionsSubTabs object
+        # name picks up the existing rectangular-tab QSS — keeps the look
+        # consistent without duplicating styling rules.
+        sub_seg = QTabBar()
+        sub_seg.setObjectName("SampleDefinitionsSubTabs")
+        sub_seg.setExpanding(False)
+        sub_seg.setElideMode(Qt.ElideNone)
+        sub_seg.setUsesScrollButtons(True)
+        sub_seg.setDrawBase(False)
         for title in _PLOT_SUBTABS:
-            sub_seg.addSegment(title, data=title)
-        cbl.addWidget(sub_seg, 1)  # fill the full row
+            sub_seg.addTab(title)
+        cbl.addWidget(sub_seg, 1)
 
         plotting_container.layout().addWidget(ctxbar, 0)
 
@@ -372,22 +384,26 @@ def build_centre(app, parent: QWidget) -> None:
             # Properties rail retired — its scope picker followed the
             # active sub-tab. Per-plot styling now happens through the
             # floating Export Style sidebar.
-            if sub_seg.currentData() != sub_title:
+            # QTabBar uses tabText(i) for the title — _PLOT_SUBTABS is the
+            # registry of legal page names and matches QTabBar tab indices.
+            if sub_seg.tabText(sub_seg.currentIndex()) != sub_title:
                 blocked = sub_seg.blockSignals(True)
                 try:
-                    sub_seg.setCurrentByData(sub_title)
+                    if sub_title in _PLOT_SUBTABS:
+                        sub_seg.setCurrentIndex(_PLOT_SUBTABS.index(sub_title))
                 finally:
                     sub_seg.blockSignals(blocked)
 
         plotting_nb.currentChanged.connect(_on_plotting_subtab)
 
         def _on_sub_seg(idx: int) -> None:
-            target = sub_seg.currentData()
+            target = sub_seg.tabText(idx)
             if target:
                 plotting_nb.setCurrentByName(target)
 
         sub_seg.currentChanged.connect(_on_sub_seg)
-        sub_seg.setCurrentByData("Line Graphs")
+        if "Line Graphs" in _PLOT_SUBTABS:
+            sub_seg.setCurrentIndex(_PLOT_SUBTABS.index("Line Graphs"))
 
         def _refresh_channel_chip(title: str) -> None:
             """Re-populate the global ctxbar channel combo on sub-tab switch.

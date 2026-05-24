@@ -81,24 +81,25 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx.app))
     cl.addWidget(ctx.app._bar_reset_order_btn)
 
-    _export_btn = btn_primary(bar_ctrl, "", partial(export_bar_plot_data, ctx.app),
-                              icon="download")
-    _export_btn.setToolTip("Export CSV")
+    # IconButton — matches Sample Definitions top toolbar style; see
+    # equivalent block in features/lineplot/tab_view.py for rationale.
+    from widgets.icon_button import IconButton as _IconButton
+    _export_btn = _IconButton("download", bar_ctrl, tooltip="Export CSV")
+    _export_btn.clicked.connect(lambda _=False: export_bar_plot_data(ctx.app))
     cl.addWidget(_export_btn)
-    _b = btn_secondary(bar_ctrl, "", lambda: ctx.app._copy_active_card_as_svg(), icon="copy")
-    _b.setToolTip("Copy SVG")
-    cl.addWidget(_b)
-    _b = btn_secondary(bar_ctrl, "", lambda: ctx.app._save_active_card_figure(), icon="save")
-    _b.setToolTip("Save figure")
-    cl.addWidget(_b)
+    _copy_btn = _IconButton("copy", bar_ctrl, tooltip="Copy SVG")
+    _copy_btn.clicked.connect(lambda _=False: ctx.app._copy_active_card_as_svg())
+    cl.addWidget(_copy_btn)
+    _save_btn = _IconButton("save", bar_ctrl, tooltip="Save figure")
+    _save_btn.clicked.connect(lambda _=False: ctx.app._save_active_card_figure())
+    cl.addWidget(_save_btn)
     # Properties button last in the row so it sits flush with the right
     # edge of the plot area — adjacent to where the dock slides out.
-    style_btn = btn_secondary(
-        bar_ctrl, "",
-        lambda: ctx.app._open_export_style_panel("bar"),
-        icon="sliders-horizontal",
+    style_btn = _IconButton(
+        "sliders-horizontal", bar_ctrl,
+        tooltip="Show / hide the figure properties panel",
     )
-    style_btn.setToolTip("Show / hide the figure properties panel")
+    style_btn.clicked.connect(lambda _=False: ctx.app._open_export_style_panel("bar"))
     cl.addWidget(style_btn)
     right_l.addWidget(bar_ctrl)
 

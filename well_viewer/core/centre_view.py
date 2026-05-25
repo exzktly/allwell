@@ -571,11 +571,12 @@ def build_centre(app, parent: QWidget) -> None:
         the original review-image panel (kept under the "Segmentation"
         sub-tab name so the existing _on_tab_change branch still applies),
         and the smFISH panel that used to live at top level. A
-        SegmentedControl above the sub-stack toggles between them; the
+        ``QTabBar`` styled to match the Plotting / Sample Definitions
+        sub-tabs sits above the sub-stack and toggles between them; the
         smFISH side is lazily built on first activation since it pulls
         in tifffile / skimage / matplotlib-QtAgg.
         """
-        from widgets.segmented_control import SegmentedControl as _SegmentedControl
+        from PySide6.QtWidgets import QTabBar
 
         parent = tab_frames["Segmentation"]
         outer = parent.layout()
@@ -583,7 +584,11 @@ def build_centre(app, parent: QWidget) -> None:
             outer = QVBoxLayout(parent)
             outer.setContentsMargins(0, 0, 0, 0)
 
-        # ── sub-tab segmented control ───────────────────────────────────
+        # ── sub-tab bar ─────────────────────────────────────────────────
+        # QTabBar with SampleDefinitionsSubTabs object name picks up the
+        # existing rectangular-tab QSS used by the Plotting ctxbar; keeps
+        # the tab styling consistent across every multi-pane area of the
+        # app (Plotting, Segmentation, Sample Definitions).
         from theme import Colors as _C, Spacing as _S
         bar = QWidget(parent)
         bar.setObjectName("CellSegCtxbar")
@@ -595,9 +600,15 @@ def build_centre(app, parent: QWidget) -> None:
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(_S.md, 6, _S.md, 6)
         bl.setSpacing(_S.sm)
-        sub_seg = _SegmentedControl()
-        for title in ("Segmentation", "smFISH"):
-            sub_seg.addSegment(title, data=title)
+        _SEG_SUBTABS = ("Segmentation", "smFISH")
+        sub_seg = QTabBar()
+        sub_seg.setObjectName("SampleDefinitionsSubTabs")
+        sub_seg.setExpanding(False)
+        sub_seg.setElideMode(Qt.ElideNone)
+        sub_seg.setUsesScrollButtons(True)
+        sub_seg.setDrawBase(False)
+        for title in _SEG_SUBTABS:
+            sub_seg.addTab(title)
         bl.addWidget(sub_seg, 1)
         outer.addWidget(bar, 0)
 
@@ -630,13 +641,13 @@ def build_centre(app, parent: QWidget) -> None:
             except Exception:
                 _logger.exception("Deferred build for smFISH sub-tab failed")
 
-        # Seed the segmented control to mirror the stack's initial page
-        # before wiring signals — addPage("Segmentation", ...) above made
-        # that the default current page. Setting the segment first avoids
-        # an extra _on_tab_change emit during build.
+        # Seed the tab bar to mirror the stack's initial page before
+        # wiring signals — addPage("Segmentation", ...) above made that
+        # the default current page. Setting the tab first avoids an
+        # extra _on_tab_change emit during build.
         blocked = sub_seg.blockSignals(True)
         try:
-            sub_seg.setCurrentByData("Segmentation")
+            sub_seg.setCurrentIndex(_SEG_SUBTABS.index("Segmentation"))
         finally:
             sub_seg.blockSignals(blocked)
 
@@ -645,17 +656,18 @@ def build_centre(app, parent: QWidget) -> None:
             if name == "smFISH":
                 _ensure_smfish_built()
             on_tab_change(app, None)
-            if sub_seg.currentData() != name:
+            if sub_seg.tabText(sub_seg.currentIndex()) != name:
                 blocked = sub_seg.blockSignals(True)
                 try:
-                    sub_seg.setCurrentByData(name)
+                    if name in _SEG_SUBTABS:
+                        sub_seg.setCurrentIndex(_SEG_SUBTABS.index(name))
                 finally:
                     sub_seg.blockSignals(blocked)
 
         sub_stack.currentChanged.connect(_on_cell_seg_subtab)
 
-        def _on_cell_seg_sub_seg(_i: int = 0) -> None:
-            target = sub_seg.currentData()
+        def _on_cell_seg_sub_seg(idx: int = 0) -> None:
+            target = sub_seg.tabText(idx)
             if target:
                 sub_stack.setCurrentByName(target)
 

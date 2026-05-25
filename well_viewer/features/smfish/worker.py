@@ -166,8 +166,29 @@ def _write_counts_to_csvs(
             )
 
         # Atomic write — a concurrent Review-CSV read or a crash mid-write
-        # must not be able to observe a truncated CSV.
-        atomic_write_text(csv_path, df.to_csv(index=False))
+        # must not be able to observe a truncated CSV. PermissionError
+        # is wrapped per-well so one locked file (Excel, AV, OneDrive)
+        # doesn't kill the rest of the run; the user still gets a clear
+        # WARN naming the well + the underlying cause.
+        try:
+            atomic_write_text(csv_path, df.to_csv(index=False))
+        except PermissionError as exc:
+            logger.warning(
+                "smFISH apply-global: could not write %s — %s. The "
+                "atomic-write helper retried for ~3s and the file is "
+                "still locked; likely Excel / a viewer has the CSV open, "
+                "or antivirus is mid-scan. Other wells will still be "
+                "written. Close the file and retry Apply Global Threshold.",
+                csv_path, exc,
+            )
+            continue
+        except OSError as exc:
+            logger.warning(
+                "smFISH apply-global: write failed for %s — %s. "
+                "Skipping this well; other wells will still be written.",
+                csv_path, exc,
+            )
+            continue
 
 
 def apply_global_threshold_async(

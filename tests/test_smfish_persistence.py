@@ -102,13 +102,24 @@ def test_save_threshold_no_data_dir_silently_noops(tmp_path):
     _smfish_persist.save_threshold(app, "w3cy5", 1500.0)
 
 
-def test_save_threshold_missing_sidecar_silently_noops(tmp_path):
-    """No pipeline_info.json on disk → log a WARN and bail. Don't create
-    the file ourselves — that's the pipeline's job."""
+def test_save_threshold_missing_sidecar_creates_minimal_file(tmp_path):
+    """No pipeline_info.json on disk → create one with just the
+    ``smfish_thresholds`` block. Previously this silently no-op'd
+    (with the rationale "the pipeline owns this file") but that
+    dropped every threshold the user applied during the session on
+    legacy datasets that weren't processed through the current
+    pipeline. The pipeline merges with any pre-existing block on its
+    next run, so creating-on-missing is non-destructive."""
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(dataset=SimpleNamespace(data_dir=tmp_path))
     _smfish_persist.save_threshold(app, "w3cy5", 1500.0)
-    assert not (tmp_path / "pipeline_info.json").exists()
+
+    info_path = tmp_path / "pipeline_info.json"
+    assert info_path.exists()
+    data = json.loads(info_path.read_text())
+    assert data == {"smfish_thresholds": {"w3cy5": 1500.0}}
+    # In-memory cache mirrors the saved value.
+    assert app._smfish_thresholds_saved == {"w3cy5": 1500.0}
 
 
 def test_load_from_pipeline_info_populates_cache_and_spinbox(tmp_path):

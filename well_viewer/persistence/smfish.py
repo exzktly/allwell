@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional  # noqa: F401  (Any used in save_threshold)
 
 from well_viewer.persistence._io import atomic_write_json
 
@@ -65,31 +65,53 @@ def save_threshold(app, channel: str, threshold: float) -> None:
     """Persist the last-applied threshold for *channel* under
     ``smfish_thresholds`` in pipeline_info.json. Called from
     ``_smfish_apply_to_all``'s after-csv callback so the saved value is
-    always the one the CSVs on disk reflect. Silently no-ops when no
-    data directory is loaded or the sidecar is missing.
+    always the one the CSVs on disk reflect.
+
+    When ``pipeline_info.json`` is absent (e.g. legacy datasets that
+    weren't processed through the current pipeline, or datasets the
+    user opened raw), the sidecar is CREATED with just the
+    ``smfish_thresholds`` block — without this, every threshold the
+    user applied during the session was silently dropped on close and
+    the spinbox reverted to its hardcoded "1500" default on reopen.
+    The pipeline merges with any pre-existing block on its next run
+    so creating-on-missing is safe.
+
+    Silent no-op when no data directory is loaded or the channel
+    string is empty.
     """
     data_dir = getattr(app._app_state.dataset, "data_dir", None)
     if not data_dir:
+        _logger.info(
+            "smFISH save_threshold: no data_dir loaded, skipping persistence",
+        )
         return
     ch = str(channel).strip().lower()
     if not ch:
-        return
-    info_path = _resolve_pipeline_info_path(Path(data_dir))
-    if not info_path.exists():
-        _logger.warning(
-            "pipeline_info.json not found at %s — smFISH threshold "
-            "will not be persisted across sessions for this dataset.",
-            info_path,
+        _logger.info(
+            "smFISH save_threshold: empty channel, skipping persistence",
         )
         return
-    try:
-        existing = json.loads(info_path.read_text())
-        if not isinstance(existing, dict):
-            _logger.warning("%s is not a JSON object; not updating.", info_path)
+    info_path = _resolve_pipeline_info_path(Path(data_dir))
+    existing: Dict[str, Any]
+    if info_path.exists():
+        try:
+            existing = json.loads(info_path.read_text())
+            if not isinstance(existing, dict):
+                _logger.warning("%s is not a JSON object; not updating.", info_path)
+                return
+        except (OSError, json.JSONDecodeError) as exc:
+            _logger.warning("Could not read %s: %s", info_path, exc)
             return
-    except (OSError, json.JSONDecodeError) as exc:
-        _logger.warning("Could not read %s: %s", info_path, exc)
-        return
+    else:
+        # Sidecar is missing — create a minimal one. The pipeline's next
+        # run will merge with these keys, so this is non-destructive.
+        existing = {}
+        _logger.info(
+            "smFISH save_threshold: %s did not exist; creating it with "
+            "only the smfish_thresholds block (the pipeline will merge "
+            "with this on its next run).",
+            info_path,
+        )
 
     block = existing.get(_SMFISH_THRESHOLDS_KEY)
     if not isinstance(block, dict):
@@ -107,6 +129,10 @@ def save_threshold(app, channel: str, threshold: float) -> None:
 
     try:
         atomic_write_json(info_path, existing)
+        _logger.info(
+            "smFISH save_threshold: wrote %s=%g to %s",
+            ch, float(threshold), info_path,
+        )
     except OSError as exc:
         _logger.warning("Could not write %s: %s", info_path, exc)
 

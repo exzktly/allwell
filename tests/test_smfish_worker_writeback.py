@@ -333,3 +333,63 @@ def test_resolve_csv_path_glob_fallback_single_match(tmp_path):
     path.write_text("dummy")
     out = _resolve_csv_path("B02", None, tmp_path)
     assert out == path
+
+
+def test_writer_skips_locked_well_and_continues(tmp_path, caplog, monkeypatch):
+    """A user-reported Windows traceback: ``atomic_write_text`` raised
+    ``PermissionError`` mid Apply-Global-Threshold because Excel /
+    AV / cloud-sync held a handle on one well's CSV. Previously the
+    error bubbled up the worker thread and killed the entire run,
+    leaving subsequent wells unwritten. Now: the failing well is
+    skipped with a WARN naming it, and the remaining wells are still
+    written."""
+    import logging
+    from unittest.mock import patch
+    from well_viewer.persistence import _io as _atomic_io
+
+    # Two wells. Lock the first; the second must still receive its update.
+    locked_csv = tmp_path / "A02.csv"
+    _write_csv(locked_csv, pd.DataFrame({
+        "well": ["A02"], "fov": ["1"], "timepoint": ["T01"],
+        "nucleus_id": ["1"], "w3cy5_smfish_count": ["0"],
+    }))
+    ok_csv = tmp_path / "B02.csv"
+    _write_csv(ok_csv, pd.DataFrame({
+        "well": ["B02"], "fov": ["1"], "timepoint": ["T01"],
+        "nucleus_id": ["1"], "w3cy5_smfish_count": ["0"],
+    }))
+    counts = {
+        ("A02", "1", normalize_tp("T01"), "1"): 42,
+        ("B02", "1", normalize_tp("T01"), "1"): 99,
+    }
+
+    real_replace = __import__("os").replace
+
+    def selective_replace(src, dst):
+        if str(dst).endswith("A02.csv"):
+            raise PermissionError("[WinError 5] Access is denied")
+        return real_replace(src, dst)
+
+    # Make the retry shield exhaust immediately so the test doesn't
+    # actually spend ~3s on the timing budget.
+    monkeypatch.setattr(_atomic_io, "_RETRY_BASE_DELAY_S", 0.0)
+    monkeypatch.setattr(_atomic_io, "_RETRY_ATTEMPTS", 2)
+    caplog.set_level(logging.WARNING, logger="smfish_tab")
+    with patch("os.replace", side_effect=selective_replace):
+        _write_counts_to_csvs(
+            out_dir=tmp_path,
+            well_to_zip={"A02": Path("ignored"), "B02": Path("ignored")},
+            counts=counts,
+            column="w3cy5_smfish_count",
+            well_to_csv={"A02": locked_csv, "B02": ok_csv},
+        )
+
+    msgs = [rec.getMessage() for rec in caplog.records]
+    assert any("could not write" in m and "A02.csv" in m for m in msgs), (
+        "expected a per-well WARN naming A02.csv as locked"
+    )
+    # B02 was NOT locked → its update went through despite A02 failing.
+    assert list(_read_csv(ok_csv)["w3cy5_smfish_count"]) == ["99"]
+    # A02 still has its pre-apply zero — the locked write was skipped,
+    # not silently replaced with stale content.
+    assert list(_read_csv(locked_csv)["w3cy5_smfish_count"]) == ["0"]

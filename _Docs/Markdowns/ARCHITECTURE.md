@@ -564,7 +564,15 @@ methods (teardown Phase 4).
 the smFISH worker's per-well CSV writer): tmp file + fsync + `os.replace`.
 A crash, signal, or full-disk mid-write can no longer leave a truncated
 sidecar that the next viewer load reads as empty state and silently
-clobbers. The registry owns the **one** debounced-save path — `schedule_save`
+clobbers. The tmp filename is uniquified (`<path>.<pid>.<rand>.tmp`) so
+concurrent writers / retry-cleanup races can't collide on a single fixed
+`<path>.tmp` name. Both `open(tmp, "w")` and the final `os.replace` retry
+on `PermissionError` with exponential backoff (5 attempts, 100/200/400/800/1600 ms)
+so the Windows AV-scanner / Excel-viewer / OneDrive-sync race doesn't surface
+`[WinError 5] Access is denied` mid Apply-Global-Threshold. The smFISH writer
+catches per-well `PermissionError` so one locked well's CSV (e.g. user has
+it open in Excel) doesn't kill the rest of the run — the locked well is
+skipped with a WARN naming the file + likely cause. The registry owns the **one** debounced-save path — `schedule_save`
 with a shared pending-set — so signal storms (ratio-panel field edits, heatmap
 layout drag-and-drop, cell-override toggles) coalesce into one disk write per
 500 ms burst; this replaced five identical per-domain `schedule_save`/`_flush`

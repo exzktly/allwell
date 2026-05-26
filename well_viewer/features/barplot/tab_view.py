@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QSlider, QVBoxLayout, QWidget, QWidgetAction,
+    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QSlider, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
@@ -14,6 +13,7 @@ from well_viewer.core.ui_helpers import (
     make_plot_with_right_dock, make_plot_view_switcher)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
+    open_bar_timepoint_selector,
     toggle_bar_group_mode,
     toggle_bar_pool_replicates,
 )
@@ -123,7 +123,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_tp_button = QPushButton("Select Timepoints", shape_ctrl)
     ctx.app._bar_tp_button.setProperty("variant", "secondary")
     ctx.app._bar_tp_button.clicked.connect(
-        lambda _=False: _open_bar_timepoint_selector(ctx.app)
+        lambda _=False: open_bar_timepoint_selector(ctx.app)
     )
     sl.addWidget(ctx.app._bar_tp_button)
     ctx.app._bar_tp_label = QLabel("(0 selected)", shape_ctrl)
@@ -133,12 +133,12 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # reads ``_bar_tp_cb.currentText()`` (export/service.py, view_state.py,
     # batch_export/bar_panel.py, plot_orchestrator.py) sees the first
     # selected tp string. Same shim the scatter tab uses for
-    # ``_scatter_tp_cb``.
+    # ``_scatter_tp_cb``. The authoritative multi-select state lives on
+    # ``BarPlotState.tp_selections`` (well_viewer/features/barplot/state.py).
     ctx.app._bar_tp_cb = QComboBox(shape_ctrl)
     ctx.app._bar_tp_cb.addItems(["—"])
     ctx.app._bar_tp_cb.hide()
     ctx.app._bar_tp_var = ctx.app._bar_tp_cb
-    ctx.app._bar_tp_selections: dict[str, bool] = {}
 
     # Layout toggle: cluster bars by well or by timepoint.
     ctx.app._bar_group_mode_btn = QPushButton("Group by Well", shape_ctrl)
@@ -228,79 +228,3 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx.app))
     ctx.app._bar_canvas.mpl_connect("motion_notify_event", ctx.app._on_bar_drag_motion)
     ctx.app._bar_canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx.app))
-
-
-def _open_bar_timepoint_selector(app) -> None:
-    """Pop up a QMenu of checkboxes below the bar tab's Timepoints button.
-
-    Direct port of the scatter tab's ``_open_timepoint_selector`` so the
-    bar plot can show bars/violins/beeswarms over multiple timepoints
-    simultaneously.
-    """
-    menu = QMenu(app._bar_tp_button)
-
-    sels: dict[str, bool] = getattr(app, "_bar_tp_selections", {}) or {}
-    checkboxes: dict[str, QCheckBox] = {}
-    for tp_str in sorted(sels.keys(), key=float):
-        cb = QCheckBox(tp_str, menu)
-        cb.setChecked(bool(sels[tp_str]))
-        checkboxes[tp_str] = cb
-
-        def _make_handler(tp=tp_str, checkbox=cb):
-            def on_toggled(checked: bool) -> None:
-                app._bar_tp_selections[tp] = bool(checked)
-                _sync_hidden_bar_tp_combo(app)
-                if hasattr(app, "_update_bar_tp_selection_display"):
-                    app._update_bar_tp_selection_display()
-                redraw_bars(app)
-            return on_toggled
-
-        cb.toggled.connect(_make_handler())
-        wa = QWidgetAction(menu)
-        wa.setDefaultWidget(cb)
-        menu.addAction(wa)
-
-    menu.addSeparator()
-
-    def _set_all(value: bool) -> None:
-        for tp_str, cb in checkboxes.items():
-            cb.blockSignals(True)
-            try:
-                cb.setChecked(value)
-            finally:
-                cb.blockSignals(False)
-            app._bar_tp_selections[tp_str] = value
-        _sync_hidden_bar_tp_combo(app)
-        if hasattr(app, "_update_bar_tp_selection_display"):
-            app._update_bar_tp_selection_display()
-        redraw_bars(app)
-
-    all_action = QAction("All", menu)
-    all_action.triggered.connect(lambda _=False: _set_all(True))
-    menu.addAction(all_action)
-    none_action = QAction("None", menu)
-    none_action.triggered.connect(lambda _=False: _set_all(False))
-    menu.addAction(none_action)
-
-    btn = app._bar_tp_button
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
-
-
-def _sync_hidden_bar_tp_combo(app) -> None:
-    """Mirror the first checked tp into the hidden ``_bar_tp_cb`` combo.
-
-    Legacy callers (export/service.py, persistence/view_state.py,
-    batch_export/bar_panel.py, core/plot_orchestrator.py) still read
-    ``_bar_tp_cb.currentText()``. We keep that combo's items as the full
-    sorted tp list (already done by ``update_bar_tp_menu``) and just snap
-    its current text to the first checked tp here.
-    """
-    sels = getattr(app, "_bar_tp_selections", {}) or {}
-    if not (hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None):
-        return
-    if not sels:
-        return
-    for tp_str in sorted(sels.keys(), key=float):
-        if sels[tp_str]:
-            app._bar_tp_cb.setCurrentText(tp_str)
-            return

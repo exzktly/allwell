@@ -20,6 +20,7 @@ from ui.theme import (
 
 from well_viewer.features.barplot.controller import (
     apply_bar_ylims as _apply_bar_ylims,
+    cluster_x_for_group_keys,
     collect_bar_items as _collect_bar_items,
     collect_bar_items_fov_pooled as _collect_bar_items_fov_pooled,
     ordered_bar_keys as _ordered_bar_keys,
@@ -68,6 +69,7 @@ def draw_violin(
     xs: Optional[List[float]] = None,
     group_keys: Optional[List[str]] = None,
     cell_scale: Optional[Dict[str, float]] = None,
+    bw: Optional[float] = None,
 ) -> None:
     """KDE-smoothed distribution per well/group.
 
@@ -77,6 +79,11 @@ def draw_violin(
     distribution shifts to live on the fold-change axis. NaN denominator
     means "this well had no resolvable baseline" and the well is left
     blank with no violin shape.
+
+    *bw* — explicit KDE bandwidth (matches the on-tab slider value /
+    100). When None, falls back to the on-tab ``_violin_slider`` widget;
+    the batch export passes its own bw so the figure does not depend on
+    the live tab's slider state.
     """
     try:
         from scipy.stats import gaussian_kde
@@ -87,9 +94,12 @@ def draw_violin(
         return
 
     n = len(wells)
-    slider = getattr(app, "_violin_slider", None)
-    bw_raw = float(slider.value()) / 100.0 if slider is not None else 1.0
-    bw = max(0.05, bw_raw)
+    if bw is None:
+        slider = getattr(app, "_violin_slider", None)
+        bw_raw = float(slider.value()) / 100.0 if slider is not None else 1.0
+        bw = max(0.05, bw_raw)
+    else:
+        bw = max(0.05, float(bw))
     bar_w = min(0.4, 3.0 / max(n, 1))
 
     if xs is None:
@@ -788,14 +798,14 @@ def resolve_bar_timepoint(app) -> Optional[tuple]:
 def resolve_bar_timepoints(app) -> List[tuple]:
     """Return the list of ``(float, str)`` timepoints currently selected.
 
-    The multi-select dict (``_bar_tp_selections``) is authoritative once
-    populated: an empty selection there means "show nothing", regardless of
-    what the hidden ``_bar_tp_cb`` combo still carries. We only fall back
-    to the combo before the popup has been populated at all (e.g. very
-    early after construction, before ``update_bar_tp_menu`` ran), so the
+    ``BarPlotState.tp_selections`` is authoritative once populated: an
+    empty selection there means "show nothing", regardless of what the
+    hidden ``_bar_tp_cb`` combo still carries. We only fall back to the
+    combo before the popup has been populated at all (e.g. very early
+    after construction, before ``update_bar_tp_menu`` ran), so the
     legacy single-tp shape still works on a fresh app.
     """
-    sels = getattr(app, "_bar_tp_selections", None)
+    sels = app._app_state.bar.tp_selections if hasattr(app, "_app_state") else None
     if isinstance(sels, dict) and sels:
         out: List[tuple] = []
         for tp_str, on in sels.items():
@@ -948,7 +958,7 @@ def draw_per_cell_bar_mode(
     else:
         cell_scale = None
 
-    xs = _cluster_x_for_groups(group_keys)
+    xs = cluster_x_for_group_keys(group_keys)
     if app._bar_violin:
         draw_violin(
             app, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
@@ -974,27 +984,6 @@ def draw_per_cell_bar_mode(
         )
     app._bar_canvas.draw_idle()
     return True
-
-
-def _cluster_x_for_groups(group_keys: List[str]) -> List[float]:
-    """Same cluster-position arithmetic as ``clustered_x_positions`` but from
-    a parallel list of group_key strings rather than ``BarItem``s."""
-    xs: List[float] = []
-    cur_x = 0.0
-    last_gk: Optional[str] = None
-    for i, gk in enumerate(group_keys):
-        gk = gk or ""
-        if i == 0:
-            xs.append(cur_x)
-            last_gk = gk
-            continue
-        if gk and gk == last_gk:
-            cur_x += 1.0
-        else:
-            cur_x += 2.0 if gk and last_gk and gk != last_gk else 1.0
-        xs.append(cur_x)
-        last_gk = gk
-    return xs
 
 
 def draw_per_well_n_bars(

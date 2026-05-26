@@ -105,7 +105,7 @@ def _snapshot_bar(app) -> dict:
     tp = _combo_text(app, "_bar_tp_cb")
     if tp is not None:
         out["timepoint"] = tp
-    sels = getattr(app, "_bar_tp_selections", None)
+    sels = app._app_state.bar.tp_selections if hasattr(app, "_app_state") else None
     if isinstance(sels, dict) and sels:
         out["timepoint_selections"] = {k: bool(v) for k, v in sels.items()}
     if hasattr(app, "_bar_swarm"):
@@ -390,7 +390,7 @@ def _apply_bar(app, state: dict) -> None:
         _set_combo_if_valid(app, "_bar_tp_cb", str(state["timepoint"]))
     if "timepoint_selections" in state and isinstance(state["timepoint_selections"], dict):
         try:
-            app._bar_tp_selections = {
+            app._app_state.bar.tp_selections = {
                 str(k): bool(v) for k, v in state["timepoint_selections"].items()
             }
         except Exception:

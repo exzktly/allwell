@@ -13,6 +13,7 @@ from typing import Callable, Dict, List, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -27,8 +28,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -126,11 +129,48 @@ class BarBatchExportPanel(BatchExportPanel):
         pool_row.addStretch(1)
         layout.addLayout(pool_row)
 
-        # Gate the cluster-by combo on whether multi-tp mode is on.
+        # ── Display mode (bars / beeswarm / violin) ────────────────────
+        mode_row = QHBoxLayout()
+        mode_row.setContentsMargins(12, 4, 12, 0)
+        mode_row.addWidget(QLabel("Mean panel display:"))
+        self._display_mode_grp = QButtonGroup(self)
+        self._mode_bar_rb = QRadioButton("Bars")
+        self._mode_bar_rb.setChecked(True)
+        self._mode_swarm_rb = QRadioButton("Beeswarm")
+        self._mode_violin_rb = QRadioButton("Violin")
+        for rb in (self._mode_bar_rb, self._mode_swarm_rb, self._mode_violin_rb):
+            self._display_mode_grp.addButton(rb)
+            mode_row.addWidget(rb)
+        mode_row.addStretch(1)
+        layout.addLayout(mode_row)
+
+        # ── Violin smoothing slider (5–200, default 100; matches on-tab) ─
+        smooth_row = QHBoxLayout()
+        smooth_row.setContentsMargins(12, 0, 12, 4)
+        smooth_row.addWidget(QLabel("Violin smoothing:"))
+        self._violin_smooth_slider = QSlider(Qt.Horizontal)
+        self._violin_smooth_slider.setRange(5, 200)
+        self._violin_smooth_slider.setValue(100)
+        self._violin_smooth_slider.setFixedWidth(120)
+        smooth_row.addWidget(self._violin_smooth_slider)
+        self._violin_smooth_label = QLabel("1.00")
+        smooth_row.addWidget(self._violin_smooth_label)
+        smooth_row.addStretch(1)
+        layout.addLayout(smooth_row)
+        self._violin_smooth_slider.valueChanged.connect(
+            lambda v: self._violin_smooth_label.setText(f"{v/100.0:.2f}")
+        )
+
+        # Gate the cluster-by combo on multi-tp mode; gate the smoothing
+        # slider on whether the violin mode is selected.
         def _refresh_layout_widgets() -> None:
             multi = self._multi_tp_cb.isChecked()
             self._group_mode_cb.setEnabled(multi)
+            in_violin = self._mode_violin_rb.isChecked()
+            self._violin_smooth_slider.setEnabled(in_violin)
+            self._violin_smooth_label.setEnabled(in_violin)
         self._multi_tp_cb.toggled.connect(lambda _=False: _refresh_layout_widgets())
+        self._display_mode_grp.buttonToggled.connect(lambda *_: _refresh_layout_widgets())
         _refresh_layout_widgets()
 
         sep3 = QFrame(); sep3.setFrameShape(QFrame.HLine)
@@ -193,6 +233,14 @@ class BarBatchExportPanel(BatchExportPanel):
         multi_tp_figure = bool(self._multi_tp_cb.isChecked())
         group_mode = "well" if self._group_mode_cb.currentText() == "Well" else "timepoint"
         pool_replicates = bool(self._pool_reps_cb.isChecked())
+        # Display mode (bars / beeswarm / violin) + violin bandwidth.
+        if self._mode_violin_rb.isChecked():
+            display_mode = "violin"
+        elif self._mode_swarm_rb.isChecked():
+            display_mode = "beeswarm"
+        else:
+            display_mode = "bar"
+        violin_bw = float(self._violin_smooth_slider.value()) / 100.0
 
         # Each job is either (group, [tp_str]) for a single-tp figure (the
         # legacy path) or (group, [tp1, tp2, ...]) for a multi-tp figure.
@@ -343,6 +391,8 @@ class BarBatchExportPanel(BatchExportPanel):
                         fc_state=panel_fc_state,
                         pool_replicates=pool_replicates,
                         group_mode=group_mode,
+                        display_mode=display_mode,
+                        violin_bw=violin_bw,
                     )
                 self._save_figure(fig, Path(str(base) + f".{fmt}"), fmt)
             except Exception as exc:
@@ -364,6 +414,8 @@ class BarBatchExportPanel(BatchExportPanel):
         fc_state: tuple = (False, "", False),
         pool_replicates: bool = True,
         group_mode: str = "well",
+        display_mode: str = "bar",
+        violin_bw: float = 1.0,
     ):
         from matplotlib.figure import Figure as _Figure
         from well_viewer.domain import fold_change as _fc
@@ -401,9 +453,25 @@ class BarBatchExportPanel(BatchExportPanel):
         _fc_suffix = _fc.fold_change_suffix(
             fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
         ) if fc_active else ""
-        apply_ax_style(ax_mean,
-                       f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}",
-                       f"{_ch} {_metric_label}{_fc_suffix}")
+        # The mean panel's title varies by display mode; the bar path
+        # below preserves the legacy "\u00b1 SD/SEM" suffix, beeswarm /
+        # violin paths describe the distribution instead.
+        if display_mode == "violin":
+            apply_ax_style(
+                ax_mean,
+                f"{_ch} {_metric_label} distribution (violin, bw={violin_bw:.2f}){_fc_suffix}",
+                f"{_ch} {_metric_label}{_fc_suffix}",
+            )
+        elif display_mode == "beeswarm":
+            apply_ax_style(
+                ax_mean,
+                f"{_ch} {_metric_label} per cell{_thr_q}{_fc_suffix}",
+                f"{_ch} {_metric_label}{_fc_suffix}",
+            )
+        else:
+            apply_ax_style(ax_mean,
+                           f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}",
+                           f"{_ch} {_metric_label}{_fc_suffix}")
         apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
         if self._app._use_fov_spread_active():
             apply_ax_style(
@@ -416,6 +484,19 @@ class BarBatchExportPanel(BatchExportPanel):
                 "N(spots)" if _metric_key == "smfish_count" else "N(above)",
             )
         ax_frac.set_ylim(-0.05, 1.05)
+
+        if display_mode in ("violin", "beeswarm"):
+            self._render_per_cell_panels(
+                fig=fig, ax_mean=ax_mean, ax_frac=ax_frac, ax_n=ax_n,
+                grp=grp, target_ts=target_ts, tp_strs=tp_strs,
+                threshold=threshold, use_sem=use_sem, band_lbl=band_lbl,
+                fc_state=fc_state,
+                pool_replicates=pool_replicates,
+                group_mode=group_mode,
+                display_mode=display_mode,
+                violin_bw=violin_bw,
+            )
+            return fig
 
         draw_items = collect_bar_items_for_group(
             self._app, grp, target_ts,
@@ -456,4 +537,123 @@ class BarBatchExportPanel(BatchExportPanel):
             err_bar_color=_CLR_ERR_BAR,
         )
         return fig
+
+    def _render_per_cell_panels(
+        self, *, fig, ax_mean, ax_frac, ax_n,
+        grp: BarGroup, target_ts: List[float], tp_strs: List[str],
+        threshold: float, use_sem: bool, band_lbl: str,
+        fc_state: tuple,
+        pool_replicates: bool,
+        group_mode: str,
+        display_mode: str,
+        violin_bw: float,
+    ) -> None:
+        """Draw the violin / beeswarm distribution panels for a batch group.
+
+        Reuses the on-tab ``draw_violin`` / ``draw_beeswarm`` /
+        ``draw_per_well_n_bars`` renderers so the batch output matches
+        what the tab would produce. Constructs the per-column
+        ``(well, color, label, tp)`` arrays from the group's rsets /
+        solo wells, honouring the same pool-replicates and group-mode
+        layout used by ``collect_bar_items_for_group``.
+        """
+        from well_viewer.features.barplot.controller import cluster_x_for_group_keys
+        from well_viewer.features.barplot.renderer import (
+            draw_beeswarm,
+            draw_per_well_n_bars,
+            draw_violin,
+        )
+        from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
+
+        # Build the per-column "base" (well + colour + cluster + per-bar label).
+        base_wells: List[str] = []
+        base_colors: List[str] = []
+        base_full: List[str] = []  # disambiguating identity (cluster header)
+        if pool_replicates:
+            for ri, rset in enumerate(grp.members):
+                color = _WELL_COLORS[ri % len(_WELL_COLORS)]
+                valid = [w for w in rset.wells if w in self._app._app_state.dataset.well_paths]
+                for w in valid:
+                    base_wells.append(w)
+                    base_colors.append(color)
+                    base_full.append(f"{self._app._well_display_label(w)} [{rset.name}]")
+            for w in grp.solo_wells:
+                if w not in self._app._app_state.dataset.well_paths:
+                    continue
+                color = _WELL_COLORS[len(base_wells) % len(_WELL_COLORS)]
+                base_wells.append(w)
+                base_colors.append(color)
+                base_full.append(self._app._well_display_label(w))
+        else:
+            seen: set = set()
+            for ri, rset in enumerate(grp.members):
+                color = _WELL_COLORS[ri % len(_WELL_COLORS)]
+                for w in rset.wells:
+                    if w in seen or w not in self._app._app_state.dataset.well_paths:
+                        continue
+                    seen.add(w)
+                    base_wells.append(w)
+                    base_colors.append(color)
+                    base_full.append(f"{self._app._well_display_label(w)} [{rset.name}]")
+            for w in grp.solo_wells:
+                if w in seen or w not in self._app._app_state.dataset.well_paths:
+                    continue
+                seen.add(w)
+                color = _WELL_COLORS[len(base_wells) % len(_WELL_COLORS)]
+                base_wells.append(w)
+                base_colors.append(color)
+                base_full.append(self._app._well_display_label(w))
+
+        if not base_wells:
+            return
+
+        # Materialise the (well \u00d7 tp) columns + cluster keys (single-line
+        # labels: the cluster header carries the disambiguating identity).
+        plot_wells: List[str] = []
+        plot_colors: List[str] = []
+        plot_labels: List[str] = []
+        plot_tps: List[float] = []
+        group_keys: List[str] = []
+        multi_tp = len(target_ts) > 1
+        if group_mode == "timepoint":
+            for t, t_str in zip(target_ts, tp_strs):
+                for w, c, full in zip(base_wells, base_colors, base_full):
+                    plot_wells.append(w)
+                    plot_colors.append(c)
+                    plot_labels.append(full)
+                    plot_tps.append(float(t))
+                    group_keys.append(t_str if multi_tp else "")
+        else:
+            for w, c, full in zip(base_wells, base_colors, base_full):
+                for t, t_str in zip(target_ts, tp_strs):
+                    plot_wells.append(w)
+                    plot_colors.append(c)
+                    plot_labels.append(f"t={t_str}" if multi_tp else full)
+                    plot_tps.append(float(t))
+                    group_keys.append(full if multi_tp else "")
+
+        xs = cluster_x_for_group_keys(group_keys)
+        tp_str_combined = ", ".join(tp_strs)
+        if display_mode == "violin":
+            draw_violin(
+                self._app, ax_mean, ax_frac,
+                plot_wells, plot_colors, plot_labels,
+                plot_tps, tp_str_combined, threshold,
+                xs=xs, group_keys=group_keys,
+                bw=violin_bw,
+            )
+        else:
+            draw_beeswarm(
+                self._app, ax_mean, ax_frac,
+                plot_wells, plot_colors, plot_labels,
+                plot_tps, tp_str_combined, threshold,
+                xs=xs, group_keys=group_keys,
+            )
+        if ax_n is not None:
+            draw_per_well_n_bars(
+                self._app, ax_n,
+                plot_wells, plot_colors, plot_labels,
+                plot_tps, threshold,
+                xs=xs, group_keys=group_keys,
+            )
 

@@ -145,8 +145,8 @@ def collect_bar_items(
 
     *target_t* — either a single ``float`` (legacy single-timepoint call) or
     a ``list[float]`` of timepoints. Multi-tp callers (the on-screen
-    renderer driven by ``_bar_tp_selections``) get one ``BarItem`` per
-    (key, tp) pair; the emission order respects ``bar_group_mode``
+    renderer driven by ``BarPlotState.tp_selections``) get one ``BarItem``
+    per (key, tp) pair; the emission order respects ``bar_group_mode``
     ("well": well-major; "timepoint": tp-major). The fold-change resolver
     runs once per tp.
 
@@ -797,6 +797,31 @@ def ordered_bar_keys(app) -> list:
     return ordered
 
 
+def cluster_x_for_group_keys(group_keys: List[str]) -> List[float]:
+    """Same cluster-position arithmetic as :func:`clustered_x_positions`
+    but from a parallel list of group_key strings rather than ``BarItem``s.
+
+    Used by the per-cell renderers (violin / beeswarm) and the batch
+    export to compute matching x positions for non-``BarItem`` callers.
+    """
+    xs: List[float] = []
+    cur_x = 0.0
+    last_gk: Optional[str] = None
+    for i, gk in enumerate(group_keys):
+        gk = gk or ""
+        if i == 0:
+            xs.append(cur_x)
+            last_gk = gk
+            continue
+        if gk and gk == last_gk:
+            cur_x += 1.0
+        else:
+            cur_x += 2.0 if gk and last_gk and gk != last_gk else 1.0
+        xs.append(cur_x)
+        last_gk = gk
+    return xs
+
+
 def clustered_x_positions(items: List[BarItem]) -> List[float]:
     """Compute clustered integer x-positions from ``BarItem.group_key``.
 
@@ -1109,17 +1134,16 @@ def update_bar_tp_menu(app) -> None:
     present across all loaded wells.
 
     Maintains two pieces of state in sync:
-      * ``app._bar_tp_selections`` — the multi-select dict backing the
-        popup checkbox menu (mirror of ``_scatter_tp_selections``).
+      * ``app._app_state.bar.tp_selections`` — the multi-select dict
+        backing the popup checkbox menu (BarPlotState).
       * ``app._bar_tp_cb`` — a hidden combo holding the first checked tp
         string so legacy callers (export, view-state, plot orchestrator)
         that read ``currentText()`` continue to work.
     """
-    if not hasattr(app, "_bar_tp_selections"):
-        app._bar_tp_selections = {}
+    bar_state = app._app_state.bar
 
     if not app._app_state.dataset.well_paths:
-        app._bar_tp_selections = {}
+        bar_state.tp_selections = {}
         if hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None:
             _set_combo_values(app._bar_tp_cb, ["—"])
             app._bar_tp_cb.setCurrentText("—")
@@ -1141,7 +1165,7 @@ def update_bar_tp_menu(app) -> None:
     # Preserve any existing selections; default-check the previously
     # selected single tp on first build, falling back to the first tp.
     new_selections: dict[str, bool] = {}
-    existing = app._bar_tp_selections
+    existing = bar_state.tp_selections
     any_existing_on = any(existing.values()) if existing else False
     for s in tp_strs:
         if existing and s in existing:
@@ -1153,7 +1177,7 @@ def update_bar_tp_menu(app) -> None:
             new_selections[cur] = True
         elif tp_strs:
             new_selections[tp_strs[0]] = True
-    app._bar_tp_selections = new_selections
+    bar_state.tp_selections = new_selections
 
     if hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None:
         _set_combo_values(app._bar_tp_cb, tp_strs)
@@ -1268,7 +1292,7 @@ def toggle_bar_pool_replicates(app) -> None:
 
 def update_bar_tp_selection_display(app) -> None:
     """Refresh the bar tab's "(X selected)" label below the picker."""
-    sels = getattr(app, "_bar_tp_selections", {}) or {}
+    sels = app._app_state.bar.tp_selections
     lbl = getattr(app, "_bar_tp_label", None)
     if lbl is None:
         return
@@ -1278,6 +1302,85 @@ def update_bar_tp_selection_display(app) -> None:
         lbl.setText(f"(All {count} selected)")
     else:
         lbl.setText(f"({count}/{total} selected)" if total else "(0 selected)")
+
+
+def sync_hidden_bar_tp_combo(app) -> None:
+    """Mirror the first checked tp into the hidden ``_bar_tp_cb`` combo.
+
+    Legacy callers (export/service.py, persistence/view_state.py,
+    batch_export/bar_panel.py, core/plot_orchestrator.py) still read
+    ``_bar_tp_cb.currentText()``. Keep the combo's items as the full
+    sorted tp list (set by ``update_bar_tp_menu``) and snap its current
+    text to the first checked tp here.
+    """
+    sels = app._app_state.bar.tp_selections
+    if not (hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None):
+        return
+    if not sels:
+        return
+    for tp_str in sorted(sels.keys(), key=float):
+        if sels[tp_str]:
+            app._bar_tp_cb.setCurrentText(tp_str)
+            return
+
+
+def open_bar_timepoint_selector(app) -> None:
+    """Pop up a QMenu of checkboxes below the bar tab's Timepoints button.
+
+    Mirrors ``features/scatter/cells_tab_view.py:_open_timepoint_selector``
+    so the bar plot can show bars / violins / beeswarms over multiple
+    timepoints simultaneously. Lives in the controller rather than the
+    tab builder so all bar-tab behaviour stays in one module (§5.5).
+    """
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+    from well_viewer.features.barplot.renderer import redraw_bars
+
+    menu = QMenu(app._bar_tp_button)
+
+    sels = app._app_state.bar.tp_selections
+    checkboxes: dict[str, QCheckBox] = {}
+    for tp_str in sorted(sels.keys(), key=float):
+        cb = QCheckBox(tp_str, menu)
+        cb.setChecked(bool(sels[tp_str]))
+        checkboxes[tp_str] = cb
+
+        def _make_handler(tp=tp_str, checkbox=cb):
+            def on_toggled(checked: bool) -> None:
+                app._app_state.bar.tp_selections[tp] = bool(checked)
+                sync_hidden_bar_tp_combo(app)
+                update_bar_tp_selection_display(app)
+                redraw_bars(app)
+            return on_toggled
+
+        cb.toggled.connect(_make_handler())
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(cb)
+        menu.addAction(wa)
+
+    menu.addSeparator()
+
+    def _set_all(value: bool) -> None:
+        for tp_str, cb in checkboxes.items():
+            cb.blockSignals(True)
+            try:
+                cb.setChecked(value)
+            finally:
+                cb.blockSignals(False)
+            app._app_state.bar.tp_selections[tp_str] = value
+        sync_hidden_bar_tp_combo(app)
+        update_bar_tp_selection_display(app)
+        redraw_bars(app)
+
+    all_action = QAction("All", menu)
+    all_action.triggered.connect(lambda _=False: _set_all(True))
+    menu.addAction(all_action)
+    none_action = QAction("None", menu)
+    none_action.triggered.connect(lambda _=False: _set_all(False))
+    menu.addAction(none_action)
+
+    btn = app._bar_tp_button
+    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
 def refresh_bar_layout_btn_state(app) -> None:

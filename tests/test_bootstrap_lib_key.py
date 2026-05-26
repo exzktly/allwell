@@ -35,9 +35,9 @@ import _bootstrap_lib as bl  # noqa: E402
 
 
 def test_ssh_run_omits_i_when_no_key(monkeypatch):
-    """Default path (no key configured): bare ssh argv, no -i. Matches
-    pre-v5.2.2 behaviour so a first-time bootstrap on a host using
-    ssh-agent / ~/.ssh/config keys keeps working unchanged."""
+    """Default path (no key configured): no -i. Matches pre-v5.2.2
+    behaviour so a first-time bootstrap on a host using ssh-agent /
+    ~/.ssh/config keys keeps working unchanged."""
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -47,8 +47,14 @@ def test_ssh_run_omits_i_when_no_key(monkeypatch):
     monkeypatch.setattr(bl.subprocess, "run", fake_run)
     bl._ssh_run("bigbox", ["echo", "ok"])
     assert "-i" not in captured["cmd"]
-    # Alias is at position 1 (right after the ssh binary).
-    assert captured["cmd"][1] == "bigbox"
+    # The alias is wherever ssh's -o options end — verify ordering
+    # rather than a fixed index since v5.2.3 prepends accept-new +
+    # ConnectTimeout to every invocation.
+    assert "bigbox" in captured["cmd"]
+    alias_idx = captured["cmd"].index("bigbox")
+    # Options come before destination per ssh argv discipline.
+    assert all(o in captured["cmd"][:alias_idx]
+               for o in ("StrictHostKeyChecking=accept-new",))
 
 
 def test_ssh_run_inserts_i_flag_when_key_set(monkeypatch, tmp_path):
@@ -94,6 +100,49 @@ def test_ssh_run_expands_tilde_in_key_path(monkeypatch):
 
 
 # ── _load_existing_key (v5.2.2) ────────────────────────────────────────────
+
+
+def test_ssh_run_passes_accept_new_for_first_contact(monkeypatch):
+    """v5.2.3 fix: StrictHostKeyChecking=accept-new prevents the
+    first-bootstrap exit-255-with-'Host key verification failed'
+    failure mode. Without it, ssh would prompt the user for trust
+    confirmation, but the bootstrap pipes a heredoc into stdin so
+    there's no place to prompt — ssh exits before the probe script
+    even runs."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(bl.subprocess, "run", fake_run)
+    bl._ssh_run("bigbox", ["echo", "ok"])
+    # The option value travels as the argument *after* the -o, per
+    # the GNU ssh argv convention.
+    assert "-o" in captured["cmd"]
+    assert "StrictHostKeyChecking=accept-new" in captured["cmd"]
+    # And a connect timeout so a dead host fails fast.
+    assert any(arg.startswith("ConnectTimeout=") for arg in captured["cmd"])
+
+
+def test_ssh_run_options_precede_alias(tmp_path, monkeypatch):
+    """ssh's argv parser requires options *before* the destination.
+    Catch regressions where someone reorders the cmd list and
+    accidentally puts an -o flag after the alias."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(bl.subprocess, "run", fake_run)
+    key = tmp_path / "k"
+    bl._ssh_run("bigbox", ["echo", "ok"], ssh_key_path=str(key))
+    alias_idx = captured["cmd"].index("bigbox")
+    # Every -o, -i must appear before the alias position.
+    for i, arg in enumerate(captured["cmd"]):
+        if arg in ("-o", "-i"):
+            assert i < alias_idx, f"option {arg!r} must precede alias 'bigbox'"
 
 
 def test_load_existing_key_returns_empty_when_no_remotes(tmp_path, monkeypatch):

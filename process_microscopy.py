@@ -1961,6 +1961,133 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:
 # Well-level task functions (run inside worker processes)
 # ---------------------------------------------------------------------------
 
+# ── Per-FOV checkpoint helpers (v5.2.0) ─────────────────────────────────────
+#
+# When a worker is killed mid-well, the next invocation should pick up where
+# the previous one left off rather than redoing every FOV in the well. The
+# scheme:
+#
+#   * After each FOV finishes (records computed, QC TIFs written), the worker
+#     writes <tmp_images>/.fov_<stem>.records.json (atomic) then touches
+#     <tmp_images>/.fov_<stem>.done. The records JSON is the cached output of
+#     :func:`process_image_group` for that FOV.
+#   * On startup, the worker scans <tmp_images> for valid checkpoint pairs and
+#     skips those FOVs in the per-group loop, loading their records from disk.
+#     Partially-written records (no .done marker) are reprocessed; orphan
+#     __aw_tmp_* scratch files are deleted.
+#   * On successful end-of-well (zip + CSV both written), the whole tmp_images
+#     dir is removed in the usual finally-block — checkpoints are inherently
+#     transient and never survive a successful well.
+#
+# Recovery cost for a killed-mid-well run drops from "redo every FOV in the
+# well" to "redo only the in-flight FOV at kill time."
+
+# Schema version stored in each records.json. Bumped if the records dict
+# layout changes — older checkpoints with a different version are discarded
+# on load so a freshly-built pipeline never reads stale records that would
+# poison the per-well CSV.
+_FOV_CHECKPOINT_SCHEMA = 1
+
+
+def _json_safe(records: "list[dict]") -> "list[dict]":
+    """Cast numpy scalars in record dicts to plain Python types so the
+    records survive a JSON round-trip. Mutates a copy, not the input."""
+    out: list[dict] = []
+    for r in records:
+        clean: dict = {}
+        for k, v in r.items():
+            # numpy scalar → Python builtin via .item(); everything else
+            # passes through. Avoids the ``import numpy`` cost in the
+            # common case where the records are already clean.
+            item = getattr(v, "item", None)
+            clean[k] = item() if callable(item) and v is not None else v
+        out.append(clean)
+    return out
+
+
+def _fov_stem(nuclear_path: Path) -> str:
+    """Stable per-FOV identifier within a well: the source file's stem.
+    process_microscopy already keys QC filenames on this stem (see
+    ``_qc_output_path`` around line 1305), so any QC file for this FOV
+    starts with ``stem``."""
+    return nuclear_path.stem
+
+
+def _checkpoint_paths(tmp_images: Path, fov_id: str) -> "tuple[Path, Path]":
+    """Return ``(records_json, done_marker)`` for a given FOV id."""
+    return (
+        tmp_images / f".fov_{fov_id}.records.json",
+        tmp_images / f".fov_{fov_id}.done",
+    )
+
+
+def _load_fov_checkpoint(tmp_images: Path, fov_id: str) -> "list[dict] | None":
+    """Return cached records for ``fov_id``, or None if no valid
+    checkpoint exists.
+
+    Treats a missing marker, a missing records file, an unreadable
+    records file, or a schema-version mismatch all as "no checkpoint" —
+    in every case the caller will reprocess the FOV and overwrite the
+    on-disk state.
+    """
+    records_file, marker = _checkpoint_paths(tmp_images, fov_id)
+    if not (marker.exists() and records_file.exists()):
+        return None
+    try:
+        payload = json.loads(records_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("schema") != _FOV_CHECKPOINT_SCHEMA:
+        return None
+    records = payload.get("records")
+    if not isinstance(records, list):
+        return None
+    return records
+
+
+def _save_fov_checkpoint(
+    tmp_images: Path, fov_id: str, records: "list[dict]",
+) -> None:
+    """Atomically persist ``records`` and create the ``.done`` marker.
+
+    Writes records.json first, fsync-then-rename, then touches the marker
+    — so a process killed between the two writes leaves NO marker and
+    the next run reprocesses the FOV (rather than reading half-written
+    records).
+    """
+    records_file, marker = _checkpoint_paths(tmp_images, fov_id)
+    tmp = records_file.with_suffix(".records.json.tmp")
+    payload = {"schema": _FOV_CHECKPOINT_SCHEMA, "records": _json_safe(records)}
+    text = json.dumps(payload)
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    tmp.replace(records_file)
+    # The marker is the atomicity boundary — present iff records_file
+    # is on disk and complete.
+    marker.touch()
+
+
+def _prune_scratch_files(tmp_images: Path) -> None:
+    """Remove ``__aw_tmp_*`` partials from a previous killed run.
+
+    These come from ``_safe_imwrite`` writes that didn't complete. The
+    zip step already filters them out, but leaving them on disk wastes
+    space and can confuse a human inspecting the checkpoint state.
+    """
+    if not tmp_images.is_dir():
+        return
+    for p in tmp_images.iterdir():
+        if p.name.startswith("__aw_tmp_"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
 def _process_groups_in_worker(
     groups: "list[tuple[Path, list[Path]]]",
     shared_kwargs: dict,
@@ -1977,12 +2104,19 @@ def _process_groups_in_worker(
     fov_threads=1 (default) is safe for any backend; >1 benefits multi-core CPU.
 
     Returns (records, failed_names).
+
+    v5.2.0: each FOV that completes successfully is persisted as a small
+    JSON checkpoint inside ``output_dir`` (the well's ``tmp_images``).
+    A subsequent invocation against the same partly-finished well loads
+    those checkpoints and skips the corresponding FOVs entirely.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 
     fov_threads = shared_kwargs.pop("_fov_threads", fov_threads)
     fov_threads = max(1, min(fov_threads, len(groups), os.cpu_count() or 1))
     kwargs = {k: v for k, v in shared_kwargs.items() if not k.startswith("_")}
+    tmp_images: Path = kwargs["output_dir"]
+    _prune_scratch_files(tmp_images)
 
     all_records: list[dict] = []
     failed:      list[str]  = []
@@ -1994,19 +2128,45 @@ def _process_groups_in_worker(
                  nuclear_path.name, time.perf_counter() - _t0, len(recs))
         for r in recs:
             r["well"] = well_label
+        # Persist this FOV's records so a kill before end-of-well
+        # doesn't lose the work. The marker write is the last step in
+        # _save_fov_checkpoint so a half-written records.json never
+        # appears "done" to the next invocation.
+        try:
+            _save_fov_checkpoint(tmp_images, _fov_stem(nuclear_path), recs)
+        except OSError as ckpt_exc:
+            log.warning(
+                "FOV %s — could not write checkpoint (%s); FOV will be "
+                "reprocessed on restart.", nuclear_path.name, ckpt_exc,
+            )
         return recs
+
+    def _process_or_resume(
+        nuclear_path: Path, fluor_paths: "list[Path]",
+    ) -> "list[dict]":
+        """Load cached records if a checkpoint exists, else process the
+        FOV from scratch."""
+        fov_id = _fov_stem(nuclear_path)
+        cached = _load_fov_checkpoint(tmp_images, fov_id)
+        if cached is not None:
+            log.info(
+                "FOV %s — resumed from checkpoint (%d records)",
+                nuclear_path.name, len(cached),
+            )
+            return cached
+        return _run_group(nuclear_path, fluor_paths)
 
     if fov_threads == 1 or len(groups) == 1:
         for nuclear_path, fluor_paths in groups:
             try:
-                all_records.extend(_run_group(nuclear_path, fluor_paths))
+                all_records.extend(_process_or_resume(nuclear_path, fluor_paths))
             except Exception as exc:           # noqa: BLE001
                 log.error("FAILED %s: %s", nuclear_path.name, exc, exc_info=True)
                 failed.append(nuclear_path.name)
     else:
         with ThreadPoolExecutor(max_workers=fov_threads) as tex:
             future_map = {
-                tex.submit(_run_group, nuc, fluors): nuc
+                tex.submit(_process_or_resume, nuc, fluors): nuc
                 for nuc, fluors in groups
             }
             for fut in _as_completed(future_map):
@@ -2050,12 +2210,29 @@ def process_well_zip_task(
     tmp_extract = output_dir / f"_tmp_extract_{well_label}"
     tmp_images  = output_dir / f"_tmp_images_{well_label}"
 
-    # Remove any stale directories left by a previous crashed run before
-    # creating fresh ones, so we never process stale files.
-    for _stale in (tmp_extract, tmp_images):
-        if _stale.exists():
-            log.warning("Well %s: removing stale tmp dir %s", well_label, _stale.name)
-            remove_directory(_stale)
+    # tmp_extract is always per-run scratch: extraction can re-derive
+    # itself from the source zip in seconds, no checkpoint value.
+    if tmp_extract.exists():
+        log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_extract.name)
+        remove_directory(tmp_extract)
+
+    # tmp_images carries per-FOV checkpoints (v5.2.0). If it holds at
+    # least one ``.fov_*.done`` marker, treat it as a partial-progress
+    # dir for this well and keep its contents — _process_groups_in_worker
+    # will pick up where the previous attempt stopped. Otherwise wipe
+    # it (matches pre-v5.2.0 behavior on a clean restart).
+    if tmp_images.exists():
+        has_checkpoint = any(tmp_images.glob(".fov_*.done"))
+        if has_checkpoint:
+            log.info(
+                "Well %s: resuming from %d FOV checkpoint(s) in %s",
+                well_label,
+                sum(1 for _ in tmp_images.glob(".fov_*.done")),
+                tmp_images.name,
+            )
+        else:
+            log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
+            remove_directory(tmp_images)
 
     try:
         try:
@@ -2159,9 +2336,20 @@ def process_well_folder_task(
     log.info("Well %s — starting (folder mode, pid %d)", well_label, os.getpid())
 
     tmp_images = output_dir / f"_tmp_images_{well_label}"
+    # v5.2.0: preserve per-FOV checkpoints if any .fov_*.done markers
+    # exist; otherwise wipe stale state. Same semantics as zip-mode.
     if tmp_images.exists():
-        log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
-        remove_directory(tmp_images)
+        has_checkpoint = any(tmp_images.glob(".fov_*.done"))
+        if has_checkpoint:
+            log.info(
+                "Well %s: resuming from %d FOV checkpoint(s) in %s",
+                well_label,
+                sum(1 for _ in tmp_images.glob(".fov_*.done")),
+                tmp_images.name,
+            )
+        else:
+            log.warning("Well %s: removing stale tmp dir %s", well_label, tmp_images.name)
+            remove_directory(tmp_images)
 
     _committed = False
     try:
@@ -2489,12 +2677,27 @@ def process_well_zips(
         schema = parse_schema(DEFAULT_SCHEMA)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sweep any stale _tmp_extract_* / _tmp_images_* dirs left by a previous
-    # crashed run before spawning new workers, so disk space is reclaimed early.
-    for _stale in sorted(output_dir.glob("_tmp_extract_*")) + sorted(output_dir.glob("_tmp_images_*")):
+    # Sweep stale dirs from previous crashed runs. v5.2.0: a
+    # _tmp_images_* dir that holds any .fov_*.done marker is treated
+    # as per-FOV checkpoint state (not garbage) and survives the sweep —
+    # the worker will pick up where the previous attempt left off.
+    # _tmp_extract_* dirs are always per-run scratch.
+    for _stale in sorted(output_dir.glob("_tmp_extract_*")):
         if _stale.is_dir():
             log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
             remove_directory(_stale)
+    for _stale in sorted(output_dir.glob("_tmp_images_*")):
+        if not _stale.is_dir():
+            continue
+        if any(_stale.glob(".fov_*.done")):
+            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
+            log.info(
+                "Keeping checkpoint dir %s (%d FOV(s) already done)",
+                _stale.name, n_done,
+            )
+            continue
+        log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+        remove_directory(_stale)
 
     # Skip already-complete wells unless --force
     n_skipped = 0
@@ -2596,11 +2799,21 @@ def process_well_folders(
         schema = parse_schema(DEFAULT_SCHEMA)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sweep any stale staging dirs left by a previous crashed run.
+    # Sweep stale staging dirs left by a previous crashed run, but
+    # keep any _tmp_images_* dir that holds per-FOV checkpoint markers
+    # (v5.2.0) — the matching worker will resume from those.
     for _stale in sorted(output_dir.glob("_tmp_images_*")):
-        if _stale.is_dir():
-            log.warning("Removing stale staging directory from previous run: %s", _stale.name)
-            remove_directory(_stale)
+        if not _stale.is_dir():
+            continue
+        if any(_stale.glob(".fov_*.done")):
+            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
+            log.info(
+                "Keeping checkpoint dir %s (%d FOV(s) already done)",
+                _stale.name, n_done,
+            )
+            continue
+        log.warning("Removing stale staging directory from previous run: %s", _stale.name)
+        remove_directory(_stale)
 
     # Skip already-complete wells unless --force
     n_skipped = 0

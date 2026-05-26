@@ -438,7 +438,7 @@ class AnalyzeTab(QWidget):
         sec.layout().addWidget(self._compress_output_cb)
 
         r = self._row(sec, "CSV prefix")
-        self._csv_prefix_edit = self._entry(r, "gfp_measurements", width=160)
+        self._csv_prefix_edit = self._entry(r, "measurements", width=160)
         r.layout().addStretch(1)
 
     def _build_compute_options_section(self, parent: QWidget) -> None:
@@ -950,7 +950,7 @@ class AnalyzeTab(QWidget):
             raw=Path(self._input_edit.text().strip()),
             nuclear_token=self._nuclear_token_edit.text().strip() or "NIR",
             fluor_tokens=self._fluor_tokens_list(),
-            csv_prefix=self._csv_prefix_edit.text().strip() or "gfp_measurements",
+            csv_prefix=self._csv_prefix_edit.text().strip() or "measurements",
             tophat_radius_nir=self._tophat_radius_nir_edit.text(),
             tophat_radius_fluor=self._tophat_radius_fluor_edit.text(),
             no_tophat_nir=self._no_tophat_nir_cb.isChecked(),

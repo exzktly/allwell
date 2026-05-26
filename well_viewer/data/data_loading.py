@@ -615,7 +615,7 @@ def _beeswarm_jitter(
 # ── Well-token parsing ───────────────────────────────────────────────────────
 
 def extract_well_token(label: str) -> Optional[str]:
-    """'gfp_measurements_B10' → 'B10'."""
+    """'measurements_B10' → 'B10'."""
     m = re.search(r"([A-Ha-h])(\d{1,2})$", label)
     return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else None
 

@@ -243,3 +243,21 @@ def test_load_existing_key_is_silent_on_toml_parse_error(tmp_path, monkeypatch):
     monkeypatch.setenv("ALLWELL_REMOTES", str(cfg))
     # Must not raise.
     assert bl._load_existing_key("anything") == ""
+
+
+def test_ssh_run_passes_batchmode_v528(monkeypatch):
+    """v5.2.8: BatchMode=yes prevents the bootstrap from dropping the
+    user into an interactive password prompt they can't satisfy. With
+    no key configured AND the server requiring auth, ssh should exit
+    with 'Permission denied' immediately so the wizard-then-bootstrap
+    diagnostic path is obvious — not a hung prompt the user types
+    blindly into."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(bl.subprocess, "run", fake_run)
+    bl._ssh_run("bigbox", ["echo", "ok"])
+    assert "BatchMode=yes" in captured["cmd"]

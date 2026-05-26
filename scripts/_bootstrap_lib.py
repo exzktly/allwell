@@ -187,6 +187,16 @@ def _ssh_run(
     key-change detection on subsequent connects. ``ConnectTimeout``
     is set so a misconfigured / unreachable host fails fast instead
     of hanging on TCP-syn retries for the kernel default (~75s).
+
+    v5.2.8: ``BatchMode=yes`` so an authentication failure produces a
+    readable "Permission denied" exit code instead of dropping the
+    user into an interactive password prompt that AllWell can't help
+    them satisfy. Aligned with every other ssh invocation in the
+    framework — the project's policy is "never store passwords; if
+    keys don't work we want to see why, not endlessly retype". If
+    the user genuinely needs password auth, ssh-copy-id (run by the
+    user in their own terminal as the Setup SSH Key wizard's Step 2)
+    handles that one-shot interaction.
     """
     cmd = [_ssh_binary()]
     if ssh_key_path:
@@ -194,6 +204,7 @@ def _ssh_run(
     cmd += [
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
+        "-o", "BatchMode=yes",
         alias, *remote_argv,
     ]
     return subprocess.run(
@@ -614,6 +625,10 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
         "ssh",
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
+        # v5.2.8: BatchMode=yes so rsync's transport ssh fails fast
+        # with "Permission denied" instead of dropping the user into
+        # an unsatisfiable password prompt mid-bandwidth-probe.
+        "-o", "BatchMode=yes",
     ]
     if ssh_key_path:
         # rsync uses an external ssh command set via -e. Shell-quote
@@ -746,9 +761,49 @@ def main(argv: list[str] | None = None) -> int:
     key_path = _load_existing_key(args.alias)
     if key_path:
         say(f"Using SSH key from remotes.toml: {key_path}")
+    else:
+        # v5.2.8: helpful guidance instead of a cryptic Permission
+        # denied later. We don't refuse to proceed — ssh-agent /
+        # default keys / SSH config IdentityFile entries are valid
+        # paths a user might rely on — but we warn loudly so the
+        # "wizard never finished saving" failure mode is obvious.
+        say(
+            f"No ssh_key_path configured for '{args.alias}' in remotes.toml. "
+            "Bootstrap will attempt ssh-agent / default identities. "
+            "If that fails with Permission denied, run the Setup SSH Key "
+            "wizard from the AllWell GUI and OK the form to save the key."
+        )
 
     # 1. Probe.
-    probe = probe_host(args.alias, ssh_key_path=key_path)
+    # v5.2.8: the probe is the very first ssh call we make. If it fails
+    # we surface a helpful diagnostic and exit 2 instead of letting the
+    # bare CalledProcessError bubble up — the traceback dump is
+    # confusing for non-Python users and obscures the real next step.
+    try:
+        probe = probe_host(args.alias, ssh_key_path=key_path)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        print(
+            f"\nERROR: ssh to '{args.alias}' failed (exit {exc.returncode}).\n",
+            file=sys.stderr,
+        )
+        if stderr:
+            print(f"  ssh said:\n    {stderr.replace(chr(10), chr(10) + '    ')}\n",
+                  file=sys.stderr)
+        print(
+            "Most likely causes (in order):\n"
+            f"  • No SSH key configured for '{args.alias}' in remotes.toml.\n"
+            "    → Open AllWell → Manage Remotes → Edit → Setup SSH Key…\n"
+            "      then OK the form to persist ssh_key_path.\n"
+            "  • The wizard's key exists but isn't installed on the remote.\n"
+            "    → Re-run the wizard's Step 2 (copy command in your terminal).\n"
+            "  • Stale host key in ~/.ssh/known_hosts after host re-creation.\n"
+            f"    → ssh-keygen -R {args.alias}\n"
+            "  • Network / DNS / firewall — verify with `ssh -v "
+            f"{args.alias} echo ok` in your terminal.",
+            file=sys.stderr,
+        )
+        return 2
     say(
         f"Probe result: conda={probe.has_conda} env={probe.has_env} "
         f"repo={probe.has_repo} tf={probe.tensorflow_version or '-'} "

@@ -533,19 +533,73 @@ class SSHKeyWizardDialog(QDialog):
         self._command_edit.setEnabled(False)
         self._verify_btn.setEnabled(False)
 
-        # If the key already exists from a previous run, populate Step 2
-        # so the user can re-run Step 3 without regenerating.
+        # If the key already exists from a previous run, surface its
+        # state up front. v5.2.6 distinguishes a passphrase-less key
+        # (safe to reuse → populate Step 2 so the user can skip
+        # straight to Verify) from a passphrase-protected one
+        # (AllWell can't use it under BatchMode=yes → warn).
         if self._key_path.is_file():
-            self._generate_status_lbl.setText(
-                f"✓ Key already exists at {self._key_path}. "
-                "Click Generate to re-use it, or jump to Step 2."
-            )
-            self._populate_step2()
+            if ssh_key_setup.key_has_passphrase(self._key_path):
+                self._generate_status_lbl.setText(
+                    f"⚠ Existing key at {self._key_path} has a passphrase. "
+                    "Click Generate to replace it with a passphrase-less key."
+                )
+                # Don't populate Step 2 — the existing key won't pass
+                # AllWell's BatchMode=yes verify even if it's copied
+                # to the remote.
+            else:
+                self._generate_status_lbl.setText(
+                    f"✓ Key already exists at {self._key_path}. "
+                    "Click Generate to re-use it, or jump to Step 2."
+                )
+                self._populate_step2()
 
     # ── steps ────────────────────────────────────────────────────────────
 
     def _on_generate(self) -> None:
         self._generate_btn.setEnabled(False)
+        self._generate_status_lbl.setText("Checking key…")
+        QApplication.processEvents()
+
+        # v5.2.6: detect the "existing key has a passphrase" trap. The
+        # default behaviour is to reuse an existing key; AllWell runs
+        # ssh with BatchMode=yes so a passphrase-protected key
+        # silently fails as "Permission denied" at every subsequent
+        # Test SSH / Bootstrap step. We catch it here and offer to
+        # replace the key with a fresh passphrase-less one.
+        if self._key_path.is_file() and ssh_key_setup.key_has_passphrase(self._key_path):
+            ans = QMessageBox.question(
+                self, "Existing key has a passphrase",
+                "An existing SSH key was found, but it's protected by "
+                "a passphrase. AllWell runs ssh non-interactively "
+                "(BatchMode=yes) so it can't unlock it — every Test "
+                "SSH or Bootstrap call would say "
+                "\"Permission denied\".\n\n"
+                "Replace it with a fresh passphrase-less key?\n\n"
+                f"Key path: {self._key_path}",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if ans != QMessageBox.Yes:
+                self._generate_btn.setEnabled(True)
+                self._generate_status_lbl.setText(
+                    "✗ Existing key has a passphrase — wizard cannot proceed. "
+                    "Delete or rename the key file manually, then click "
+                    "Generate again."
+                )
+                return
+            # User opted in: remove both halves so generate_keypair's
+            # idempotency check produces a fresh key.
+            try:
+                self._key_path.unlink()
+            except OSError:
+                pass
+            pub = self._key_path.with_suffix(self._key_path.suffix + ".pub")
+            try:
+                pub.unlink()
+            except OSError:
+                pass
+
         self._generate_status_lbl.setText("Generating…")
         QApplication.processEvents()
         created, err = ssh_key_setup.generate_keypair(self._key_path)

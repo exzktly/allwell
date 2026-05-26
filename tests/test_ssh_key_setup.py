@@ -28,6 +28,7 @@ from services.ssh_key_setup import (
     default_key_path,
     generate_keypair,
     has_ssh_copy_id,
+    key_has_passphrase,
     probe_ssh_connection,
     verify_key_works,
 )
@@ -337,3 +338,86 @@ def test_verify_key_works_still_delegates_through_new_helper(tmp_path, monkeypat
     ok, detail = verify_key_works("bigbox", key)
     assert ok is True
     assert detail == ""
+
+
+# ── key_has_passphrase (v5.2.6) ─────────────────────────────────────────────
+
+
+def test_key_has_passphrase_returns_false_for_missing_file(tmp_path):
+    """No file → nothing to check. False so callers don't trigger the
+    'replace this key' prompt for a key that doesn't exist."""
+    assert key_has_passphrase(tmp_path / "nope") is False
+
+
+def test_key_has_passphrase_returns_false_when_ssh_keygen_succeeds(tmp_path, monkeypatch):
+    """ssh-keygen -y -P "" -f <key> with rc 0 means the key has no
+    passphrase (empty string unlocked it)."""
+    key = tmp_path / "key"
+    key.write_text("FAKE")
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0, stdout="ssh-ed25519 AAAA…", stderr="",
+        )),
+    )
+    assert key_has_passphrase(key) is False
+
+
+def test_key_has_passphrase_returns_true_when_ssh_keygen_fails(tmp_path, monkeypatch):
+    """Non-zero rc with the empty passphrase means a passphrase IS set
+    (the wrong passphrase '' was rejected). This is the trap v5.2.6
+    detects."""
+    key = tmp_path / "key"
+    key.write_text("FAKE")
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="Load key \"key\": incorrect passphrase",
+        )),
+    )
+    assert key_has_passphrase(key) is True
+
+
+def test_key_has_passphrase_fails_safe_when_ssh_keygen_missing(tmp_path, monkeypatch):
+    """If ssh-keygen isn't on PATH we can't detect — return False so
+    the wizard reuses the existing key rather than blocking on a
+    detection mechanism we can't run."""
+    key = tmp_path / "key"
+    key.write_text("FAKE")
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(side_effect=FileNotFoundError("ssh-keygen not on PATH")),
+    )
+    assert key_has_passphrase(key) is False
+
+
+def test_key_has_passphrase_fails_safe_on_timeout(tmp_path, monkeypatch):
+    """A hung ssh-keygen shouldn't deadlock the wizard."""
+    key = tmp_path / "key"
+    key.write_text("FAKE")
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(side_effect=subprocess.TimeoutExpired(cmd="ssh-keygen", timeout=10)),
+    )
+    assert key_has_passphrase(key) is False
+
+
+def test_key_has_passphrase_invokes_correct_command(tmp_path, monkeypatch):
+    """Argv discipline: -y for the derive-pubkey mode, -P '' to attempt
+    the empty passphrase, -f to point at the key file."""
+    key = tmp_path / "mykey"
+    key.write_text("FAKE")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("services.ssh_key_setup.subprocess.run", fake_run)
+    key_has_passphrase(key)
+    assert captured["cmd"][0] == "ssh-keygen"
+    assert "-y" in captured["cmd"]
+    p_idx = captured["cmd"].index("-P")
+    assert captured["cmd"][p_idx + 1] == ""  # empty passphrase argument
+    f_idx = captured["cmd"].index("-f")
+    assert captured["cmd"][f_idx + 1] == str(key)

@@ -187,6 +187,16 @@ def _ssh_run(
     key-change detection on subsequent connects. ``ConnectTimeout``
     is set so a misconfigured / unreachable host fails fast instead
     of hanging on TCP-syn retries for the kernel default (~75s).
+
+    v5.2.8: ``BatchMode=yes`` so an authentication failure produces a
+    readable "Permission denied" exit code instead of dropping the
+    user into an interactive password prompt that AllWell can't help
+    them satisfy. Aligned with every other ssh invocation in the
+    framework — the project's policy is "never store passwords; if
+    keys don't work we want to see why, not endlessly retype". If
+    the user genuinely needs password auth, ssh-copy-id (run by the
+    user in their own terminal as the Setup SSH Key wizard's Step 2)
+    handles that one-shot interaction.
     """
     cmd = [_ssh_binary()]
     if ssh_key_path:
@@ -194,6 +204,7 @@ def _ssh_run(
     cmd += [
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
+        "-o", "BatchMode=yes",
         alias, *remote_argv,
     ]
     return subprocess.run(
@@ -614,6 +625,10 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
         "ssh",
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
+        # v5.2.8: BatchMode=yes so rsync's transport ssh fails fast
+        # with "Permission denied" instead of dropping the user into
+        # an unsatisfiable password prompt mid-bandwidth-probe.
+        "-o", "BatchMode=yes",
     ]
     if ssh_key_path:
         # rsync uses an external ssh command set via -e. Shell-quote
@@ -702,10 +717,18 @@ def write_or_update_remotes_toml(
     prior = get_remote(alias, path=path)
     base = prior or RemoteHost(name=alias, ssh_alias=alias)
     from dataclasses import replace
+    # v5.2.9: do NOT overwrite ssh_alias with the section name. A user
+    # may have set up `[remote.j]` with `ssh_alias = "jupyterhub"` so
+    # the section is short to type but the ssh target matches their
+    # ~/.ssh/config entry. Pre-v5.2.9 this `replace(base, ssh_alias=
+    # alias)` clobbered the user's mapping and broke every subsequent
+    # ssh attempt. The `base.ssh_alias or alias` fallback covers the
+    # fresh-entry case (prior is None → base.ssh_alias == alias
+    # already, so the `or` is a no-op).
     host = replace(
         base,
         name=alias,
-        ssh_alias=alias,
+        ssh_alias=base.ssh_alias or alias,
         remote_project_dir=base.remote_project_dir or REMOTE_HOME_REPO,
         remote_staging_dir=base.remote_staging_dir or REMOTE_STAGING,
         remote_python=base.remote_python or REMOTE_PYTHON,
@@ -746,9 +769,73 @@ def main(argv: list[str] | None = None) -> int:
     key_path = _load_existing_key(args.alias)
     if key_path:
         say(f"Using SSH key from remotes.toml: {key_path}")
+    else:
+        # v5.2.8: helpful guidance instead of a cryptic Permission
+        # denied later. We don't refuse to proceed — ssh-agent /
+        # default keys / SSH config IdentityFile entries are valid
+        # paths a user might rely on — but we warn loudly so the
+        # "wizard never finished saving" failure mode is obvious.
+        say(
+            f"No ssh_key_path configured for '{args.alias}' in remotes.toml. "
+            "Bootstrap will attempt ssh-agent / default identities. "
+            "If that fails with Permission denied, run the Setup SSH Key "
+            "wizard from the AllWell GUI and OK the form to save the key."
+        )
+
+    # v5.2.9: the CLI argv (`args.alias`) is the [remote.<X>] SECTION
+    # name in remotes.toml. The actual ssh-config target (what we pass
+    # to `ssh`) is the `ssh_alias` field, which can differ — a user
+    # named the section "j" but wired ssh_alias="jupyterhub.example.edu"
+    # via their ~/.ssh/config. Resolve the ssh_alias so every ssh call
+    # below targets the right host.
+    ssh_target = args.alias
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from services.remote_config import get_remote
+        host_entry = get_remote(args.alias)
+    except Exception:  # noqa: BLE001 — best-effort
+        host_entry = None
+    if host_entry is not None and host_entry.ssh_alias:
+        ssh_target = host_entry.ssh_alias
+        if ssh_target != args.alias:
+            say(
+                f"[remote.{args.alias}] ssh_alias = {ssh_target!r}; "
+                "using as ssh target."
+            )
 
     # 1. Probe.
-    probe = probe_host(args.alias, ssh_key_path=key_path)
+    # v5.2.8: the probe is the very first ssh call we make. If it fails
+    # we surface a helpful diagnostic and exit 2 instead of letting the
+    # bare CalledProcessError bubble up — the traceback dump is
+    # confusing for non-Python users and obscures the real next step.
+    # v5.2.9: target ssh_target (host.ssh_alias when known, else
+    # args.alias), so a `[remote.j]` section with ssh_alias="jupyterhub"
+    # actually ssh's to "jupyterhub", not "j".
+    try:
+        probe = probe_host(ssh_target, ssh_key_path=key_path)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        print(
+            f"\nERROR: ssh to '{ssh_target}' failed (exit {exc.returncode}).\n",
+            file=sys.stderr,
+        )
+        if stderr:
+            print(f"  ssh said:\n    {stderr.replace(chr(10), chr(10) + '    ')}\n",
+                  file=sys.stderr)
+        print(
+            "Most likely causes (in order):\n"
+            f"  • No SSH key configured for '{args.alias}' in remotes.toml.\n"
+            "    → Open AllWell → Manage Remotes → Edit → Setup SSH Key…\n"
+            "      then OK the form to persist ssh_key_path.\n"
+            "  • The wizard's key exists but isn't installed on the remote.\n"
+            "    → Re-run the wizard's Step 2 (copy command in your terminal).\n"
+            "  • Stale host key in ~/.ssh/known_hosts after host re-creation.\n"
+            f"    → ssh-keygen -R {ssh_target}\n"
+            "  • Network / DNS / firewall — verify with `ssh -v "
+            f"{ssh_target} echo ok` in your terminal.",
+            file=sys.stderr,
+        )
+        return 2
     say(
         f"Probe result: conda={probe.has_conda} env={probe.has_env} "
         f"repo={probe.has_repo} tf={probe.tensorflow_version or '-'} "
@@ -760,7 +847,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.force:
         say("--force: removing existing miniforge + env on remote")
         _ssh_run(
-            args.alias, ["bash", "-c", "rm -rf ~/miniforge3 ~/allwell"],
+            ssh_target, ["bash", "-c", "rm -rf ~/miniforge3 ~/allwell"],
             check=False, capture=False,
             ssh_key_path=key_path,
         )
@@ -768,24 +855,27 @@ def main(argv: list[str] | None = None) -> int:
 
     # 3. Install miniforge if missing.
     install_miniforge_if_missing(
-        args.alias, probe, args.force, ssh_key_path=key_path,
+        ssh_target, probe, args.force, ssh_key_path=key_path,
     )
 
     # 4. Ensure env + staging.
     ensure_env_and_staging(
-        args.alias, probe, args.force, ssh_key_path=key_path,
+        ssh_target, probe, args.force, ssh_key_path=key_path,
     )
 
     # 5. Sync required files.
-    sync_required_files(args.alias, ssh_key_path=key_path)
+    sync_required_files(ssh_target, ssh_key_path=key_path)
 
     # 6. Install pip deps (skipped if TF already importable).
-    install_pip_deps(args.alias, probe, ssh_key_path=key_path)
+    install_pip_deps(ssh_target, probe, ssh_key_path=key_path)
 
     # 7. Bandwidth probe.
-    mbps = measure_bandwidth(args.alias, ssh_key_path=key_path)
+    mbps = measure_bandwidth(ssh_target, ssh_key_path=key_path)
 
-    # 8. Write remotes.toml.
+    # 8. Write remotes.toml. Uses the SECTION name (args.alias) so a
+    # user who set up [remote.j] keeps that section, but
+    # write_or_update_remotes_toml preserves any pre-existing
+    # ssh_alias so the user's custom mapping survives.
     path, block, wrote = write_or_update_remotes_toml(args.alias, probe, mbps)
 
     # 9. Final report.

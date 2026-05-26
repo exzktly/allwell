@@ -136,6 +136,30 @@ def test_write_remote_extra_args_round_trip(tmp_path):
     assert reloaded["withargs"].extra_args == ("--workers", "16", "--force")
 
 
+def test_write_remote_ssh_key_path_round_trip(tmp_path):
+    """v5.2.1: the wizard's recorded key path must survive a write
+    cycle, and an empty path must NOT emit an empty ssh_key_path
+    line to keep the common-case block tidy."""
+    cfg = tmp_path / "remotes.toml"
+
+    # With a key.
+    write_remote(
+        _make_host("keyed", ssh_key_path="~/.ssh/allwell_keyed"),
+        path=cfg,
+    )
+    reloaded = load_remotes(cfg)
+    assert reloaded["keyed"].ssh_key_path == "~/.ssh/allwell_keyed"
+    assert "ssh_key_path" in cfg.read_text(encoding="utf-8")
+
+    # Replace with empty — block stays valid but ssh_key_path line
+    # disappears (terser, no empty-string noise).
+    write_remote(_make_host("keyed", ssh_key_path=""), path=cfg)
+    text = cfg.read_text(encoding="utf-8")
+    assert "ssh_key_path" not in text
+    reloaded = load_remotes(cfg)
+    assert reloaded["keyed"].ssh_key_path == ""
+
+
 # ── delete_remote ──────────────────────────────────────────────────────────
 
 

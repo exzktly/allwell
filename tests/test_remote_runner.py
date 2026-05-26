@@ -8,6 +8,7 @@ verify step). Anything that would touch real ssh/rsync is mocked.
 from __future__ import annotations
 
 import os
+import subprocess
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -822,3 +823,109 @@ def test_sync_required_files_passes_e_flag_to_rsync(host, monkeypatch):
     assert "-i" in inner
     assert "/tmp/k" in inner
     assert "StrictHostKeyChecking=accept-new" in inner
+
+
+# ── v5.2.10: rsync --info gating for legacy rsync ──────────────────────────
+
+
+def test_rsync_supports_info_flag_recognises_modern_rsync(monkeypatch):
+    """rsync 3.2.7 (current default on most Linux + recent Git Bash)
+    must be detected as supporting --info=...."""
+    from services.remote_runner import _rsync_supports_info_flag
+    _rsync_supports_info_flag.cache_clear()
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 3.2.7  protocol version 31\n",
+            stderr="",
+        )),
+    )
+    assert _rsync_supports_info_flag() is True
+
+
+def test_rsync_supports_info_flag_rejects_legacy_rsync(monkeypatch):
+    """macOS bundles rsync 2.6.9. Detect it and skip --info=...
+    rather than blowing up bootstrap with 'unknown option'."""
+    from services.remote_runner import _rsync_supports_info_flag
+    _rsync_supports_info_flag.cache_clear()
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 2.6.9  protocol version 29\n",
+            stderr="",
+        )),
+    )
+    assert _rsync_supports_info_flag() is False
+
+
+def test_rsync_supports_info_flag_fails_safe_when_rsync_missing(monkeypatch):
+    """If rsync isn't on PATH the version probe raises; fail-safe to
+    False so the caller omits --info= and doesn't crash."""
+    from services.remote_runner import _rsync_supports_info_flag
+    _rsync_supports_info_flag.cache_clear()
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(side_effect=FileNotFoundError("rsync")),
+    )
+    assert _rsync_supports_info_flag() is False
+
+
+def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
+    """Integration: a host with legacy rsync gets the bare argv
+    (no --info=stats0), avoiding the 'unknown option' exit 1 that
+    blocked the user's bootstrap."""
+    from services.remote_runner import _rsync_supports_info_flag
+    _rsync_supports_info_flag.cache_clear()
+    captured = {}
+
+    runner = RemoteRunner(host)
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+
+    def fake_run(cmd, **kwargs):
+        # First call: rsync --version → return legacy version.
+        # Second call: the actual rsync — capture and succeed.
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout="rsync  version 2.6.9  protocol version 29\n",
+                stderr="",
+            )
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    runner.sync_required_files()
+    assert "--info=stats0" not in captured["cmd"], \
+        f"--info=stats0 should be omitted on legacy rsync; argv: {captured['cmd']}"
+
+
+def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatch):
+    """Inverse of the above — modern rsync still gets the --info
+    flag so the GUI's terser log output is preserved."""
+    from services.remote_runner import _rsync_supports_info_flag
+    _rsync_supports_info_flag.cache_clear()
+    captured = {}
+    runner = RemoteRunner(host)
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+
+    def fake_run(cmd, **kwargs):
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout="rsync  version 3.2.7  protocol version 31\n",
+                stderr="",
+            )
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
+    runner.sync_required_files()
+    assert "--info=stats0" in captured["cmd"]

@@ -27,6 +27,7 @@ from services.remote_runner import (
     _filter_channels_in_place,
     _member_matches,
     _required_tokens,
+    _rsync_ssh_transport,
     repo_root,
     stage_local_zips,
 )
@@ -742,3 +743,82 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
     rm_calls = [c for c in calls if c and c[0] == "rm"]
     assert rm_calls == []
     assert any("keeping remote files" in m for m in logs)
+
+
+# ── _rsync_ssh_transport (v5.2.5) ───────────────────────────────────────────
+
+
+def test_rsync_ssh_transport_includes_standard_options(host):
+    """The -e ssh string every rsync passes must carry the same policy
+    options the runner's direct ssh calls do: accept-new for first
+    contact, ConnectTimeout to fail fast, BatchMode=yes to refuse
+    password prompts."""
+    argv = _rsync_ssh_transport(host)
+    assert argv[0] == "-e", "first element must be the rsync -e flag"
+    ssh_cmd = argv[1]
+    assert "StrictHostKeyChecking=accept-new" in ssh_cmd
+    assert "ConnectTimeout=15" in ssh_cmd
+    assert "BatchMode=yes" in ssh_cmd
+
+
+def test_rsync_ssh_transport_inserts_i_when_key_set(host):
+    """v5.2.5 fix: ssh_key_path on the host must thread into rsync's
+    underlying ssh transport via -i <path>. Without this, the rsync
+    calls bare-ssh and fail "Permission denied" on a keys-only host
+    even though direct ssh calls (Test SSH button) succeed."""
+    keyed = RemoteHost(**{**host.__dict__, "ssh_key_path": "/tmp/my_key"})
+    argv = _rsync_ssh_transport(keyed)
+    ssh_cmd = argv[1]
+    assert "-i" in ssh_cmd
+    # Path follows the -i flag.
+    parts = ssh_cmd.split()
+    i_idx = parts.index("-i")
+    assert parts[i_idx + 1] == "/tmp/my_key"
+
+
+def test_rsync_ssh_transport_omits_i_when_no_key(host):
+    argv = _rsync_ssh_transport(host)
+    ssh_cmd = argv[1]
+    assert "-i" not in ssh_cmd.split()
+
+
+def test_rsync_ssh_transport_expands_tilde(host):
+    """Wizard keys live at ~/.ssh/allwell_<alias> — must expand
+    before reaching rsync's ssh."""
+    keyed = RemoteHost(**{
+        **host.__dict__, "ssh_key_path": "~/.ssh/allwell_bigbox",
+    })
+    argv = _rsync_ssh_transport(keyed)
+    ssh_cmd = argv[1]
+    assert "~" not in ssh_cmd, f"tilde should be expanded; got: {ssh_cmd}"
+    assert "allwell_bigbox" in ssh_cmd
+
+
+def test_sync_required_files_passes_e_flag_to_rsync(host, monkeypatch):
+    """Integration: the actual rsync invocation for sync_required_files
+    includes the -e flag with the key. This is the call site whose
+    absence of -e was the root cause of the v5.2.4 user-report bug."""
+    keyed = RemoteHost(**{**host.__dict__, "ssh_key_path": "/tmp/k"})
+    runner = RemoteRunner(keyed)
+    captured = {}
+
+    def fake_ssh_run(self, argv, *, check):
+        return MagicMock(stdout="", returncode=0)
+
+    def fake_subprocess_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run", fake_subprocess_run,
+    )
+
+    runner.sync_required_files()
+    rsync = captured["cmd"]
+    assert "-e" in rsync, f"rsync must pass -e ssh ...; got: {rsync}"
+    e_idx = rsync.index("-e")
+    inner = rsync[e_idx + 1]
+    assert "-i" in inner
+    assert "/tmp/k" in inner
+    assert "StrictHostKeyChecking=accept-new" in inner

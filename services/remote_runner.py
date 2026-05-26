@@ -53,6 +53,7 @@ from typing import Callable, Iterable, Optional
 from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
+    resolve_ssh_binary,
     to_rsync_path,
     update_bandwidth,
 )
@@ -350,6 +351,45 @@ def _member_matches(member: str, keep_tokens: set[str]) -> bool:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+def _rsync_ssh_transport(host: RemoteHost) -> list[str]:
+    """Build the ``-e "ssh …"`` argument every rsync in this module
+    should pass.
+
+    rsync invokes ssh as a separate child process — it does NOT use
+    the runner's ``host.ssh_argv()`` machinery. Without an explicit
+    ``-e`` flag, rsync's ssh would:
+
+    * **Skip the wizard-generated key.** v5.2.2 threaded ``ssh_key_path``
+      through every direct ssh call, but the rsync calls in this module
+      pass bare argv with no ``-i``, so rsync's underlying ssh falls
+      through to ssh's default identity search and never tries
+      ``~/.ssh/allwell_<alias>``. A keys-only remote then rejects the
+      connection with "Permission denied".
+
+    * **Refuse first-contact hosts.** No ``StrictHostKeyChecking=
+      accept-new``, so a host that isn't in ``~/.ssh/known_hosts`` yet
+      kills rsync with exit 255 "Host key verification failed", same
+      class of failure the bootstrap's ``_ssh_run`` had before v5.2.3.
+
+    This helper centralises the policy so every call site (there are
+    seven as of v5.2.5: cache upload, file sync, per-well fetch, glob
+    pull, optional pull, two end-of-run retries) gets the same options.
+    """
+    ssh_inner = [
+        resolve_ssh_binary(),
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ConnectTimeout=15",
+        "-o", "BatchMode=yes",
+    ]
+    if host.ssh_key_path:
+        key = str(Path(host.ssh_key_path).expanduser())
+        ssh_inner += ["-i", key]
+    # Join with shlex.quote so a path with spaces (rare on Linux, common
+    # on macOS / Windows user dirs) survives the round-trip through the
+    # shell rsync uses internally.
+    return ["-e", " ".join(shlex.quote(a) for a in ssh_inner)]
+
+
 class DatasetCache:
     """Manage the persistent per-well-zip cache on the remote.
 
@@ -420,6 +460,7 @@ class DatasetCache:
         dest = f"{self.host.ssh_alias}:{remote_path}/"
         cmd = [
             resolve_rsync_binary(),
+            *_rsync_ssh_transport(self.host),
             "-aH",
             "--partial",
             "--append-verify",
@@ -902,7 +943,8 @@ class Fetcher:
         # even under CSV-only mode: we'll discard it after extracting the
         # files we want.
         if not self._rsync(
-            [resolve_rsync_binary(), "-a", zip_src, to_rsync_path(tmp_zip)]
+            [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
+             "-a", zip_src, to_rsync_path(tmp_zip)]
         ):
             self._log(f"[remote] warn: could not pull {well}_out.zip; will retry at end.\n")
             return
@@ -970,8 +1012,14 @@ class Fetcher:
         # support requires the source to be quoted in a way that's awkward
         # to spell cross-shell.
         host, path_glob = src_glob.split(":", 1)
+        # v5.2.5: the ls-listing ssh and the per-file rsync both go
+        # through the runner's ssh policy (key, accept-new, batchmode).
+        # Without this they fall through to bare ssh argv and fail on
+        # the very hosts the rest of the framework can talk to.
         listing = subprocess.run(
-            ["ssh", host, "sh", "-c", shlex.quote(f"ls -1 {path_glob} 2>/dev/null || true")],
+            self.host.ssh_argv(allocate_tty=False) + [
+                "sh", "-c", shlex.quote(f"ls -1 {path_glob} 2>/dev/null || true"),
+            ],
             capture_output=True,
             text=True,
             timeout=60,
@@ -983,7 +1031,8 @@ class Fetcher:
         dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
         for f in files:
             if not self._rsync(
-                [resolve_rsync_binary(), "-a", f"{host}:{f}", dest_str]
+                [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
+                 "-a", f"{host}:{f}", dest_str]
             ):
                 ok = False
         return ok
@@ -1068,7 +1117,11 @@ class RemoteRunner:
         root_for_rsync = to_rsync_path(root)
         sources = [f"{root_for_rsync}/./{f}" for f in _REQUIRED_REMOTE_FILES]
         dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"
-        cmd = [resolve_rsync_binary(), "-aR", "--info=stats0", *sources, dest]
+        cmd = [
+            resolve_rsync_binary(),
+            *_rsync_ssh_transport(self.host),
+            "-aR", "--info=stats0", *sources, dest,
+        ]
         result = _rsync_with_retry(cmd, log_fn=log_fn, timeout=60)
         if result.returncode != 0:
             err = (result.stderr or "").strip() or f"rsync exited {result.returncode}"
@@ -1288,7 +1341,8 @@ class RemoteRunner:
     ) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         result = _rsync_with_retry(
-            [resolve_rsync_binary(), "-a", src, to_rsync_path(dest)],
+            [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
+             "-a", src, to_rsync_path(dest)],
             log_fn=log_fn, timeout=60,
         )
         if result.returncode != 0:
@@ -1343,7 +1397,8 @@ class RemoteRunner:
             files = [ln for ln in (listing.stdout or "").splitlines() if ln.strip()]
             for f in files:
                 _rsync_with_retry(
-                    [resolve_rsync_binary(), "-a", f"{host.ssh_alias}:{f}",
+                    [resolve_rsync_binary(), *_rsync_ssh_transport(host),
+                     "-a", f"{host.ssh_alias}:{f}",
                      to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
                     log_fn=log,
                 )
@@ -1351,7 +1406,8 @@ class RemoteRunner:
             # full output filter — it's harmless under csv-only mode
             # since the temp zip gets discarded.
             _rsync_with_retry(
-                [resolve_rsync_binary(), "-a",
+                [resolve_rsync_binary(), *_rsync_ssh_transport(host),
+                 "-a",
                  f"{host.ssh_alias}:{run.remote_output_dir}/{well}_out.zip",
                  to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
                 log_fn=log,

@@ -25,6 +25,8 @@ from services.remote_runner import (
     ZippedInput,
     _REQUIRED_REMOTE_FILES,
     _detect_local_input_mode,
+    _CONDA_ACTIVATE_SNIPPET,
+    _conda_run_prefix,
     _filter_channels_in_place,
     _member_matches,
     _required_tokens,
@@ -227,8 +229,10 @@ def test_remote_argv_swaps_input_output(host):
         local, "/remote/in", "/remote/out",
         OutputFilter.FULL, LocalInputMode.ZIP,
     )
-    assert remote[0] == host.remote_python
-    assert remote[1] == f"{host.remote_project_dir}/process_microscopy.py"
+    # v5.2.13: argv now starts with ``conda run --no-capture-output -n
+    # <env> python <script>`` instead of the hard-coded host.remote_python.
+    assert remote[:6] == ["conda", "run", "--no-capture-output", "-n", "allwell", "python"]
+    assert remote[6] == f"{host.remote_project_dir}/process_microscopy.py"
     i_in = remote.index("--input_dir")
     assert remote[i_in + 1] == "/remote/in"
     i_out = remote.index("--output_dir")
@@ -997,6 +1001,38 @@ def test_remote_join_renders_full_command():
     # No single-quoted ~ anywhere (the bug).
     assert "'~/" not in cmd
     assert "'~'" not in cmd
+
+
+def test_conda_run_prefix_default_env():
+    """v5.2.13: the conda-run prefix uses ``--no-capture-output`` (so
+    progress streams through) and names the ``allwell`` env."""
+    prefix = _conda_run_prefix()
+    assert prefix == ["conda", "run", "--no-capture-output", "-n", "allwell"]
+
+
+def test_conda_run_prefix_custom_env():
+    """Future-proofing: the helper accepts a custom env name."""
+    prefix = _conda_run_prefix("foo")
+    assert prefix[-1] == "foo"
+
+
+def test_conda_activate_snippet_discovers_conda_sh():
+    """The activate snippet must check the bootstrap-managed location
+    first (``$HOME/miniforge3/etc/profile.d/conda.sh``) AND fall back to
+    ``conda info --base`` for hosts with a pre-existing system conda
+    (HPC modules, ``/opt/conda``, etc.). This is exactly the discovery
+    path that failed pre-v5.2.13 when the user's HPC had system conda."""
+    snippet = _CONDA_ACTIVATE_SNIPPET
+    assert "$HOME/miniforge3/etc/profile.d/conda.sh" in snippet
+    assert "conda info --base" in snippet
+    # Sources the script so ``conda`` becomes available as a shell
+    # function in the current process.
+    assert '. "$CONDA_SH"' in snippet
+    # Hard-fails with a clear log line on hosts where neither path
+    # turns up conda.sh, rather than producing an obscure
+    # ``conda: command not found`` later.
+    assert "cannot find conda.sh" in snippet
+    assert "exit 127" in snippet
 
 
 def test_gc_is_disabled_when_auto_gc_false(host, monkeypatch):

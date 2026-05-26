@@ -23,6 +23,7 @@ Example::
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -74,8 +75,14 @@ class RemoteHost:
         ``stop()`` reaches the remote pipeline. The ControlMaster/Persist
         pair lets follow-up ssh's (cleanup, kill) reuse the same TCP
         connection without re-authenticating.
+
+        On Windows we prefer the Git-for-Windows-bundled OpenSSH (a
+        Cygwin build that supports ControlMaster cleanly) over native
+        Windows OpenSSH whose ControlMaster support is unreliable. If
+        Git Bash isn't installed, fall back to plain ``ssh`` on PATH —
+        same as on POSIX systems.
         """
-        argv = ["ssh"]
+        argv = [resolve_ssh_binary()]
         if allocate_tty:
             argv.append("-tt")
         argv += [
@@ -95,14 +102,101 @@ def _controlpath_template() -> str:
     return str(base / "allwell-cm-%r@%h:%p")
 
 
+# Git for Windows ships ssh.exe and rsync.exe at a predictable location.
+# When the local machine is Windows we use these explicitly rather than
+# trusting PATH: native Windows OpenSSH has flaky ControlMaster support,
+# and there's no native Windows rsync at all.
+_GIT_BASH_BIN_DIR = Path(r"C:\Program Files\Git\usr\bin")
+
+
+def _is_windows() -> bool:
+    """Module-local platform check.
+
+    Indirected through a helper so tests can ``monkeypatch`` it cleanly
+    without poisoning the real ``os.name`` (which would break pytest's
+    own internals on a Linux test runner). All Windows-aware code in
+    this module funnels through here.
+    """
+    return os.name == "nt"
+
+
+def resolve_ssh_binary() -> str:
+    """Return the ssh executable this framework should use.
+
+    On Windows: prefer Git for Windows' ssh.exe (Cygwin OpenSSH); fall
+    back to plain ``ssh``. On POSIX: always plain ``ssh``.
+    """
+    if _is_windows():
+        git_bash_ssh = _GIT_BASH_BIN_DIR / "ssh.exe"
+        if git_bash_ssh.is_file():
+            return str(git_bash_ssh)
+    return "ssh"
+
+
+def resolve_rsync_binary() -> str:
+    """Return the rsync executable this framework should use.
+
+    On Windows: prefer Git for Windows' rsync.exe; fall back to plain
+    ``rsync`` (which on Windows usually means "user has cwRsync or
+    similar on PATH"). On POSIX: always plain ``rsync``.
+    """
+    if _is_windows():
+        git_bash_rsync = _GIT_BASH_BIN_DIR / "rsync.exe"
+        if git_bash_rsync.is_file():
+            return str(git_bash_rsync)
+    return "rsync"
+
+
+def to_rsync_path(p: Path | str) -> str:
+    """Translate a local-filesystem path to the form rsync expects.
+
+    POSIX: ``str(p)`` unchanged. Windows: drive-letter rewritten to
+    Cygwin form, e.g. ``C:\\Users\\foo\\plate`` → ``/c/Users/foo/plate``.
+    UNC paths (``\\\\server\\share``) raise ``NotImplementedError`` —
+    rsync over Cygwin can't address them directly and the workaround
+    (map a drive letter first) is the user's problem.
+    """
+    if not _is_windows():
+        return str(p)
+    s = str(p)
+    if s.startswith("\\\\") or s.startswith("//"):
+        raise NotImplementedError(
+            "UNC paths aren't supported by rsync on Windows. "
+            "Map the share to a drive letter first."
+        )
+    # On a non-Windows test runner with _is_windows monkeypatched True,
+    # Path(s).resolve() would try to construct WindowsPath which can't
+    # be instantiated on POSIX. Bypass it: split the drive textually,
+    # normalise the rest by hand.
+    match = re.match(r"^([A-Za-z]):[\\/](.*)$", s)
+    if match:
+        drive = match.group(1).lower()
+        rest = match.group(2).replace("\\", "/")
+        return f"/{drive}/{rest}"
+    return s.replace("\\", "/")
+
+
 def default_config_path() -> Path:
     """Return the resolved path to the user's remotes.toml.
 
     Honors ``$ALLWELL_REMOTES`` for tests and ad-hoc overrides.
+
+    On Windows, ``%APPDATA%\\allwell\\remotes.toml`` takes precedence
+    over the legacy ``~/.config/allwell/remotes.toml`` if it exists,
+    matching the convention Windows users expect for per-user config.
+    The legacy path is still used as a fall-back so an existing
+    cross-platform user with ``~/.config/allwell`` keeps working.
     """
     override = os.environ.get("ALLWELL_REMOTES")
     if override:
         return Path(override).expanduser()
+    if _is_windows():
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            appdata_path = Path(appdata) / "allwell" / "remotes.toml"
+            legacy = _DEFAULT_CONFIG_PATH.expanduser()
+            if appdata_path.is_file() or not legacy.is_file():
+                return appdata_path
     return _DEFAULT_CONFIG_PATH.expanduser()
 
 

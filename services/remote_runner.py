@@ -50,7 +50,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from services.remote_config import RemoteHost, update_bandwidth
+from services.remote_config import (
+    RemoteHost,
+    resolve_rsync_binary,
+    to_rsync_path,
+    update_bandwidth,
+)
 
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
@@ -405,13 +410,13 @@ class DatasetCache:
         # Ensure remote target dir exists.
         self._ssh_run(["mkdir", "-p", remote_path], check=True)
 
-        sources = [str(p) for p in zipped.well_zips]
+        sources = [to_rsync_path(p) for p in zipped.well_zips]
         # The trailing slash on the remote dest is critical for rsync's
         # tree-merge semantics — without it rsync would create
         # `<key>/<key>/` on the second run.
         dest = f"{self.host.ssh_alias}:{remote_path}/"
         cmd = [
-            "rsync",
+            resolve_rsync_binary(),
             "-aH",
             "--partial",
             "--append-verify",
@@ -790,7 +795,9 @@ class Fetcher:
         # Output zip — exists iff the pipeline finished this well. Pull it
         # even under CSV-only mode: we'll discard it after extracting the
         # files we want.
-        if not self._rsync(["rsync", "-a", zip_src, str(tmp_zip)]):
+        if not self._rsync(
+            [resolve_rsync_binary(), "-a", zip_src, to_rsync_path(tmp_zip)]
+        ):
             self._log(f"[remote] warn: could not pull {well}_out.zip; will retry at end.\n")
             return
 
@@ -867,8 +874,11 @@ class Fetcher:
         if not files:
             return False
         ok = True
+        dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
         for f in files:
-            if not self._rsync(["rsync", "-a", f"{host}:{f}", str(dest_dir) + "/"]):
+            if not self._rsync(
+                [resolve_rsync_binary(), "-a", f"{host}:{f}", dest_str]
+            ):
                 ok = False
         return ok
 
@@ -947,9 +957,12 @@ class RemoteRunner:
         # under the destination — i.e. _Docs/requirements.txt lands at
         # <remote_project_dir>/_Docs/requirements.txt, not flattened.
         # The /./ pivot anchors the relative root at the repo top.
-        sources = [f"{root}/./{f}" for f in _REQUIRED_REMOTE_FILES]
+        # On Windows the root path is translated to /c/Users/... form
+        # so Git Bash's rsync (Cygwin build) accepts it.
+        root_for_rsync = to_rsync_path(root)
+        sources = [f"{root_for_rsync}/./{f}" for f in _REQUIRED_REMOTE_FILES]
         dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"
-        cmd = ["rsync", "-aR", "--info=stats0", *sources, dest]
+        cmd = [resolve_rsync_binary(), "-aR", "--info=stats0", *sources, dest]
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60, check=True,
@@ -1169,7 +1182,7 @@ class RemoteRunner:
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             rc = subprocess.run(
-                ["rsync", "-a", src, str(dest)],
+                [resolve_rsync_binary(), "-a", src, to_rsync_path(dest)],
                 capture_output=True, text=True, timeout=60,
             ).returncode
         except (subprocess.TimeoutExpired, OSError) as exc:

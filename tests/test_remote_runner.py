@@ -551,6 +551,42 @@ def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
         runner.sync_required_files()
 
 
+def test_sync_required_files_uses_translated_paths_on_windows(host, monkeypatch):
+    """On Windows, the rsync sources must be in /c/... Cygwin form so
+    Git for Windows' rsync accepts them. The /./ pivot for relative
+    paths must come AFTER the translation."""
+    runner = RemoteRunner(host)
+    captured: dict = {}
+
+    def fake_ssh_run(self, argv, *, check):
+        return MagicMock(stdout="", returncode=0)
+
+    def fake_subprocess_run(cmd, **kwargs):
+        captured["rsync_cmd"] = list(cmd)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    # Pretend we're on Windows and Git Bash is installed.
+    monkeypatch.setattr("services.remote_config._is_windows", lambda: True)
+    monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: True)
+    # Pretend the repo root is on the C: drive.
+    monkeypatch.setattr(
+        "services.remote_runner.repo_root",
+        lambda: Path("C:\\Users\\me\\allwell"),
+    )
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_subprocess_run)
+
+    runner.sync_required_files()
+
+    rsync = captured["rsync_cmd"]
+    assert rsync[0].endswith("rsync.exe"), "should use Git Bash rsync on Windows"
+    # Every required-file source must reference /c/Users/me/allwell/./<file>
+    for required in _REQUIRED_REMOTE_FILES:
+        assert any(
+            f"/c/Users/me/allwell/./{required}" == arg for arg in rsync
+        ), f"sources should be cygwin-form; missing /c/Users/me/allwell/./{required} in {rsync}"
+
+
 # ── verify_and_cleanup decision matrix ──────────────────────────────────────
 
 

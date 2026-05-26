@@ -236,6 +236,118 @@ def get_remote(name: str, path: Path | None = None) -> RemoteHost | None:
     return load_remotes(path).get(name)
 
 
+def _format_block(host: RemoteHost) -> str:
+    """Render a ``RemoteHost`` as a TOML ``[remote.<name>]`` block.
+
+    Single source of truth for what a remote looks like on disk; called
+    by both :func:`write_remote` and ``scripts/_bootstrap_lib.py``.
+    """
+    extras = ", ".join(f'"{x}"' for x in host.extra_args)
+    return (
+        f"[remote.{host.name}]\n"
+        f"ssh_alias = \"{host.ssh_alias}\"\n"
+        f"remote_project_dir = \"{host.remote_project_dir}\"\n"
+        f"remote_staging_dir = \"{host.remote_staging_dir}\"\n"
+        f"remote_python = \"{host.remote_python}\"\n"
+        f"cpu_only = {'true' if host.cpu_only else 'false'}\n"
+        f"extra_args = [{extras}]\n"
+        f"cache_budget_gb = {host.cache_budget_gb}\n"
+        f"measured_bandwidth_mbps = {host.measured_bandwidth_mbps:.2f}\n"
+    )
+
+
+def write_remote(host: RemoteHost, path: Path | None = None) -> bool:
+    """Insert or replace a ``[remote.<name>]`` block in ``remotes.toml``.
+
+    Idempotent. Preserves comments and other sections — the file is
+    rewritten by line-edit, not parsed-and-reserialised. Returns True
+    iff the file content changed.
+
+    Raises ``OSError`` if the file can't be written. Callers that can't
+    surface IO failures (the GUI) should catch that explicitly.
+    """
+    p = path or default_config_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    block = _format_block(host)
+
+    existing = p.read_text(encoding="utf-8") if p.is_file() else ""
+
+    section_re = re.compile(rf"^\[remote\.{re.escape(host.name)}\]\s*$")
+    has_section = any(section_re.match(line) for line in existing.splitlines())
+
+    if not has_section:
+        # Append. Make sure there's exactly one blank line between the
+        # previous section and the new one.
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        if existing and not existing.endswith("\n\n"):
+            existing += "\n"
+        new_text = existing + block
+    else:
+        # Replace the existing block in place. A "block" is the section
+        # header plus every subsequent line up to (but not including)
+        # the next ``[…]`` header or EOF.
+        out: list[str] = []
+        in_target = False
+        replaced = False
+        for line in existing.splitlines(keepends=True):
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                if in_target:
+                    in_target = False
+                if section_re.match(stripped):
+                    in_target = True
+                    if not replaced:
+                        out.append(block)
+                        replaced = True
+                    continue
+            if in_target:
+                continue
+            out.append(line)
+        new_text = "".join(out)
+
+    if new_text == existing:
+        return False
+    p.write_text(new_text, encoding="utf-8")
+    return True
+
+
+def delete_remote(name: str, path: Path | None = None) -> bool:
+    """Remove the ``[remote.<name>]`` block from ``remotes.toml``.
+
+    Idempotent: a name that isn't present is a silent no-op. Comments
+    and other sections are preserved. Returns True iff the file
+    actually changed.
+    """
+    p = path or default_config_path()
+    if not p.is_file():
+        return False
+    text = p.read_text(encoding="utf-8")
+    section_re = re.compile(rf"^\[remote\.{re.escape(name)}\]\s*$")
+    out: list[str] = []
+    in_target = False
+    found = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if in_target:
+                in_target = False
+            if section_re.match(stripped):
+                in_target = True
+                found = True
+                continue
+        if in_target:
+            continue
+        out.append(line)
+    if not found:
+        return False
+    new_text = "".join(out).rstrip("\n") + "\n"
+    if new_text == text:
+        return False
+    p.write_text(new_text, encoding="utf-8")
+    return True
+
+
 def update_bandwidth(name: str, mbps: float, path: Path | None = None) -> None:
     """Rewrite ``measured_bandwidth_mbps`` for ``name`` in place.
 

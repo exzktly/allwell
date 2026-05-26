@@ -1,0 +1,210 @@
+"""Tests for services.remote_config.write_remote / delete_remote.
+
+These are the v5.1.0 persistence helpers used by the "Manage Remotes"
+GUI dialog. They share the surgical line-edit approach the existing
+``update_bandwidth`` uses so comments and unrelated sections survive a
+write — verified explicitly below.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from services.remote_config import (
+    RemoteHost,
+    delete_remote,
+    get_remote,
+    load_remotes,
+    update_bandwidth,
+    write_remote,
+)
+
+
+def _make_host(name: str = "bigbox", **overrides) -> RemoteHost:
+    base = dict(
+        name=name,
+        ssh_alias=name,
+        remote_project_dir="~/allwell",
+        remote_staging_dir="~/.allwell-staging",
+        remote_python="~/miniforge3/envs/allwell/bin/python",
+        cpu_only=False,
+        extra_args=(),
+        cache_budget_gb=200,
+        measured_bandwidth_mbps=0.0,
+    )
+    base.update(overrides)
+    return RemoteHost(**base)
+
+
+# ── write_remote: brand-new section ────────────────────────────────────────
+
+
+def test_write_remote_creates_file_when_missing(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    assert not cfg.exists()
+    changed = write_remote(_make_host(), path=cfg)
+    assert changed
+    assert cfg.exists()
+    reloaded = load_remotes(cfg)
+    assert "bigbox" in reloaded
+    assert reloaded["bigbox"].ssh_alias == "bigbox"
+
+
+def test_write_remote_appends_to_existing_file(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "[remote.existing]\n"
+        "ssh_alias = \"existing\"\n",
+        encoding="utf-8",
+    )
+    write_remote(_make_host("newone"), path=cfg)
+    reloaded = load_remotes(cfg)
+    assert set(reloaded) == {"existing", "newone"}
+
+
+def test_write_remote_preserves_surrounding_comments(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "# Top-of-file comment.\n"
+        "[remote.keep]\n"
+        "ssh_alias = \"keep\"\n"
+        "# inline note on this host\n",
+        encoding="utf-8",
+    )
+    write_remote(_make_host("added"), path=cfg)
+    text = cfg.read_text(encoding="utf-8")
+    assert "# Top-of-file comment." in text
+    assert "# inline note on this host" in text
+    assert "[remote.keep]" in text
+    assert "[remote.added]" in text
+
+
+# ── write_remote: replace in place ─────────────────────────────────────────
+
+
+def test_write_remote_replaces_existing_section(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "[remote.host]\n"
+        "ssh_alias = \"old-alias\"\n"
+        "cpu_only = false\n",
+        encoding="utf-8",
+    )
+    write_remote(_make_host("host", ssh_alias="new-alias", cpu_only=True), path=cfg)
+    reloaded = load_remotes(cfg)
+    assert reloaded["host"].ssh_alias == "new-alias"
+    assert reloaded["host"].cpu_only is True
+
+
+def test_write_remote_replace_leaves_other_sections_alone(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "[remote.a]\n"
+        "ssh_alias = \"a\"\n"
+        "cache_budget_gb = 99\n"
+        "\n"
+        "[remote.b]\n"
+        "ssh_alias = \"b\"\n"
+        "cache_budget_gb = 77\n",
+        encoding="utf-8",
+    )
+    write_remote(_make_host("a", cache_budget_gb=42), path=cfg)
+    reloaded = load_remotes(cfg)
+    assert reloaded["a"].cache_budget_gb == 42
+    # b untouched.
+    assert reloaded["b"].cache_budget_gb == 77
+    assert reloaded["b"].ssh_alias == "b"
+
+
+def test_write_remote_returns_false_when_content_unchanged(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    host = _make_host("same")
+    assert write_remote(host, path=cfg) is True
+    # Second write of the identical block is a no-op.
+    assert write_remote(host, path=cfg) is False
+
+
+def test_write_remote_extra_args_round_trip(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    write_remote(
+        _make_host("withargs", extra_args=("--workers", "16", "--force")),
+        path=cfg,
+    )
+    reloaded = load_remotes(cfg)
+    assert reloaded["withargs"].extra_args == ("--workers", "16", "--force")
+
+
+# ── delete_remote ──────────────────────────────────────────────────────────
+
+
+def test_delete_remote_removes_the_section(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "[remote.gone]\n"
+        "ssh_alias = \"gone\"\n"
+        "cpu_only = true\n",
+        encoding="utf-8",
+    )
+    assert delete_remote("gone", path=cfg) is True
+    reloaded = load_remotes(cfg)
+    assert reloaded == {}
+
+
+def test_delete_remote_leaves_other_sections_alone(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "# keep this comment\n"
+        "[remote.a]\n"
+        "ssh_alias = \"a\"\n"
+        "\n"
+        "[remote.b]\n"
+        "ssh_alias = \"b\"\n"
+        "cache_budget_gb = 77\n",
+        encoding="utf-8",
+    )
+    delete_remote("a", path=cfg)
+    text = cfg.read_text(encoding="utf-8")
+    assert "[remote.a]" not in text
+    assert "# keep this comment" in text
+    reloaded = load_remotes(cfg)
+    assert set(reloaded) == {"b"}
+    assert reloaded["b"].cache_budget_gb == 77
+
+
+def test_delete_remote_unknown_is_silent_noop(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text("[remote.x]\nssh_alias = \"x\"\n", encoding="utf-8")
+    before = cfg.read_text(encoding="utf-8")
+    assert delete_remote("nonexistent", path=cfg) is False
+    assert cfg.read_text(encoding="utf-8") == before
+
+
+def test_delete_remote_missing_file_is_silent(tmp_path):
+    assert delete_remote("ghost", path=tmp_path / "nope.toml") is False
+
+
+# ── update_bandwidth still works after the refactor ────────────────────────
+
+
+def test_update_bandwidth_still_round_trips(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    write_remote(_make_host("bw", measured_bandwidth_mbps=10.0), path=cfg)
+    update_bandwidth("bw", 99.5, path=cfg)
+    reloaded = load_remotes(cfg)
+    assert reloaded["bw"].measured_bandwidth_mbps == pytest.approx(99.5)
+
+
+# ── interaction with get_remote ────────────────────────────────────────────
+
+
+def test_write_then_get_remote_round_trip(tmp_path):
+    cfg = tmp_path / "remotes.toml"
+    write_remote(
+        _make_host("rt", remote_project_dir="~/custom"),
+        path=cfg,
+    )
+    host = get_remote("rt", path=cfg)
+    assert host is not None
+    assert host.remote_project_dir == "~/custom"

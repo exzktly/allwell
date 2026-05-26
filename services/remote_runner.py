@@ -81,7 +81,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "process_microscopy.py",
     "auto_threshold_core.py",
     "well_token.py",
-    "_Docs/requirements.txt",
+    # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
+    # — the remote doesn't run the GUI). See _Docs/requirements.txt for
+    # the GUI superset.
+    "_Docs/requirements-remote.txt",
 )
 
 

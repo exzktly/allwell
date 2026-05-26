@@ -29,11 +29,11 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
-    QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+    QPlainTextEdit, QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from services.remote_config import (
@@ -43,6 +43,7 @@ from services.remote_config import (
     resolve_ssh_binary,
     write_remote,
 )
+from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
 
 
@@ -116,39 +117,123 @@ class RemoteFormDialog(QDialog):
         ssh_row_layout.addWidget(self._test_btn)
         form.addRow("SSH alias *", ssh_row)
 
+        # SSH key path + wizard launcher (v5.2.1). The key path field is
+        # populated automatically by the wizard but left editable so a
+        # power user can point at an existing key. Empty = use whatever
+        # ~/.ssh/config provides (typical case for any developer with a
+        # working ssh setup).
+        key_row = QWidget(self)
+        key_row_layout = QHBoxLayout(key_row)
+        key_row_layout.setContentsMargins(0, 0, 0, 0)
+        key_row_layout.setSpacing(6)
+        self._ssh_key_edit = QLineEdit(host.ssh_key_path, key_row)
+        self._ssh_key_edit.setPlaceholderText(
+            "Empty = use ~/.ssh/config (recommended) or click Setup…"
+        )
+        key_row_layout.addWidget(self._ssh_key_edit, 1)
+        self._setup_key_btn = QPushButton("Setup SSH Key…", key_row)
+        self._setup_key_btn.setProperty("variant", "secondary")
+        self._setup_key_btn.setToolTip(
+            "Generate a passphrase-less Ed25519 key and walk through "
+            "copying it to the remote so future runs don't need a password."
+        )
+        self._setup_key_btn.clicked.connect(self._open_ssh_key_wizard)
+        key_row_layout.addWidget(self._setup_key_btn)
+        form.addRow("SSH key (optional)", key_row)
+
         self._test_result_lbl = QLabel("", self)
         self._test_result_lbl.setObjectName("Muted")
         layout.addLayout(form)
         layout.addWidget(self._test_result_lbl)
 
-        more = QFormLayout()
-        more.setLabelAlignment(Qt.AlignRight)
-        more.setSpacing(8)
-
-        self._project_dir_edit = QLineEdit(host.remote_project_dir, self)
-        more.addRow("Remote project dir", self._project_dir_edit)
-
-        self._staging_dir_edit = QLineEdit(host.remote_staging_dir, self)
-        more.addRow("Remote staging dir", self._staging_dir_edit)
-
-        self._python_edit = QLineEdit(host.remote_python, self)
-        more.addRow("Remote python", self._python_edit)
+        # ── Main (non-advanced) controls ────────────────────────────────
+        main_form = QFormLayout()
+        main_form.setLabelAlignment(Qt.AlignRight)
+        main_form.setSpacing(8)
 
         self._cpu_only_cb = QCheckBox("CPU only (disable GPU on remote)", self)
         self._cpu_only_cb.setChecked(host.cpu_only)
-        more.addRow("", self._cpu_only_cb)
+        main_form.addRow("", self._cpu_only_cb)
 
         self._cache_budget_spin = QSpinBox(self)
         self._cache_budget_spin.setRange(1, 10000)
         self._cache_budget_spin.setSuffix(" GB")
         self._cache_budget_spin.setValue(host.cache_budget_gb)
-        more.addRow("Cache budget", self._cache_budget_spin)
+        main_form.addRow("Cache budget", self._cache_budget_spin)
 
         self._extra_args_edit = QLineEdit(" ".join(host.extra_args), self)
         self._extra_args_edit.setPlaceholderText("--workers 16 --tf_threads 8")
-        more.addRow("Extra args", self._extra_args_edit)
+        main_form.addRow("Extra args", self._extra_args_edit)
 
-        layout.addLayout(more)
+        layout.addLayout(main_form)
+
+        # ── Advanced (collapsible) — remote paths ───────────────────────
+        # v5.2.1: these three fields rarely need changing. The bootstrap
+        # always installs to the conventional locations and writes the
+        # correct values into remotes.toml automatically. Hiding them
+        # behind a toggle de-clutters the form for the typical user
+        # while still giving the edge-case user a clear path.
+        defaults = RemoteHost(name=host.name or "_", ssh_alias=host.ssh_alias or "_")
+        non_default_paths = (
+            (host.remote_project_dir and host.remote_project_dir != defaults.remote_project_dir)
+            or (host.remote_staging_dir and host.remote_staging_dir != defaults.remote_staging_dir)
+            or (host.remote_python and host.remote_python != defaults.remote_python)
+        )
+
+        self._advanced_btn = QToolButton(self)
+        self._advanced_btn.setText("Advanced (remote paths)")
+        self._advanced_btn.setCheckable(True)
+        self._advanced_btn.setArrowType(
+            Qt.DownArrow if non_default_paths else Qt.RightArrow
+        )
+        self._advanced_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._advanced_btn.setStyleSheet("QToolButton { border: none; padding: 4px 0; }")
+        self._advanced_btn.toggled.connect(self._on_advanced_toggled)
+        layout.addWidget(self._advanced_btn)
+
+        self._advanced_frame = QFrame(self)
+        adv_form = QFormLayout(self._advanced_frame)
+        adv_form.setLabelAlignment(Qt.AlignRight)
+        adv_form.setSpacing(8)
+        adv_form.setContentsMargins(20, 4, 0, 4)
+
+        hint = QLabel(
+            "Leave blank to use the bootstrap defaults. Change only if "
+            "your remote installs miniforge to a non-standard location.",
+            self._advanced_frame,
+        )
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        adv_form.addRow(hint)
+
+        # Show the user's value if non-default, else leave the field
+        # blank and surface the default via placeholder. result_host()
+        # already falls back to dataclass defaults on empty strings.
+        self._project_dir_edit = QLineEdit(
+            "" if host.remote_project_dir == defaults.remote_project_dir else host.remote_project_dir,
+            self._advanced_frame,
+        )
+        self._project_dir_edit.setPlaceholderText(defaults.remote_project_dir)
+        adv_form.addRow("Remote project dir", self._project_dir_edit)
+
+        self._staging_dir_edit = QLineEdit(
+            "" if host.remote_staging_dir == defaults.remote_staging_dir else host.remote_staging_dir,
+            self._advanced_frame,
+        )
+        self._staging_dir_edit.setPlaceholderText(defaults.remote_staging_dir)
+        adv_form.addRow("Remote staging dir", self._staging_dir_edit)
+
+        self._python_edit = QLineEdit(
+            "" if host.remote_python == defaults.remote_python else host.remote_python,
+            self._advanced_frame,
+        )
+        self._python_edit.setPlaceholderText(defaults.remote_python)
+        adv_form.addRow("Remote python", self._python_edit)
+
+        self._advanced_frame.setVisible(non_default_paths)
+        self._advanced_btn.setChecked(non_default_paths)
+        layout.addWidget(self._advanced_frame)
+
         layout.addStretch(1)
 
         self._buttons = QDialogButtonBox(
@@ -209,7 +294,10 @@ class RemoteFormDialog(QDialog):
         """Build a ``RemoteHost`` from the current form state.
 
         Public so callers (e.g. the Test SSH button before OK is hit)
-        can preview the host without committing.
+        can preview the host without committing. Empty path fields
+        fall back to the dataclass defaults — the v5.2.1 Advanced
+        expander uses placeholders to communicate this so users
+        don't need to retype the defaults.
         """
         raw_extras = self._extra_args_edit.text().strip()
         extras: tuple[str, ...] = tuple(raw_extras.split()) if raw_extras else ()
@@ -223,7 +311,38 @@ class RemoteFormDialog(QDialog):
             cpu_only=self._cpu_only_cb.isChecked(),
             extra_args=extras,
             cache_budget_gb=self._cache_budget_spin.value(),
+            ssh_key_path=self._ssh_key_edit.text().strip(),
         )
+
+    # ── advanced expander ──────────────────────────────────────────────────
+
+    def _on_advanced_toggled(self, checked: bool) -> None:
+        self._advanced_btn.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        self._advanced_frame.setVisible(checked)
+        # Resize-to-fit so the dialog grows/shrinks with the section
+        # rather than leaving empty space when collapsed.
+        self.adjustSize()
+
+    # ── SSH key wizard ─────────────────────────────────────────────────────
+
+    def _open_ssh_key_wizard(self) -> None:
+        """Open the v5.2.1 SSH-key setup wizard.
+
+        Requires an SSH alias to be entered first; the wizard's whole
+        purpose is to install a key on that alias's remote, so an
+        empty alias means there's nothing useful for it to do.
+        """
+        alias = self._ssh_alias_edit.text().strip()
+        if not alias:
+            QMessageBox.information(
+                self, "SSH alias required",
+                "Enter an SSH alias first (e.g. 'user@host' or a name "
+                "from your ~/.ssh/config), then click Setup SSH Key again.",
+            )
+            return
+        dlg = SSHKeyWizardDialog(self, ssh_alias=alias)
+        if dlg.exec() == QDialog.Accepted and dlg.installed_key_path:
+            self._ssh_key_edit.setText(str(dlg.installed_key_path))
 
     # ── inline test ────────────────────────────────────────────────────────
 
@@ -288,6 +407,213 @@ class RemoteFormDialog(QDialog):
 
     def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
         self._settings().setValue("dialog/remote_form_geometry", self.saveGeometry())
+        super().closeEvent(event)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# SSHKeyWizardDialog — generate + install an SSH key (v5.2.1)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class SSHKeyWizardDialog(QDialog):
+    """Walk the user through generating an Ed25519 key and copying it
+    to the remote so future runs never need a password.
+
+    Three-step flow:
+
+    1. **Generate** — creates ``~/.ssh/allwell_<alias>`` + ``.pub``
+       (idempotent: existing key is reused).
+    2. **Copy** — shows the exact shell command (``ssh-copy-id …`` or
+       a portable ``cat | ssh`` fallback). User runs it in their own
+       terminal and types the password once. We do NOT execute or pipe
+       passwords ourselves — the user retains full control and the
+       password never enters AllWell's address space.
+    3. **Verify** — runs ``ssh -i <key> -o BatchMode=yes <alias> echo
+       ok``. Success means the key is installed and AllWell can use it
+       for every subsequent ssh / rsync.
+
+    On Accepted, :attr:`installed_key_path` is the path the parent
+    dialog should record in ``ssh_key_path``.
+    """
+
+    def __init__(self, parent: Optional[QWidget], *, ssh_alias: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Setup SSH Key — {ssh_alias}")
+        self.setModal(True)
+        self.resize(640, 520)
+
+        self._ssh_alias = ssh_alias
+        self._key_path: Path = ssh_key_setup.default_key_path(ssh_alias)
+        self.installed_key_path: Path | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(10)
+
+        title = QLabel(f"Set up passwordless SSH for {ssh_alias}", self)
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        intro = QLabel(
+            "AllWell never stores SSH passwords. The standard way to "
+            "automate ssh is to install a per-machine key on the remote. "
+            "This wizard generates that key locally, shows you the exact "
+            "command to copy the public half to the remote (you'll be "
+            "asked for the password once, in your own terminal), and "
+            "verifies the result.",
+            self,
+        )
+        intro.setObjectName("Muted")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        # Step 1: generate key ────────────────────────────────────────────
+        step1_title = QLabel("Step 1 — Generate the key locally", self)
+        step1_title.setObjectName("SectionTitle")
+        layout.addWidget(step1_title)
+        self._key_path_lbl = QLabel(f"Key path: {self._key_path}", self)
+        self._key_path_lbl.setObjectName("Muted")
+        layout.addWidget(self._key_path_lbl)
+        self._generate_btn = QPushButton("Generate key", self)
+        self._generate_btn.setProperty("variant", "primary")
+        self._generate_btn.clicked.connect(self._on_generate)
+        layout.addWidget(self._generate_btn)
+        self._generate_status_lbl = QLabel("", self)
+        self._generate_status_lbl.setObjectName("Muted")
+        self._generate_status_lbl.setWordWrap(True)
+        layout.addWidget(self._generate_status_lbl)
+
+        # Step 2: copy command ────────────────────────────────────────────
+        step2_title = QLabel(
+            "Step 2 — Copy the public key to the remote", self,
+        )
+        step2_title.setObjectName("SectionTitle")
+        layout.addWidget(step2_title)
+        step2_hint = QLabel(
+            "Open your terminal and run this command. You'll be asked "
+            "for the remote password once; AllWell never sees it.",
+            self,
+        )
+        step2_hint.setObjectName("Muted")
+        step2_hint.setWordWrap(True)
+        layout.addWidget(step2_hint)
+
+        cmd_row = QHBoxLayout()
+        self._command_edit = QLineEdit(self)
+        self._command_edit.setReadOnly(True)
+        mono = QFont("Monaco")
+        mono.setStyleHint(QFont.TypeWriter)
+        self._command_edit.setFont(mono)
+        cmd_row.addWidget(self._command_edit, 1)
+        self._copy_btn = QPushButton("Copy", self)
+        self._copy_btn.setProperty("variant", "secondary")
+        self._copy_btn.clicked.connect(self._on_copy_command)
+        cmd_row.addWidget(self._copy_btn)
+        layout.addLayout(cmd_row)
+
+        # Step 3: verify ──────────────────────────────────────────────────
+        step3_title = QLabel("Step 3 — Verify", self)
+        step3_title.setObjectName("SectionTitle")
+        layout.addWidget(step3_title)
+        self._verify_btn = QPushButton("I ran the command — verify now", self)
+        self._verify_btn.setProperty("variant", "primary")
+        self._verify_btn.clicked.connect(self._on_verify)
+        layout.addWidget(self._verify_btn)
+        self._verify_status_lbl = QLabel("", self)
+        self._verify_status_lbl.setWordWrap(True)
+        layout.addWidget(self._verify_status_lbl)
+
+        layout.addStretch(1)
+
+        self._buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=self)
+        self._buttons.rejected.connect(self.reject)
+        layout.addWidget(self._buttons)
+
+        # Disable the later steps until the earlier ones progress.
+        self._copy_btn.setEnabled(False)
+        self._command_edit.setEnabled(False)
+        self._verify_btn.setEnabled(False)
+
+        # If the key already exists from a previous run, populate Step 2
+        # so the user can re-run Step 3 without regenerating.
+        if self._key_path.is_file():
+            self._generate_status_lbl.setText(
+                f"✓ Key already exists at {self._key_path}. "
+                "Click Generate to re-use it, or jump to Step 2."
+            )
+            self._populate_step2()
+
+    # ── steps ────────────────────────────────────────────────────────────
+
+    def _on_generate(self) -> None:
+        self._generate_btn.setEnabled(False)
+        self._generate_status_lbl.setText("Generating…")
+        QApplication.processEvents()
+        created, err = ssh_key_setup.generate_keypair(self._key_path)
+        self._generate_btn.setEnabled(True)
+        if err:
+            self._generate_status_lbl.setText(f"✗ {err}")
+            QMessageBox.critical(
+                self, "Key generation failed",
+                f"Could not generate {self._key_path}:\n{err}",
+            )
+            return
+        msg = f"✓ Key generated at {self._key_path}" if created else \
+              f"✓ Key already present at {self._key_path} — reusing."
+        self._generate_status_lbl.setText(msg)
+        self._populate_step2()
+
+    def _populate_step2(self) -> None:
+        cmd = ssh_key_setup.build_copy_command(self._ssh_alias, self._key_path)
+        self._command_edit.setText(cmd)
+        self._command_edit.setEnabled(True)
+        self._copy_btn.setEnabled(True)
+        self._verify_btn.setEnabled(True)
+
+    def _on_copy_command(self) -> None:
+        cb = QGuiApplication.clipboard()
+        if cb is not None:
+            cb.setText(self._command_edit.text())
+            self._copy_btn.setText("Copied ✓")
+            QTimer.singleShot(2000, lambda: self._copy_btn.setText("Copy"))
+
+    def _on_verify(self) -> None:
+        self._verify_btn.setEnabled(False)
+        self._verify_status_lbl.setText("Verifying…")
+        QApplication.processEvents()
+        ok, detail = ssh_key_setup.verify_key_works(
+            self._ssh_alias, self._key_path,
+        )
+        self._verify_btn.setEnabled(True)
+        if ok:
+            self._verify_status_lbl.setText(
+                f"<span style='color: #4caf50;'>✓ Key accepted by "
+                f"{self._ssh_alias}. AllWell will use this key going forward.</span>"
+            )
+            self.installed_key_path = self._key_path
+            # Replace the Close button with OK so the user can commit
+            # the path back to RemoteFormDialog.
+            self._buttons.clear()
+            ok_btn = self._buttons.addButton(QDialogButtonBox.Ok)
+            ok_btn.clicked.connect(self.accept)
+            ok_btn.setDefault(True)
+        else:
+            self._verify_status_lbl.setText(
+                f"<span style='color: #e57373;'>✗ {detail}</span><br>"
+                "<small>The key may not be installed yet. Make sure you "
+                "ran the Step 2 command and the remote accepted your "
+                "password. Then click Verify again.</small>"
+            )
+
+    # ── geometry persistence ──────────────────────────────────────────────
+
+    def _settings(self) -> QSettings:
+        return QSettings("AllWell", "AllWellApp")
+
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
+        self._settings().setValue(
+            "dialog/ssh_key_wizard_geometry", self.saveGeometry(),
+        )
         super().closeEvent(event)
 
 

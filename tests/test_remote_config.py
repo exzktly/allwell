@@ -51,6 +51,43 @@ def test_load_remotes_minimal_entry(tmp_path):
     assert host.remote_project_dir == "~/allwell"
     assert host.cache_budget_gb == 200
     assert host.cpu_only is False
+    # v5.2.1: ssh_key_path defaults to empty (uses ~/.ssh/config).
+    assert host.ssh_key_path == ""
+
+
+def test_load_remotes_with_ssh_key_path(tmp_path):
+    """v5.2.1: the wizard records a per-host key path which must
+    round-trip cleanly."""
+    cfg = _write_config(
+        tmp_path,
+        """
+        [remote.keyed]
+        ssh_alias = "keyed"
+        ssh_key_path = "~/.ssh/allwell_keyed"
+        """,
+    )
+    host = load_remotes(cfg)["keyed"]
+    assert host.ssh_key_path == "~/.ssh/allwell_keyed"
+
+
+def test_ssh_argv_includes_identity_when_key_path_set():
+    """v5.2.1: a configured ssh_key_path must surface as ``-i <path>``
+    so AllWell uses that key over whatever ssh's default search would
+    pick."""
+    host = RemoteHost(name="x", ssh_alias="x", ssh_key_path="~/.ssh/k")
+    argv = host.ssh_argv()
+    assert "-i" in argv
+    i_idx = argv.index("-i")
+    # ~ is expanded in the argv so ssh doesn't have to interpret it
+    # via /bin/sh.
+    assert not argv[i_idx + 1].startswith("~")
+    assert argv[i_idx + 1].endswith("/.ssh/k")
+
+
+def test_ssh_argv_omits_identity_when_key_path_unset():
+    host = RemoteHost(name="x", ssh_alias="x")
+    argv = host.ssh_argv()
+    assert "-i" not in argv
 
 
 def test_load_remotes_full_entry(tmp_path):

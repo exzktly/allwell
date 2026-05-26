@@ -788,14 +788,16 @@ def resolve_bar_timepoint(app) -> Optional[tuple]:
 def resolve_bar_timepoints(app) -> List[tuple]:
     """Return the list of ``(float, str)`` timepoints currently selected.
 
-    Reads from ``app._bar_tp_selections`` (the dict backing the multi-select
-    popup); falls back to the hidden ``_bar_tp_cb`` for compatibility when
-    the popup hasn't been populated yet (e.g. very early after construction
-    before ``update_bar_tp_menu`` ran).
+    The multi-select dict (``_bar_tp_selections``) is authoritative once
+    populated: an empty selection there means "show nothing", regardless of
+    what the hidden ``_bar_tp_cb`` combo still carries. We only fall back
+    to the combo before the popup has been populated at all (e.g. very
+    early after construction, before ``update_bar_tp_menu`` ran), so the
+    legacy single-tp shape still works on a fresh app.
     """
     sels = getattr(app, "_bar_tp_selections", None)
-    out: List[tuple] = []
     if isinstance(sels, dict) and sels:
+        out: List[tuple] = []
         for tp_str, on in sels.items():
             if not on:
                 continue
@@ -804,9 +806,8 @@ def resolve_bar_timepoints(app) -> List[tuple]:
             except (TypeError, ValueError):
                 continue
         out.sort(key=lambda p: p[0])
-        if out:
-            return out
-    # Fallback: derive from the hidden combo.
+        return out
+    # Fallback: derive from the hidden combo (popup not yet populated).
     tp_str = app._bar_tp_var.currentText() if hasattr(app, "_bar_tp_var") else ""
     if tp_str in ("—", ""):
         return []
@@ -848,12 +849,16 @@ def draw_per_cell_bar_mode(
     group_mode = getattr(plot, "bar_group_mode", "well")
     pool_reps = bool(getattr(plot, "bar_pool_replicates", True))
 
-    # Build a base (well, color, label) sequence for one timepoint. When
-    # rsets are active and pool_replicates is False, expand wells inside
-    # each rset (keeping the rset rank colour).
+    # Build a base (well, color, well_label, cluster_label) sequence for
+    # one timepoint. When rsets are active and pool_replicates is False,
+    # expand wells inside each rset (keeping the rset rank colour). The
+    # cluster_label is used as the cluster header (well-grouped layout)
+    # so it carries the full disambiguating identity (e.g. "A01 [CTRL]"),
+    # while the per-bar tick label stays short.
     base_wells: List[str] = []
     base_colors: List[str] = []
-    base_labels: List[str] = []
+    base_short: List[str] = []      # short well/rset label used per-bar
+    base_full: List[str] = []       # disambiguating label used in cluster headers
     if active_rsets and pool_reps:
         rset_by_name = {r.name: r for r in active_rsets}
         for key in ordered_keys:
@@ -865,7 +870,9 @@ def draw_per_cell_bar_mode(
             for w in valid:
                 base_wells.append(w)
                 base_colors.append(color)
-                base_labels.append(f"{app._well_display_label(w)}\n[{rset.name}]")
+                short = app._well_display_label(w)
+                base_short.append(short)
+                base_full.append(f"{short} [{rset.name}]")
     elif active_rsets:
         seen: set = set()
         for rset in active_rsets:
@@ -876,40 +883,49 @@ def draw_per_cell_bar_mode(
                 seen.add(w)
                 base_wells.append(w)
                 base_colors.append(color)
-                base_labels.append(f"{app._well_display_label(w)}\n[{rset.name}]")
+                short = app._well_display_label(w)
+                base_short.append(short)
+                base_full.append(f"{short} [{rset.name}]")
     else:
         base_wells = [k for k in ordered_keys if k in app._app_state.dataset.well_paths]
         base_colors = [app._rank_color_well(w) for w in base_wells]
-        base_labels = [app._well_display_label(w) for w in base_wells]
+        base_short = [app._well_display_label(w) for w in base_wells]
+        base_full = list(base_short)
 
     if not base_wells:
         app._bar_canvas.draw_idle()
         return True
 
-    # Materialise (well × tp) columns in the order the active layout asks for.
+    # Materialise (well × tp) columns in the order the active layout asks
+    # for. Labels stay single-line: cluster headers carry the primary
+    # identity so per-bar labels only need to carry the secondary axis
+    # (the variable that changes inside the cluster).
     plot_wells: List[str] = []
     plot_colors: List[str] = []
     plot_labels: List[str] = []
     plot_tps: List[float] = []
     group_keys: List[str] = []
+    multi_tp = len(target_ts) > 1
     if group_mode == "timepoint":
         for t in target_ts:
             tp_lbl = f"{t:.4g}"
-            for w, c, lbl in zip(base_wells, base_colors, base_labels):
+            for w, c, short, full in zip(base_wells, base_colors, base_short, base_full):
                 plot_wells.append(w)
                 plot_colors.append(c)
-                plot_labels.append(f"{lbl}\n@t={tp_lbl}" if len(target_ts) > 1 else lbl)
+                # cluster header = tp; per-bar tick = well identity
+                plot_labels.append(full if multi_tp else full)
                 plot_tps.append(float(t))
-                group_keys.append(tp_lbl if len(target_ts) > 1 else "")
+                group_keys.append(tp_lbl if multi_tp else "")
     else:
-        for w, c, lbl in zip(base_wells, base_colors, base_labels):
+        for w, c, short, full in zip(base_wells, base_colors, base_short, base_full):
             for t in target_ts:
                 tp_lbl = f"{t:.4g}"
                 plot_wells.append(w)
                 plot_colors.append(c)
-                plot_labels.append(f"{lbl}\n@t={tp_lbl}" if len(target_ts) > 1 else lbl)
+                # cluster header = well/rset identity; per-bar tick = tp
+                plot_labels.append(f"t={tp_lbl}" if multi_tp else full)
                 plot_tps.append(float(t))
-                group_keys.append(w if len(target_ts) > 1 else "")
+                group_keys.append(full if multi_tp else "")
 
     if _debug_flags.review_bar_debug_enabled():
         mode = "violin" if app._bar_violin else "beeswarm"

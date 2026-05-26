@@ -234,12 +234,20 @@ def collect_bar_items(
         if use_groups:
             # Grouped mode: one BarItem per rset, wells inside each rset
             # collapsed via compute_rep_stats / compute_rep_per_fov_stats.
+            multi_tp = len(target_ts) > 1
             for key in ordered_keys:
                 rset = rset_by_name.get(key)
                 if rset is None:
                     continue
                 color = app._rank_color_rset(rset)
-                display = app._replicate_display_label(rset)
+                rset_disp = app._replicate_display_label(rset)
+                # In multi-tp group-by-well mode the cluster header is the
+                # rset name; per-bar label collapses to the timepoint so
+                # the tick row stays single-line.
+                if multi_tp and group_mode == "well":
+                    display = f"t={tp_str}"
+                else:
+                    display = rset_disp
                 if per_fov_spread:
                     gm, g_err_m, gf, g_err_f, n_above_pf_mean, n_above_pf_spread = (
                         compute_rep_per_fov_stats(app, rset, target_t, threshold, use_sem)
@@ -275,7 +283,7 @@ def collect_bar_items(
                     )
                 has_mean = not math.isnan(gm)
                 has_frac = has_mean and not math.isnan(gf)
-                gk = rset.name if group_mode == "well" else tp_str
+                gk = rset_disp if group_mode == "well" else tp_str
                 out.append(BarItem(
                     key=rset.name, display=display, color=color,
                     mean=gm, spread=g_err_m, has_mean=has_mean,
@@ -288,6 +296,7 @@ def collect_bar_items(
         # Per-well branch: either no rsets are active, or
         # ``bar_pool_replicates`` is False and rsets exist (wells are
         # iterated explicitly so the rset colour is preserved).
+        multi_tp = len(target_ts) > 1
         if active_rsets and not pool_reps:
             iter_specs = []  # (well_label, color, display, group_key)
             seen: set = set()
@@ -299,8 +308,19 @@ def collect_bar_items(
                     if w not in app._app_state.dataset.well_paths:
                         continue
                     seen.add(w)
-                    disp = f"{app._bar_well_display_label(w)}\n[{rset.name}]"
-                    gk = w if group_mode == "well" else tp_str
+                    well_disp = app._bar_well_display_label(w)
+                    if multi_tp and group_mode == "well":
+                        # cluster header shows well + rset; per-bar label
+                        # shows just the timepoint.
+                        disp = f"t={tp_str}"
+                    elif multi_tp and group_mode == "timepoint":
+                        # cluster header shows timepoint; per-bar label
+                        # shows well + rset name (single line).
+                        disp = f"{well_disp} [{rset.name}]"
+                    else:
+                        disp = f"{well_disp} [{rset.name}]"
+                    gk_well = f"{well_disp} [{rset.name}]"
+                    gk = gk_well if group_mode == "well" else tp_str
                     iter_specs.append((w, rcolor, disp, gk))
             label_iter = iter_specs
         else:
@@ -309,7 +329,11 @@ def collect_bar_items(
                 if label not in app._app_state.dataset.well_paths:
                     continue
                 color = app._rank_color_well(label)
-                display = app._bar_well_display_label(label)
+                well_disp = app._bar_well_display_label(label)
+                if multi_tp and group_mode == "well":
+                    display = f"t={tp_str}"
+                else:
+                    display = well_disp
                 gk = label if group_mode == "well" else tp_str
                 label_iter.append((label, color, display, gk))
 
@@ -403,7 +427,7 @@ def collect_bar_items(
 def collect_bar_items_for_group(
     app,
     group: BarGroup,
-    target_t: float,
+    target_t,
     *,
     val_col: str,
     threshold: float,
@@ -412,16 +436,20 @@ def collect_bar_items_for_group(
     fc_state: Tuple[bool, str, bool],
     cell_area_threshold: Optional[float] = None,
     fluor_gates: Optional[dict] = None,
+    pool_replicates: bool = True,
+    group_mode: str = "well",
 ) -> List[BarItem]:
     """Build ``BarItem``s for a batch-export ``BarGroup`` (members + solo wells).
 
-    This is the batch-side analogue of :func:`collect_bar_items`. The plot
-    tab's collector reads from ``app._rep_sets_active()`` / ``_selected_wells``
-    and ``app._fc_*`` state; the batch path needs to operate on arbitrary
-    ``BarGroup`` instances with a panel-local fold-change state — so
-    everything is passed in explicitly. The batch panel maintains its own
-    ``_fc_*`` mirror (intentionally decoupled from the plot tab) and
-    forwards it via ``fc_state``.
+    Batch-side analogue of :func:`collect_bar_items` with the same
+    multi-tp / pool-replicates / group-mode semantics. ``target_t`` may be
+    a single ``float`` (legacy single-tp call) or a ``list[float]``; the
+    function emits one ``BarItem`` per (member, tp) pair, ordered by
+    ``group_mode`` (well-major / tp-major).
+
+    *pool_replicates* — when False, each rset member's wells are expanded
+    into their own ``BarItem``s (one per well, coloured by the rset's
+    palette colour). Default True preserves the legacy collapse.
 
     Pass :data:`FC_STATE_OFF` to skip fold-change scaling and get raw
     aggregated values (used by the additive CSV emitter).
@@ -431,110 +459,152 @@ def collect_bar_items_for_group(
     if fluor_gates is None:
         fluor_gates = app._get_all_fluor_gates()
 
+    if isinstance(target_t, (list, tuple)):
+        target_ts = [float(t) for t in target_t]
+    else:
+        target_ts = [float(target_t)]
+    if not target_ts:
+        return []
+
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
-    fc_control_mean_at_t = None
-    fc_control_spread_at_t = None
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        # Batch path uses ``_aggregate_group`` (pool-of-cells) for the
-        # bar numerator, so the control denominator stays on the
-        # pool-of-cells stat too — keeps the ratio internally
-        # consistent. (The plot tab uses ``_compute_rep_stats``
-        # mean-of-means and pairs with ``control_stats_at_for_bar`` to
-        # match. The cross-path numerator difference is a pre-existing
-        # issue out of scope here.)
-        ctrl_stats = _fc.control_stats_at(
-            app, fc_ctrl_lbl, target_t,
-            threshold=threshold, val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
-            fluor_gates=fluor_gates,
-        )
-        if ctrl_stats is not None:
-            fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
 
-    items: List[BarItem] = []
-    members: List[Tuple[str, str, list[str]]] = []  # (key, display, wells)
-    for rset in group.members:
-        valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
-        if not valid:
-            continue
-        members.append((rset.name, rset.name, valid))
-    for w in group.solo_wells:
-        if w not in app._app_state.dataset.well_paths:
-            continue
-        members.append((w, w, [w]))
-
-    # Use the batch-export palette by position rank — matches the prior
-    # behaviour of ``_render_bar_group_figure`` before consolidation. Each
-    # caller may override the colour by mutating ``item.color`` after the
-    # call if needed.
+    # Build (key, display, wells, rset_name_or_None, color) member list.
     from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
+    members: List[Tuple[str, str, list[str], Optional[str], str]] = []
+    if pool_replicates:
+        for i, rset in enumerate(group.members):
+            valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+            if not valid:
+                continue
+            members.append((rset.name, rset.name, valid, rset.name,
+                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
+        for w in group.solo_wells:
+            if w not in app._app_state.dataset.well_paths:
+                continue
+            members.append((w, w, [w], None,
+                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
+    else:
+        # Expand rset members into per-well entries; each well coloured by
+        # the rset's palette colour so the membership stays visible.
+        seen: set = set()
+        for ri, rset in enumerate(group.members):
+            rcolor = _WELL_COLORS[ri % len(_WELL_COLORS)]
+            for w in rset.wells:
+                if w in seen or w not in app._app_state.dataset.well_paths:
+                    continue
+                seen.add(w)
+                members.append((w, f"{w} [{rset.name}]", [w], rset.name, rcolor))
+        for w in group.solo_wells:
+            if w in seen or w not in app._app_state.dataset.well_paths:
+                continue
+            seen.add(w)
+            members.append((w, w, [w], None,
+                            _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
 
-    for i, (key, display, wells) in enumerate(members):
-        color = _WELL_COLORS[i % len(_WELL_COLORS)]
-        pts = aggregate_group(app, 
-            wells, threshold=threshold, use_sem=use_sem,
-            val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
-        if matched:
-            pt = matched[0]
-            m, s, f = pt[1], pt[2], pt[3]
-            n_above_total = int(pt[4]) if len(pt) >= 5 else 0
-            frac_spread = float(pt[6]) if len(pt) >= 7 else 0.0
-            n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
-            n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
-            if per_fov_spread:
-                n_above_val = n_above_pf_mean
-                n_above_err = n_above_pf_spread
+    def _format_tp(t: float) -> str:
+        return f"{t:.4g}"
+
+    def _items_for_tp(target_t: float) -> List[BarItem]:
+        # Resolve control denominator once per tp.
+        fc_control_mean_at_t = None
+        fc_control_spread_at_t = None
+        if fc_vs_ctrl and fc_ctrl_lbl:
+            ctrl_stats = _fc.control_stats_at(
+                app, fc_ctrl_lbl, target_t,
+                threshold=threshold, val_col=val_col,
+                cell_area_threshold=cell_area_threshold,
+                fluor_gates=fluor_gates,
+            )
+            if ctrl_stats is not None:
+                fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
+
+        out: List[BarItem] = []
+        tp_str = _format_tp(target_t)
+        multi_tp = len(target_ts) > 1
+        for (key, base_display, wells, rset_name, color) in members:
+            pts = aggregate_group(app,
+                wells, threshold=threshold, use_sem=use_sem,
+                val_col=val_col,
+                cell_area_threshold=cell_area_threshold,
+                fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread,
+            )
+            matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+            if matched:
+                pt = matched[0]
+                m, s, f = pt[1], pt[2], pt[3]
+                n_above_total = int(pt[4]) if len(pt) >= 5 else 0
+                frac_spread = float(pt[6]) if len(pt) >= 7 else 0.0
+                n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
+                n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
+                if per_fov_spread:
+                    n_above_val = n_above_pf_mean
+                    n_above_err = n_above_pf_spread
+                else:
+                    n_above_val = float(n_above_total)
+                    n_above_err = 0.0
+                if fc_vs_ctrl or fc_vs_t0:
+                    t0_mean = None
+                    t0_spread = None
+                    if fc_vs_t0:
+                        for _pt in sorted(pts, key=lambda p: p[0]):
+                            _m = _pt[1]
+                            if (isinstance(_m, (int, float))
+                                    and math.isfinite(_m) and _m != 0):
+                                t0_mean = float(_m)
+                                _sp = _pt[2] if len(_pt) > 2 else 0.0
+                                t0_spread = (
+                                    float(_sp) if (
+                                        isinstance(_sp, (int, float))
+                                        and math.isfinite(_sp)
+                                    ) else 0.0
+                                )
+                                break
+                    m, s = _fc.scale_bar_value(
+                        m, s,
+                        control_mean=fc_control_mean_at_t if fc_vs_ctrl else None,
+                        control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
+                        t0_mean=t0_mean if fc_vs_t0 else None,
+                        t0_spread=t0_spread if fc_vs_t0 else None,
+                    )
+                has_mean = not math.isnan(m)
+                has_frac = has_mean and not math.isnan(f)
             else:
-                n_above_val = float(n_above_total)
-                n_above_err = 0.0
-            if fc_vs_ctrl or fc_vs_t0:
-                # Batch t0 baseline: pool-of-cells stat (matches the
-                # batch numerator). Spread comes from the same AggPoint
-                # at the earliest tp so error propagation has the right
-                # uncertainty for the baseline.
-                t0_mean = None
-                t0_spread = None
-                if fc_vs_t0:
-                    for _pt in sorted(pts, key=lambda p: p[0]):
-                        _m = _pt[1]
-                        if (isinstance(_m, (int, float))
-                                and math.isfinite(_m) and _m != 0):
-                            t0_mean = float(_m)
-                            _sp = _pt[2] if len(_pt) > 2 else 0.0
-                            t0_spread = (
-                                float(_sp) if (
-                                    isinstance(_sp, (int, float))
-                                    and math.isfinite(_sp)
-                                ) else 0.0
-                            )
-                            break
-                m, s = _fc.scale_bar_value(
-                    m, s,
-                    control_mean=fc_control_mean_at_t if fc_vs_ctrl else None,
-                    control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
-                    t0_mean=t0_mean if fc_vs_t0 else None,
-                    t0_spread=t0_spread if fc_vs_t0 else None,
-                )
-            has_mean = not math.isnan(m)
-            has_frac = has_mean and not math.isnan(f)
-            items.append(BarItem(
+                m = float("nan"); s = 0.0
+                f = float("nan"); frac_spread = 0.0
+                n_above_val = 0.0; n_above_err = 0.0
+                has_mean = False; has_frac = False
+            # Labels stay single-line: cluster headers show the primary
+            # identity; per-bar labels show the secondary.
+            if multi_tp and group_mode == "well":
+                display = f"t={tp_str}"
+                gk = base_display
+            elif multi_tp and group_mode == "timepoint":
+                display = base_display
+                gk = tp_str
+            else:
+                display = base_display
+                gk = ""
+            out.append(BarItem(
                 key=key, display=display, color=color,
                 mean=m, spread=s, has_mean=has_mean,
                 frac=f, frac_spread=frac_spread, has_frac=has_frac,
                 n_above=n_above_val, n_above_spread=n_above_err,
+                tp=float(target_t), group_key=gk,
             ))
-        else:
-            items.append(BarItem(
-                key=key, display=display, color=color,
-                mean=float("nan"), spread=0.0, has_mean=False,
-                frac=float("nan"), frac_spread=0.0, has_frac=False,
-                n_above=0.0, n_above_spread=0.0,
-            ))
+        return out
+
+    items: List[BarItem] = []
+    if group_mode == "timepoint":
+        for t in target_ts:
+            items.extend(_items_for_tp(t))
+    else:
+        per_tp = [(_items_for_tp(tp), tp) for tp in target_ts]
+        n_keys = len(per_tp[0][0]) if per_tp else 0
+        for ki in range(n_keys):
+            for items_for_tp, _tp in per_tp:
+                if ki < len(items_for_tp):
+                    items.append(items_for_tp[ki])
     return items
 
 

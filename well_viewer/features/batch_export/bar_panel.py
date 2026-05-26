@@ -97,10 +97,50 @@ class BarBatchExportPanel(BatchExportPanel):
         sep2 = QFrame(); sep2.setFrameShape(QFrame.HLine)
         layout.addWidget(sep2)
 
+        # \u2500\u2500 Layout options (multi-tp figure + group-by + pool-replicates) \u2500\u2500
+        # These mirror the on-tab toggles; defaults preserve the legacy
+        # batch behaviour (one figure per (group, tp), rsets pooled).
+        opts_row = QHBoxLayout()
+        opts_row.setContentsMargins(12, 4, 12, 4)
+        self._multi_tp_cb = QCheckBox("Single figure spans selected timepoints")
+        self._multi_tp_cb.setChecked(False)
+        opts_row.addWidget(self._multi_tp_cb)
+        opts_row.addStretch(1)
+        layout.addLayout(opts_row)
+
+        layout_row = QHBoxLayout()
+        layout_row.setContentsMargins(12, 0, 12, 4)
+        layout_row.addWidget(QLabel("When spanning timepoints \u2014 cluster by:"))
+        self._group_mode_cb = QComboBox()
+        self._group_mode_cb.addItem("Well")
+        self._group_mode_cb.addItem("Timepoint")
+        layout_row.addWidget(self._group_mode_cb)
+        layout_row.addStretch(1)
+        layout.addLayout(layout_row)
+
+        pool_row = QHBoxLayout()
+        pool_row.setContentsMargins(12, 0, 12, 4)
+        self._pool_reps_cb = QCheckBox("Pool replicate-set wells into one bar")
+        self._pool_reps_cb.setChecked(True)
+        pool_row.addWidget(self._pool_reps_cb)
+        pool_row.addStretch(1)
+        layout.addLayout(pool_row)
+
+        # Gate the cluster-by combo on whether multi-tp mode is on.
+        def _refresh_layout_widgets() -> None:
+            multi = self._multi_tp_cb.isChecked()
+            self._group_mode_cb.setEnabled(multi)
+        self._multi_tp_cb.toggled.connect(lambda _=False: _refresh_layout_widgets())
+        _refresh_layout_widgets()
+
+        sep3 = QFrame(); sep3.setFrameShape(QFrame.HLine)
+        layout.addWidget(sep3)
+
         info = QLabel(
-            "Each group \u00d7 timepoint produces:\n"
-            "  \u2022 One bar figure (one bar per replicate set or well)\n"
-            "  \u2022 One CSV row per member at that timepoint\n\n"
+            "Each group produces:\n"
+            "  \u2022 One bar figure per timepoint (or one figure spanning all\n"
+            "    selected timepoints when the toggle above is on)\n"
+            "  \u2022 One CSV row per member at each timepoint\n\n"
             + ("Groups come from Sample Definitions in the left sidebar.\n"
                if self._use_sidebar_groups
                else "Groups are defined in the left panel.\n")
@@ -148,22 +188,37 @@ class BarBatchExportPanel(BatchExportPanel):
         fmt = self._fmt_cb.currentText()
         fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()
         fc_active = fc_vs_ctrl or fc_vs_t0
-        jobs = [(grp, tp_str) for grp in groups_with_data for tp_str in selected_tps]
+        # Layout options collected once here so each job sees a stable
+        # snapshot of the panel state.
+        multi_tp_figure = bool(self._multi_tp_cb.isChecked())
+        group_mode = "well" if self._group_mode_cb.currentText() == "Well" else "timepoint"
+        pool_replicates = bool(self._pool_reps_cb.isChecked())
+
+        # Each job is either (group, [tp_str]) for a single-tp figure (the
+        # legacy path) or (group, [tp1, tp2, ...]) for a multi-tp figure.
+        if multi_tp_figure and len(selected_tps) > 1:
+            jobs = [(grp, list(selected_tps)) for grp in groups_with_data]
+        else:
+            jobs = [(grp, [tp_str]) for grp in groups_with_data for tp_str in selected_tps]
 
         def _progress(job, step: int, total: int) -> str:
-            grp, tp_str = job
-            return f"'{grp.name}' @ t={tp_str}h  ({step}/{total})"
+            grp, tp_strs = job
+            tp_lbl = tp_strs[0] if len(tp_strs) == 1 else f"[{','.join(tp_strs)}]"
+            return f"'{grp.name}' @ t={tp_lbl}h  ({step}/{total})"
 
         def _run_job(job) -> Optional[str]:
-            grp, tp_str = job
+            grp, tp_strs = job
             safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
             try:
-                target_t = float(tp_str)
+                target_ts = [float(s) for s in tp_strs]
             except ValueError:
-                return f"{grp.name} t={tp_str}: invalid timepoint"
+                return f"{grp.name} t={tp_strs}: invalid timepoint"
 
-            safe_tp = tp_str.replace(".", "_").replace("-", "m")
-            base = out_dir / f"bar_{safe_grp}_t{safe_tp}"
+            if len(tp_strs) == 1:
+                safe_tp = tp_strs[0].replace(".", "_").replace("-", "m")
+                base = out_dir / f"bar_{safe_grp}_t{safe_tp}"
+            else:
+                base = out_dir / f"bar_{safe_grp}_t_multi"
 
             try:
                 from well_viewer.features.barplot.controller import (
@@ -175,8 +230,6 @@ class BarBatchExportPanel(BatchExportPanel):
                     bar_metric_fieldnames, bar_metric_row,
                     well_name_for, well_names_joined,
                 )
-                # Resolve the panel's (Channel, Property) selection into a
-                # column / ratio key — independent of the plot-tab state.
                 _val_col = self._export_val_col_for("_bar_channel_cb")
                 _ch = _ch_selected
                 _metric = self._selected_export_metric_key("_bar_channel_cb")
@@ -187,37 +240,48 @@ class BarBatchExportPanel(BatchExportPanel):
 
                 panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
                 items_raw = collect_bar_items_for_group(
-                    self._app, grp, target_t,
+                    self._app, grp, target_ts,
                     val_col=_val_col, threshold=threshold,
                     use_sem=use_sem, per_fov_spread=_per_fov_spread,
                     fc_state=FC_STATE_OFF,
                     cell_area_threshold=_cell_area_threshold,
                     fluor_gates=_fluor_gates,
+                    pool_replicates=pool_replicates,
+                    group_mode=group_mode,
                 )
                 if fc_active:
                     items_fc = collect_bar_items_for_group(
-                        self._app, grp, target_t,
+                        self._app, grp, target_ts,
                         val_col=_val_col, threshold=threshold,
                         use_sem=use_sem, per_fov_spread=_per_fov_spread,
                         fc_state=panel_fc_state,
                         cell_area_threshold=_cell_area_threshold,
                         fluor_gates=_fluor_gates,
+                        pool_replicates=pool_replicates,
+                        group_mode=group_mode,
                     )
-                    fc_by_key = {it.key: it for it in items_fc}
+                    fc_by_key_tp = {(it.key, it.tp): it for it in items_fc}
                 else:
-                    fc_by_key = {}
+                    fc_by_key_tp = {}
 
-                # Build a (key → member metadata) map so each row can pick
-                # up its wells / member_type without a second pass.
+                # Build a (key → member metadata) map keyed by either rset
+                # name (pooled) or individual well (expanded).
                 _meta_by_key: Dict[str, tuple] = {}
                 for rset in grp.members:
                     valid = [w for w in rset.wells if w in self._app._app_state.dataset.well_paths]
-                    if valid:
+                    if not valid:
+                        continue
+                    if pool_replicates:
                         _meta_by_key[rset.name] = (
                             "replicate_set", ";".join(valid), len(valid),
                         )
+                    else:
+                        for w in valid:
+                            _meta_by_key[w] = (
+                                f"replicate_set_member:{rset.name}", w, 1,
+                            )
                 for w in grp.solo_wells:
-                    if w in self._app._app_state.dataset.well_paths:
+                    if w in self._app._app_state.dataset.well_paths and w not in _meta_by_key:
                         _meta_by_key[w] = ("solo_well", w, 1)
 
                 rows_csv: List[dict] = []
@@ -230,6 +294,7 @@ class BarBatchExportPanel(BatchExportPanel):
                         well_names_str = well_names_joined(wells_str, _well_labels)
                     else:
                         well_names_str = well_name_for(wells_str, _well_labels)
+                    item_tp_str = f"{item.tp:.4g}"
                     row = {
                         "group": grp.name,
                         "member": item.key,
@@ -244,14 +309,14 @@ class BarBatchExportPanel(BatchExportPanel):
                         has=item.has_mean,
                         n_above=float(item.n_above),
                         n_above_spread=float(item.n_above_spread),
-                        ch=_ch, metric=_metric, tp_str=tp_str,
+                        ch=_ch, metric=_metric, tp_str=item_tp_str,
                         threshold=threshold, band_lbl=band_lbl,
                     ))
-                    if fc_active and item.key in fc_by_key:
-                        fc_item = fc_by_key[item.key]
+                    fc_match = fc_by_key_tp.get((item.key, item.tp)) if fc_active else None
+                    if fc_match is not None:
                         attach_bar_fold_change_columns(
-                            row, fc_mean=fc_item.mean, fc_spread=fc_item.spread,
-                            fc_has=fc_item.has_mean, band_lbl=band_lbl,
+                            row, fc_mean=fc_match.mean, fc_spread=fc_match.spread,
+                            fc_has=fc_match.has_mean, band_lbl=band_lbl,
                             vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
                             control_label=fc_ctrl_lbl,
                         )
@@ -269,21 +334,19 @@ class BarBatchExportPanel(BatchExportPanel):
                         wrt.writeheader()
                         wrt.writerows(rows_csv)
             except Exception as exc:
-                return f"{grp.name} t={tp_str} CSV: {exc}"
+                return f"{grp.name} t={tp_strs} CSV: {exc}"
 
             try:
-                # Helpers consulted during the render may read
-                # ``app._app_state.channel.active_val_col`` directly — swap it for the
-                # panel's selection so a ratio or non-MFI batch draws
-                # the right curves.
                 with self._app_val_col_scope(_val_col):
                     fig = self._render_bar_group_figure(
-                        grp, target_t, tp_str, threshold, use_sem, band_lbl,
+                        grp, target_ts, tp_strs, threshold, use_sem, band_lbl,
                         fc_state=panel_fc_state,
+                        pool_replicates=pool_replicates,
+                        group_mode=group_mode,
                     )
                 self._save_figure(fig, Path(str(base) + f".{fmt}"), fmt)
             except Exception as exc:
-                return f"{grp.name} t={tp_str} figure: {exc}"
+                return f"{grp.name} t={tp_strs} figure: {exc}"
             return None
 
         self._run_batch_jobs(
@@ -295,10 +358,12 @@ class BarBatchExportPanel(BatchExportPanel):
         )
 
     def _render_bar_group_figure(
-        self, grp: BarGroup, target_t: float, tp_str: str,
+        self, grp: BarGroup, target_t, tp_str,
         threshold: float, use_sem: bool, band_lbl: str,
         *,
         fc_state: tuple = (False, "", False),
+        pool_replicates: bool = True,
+        group_mode: str = "well",
     ):
         from matplotlib.figure import Figure as _Figure
         from well_viewer.domain import fold_change as _fc
@@ -306,13 +371,23 @@ class BarBatchExportPanel(BatchExportPanel):
 
         fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
         fc_active = fc_vs_ctrl or fc_vs_t0
+        # Normalise the (target_t, tp_str) inputs into the multi-shape the
+        # collector expects. Both legacy single-tp calls (float, str) and
+        # the new multi-tp calls (list, list) work.
+        if isinstance(target_t, (list, tuple)):
+            target_ts = [float(t) for t in target_t]
+            tp_strs = list(tp_str) if isinstance(tp_str, (list, tuple)) else [str(tp_str)]
+        else:
+            target_ts = [float(target_t)]
+            tp_strs = [str(tp_str)] if not isinstance(tp_str, (list, tuple)) else list(tp_str)
+        tp_title = tp_strs[0] if len(tp_strs) == 1 else f"[{', '.join(tp_strs)}]"
         fig = _Figure(figsize=(8, 10), dpi=300, facecolor=PLOT_BG)
         ax_mean = fig.add_subplot(3, 1, 1)
         ax_frac = fig.add_subplot(3, 1, 2)
         ax_n = fig.add_subplot(3, 1, 3)
         fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.10,
                             left=0.13, right=0.97)
-        fig.suptitle(f"{grp.name}  \u2014  t = {tp_str} h",
+        fig.suptitle(f"{grp.name}  \u2014  t = {tp_title} h",
                      fontsize=10, fontweight="bold", color=get_color("PLOT_TXT"), y=0.97)
         _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
         from well_viewer.data.metric_labels import (
@@ -343,30 +418,35 @@ class BarBatchExportPanel(BatchExportPanel):
         ax_frac.set_ylim(-0.05, 1.05)
 
         draw_items = collect_bar_items_for_group(
-            self._app, grp, target_t,
+            self._app, grp, target_ts,
             val_col=self._export_val_col_for("_bar_channel_cb"),
             threshold=threshold, use_sem=use_sem,
             per_fov_spread=self._app._use_fov_spread_active(),
             fc_state=fc_state,
+            pool_replicates=pool_replicates,
+            group_mode=group_mode,
         )
-        # Restore replicate-set display labels (the batch collector emits
-        # the bare rset.name; preserve the prior batch-figure convention
-        # of using ``_replicate_display_label`` for the visible x-tick).
-        rset_display_by_name = {
-            r.name: self._app._replicate_display_label(r)
-            for r in grp.members
-        }
-        for item in draw_items:
-            item.display = rset_display_by_name.get(item.key, item.display)
-
         if not draw_items:
             return fig
+
+        # Restore replicate-set display labels for legacy single-tp pooled
+        # mode (the batch collector emits bare rset.name; preserve the
+        # prior batch-figure convention of using ``_replicate_display_label``).
+        # In multi-tp mode the collector already produces the desired short
+        # display (e.g. "t=0") so we leave it alone.
+        if len(target_ts) == 1 and pool_replicates:
+            rset_display_by_name = {
+                r.name: self._app._replicate_display_label(r)
+                for r in grp.members
+            }
+            for item in draw_items:
+                item.display = rset_display_by_name.get(item.key, item.display)
 
         _bar_render_items(
             ax_mean=ax_mean,
             ax_frac=ax_frac,
             ax_n=ax_n,
-            use_groups=True,
+            use_groups=pool_replicates and len(target_ts) == 1,
             items=draw_items,
             threshold=threshold,
             warn_color=WARN,

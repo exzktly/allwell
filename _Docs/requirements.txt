@@ -101,6 +101,12 @@ imagecodecs==2023.9.18
 # so it resolves cleanly against the env's numpy>=1.24,<1.25 pin.
 pandas==2.2.3
 
+# ── TOML config parsing (v5.0.0 remote-execution config) ─────────────────────
+# Python 3.10 doesn't have tomllib (stdlib only from 3.11); tomli is the
+# backport. ~30 KB, pure-Python, no transitive deps. Used by
+# services/remote_config.py to load ~/.config/allwell/remotes.toml.
+tomli ; python_version < "3.11"
+
 # ── Test environment guard ───────────────────────────────────────────────────
 # exceptiongroup is a transitive dep of pytest on py<3.11. Versions >=1.3
 # add `typing-extensions>=4.6.0`, which conflicts with the

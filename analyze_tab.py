@@ -34,6 +34,7 @@ from services.pipeline_runner import (
     classify_log_line,
 )
 from services.pipeline_service import find_pipeline_script
+from services.remote_config import load_remotes
 from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
@@ -463,6 +464,42 @@ class AnalyzeTab(QWidget):
         sec.layout().addWidget(self._force_cb)
 
     def _build_run_controls(self, parent: QWidget) -> None:
+        # Remote-execution selector. Populated from ~/.config/allwell/remotes.toml
+        # so users can flip between Local and any configured SSH host
+        # without restarting the GUI.
+        remote_widget = QWidget(parent)
+        rl = QHBoxLayout(remote_widget)
+        rl.setContentsMargins(12, 6, 12, 0)
+        rl.setSpacing(8)
+        rl.addWidget(QLabel("Run on:", remote_widget))
+        self._remote_cb = QComboBox(remote_widget)
+        self._remote_cb.addItem("Local", userData=None)
+        try:
+            for name in load_remotes():
+                self._remote_cb.addItem(name, userData=name)
+        except (ValueError, OSError) as exc:
+            # Malformed remotes.toml shouldn't bring the GUI down — just
+            # surface the error in the log and stick with Local.
+            self._log_q.put((
+                "line",
+                f"[warn] could not load remotes.toml: {exc}\n",
+            ))
+        rl.addWidget(self._remote_cb)
+        self._cleanup_remote_cb = QCheckBox(
+            "Remove from remote when done", remote_widget,
+        )
+        self._cleanup_remote_cb.setToolTip(
+            "After a verified-successful run, delete both the per-run output "
+            "dir AND the cached input on the remote. Unchecked = keep the "
+            "input cache so the next run on the same data skips re-upload."
+        )
+        rl.addWidget(self._cleanup_remote_cb)
+        rl.addStretch(1)
+        parent.layout().addWidget(remote_widget)
+        # Disable the cleanup checkbox until the user picks a remote.
+        self._remote_cb.currentIndexChanged.connect(self._refresh_remote_controls)
+        self._refresh_remote_controls()
+
         btn_widget = QWidget(parent)
         btn_widget
         bl = QHBoxLayout(btn_widget)
@@ -482,6 +519,13 @@ class AnalyzeTab(QWidget):
         bl.addStretch(1)
 
         parent.layout().addWidget(btn_widget)
+
+    def _refresh_remote_controls(self) -> None:
+        """Enable the cleanup checkbox only when a remote is selected."""
+        is_remote = self._remote_cb.currentData() is not None
+        self._cleanup_remote_cb.setEnabled(is_remote)
+        if not is_remote:
+            self._cleanup_remote_cb.setChecked(False)
 
     # ------------------------------------------------------------------
     # Fluorescent channel helpers
@@ -759,7 +803,36 @@ class AnalyzeTab(QWidget):
             return
         self._set_running_ui_state()
         opts = self._collect_run_options()
-        self._runner.start(pipeline, opts, resolve_dirs=self._resolve_run_dirs_for_runner)
+        remote_name = self._remote_cb.currentData()
+        remote = None
+        if remote_name is not None:
+            try:
+                from services.remote_config import get_remote
+                remote = get_remote(remote_name)
+            except (ValueError, OSError) as exc:
+                QMessageBox.critical(
+                    self,
+                    "Remote Config Error",
+                    f"Could not load remote '{remote_name}':\n{exc}",
+                )
+                # Revert the running UI state set above so the user can
+                # try again. Mirrors the inline cleanup in _poll_log's
+                # "finished" branch.
+                self._running = False
+                self._run_btn.setEnabled(True)
+                self._stop_btn.setEnabled(False)
+                self._status_lbl.setText("Idle")
+                return
+        cleanup_mode = "all" if self._cleanup_remote_cb.isChecked() else "run"
+        self._runner.start(
+            pipeline,
+            opts,
+            resolve_dirs=self._resolve_run_dirs_for_runner,
+            remote=remote,
+            output_filter="full",
+            cleanup_remote=cleanup_mode,
+            selective_channels=True,
+        )
 
     def _validate_run_request(self) -> Optional[Path]:
         if not self._input_edit.text().strip():
@@ -1062,6 +1135,17 @@ class AnalyzeTab(QWidget):
                     except (TypeError, ValueError):
                         self._pipeline_workers = 1
                     self._log_line(f"[info] Workers: {payload} parallel well(s).\n", "INFO")
+                elif kind == "remote_xfer":
+                    # Remote upload / download progress in [0, 1]. The
+                    # well-progress bar isn't accurate yet (no wells have
+                    # finished on the remote), so surface the transfer
+                    # progress on the status label instead of clobbering
+                    # the well bar.
+                    try:
+                        pct = float(payload)
+                    except (TypeError, ValueError):
+                        pct = 0.0
+                    self._status_lbl.setText(f"Transferring… {int(pct * 100)}%")
                 elif kind == "done":
                     self._progress.setValue(self._progress.maximum() or 100)
                     n = self._well_done or getattr(self, "_zipper_done", 0)

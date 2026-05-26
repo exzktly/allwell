@@ -10,6 +10,8 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
     zipper_start  int        Begin grouping phase, expected well count.
     zipper_well   str|None   One well finished grouping.
     zipper_done   None       Grouping phase finished.
+    remote_xfer   float      Remote rsync progress as a fraction in [0, 1].
+                             Only emitted during remote-execution runs.
     done          str        Pipeline finished successfully.
     error         str        Pipeline failed; payload is a message.
     finished      None       Final event, always emitted in a finally.
@@ -27,6 +29,12 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
+from services.remote_config import RemoteHost
+from services.remote_runner import (
+    OutputFilter,
+    RemoteRunner,
+    stage_local_zips,
+)
 
 
 def classify_log_line(line: str) -> str:
@@ -135,6 +143,14 @@ class PipelineRunner:
         # launch so a cancel during grouping doesn't slip through and
         # start a fresh pipeline run.
         self._stop_requested: threading.Event = threading.Event()
+        # Remote-execution state. Set in start() when the user chose a
+        # remote host; the runner threads it through _run_pipeline_thread
+        # to swap spawn_pipeline for the SSH-staged remote run.
+        self._remote: Optional[RemoteHost] = None
+        self._remote_runner: Optional[RemoteRunner] = None
+        self._output_filter: str = "full"
+        self._cleanup_remote: str = "run"
+        self._selective_channels: bool = True
 
     def _enqueue(self, event: "Tuple[str, object]") -> None:
         """Non-blocking enqueue; drops the message on overflow with a
@@ -168,6 +184,10 @@ class PipelineRunner:
         opts: dict,
         *,
         resolve_dirs: Callable[..., Optional[Tuple[Path, Path]]],
+        remote: Optional[RemoteHost] = None,
+        output_filter: str = "full",
+        cleanup_remote: str = "run",
+        selective_channels: bool = True,
     ) -> None:
         """Spawn the worker thread that runs the pipeline subprocess.
 
@@ -175,7 +195,20 @@ class PipelineRunner:
         ``proc_hook`` is the runner's zipper-tracking callback (forwarded
         to the grouping subprocess so Stop can reach it). Old call sites
         that ignore the kwarg still work.
+
+        When ``remote`` is set, the pipeline runs on the named SSH host
+        instead of locally. ``output_filter``, ``cleanup_remote``, and
+        ``selective_channels`` map to the corresponding flags on
+        :func:`scripts.allwell_remote.main` — they're ignored in
+        local mode.
         """
+        self._remote = remote
+        self._remote_runner: Optional[RemoteRunner] = (
+            RemoteRunner(remote) if remote is not None else None
+        )
+        self._output_filter = output_filter
+        self._cleanup_remote = cleanup_remote
+        self._selective_channels = selective_channels
         self._thread = threading.Thread(
             target=self._run_pipeline_thread,
             args=(pipeline, opts, resolve_dirs),
@@ -200,6 +233,18 @@ class PipelineRunner:
         # multiprocessing workers it spawned get torn down too.
         for proc in (self._zipper_proc, self._proc):
             self._signal_subprocess(proc)
+
+        # For remote runs, the local SIGTERM above tears down the ssh
+        # client; ssh -tt propagates SIGHUP to the remote pipeline. The
+        # second channel here is belt-and-braces — a fresh ssh that kills
+        # the PID we wrote on startup, in case the PTY hangup didn't
+        # propagate (older OpenSSH on the remote, NAT teardown, etc.).
+        if self._remote_runner is not None and self._proc is not None:
+            try:
+                inner = getattr(self._proc, "_ssh", None) or self._proc
+                self._remote_runner.cancel(inner)
+            except Exception:  # noqa: BLE001 — best-effort kill
+                pass
 
     @staticmethod
     def _signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
@@ -281,12 +326,19 @@ class PipelineRunner:
             self._last_output_dir = output_dir
             args = build_pipeline_args(pipeline, input_dir, output_dir, opts)
             self._enqueue(("line", f"$ {' '.join(args)}\n"))
+            target = (
+                f"remote:{self._remote.name}" if self._remote is not None else "local"
+            )
             self._enqueue((
                 "line",
                 f"Input  : {input_dir}\nOutput : {output_dir}\n"
-                f"Schema : {opts['filename_schema']}  sep={opts['filename_sep']!r}\n\n",
+                f"Schema : {opts['filename_schema']}  sep={opts['filename_sep']!r}\n"
+                f"Target : {target}\n\n",
             ))
-            self._run_pipeline_subprocess(args)
+            if self._remote is not None and self._remote_runner is not None:
+                self._run_pipeline_remote(input_dir, output_dir, args, opts)
+            else:
+                self._run_pipeline_subprocess(args)
         finally:
             self._enqueue(("finished", None))
 
@@ -304,3 +356,87 @@ class PipelineRunner:
                 self._enqueue(("error", f"Pipeline exited with code {rc}.\n"))
         except Exception as exc:  # noqa: BLE001 — surface any failure to the GUI
             self._enqueue(("error", f"Failed to start pipeline: {exc}\n"))
+
+    def _run_pipeline_remote(
+        self,
+        input_dir: Path,
+        output_dir: Path,
+        args: list[str],
+        opts: dict,
+    ) -> None:
+        """Stage inputs, launch the pipeline on the remote, stream output.
+
+        The pipeline.subprocess.Popen handle returned by
+        ``RemoteRunner.spawn`` is API-compatible with the local spawn
+        path, so the reader loop below is the same shape as
+        ``_run_pipeline_subprocess``. After the pipeline exits, we
+        verify the local manifest and run the configured remote cleanup.
+        """
+        assert self._remote_runner is not None
+        assert self._remote is not None
+        zipped = None
+        try:
+            self._enqueue(("line", f"[remote] target: {self._remote.name}\n"))
+            zipped = stage_local_zips(
+                input_dir,
+                filename_schema=opts["filename_schema"],
+                filename_sep=opts["filename_sep"],
+                fluor_tokens=opts["fluor_tokens"] if self._selective_channels else None,
+                nuclear_token=opts["nuclear_token"] if self._selective_channels else None,
+                log_fn=lambda m: self._enqueue(("line", m)),
+            )
+            self._enqueue((
+                "line",
+                f"[remote] {len(zipped.well_zips)} well-zip(s) staged "
+                f"({zipped.mode.value} mode).\n",
+            ))
+
+            est = self._remote_runner.estimate(zipped)
+            self._enqueue(("line", f"[remote] {est.format()}\n"))
+
+            output_filter = OutputFilter(self._output_filter)
+
+            def _on_xfer_progress(pct: float) -> None:
+                # Surface rsync progress as a dedicated queue event so the
+                # GUI can show a real bar during upload/download instead
+                # of a static spinner. A separate event kind keeps it out
+                # of the existing well-progress signal in ProgressTracker.
+                self._enqueue(("remote_xfer", pct))
+
+            self._proc = self._remote_runner.spawn(
+                zipped,
+                output_dir,
+                args,
+                output_filter=output_filter,
+                log_fn=lambda m: self._enqueue(("line", m)),
+                progress_fn=_on_xfer_progress,
+            )
+            assert self._proc.stdout is not None
+            for line in self._proc.stdout:
+                self._enqueue(("line", line))
+            self._proc.wait()
+            rc = self._proc.returncode
+
+            ok = self._remote_runner.verify_and_cleanup(
+                ok=(rc == 0),
+                cleanup_mode=self._cleanup_remote,
+                log_fn=lambda m: self._enqueue(("line", m)),
+            )
+            if rc == 0 and ok:
+                self._enqueue(("done", "Remote pipeline completed successfully.\n"))
+            elif rc != 0:
+                self._enqueue(("error", f"Remote pipeline exited with code {rc}.\n"))
+            else:
+                self._enqueue((
+                    "error",
+                    "Remote pipeline finished but local verification failed; "
+                    "remote files preserved for retry.\n",
+                ))
+        except Exception as exc:  # noqa: BLE001 — surface any failure to the GUI
+            self._enqueue(("error", f"Failed to run pipeline remotely: {exc}\n"))
+        finally:
+            if zipped is not None and zipped.cleanup is not None:
+                try:
+                    zipped.cleanup()
+                except OSError:
+                    pass

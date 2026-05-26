@@ -38,16 +38,24 @@ and the bootstrap script all work natively on Windows now.
 
 ## Bootstrap a host
 
-From PowerShell, in the AllWell repo root:
+**Recommended (v5.1.0+, GUI):** Launch AllWell, open the **Analyze**
+tab, click **Manage…** next to the "Run on:" dropdown. Click **Add…**,
+fill in the SSH alias, save. Then select the new entry in the list and
+click **Bootstrap…** — a sub-dialog streams the bootstrap output live
+so you can watch the conda/pip install progress through the
+10–30 minute first-run pip install.
+
+**CLI alternative:** From PowerShell, in the AllWell repo root:
 
 ```powershell
 .\scripts\bootstrap_remote.ps1 bigbox
 ```
 
 This runs `scripts\_bootstrap_lib.py` (the same module the bash wrapper
-calls on Linux/macOS) and produces an identical result: miniforge +
-conda env installed under `$HOME` on the remote, four required files
-synced, bandwidth measured, `remotes.toml` written.
+calls on Linux/macOS and the same module the GUI Bootstrap… button
+invokes) and produces an identical result: miniforge + conda env
+installed under `$HOME` on the remote, four required files synced,
+bandwidth measured, `remotes.toml` written.
 
 Re-running is a fast no-op. Pass `-Force` to wipe the remote miniforge
 + env and start clean.

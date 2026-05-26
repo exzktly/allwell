@@ -485,6 +485,13 @@ class AnalyzeTab(QWidget):
                 f"[warn] could not load remotes.toml: {exc}\n",
             ))
         rl.addWidget(self._remote_cb)
+        self._manage_remotes_btn = QPushButton("Manage…", remote_widget)
+        self._manage_remotes_btn.setProperty("variant", "secondary")
+        self._manage_remotes_btn.setToolTip(
+            "Add, edit, delete, test, or bootstrap remote-execution hosts."
+        )
+        self._manage_remotes_btn.clicked.connect(self._open_manage_remotes)
+        rl.addWidget(self._manage_remotes_btn)
         self._cleanup_remote_cb = QCheckBox(
             "Remove from remote when done", remote_widget,
         )
@@ -526,6 +533,58 @@ class AnalyzeTab(QWidget):
         self._cleanup_remote_cb.setEnabled(is_remote)
         if not is_remote:
             self._cleanup_remote_cb.setChecked(False)
+
+    def _open_manage_remotes(self) -> None:
+        """Open the v5.1.0 Manage Remotes dialog.
+
+        After the dialog closes (or any time remotes_changed fires), the
+        "Run on:" combobox is rebuilt from disk. The previous selection
+        is preserved if it still exists; otherwise we fall back to
+        "Local" so a user who just deleted their currently-selected
+        remote can't end up with a stale selection.
+        """
+        # Lazy import to avoid pulling the dialog module into the
+        # AnalyzeTab import graph on startup — the dialog imports
+        # services.remote_runner which has heavier-weight dependencies.
+        from analyze_remote_dialog import ManageRemotesDialog
+        dlg = ManageRemotesDialog(self)
+        dlg.remotes_changed.connect(self._reload_remotes_combo)
+        dlg.exec()
+
+    def _reload_remotes_combo(self) -> None:
+        """Refresh the 'Run on:' combobox from remotes.toml.
+
+        Called after every add / edit / delete in the Manage Remotes
+        dialog. Preserves the user's current selection when possible.
+        """
+        prev = self._remote_cb.currentData()
+        self._remote_cb.blockSignals(True)
+        try:
+            self._remote_cb.clear()
+            self._remote_cb.addItem("Local", userData=None)
+            try:
+                from services.remote_config import load_remotes
+                for name in load_remotes():
+                    self._remote_cb.addItem(name, userData=name)
+            except (ValueError, OSError) as exc:
+                self._log_q.put((
+                    "line",
+                    f"[warn] could not reload remotes.toml: {exc}\n",
+                ))
+            # Try to re-select the previous remote; otherwise fall back
+            # to Local (index 0) which is always present.
+            if prev is not None:
+                for i in range(self._remote_cb.count()):
+                    if self._remote_cb.itemData(i) == prev:
+                        self._remote_cb.setCurrentIndex(i)
+                        break
+                else:
+                    self._remote_cb.setCurrentIndex(0)
+        finally:
+            self._remote_cb.blockSignals(False)
+        # Manually re-fire the dependent-control refresh since we
+        # silenced the signal during the rebuild.
+        self._refresh_remote_controls()
 
     # ------------------------------------------------------------------
     # Fluorescent channel helpers

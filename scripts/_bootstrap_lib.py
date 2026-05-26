@@ -177,11 +177,25 @@ def _ssh_run(
     after the wizard has set things up. When unset (typical first-
     bootstrap path), ssh falls back to its default identity search /
     ``~/.ssh/config`` exactly as before.
+
+    v5.2.3: passes ``StrictHostKeyChecking=accept-new``. The bootstrap
+    feeds the probe script in via ``input=...``, so ssh's stdin is a
+    pipe — no place to prompt the user for "do you trust this host?".
+    On a fresh ``known_hosts`` ssh would then exit 255 with the
+    cryptic "Host key verification failed" message. ``accept-new``
+    auto-trusts the host on first contact and enforces normal
+    key-change detection on subsequent connects. ``ConnectTimeout``
+    is set so a misconfigured / unreachable host fails fast instead
+    of hanging on TCP-syn retries for the kernel default (~75s).
     """
     cmd = [_ssh_binary()]
     if ssh_key_path:
         cmd += ["-i", str(Path(ssh_key_path).expanduser())]
-    cmd += [alias, *remote_argv]
+    cmd += [
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ConnectTimeout=15",
+        alias, *remote_argv,
+    ]
     return subprocess.run(
         cmd,
         capture_output=capture,
@@ -531,13 +545,24 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
         for _ in range(50):
             fh.write(os.urandom(1024 * 1024))
         local_probe = Path(fh.name)
+    # v5.2.3: pass StrictHostKeyChecking=accept-new + ConnectTimeout
+    # through rsync's underlying ssh too, matching the policy in
+    # _ssh_run. Without these, a first-contact bootstrap survives
+    # probe_host (because that ssh now has accept-new) only to fail
+    # again here at the bandwidth probe, where rsync uses its own ssh.
     rsync_argv = [_rsync_binary(), "-a"]
+    ssh_inner = [
+        "ssh",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ConnectTimeout=15",
+    ]
     if ssh_key_path:
         # rsync uses an external ssh command set via -e. Shell-quote
         # the key path so a path with spaces survives the round-trip
         # through whatever shell rsync invokes underneath.
         expanded_key = str(Path(ssh_key_path).expanduser())
-        rsync_argv += ["-e", f"ssh -i {shlex.quote(expanded_key)}"]
+        ssh_inner += ["-i", shlex.quote(expanded_key)]
+    rsync_argv += ["-e", " ".join(ssh_inner)]
     rsync_argv += [
         _to_rsync_path(local_probe),
         f"{alias}:/tmp/allwell-bw-probe",

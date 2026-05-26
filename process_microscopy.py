@@ -34,7 +34,7 @@ python process_microscopy.py \\
     --no_tophat_nir \\
     --no_tophat_gfp \\
     --workers 4 \\
-    --csv_prefix gfp_measurements
+    --csv_prefix measurements
 
 Filename convention (underscore-separated):
     <ExperimentName>_<Well>_<FOV>_<Timepoint>_NIR.tif
@@ -3242,7 +3242,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    p.add_argument("--csv_prefix", default="gfp_measurements",
+    p.add_argument("--csv_prefix", default="measurements",
                    help="Filename prefix for per-well CSVs (<prefix>_<well>.csv)")
 
     p.add_argument("--force", action="store_true",

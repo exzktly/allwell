@@ -24,7 +24,7 @@ def extract_well_token(label: str) -> Optional[str]:
     """Extract normalized well token from trailing label text.
 
     Example:
-        "gfp_measurements_B10" -> "B10"
+        "measurements_B10" -> "B10"
     """
     m = re.search(r"([A-Ha-h])(\d{1,2})$", label)
     return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else None

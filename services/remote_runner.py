@@ -40,6 +40,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+from functools import lru_cache
 import tempfile
 import threading
 import time
@@ -351,6 +352,37 @@ def _member_matches(member: str, keep_tokens: set[str]) -> bool:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+@lru_cache(maxsize=1)
+def _rsync_supports_info_flag() -> bool:
+    """Whether the local rsync accepts ``--info=...``.
+
+    Added in rsync 3.1.0 (2013). macOS still ships the very old
+    rsync 2.6.9 by default (Apple licensing — they froze before
+    rsync went GPLv3); HPC clusters and minimal containers can
+    have similar vintage. Those rsyncs reject ``--info=...`` with
+    "rsync: --info=stats0: unknown option" → exit 1.
+
+    Detected once at first call via ``rsync --version`` (which both
+    old and new rsyncs support) and cached for the process lifetime.
+    Returns False on any error so the caller defaults to the
+    safer "omit --info" path.
+    """
+    try:
+        result = subprocess.run(
+            [resolve_rsync_binary(), "--version"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+    if result.returncode != 0:
+        return False
+    first_line = (result.stdout or "").splitlines()[0] if result.stdout else ""
+    match = re.search(r"version\s+(\d+)\.(\d+)", first_line)
+    if not match:
+        return False
+    return (int(match.group(1)), int(match.group(2))) >= (3, 1)
+
+
 def _rsync_ssh_transport(host: RemoteHost) -> list[str]:
     """Build the ``-e "ssh …"`` argument every rsync in this module
     should pass.
@@ -464,10 +496,14 @@ class DatasetCache:
             "-aH",
             "--partial",
             "--append-verify",
-            "--info=stats2,progress2",
-            *sources,
-            dest,
         ]
+        # v5.2.10: --info= needs rsync ≥ 3.1.0. Old rsync (macOS's
+        # bundled 2.6.9, some HPC clusters) rejects it with exit 1.
+        # The progress callback degrades to "stats appear at end" on
+        # legacy rsync, but the transfer itself still works.
+        if _rsync_supports_info_flag():
+            cmd.append("--info=stats2,progress2")
+        cmd += [*sources, dest]
         if log_fn:
             log_fn(f"[remote] $ {' '.join(shlex.quote(c) for c in cmd[:6])} … → {dest}\n")
 
@@ -1120,8 +1156,16 @@ class RemoteRunner:
         cmd = [
             resolve_rsync_binary(),
             *_rsync_ssh_transport(self.host),
-            "-aR", "--info=stats0", *sources, dest,
+            "-aR",
         ]
+        # v5.2.10: --info=stats0 (suppresses summary footer) needs
+        # rsync ≥ 3.1.0. Old rsync (macOS 2.6.9, older HPC images)
+        # rejects with exit 1. Omitting it is purely cosmetic — rsync
+        # just prints its stats summary to stdout, which we don't
+        # parse or display anyway.
+        if _rsync_supports_info_flag():
+            cmd.append("--info=stats0")
+        cmd += [*sources, dest]
         result = _rsync_with_retry(cmd, log_fn=log_fn, timeout=60)
         if result.returncode != 0:
             err = (result.stderr or "").strip() or f"rsync exited {result.returncode}"

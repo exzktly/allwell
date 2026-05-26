@@ -72,48 +72,12 @@
 #   python -c "import tensorflow as tf; print(tf.config.list_physical_devices('CPU'))"
 #   # Expected: [PhysicalDevice(name='/physical_device:CPU:0', device_type='CPU')]
 
-# ── TensorFlow (Apple Silicon, GPU via Metal) ────────────────────────────────
-tensorflow-macos==2.13.0 ; sys_platform == "darwin" and platform_machine == "arm64"
-tensorflow-metal==1.1.0  ; sys_platform == "darwin" and platform_machine == "arm64"
-
-# ── TensorFlow (Windows, CPU-only) ───────────────────────────────────────────
-# Native Windows TF has been CPU-only since 2.11 (TF 2.10 was the last
-# release with native Windows GPU). Pinning 2.13.0 keeps keras / protobuf /
-# StarDist identical across platforms. Intel macOS is not supported.
-tensorflow==2.13.0 ; sys_platform == "win32"
-
-# Shared by both TF lines (cross-platform pins)
-keras==2.13.1
-protobuf==3.20.3
-
-# ── StarDist segmentation pipeline ───────────────────────────────────────────
-csbdeep==0.8.0
-stardist==0.9.1
-numba==0.57.1
-llvmlite==0.40.1
-
-# ── Image I/O ────────────────────────────────────────────────────────────────
-tifffile==2023.9.26
-imagecodecs==2023.9.18
-
-# ── Data analysis (well_viewer aggregation) ──────────────────────────────────
-# pandas 2.2.3 requires numpy>=1.22.4 on py3.10 with no upper bound,
-# so it resolves cleanly against the env's numpy>=1.24,<1.25 pin.
-pandas==2.2.3
-
-# ── TOML config parsing (v5.0.0 remote-execution config) ─────────────────────
-# Python 3.10 doesn't have tomllib (stdlib only from 3.11); tomli is the
-# backport. ~30 KB, pure-Python, no transitive deps. Used by
-# services/remote_config.py to load ~/.config/allwell/remotes.toml.
-tomli ; python_version < "3.11"
-
-# ── Test environment guard ───────────────────────────────────────────────────
-# exceptiongroup is a transitive dep of pytest on py<3.11. Versions >=1.3
-# add `typing-extensions>=4.6.0`, which conflicts with the
-# `typing-extensions<4.6.0,>=3.6.6` pin from tensorflow-macos 2.13.0 and
-# silently upgrades typing-extensions, breaking TF imports. Pinning
-# below 1.3 keeps pytest installable without disturbing TF.
-exceptiongroup<1.3
+# ── Pipeline + scientific stack (shared with the headless remote) ────────────
+# v5.2.1: split off so the bootstrap can install just the pipeline deps
+# on the remote without dragging PySide6/pyobjc/pyinstaller through
+# (some of which lack wheels on Linux aarch64 / newer Pythons). See
+# _Docs/requirements-remote.txt for the full list.
+-r requirements-remote.txt
 
 # ── GUI toolkit (Qt for Python) ──────────────────────────────────────────────
 # Replaces tkinter. Pulls in shiboken6 transitively at the matching version.

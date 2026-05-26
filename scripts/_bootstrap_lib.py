@@ -44,7 +44,9 @@ REQUIRED_FILES: tuple[str, ...] = (
     "process_microscopy.py",
     "auto_threshold_core.py",
     "well_token.py",
-    "_Docs/requirements.txt",
+    # v5.2.1: headless-only requirements file (no PySide6/pyobjc/
+    # pyinstaller). See _Docs/requirements.txt for the GUI superset.
+    "_Docs/requirements-remote.txt",
 )
 
 ENV_NAME = "allwell"
@@ -400,7 +402,8 @@ RUNNING="$STAGING/.pip_running"
 DONE="$STAGING/.pip_done"
 FAILED="$STAGING/.pip_failed"
 
-if [ -f "$HOME/allwell/_Docs/requirements.txt" ]; then
+REQ_FILE="$HOME/allwell/_Docs/requirements-remote.txt"
+if [ -f "$REQ_FILE" ]; then
     # If a previous bootstrap left pip running in the background, just
     # tail its log — don't start a second pip in parallel.
     if [ -f "$RUNNING" ] && kill -0 "$(cat "$RUNNING")" 2>/dev/null; then
@@ -417,7 +420,7 @@ if [ -f "$HOME/allwell/_Docs/requirements.txt" ]; then
     # Launch pip detached. Use a subshell so the PID we capture is the
     # one whose stdout/stderr lands in PIPLOG.
     (
-        ( pip install --no-build-isolation -r "$HOME/allwell/_Docs/requirements.txt" \
+        ( pip install --no-build-isolation -r "$REQ_FILE" \
             > "$PIPLOG" 2>&1 && touch "$DONE" ) \
         || touch "$FAILED"
         rm -f "$RUNNING"
@@ -430,7 +433,10 @@ if [ -f "$HOME/allwell/_Docs/requirements.txt" ]; then
     if [ -f "$DONE" ]; then exit 0; fi
     exit 1
 else
-    echo "ERROR: $HOME/allwell/_Docs/requirements.txt not found on remote." >&2
+    echo "ERROR: $REQ_FILE not found on remote." >&2
+    echo "(v5.2.1 split the GUI superset off into _Docs/requirements.txt;" >&2
+    echo " the headless deps live in _Docs/requirements-remote.txt — make" >&2
+    echo " sure your local working copy has that file and re-run bootstrap.)" >&2
     exit 1
 fi
 """

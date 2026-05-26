@@ -446,13 +446,40 @@ def test_verify_reports_empty_csv(host, tmp_path):
 
 
 def test_required_files_list_is_what_we_promised():
-    """The contract from the design discussion: only these four files."""
+    """The contract from the design discussion: only these four files.
+
+    v5.2.1 swapped ``_Docs/requirements.txt`` for
+    ``_Docs/requirements-remote.txt`` so the remote install no longer
+    drags in PySide6 / pyobjc / pyinstaller. If this assertion fails
+    the contract drifted and both halves of the split need a look.
+    """
     assert _REQUIRED_REMOTE_FILES == (
         "process_microscopy.py",
         "auto_threshold_core.py",
         "well_token.py",
-        "_Docs/requirements.txt",
+        "_Docs/requirements-remote.txt",
     )
+
+
+def test_remote_requirements_file_omits_gui_deps():
+    """v5.2.1 contract: the headless requirements file must not list
+    PySide6 / pyobjc / pyinstaller. If any of those leak back in we
+    re-introduce the same wheel-availability failures on aarch64 / new
+    Pythons that the v5.2.1 split was meant to fix."""
+    from services.remote_runner import repo_root
+    text = (repo_root() / "_Docs" / "requirements-remote.txt").read_text(
+        encoding="utf-8",
+    )
+    # Strip comment lines so a doc-only mention doesn't break the check.
+    body = "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith("#")
+    )
+    assert "PySide6" not in body
+    assert "pyobjc" not in body
+    assert "pyinstaller" not in body
+    # But it MUST contain the scientific stack the pipeline depends on.
+    assert "tensorflow" in body.lower()
+    assert "stardist" in body
 
 
 def test_required_files_all_exist_in_repo():

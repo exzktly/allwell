@@ -929,3 +929,118 @@ def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatc
     monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
     runner.sync_required_files()
     assert "--info=stats0" in captured["cmd"]
+
+
+# ── v5.2.11: ~ quoting + auto_gc gating + cleanup default ───────────────────
+
+
+def test_remote_quote_preserves_tilde_expansion():
+    """The bug v5.2.11 fixes: stock shlex.quote("~/foo") → "'~/foo'"
+    which the remote bash treats as literal, creating a directory
+    called ~. _remote_quote routes ~/foo through "$HOME"/foo so the
+    remote shell expands $HOME properly. The inner shlex.quote of the
+    remainder may or may not single-quote depending on shell-special
+    chars — what matters is that the LEADING ~ is replaced with the
+    expanding form."""
+    from services.remote_runner import _remote_quote
+    # Must start with "$HOME" so the remote shell expands it.
+    assert _remote_quote("~/foo").startswith('"$HOME"')
+    assert "foo" in _remote_quote("~/foo")
+    assert _remote_quote("~") == '"$HOME"'
+    # Crucially: no version of the output contains '~' (the bug).
+    assert "~" not in _remote_quote("~/foo")
+    # Non-tilde paths fall back to plain shlex.quote semantics.
+    assert _remote_quote("simple") == "simple"
+    # Paths with spaces still get single-quoted; we don't break that case.
+    assert "'" in _remote_quote("/path with spaces")
+
+
+def test_remote_join_renders_full_command():
+    """The full join: mkdir -p ~/.allwell-staging produces a command
+    containing "$HOME" rather than a quoted literal ~ — the remote
+    shell will then expand $HOME instead of creating a ~ directory."""
+    from services.remote_runner import _remote_join
+    cmd = _remote_join(["mkdir", "-p", "~/.allwell-staging"])
+    assert cmd.startswith("mkdir -p ")
+    assert '"$HOME"' in cmd
+    assert ".allwell-staging" in cmd
+    # No single-quoted ~ anywhere (the bug).
+    assert "'~/" not in cmd
+    assert "'~'" not in cmd
+
+
+def test_gc_is_disabled_when_auto_gc_false(host, monkeypatch):
+    """v5.2.11: shared-machine safety. gc() must do NOTHING when
+    auto_gc=False (the default)."""
+    no_gc_host = RemoteHost(**{**host.__dict__, "auto_gc": False})
+    cache = DatasetCache(no_gc_host)
+    ssh_calls = []
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: ssh_calls.append(argv) or MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: ssh_calls.append(script) or MagicMock(stdout="", returncode=0),
+    )
+
+    log_lines: list[str] = []
+    cache.gc(1024 * 1024 * 1024, log_fn=log_lines.append)
+
+    # No ssh calls made: no listing, no eviction.
+    assert ssh_calls == []
+    # User informed that gc was skipped + how to enable.
+    assert any("auto_gc disabled" in line for line in log_lines)
+
+
+def test_gc_runs_when_auto_gc_true(host, monkeypatch):
+    """Inverse of the above — power user explicitly enables auto_gc,
+    so the listing query DOES run."""
+    gc_host = RemoteHost(**{**host.__dict__, "auto_gc": True})
+    cache = DatasetCache(gc_host)
+    ssh_scripts: list[str] = []
+
+    def fake_script(self, script, *, check):
+        ssh_scripts.append(script)
+        # Return empty listing → no eviction needed.
+        return MagicMock(stdout="", returncode=0)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_script", fake_script)
+    cache.gc(1024 * 1024 * 1024)
+    # gc tried to list datasets.
+    assert ssh_scripts, "gc should have queried the remote when auto_gc=True"
+
+
+def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
+    """v5.2.11: default cleanup_mode is 'none' (no auto-delete).
+    User opts in explicitly via the GUI checkbox or
+    --cleanup-remote=run / =all on the CLI."""
+    from services.remote_runner import _RemoteRun
+    runner = RemoteRunner(host)
+    run = _RemoteRun(
+        run_id="x", cache_key="k",
+        remote_input_dir="/r/in", remote_output_dir="/r/out",
+        remote_pidfile="/r/pid", local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+    )
+    run.expected_wells = {"A01"}
+    runner._run = run  # noqa: SLF001
+    (tmp_path / "x_A01.csv").write_text("ok\n")
+
+    rm_calls = []
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: (
+            rm_calls.append(list(argv)) if argv and argv[0] == "rm" else None
+        ) or MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        RemoteRunner, "_rsync_optional",
+        lambda self, src, dest, log_fn: None,
+    )
+
+    # Default call (no cleanup_mode arg)
+    runner.verify_and_cleanup(ok=True, log_fn=lambda _m: None)
+    # No rm calls — the default doesn't delete anything.
+    assert rm_calls == [], \
+        f"v5.2.11 default must not delete; observed rm calls: {rm_calls}"

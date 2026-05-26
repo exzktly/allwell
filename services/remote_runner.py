@@ -352,6 +352,42 @@ def _member_matches(member: str, keep_tokens: set[str]) -> bool:
 # ────────────────────────────────────────────────────────────────────────────
 
 
+def _remote_quote(s: str) -> str:
+    """Shell-quote ``s`` for embedding in a remote bash command line,
+    preserving leading-``~/`` expansion.
+
+    Stock ``shlex.quote`` wraps everything in single quotes, which the
+    remote bash treats as literal — so ``shlex.quote("~/foo")`` →
+    ``'~/foo'``, and the remote ``mkdir -p '~/foo'`` creates a folder
+    literally named ``~`` containing ``foo``. (This bit a user in
+    v5.2.10 with a `[remote.j]` config whose ``remote_staging_dir`` was
+    the default ``~/.allwell-staging``.)
+
+    Fix: a leading ``~/`` is rewritten to ``"$HOME"`` followed by the
+    single-quoted remainder. The remote bash expands ``$HOME`` inside
+    the double-quoted half and keeps the rest literal:
+
+        _remote_quote("~/foo bar")  →  '"$HOME"'\\''/foo bar'\\'
+                                       ^^^^^^^^   ^^^^^^^^^^^^^
+                                       expanded   literal (quoted)
+
+    A bare ``~`` becomes ``"$HOME"`` directly. Everything else falls
+    through to ``shlex.quote`` so spaces / metacharacters in regular
+    paths stay safe.
+    """
+    if s == "~":
+        return '"$HOME"'
+    if s.startswith("~/"):
+        return '"$HOME"' + shlex.quote(s[1:])
+    return shlex.quote(s)
+
+
+def _remote_join(remote_argv: list[str]) -> str:
+    """Like ``shlex.join`` but tilde-aware. Use everywhere we build a
+    remote command line for execution by the remote bash."""
+    return " ".join(_remote_quote(a) for a in remote_argv)
+
+
 @lru_cache(maxsize=1)
 def _rsync_supports_info_flag() -> bool:
     """Whether the local rsync accepts ``--info=...``.
@@ -551,15 +587,27 @@ class DatasetCache:
         self, max_bytes: int, *, log_fn: Callable[[str], None] | None = None
     ) -> None:
         """LRU-evict old dataset caches until the staging dir is under
-        ``max_bytes``. Run on every connect, independent of any
-        ``--cleanup-remote`` flag — this is budget enforcement.
+        ``max_bytes``.
+
+        v5.2.11: gated on ``host.auto_gc``. Defaults to OFF so a
+        shared-machine remote never has files deleted without the
+        user opting in. Power users set ``auto_gc = true`` in
+        remotes.toml; the field is documented on ``RemoteHost``.
         """
-        listing = self._ssh_run(
-            [
-                "sh", "-c",
-                f"cd {shlex.quote(self.host.remote_staging_dir)}/datasets 2>/dev/null && "
-                "du -sb -- */ 2>/dev/null | sort -nr || true",
-            ],
+        if not self.host.auto_gc:
+            if log_fn:
+                log_fn(
+                    "[remote] gc: skipped (auto_gc disabled). "
+                    "Set auto_gc=true in remotes.toml to enable LRU "
+                    "eviction of old dataset caches.\n"
+                )
+            return
+        # Send the script via stdin so the remote bash parses
+        # ~/.allwell-staging normally. Embedding it in a one-line ssh
+        # arg always loses tilde expansion via outer shell quoting.
+        listing = self._ssh_script(
+            f"cd {self.host.remote_staging_dir}/datasets 2>/dev/null && "
+            "du -sb -- */ 2>/dev/null | sort -nr || true",
             check=False,
         )
         if not listing or not listing.stdout:
@@ -575,12 +623,9 @@ class DatasetCache:
         # Sort by access time ascending (oldest first). We don't have an
         # easy LRU stamp without a stat round-trip, so approximate via the
         # current sort: largest-first is wrong, so refetch with atime.
-        atime_cmd = self._ssh_run(
-            [
-                "sh", "-c",
-                f"cd {shlex.quote(self.host.remote_staging_dir)}/datasets 2>/dev/null && "
-                "stat -c '%X %n' -- */ 2>/dev/null | sort -n || true",
-            ],
+        atime_cmd = self._ssh_script(
+            f"cd {self.host.remote_staging_dir}/datasets 2>/dev/null && "
+            "stat -c '%X %n' -- */ 2>/dev/null | sort -n || true",
             check=False,
         )
         if not atime_cmd or not atime_cmd.stdout:
@@ -606,12 +651,39 @@ class DatasetCache:
     def _ssh_run(
         self, remote_argv: list[str], *, check: bool
     ) -> subprocess.CompletedProcess[str] | None:
+        # v5.2.11: use the tilde-aware joiner so ``mkdir -p ~/foo`` reaches
+        # the remote shell as ``mkdir -p "$HOME"/foo`` rather than as
+        # ``mkdir -p '~/foo'`` (which creates a literal ``~`` directory).
         cmd = self.host.ssh_argv(allocate_tty=False) + [
-            shlex.join(remote_argv),
+            _remote_join(remote_argv),
         ]
         try:
             return subprocess.run(
                 cmd, capture_output=True, text=True, check=check
+            )
+        except subprocess.CalledProcessError as exc:
+            if check:
+                raise
+            return exc  # type: ignore[return-value]
+
+    def _ssh_script(
+        self, script: str, *, check: bool,
+    ) -> subprocess.CompletedProcess[str] | None:
+        """Pipe ``script`` to the remote bash via stdin.
+
+        For multi-line / embedded-glob scripts, this is safer than
+        building a one-line command via ``_ssh_run`` + ``_remote_join``:
+        bash reads the script from stdin and parses it normally, so
+        any ``~`` inside expands without us having to know about it.
+        The price is one extra round-trip (no, the same number — ssh
+        executes immediately) and the requirement that ``bash`` be on
+        PATH on the remote (it is, for every host our framework supports).
+        """
+        cmd = self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"]
+        try:
+            return subprocess.run(
+                cmd, input=script,
+                capture_output=True, text=True, check=check,
             )
         except subprocess.CalledProcessError as exc:
             if check:
@@ -1050,12 +1122,13 @@ class Fetcher:
         host, path_glob = src_glob.split(":", 1)
         # v5.2.5: the ls-listing ssh and the per-file rsync both go
         # through the runner's ssh policy (key, accept-new, batchmode).
-        # Without this they fall through to bare ssh argv and fail on
-        # the very hosts the rest of the framework can talk to.
+        # v5.2.11: pipe the script via stdin so the remote bash parses
+        # any ~ in path_glob normally — wrapping in shlex.quote here
+        # would lose tilde expansion and the listing would silently
+        # return nothing.
         listing = subprocess.run(
-            self.host.ssh_argv(allocate_tty=False) + [
-                "sh", "-c", shlex.quote(f"ls -1 {path_glob} 2>/dev/null || true"),
-            ],
+            self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
+            input=f"ls -1 {path_glob} 2>/dev/null || true",
             capture_output=True,
             text=True,
             timeout=60,
@@ -1278,17 +1351,20 @@ class RemoteRunner:
         )
 
         # Compose the remote shell command. PID echoed first so the
-        # cancel path can target the pipeline directly.
+        # cancel path can target the pipeline directly. v5.2.11: tilde-
+        # aware quoting so the pidfile (under ~/.allwell-staging) and
+        # the pipeline argv (with --output_dir ~/.allwell-staging/...)
+        # don't end up creating a literal ~ directory on the remote.
         remote_cmd = (
-            f"echo $$ > {shlex.quote(remote_pidfile)}; "
-            f"exec {shlex.join(remote_argv)}"
+            f"echo $$ > {_remote_quote(remote_pidfile)}; "
+            f"exec {_remote_join(remote_argv)}"
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
 
         log(
             f"[remote] run_id={run_id}  cache_key={key[:8]}  "
             f"(upload {sent / (1024**2):.1f} MB in {_fmt_secs(elapsed)})\n"
-            f"[remote] $ {shlex.join(remote_argv)}\n"
+            f"[remote] $ {_remote_join(remote_argv)}\n"
         )
 
         popen = subprocess.Popen(
@@ -1316,7 +1392,7 @@ class RemoteRunner:
         self,
         ok: bool,
         *,
-        cleanup_mode: str = "run",
+        cleanup_mode: str = "none",
         log_fn: Callable[[str], None] | None = None,
     ) -> bool:
         """Pull top-level artefacts, then verify and clean up.
@@ -1429,10 +1505,8 @@ class RemoteRunner:
             )
             try:
                 listing = subprocess.run(
-                    host.ssh_argv(allocate_tty=False) + [
-                        "sh", "-c",
-                        shlex.quote(f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true"),
-                    ],
+                    host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
+                    input=f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true",
                     capture_output=True, text=True, timeout=30,
                 )
             except (subprocess.TimeoutExpired, OSError) as exc:
@@ -1500,7 +1574,7 @@ class RemoteRunner:
         try:
             subprocess.run(
                 self.host.ssh_argv(allocate_tty=False) + [
-                    f"kill -TERM $(cat {shlex.quote(run.remote_pidfile)} 2>/dev/null) "
+                    f"kill -TERM $(cat {_remote_quote(run.remote_pidfile)} 2>/dev/null) "
                     "2>/dev/null || true"
                 ],
                 capture_output=True, timeout=10,

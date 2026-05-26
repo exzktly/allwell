@@ -67,6 +67,100 @@ def say(msg: str) -> None:
     sys.stdout.flush()
 
 
+# ── v5.2.11: debug log file ────────────────────────────────────────────────
+
+
+_LOG_FILE: "object | None" = None  # the open file or None
+
+
+class _TeeStream:
+    """File-like that writes to both a primary stream (real stdout /
+    stderr) and a secondary log file. Installed as ``sys.stdout`` and
+    ``sys.stderr`` so every Python ``print`` / ``say`` ends up in the
+    bootstrap log alongside what the user sees on screen.
+
+    Subprocesses (``_ssh_run`` capture=True / capture=False) still
+    write to the OS-level fd 1/2 — we tee their output explicitly
+    after each call by writing ``result.stdout`` / ``result.stderr``
+    to the log too. Capture=False (streaming) sites have been
+    converted to capture=True so their output is also in the log.
+    """
+
+    def __init__(self, primary, log_file) -> None:
+        self._primary = primary
+        self._log = log_file
+
+    def write(self, data: str) -> int:
+        self._primary.write(data)
+        try:
+            self._log.write(data)
+        except Exception:  # noqa: BLE001 — never let logging break runtime
+            pass
+        try:
+            self._primary.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._log.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        return len(data)
+
+    def flush(self) -> None:
+        try:
+            self._primary.flush()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._log.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def fileno(self) -> int:
+        return self._primary.fileno()
+
+    def isatty(self) -> bool:
+        return getattr(self._primary, "isatty", lambda: False)()
+
+
+def _log_to_file(text: str) -> None:
+    """Append free-form text to the bootstrap log, if open.
+
+    Subprocess output (probe results, ssh stderr from check=False
+    calls) goes here so the log contains everything the bootstrap
+    saw on the remote — not just the local say() messages.
+    """
+    if _LOG_FILE is None:
+        return
+    try:
+        _LOG_FILE.write(text if text.endswith("\n") else text + "\n")
+        _LOG_FILE.flush()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _open_log_file() -> "tuple[Path, object] | tuple[None, None]":
+    """Open a per-invocation bootstrap log file under
+    ``~/.cache/allwell/bootstrap-<timestamp>.log`` on the LOCAL
+    machine. Returns ``(path, file_handle)`` or ``(None, None)`` on
+    failure (logging should never block bootstrap).
+
+    Local-only by design: the user asked for a debug log they can
+    inspect on their own machine, not a remote-side artefact. Logs
+    are never auto-deleted; they pile up and the user clears them
+    if they want.
+    """
+    try:
+        log_dir = Path("~/.cache/allwell").expanduser()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%dT%H%M%S")
+        path = log_dir / f"bootstrap-{stamp}.log"
+        fh = open(path, "w", encoding="utf-8", buffering=1)
+        return path, fh
+    except OSError:
+        return None, None
+
+
 # ── data types ─────────────────────────────────────────────────────────────
 
 
@@ -207,13 +301,27 @@ def _ssh_run(
         "-o", "BatchMode=yes",
         alias, *remote_argv,
     ]
-    return subprocess.run(
+    # v5.2.11: tee subprocess output into the bootstrap log. For
+    # capture=True, we write stdout/stderr to the log after the call
+    # completes. For capture=False (streaming installs), the child
+    # writes directly to the terminal — _TeeStream-based capture
+    # doesn't reach the child's fd 1/2. The log still records the
+    # local say() narration that brackets each step.
+    _log_to_file(f"$ {' '.join(shlex.quote(c) for c in cmd)}")
+    result = subprocess.run(
         cmd,
         capture_output=capture,
         text=True,
         check=check,
         input=input,
     )
+    if capture:
+        if result.stdout:
+            _log_to_file(f"--- stdout ---\n{result.stdout.rstrip()}")
+        if result.stderr:
+            _log_to_file(f"--- stderr ---\n{result.stderr.rstrip()}")
+        _log_to_file(f"--- exit {result.returncode} ---")
+    return result
 
 
 def _load_existing_key(alias: str) -> str:
@@ -749,6 +857,25 @@ def write_or_update_remotes_toml(
 
 def main(argv: list[str] | None = None) -> int:
     args = _argv_parser().parse_args(argv)
+
+    # v5.2.11: open a per-invocation debug log on the LOCAL machine.
+    # Tee Python stdout/stderr into it so every say(), every probe
+    # result, and every ssh stderr ends up in the log alongside what
+    # the user sees on screen. Logs are never auto-deleted — the user
+    # asked for a debug log they can read after the fact, and they're
+    # on a shared remote where they explicitly don't want automatic
+    # deletions. The log directory `~/.cache/allwell` is on the user's
+    # LOCAL machine, so cleanup is their decision.
+    global _LOG_FILE
+    log_path, _LOG_FILE = _open_log_file()
+    if _LOG_FILE is not None:
+        sys.stdout = _TeeStream(sys.__stdout__, _LOG_FILE)
+        sys.stderr = _TeeStream(sys.__stderr__, _LOG_FILE)
+        say(f"Debug log: {log_path}")
+        _log_to_file(
+            f"=== bootstrap started at {time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"alias={args.alias!r} force={args.force} ==="
+        )
 
     # Sanity: make sure the four required files actually exist locally
     # before we go through the trouble of probing the remote.

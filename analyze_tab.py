@@ -493,12 +493,13 @@ class AnalyzeTab(QWidget):
         self._manage_remotes_btn.clicked.connect(self._open_manage_remotes)
         rl.addWidget(self._manage_remotes_btn)
         self._cleanup_remote_cb = QCheckBox(
-            "Remove from remote when done", remote_widget,
+            "Auto-delete remote files when done", remote_widget,
         )
         self._cleanup_remote_cb.setToolTip(
-            "After a verified-successful run, delete both the per-run output "
-            "dir AND the cached input on the remote. Unchecked = keep the "
-            "input cache so the next run on the same data skips re-upload."
+            "v5.2.11+: unchecked (default) = leave everything on the remote "
+            "untouched. Safe for shared machines. Checked = after a "
+            "verified-successful run, delete both the per-run output dir "
+            "AND the cached input on the remote."
         )
         rl.addWidget(self._cleanup_remote_cb)
         rl.addStretch(1)
@@ -882,7 +883,10 @@ class AnalyzeTab(QWidget):
                 self._stop_btn.setEnabled(False)
                 self._status_lbl.setText("Idle")
                 return
-        cleanup_mode = "all" if self._cleanup_remote_cb.isChecked() else "run"
+        # v5.2.11: unchecked = "none" (safe default for shared
+        # machines). Checked = "all" (delete per-run output AND the
+        # dataset cache after a verified-successful run).
+        cleanup_mode = "all" if self._cleanup_remote_cb.isChecked() else "none"
         self._runner.start(
             pipeline,
             opts,

@@ -533,6 +533,9 @@ def test_sync_required_files_raises_when_local_file_missing(host, monkeypatch, t
 
 
 def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
+    """A non-transient rsync failure (e.g. exit 23 — permission/path
+    error) must surface as a RuntimeError after the retry helper
+    fast-fails out, not retry forever."""
     runner = RemoteRunner(host)
 
     def fake_ssh_run(self, argv, *, check):
@@ -540,12 +543,13 @@ def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
 
     def fail_rsync(cmd, **kwargs):
         import subprocess as sp
-        raise sp.CalledProcessError(
-            returncode=23, cmd=cmd, output="", stderr="ssh: connection refused",
+        return sp.CompletedProcess(
+            cmd, returncode=23, stdout="", stderr="ssh: connection refused",
         )
 
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr("services.remote_runner.subprocess.run", fail_rsync)
+    monkeypatch.setattr("services.remote_runner.time.sleep", lambda _s: None)
 
     with pytest.raises(RuntimeError, match="connection refused"):
         runner.sync_required_files()

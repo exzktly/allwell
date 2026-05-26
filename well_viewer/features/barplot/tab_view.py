@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QSlider, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QSlider, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
-from well_viewer.features.barplot.controller import bar_reset_order
+from well_viewer.features.barplot.controller import (
+    bar_reset_order,
+    open_bar_timepoint_selector,
+    toggle_bar_group_mode,
+    toggle_bar_pool_replicates,
+)
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
 from well_viewer.features.barplot.controller import on_bar_drag_press
@@ -111,12 +116,49 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     sl = QHBoxLayout(shape_ctrl)
     sl.setContentsMargins(10, 2, 10, 6)
 
-    sl.addWidget(QLabel("Timepoint:", shape_ctrl))
+    # Multi-timepoint picker — mirrors the scatter plot's
+    # ``_open_timepoint_selector`` popup so the bar plot can show bars/
+    # violins/beeswarms over multiple timepoints simultaneously.
+    sl.addWidget(QLabel("Timepoints:", shape_ctrl))
+    ctx.app._bar_tp_button = QPushButton("Select Timepoints", shape_ctrl)
+    ctx.app._bar_tp_button.setProperty("variant", "secondary")
+    ctx.app._bar_tp_button.clicked.connect(
+        lambda _=False: open_bar_timepoint_selector(ctx.app)
+    )
+    sl.addWidget(ctx.app._bar_tp_button)
+    ctx.app._bar_tp_label = QLabel("(0 selected)", shape_ctrl)
+    ctx.app._bar_tp_label.setObjectName("Muted")
+    sl.addWidget(ctx.app._bar_tp_label)
+    # Hidden legacy single-tp combo — kept so export / save-figure code that
+    # reads ``_bar_tp_cb.currentText()`` (export/service.py, view_state.py,
+    # batch_export/bar_panel.py, plot_orchestrator.py) sees the first
+    # selected tp string. Same shim the scatter tab uses for
+    # ``_scatter_tp_cb``. The authoritative multi-select state lives on
+    # ``BarPlotState.tp_selections`` (well_viewer/features/barplot/state.py).
     ctx.app._bar_tp_cb = QComboBox(shape_ctrl)
     ctx.app._bar_tp_cb.addItems(["—"])
-    ctx.app._bar_tp_cb.currentIndexChanged.connect(lambda _i: redraw_bars(ctx.app))
-    sl.addWidget(ctx.app._bar_tp_cb)
+    ctx.app._bar_tp_cb.hide()
     ctx.app._bar_tp_var = ctx.app._bar_tp_cb
+
+    # Layout toggle: cluster bars by well or by timepoint.
+    ctx.app._bar_group_mode_btn = QPushButton("Group by Well", shape_ctrl)
+    ctx.app._bar_group_mode_btn.setProperty("variant", "toggle")
+    ctx.app._bar_group_mode_btn.setCheckable(True)
+    ctx.app._bar_group_mode_btn.clicked.connect(
+        lambda _=False: toggle_bar_group_mode(ctx.app)
+    )
+    sl.addWidget(ctx.app._bar_group_mode_btn)
+
+    # Replicate-pool toggle: collapse rset wells into one column or
+    # expand them. Hidden when no replicate sets are active.
+    ctx.app._bar_pool_reps_btn = QPushButton("Pool Replicates", shape_ctrl)
+    ctx.app._bar_pool_reps_btn.setProperty("variant", "toggle")
+    ctx.app._bar_pool_reps_btn.setCheckable(True)
+    ctx.app._bar_pool_reps_btn.clicked.connect(
+        lambda _=False: toggle_bar_pool_replicates(ctx.app)
+    )
+    ctx.app._bar_pool_reps_btn.setVisible(False)
+    sl.addWidget(ctx.app._bar_pool_reps_btn)
 
     ctx.app._swarm_btn = QPushButton("Beeswarm", shape_ctrl)
     ctx.app._swarm_btn.setProperty("variant", "toggle")

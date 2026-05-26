@@ -190,7 +190,7 @@ from functools import partial
 from well_viewer.features.preview.montage import montage_redraw_at_zoom
 from well_viewer.features.preview.montage import refresh_preview_montage
 from well_viewer.core.selection_controller import labels_apply_affix
-from well_viewer.features.barplot.controller import toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app
+from well_viewer.features.barplot.controller import toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display
 from well_viewer.core.channel_state_controller import get_cell_area_threshold, get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
 from well_viewer.features.export.service import export_scatter_agg_data
 from well_viewer.features.export.style import open_export_style_panel
@@ -911,6 +911,8 @@ class WellViewerApp(QWidget):
     def _toggle_fov_replicates(self) -> None: return toggle_fov_replicates(self)
 
     def _refresh_fov_btn_state(self) -> None: return refresh_fov_btn_state(self)
+    def _refresh_bar_layout_btn_state(self) -> None: return refresh_bar_layout_btn_state(self)
+    def _update_bar_tp_selection_display(self) -> None: return update_bar_tp_selection_display(self)
 
     # ── Well selection (plate-map backed) ─────────────────────────────────────
 

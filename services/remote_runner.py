@@ -63,6 +63,30 @@ _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well
 _CSV_ONLY_GLOBS: tuple[str, ...] = ("*.csv", "pipeline_info.json")
 
 
+# Files this framework needs on the remote in order to run the pipeline.
+# Kept minimal on purpose: process_microscopy.py plus its two local-module
+# imports, plus the requirements list (so the bootstrap script knows what
+# pip-installs to do). Paths are relative to the repo root.
+#
+# Synced before every run by :meth:`RemoteRunner.spawn` so a user who
+# edits any of these files locally doesn't end up running stale code on
+# the remote — the per-run cost is a few hundred KB and a quick rsync
+# stat-pass when nothing changed.
+_REQUIRED_REMOTE_FILES: tuple[str, ...] = (
+    "process_microscopy.py",
+    "auto_threshold_core.py",
+    "well_token.py",
+    "_Docs/requirements.txt",
+)
+
+
+def repo_root() -> Path:
+    """Absolute path to the repo root from which required-file paths
+    are resolved. Single source of truth used by the runner and the
+    bootstrap script's Python helpers."""
+    return Path(__file__).resolve().parent.parent
+
+
 class OutputFilter(str, Enum):
     """What to bring back from the remote when a run completes."""
 
@@ -877,6 +901,74 @@ class RemoteRunner:
     def run(self) -> Optional[_RemoteRun]:
         return self._run
 
+    # ── Required-file sync ──────────────────────────────────────────────
+
+    def sync_required_files(
+        self,
+        *,
+        log_fn: Callable[[str], None] | None = None,
+    ) -> None:
+        """Push the minimal set of files the pipeline needs to the remote.
+
+        Idempotent and cheap: rsync's mtime+size skip-pass means a no-op
+        run is a single round-trip with no bytes transferred. Called
+        automatically by :meth:`spawn` before every run so the user
+        never accidentally runs against stale remote code.
+
+        Files synced: see :data:`_REQUIRED_REMOTE_FILES`. The relative
+        layout is preserved on the remote (so ``_Docs/requirements.txt``
+        lands at ``{remote_project_dir}/_Docs/requirements.txt``).
+        """
+        log = log_fn or (lambda _m: None)
+        root = repo_root()
+        missing_local = [f for f in _REQUIRED_REMOTE_FILES if not (root / f).is_file()]
+        if missing_local:
+            raise FileNotFoundError(
+                "Required pipeline files missing locally: "
+                + ", ".join(missing_local)
+                + f"  (looked under {root})"
+            )
+
+        # Make sure subdirectories exist on the remote — rsync with
+        # individual file sources doesn't create intermediate dirs on
+        # the target. One mkdir -p covers everything.
+        remote_subdirs = sorted({
+            str(Path(f).parent) for f in _REQUIRED_REMOTE_FILES
+            if str(Path(f).parent) not in (".", "")
+        })
+        mk_target = f"{self.host.remote_project_dir}"
+        mkdirs = [f"{mk_target}/{d}" for d in remote_subdirs]
+        self._cache._ssh_run(  # noqa: SLF001
+            ["mkdir", "-p", mk_target, *mkdirs],
+            check=True,
+        )
+
+        # Use rsync's -R (--relative) so the source paths are recreated
+        # under the destination — i.e. _Docs/requirements.txt lands at
+        # <remote_project_dir>/_Docs/requirements.txt, not flattened.
+        # The /./ pivot anchors the relative root at the repo top.
+        sources = [f"{root}/./{f}" for f in _REQUIRED_REMOTE_FILES]
+        dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"
+        cmd = ["rsync", "-aR", "--info=stats0", *sources, dest]
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60, check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Failed to sync pipeline files to remote "
+                f"({self.host.ssh_alias}): {exc.stderr.strip() or exc}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"Timed out syncing pipeline files to remote "
+                f"({self.host.ssh_alias})."
+            ) from exc
+        log(
+            f"[remote] code sync: {len(_REQUIRED_REMOTE_FILES)} file(s) "
+            f"verified on {self.host.ssh_alias}:{self.host.remote_project_dir}\n"
+        )
+
     # ── Estimation ──────────────────────────────────────────────────────
 
     def estimate(
@@ -934,6 +1026,14 @@ class RemoteRunner:
 
         # Cache budget enforcement before each run.
         self._cache.gc(self.host.cache_budget_gb * (1024**3), log_fn=log)
+
+        # Ensure the pipeline code is up to date on the remote. Cheap —
+        # ~300 KB of source plus rsync's delta-skip when nothing changed.
+        # Guarantees the user is never running stale code after a local
+        # edit, and turns the first-ever invocation against a host where
+        # only the conda env was pre-installed (no bootstrap rsync) into
+        # a working run instead of an obscure "can't open file" error.
+        self.sync_required_files(log_fn=log)
 
         # Upload.
         key, sent, elapsed = self._cache.ensure_uploaded(

@@ -22,10 +22,12 @@ from services.remote_runner import (
     OutputFilter,
     RemoteRunner,
     ZippedInput,
+    _REQUIRED_REMOTE_FILES,
     _detect_local_input_mode,
     _filter_channels_in_place,
     _member_matches,
     _required_tokens,
+    repo_root,
     stage_local_zips,
 )
 
@@ -438,6 +440,115 @@ def test_verify_reports_empty_csv(host, tmp_path):
     logs: list[str] = []
     missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
     assert missing == ["empty CSV for A01"]
+
+
+# ── sync_required_files ─────────────────────────────────────────────────────
+
+
+def test_required_files_list_is_what_we_promised():
+    """The contract from the design discussion: only these four files."""
+    assert _REQUIRED_REMOTE_FILES == (
+        "process_microscopy.py",
+        "auto_threshold_core.py",
+        "well_token.py",
+        "_Docs/requirements.txt",
+    )
+
+
+def test_required_files_all_exist_in_repo():
+    """If any of these files moves or is deleted, the runner breaks
+    silently against a fresh remote. Catch that here, loudly."""
+    root = repo_root()
+    missing = [f for f in _REQUIRED_REMOTE_FILES if not (root / f).is_file()]
+    assert not missing, f"Required pipeline files missing from repo: {missing}"
+
+
+def test_sync_required_files_rsync_argv_shape(host, monkeypatch):
+    """The rsync command must use -aR (relative paths) so subdirs are
+    recreated under the destination, and must point at our four files."""
+    runner = RemoteRunner(host)
+    captured: dict = {}
+
+    def fake_ssh_run(self, argv, *, check):
+        captured.setdefault("ssh_calls", []).append(list(argv))
+        return MagicMock(stdout="", returncode=0)
+
+    def fake_subprocess_run(cmd, **kwargs):
+        captured["rsync_cmd"] = list(cmd)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_subprocess_run)
+
+    runner.sync_required_files()
+
+    rsync = captured["rsync_cmd"]
+    assert rsync[0] == "rsync"
+    assert "-aR" in rsync
+    # Last element is the destination — verify it targets remote_project_dir.
+    assert rsync[-1] == f"{host.ssh_alias}:{host.remote_project_dir}/"
+    # Every required file should appear (with a /./ pivot for --relative).
+    for required in _REQUIRED_REMOTE_FILES:
+        assert any(required in arg and "/./" in arg for arg in rsync), \
+            f"missing rsync source for {required}"
+
+
+def test_sync_required_files_mkdir_for_subdirs(host, monkeypatch):
+    """Subdirs like _Docs/ must be pre-created on the remote — rsync
+    with individual file sources doesn't create intermediate dirs."""
+    runner = RemoteRunner(host)
+    captured: list = []
+
+    def fake_ssh_run(self, argv, *, check):
+        captured.append(list(argv))
+        return MagicMock(stdout="", returncode=0)
+
+    def fake_subprocess_run(cmd, **kwargs):
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_subprocess_run)
+
+    runner.sync_required_files()
+
+    # First ssh call should be a `mkdir -p` covering the project dir
+    # plus the _Docs subdir.
+    assert captured, "expected at least one ssh mkdir call"
+    mk = captured[0]
+    assert mk[0] == "mkdir"
+    assert "-p" in mk
+    assert any(host.remote_project_dir in arg for arg in mk)
+    assert any("_Docs" in arg for arg in mk)
+
+
+def test_sync_required_files_raises_when_local_file_missing(host, monkeypatch, tmp_path):
+    """If the user's local working copy is missing required files, fail
+    early with a clear error instead of trying to rsync a nonexistent
+    source (which rsync handles, but the resulting remote would silently
+    keep stale code)."""
+    monkeypatch.setattr("services.remote_runner.repo_root", lambda: tmp_path)
+    runner = RemoteRunner(host)
+    with pytest.raises(FileNotFoundError, match="missing locally"):
+        runner.sync_required_files()
+
+
+def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
+    runner = RemoteRunner(host)
+
+    def fake_ssh_run(self, argv, *, check):
+        return MagicMock(stdout="", returncode=0)
+
+    def fail_rsync(cmd, **kwargs):
+        import subprocess as sp
+        raise sp.CalledProcessError(
+            returncode=23, cmd=cmd, output="", stderr="ssh: connection refused",
+        )
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr("services.remote_runner.subprocess.run", fail_rsync)
+
+    with pytest.raises(RuntimeError, match="connection refused"):
+        runner.sync_required_files()
 
 
 # ── verify_and_cleanup decision matrix ──────────────────────────────────────

@@ -174,13 +174,32 @@ PROBE="$(printf '%s' "$REMOTE_REPORT" | awk '/^===PROBE_BEGIN===$/{flag=1; next}
 HAS_GPU="$(printf '%s' "$PROBE" | awk -F= '/^gpu=/{print $2}')"
 HAS_TF="$(printf '%s' "$PROBE" | awk -F= '/^tensorflow=/{print $2}')"
 
-# ── 5. Sync the working copy → remote ────────────────────────────────────────
-say "Syncing local working copy → $ALIAS:~/allwell/  (this is the authoritative project source)"
-rsync -aH --delete \
-    --exclude='.git/' --exclude='__pycache__/' --exclude='*.pyc' \
-    --exclude='build/' --exclude='dist/' --exclude='.pytest_cache/' \
-    --exclude='_results*/' --exclude='results/' \
-    "$LOCAL_REPO/" "$ALIAS:~/allwell/"
+# ── 5. Sync the four required pipeline files → remote ───────────────────────
+# Mirror the minimal-footprint contract enforced by
+# services/remote_runner.py: only the pipeline script, its two local
+# imports, and the requirements list need to live on the remote.
+# Everything else (the GUI, the runner itself, tests, build scripts) is
+# local-only. -aR preserves the relative path so _Docs/requirements.txt
+# lands at ~/allwell/_Docs/requirements.txt instead of being flattened.
+REQUIRED_FILES=(
+    "process_microscopy.py"
+    "auto_threshold_core.py"
+    "well_token.py"
+    "_Docs/requirements.txt"
+)
+say "Syncing ${#REQUIRED_FILES[@]} required pipeline files → $ALIAS:~/allwell/"
+# Pre-create subdirs on the remote — rsync with individual file sources
+# won't make intermediate dirs.
+ssh "$ALIAS" mkdir -p '~/allwell/_Docs'
+RSYNC_SOURCES=()
+for f in "${REQUIRED_FILES[@]}"; do
+    if [[ ! -f "$LOCAL_REPO/$f" ]]; then
+        echo "[bootstrap] ERROR: required file missing locally: $f" >&2
+        exit 1
+    fi
+    RSYNC_SOURCES+=("$LOCAL_REPO/./$f")
+done
+rsync -aR "${RSYNC_SOURCES[@]}" "$ALIAS:~/allwell/"
 
 # If TF wasn't importable, the env is freshly created — install pip deps now.
 if [[ "$HAS_TF" == "" ]]; then

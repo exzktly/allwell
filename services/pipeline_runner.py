@@ -35,6 +35,7 @@ from services.remote_runner import (
     RemoteRunner,
     stage_local_zips,
 )
+from services.subprocess_kill import signal_subprocess
 
 
 def classify_log_line(line: str) -> str:
@@ -248,46 +249,15 @@ class PipelineRunner:
 
     @staticmethod
     def _signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
-        """SIGTERM the subprocess's session, then SIGKILL after 5 s if
-        it's still alive. Captures the pgid up front so a 5-second
-        delay doesn't risk SIGKILLing a process whose PID has been
-        reused by the OS."""
-        if proc is None or proc.poll() is not None:
-            return
-        pgid: Optional[int] = None
-        if os.name == "posix":
-            try:
-                pgid = os.getpgid(proc.pid)
-            except (ProcessLookupError, OSError):
-                pgid = None
-        try:
-            if os.name == "posix":
-                if pgid is not None:
-                    os.killpg(pgid, signal.SIGTERM)
-                else:
-                    proc.terminate()
-            else:
-                proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
-        except (ProcessLookupError, OSError, AttributeError):
-            proc.terminate()
+        """Cross-platform pgid-aware SIGTERM with SIGKILL escalation.
 
-        def _force_kill_if_alive() -> None:
-            # Re-check the live process handle, not just the cached pgid
-            # — if the process exited cleanly within the 5 s window, the
-            # OS may have re-used the PID for an unrelated process.
-            if proc.poll() is not None:
-                return
-            try:
-                if os.name == "posix" and pgid is not None:
-                    os.killpg(pgid, signal.SIGKILL)
-                elif os.name == "posix":
-                    proc.kill()
-                else:
-                    proc.kill()
-            except (ProcessLookupError, OSError):
-                pass
-
-        threading.Timer(5.0, _force_kill_if_alive).start()
+        Thin wrapper around :func:`services.subprocess_kill.signal_subprocess`
+        — extracted in v5.1.0 so the bootstrap-from-GUI dialog and any
+        future subprocess-managing component can share one
+        implementation. The wrapper stays here as a static method to
+        keep the PipelineRunner public surface unchanged for callers.
+        """
+        signal_subprocess(proc)
 
     def _run_pipeline_thread(
         self,

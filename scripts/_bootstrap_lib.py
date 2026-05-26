@@ -434,35 +434,49 @@ def write_or_update_remotes_toml(
 ) -> tuple[Path, str, bool]:
     """Write a ``[remote.<alias>]`` block to the user's remotes.toml.
 
-    Idempotent: re-runs with the same alias leave the file untouched
-    if a block for that alias already exists. Returns
-    ``(path, block_string, wrote_changes)``.
+    Idempotent: re-runs with the same alias preserve any prior tuning
+    the user did to the block (e.g. ``extra_args``) and only refresh
+    ``measured_bandwidth_mbps`` + ``cpu_only`` from the latest probe.
+    Returns ``(path, block_string, wrote_changes)``.
+
+    Since v5.1.0 this delegates to
+    :func:`services.remote_config.write_remote` so the bootstrap path
+    and the GUI's "Manage Remotes" dialog produce byte-identical
+    blocks.
     """
-    path = cfg_path or default_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    cpu_only = "false" if probe.gpu_visible else "true"
-    block = (
-        f"[remote.{alias}]\n"
-        f"ssh_alias = \"{alias}\"\n"
-        f"remote_project_dir = \"{REMOTE_HOME_REPO}\"\n"
-        f"remote_staging_dir = \"{REMOTE_STAGING}\"\n"
-        f"remote_python = \"{REMOTE_PYTHON}\"\n"
-        f"cpu_only = {cpu_only}\n"
-        f"extra_args = []\n"
-        f"cache_budget_gb = 200\n"
-        f"measured_bandwidth_mbps = {mbps:.2f}\n"
+    # Late import so this module stays usable when services/ isn't on
+    # sys.path yet (early in the wrapper script).
+    sys.path.insert(0, str(REPO_ROOT))
+    from services.remote_config import (
+        RemoteHost, _format_block, get_remote, write_remote,
     )
 
-    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-    if re.search(rf"^\[remote\.{re.escape(alias)}\]\s*$", existing, re.MULTILINE):
-        say(f"Config block for {alias} already exists at {path} — leaving file alone.")
-        return path, block, False
+    path = cfg_path or default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    sep = "\n" if existing and not existing.endswith("\n\n") else ""
-    new = existing + sep + block
-    path.write_text(new, encoding="utf-8")
-    say(f"Appended new block to {path}")
-    return path, block, True
+    # Start from any prior values for this alias (preserves the user's
+    # extra_args / cache_budget_gb / remote_project_dir customisations
+    # across re-bootstraps); fall back to defaults otherwise.
+    prior = get_remote(alias, path=path)
+    base = prior or RemoteHost(name=alias, ssh_alias=alias)
+    from dataclasses import replace
+    host = replace(
+        base,
+        name=alias,
+        ssh_alias=alias,
+        remote_project_dir=base.remote_project_dir or REMOTE_HOME_REPO,
+        remote_staging_dir=base.remote_staging_dir or REMOTE_STAGING,
+        remote_python=base.remote_python or REMOTE_PYTHON,
+        cpu_only=not probe.gpu_visible,
+        measured_bandwidth_mbps=mbps,
+    )
+    block = _format_block(host)
+    changed = write_remote(host, path=path)
+    if changed:
+        say(f"Wrote block for {alias} to {path}")
+    else:
+        say(f"Config block for {alias} already up to date in {path}")
+    return path, block, changed
 
 
 # ── orchestration ──────────────────────────────────────────────────────────

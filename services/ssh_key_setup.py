@@ -139,28 +139,38 @@ def build_copy_command(ssh_alias: str, key_path: Path) -> str:
     )
 
 
-def verify_key_works(
-    ssh_alias: str, key_path: Path, *, timeout: int = 10,
+def probe_ssh_connection(
+    ssh_alias: str,
+    ssh_key_path: str | Path = "",
+    *,
+    timeout: int = 10,
 ) -> tuple[bool, str]:
-    """Test that the key is now accepted on the remote.
+    """One-shot ``ssh <alias> echo ok`` probe for the dialog test buttons.
 
-    Runs ``ssh -i <key> -o BatchMode=yes <alias> echo ok``. BatchMode
-    disables interactive password prompts, so if the key isn't
-    installed the call fails fast with a clear message instead of
-    hanging or asking for a password.
+    Honors ``ssh_key_path`` when set so a freshly-installed wizard key
+    is actually used (the bug in v5.2.1: the Test SSH buttons built
+    bare ssh argv that fell back to ssh's default identity search and
+    couldn't find ``~/.ssh/allwell_<alias>``, so a successful wizard
+    run was followed by a Test that said "Permission denied").
+
+    ``BatchMode=yes`` disables interactive password prompts so the
+    call fails fast with a clear message instead of hanging. The
+    framework's policy is "never store passwords" — if no key works,
+    that's a config problem the user fixes via the SSH Key wizard.
 
     Returns ``(True, "")`` on ``ok`` response, else ``(False, <detail>)``.
     """
-    key_path = key_path.expanduser()
     cmd = [
         resolve_ssh_binary(),
-        "-i", str(key_path),
         "-o", "BatchMode=yes",
         "-o", "ConnectTimeout=10",
         "-o", "StrictHostKeyChecking=accept-new",
-        ssh_alias,
-        "echo", "ok",
     ]
+    if ssh_key_path:
+        key = Path(ssh_key_path).expanduser()
+        cmd += ["-i", str(key)]
+    cmd += [ssh_alias, "echo", "ok"]
+
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
@@ -172,7 +182,18 @@ def verify_key_works(
     detail = (result.stderr or result.stdout).strip()
     if not detail:
         detail = f"ssh exited {result.returncode}"
-    # Truncate to keep dialog messageboxes readable; the full output is
-    # usually two lines, but a misconfigured host can produce a page
-    # of warnings.
     return False, detail[:240]
+
+
+def verify_key_works(
+    ssh_alias: str, key_path: Path, *, timeout: int = 10,
+) -> tuple[bool, str]:
+    """Test that the key is now accepted on the remote.
+
+    Thin shim over :func:`probe_ssh_connection` that requires a key
+    path — used by the SSH Key wizard's Verify step where the key
+    path is the whole point of the probe. New callers should use
+    ``probe_ssh_connection`` directly so the no-key case is supported
+    in one place.
+    """
+    return probe_ssh_connection(ssh_alias, key_path, timeout=timeout)

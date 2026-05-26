@@ -28,6 +28,7 @@ from services.ssh_key_setup import (
     default_key_path,
     generate_keypair,
     has_ssh_copy_id,
+    probe_ssh_connection,
     verify_key_works,
 )
 
@@ -237,3 +238,102 @@ def test_verify_key_works_handles_timeout(tmp_path, monkeypatch):
     ok, detail = verify_key_works("bigbox", key, timeout=10)
     assert ok is False
     assert detail
+
+
+# ── probe_ssh_connection (v5.2.2) ────────────────────────────────────────────
+
+
+def test_probe_ssh_connection_without_key_omits_i_flag(monkeypatch):
+    """No key path → no -i flag. Lets ssh fall through to ~/.ssh/config /
+    default identities for users who already have a working ssh setup."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("services.ssh_key_setup.subprocess.run", fake_run)
+    ok, detail = probe_ssh_connection("bigbox")
+    assert ok is True
+    assert "-i" not in captured["cmd"], \
+        f"-i should be absent when no key path; got argv: {captured['cmd']}"
+    # Alias still passed as the destination.
+    assert "bigbox" in captured["cmd"]
+
+
+def test_probe_ssh_connection_with_key_passes_i_flag(tmp_path, monkeypatch):
+    """The v5.2.2 fix: when ssh_key_path is set, -i <expanded-path> is
+    inserted so ssh picks up the wizard-generated key instead of
+    falling back to default identity search and reporting 'Permission
+    denied' on hosts whose only accepted credential is that key."""
+    key = tmp_path / "my_key"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("services.ssh_key_setup.subprocess.run", fake_run)
+    probe_ssh_connection("bigbox", key)
+    assert "-i" in captured["cmd"]
+    # -i and the path must be adjacent and in that order.
+    i_idx = captured["cmd"].index("-i")
+    assert captured["cmd"][i_idx + 1] == str(key)
+
+
+def test_probe_ssh_connection_expands_tilde_in_key_path(monkeypatch):
+    """`~/.ssh/allwell_<alias>` (the wizard's default key path) needs
+    to be expanded before being passed to ssh; raw '~' inside an argv
+    element doesn't get shell expansion."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("services.ssh_key_setup.subprocess.run", fake_run)
+    probe_ssh_connection("bigbox", "~/.ssh/allwell_bigbox")
+    i_idx = captured["cmd"].index("-i")
+    assert "~" not in captured["cmd"][i_idx + 1]
+    assert captured["cmd"][i_idx + 1].endswith("allwell_bigbox")
+
+
+def test_probe_ssh_connection_uses_batchmode(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("services.ssh_key_setup.subprocess.run", fake_run)
+    probe_ssh_connection("bigbox")
+    # Without BatchMode=yes, a missing-key situation would hang on a
+    # password prompt instead of failing cleanly.
+    assert any("BatchMode=yes" in a for a in captured["cmd"])
+
+
+def test_probe_ssh_connection_fail_returns_stderr_detail(monkeypatch):
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 255, stdout="", stderr="Permission denied (publickey).\n",
+        )),
+    )
+    ok, detail = probe_ssh_connection("bigbox", "~/key")
+    assert ok is False
+    assert "Permission denied" in detail
+
+
+def test_verify_key_works_still_delegates_through_new_helper(tmp_path, monkeypatch):
+    """v5.2.2 backwards-compat: the original verify_key_works API used
+    by the SSH Key wizard's Verify step keeps working."""
+    key = tmp_path / "key"
+    monkeypatch.setattr(
+        "services.ssh_key_setup.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0, stdout="ok\n", stderr="",
+        )),
+    )
+    ok, detail = verify_key_works("bigbox", key)
+    assert ok is True
+    assert detail == ""

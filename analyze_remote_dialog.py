@@ -352,31 +352,30 @@ class RemoteFormDialog(QDialog):
         Runs in a worker thread so the dialog stays responsive. The
         result lands in ``_test_result_lbl`` via a tiny queue + QTimer
         — same pattern as PipelineRunner but cut to one event.
+
+        v5.2.2: routes through ``ssh_key_setup.probe_ssh_connection``
+        so the current form's ``ssh_key_path`` (set by the Setup SSH
+        Key wizard) is actually passed as ``-i <key>``. Pre-fix, this
+        used bare ssh and would say "Permission denied" right after a
+        successful wizard run because the wizard's key sits at a
+        non-default path that ssh's identity search doesn't try.
         """
         alias = self._ssh_alias_edit.text().strip()
         if not alias:
             self._test_result_lbl.setText("Set an SSH alias first.")
             return
 
+        key_path = self._ssh_key_edit.text().strip()
         self._test_btn.setEnabled(False)
-        self._test_result_lbl.setText(f"Testing {alias}…")
+        suffix = f" (with key {Path(key_path).name})" if key_path else ""
+        self._test_result_lbl.setText(f"Testing {alias}{suffix}…")
         result_q: queue.Queue = queue.Queue()
 
         def _runner() -> None:
-            try:
-                proc = subprocess.run(
-                    [resolve_ssh_binary(),
-                     "-o", "BatchMode=yes",
-                     "-o", "ConnectTimeout=10",
-                     alias, "echo", "ok"],
-                    capture_output=True, text=True, timeout=15,
-                )
-                if proc.returncode == 0 and proc.stdout.strip() == "ok":
-                    result_q.put(("ok", ""))
-                else:
-                    result_q.put(("fail", (proc.stderr or proc.stdout).strip()))
-            except (subprocess.TimeoutExpired, OSError) as exc:
-                result_q.put(("fail", str(exc)))
+            ok, detail = ssh_key_setup.probe_ssh_connection(
+                alias, key_path, timeout=15,
+            )
+            result_q.put(("ok" if ok else "fail", detail))
 
         threading.Thread(target=_runner, daemon=True).start()
 
@@ -997,33 +996,27 @@ class ManageRemotesDialog(QDialog):
         host = remotes.get(name)
         if host is None:
             return
-        # Cheap inline test — same shape as RemoteFormDialog._test_ssh
-        # but reported via a QMessageBox so the user gets unambiguous
-        # ✓ / ✗ feedback from the list view.
-        try:
-            proc = subprocess.run(
-                [resolve_ssh_binary(),
-                 "-o", "BatchMode=yes",
-                 "-o", "ConnectTimeout=10",
-                 host.ssh_alias, "echo", "ok"],
-                capture_output=True, text=True, timeout=15,
+        # v5.2.2: routed through ssh_key_setup.probe_ssh_connection so a
+        # configured ssh_key_path is passed as -i <key>. Without this,
+        # a host whose only accepted credential is the wizard-generated
+        # ~/.ssh/allwell_<alias> key reports "Permission denied" here
+        # even after the wizard verified the key.
+        ok, detail = ssh_key_setup.probe_ssh_connection(
+            host.ssh_alias, host.ssh_key_path, timeout=15,
+        )
+        if ok:
+            extras = (
+                f" (using key {Path(host.ssh_key_path).name})"
+                if host.ssh_key_path else ""
             )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            QMessageBox.critical(
-                self, f"Test failed: {name}",
-                f"Could not reach {host.ssh_alias}:\n{exc}",
-            )
-            return
-        if proc.returncode == 0 and proc.stdout.strip() == "ok":
             QMessageBox.information(
                 self, f"Test passed: {name}",
-                f"{host.ssh_alias} responded.",
+                f"{host.ssh_alias} responded{extras}.",
             )
         else:
             QMessageBox.critical(
                 self, f"Test failed: {name}",
-                (proc.stderr or proc.stdout).strip()
-                or "(ssh returned non-zero with no message)",
+                detail or "(ssh returned non-zero with no message)",
             )
 
     def _on_bootstrap(self) -> None:

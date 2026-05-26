@@ -150,7 +150,12 @@ class PipelineRunner:
         self._remote: Optional[RemoteHost] = None
         self._remote_runner: Optional[RemoteRunner] = None
         self._output_filter: str = "full"
-        self._cleanup_remote: str = "run"
+        # v5.2.11: default to "none" so a shared-machine remote never
+        # has files deleted without the user explicitly opting in.
+        # Pre-v5.2.11 default was "run" (auto-delete per-run output);
+        # users who want that behaviour now toggle it via the GUI
+        # checkbox or pass --cleanup-remote=run on the CLI.
+        self._cleanup_remote: str = "none"
         self._selective_channels: bool = True
 
     def _enqueue(self, event: "Tuple[str, object]") -> None:
@@ -187,7 +192,7 @@ class PipelineRunner:
         resolve_dirs: Callable[..., Optional[Tuple[Path, Path]]],
         remote: Optional[RemoteHost] = None,
         output_filter: str = "full",
-        cleanup_remote: str = "run",
+        cleanup_remote: str = "none",
         selective_channels: bool = True,
     ) -> None:
         """Spawn the worker thread that runs the pipeline subprocess.

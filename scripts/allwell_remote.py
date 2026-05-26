@@ -66,8 +66,13 @@ def _build_argv_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--cleanup-remote",
         choices=["run", "all", "none"],
-        default="run",
-        help="After a verified successful run: 'run' (default) removes "
+        default="none",
+        # v5.2.11: default changed from 'run' to 'none' so a
+        # shared-machine remote never has files removed without the
+        # user explicitly asking. Pass --cleanup-remote=run to restore
+        # pre-v5.2.11 behaviour.
+        help="After a verified successful run: 'none' (default) leaves "
+             "everything in place — safe for shared remotes. 'run' removes "
              "the per-run output dir but keeps the dataset cache so re-"
              "runs are fast; 'all' also removes the dataset cache; 'none' "
              "leaves everything (for debugging).",

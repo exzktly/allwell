@@ -66,6 +66,17 @@ class RemoteHost:
     extra_args: tuple[str, ...] = field(default_factory=tuple)
     cache_budget_gb: int = 200
     measured_bandwidth_mbps: float = 0.0
+    auto_gc: bool = False
+    """Whether AllWell may automatically evict oldest dataset caches
+    when ``cache_budget_gb`` is exceeded.
+
+    v5.2.11: default is False — shared remote machines should never
+    have files deleted without explicit user consent. Power users
+    set ``auto_gc = true`` in ``remotes.toml`` (or via a future GUI
+    toggle) to re-enable LRU eviction. ``cache_budget_gb`` is still
+    the limit when auto_gc fires; without auto_gc the cache grows
+    until the user manually clears it.
+    """
     ssh_key_path: str = ""
     """Optional path to an SSH private key (``~`` expanded at use time).
 
@@ -276,6 +287,7 @@ def _format_block(host: RemoteHost) -> str:
         f"cpu_only = {'true' if host.cpu_only else 'false'}\n"
         f"extra_args = [{extras}]\n"
         f"cache_budget_gb = {host.cache_budget_gb}\n"
+        f"auto_gc = {'true' if host.auto_gc else 'false'}\n"
         f"measured_bandwidth_mbps = {host.measured_bandwidth_mbps:.2f}\n"
     )
 
@@ -439,6 +451,7 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
         cpu_only=bool(entry.get("cpu_only", defaults.cpu_only)),
         extra_args=tuple(extra_args),
         cache_budget_gb=int(entry.get("cache_budget_gb", defaults.cache_budget_gb)),
+        auto_gc=bool(entry.get("auto_gc", defaults.auto_gc)),
         measured_bandwidth_mbps=float(
             entry.get("measured_bandwidth_mbps", defaults.measured_bandwidth_mbps)
         ),

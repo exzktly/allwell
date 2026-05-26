@@ -102,6 +102,46 @@ def generate_keypair(
     return True, ""
 
 
+def key_has_passphrase(path: Path) -> bool:
+    """Return True iff the private key at ``path`` is protected by a
+    passphrase that ``BatchMode=yes`` ssh can't satisfy non-interactively.
+
+    AllWell's policy is "never store passwords / passphrases" — every
+    ssh and rsync call runs with ``BatchMode=yes`` so a passphrase
+    prompt turns into "Permission denied" rather than a hang. A user
+    who unknowingly reuses a passphrase-protected key (manually
+    generated, or left over from a previous tool) hits this every
+    time and the failure mode looks like "wrong key" rather than
+    "right key but I can't unlock it."
+
+    Detection: ``ssh-keygen -y -P "" -f <path>`` derives the public
+    half of the key using an empty passphrase. If the key is
+    passphrase-less the command exits 0 with the public key on stdout;
+    if it's passphrase-protected, the wrong passphrase ("") fails with
+    a non-zero exit. The wizard reads this signal and prompts the user
+    to regenerate rather than silently reusing an unusable key.
+
+    Returns ``False`` if:
+
+    * The file doesn't exist (no key to check).
+    * ``ssh-keygen`` isn't available (fail-safe: don't block on a
+      detection mechanism we can't run).
+    * The command times out (unlikely; keys are tiny).
+
+    Returns ``True`` only on a confirmed wrong-passphrase failure.
+    """
+    if not path.is_file():
+        return False
+    try:
+        result = subprocess.run(
+            ["ssh-keygen", "-y", "-P", "", "-f", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode != 0
+
+
 def has_ssh_copy_id() -> bool:
     """Whether ``ssh-copy-id`` is available on this machine.
 

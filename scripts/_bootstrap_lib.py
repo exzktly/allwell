@@ -23,6 +23,7 @@ import argparse
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -166,9 +167,21 @@ def _to_rsync_path(p: Path | str) -> str:
 def _ssh_run(
     alias: str, remote_argv: list[str], *, check: bool = True,
     input: str | None = None, capture: bool = True,
+    ssh_key_path: str = "",
 ) -> subprocess.CompletedProcess:
-    """Run ``ssh <alias> <remote_argv>`` and return the result."""
-    cmd = [_ssh_binary(), alias, *remote_argv]
+    """Run ``ssh <alias> <remote_argv>`` and return the result.
+
+    v5.2.2: ``ssh_key_path`` is threaded through every bootstrap ssh
+    call so a host whose only accepted credential is the wizard-
+    generated ``~/.ssh/allwell_<alias>`` key can be re-bootstrapped
+    after the wizard has set things up. When unset (typical first-
+    bootstrap path), ssh falls back to its default identity search /
+    ``~/.ssh/config`` exactly as before.
+    """
+    cmd = [_ssh_binary()]
+    if ssh_key_path:
+        cmd += ["-i", str(Path(ssh_key_path).expanduser())]
+    cmd += [alias, *remote_argv]
     return subprocess.run(
         cmd,
         capture_output=capture,
@@ -176,6 +189,27 @@ def _ssh_run(
         check=check,
         input=input,
     )
+
+
+def _load_existing_key(alias: str) -> str:
+    """Read ``ssh_key_path`` for ``alias`` from the user's remotes.toml.
+
+    Returns "" when no entry exists yet (the typical first-time
+    bootstrap case — the user hasn't run the wizard or hand-set a
+    key). Best-effort: any TOML parse error is swallowed and we
+    behave as "no key configured" so a broken config doesn't block
+    bootstrap from making progress.
+    """
+    # Late import: this script is the bootstrap entry point and runs
+    # from a wrapper that adds services/ to sys.path; at module-top
+    # time the path may not include it yet.
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from services.remote_config import get_remote
+        host = get_remote(alias)
+    except Exception:  # noqa: BLE001 — best-effort
+        return ""
+    return host.ssh_key_path if host is not None else ""
 
 
 # ── probes ─────────────────────────────────────────────────────────────────
@@ -241,10 +275,14 @@ echo "pip_in_progress=$PIP_IN_PROGRESS"
 """
 
 
-def probe_host(alias: str) -> HostProbe:
+def probe_host(alias: str, *, ssh_key_path: str = "") -> HostProbe:
     """Single-ssh-round-trip probe of the remote's current state."""
     say(f"Probing {alias} for existing setup…")
-    result = _ssh_run(alias, ["bash", "-s"], input=_PROBE_SCRIPT, check=True)
+    result = _ssh_run(
+        alias, ["bash", "-s"],
+        input=_PROBE_SCRIPT, check=True,
+        ssh_key_path=ssh_key_path,
+    )
     fields: dict[str, str] = {}
     for line in result.stdout.splitlines():
         if "=" in line:
@@ -269,7 +307,9 @@ def probe_host(alias: str) -> HostProbe:
 # ── install steps ─────────────────────────────────────────────────────────
 
 
-def install_miniforge_if_missing(alias: str, probe: HostProbe, force: bool) -> None:
+def install_miniforge_if_missing(
+    alias: str, probe: HostProbe, force: bool, *, ssh_key_path: str = "",
+) -> None:
     """Install miniforge under ``$HOME/miniforge3`` on the remote.
 
     Idempotent: skipped when the probe found an existing conda unless
@@ -302,10 +342,16 @@ bash "$INSTALLER" -b -p "$MINIFORGE_DIR"
 rm -f "$INSTALLER"
 """
     say("Installing miniforge on remote (this is the big one-time download)…")
-    _ssh_run(alias, ["bash", "-s"], input=install_script, check=True, capture=False)
+    _ssh_run(
+        alias, ["bash", "-s"],
+        input=install_script, check=True, capture=False,
+        ssh_key_path=ssh_key_path,
+    )
 
 
-def ensure_env_and_staging(alias: str, probe: HostProbe, force: bool) -> None:
+def ensure_env_and_staging(
+    alias: str, probe: HostProbe, force: bool, *, ssh_key_path: str = "",
+) -> None:
     """Make the conda env + staging directories if missing.
 
     The env's heavyweight pip dependencies (TensorFlow, StarDist, etc.)
@@ -336,10 +382,14 @@ else
 fi
 """
     say("Ensuring conda env + staging dirs on remote…")
-    _ssh_run(alias, ["bash", "-s"], input=setup_script, check=True, capture=False)
+    _ssh_run(
+        alias, ["bash", "-s"],
+        input=setup_script, check=True, capture=False,
+        ssh_key_path=ssh_key_path,
+    )
 
 
-def sync_required_files(alias: str) -> None:
+def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
     """Rsync the four pipeline files to ``~/allwell/`` on the remote.
 
     Delegates to :class:`services.remote_runner.RemoteRunner` so the
@@ -354,11 +404,19 @@ def sync_required_files(alias: str) -> None:
     from services.remote_runner import RemoteRunner
 
     say(f"Syncing {len(REQUIRED_FILES)} required pipeline files → {alias}:~/allwell/")
-    host = RemoteHost(name=alias, ssh_alias=alias)
+    # v5.2.2: include ssh_key_path so rsync's underlying ssh transport
+    # picks up the wizard-generated key. Without this, sync would
+    # bare-ssh and fail with "Permission denied" on hosts that only
+    # accept the new key.
+    host = RemoteHost(
+        name=alias, ssh_alias=alias, ssh_key_path=ssh_key_path,
+    )
     RemoteRunner(host).sync_required_files(log_fn=lambda m: sys.stdout.write(m))
 
 
-def install_pip_deps(alias: str, probe: HostProbe) -> None:
+def install_pip_deps(
+    alias: str, probe: HostProbe, *, ssh_key_path: str = "",
+) -> None:
     """Pip-install ``_Docs/requirements.txt`` in the conda env.
 
     Skipped when the probe found a usable tensorflow already — that's
@@ -445,17 +503,26 @@ fi
         "If the SSH connection drops, pip keeps running and the next bootstrap "
         "resumes tailing."
     )
-    _ssh_run(alias, ["bash", "-s"], input=pip_script, check=True, capture=False)
+    _ssh_run(
+        alias, ["bash", "-s"],
+        input=pip_script, check=True, capture=False,
+        ssh_key_path=ssh_key_path,
+    )
 
 
 # ── bandwidth probe ────────────────────────────────────────────────────────
 
 
-def measure_bandwidth(alias: str) -> float:
+def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
     """50 MB throwaway-file upload; return Mbps as a float.
 
     Uses a random-bytes payload so deflate / dedup heuristics in the SSH
     cipher or filesystem don't make the result optimistic.
+
+    v5.2.2: when ssh_key_path is set, rsync gets ``-e "ssh -i <key>"``
+    so the underlying ssh transport uses the wizard-generated key
+    instead of falling back to ssh's default identity search. The
+    cleanup ssh call gets the same -i treatment.
     """
     say("Measuring upload bandwidth (50 MB throwaway)…")
     with tempfile.NamedTemporaryFile(prefix="allwell-bw-", suffix=".bin", delete=False) as fh:
@@ -464,14 +531,21 @@ def measure_bandwidth(alias: str) -> float:
         for _ in range(50):
             fh.write(os.urandom(1024 * 1024))
         local_probe = Path(fh.name)
+    rsync_argv = [_rsync_binary(), "-a"]
+    if ssh_key_path:
+        # rsync uses an external ssh command set via -e. Shell-quote
+        # the key path so a path with spaces survives the round-trip
+        # through whatever shell rsync invokes underneath.
+        expanded_key = str(Path(ssh_key_path).expanduser())
+        rsync_argv += ["-e", f"ssh -i {shlex.quote(expanded_key)}"]
+    rsync_argv += [
+        _to_rsync_path(local_probe),
+        f"{alias}:/tmp/allwell-bw-probe",
+    ]
     try:
         start = time.monotonic()
         subprocess.run(
-            [
-                _rsync_binary(), "-a",
-                _to_rsync_path(local_probe),
-                f"{alias}:/tmp/allwell-bw-probe",
-            ],
+            rsync_argv,
             check=True,
             capture_output=True,
             text=True,
@@ -485,6 +559,7 @@ def measure_bandwidth(alias: str) -> float:
         _ssh_run(
             alias, ["rm", "-f", "/tmp/allwell-bw-probe"],
             check=False, capture=True,
+            ssh_key_path=ssh_key_path,
         )
 
     mbps = (50 * 8) / elapsed
@@ -578,8 +653,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    # 0. v5.2.2: pick up any ssh_key_path the user already configured for
+    # this alias (via the wizard, or by hand). When present every ssh /
+    # rsync call in this bootstrap will pass -i <key>, so a host that
+    # only accepts the wizard key still bootstraps successfully on a
+    # second run. When absent (typical first bootstrap), behavior is
+    # unchanged — ssh uses its default identity search / ~/.ssh/config.
+    key_path = _load_existing_key(args.alias)
+    if key_path:
+        say(f"Using SSH key from remotes.toml: {key_path}")
+
     # 1. Probe.
-    probe = probe_host(args.alias)
+    probe = probe_host(args.alias, ssh_key_path=key_path)
     say(
         f"Probe result: conda={probe.has_conda} env={probe.has_env} "
         f"repo={probe.has_repo} tf={probe.tensorflow_version or '-'} "
@@ -593,23 +678,28 @@ def main(argv: list[str] | None = None) -> int:
         _ssh_run(
             args.alias, ["bash", "-c", "rm -rf ~/miniforge3 ~/allwell"],
             check=False, capture=False,
+            ssh_key_path=key_path,
         )
         probe = HostProbe(False, False, False, "", False, False, "")
 
     # 3. Install miniforge if missing.
-    install_miniforge_if_missing(args.alias, probe, args.force)
+    install_miniforge_if_missing(
+        args.alias, probe, args.force, ssh_key_path=key_path,
+    )
 
     # 4. Ensure env + staging.
-    ensure_env_and_staging(args.alias, probe, args.force)
+    ensure_env_and_staging(
+        args.alias, probe, args.force, ssh_key_path=key_path,
+    )
 
     # 5. Sync required files.
-    sync_required_files(args.alias)
+    sync_required_files(args.alias, ssh_key_path=key_path)
 
     # 6. Install pip deps (skipped if TF already importable).
-    install_pip_deps(args.alias, probe)
+    install_pip_deps(args.alias, probe, ssh_key_path=key_path)
 
     # 7. Bandwidth probe.
-    mbps = measure_bandwidth(args.alias)
+    mbps = measure_bandwidth(args.alias, ssh_key_path=key_path)
 
     # 8. Write remotes.toml.
     path, block, wrote = write_or_update_remotes_toml(args.alias, probe, mbps)

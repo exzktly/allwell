@@ -105,6 +105,9 @@ def _snapshot_bar(app) -> dict:
     tp = _combo_text(app, "_bar_tp_cb")
     if tp is not None:
         out["timepoint"] = tp
+    sels = getattr(app, "_bar_tp_selections", None)
+    if isinstance(sels, dict) and sels:
+        out["timepoint_selections"] = {k: bool(v) for k, v in sels.items()}
     if hasattr(app, "_bar_swarm"):
         out["swarm"] = bool(app._bar_swarm)
     if hasattr(app, "_bar_violin"):
@@ -115,6 +118,12 @@ def _snapshot_bar(app) -> dict:
             out["violin_smooth"] = int(slider.value())
         except Exception:
             pass
+    plot = getattr(app._app_state, "plot", None) if hasattr(app, "_app_state") else None
+    if plot is not None:
+        if hasattr(plot, "bar_group_mode"):
+            out["group_mode"] = str(plot.bar_group_mode)
+        if hasattr(plot, "bar_pool_replicates"):
+            out["pool_replicates"] = bool(plot.bar_pool_replicates)
     return out
 
 
@@ -379,6 +388,13 @@ def _set_combo_if_valid(app, attr: str, value: str) -> None:
 def _apply_bar(app, state: dict) -> None:
     if "timepoint" in state:
         _set_combo_if_valid(app, "_bar_tp_cb", str(state["timepoint"]))
+    if "timepoint_selections" in state and isinstance(state["timepoint_selections"], dict):
+        try:
+            app._bar_tp_selections = {
+                str(k): bool(v) for k, v in state["timepoint_selections"].items()
+            }
+        except Exception:
+            pass
     if "swarm" in state:
         app._bar_swarm = bool(state["swarm"])
     if "violin" in state:
@@ -389,6 +405,12 @@ def _apply_bar(app, state: dict) -> None:
             slider.setValue(int(state["violin_smooth"]))
         except Exception:
             pass
+    plot = getattr(app._app_state, "plot", None) if hasattr(app, "_app_state") else None
+    if plot is not None:
+        if "group_mode" in state and str(state["group_mode"]) in ("well", "timepoint"):
+            plot.bar_group_mode = str(state["group_mode"])
+        if "pool_replicates" in state:
+            plot.bar_pool_replicates = bool(state["pool_replicates"])
 
 
 def _apply_distribution(app, state: dict) -> None:

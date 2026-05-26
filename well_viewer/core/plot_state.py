@@ -39,6 +39,15 @@ class PlotState:
     line_order_rsets: list[str] = field(default_factory=list)
     line_order_wells: list[str] = field(default_factory=list)
 
+    # Bar tab multi-timepoint layout. ``bar_group_mode`` controls whether the
+    # x-axis clusters by well ("well": one cluster per well/rset, timepoints
+    # inside) or by timepoint ("timepoint": one cluster per tp, wells inside).
+    # ``bar_pool_replicates`` controls whether wells inside a ReplicateSet are
+    # collapsed into a single column (legacy grouped-mode) or expanded into
+    # one column per well (still coloured by the rset's rank colour).
+    bar_group_mode: str = "well"
+    bar_pool_replicates: bool = True
+
     fc_vs_control_on: bool = False
     fc_control_label: str = ""
     fc_vs_t0_on: bool = False
@@ -80,3 +89,13 @@ class PlotState:
         """Flip the per-FOV replicate mode; returns the new state."""
         self.use_fov_replicates = not self.use_fov_replicates
         return self.use_fov_replicates
+
+    def toggle_bar_group_mode(self) -> str:
+        """Flip the bar-tab x-axis grouping (well ↔ timepoint); returns the new value."""
+        self.bar_group_mode = "timepoint" if self.bar_group_mode == "well" else "well"
+        return self.bar_group_mode
+
+    def toggle_bar_pool_replicates(self) -> bool:
+        """Flip whether replicate-set wells pool to a single column."""
+        self.bar_pool_replicates = not self.bar_pool_replicates
+        return self.bar_pool_replicates

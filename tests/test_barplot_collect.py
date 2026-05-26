@@ -101,3 +101,74 @@ def test_collect_bar_items_baseline_t0_uses_member_stat(mock_app):
     _, items, _ = collect_bar_items(mock_app, 0.0)  # at t0 itself
     for it in items:
         assert math.isclose(it.mean, 1.0)
+
+
+# ── Multi-timepoint extension ────────────────────────────────────────────────
+
+def test_collect_bar_items_multi_tp_well_major_order(mock_app):
+    """With ``bar_group_mode='well'`` (default), pass a list of tps and
+    confirm we get one BarItem per (key, tp) pair in well-major order:
+    CTRL@0, CTRL@1, CTRL@2, TREAT@0, TREAT@1, TREAT@2."""
+    use_groups, items, _ = collect_bar_items(mock_app, [0.0, 1.0, 2.0])
+    assert use_groups is True
+    keys_tps = [(it.key, it.tp) for it in items]
+    assert keys_tps == [
+        ("CTRL", 0.0), ("CTRL", 1.0), ("CTRL", 2.0),
+        ("TREAT", 0.0), ("TREAT", 1.0), ("TREAT", 2.0),
+    ]
+    # group_key in "well" mode is the well/rset name.
+    assert {it.group_key for it in items if it.key == "CTRL"} == {"CTRL"}
+
+
+def _with_plot_overrides(mock_app, **plot_kwargs):
+    """Return a context manager that monkey-patches MockApp._app_state to
+    surface the given ``PlotState`` field overrides for the duration of a
+    test, then cleanly restores the original property."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _cm():
+        cls = type(mock_app)
+        original = cls.__dict__["_app_state"]
+
+        def _patched(self):
+            st = original.fget(self)
+            for k, v in plot_kwargs.items():
+                setattr(st.plot, k, v)
+            return st
+
+        cls._app_state = property(_patched)
+        try:
+            yield
+        finally:
+            cls._app_state = original
+    return _cm()
+
+
+def test_collect_bar_items_group_by_timepoint_orders_tp_major(mock_app):
+    """With ``bar_group_mode='timepoint'`` items emit tp-major:
+    CTRL@0, TREAT@0, CTRL@1, TREAT@1, ..."""
+    with _with_plot_overrides(mock_app, bar_group_mode="timepoint",
+                              bar_pool_replicates=True):
+        _, items, _ = collect_bar_items(mock_app, [0.0, 1.0, 2.0])
+        keys_tps = [(it.key, it.tp) for it in items]
+        assert keys_tps == [
+            ("CTRL", 0.0), ("TREAT", 0.0),
+            ("CTRL", 1.0), ("TREAT", 1.0),
+            ("CTRL", 2.0), ("TREAT", 2.0),
+        ]
+        # group_key in "timepoint" mode is the formatted tp string.
+        assert {it.group_key for it in items if it.tp == 0.0} == {"0"}
+
+
+def test_collect_bar_items_pool_replicates_off_expands_to_wells(mock_app):
+    """When pool_replicates is False AND rsets are active, each rset's
+    wells expand into individual BarItems (one per well per tp)."""
+    with _with_plot_overrides(mock_app, bar_group_mode="well",
+                              bar_pool_replicates=False):
+        use_groups, items, _ = collect_bar_items(mock_app, 1.0)
+        # use_groups is False because wells are NOT being collapsed.
+        assert use_groups is False
+        # CTRL has 2 wells, TREAT has 2 wells → 4 items total.
+        keys = [it.key for it in items]
+        assert keys == ["A01", "A02", "B01", "B02"]

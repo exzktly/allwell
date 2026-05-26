@@ -190,6 +190,50 @@ def test_load_existing_key_empty_for_entry_without_key(tmp_path, monkeypatch):
     assert bl._load_existing_key("keyless") == ""
 
 
+def test_locate_conda_sh_snippet_handles_both_paths():
+    """v5.2.4: the conda.sh discovery snippet that's prepended to
+    ensure_env_and_staging / install_pip_deps must handle both:
+
+      * miniforge in $HOME (the bootstrap's preferred install target)
+      * a system / pre-existing conda elsewhere on PATH
+
+    Without this, a host whose probe reports has_conda=true via the
+    PATH check (e.g. HPC module-loaded conda) would fail in
+    ensure_env_and_staging with "source: no such file or directory"
+    because the script hard-coded $HOME/miniforge3.
+    """
+    # Static check on the snippet: the two probe paths must be present
+    # in the order the docstring promises.
+    snippet = bl._LOCATE_CONDA_SH
+    miniforge_idx = snippet.find('"$HOME/miniforge3/etc/profile.d/conda.sh"')
+    info_base_idx = snippet.find("conda info --base")
+    assert miniforge_idx != -1, "miniforge check must be present"
+    assert info_base_idx != -1, "system-conda fallback must be present"
+    assert miniforge_idx < info_base_idx, \
+        "miniforge path must be checked first (the bootstrap installs there)"
+    # Must exit non-zero with a diagnostic if neither works — silent
+    # fallthrough would leave the next conda activate call running
+    # against a stale shell env.
+    assert "exit 1" in snippet
+    assert "could not locate conda.sh" in snippet
+
+
+def test_locate_conda_sh_snippet_is_used_by_setup_scripts():
+    """Regression guard: the install / activate paths must use the
+    shared discovery snippet, not hard-coded $HOME/miniforge3."""
+    # Read the source of the relevant functions.
+    import inspect
+    setup_src = inspect.getsource(bl.ensure_env_and_staging)
+    pip_src = inspect.getsource(bl.install_pip_deps)
+    # Both should reference the discovery snippet.
+    assert "_LOCATE_CONDA_SH" in setup_src
+    assert "_LOCATE_CONDA_SH" in pip_src
+    # And neither should still hard-code the source line (which used
+    # to live in the heredoc body before v5.2.4).
+    assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in setup_src
+    assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in pip_src
+
+
 def test_load_existing_key_is_silent_on_toml_parse_error(tmp_path, monkeypatch):
     """A corrupt remotes.toml shouldn't block bootstrap — fall back
     to no-key behaviour so the user can still bootstrap from scratch

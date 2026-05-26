@@ -494,7 +494,8 @@ def test_required_files_all_exist_in_repo():
 
 def test_sync_required_files_rsync_argv_shape(host, monkeypatch):
     """The rsync command must use -aR (relative paths) so subdirs are
-    recreated under the destination, and must point at our four files."""
+    recreated under the destination, and must point at our four files
+    as bare relative paths (v5.2.12: no /./ pivot)."""
     runner = RemoteRunner(host)
     captured: dict = {}
 
@@ -516,10 +517,10 @@ def test_sync_required_files_rsync_argv_shape(host, monkeypatch):
     assert "-aR" in rsync
     # Last element is the destination — verify it targets remote_project_dir.
     assert rsync[-1] == f"{host.ssh_alias}:{host.remote_project_dir}/"
-    # Every required file should appear (with a /./ pivot for --relative).
+    # Every required file should appear as a bare relative path.
     for required in _REQUIRED_REMOTE_FILES:
-        assert any(required in arg and "/./" in arg for arg in rsync), \
-            f"missing rsync source for {required}"
+        assert required in rsync, \
+            f"missing bare-relative rsync source for {required}"
 
 
 def test_sync_required_files_mkdir_for_subdirs(host, monkeypatch):
@@ -584,10 +585,18 @@ def test_sync_required_files_surfaces_rsync_failure(host, monkeypatch):
         runner.sync_required_files()
 
 
-def test_sync_required_files_uses_translated_paths_on_windows(host, monkeypatch):
-    """On Windows, the rsync sources must be in /c/... Cygwin form so
-    Git for Windows' rsync accepts them. The /./ pivot for relative
-    paths must come AFTER the translation."""
+def test_sync_required_files_uses_bare_relative_sources_with_cwd(host, monkeypatch):
+    """v5.2.12: rsync sources are bare relative paths
+    (``process_microscopy.py``, ``_Docs/requirements-remote.txt``)
+    and the subprocess.run cwd is the repo root. Pre-v5.2.12 we used
+    absolute paths with the ``/./`` pivot, which older rsync versions
+    (macOS bundled 2.6.9) mis-handled — they preserved the FULL local
+    path on the remote, creating directories like
+    ``~/allwell/Users/me/allwell/_Docs/requirements-remote.txt`` instead
+    of ``~/allwell/_Docs/requirements-remote.txt``.
+
+    Bare-relative + cwd works on every rsync version we've seen.
+    """
     runner = RemoteRunner(host)
     captured: dict = {}
 
@@ -596,28 +605,49 @@ def test_sync_required_files_uses_translated_paths_on_windows(host, monkeypatch)
 
     def fake_subprocess_run(cmd, **kwargs):
         captured["rsync_cmd"] = list(cmd)
+        captured["cwd"] = kwargs.get("cwd")
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    # Pretend we're on Windows and Git Bash is installed.
-    monkeypatch.setattr("services.remote_config._is_windows", lambda: True)
-    monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: True)
-    # Pretend the repo root is on the C: drive.
+    # Pin repo_root so the assertion below knows the expected cwd.
+    fake_root = Path("/Users/me/allwell")
     monkeypatch.setattr(
         "services.remote_runner.repo_root",
-        lambda: Path("C:\\Users\\me\\allwell"),
+        lambda: fake_root,
     )
+    # The pre-flight check inside sync_required_files calls
+    # ``(root / f).is_file()`` for each required file. ``fake_root``
+    # doesn't actually exist on disk, so we patch Path.is_file to
+    # return True for any path under it.
+    real_is_file = Path.is_file
+
+    def fake_is_file(self):
+        try:
+            self.relative_to(fake_root)
+            return True
+        except ValueError:
+            return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", fake_is_file)
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr("services.remote_runner.subprocess.run", fake_subprocess_run)
 
     runner.sync_required_files()
 
     rsync = captured["rsync_cmd"]
-    assert rsync[0].endswith("rsync.exe"), "should use Git Bash rsync on Windows"
-    # Every required-file source must reference /c/Users/me/allwell/./<file>
+    # cwd must be the repo root so rsync resolves bare relative paths.
+    assert captured["cwd"] == "/Users/me/allwell", \
+        f"subprocess cwd should be the repo root; got: {captured['cwd']}"
+    # Each required file should appear as a BARE RELATIVE path (no
+    # leading /, no /./ pivot). That's the v5.2.12 fix.
     for required in _REQUIRED_REMOTE_FILES:
-        assert any(
-            f"/c/Users/me/allwell/./{required}" == arg for arg in rsync
-        ), f"sources should be cygwin-form; missing /c/Users/me/allwell/./{required} in {rsync}"
+        assert required in rsync, \
+            f"missing bare-relative source {required!r}; got: {rsync}"
+        # And critically: no absolute version of the path is in the
+        # argv (would mean we regressed back to the broken pre-v5.2.12
+        # construction).
+        for arg in rsync:
+            assert not arg.endswith(f"/./{required}"), \
+                f"v5.2.12 regression: /./ pivot found in {arg!r}"
 
 
 # ── verify_and_cleanup decision matrix ──────────────────────────────────────

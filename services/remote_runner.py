@@ -427,10 +427,30 @@ class DatasetCache:
         if log_fn:
             log_fn(f"[remote] $ {' '.join(shlex.quote(c) for c in cmd[:6])} … → {dest}\n")
 
+        # Bounded retry on transient network failures (v5.1.1). The
+        # ``--partial`` flag means each retry resumes where the previous
+        # attempt left off, so a flaky link doesn't restart the whole
+        # upload from zero. Non-transient errors (permission, bad path)
+        # break out of the loop on the first attempt.
         t0 = time.monotonic()
-        sent_bytes = _run_rsync_streaming(
-            cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event
-        )
+        sent_bytes = 0
+        rc = -1
+        for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
+            if stop_event is not None and stop_event.is_set():
+                break
+            if delay > 0:
+                if log_fn:
+                    log_fn(
+                        f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
+                        f"in {delay:.0f}s (last exit code {rc})\n"
+                    )
+                time.sleep(delay)
+            attempt_bytes, rc = _run_rsync_streaming(
+                cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+            )
+            sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
+            if rc == 0 or rc not in _RSYNC_RETRY_CODES:
+                break
         elapsed = max(time.monotonic() - t0, 1e-6)
 
         # Refresh the bandwidth estimate when we actually moved bytes —
@@ -525,11 +545,14 @@ def _run_rsync_streaming(
     log_fn: Callable[[str], None] | None,
     progress_fn: Callable[[float], None] | None,
     stop_event: threading.Event | None,
-) -> int:
-    """Run rsync, stream its stdout, return the total bytes transferred.
+) -> tuple[int, int]:
+    """Run rsync, stream its stdout, return ``(bytes_sent, returncode)``.
 
     Honors the stop_event by terminating the rsync subprocess. Parses the
     ``--info=stats2`` summary line at the end for the byte count.
+
+    v5.1.1: return value gained the exit code so the caller can drive a
+    bounded retry on transient network failures (rsync codes 10/12/30/35).
     """
     proc = subprocess.Popen(
         cmd,
@@ -581,7 +604,87 @@ def _run_rsync_streaming(
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
-    return sent_bytes
+    return sent_bytes, proc.returncode if proc.returncode is not None else -1
+
+
+# Exit codes rsync uses to signal a network-side failure (per rsync(1)
+# manpage, "EXIT VALUES" section). Anything outside this set is treated
+# as a configuration / permission / logic error and surfaces immediately
+# without retry — re-running such an error wouldn't help and would mask
+# the real problem.
+#
+#   10: error in socket I/O
+#   12: error in rsync protocol data stream
+#   30: timeout in data send/receive
+#   35: timeout waiting for daemon connection
+_RSYNC_RETRY_CODES = {10, 12, 30, 35}
+
+# Backoff schedule for rsync retries — mirrors the git push/pull policy
+# documented at the top of the runner's invocation env. Total wait
+# across the three retries is 14 s, an upper bound the user can sit
+# through without thinking the run is hung.
+_RSYNC_RETRY_DELAYS = (2.0, 4.0, 8.0)
+
+
+def _rsync_with_retry(
+    cmd: list[str],
+    *,
+    log_fn: Callable[[str], None] | None = None,
+    timeout: int = 300,
+    capture_output: bool = True,
+) -> subprocess.CompletedProcess:
+    """Run an rsync command, retrying on transient network failures.
+
+    Returns the final ``CompletedProcess``. A success on the first try
+    is the common path; transient failures (rsync exit codes 10/12/30/35
+    or an OSError from the subprocess machinery itself) trigger up to
+    three retries with exponential backoff. Non-transient failures
+    (any other non-zero exit code) return immediately so logic /
+    configuration errors don't get masked behind a retry storm.
+
+    This is the v5.1.1 patch to the v5.0.0 runner — every rsync call
+    site in the framework funnels through here.
+    """
+    log = log_fn or (lambda _m: None)
+    delays = (0.0,) + _RSYNC_RETRY_DELAYS  # delay before each attempt
+    last_result: subprocess.CompletedProcess | None = None
+    last_exc: BaseException | None = None
+
+    for attempt, delay in enumerate(delays):
+        if delay > 0:
+            log(
+                f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
+                f"in {delay:.0f}s (last exit code "
+                f"{last_result.returncode if last_result else '?'})\n"
+            )
+            time.sleep(delay)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=capture_output,
+                text=True,
+                timeout=timeout,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            last_exc = exc
+            log(f"[remote] rsync attempt {attempt + 1} raised: {exc}\n")
+            continue
+        last_result = result
+        last_exc = None
+        if result.returncode == 0:
+            return result
+        if result.returncode not in _RSYNC_RETRY_CODES:
+            # Non-transient — return immediately so the caller sees the
+            # real error.
+            return result
+
+    if last_result is not None:
+        return last_result
+    # Every attempt raised — synthesise a CompletedProcess so callers
+    # have a uniform return type.
+    return subprocess.CompletedProcess(
+        cmd, returncode=255, stdout="", stderr=str(last_exc),
+    )
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -850,12 +953,12 @@ class Fetcher:
             self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
 
     def _rsync(self, argv: list[str]) -> bool:
-        try:
-            rc = subprocess.run(argv, capture_output=True, text=True, timeout=300).returncode
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            self._log(f"[remote] rsync error: {exc}\n")
-            return False
-        return rc == 0
+        # Routed through the shared retry helper (v5.1.1) so transient
+        # network glitches during the Fetcher's per-well pull don't
+        # silently lose a well's output. Non-transient rsync errors
+        # (permission, bad path) still fail immediately.
+        result = _rsync_with_retry(argv, log_fn=self._log)
+        return result.returncode == 0
 
     def _rsync_glob(self, src_glob: str, dest_dir: Path) -> bool:
         """Pull files matching a glob. Wraps the source in a quoted-glob
@@ -963,20 +1066,13 @@ class RemoteRunner:
         sources = [f"{root_for_rsync}/./{f}" for f in _REQUIRED_REMOTE_FILES]
         dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"
         cmd = [resolve_rsync_binary(), "-aR", "--info=stats0", *sources, dest]
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60, check=True,
-            )
-        except subprocess.CalledProcessError as exc:
+        result = _rsync_with_retry(cmd, log_fn=log_fn, timeout=60)
+        if result.returncode != 0:
+            err = (result.stderr or "").strip() or f"rsync exited {result.returncode}"
             raise RuntimeError(
                 f"Failed to sync pipeline files to remote "
-                f"({self.host.ssh_alias}): {exc.stderr.strip() or exc}"
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"Timed out syncing pipeline files to remote "
-                f"({self.host.ssh_alias})."
-            ) from exc
+                f"({self.host.ssh_alias}): {err}"
+            )
         log(
             f"[remote] code sync: {len(_REQUIRED_REMOTE_FILES)} file(s) "
             f"verified on {self.host.ssh_alias}:{self.host.remote_project_dir}\n"
@@ -1149,7 +1245,15 @@ class RemoteRunner:
             return False
 
         # Verify each expected well's output is present locally.
+        # v5.1.1: before declaring the manifest incomplete, give the
+        # Fetcher one more pass at any well whose CSV didn't make it
+        # back. A transient connection blip during a per-well rsync no
+        # longer requires a full pipeline re-run — we re-pull the
+        # missing files using the same retry-aware helpers.
         missing = self._verify_local_manifest(log=log)
+        if missing:
+            self._retry_missing_wells(missing, log=log)
+            missing = self._verify_local_manifest(log=log)
         if missing:
             log(
                 f"[remote] keeping remote files for retry — verification failed: "
@@ -1180,16 +1284,75 @@ class RemoteRunner:
         self, src: str, dest: Path, *, log_fn: Callable[[str], None]
     ) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            rc = subprocess.run(
-                [resolve_rsync_binary(), "-a", src, to_rsync_path(dest)],
-                capture_output=True, text=True, timeout=60,
-            ).returncode
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            log_fn(f"[remote] warn: could not pull {src}: {exc}\n")
+        result = _rsync_with_retry(
+            [resolve_rsync_binary(), "-a", src, to_rsync_path(dest)],
+            log_fn=log_fn, timeout=60,
+        )
+        if result.returncode != 0:
+            log_fn(
+                f"[remote] note: {src} not present on remote "
+                f"(rc={result.returncode}).\n"
+            )
+
+    def _retry_missing_wells(
+        self, missing_messages: list[str], *, log: Callable[[str], None],
+    ) -> None:
+        """Re-pull the per-well outputs for wells whose CSV is missing.
+
+        Closes the "transient drop ate one well's output" hole that
+        existed in v5.0.0–v5.1.0: the in-stream Fetcher already gave up
+        on a failed pull with a "will retry at end" comment that wasn't
+        actually implemented. This is that retry.
+        """
+        run = self._run
+        if run is None:
             return
-        if rc != 0:
-            log_fn(f"[remote] note: {src} not present on remote (rc={rc}).\n")
+        # Extract well IDs from the manifest messages. Format from
+        # _verify_local_manifest: "missing CSV for A01" / "empty CSV
+        # for A01". Match a two-letter+two-digit token.
+        well_re = re.compile(r"\b([A-H]\d{2})\b")
+        wells: set[str] = set()
+        for m in missing_messages:
+            match = well_re.search(m)
+            if match:
+                wells.add(match.group(1))
+        if not wells:
+            return
+
+        log(f"[remote] end-of-run retry: re-pulling {len(wells)} well(s)…\n")
+        host = self.host
+        for well in sorted(wells):
+            # Pull the per-well CSV (top-level on remote out dir).
+            csv_glob_src = (
+                f"{host.ssh_alias}:{run.remote_output_dir}/*_{well}.csv"
+            )
+            try:
+                listing = subprocess.run(
+                    host.ssh_argv(allocate_tty=False) + [
+                        "sh", "-c",
+                        shlex.quote(f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true"),
+                    ],
+                    capture_output=True, text=True, timeout=30,
+                )
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                log(f"[remote] retry: listing {well} failed: {exc}\n")
+                continue
+            files = [ln for ln in (listing.stdout or "").splitlines() if ln.strip()]
+            for f in files:
+                _rsync_with_retry(
+                    [resolve_rsync_binary(), "-a", f"{host.ssh_alias}:{f}",
+                     to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
+                    log_fn=log,
+                )
+            # Also re-pull the {well}_out.zip in case the user has a
+            # full output filter — it's harmless under csv-only mode
+            # since the temp zip gets discarded.
+            _rsync_with_retry(
+                [resolve_rsync_binary(), "-a",
+                 f"{host.ssh_alias}:{run.remote_output_dir}/{well}_out.zip",
+                 to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
+                log_fn=log,
+            )
 
     def _verify_local_manifest(
         self, *, log: Callable[[str], None]

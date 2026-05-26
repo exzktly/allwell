@@ -82,6 +82,11 @@ class HostProbe:
     stardist_ok: bool
     gpu_visible: bool
     python_version: str  # from the env's python, empty if env missing
+    pip_in_progress: bool = False
+    """True iff a detached pip install from a previous bootstrap
+    invocation is still running on the remote. Drives the v5.1.1
+    'resume tailing instead of restart' behavior in
+    :func:`install_pip_deps`."""
 
 
 # ── argv ───────────────────────────────────────────────────────────────────
@@ -218,6 +223,19 @@ echo "tensorflow_version=$TF_VERSION"
 echo "stardist_ok=$STARDIST_OK"
 echo "gpu_visible=$GPU_VISIBLE"
 echo "python_version=$PY_VERSION"
+
+# v5.1.1: detect a still-running detached pip install from a prior
+# bootstrap. The marker is written by install_pip_deps; we only
+# consider it "in progress" if the recorded PID is still alive.
+PIP_RUNNING_MARKER="$HOME/.allwell-staging/.pip_running"
+PIP_IN_PROGRESS=false
+if [ -f "$PIP_RUNNING_MARKER" ]; then
+    pid_val=$(cat "$PIP_RUNNING_MARKER" 2>/dev/null || true)
+    if [ -n "$pid_val" ] && kill -0 "$pid_val" 2>/dev/null; then
+        PIP_IN_PROGRESS=true
+    fi
+fi
+echo "pip_in_progress=$PIP_IN_PROGRESS"
 """
 
 
@@ -242,6 +260,7 @@ def probe_host(alias: str) -> HostProbe:
         stardist_ok=_bool("stardist_ok"),
         gpu_visible=_bool("gpu_visible"),
         python_version=fields.get("python_version", ""),
+        pip_in_progress=_bool("pip_in_progress"),
     )
 
 
@@ -343,6 +362,15 @@ def install_pip_deps(alias: str, probe: HostProbe) -> None:
     Skipped when the probe found a usable tensorflow already — that's
     the most expensive part of bootstrap and re-doing it on every
     invocation would make ``--force``-less re-runs unbearably slow.
+
+    v5.1.1: the pip install is wrapped in ``nohup`` and redirected to a
+    log file, with a ``.pip_running`` marker on the remote. If the SSH
+    session drops mid-install, pip keeps going. The local side tails
+    the log file (or detects the marker on the next bootstrap and
+    resumes tailing) so the user sees progress restore without losing
+    the 10–30 minute install. The local ssh waits for the pip process
+    to exit so the synchronous code path stays as it was on a stable
+    connection.
     """
     if probe.tensorflow_version:
         say(
@@ -350,18 +378,67 @@ def install_pip_deps(alias: str, probe: HostProbe) -> None:
             "skipping pip install."
         )
         return
+    if probe.pip_in_progress:
+        say(
+            "A previous bootstrap left pip running detached on the remote. "
+            "Re-attaching to its log instead of starting a second install."
+        )
+
+    # The wrapper: nohup keeps pip alive past SSH hangup; .pip_running
+    # tells the next bootstrap to tail rather than restart; .pip_done /
+    # .pip_failed are the terminal markers. We `wait` on pip in the
+    # foreground so the local user sees real-time output, but if ssh
+    # drops the wait dies and pip continues to completion.
     pip_script = r"""
 set -euo pipefail
 source "$HOME/miniforge3/etc/profile.d/conda.sh"
 conda activate allwell
+STAGING="$HOME/.allwell-staging"
+mkdir -p "$STAGING"
+PIPLOG="$STAGING/.pip_install.log"
+RUNNING="$STAGING/.pip_running"
+DONE="$STAGING/.pip_done"
+FAILED="$STAGING/.pip_failed"
+
 if [ -f "$HOME/allwell/_Docs/requirements.txt" ]; then
-    pip install --no-build-isolation -r "$HOME/allwell/_Docs/requirements.txt"
+    # If a previous bootstrap left pip running in the background, just
+    # tail its log — don't start a second pip in parallel.
+    if [ -f "$RUNNING" ] && kill -0 "$(cat "$RUNNING")" 2>/dev/null; then
+        echo "[bootstrap-remote] pip install already running (pid $(cat "$RUNNING")); tailing log…" >&2
+        tail -n +1 --pid="$(cat "$RUNNING")" -f "$PIPLOG"
+        if [ -f "$DONE" ]; then exit 0; fi
+        if [ -f "$FAILED" ]; then exit 1; fi
+        # Process exited but no marker — treat as failure.
+        echo "[bootstrap-remote] pip process gone but no done/failed marker — investigate $PIPLOG" >&2
+        exit 1
+    fi
+    rm -f "$DONE" "$FAILED"
+    : > "$PIPLOG"
+    # Launch pip detached. Use a subshell so the PID we capture is the
+    # one whose stdout/stderr lands in PIPLOG.
+    (
+        ( pip install --no-build-isolation -r "$HOME/allwell/_Docs/requirements.txt" \
+            > "$PIPLOG" 2>&1 && touch "$DONE" ) \
+        || touch "$FAILED"
+        rm -f "$RUNNING"
+    ) </dev/null > /dev/null 2>&1 &
+    PIP_PID=$!
+    echo "$PIP_PID" > "$RUNNING"
+    echo "[bootstrap-remote] pip running detached as pid $PIP_PID; tailing log…" >&2
+    tail -n +1 --pid="$PIP_PID" -f "$PIPLOG"
+    wait "$PIP_PID" || true
+    if [ -f "$DONE" ]; then exit 0; fi
+    exit 1
 else
     echo "ERROR: $HOME/allwell/_Docs/requirements.txt not found on remote." >&2
     exit 1
 fi
 """
-    say("Installing pip dependencies on remote (TensorFlow, StarDist, …)")
+    say(
+        "Installing pip dependencies on remote (detached; tails log to local). "
+        "If the SSH connection drops, pip keeps running and the next bootstrap "
+        "resumes tailing."
+    )
     _ssh_run(alias, ["bash", "-s"], input=pip_script, check=True, capture=False)
 
 

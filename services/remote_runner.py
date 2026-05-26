@@ -388,6 +388,45 @@ def _remote_join(remote_argv: list[str]) -> str:
     return " ".join(_remote_quote(a) for a in remote_argv)
 
 
+# v5.2.13: bash snippet that locates conda.sh wherever conda is
+# installed (``$HOME/miniforge3`` for bootstrap-managed installs OR
+# whatever ``conda info --base`` reports for pre-existing system
+# condas) and sources it. Mirrors the discovery logic in
+# ``scripts/_bootstrap_lib.py`` so the runner doesn't care which path
+# bootstrap actually used.
+#
+# Why ``conda run --no-capture-output -n <env>`` rather than the old
+# hard-coded ``host.remote_python``: on hosts where the bootstrap
+# found a pre-existing system conda (HPC module, ``/opt/conda``,
+# etc.) the env lives somewhere like ``/opt/conda/envs/allwell``, not
+# under ``~/miniforge3``. The hard-coded path then exits 127 — the
+# v5.2.12 user hit exactly this. ``conda run`` resolves the python
+# from inside the env so it works regardless of conda's install
+# location.
+_CONDA_ACTIVATE_SNIPPET = (
+    'CONDA_SH=""; '
+    'if [ -f "$HOME/miniforge3/etc/profile.d/conda.sh" ]; then '
+    'CONDA_SH="$HOME/miniforge3/etc/profile.d/conda.sh"; '
+    'elif command -v conda >/dev/null 2>&1; then '
+    '_base=$(conda info --base 2>/dev/null); '
+    '[ -n "$_base" ] && [ -f "$_base/etc/profile.d/conda.sh" ] '
+    '&& CONDA_SH="$_base/etc/profile.d/conda.sh"; '
+    'fi; '
+    'if [ -z "$CONDA_SH" ]; then '
+    'echo "[remote] ERROR: cannot find conda.sh on remote" >&2; '
+    'exit 127; '
+    'fi; '
+    '. "$CONDA_SH"'
+)
+
+
+def _conda_run_prefix(env_name: str = "allwell") -> list[str]:
+    """Argv prefix that runs the following command inside conda env
+    ``env_name``. ``--no-capture-output`` makes stdout/stderr stream
+    through unchanged so the existing progress parser keeps working."""
+    return ["conda", "run", "--no-capture-output", "-n", env_name]
+
+
 @lru_cache(maxsize=1)
 def _rsync_supports_info_flag() -> bool:
     """Whether the local rsync accepts ``--info=...``.
@@ -1375,8 +1414,12 @@ class RemoteRunner:
         # aware quoting so the pidfile (under ~/.allwell-staging) and
         # the pipeline argv (with --output_dir ~/.allwell-staging/...)
         # don't end up creating a literal ~ directory on the remote.
+        # v5.2.13: source conda.sh and exec via ``conda run`` so the
+        # pipeline runs inside the ``allwell`` env regardless of where
+        # the user's conda is installed.
         remote_cmd = (
             f"echo $$ > {_remote_quote(remote_pidfile)}; "
+            f"{_CONDA_ACTIVATE_SNIPPET}; "
             f"exec {_remote_join(remote_argv)}"
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
@@ -1615,14 +1658,18 @@ class RemoteRunner:
         """Rewrite the local pipeline argv for remote execution.
 
         Replaces ``--input_dir`` / ``--output_dir`` with the remote-side
-        paths, swaps the local python path for the host's
-        ``remote_python``, and appends the filter flags.
+        paths, swaps the local python path for ``conda run`` inside the
+        ``allwell`` env, and appends the filter flags.
         """
         # The local argv is shaped like:
         #   [sys.executable, /path/to/process_microscopy.py, --input_dir, X, ...]
-        # We replace the interpreter and script path with the host's.
+        # We replace the interpreter and script path. v5.2.13: instead
+        # of pinning ``self.host.remote_python`` (which broke on hosts
+        # whose conda lives outside ``~/miniforge3``), we wrap with
+        # ``conda run --no-capture-output -n allwell python`` — the
+        # surrounding shell prefix in ``spawn`` sources conda.sh first.
         remote_script = f"{self.host.remote_project_dir}/process_microscopy.py"
-        out = [self.host.remote_python, remote_script]
+        out = [*_conda_run_prefix(), "python", remote_script]
         i = 2  # skip the interpreter + script slots
         while i < len(local_argv):
             arg = local_argv[i]

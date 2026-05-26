@@ -229,6 +229,48 @@ def _load_existing_key(alias: str) -> str:
 # ── probes ─────────────────────────────────────────────────────────────────
 
 
+# Bash snippet that finds and sources the right conda.sh wherever conda
+# actually lives on the remote. Prepended to every heredoc that needs
+# ``conda activate``. Necessary because the probe accepts EITHER
+# ``$HOME/miniforge3`` (the bootstrap's install target) OR a pre-
+# existing system conda — but the install / activate scripts used to
+# hard-code ``$HOME/miniforge3``, which broke on hosts whose conda
+# lives elsewhere (HPC modules, ``/opt/conda`` admin installs, etc.).
+#
+# Discovery order:
+#   1. ``$HOME/miniforge3/bin/conda`` — the bootstrap's preferred path.
+#   2. ``conda`` on PATH (system / admin conda); use ``conda info --base``
+#      to resolve its actual root.
+#
+# If neither works the host's ``has_conda=true`` probe was lying;
+# exit 1 with a clear diagnostic instead of letting bash blow up on
+# an "ambiguous redirect" or "command not found".
+_LOCATE_CONDA_SH = r"""
+_aw_locate_conda_sh() {
+    if [ -f "$HOME/miniforge3/etc/profile.d/conda.sh" ]; then
+        printf '%s\n' "$HOME/miniforge3/etc/profile.d/conda.sh"
+        return 0
+    fi
+    if command -v conda >/dev/null 2>&1; then
+        local base
+        base=$(conda info --base 2>/dev/null) || base=""
+        if [ -n "$base" ] && [ -f "$base/etc/profile.d/conda.sh" ]; then
+            printf '%s\n' "$base/etc/profile.d/conda.sh"
+            return 0
+        fi
+    fi
+    return 1
+}
+_AW_CONDA_SH=$(_aw_locate_conda_sh) || {
+    echo "[bootstrap-remote] could not locate conda.sh — has the probe lied?" >&2
+    echo "[bootstrap-remote] checked: \$HOME/miniforge3/etc/profile.d/conda.sh and \$(conda info --base)" >&2
+    exit 1
+}
+# shellcheck disable=SC1090
+source "$_AW_CONDA_SH"
+"""
+
+
 _PROBE_SCRIPT = r"""
 set -u
 MINIFORGE_DIR="$HOME/miniforge3"
@@ -252,8 +294,23 @@ GPU_VISIBLE=false
 PY_VERSION=
 
 if has_conda; then
-    # shellcheck disable=SC1091
-    . "$MINIFORGE_DIR/etc/profile.d/conda.sh" 2>/dev/null || true
+    # v5.2.4: same discovery as the install scripts — prefer miniforge
+    # in $HOME, fall back to a system conda's `conda info --base`. The
+    # || true tolerates a host where the source itself fails (PATH
+    # conda only), since `conda env list` works off PATH regardless.
+    CONDA_SH=""
+    if [ -f "$MINIFORGE_DIR/etc/profile.d/conda.sh" ]; then
+        CONDA_SH="$MINIFORGE_DIR/etc/profile.d/conda.sh"
+    elif command -v conda >/dev/null 2>&1; then
+        _base=$(conda info --base 2>/dev/null || echo "")
+        if [ -n "$_base" ] && [ -f "$_base/etc/profile.d/conda.sh" ]; then
+            CONDA_SH="$_base/etc/profile.d/conda.sh"
+        fi
+    fi
+    if [ -n "$CONDA_SH" ]; then
+        # shellcheck disable=SC1090
+        . "$CONDA_SH" 2>/dev/null || true
+    fi
     if conda env list 2>/dev/null | awk '{print $1}' | grep -qx "$ENV_NAME"; then
         ENV_PRESENT=true
         conda activate "$ENV_NAME" 2>/dev/null || true
@@ -373,12 +430,13 @@ def ensure_env_and_staging(
     have been rsynced to the remote — that way pip can read
     ``_Docs/requirements.txt`` from disk.
     """
-    setup_script = r"""
-set -euo pipefail
-MINIFORGE_DIR="$HOME/miniforge3"
-ENV_NAME=allwell
-# shellcheck disable=SC1091
-source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+    # v5.2.4: prepend conda.sh discovery so this works whether the host
+    # has miniforge at $HOME or a pre-existing system conda elsewhere
+    # (HPC modules, /opt/conda, etc.). Without it, install_miniforge_
+    # if_missing is correctly skipped for the system-conda case but the
+    # next step here used to fail with "source: no such file or
+    # directory" on $HOME/miniforge3/etc/profile.d/conda.sh.
+    setup_script = "set -euo pipefail\nENV_NAME=allwell\n" + _LOCATE_CONDA_SH + r"""
 
 # Staging dirs always exist after this.
 mkdir -p "$HOME/.allwell-staging/datasets" "$HOME/.allwell-staging/runs"
@@ -463,9 +521,10 @@ def install_pip_deps(
     # .pip_failed are the terminal markers. We `wait` on pip in the
     # foreground so the local user sees real-time output, but if ssh
     # drops the wait dies and pip continues to completion.
-    pip_script = r"""
-set -euo pipefail
-source "$HOME/miniforge3/etc/profile.d/conda.sh"
+    # v5.2.4: same conda.sh discovery treatment as ensure_env_and_staging
+    # so a host using a system / non-miniforge conda doesn't fail here
+    # after install_miniforge_if_missing was correctly skipped.
+    pip_script = "set -euo pipefail\n" + _LOCATE_CONDA_SH + r"""
 conda activate allwell
 STAGING="$HOME/.allwell-staging"
 mkdir -p "$STAGING"

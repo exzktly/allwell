@@ -243,3 +243,58 @@ def test_load_existing_key_is_silent_on_toml_parse_error(tmp_path, monkeypatch):
     monkeypatch.setenv("ALLWELL_REMOTES", str(cfg))
     # Must not raise.
     assert bl._load_existing_key("anything") == ""
+
+
+# ── v5.2.9: section name vs ssh_alias ───────────────────────────────────────
+
+
+def test_load_existing_key_finds_entry_when_section_differs_from_ssh_alias(tmp_path, monkeypatch):
+    """User reported flow: [remote.j] with ssh_alias='jupyterhub'.
+    The bootstrap looks up by section name 'j'; the ssh_alias is
+    what actually gets passed to ssh. v5.2.9 separates the two."""
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "[remote.j]\n"
+        "ssh_alias = \"jupyterhub\"\n"
+        "ssh_key_path = \"~/.ssh/allwell_j\"\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ALLWELL_REMOTES", str(cfg))
+    # _load_existing_key takes the SECTION name as argv from the CLI
+    # and returns the ssh_key_path. That part is unchanged from v5.2.2.
+    assert bl._load_existing_key("j") == "~/.ssh/allwell_j"
+
+
+def test_write_or_update_remotes_toml_preserves_user_ssh_alias(tmp_path, monkeypatch):
+    """v5.2.9 fix: re-running bootstrap on `[remote.j]` with
+    ssh_alias='jupyterhub' must keep ssh_alias='jupyterhub' in the
+    rewritten block. Before v5.2.9, write_or_update_remotes_toml's
+    `replace(base, ssh_alias=alias)` clobbered the user's mapping
+    with the section name."""
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "[remote.j]\n"
+        "ssh_alias = \"jupyterhub\"\n"
+        "remote_project_dir = \"~/allwell\"\n"
+        "remote_staging_dir = \"~/.allwell-staging\"\n"
+        "remote_python = \"~/miniforge3/envs/allwell/bin/python\"\n"
+        "cpu_only = false\n"
+        "extra_args = []\n"
+        "cache_budget_gb = 200\n"
+        "measured_bandwidth_mbps = 0.00\n",
+        encoding="utf-8",
+    )
+    probe = bl.HostProbe(
+        has_conda=True, has_repo=True, has_env=True,
+        tensorflow_version="2.13.0", stardist_ok=True,
+        gpu_visible=True, python_version="3.10.14",
+    )
+    bl.write_or_update_remotes_toml("j", probe, mbps=42.0, cfg_path=cfg)
+
+    text = cfg.read_text(encoding="utf-8")
+    # ssh_alias must still be "jupyterhub" — NOT "j".
+    assert 'ssh_alias = "jupyterhub"' in text, \
+        f"ssh_alias was clobbered with section name; file is:\n{text}"
+    # And measured_bandwidth_mbps did get updated, proving the rewrite
+    # ran (this isn't a no-op test).
+    assert "measured_bandwidth_mbps = 42.00" in text

@@ -520,7 +520,7 @@ app = BUNDLE(   # noqa: F821
     name="AllWell.app",
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
-    version="5.2.7",
+    version="5.2.9",
     info_plist={
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription":

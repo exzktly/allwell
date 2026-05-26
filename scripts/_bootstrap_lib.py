@@ -702,10 +702,18 @@ def write_or_update_remotes_toml(
     prior = get_remote(alias, path=path)
     base = prior or RemoteHost(name=alias, ssh_alias=alias)
     from dataclasses import replace
+    # v5.2.9: do NOT overwrite ssh_alias with the section name. A user
+    # may have set up `[remote.j]` with `ssh_alias = "jupyterhub"` so
+    # the section is short to type but the ssh target matches their
+    # ~/.ssh/config entry. Pre-v5.2.9 this `replace(base, ssh_alias=
+    # alias)` clobbered the user's mapping and broke every subsequent
+    # ssh attempt. The `base.ssh_alias or alias` fallback covers the
+    # fresh-entry case (prior is None → base.ssh_alias == alias
+    # already, so the `or` is a no-op).
     host = replace(
         base,
         name=alias,
-        ssh_alias=alias,
+        ssh_alias=base.ssh_alias or alias,
         remote_project_dir=base.remote_project_dir or REMOTE_HOME_REPO,
         remote_staging_dir=base.remote_staging_dir or REMOTE_STAGING,
         remote_python=base.remote_python or REMOTE_PYTHON,
@@ -747,8 +755,29 @@ def main(argv: list[str] | None = None) -> int:
     if key_path:
         say(f"Using SSH key from remotes.toml: {key_path}")
 
+    # v5.2.9: the CLI argv (`args.alias`) is the [remote.<X>] SECTION
+    # name in remotes.toml. The actual ssh-config target (what we pass
+    # to `ssh`) is the `ssh_alias` field, which can differ — a user
+    # named the section "j" but wired ssh_alias="jupyterhub.example.edu"
+    # via their ~/.ssh/config. Resolve the ssh_alias so every ssh call
+    # below targets the right host.
+    ssh_target = args.alias
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from services.remote_config import get_remote
+        host_entry = get_remote(args.alias)
+    except Exception:  # noqa: BLE001 — best-effort
+        host_entry = None
+    if host_entry is not None and host_entry.ssh_alias:
+        ssh_target = host_entry.ssh_alias
+        if ssh_target != args.alias:
+            say(
+                f"[remote.{args.alias}] ssh_alias = {ssh_target!r}; "
+                "using as ssh target."
+            )
+
     # 1. Probe.
-    probe = probe_host(args.alias, ssh_key_path=key_path)
+    probe = probe_host(ssh_target, ssh_key_path=key_path)
     say(
         f"Probe result: conda={probe.has_conda} env={probe.has_env} "
         f"repo={probe.has_repo} tf={probe.tensorflow_version or '-'} "
@@ -760,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.force:
         say("--force: removing existing miniforge + env on remote")
         _ssh_run(
-            args.alias, ["bash", "-c", "rm -rf ~/miniforge3 ~/allwell"],
+            ssh_target, ["bash", "-c", "rm -rf ~/miniforge3 ~/allwell"],
             check=False, capture=False,
             ssh_key_path=key_path,
         )
@@ -768,24 +797,27 @@ def main(argv: list[str] | None = None) -> int:
 
     # 3. Install miniforge if missing.
     install_miniforge_if_missing(
-        args.alias, probe, args.force, ssh_key_path=key_path,
+        ssh_target, probe, args.force, ssh_key_path=key_path,
     )
 
     # 4. Ensure env + staging.
     ensure_env_and_staging(
-        args.alias, probe, args.force, ssh_key_path=key_path,
+        ssh_target, probe, args.force, ssh_key_path=key_path,
     )
 
     # 5. Sync required files.
-    sync_required_files(args.alias, ssh_key_path=key_path)
+    sync_required_files(ssh_target, ssh_key_path=key_path)
 
     # 6. Install pip deps (skipped if TF already importable).
-    install_pip_deps(args.alias, probe, ssh_key_path=key_path)
+    install_pip_deps(ssh_target, probe, ssh_key_path=key_path)
 
     # 7. Bandwidth probe.
-    mbps = measure_bandwidth(args.alias, ssh_key_path=key_path)
+    mbps = measure_bandwidth(ssh_target, ssh_key_path=key_path)
 
-    # 8. Write remotes.toml.
+    # 8. Write remotes.toml. Uses the SECTION name (args.alias) so a
+    # user who set up [remote.j] keeps that section, but
+    # write_or_update_remotes_toml preserves any pre-existing
+    # ssh_alias so the user's custom mapping survives.
     path, block, wrote = write_or_update_remotes_toml(args.alias, probe, mbps)
 
     # 9. Final report.

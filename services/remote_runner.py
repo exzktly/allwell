@@ -784,6 +784,7 @@ def _rsync_with_retry(
     log_fn: Callable[[str], None] | None = None,
     timeout: int = 300,
     capture_output: bool = True,
+    cwd: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run an rsync command, retrying on transient network failures.
 
@@ -796,6 +797,12 @@ def _rsync_with_retry(
 
     This is the v5.1.1 patch to the v5.0.0 runner — every rsync call
     site in the framework funnels through here.
+
+    v5.2.12: ``cwd`` is passed through to ``subprocess.run`` so callers
+    can use bare relative source paths (the only portable way to make
+    ``rsync -aR`` recreate the right directory layout on the remote;
+    the absolute-path-with-``/./``-pivot trick is fragile on older
+    rsync versions, which mirror the full local path instead).
     """
     log = log_fn or (lambda _m: None)
     delays = (0.0,) + _RSYNC_RETRY_DELAYS  # delay before each attempt
@@ -816,6 +823,7 @@ def _rsync_with_retry(
                 capture_output=capture_output,
                 text=True,
                 timeout=timeout,
+                cwd=cwd,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             last_exc = exc
@@ -1217,14 +1225,24 @@ class RemoteRunner:
             check=True,
         )
 
-        # Use rsync's -R (--relative) so the source paths are recreated
-        # under the destination — i.e. _Docs/requirements.txt lands at
-        # <remote_project_dir>/_Docs/requirements.txt, not flattened.
-        # The /./ pivot anchors the relative root at the repo top.
-        # On Windows the root path is translated to /c/Users/... form
-        # so Git Bash's rsync (Cygwin build) accepts it.
-        root_for_rsync = to_rsync_path(root)
-        sources = [f"{root_for_rsync}/./{f}" for f in _REQUIRED_REMOTE_FILES]
+        # v5.2.12: use bare relative source paths with cwd=root so
+        # rsync's -R preserves only the path BELOW the repo root.
+        #
+        # Previously we used the absolute-path-with-`/./`-pivot trick:
+        #   sources = ["/Users/me/allwell/./process_microscopy.py", ...]
+        # which is supposed to make rsync use everything after /./ as
+        # the relative path. Older rsync (macOS bundles 2.6.9) doesn't
+        # honor that pivot reliably and mirrors the WHOLE local path
+        # on the remote, so the user saw:
+        #   ~/allwell/Users/me/allwell/_Docs/requirements-remote.txt
+        # instead of the expected:
+        #   ~/allwell/_Docs/requirements-remote.txt
+        #
+        # Using cwd + bare relative sources works on every rsync
+        # version we've seen. rsync's -R then preserves just the
+        # relative path from cwd (`_Docs/requirements-remote.txt`)
+        # rather than the absolute prefix.
+        sources = list(_REQUIRED_REMOTE_FILES)
         dest = f"{self.host.ssh_alias}:{self.host.remote_project_dir}/"
         cmd = [
             resolve_rsync_binary(),
@@ -1239,7 +1257,9 @@ class RemoteRunner:
         if _rsync_supports_info_flag():
             cmd.append("--info=stats0")
         cmd += [*sources, dest]
-        result = _rsync_with_retry(cmd, log_fn=log_fn, timeout=60)
+        result = _rsync_with_retry(
+            cmd, log_fn=log_fn, timeout=60, cwd=str(root),
+        )
         if result.returncode != 0:
             err = (result.stderr or "").strip() or f"rsync exited {result.returncode}"
             raise RuntimeError(

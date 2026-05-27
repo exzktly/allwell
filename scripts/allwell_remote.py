@@ -86,6 +86,16 @@ def _build_argv_parser() -> argparse.ArgumentParser:
              "fraction (Phase-3 lever). On by default; pass "
              "--no-selective-channels to upload every channel image.",
     )
+    g.add_argument(
+        "--dry-run-cleanup",
+        action="store_true",
+        default=False,
+        help="v5.2.23: with --cleanup-remote=run|all, log what WOULD be "
+             "deleted at end-of-run (path, file count, total bytes) without "
+             "actually deleting anything. Use to confirm what auto-delete "
+             "would do on a shared remote before turning it on for real. "
+             "Ignored when --cleanup-remote=none.",
+    )
     return parser
 
 
@@ -189,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         runner.verify_and_cleanup(
             ok=(rc == 0),
             cleanup_mode=args.cleanup_remote,
+            dry_run=args.dry_run_cleanup,
             log_fn=_log,
         )
         return rc

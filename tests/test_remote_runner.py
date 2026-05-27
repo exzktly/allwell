@@ -1237,6 +1237,112 @@ def test_verify_and_cleanup_none_mode_removes_nothing(runner_with_run, monkeypat
     assert rm_calls == []
 
 
+def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
+    """v5.2.23: with dry_run=True, the ``rm -rf`` ssh calls must NOT
+    fire. Instead, a probe via _ssh_script reports what WOULD be
+    deleted (path, file count, total bytes)."""
+    runner = runner_with_run
+    rm_calls: list[list[str]] = []
+    script_calls: list[str] = []
+
+    def fake_ssh_run(self, argv, *, check):
+        rm_calls.append(list(argv))
+        return MagicMock(stdout="", returncode=0)
+
+    def fake_ssh_script(self, script, *, check):
+        script_calls.append(script)
+        # Probe returns realistic size + count.
+        return MagicMock(stdout="BYTES 12345678\nFILES 42\n", returncode=0)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
+    monkeypatch.setattr(
+        RemoteRunner, "_rsync_optional",
+        lambda self, src, dest, log_fn: None,
+    )
+    log_lines: list[str] = []
+    ok = runner.verify_and_cleanup(
+        ok=True, cleanup_mode="all", dry_run=True,
+        log_fn=log_lines.append,
+    )
+    assert ok
+    # No actual rm -rf was fired.
+    assert not any(c and c[0] == "rm" for c in rm_calls), (
+        f"dry-run must not delete; got rm calls: {rm_calls}"
+    )
+    # Two probes: one for the run dir, one for the dataset cache.
+    assert len(script_calls) == 2
+    blob = "".join(log_lines)
+    # Both targets appear with [DRY-RUN] prefix, with byte/file counts.
+    assert "[DRY-RUN]" in blob
+    assert "would delete run dir run123" in blob
+    assert "would delete dataset cache deadbeef" in blob
+    # Counts surfaced.
+    assert "42 file(s)" in blob
+    assert "11.8 MB" in blob  # 12345678 bytes → 11.8 MB
+    # Footer reminds the user it was a dry run.
+    assert "no files were actually deleted" in blob
+
+
+def test_verify_and_cleanup_dry_run_handles_missing_remote_path(runner_with_run, monkeypatch):
+    """If the remote path doesn't exist (already cleaned up by a
+    previous run), the dry-run probe must say so explicitly — not
+    print a 0-byte/0-file delete line that would be misleading."""
+    runner = runner_with_run
+
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="MISSING\n", returncode=0),
+    )
+    monkeypatch.setattr(
+        RemoteRunner, "_rsync_optional",
+        lambda self, src, dest, log_fn: None,
+    )
+    log_lines: list[str] = []
+    runner.verify_and_cleanup(
+        ok=True, cleanup_mode="run", dry_run=True,
+        log_fn=log_lines.append,
+    )
+    blob = "".join(log_lines)
+    assert "doesn't exist on remote" in blob
+    assert "already cleaned up" in blob
+
+
+def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, monkeypatch):
+    """dry_run + cleanup_mode='none' = nothing to probe AND nothing
+    to delete. No ssh probes, no rm calls, no '[DRY-RUN]' chatter."""
+    runner = runner_with_run
+    script_calls: list[str] = []
+
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: (
+            script_calls.append(script) or MagicMock(stdout="", returncode=0)
+        ),
+    )
+    monkeypatch.setattr(
+        RemoteRunner, "_rsync_optional",
+        lambda self, src, dest, log_fn: None,
+    )
+    log_lines: list[str] = []
+    runner.verify_and_cleanup(
+        ok=True, cleanup_mode="none", dry_run=True,
+        log_fn=log_lines.append,
+    )
+    # Probe shouldn't fire because cleanup_mode=none short-circuits.
+    assert not script_calls
+    blob = "".join(log_lines)
+    assert "[DRY-RUN]" not in blob
+
+
 def test_verify_and_cleanup_skips_when_failure(runner_with_run, monkeypatch):
     runner = runner_with_run
     calls: list[list[str]] = []

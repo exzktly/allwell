@@ -519,8 +519,33 @@ class AnalyzeTab(QWidget):
         cl_rl.addWidget(self._cleanup_remote_cb)
         cl_rl.addStretch(1)
         parent.layout().addWidget(cleanup_row)
+
+        # Dry-run cleanup row (v5.2.23): log what auto-delete WOULD
+        # remove without actually removing anything. Only enabled
+        # when auto-delete itself is checked.
+        dry_run_row = QWidget(parent)
+        dr_rl = QHBoxLayout(dry_run_row)
+        dr_rl.setContentsMargins(12, 0, 12, 0)
+        dr_rl.setSpacing(8)
+        self._dry_run_cleanup_cb = QCheckBox(
+            "Dry-run cleanup (show what would be deleted, don't delete)",
+            dry_run_row,
+        )
+        self._dry_run_cleanup_cb.setToolTip(
+            "v5.2.23: with auto-delete enabled, log path + file count + "
+            "total bytes for each remote directory that WOULD be removed "
+            "at end-of-run, without actually removing anything. Useful "
+            "for confirming what auto-delete will do on a shared remote "
+            "before committing to it."
+        )
+        dr_rl.addWidget(self._dry_run_cleanup_cb)
+        dr_rl.addStretch(1)
+        parent.layout().addWidget(dry_run_row)
+
         # Disable the cleanup checkbox until the user picks a remote.
         self._remote_cb.currentIndexChanged.connect(self._refresh_remote_controls)
+        # Dry-run only makes sense when auto-delete is on.
+        self._cleanup_remote_cb.toggled.connect(self._refresh_remote_controls)
         self._refresh_remote_controls()
 
         btn_widget = QWidget(parent)
@@ -544,11 +569,17 @@ class AnalyzeTab(QWidget):
         parent.layout().addWidget(btn_widget)
 
     def _refresh_remote_controls(self) -> None:
-        """Enable the cleanup checkbox only when a remote is selected."""
+        """Enable the cleanup checkbox only when a remote is selected.
+        Enable the dry-run-cleanup checkbox only when both a remote
+        is selected AND auto-delete is checked."""
         is_remote = self._remote_cb.currentData() is not None
         self._cleanup_remote_cb.setEnabled(is_remote)
         if not is_remote:
             self._cleanup_remote_cb.setChecked(False)
+        dry_run_enabled = is_remote and self._cleanup_remote_cb.isChecked()
+        self._dry_run_cleanup_cb.setEnabled(dry_run_enabled)
+        if not dry_run_enabled:
+            self._dry_run_cleanup_cb.setChecked(False)
 
     def _open_manage_remotes(self) -> None:
         """Open the v5.1.0 Manage Remotes dialog.
@@ -902,6 +933,7 @@ class AnalyzeTab(QWidget):
         # machines). Checked = "all" (delete per-run output AND the
         # dataset cache after a verified-successful run).
         cleanup_mode = "all" if self._cleanup_remote_cb.isChecked() else "none"
+        dry_run_cleanup = self._dry_run_cleanup_cb.isChecked()
         self._runner.start(
             pipeline,
             opts,
@@ -909,6 +941,7 @@ class AnalyzeTab(QWidget):
             remote=remote,
             output_filter="full",
             cleanup_remote=cleanup_mode,
+            dry_run_cleanup=dry_run_cleanup,
             selective_channels=True,
         )
 

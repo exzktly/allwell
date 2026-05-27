@@ -142,6 +142,15 @@ class LocalInputMode(str, Enum):
     defaults to True), then proceed identically to zip mode. Treated
     like ZIP from the Fetcher's perspective."""
 
+    MIXED = "mixed"
+    """Input has BOTH ``{well}.zip`` files AND ``{well}/`` folders for
+    different wells — the signature of a previous run that died
+    partway through ``compress_input_well_folders`` (or a manual
+    half-conversion). v5.2.21: instead of silently picking ZIP mode
+    and ignoring the remaining folders, treat the input as a resume
+    point: trust the existing zips, and zip the leftover folders
+    into the staging dir so the run includes every well."""
+
 
 @dataclass
 class RunEstimate:
@@ -228,13 +237,46 @@ def stage_local_zips(
             raise RuntimeError(
                 f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
             )
-        if fluor_tokens is not None:
-            return _filter_channels_in_place(
-                input_dir, well_zips, mode,
+        if fluor_tokens is None:
+            # No filtering — use the user's zips directly (read-only).
+            return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
+        # v5.2.18: copy the user's zips into a staging dir BEFORE
+        # filtering. Pre-v5.2.18 the filter rewrote zips in place at
+        # ``input_dir`` — if the user mis-typed a fluor channel name
+        # (e.g. "GP" for "GFP"), every fluor image got dropped from
+        # the user's original dataset on disk. The user's input dir
+        # must be treated as read-only.
+        staging = Path(tempfile.mkdtemp(prefix="allwell-stage-"))
+        try:
+            staged: list[Path] = []
+            for wz in well_zips:
+                dest = staging / wz.name
+                shutil.copy2(wz, dest)
+                staged.append(dest)
+            staged_zips = tuple(staged)
+            zin = _filter_channels_in_staging(
+                staging, staged_zips, mode,
                 keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
                 log_fn=log_fn,
             )
-        return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
+            zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
+            return zin
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
+    if mode is LocalInputMode.MIXED:
+        # v5.2.21: input has zips for some wells and folders for
+        # others — the signature of a previous run that died partway
+        # through compress_input_well_folders. Resume by trusting the
+        # existing zips and zipping the leftover folders into a
+        # staging dir.
+        return _stage_mixed_mode(
+            input_dir,
+            fluor_tokens=fluor_tokens,
+            nuclear_token=nuclear_token,
+            log_fn=log_fn,
+        )
 
     # Folder or flat mode: shell out to WellPlateZipper. The zipper writes
     # `{well}.zip` files into the staging dir.
@@ -261,7 +303,7 @@ def stage_local_zips(
         )
 
     if fluor_tokens is not None:
-        zin = _filter_channels_in_place(
+        zin = _filter_channels_in_staging(
             staging, well_zips, mode,
             keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
             log_fn=log_fn,
@@ -278,15 +320,56 @@ def stage_local_zips(
 
 
 def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
-    """Mirror the discovery logic in process_microscopy's main()."""
-    if any(input_dir.glob("[A-H][0-9]*.zip")):
+    """Mirror the discovery logic in process_microscopy's main(), with
+    one extension over the local script: detect MIXED mode (zips +
+    folders for different wells) so the staging path can resume from
+    a half-completed prior run rather than silently dropping the
+    unzipped wells.
+    """
+    zip_wells: set[str] = set()
+    for p in input_dir.glob("[A-H][0-9]*.zip"):
+        label = _canonical_well_from_path(p.stem)
+        if label is not None:
+            zip_wells.add(label)
+
+    folder_wells: set[str] = set()
+    try:
+        for p in input_dir.iterdir():
+            if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+                continue
+            label = _canonical_well_from_path(p.name)
+            if label is None:
+                continue
+            # Empty folders don't count — they're often leftovers from
+            # ``compress_folder_images_to_zip_and_remove`` that
+            # interrupted between zip-write and folder-delete.
+            try:
+                if not any(p.iterdir()):
+                    continue
+            except OSError:
+                continue
+            folder_wells.add(label)
+    except OSError:
+        # Drive yanked? Re-raise as a clearer error upstream.
+        raise
+
+    # MIXED iff there's at least one well with a folder that has no
+    # matching zip AND at least one well that DOES have a zip.
+    remaining = folder_wells - zip_wells
+    if zip_wells and remaining:
+        return LocalInputMode.MIXED
+    if zip_wells:
         return LocalInputMode.ZIP
-    if any(
-        p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
-        for p in input_dir.iterdir()
-    ):
+    if folder_wells:
         return LocalInputMode.FOLDER
     return LocalInputMode.FLAT
+
+
+def _canonical_well_from_path(stem: str) -> str | None:
+    """Normalize a path stem like ``A1`` or ``A01`` to canonical
+    ``A01``. Returns None if the stem isn't a 96-well token."""
+    from well_token import canonical_well_label
+    return canonical_well_label(stem)
 
 
 def _required_tokens(
@@ -299,7 +382,151 @@ def _required_tokens(
     return keep
 
 
-def _filter_channels_in_place(
+def _zip_well_folder(folder: Path, out_zip: Path) -> int:
+    """Atomically zip the TIFs in ``folder`` to ``out_zip``.
+
+    Uses the same ``__aw_tmp_*.pidNNN`` rename pattern as
+    ``process_microscopy.compress_folder_images_to_zip_and_remove`` so
+    a future inspection can tell a partial v5.2.21 mixed-mode resume
+    apart from a partial local-pipeline compression. Returns the
+    number of TIFs zipped (0 → folder had no images, caller should
+    skip).
+    """
+    tifs = sorted(
+        p for p in folder.iterdir()
+        if p.suffix.lower() in (".tif", ".tiff")
+    )
+    if not tifs:
+        return 0
+    tmp = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
+    try:
+        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for t in tifs:
+                zf.write(t, arcname=t.name)
+        tmp.replace(out_zip)
+    except BaseException:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
+    return len(tifs)
+
+
+def _stage_mixed_mode(
+    input_dir: Path,
+    *,
+    fluor_tokens: Iterable[str] | None,
+    nuclear_token: str | None,
+    log_fn: Callable[[str], None] | None,
+) -> ZippedInput:
+    """Resume from a half-completed compression: zip the leftover
+    folders into a staging dir, combine with the existing zips, and
+    return the union.
+
+    v5.2.21 entry point for the MIXED input mode. The detection in
+    ``_detect_local_input_mode`` already established that at least one
+    well has a zip AND at least one DIFFERENT well has a folder of
+    TIFs — exactly the state a network-drop mid-``compress_input_well_folders``
+    leaves behind.
+
+    The user's existing zips are NOT mutated; they stay where they
+    are. The staging dir holds only the newly-zipped wells, and the
+    returned ``ZippedInput.well_zips`` tuple points at both: existing
+    zips by their original path, new zips by their staging path. If
+    a channel filter is requested, BOTH sets are first copied/written
+    into staging and then filtered there — the user's originals stay
+    pristine (same invariant as v5.2.18).
+    """
+    existing_zip_paths = sorted(input_dir.glob("[A-H][0-9]*.zip"))
+    existing_wells: dict[str, Path] = {}
+    for p in existing_zip_paths:
+        label = _canonical_well_from_path(p.stem)
+        if label is not None:
+            existing_wells[label] = p
+
+    folder_wells: dict[str, Path] = {}
+    for p in input_dir.iterdir():
+        if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+            continue
+        label = _canonical_well_from_path(p.name)
+        if label is None or label in existing_wells:
+            continue
+        try:
+            if not any(p.iterdir()):
+                continue
+        except OSError:
+            continue
+        folder_wells[label] = p
+
+    if not folder_wells:
+        # Shouldn't reach here — _detect_local_input_mode wouldn't have
+        # returned MIXED. Defensive: fall back to plain ZIP mode.
+        return ZippedInput(
+            zip_dir=input_dir,
+            mode=LocalInputMode.ZIP,
+            well_zips=tuple(existing_zip_paths),
+            cleanup=None,
+        )
+
+    if log_fn:
+        log_fn(
+            f"[stage] resume detected: {len(existing_wells)} existing "
+            f"zip(s), {len(folder_wells)} leftover folder(s) to zip "
+            f"({sorted(folder_wells)[:5]}{'…' if len(folder_wells) > 5 else ''}).\n"
+        )
+
+    staging = Path(tempfile.mkdtemp(prefix="allwell-resume-"))
+    try:
+        # Zip the leftover folders into staging.
+        for label in sorted(folder_wells):
+            folder = folder_wells[label]
+            target = staging / f"{label}.zip"
+            n = _zip_well_folder(folder, target)
+            if log_fn:
+                log_fn(
+                    f"[stage] zipped {folder.name} → {target.name} "
+                    f"({n} TIF{'s' if n != 1 else ''})\n"
+                )
+
+        new_zip_paths = sorted(staging.glob("[A-H][0-9]*.zip"))
+        all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
+
+        if fluor_tokens is not None:
+            # The v5.2.18 invariant: the channel filter must NOT
+            # mutate the user's originals. Copy ALL zips (existing +
+            # new) into staging, then filter. The originals stay
+            # pristine.
+            staged_for_filter: list[Path] = []
+            for z in existing_zip_paths:
+                dest = staging / z.name
+                if not dest.exists():
+                    shutil.copy2(z, dest)
+                staged_for_filter.append(dest)
+            # New zips are already in staging.
+            staged_for_filter.extend(new_zip_paths)
+            staged_for_filter = sorted(set(staged_for_filter))
+            zin = _filter_channels_in_staging(
+                staging, tuple(staged_for_filter), LocalInputMode.MIXED,
+                keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
+                log_fn=log_fn,
+            )
+            zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
+            return zin
+
+        return ZippedInput(
+            zip_dir=staging,
+            mode=LocalInputMode.MIXED,
+            well_zips=all_zips,
+            cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
+        )
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def _filter_channels_in_staging(
     zip_dir: Path,
     well_zips: tuple[Path, ...],
     mode: LocalInputMode,
@@ -308,29 +535,81 @@ def _filter_channels_in_place(
     log_fn: Callable[[str], None] | None,
 ) -> ZippedInput:
     """Rewrite each well zip to drop members whose name doesn't contain one
-    of ``keep_tokens``. Skipped silently if every member is kept.
+    of ``keep_tokens``.
+
+    v5.2.18: renamed from ``_filter_channels_in_place``. The caller is
+    expected to have already copied the user's zips into a staging
+    temp dir — this function still rewrites in place RELATIVE to the
+    files it's handed, so passing it the user's original input dir
+    would corrupt the user's dataset (a pre-v5.2.18 bug).
 
     Phase-3 selective staging: this is the lever-1 multiplier — for a
     plate with 4 channels but only 2 in use, this cuts upload in half.
     Idempotent: a zip whose members are already filtered is a no-op.
+
+    v5.2.20: emits a per-well log line so the user sees a steady stream
+    of progress during a 96-well filter rather than wondering whether
+    the GUI has hung. No-op wells (everything already matches) get an
+    ``all N kept (no-op)`` line; rewritten wells report before/after
+    size and elapsed time. The end-of-plate summary fires only when at
+    least one well was actually rewritten.
     """
     if not keep_tokens:
         return ZippedInput(zip_dir=zip_dir, mode=mode, well_zips=well_zips, cleanup=None)
 
+    n_total = len(well_zips)
     total_in = 0
     total_kept = 0
-    for wz in well_zips:
+    rewrote = 0
+    empty_wells: list[str] = []  # v5.2.18 typo-guard accumulator
+    for idx, wz in enumerate(well_zips, start=1):
         try:
             with zipfile.ZipFile(wz, "r") as zf:
                 members = zf.namelist()
             keep_mask = [_member_matches(m, keep_tokens) for m in members]
-        except (OSError, zipfile.BadZipFile):
+        except (OSError, zipfile.BadZipFile) as exc:
+            if log_fn:
+                log_fn(
+                    f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                    f"WARN unreadable ({exc.__class__.__name__}: {exc}); skipping\n"
+                )
             continue
+        # Empty zip — nothing to filter, but distinct from "all kept".
+        # all([]) is True in Python, which would otherwise silently
+        # bucket this into the no-op branch with a misleading
+        # "all 0 kept" line.
+        if not members:
+            if log_fn:
+                log_fn(
+                    f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                    f"WARN empty zip; skipping\n"
+                )
+            continue
+        kept = sum(keep_mask)
         total_in += len(members)
-        total_kept += sum(keep_mask)
-        if all(keep_mask):
+        total_kept += kept
+        # v5.2.18 typo guard: if the requested tokens match ZERO
+        # images in a well, that's almost always a typo'd channel
+        # name. Collect the affected wells and raise after the loop
+        # so we can name them all at once.
+        if kept == 0:
+            empty_wells.append(wz.stem)
+            if log_fn:
+                log_fn(
+                    f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                    f"WARN zero matches; will fail after pass\n"
+                )
+            continue
+        if kept == len(members):
+            if log_fn:
+                log_fn(
+                    f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                    f"all {kept} kept (no-op)\n"
+                )
             continue
         # Re-write the zip with only the kept members.
+        t0 = time.monotonic()
+        size_before = wz.stat().st_size
         tmp = wz.with_suffix(".zip.tmp")
         with zipfile.ZipFile(wz, "r") as src, zipfile.ZipFile(
             tmp, "w", compression=zipfile.ZIP_DEFLATED
@@ -338,15 +617,46 @@ def _filter_channels_in_place(
             for member, keep in zip(members, keep_mask):
                 if keep:
                     dst.writestr(src.getinfo(member), src.read(member))
+        # Read the size from the temp before replace — one stat
+        # syscall instead of two, and avoids any race where another
+        # process might mutate `wz` between rename and stat.
+        size_after = tmp.stat().st_size
         tmp.replace(wz)
-
-    if log_fn and total_in:
-        dropped = total_in - total_kept
-        if dropped:
+        rewrote += 1
+        if log_fn:
+            mb_in = size_before / (1024 * 1024)
+            mb_out = size_after / (1024 * 1024)
+            elapsed = time.monotonic() - t0
             log_fn(
-                f"[remote] selective staging: kept {total_kept}/{total_in} "
-                f"channel images (dropped {dropped} unused).\n"
+                f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                f"kept {kept}/{len(members)} ({mb_in:.1f}→{mb_out:.1f} MB) "
+                f"in {_fmt_secs(elapsed)}\n"
             )
+
+    # v5.2.18: raise AFTER the loop so every typo'd well is named in
+    # the error message — earlier we accumulated them in empty_wells.
+    if empty_wells:
+        sample = ", ".join(empty_wells[:5])
+        more = f" (and {len(empty_wells) - 5} more)" if len(empty_wells) > 5 else ""
+        raise RuntimeError(
+            f"Channel filter '{', '.join(sorted(keep_tokens))}' matched zero "
+            f"images in {len(empty_wells)} well(s): {sample}{more}. "
+            f"Likely a typo in the channel name(s) on the Analyze tab — "
+            f"check your nuclear and fluor channel tokens against the "
+            f"filenames inside the well zips."
+        )
+
+    # Only emit the summary when at least one well was actually
+    # rewritten — pre-v5.2.20 the summary fired for any non-empty
+    # plate, including the "all channels matched everywhere" case
+    # where the line was pure noise.
+    if log_fn and rewrote:
+        dropped = total_in - total_kept
+        log_fn(
+            f"[remote] filter: summary — kept {total_kept}/{total_in} "
+            f"images across {n_total} well(s), rewrote {rewrote}, "
+            f"dropped {dropped}.\n"
+        )
     return ZippedInput(zip_dir=zip_dir, mode=mode, well_zips=well_zips, cleanup=None)
 
 
@@ -614,11 +924,22 @@ class DatasetCache:
         # bundled 2.6.9, some HPC clusters) rejects it with exit 1.
         # The progress callback degrades to "stats appear at end" on
         # legacy rsync, but the transfer itself still works.
+        # v5.2.20: add ``name1`` so rsync emits a bare filename per
+        # transferred file. ``_run_rsync_streaming`` forwards those
+        # lines as ``[remote] ↑ <filename>`` so the user can see
+        # which well is in flight.
         if _rsync_supports_info_flag():
-            cmd.append("--info=stats2,progress2")
-        cmd += [*sources, dest]
+            cmd.append("--info=name1,stats2,progress2")
         if log_fn:
-            log_fn(f"[remote] $ {' '.join(shlex.quote(c) for c in cmd[:6])} … → {dest}\n")
+            # Log the full flag list so the user can see every gating
+            # flag (--append-verify, --info=name1,...) in the log;
+            # pre-cleanup we sliced ``cmd[:6]`` which truncated before
+            # the --info flag on modern rsync.
+            log_fn(
+                f"[remote] $ {' '.join(shlex.quote(c) for c in cmd)} … → {dest} "
+                f"({len(sources)} file(s))\n"
+            )
+        cmd += [*sources, dest]
 
         # Bounded retry on transient network failures (v5.1.1). The
         # ``--partial`` flag means each retry resumes where the previous
@@ -822,6 +1143,39 @@ class DatasetCache:
             return exc  # type: ignore[return-value]
 
 
+_RSYNC_FILENAME_RE = re.compile(
+    # Positive match: a single token (NO whitespace anywhere) that
+    # either contains a path separator (e.g. ``subdir/foo.tif``) or
+    # ends with a 1–8 character extension (e.g. ``A01.zip``,
+    # ``process_microscopy.py``, ``_Docs/requirements-remote.txt``).
+    r"^\S+(?:[/\\]\S+|\.[A-Za-z0-9]{1,8})$"
+)
+
+
+def _looks_like_rsync_filename(line: str) -> bool:
+    """Return True iff ``line`` looks like an rsync ``--info=name1``
+    filename emission (vs progress, stats, warning, or error noise).
+
+    Uses a POSITIVE match rather than elimination. The original
+    negate-known-prefixes approach was leaky — rsync emits dozens of
+    status lines (``total size is X``, ``Number of files: N``,
+    ``sending incremental file list``, ``created directory /foo``,
+    ``file has vanished: x.tmp``, ``deleting old.zip``, etc.) and
+    every new one would silently get misclassified as a "filename"
+    until the prefix list was extended.
+
+    The positive form keys on two observations: (a) every transferred
+    filename rsync emits with ``--info=name1`` is a single
+    whitespace-free token, and (b) every status/diagnostic line
+    contains whitespace (the prose part). So a no-whitespace line
+    that also looks like a path is the filename; anything else is
+    noise.
+    """
+    if not line:
+        return False
+    return bool(_RSYNC_FILENAME_RE.match(line))
+
+
 def _run_rsync_streaming(
     cmd: list[str],
     *,
@@ -850,6 +1204,14 @@ def _run_rsync_streaming(
     progress_re = re.compile(r"(\d[\d,]*)\s+(\d+)%\s+(\S+)\s+\S+(?:\s+\(.*\))?")
     bytes_sent_re = re.compile(r"^[Tt]otal transferred file size:\s+([\d,]+)\s+bytes")
     bytes_actual_re = re.compile(r"^sent\s+([\d,]+)\s+bytes")
+    # v5.2.20: when --info=name1 is on, rsync emits a bare filename
+    # per transferred file. Detect them by elimination — they're
+    # non-empty lines that aren't a progress line, a stats footer,
+    # an rsync error line, or one of the well-known directory or
+    # incremental-listing markers. Captures both the well-zip names
+    # (e.g. "A01.zip") and the required-files names (e.g.
+    # "process_microscopy.py", "_Docs/requirements-remote.txt").
+    file_count = 0
 
     try:
         assert proc.stdout is not None
@@ -877,8 +1239,12 @@ def _run_rsync_streaming(
                 m = bytes_sent_re.match(line)
                 if m:
                     sent_bytes = int(m.group(1).replace(",", ""))
-            if log_fn and line.startswith(("sent ", "Total ", "rsync:", "rsync error")):
-                log_fn(f"[remote] {line}\n")
+            if log_fn:
+                if line.startswith(("sent ", "Total ", "rsync:", "rsync error")):
+                    log_fn(f"[remote] {line}\n")
+                elif _looks_like_rsync_filename(line):
+                    file_count += 1
+                    log_fn(f"[remote] ↑ ({file_count}) {line}\n")
         proc.wait()
     finally:
         if proc.poll() is None:
@@ -1165,8 +1531,34 @@ class Fetcher:
         Called by the Popen wrapper's ``wait()`` so the run isn't
         reported complete until every well's output has landed.
         """
+        pending_count = self._pending.qsize()
+        if pending_count:
+            self._log(
+                f"[remote] ↓ draining fetcher: {pending_count} well(s) "
+                f"still queued for download\n"
+            )
         self._pending.put(None)
         self._worker.join(timeout=timeout)
+        # v5.2.18: surface the end-of-stream summary so the user
+        # sees a clear "all downloads complete" marker rather than
+        # the run silently going quiet.
+        total = self.run.well_count_total
+        fetched = len(self.run.fetched_wells)
+        if total and fetched == total:
+            self._log(
+                f"[remote] ↓ fetcher: {fetched}/{total} wells downloaded "
+                f"to {self.run.local_output_dir}\n"
+            )
+        elif total:
+            self._log(
+                f"[remote] ↓ fetcher: {fetched}/{total} wells downloaded "
+                f"({total - fetched} missing — verify step will retry)\n"
+            )
+        else:
+            self._log(
+                f"[remote] ↓ fetcher: {fetched} well(s) downloaded "
+                f"(remote never announced total)\n"
+            )
 
     # Internals ──────────────────────────────────────────────────────────
 
@@ -1185,26 +1577,62 @@ class Fetcher:
     def _fetch_one(self, well: str) -> None:
         """Pull a single well's output. The remote pipeline produces
         ``{output_dir}/{well}_out.zip`` and a sibling
-        ``{csv_prefix}_{well}.csv`` (see report §2)."""
+        ``{csv_prefix}_{well}.csv`` (see report §2).
+
+        v5.2.18: emits visible progress lines so the user can see
+        what's being downloaded. Pre-v5.2.18 the Fetcher worked
+        silently — a long fetch looked like the GUI had hung.
+        """
         tmp_zip = Path(tempfile.gettempdir()) / f"allwell-{self.run.run_id}-{well}_out.zip"
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
         csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
 
+        total = self.run.well_count_total or 0
+        position = len(self.run.fetched_wells) + 1
+        prefix = f"({position}/{total}) " if total else ""
+
+        self._log(f"[remote] ↓ {prefix}{well}: starting download from {self.host.ssh_alias}\n")
+
         # Output zip — exists iff the pipeline finished this well. Pull it
         # even under CSV-only mode: we'll discard it after extracting the
         # files we want.
+        t0 = time.monotonic()
         if not self._rsync(
             [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
              "-a", zip_src, to_rsync_path(tmp_zip)]
         ):
-            self._log(f"[remote] warn: could not pull {well}_out.zip; will retry at end.\n")
+            self._log(
+                f"[remote] ↓ {well}: WARN could not pull {well}_out.zip from "
+                f"{self.run.remote_output_dir}; will retry at end of run.\n"
+            )
             return
+
+        zip_elapsed = time.monotonic() - t0
+        zip_size = tmp_zip.stat().st_size if tmp_zip.exists() else 0
+        mb = zip_size / (1024 * 1024)
+        mbps = (mb * 8) / zip_elapsed if zip_elapsed > 0 else 0.0
+        self._log(
+            f"[remote] ↓ {well}: {mb:.1f} MB zip in "
+            f"{_fmt_secs(zip_elapsed)} ({mbps:.0f} Mbps)\n"
+        )
 
         # CSVs live at the top of the remote output_dir, not inside the
         # well zip — pull them separately. A failure here isn't fatal:
         # the per-well CSV is the most important file and any retry can
         # re-pull it.
-        self._rsync_glob(csv_glob_src, self.run.local_output_dir)
+        t1 = time.monotonic()
+        csv_count = self._rsync_glob(csv_glob_src, self.run.local_output_dir)
+        csv_elapsed = time.monotonic() - t1
+        if csv_count > 0:
+            self._log(
+                f"[remote] ↓ {well}: {csv_count} CSV file(s) in "
+                f"{_fmt_secs(csv_elapsed)}\n"
+            )
+        else:
+            self._log(
+                f"[remote] ↓ {well}: WARN no CSV files found at "
+                f"{self.run.remote_output_dir}/*_{well}.csv\n"
+            )
 
         # Now materialize the well's output in the user's output_dir
         # according to local input mode.
@@ -1214,6 +1642,13 @@ class Fetcher:
         except OSError:
             pass
         self.run.fetched_wells.add(well)
+        total_elapsed = time.monotonic() - t0
+        position_done = len(self.run.fetched_wells)
+        tally = f"{position_done}/{total} wells" if total else f"{position_done} wells"
+        self._log(
+            f"[remote] ✓ {well}: materialised to {self.run.local_output_dir} "
+            f"(total {_fmt_secs(total_elapsed)}, {tally} fetched)\n"
+        )
         if self._progress and self.run.well_count_total > 0:
             self._progress(len(self.run.fetched_wells) / self.run.well_count_total)
 
@@ -1256,9 +1691,14 @@ class Fetcher:
         result = _rsync_with_retry(argv, log_fn=self._log)
         return result.returncode == 0
 
-    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> bool:
+    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> int:
         """Pull files matching a glob. Wraps the source in a quoted-glob
-        rsync so the remote side expands ``*``, not the local shell."""
+        rsync so the remote side expands ``*``, not the local shell.
+
+        v5.2.18: returns the count of files successfully pulled
+        (was: bool). The caller logs the count so the user can see
+        how many CSVs landed per well.
+        """
         # We invoke `ssh host 'ls -1 GLOB'` first; rsync's own glob
         # support requires the source to be quoted in a way that's awkward
         # to spell cross-shell.
@@ -1278,16 +1718,16 @@ class Fetcher:
         )
         files = [ln for ln in listing.stdout.splitlines() if ln.strip()]
         if not files:
-            return False
-        ok = True
+            return 0
+        pulled = 0
         dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
         for f in files:
-            if not self._rsync(
+            if self._rsync(
                 [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
                  "-a", f"{host}:{f}", dest_str]
             ):
-                ok = False
-        return ok
+                pulled += 1
+        return pulled
 
 
 # ────────────────────────────────────────────────────────────────────────────

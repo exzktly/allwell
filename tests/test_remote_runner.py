@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -27,7 +28,7 @@ from services.remote_runner import (
     _detect_local_input_mode,
     _CONDA_ACTIVATE_SNIPPET,
     _conda_run_prefix,
-    _filter_channels_in_place,
+    _filter_channels_in_staging,
     _member_matches,
     _required_tokens,
     _rsync_ssh_transport,
@@ -84,6 +85,44 @@ def test_detect_flat_mode(tmp_path):
     assert _detect_local_input_mode(tmp_path) is LocalInputMode.FLAT
 
 
+def test_detect_mixed_mode_zips_plus_folders_for_other_wells(tmp_path):
+    """v5.2.21: input dir has zips for some wells AND folders for
+    DIFFERENT wells — the signature of a previous run that died
+    partway through compress_input_well_folders. Must be recognised
+    as MIXED so the staging path can resume."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    _make_well_zip(tmp_path, "A02.zip", ["NIR.tif"])
+    (tmp_path / "B03").mkdir()
+    (tmp_path / "B03" / "NIR.tif").write_bytes(b"\0")
+    (tmp_path / "B04").mkdir()
+    (tmp_path / "B04" / "NIR.tif").write_bytes(b"\0")
+    assert _detect_local_input_mode(tmp_path) is LocalInputMode.MIXED
+
+
+def test_detect_mode_empty_leftover_folders_dont_trigger_mixed(tmp_path):
+    """Compress-and-delete sometimes leaves empty folder husks (the
+    rename completed, the rmtree raced with another process). An
+    empty folder should NOT trigger MIXED detection — it's just
+    cleanup debris, not real loose content."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    (tmp_path / "A01").mkdir()  # empty husk left behind
+    (tmp_path / "B02").mkdir()  # another empty husk
+    assert _detect_local_input_mode(tmp_path) is LocalInputMode.ZIP
+
+
+def test_detect_mode_folder_with_existing_zip_for_same_well_is_zip(tmp_path):
+    """If a well has BOTH a zip AND a folder of TIFs (the truly
+    half-finished case where the zip was written but the folder
+    rmtree never ran), the zip wins — same well, no extra work to do
+    on the leftover folder. MIXED should be reserved for wells with
+    NO existing zip."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    (tmp_path / "A01").mkdir()
+    (tmp_path / "A01" / "NIR.tif").write_bytes(b"\0")
+    # No OTHER wells with folders only — so this is ZIP mode.
+    assert _detect_local_input_mode(tmp_path) is LocalInputMode.ZIP
+
+
 # ── stage_local_zips: zip-input fast path ───────────────────────────────────
 
 
@@ -99,6 +138,98 @@ def test_stage_local_zips_zip_input_passthrough(tmp_path):
     assert zipped.zip_dir == tmp_path  # no copy
     assert len(zipped.well_zips) == 2
     assert zipped.cleanup is None  # no temp dir to clean up
+
+
+def test_stage_local_zips_mixed_mode_resumes_from_leftover_folders(tmp_path):
+    """v5.2.21: a dropped-drive interrupted a prior local
+    compress_input_well_folders run, leaving the input dir with some
+    completed zips and some unzipped folders. The staging step must
+    pick this up as a resume — zip the leftover folders and combine
+    with the existing zips for the union of wells, not silently drop
+    the folders by picking ZIP mode."""
+    _make_well_zip(tmp_path, "A01.zip", ["A01_NIR_F001.tif"])
+    _make_well_zip(tmp_path, "A02.zip", ["A02_NIR_F001.tif"])
+    (tmp_path / "B03").mkdir()
+    (tmp_path / "B03" / "B03_NIR_F001.tif").write_bytes(b"\xff" * 64)
+    (tmp_path / "B03" / "B03_GFP_F001.tif").write_bytes(b"\xff" * 64)
+    (tmp_path / "B04").mkdir()
+    (tmp_path / "B04" / "B04_NIR_F001.tif").write_bytes(b"\xff" * 64)
+
+    logs: list[str] = []
+    zipped = stage_local_zips(
+        tmp_path,
+        filename_schema="well:channel:fov",
+        filename_sep="_",
+        log_fn=logs.append,
+    )
+
+    assert zipped.mode is LocalInputMode.MIXED
+    # Four wells total: 2 existing zips + 2 newly-zipped from folders.
+    assert len(zipped.well_zips) == 4
+    names = sorted(p.name for p in zipped.well_zips)
+    assert names == ["A01.zip", "A02.zip", "B03.zip", "B04.zip"]
+    # The resume log line must surface so the user knows what's
+    # happening (and which wells are being newly zipped).
+    blob = "".join(logs)
+    assert "resume detected" in blob
+    assert "B03" in blob
+    assert "B04" in blob
+
+    # User's existing zips are untouched (path still points at input dir).
+    a01 = next(p for p in zipped.well_zips if p.name == "A01.zip")
+    assert a01.parent == tmp_path
+    # Newly-zipped wells live in the staging dir.
+    b03 = next(p for p in zipped.well_zips if p.name == "B03.zip")
+    assert b03.parent == zipped.zip_dir
+    assert zipped.zip_dir != tmp_path
+
+    # New zips actually contain the source TIFs.
+    with zipfile.ZipFile(b03, "r") as zf:
+        assert sorted(zf.namelist()) == ["B03_GFP_F001.tif", "B03_NIR_F001.tif"]
+
+    # Cleanup tears down the staging dir.
+    assert zipped.cleanup is not None
+    zipped.cleanup()
+    assert not zipped.zip_dir.exists()
+    # The user's zips and folders remain in the input dir post-cleanup.
+    assert (tmp_path / "A01.zip").exists()
+    assert (tmp_path / "B03" / "B03_NIR_F001.tif").exists()
+
+
+def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
+    """If _stage_mixed_mode raises mid-zip (e.g. PermissionError on a
+    folder), the user's pre-existing zips MUST be untouched and the
+    staging dir MUST be cleaned up — no leaked temp dir, no mutation
+    of the input dir."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    original_bytes = (tmp_path / "A01.zip").read_bytes()
+    (tmp_path / "B02").mkdir()
+    (tmp_path / "B02" / "NIR.tif").write_bytes(b"\xff" * 32)
+
+    import services.remote_runner as rr
+
+    def fake_zip_well_folder(folder: Path, out_zip: Path) -> int:
+        raise PermissionError("drive yanked mid-zip")
+
+    original = rr._zip_well_folder
+    rr._zip_well_folder = fake_zip_well_folder
+    try:
+        with pytest.raises(PermissionError, match="drive yanked"):
+            stage_local_zips(
+                tmp_path,
+                filename_schema="well:channel:fov",
+                filename_sep="_",
+            )
+    finally:
+        rr._zip_well_folder = original
+
+    # User's zip is byte-for-byte unchanged.
+    assert (tmp_path / "A01.zip").read_bytes() == original_bytes
+    # Folder is untouched.
+    assert (tmp_path / "B02" / "NIR.tif").exists()
+    # No leaked staging dirs.
+    leaked = list(Path(tempfile.gettempdir()).glob("allwell-resume-*"))
+    assert not leaked, f"staging dir leaked on error: {leaked}"
 
 
 # ── selective channel staging ───────────────────────────────────────────────
@@ -133,7 +264,7 @@ def test_filter_channels_drops_unused(tmp_path):
         ],
     )
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z,))
-    _filter_channels_in_place(
+    _filter_channels_in_staging(
         tmp_path, (z,), LocalInputMode.ZIP,
         keep_tokens={"NIR", "GFP"},
         log_fn=None,
@@ -150,7 +281,7 @@ def test_filter_channels_noop_when_all_kept(tmp_path):
     members = ["Exp_NIR_A01.tif", "Exp_GFP_A01.tif"]
     z = _make_well_zip(tmp_path, "A01.zip", members)
     size_before = z.stat().st_size
-    _filter_channels_in_place(
+    _filter_channels_in_staging(
         tmp_path, (z,), LocalInputMode.ZIP,
         keep_tokens={"NIR", "GFP"},
         log_fn=None,
@@ -159,6 +290,129 @@ def test_filter_channels_noop_when_all_kept(tmp_path):
     assert z.stat().st_size == size_before
     with zipfile.ZipFile(z, "r") as zf:
         assert sorted(zf.namelist()) == sorted(members)
+
+
+def test_filter_channels_raises_when_typo_drops_everything(tmp_path):
+    """v5.2.18: if a typo'd channel name matches zero members in a
+    well, refuse to ship an empty zip. The pipeline downstream would
+    crash with a confusing 'no images found' message far from the
+    real cause."""
+    z = _make_well_zip(
+        tmp_path,
+        "A01.zip",
+        ["Exp_NIR_A01_F001.tif", "Exp_GFP_A01_F001.tif"],
+    )
+    # User typoed "GP" instead of "GFP" — neither token matches.
+    with pytest.raises(RuntimeError, match=r"matched zero images.*A01.*typo"):
+        _filter_channels_in_staging(
+            tmp_path, (z,), LocalInputMode.ZIP,
+            keep_tokens={"NUR", "GP"},  # both typoed
+            log_fn=None,
+        )
+
+
+def test_stage_local_zips_with_fluor_filter_preserves_user_input(tmp_path):
+    """v5.2.18: stage_local_zips MUST NOT modify the user's original
+    input zips. Pre-v5.2.18 it rewrote them in place — a typo'd
+    channel name silently deleted frames from the user's dataset.
+    Verify the user's zip is byte-for-byte unchanged after staging
+    a fluor-filter request."""
+    members = [
+        "Exp_NIR_A01_F001.tif",
+        "Exp_GFP_A01_F001.tif",
+        "Exp_mCherry_A01_F001.tif",
+    ]
+    z = _make_well_zip(tmp_path, "A01.zip", members)
+    original_bytes = z.read_bytes()
+    original_size = z.stat().st_size
+    original_mtime = z.stat().st_mtime
+
+    zipped = stage_local_zips(
+        tmp_path,
+        filename_schema="experiment:channel:well:fov",
+        filename_sep="_",
+        nuclear_token="NIR",
+        fluor_tokens=["GFP"],  # drops mCherry
+    )
+
+    # The user's original file is untouched.
+    assert z.read_bytes() == original_bytes
+    assert z.stat().st_size == original_size
+    assert z.stat().st_mtime == original_mtime
+    with zipfile.ZipFile(z, "r") as zf:
+        assert sorted(zf.namelist()) == sorted(members)
+
+    # The staged copy lives in a separate temp dir and HAS been filtered.
+    assert zipped.zip_dir != tmp_path
+    assert len(zipped.well_zips) == 1
+    staged = zipped.well_zips[0]
+    assert staged.parent == zipped.zip_dir
+    with zipfile.ZipFile(staged, "r") as zf:
+        staged_members = zf.namelist()
+    assert any("NIR" in m for m in staged_members)
+    assert any("GFP" in m for m in staged_members)
+    assert not any("mCherry" in m for m in staged_members)
+
+    # A cleanup hook is provided so the temp dir gets removed.
+    assert zipped.cleanup is not None
+    zipped.cleanup()
+    assert not zipped.zip_dir.exists()
+
+
+def test_stage_local_zips_typoed_channel_does_not_corrupt_user_input(tmp_path):
+    """v5.2.18 worst-case scenario: user types nonsense channel
+    names. The staging must (a) NOT modify the user's input, AND
+    (b) raise a helpful error before anything reaches the remote."""
+    members = ["Exp_NIR_A01_F001.tif", "Exp_GFP_A01_F001.tif"]
+    z = _make_well_zip(tmp_path, "A01.zip", members)
+    original_bytes = z.read_bytes()
+
+    with pytest.raises(RuntimeError, match=r"matched zero images"):
+        stage_local_zips(
+            tmp_path,
+            filename_schema="experiment:channel:well:fov",
+            filename_sep="_",
+            nuclear_token="WRONG",
+            fluor_tokens=["ALSO_WRONG"],
+        )
+
+    # User's zip is still pristine after the error.
+    assert z.read_bytes() == original_bytes
+    with zipfile.ZipFile(z, "r") as zf:
+        assert sorted(zf.namelist()) == sorted(members)
+
+
+def test_filter_channels_logs_per_well_progress(tmp_path):
+    """v5.2.20: pre-v5.2.20 the channel filter only emitted ONE
+    summary line at the end of the whole plate. For a 96-well filter
+    that meant total silence for tens of seconds. Now each well
+    contributes a progress line so the user can see the filter
+    chewing through the plate."""
+    # A01 — all kept (no-op). B02 — partial (rewrite). C03 — all kept.
+    a01 = _make_well_zip(tmp_path, "A01.zip", ["NIR_F001.tif", "GFP_F001.tif"])
+    b02 = _make_well_zip(
+        tmp_path, "B02.zip",
+        ["NIR_F001.tif", "GFP_F001.tif", "DAPI_F001.tif"],
+    )
+    c03 = _make_well_zip(tmp_path, "C03.zip", ["NIR_F001.tif", "GFP_F001.tif"])
+
+    lines: list[str] = []
+    _filter_channels_in_staging(
+        tmp_path, (a01, b02, c03), LocalInputMode.ZIP,
+        keep_tokens={"NIR", "GFP"},
+        log_fn=lambda s: lines.append(s),
+    )
+    blob = "".join(lines)
+    # Per-well status with position-of-total prefix.
+    assert "(1/3): A01" in blob
+    assert "(2/3): B02" in blob
+    assert "(3/3): C03" in blob
+    # No-op wells say "all N kept".
+    assert "A01" in blob and "no-op" in blob
+    # The rewrite well reports its before→after size.
+    assert "B02" in blob and "kept 2/3" in blob
+    # End-of-plate summary still fires.
+    assert "summary" in blob and "rewrote 1" in blob
 
 
 # ── DatasetCache: cache-key stability ───────────────────────────────────────
@@ -533,6 +787,91 @@ def test_fetcher_ignores_unrelated_lines(host, tmp_path):
         fetcher.observe("[zipper] copying foo\n")
         fetcher.cancel()
     assert run.expected_wells == set()
+
+
+def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
+    """v5.2.18: per-well fetch must emit visible progress lines —
+    start-of-download, size+throughput summary, CSV count, and final
+    materialised confirmation. Pre-v5.2.18 the Fetcher was completely
+    silent during downloads; the user couldn't tell whether the GUI
+    had hung or was making progress."""
+    from services.remote_runner import _RemoteRun
+
+    run = _RemoteRun(
+        run_id="r",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+    )
+    run.well_count_total = 2
+
+    log_lines: list[str] = []
+
+    def fake_rsync(self, argv):
+        # Simulate a successful download: write a 1MB temp zip if the
+        # call is the per-well zip pull.
+        for a in argv:
+            if a.startswith("/") and a.endswith("_out.zip"):
+                Path(a).write_bytes(b"\0" * 1024 * 1024)
+        return True
+
+    monkeypatch.setattr(Fetcher, "_rsync", fake_rsync)
+    monkeypatch.setattr(Fetcher, "_rsync_glob", lambda self, src, dst: 1)
+    monkeypatch.setattr(Fetcher, "_materialize", lambda self, w, z: None)
+
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(
+            host, run, output_filter=OutputFilter.FULL,
+            log_fn=lambda m: log_lines.append(m),
+        )
+        fetcher._fetch_one("A01")  # noqa: SLF001
+        fetcher.cancel()
+
+    blob = "".join(log_lines)
+    # Start line includes a position-of-total prefix.
+    assert "(1/2) A01: starting download" in blob
+    # Zip size and rate.
+    assert "A01: 1.0 MB zip" in blob
+    assert "Mbps" in blob
+    # CSV count.
+    assert "A01: 1 CSV file(s)" in blob
+    # Final materialised marker with running tally.
+    assert "✓ A01: materialised to" in blob
+    assert "1/2 wells fetched" in blob
+
+
+def test_fetcher_fetch_one_warns_when_zip_missing(host, tmp_path, monkeypatch):
+    """If the remote well_out.zip can't be pulled, the warn line must
+    include the remote output dir so the user can investigate."""
+    from services.remote_runner import _RemoteRun
+
+    run = _RemoteRun(
+        run_id="r",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+    )
+
+    log_lines: list[str] = []
+    monkeypatch.setattr(Fetcher, "_rsync", lambda self, argv: False)
+
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(
+            host, run, output_filter=OutputFilter.FULL,
+            log_fn=lambda m: log_lines.append(m),
+        )
+        fetcher._fetch_one("B02")  # noqa: SLF001
+        fetcher.cancel()
+
+    blob = "".join(log_lines)
+    assert "B02: WARN could not pull B02_out.zip" in blob
+    assert "/r/out" in blob  # remote dir surfaced for debugging
 
 
 # ── Verify ──────────────────────────────────────────────────────────────────
@@ -1313,6 +1652,100 @@ def test_remote_join_renders_full_command():
     # No single-quoted ~ anywhere (the bug).
     assert "'~/" not in cmd
     assert "'~'" not in cmd
+
+
+def test_looks_like_rsync_filename_accepts_zip_paths():
+    """v5.2.20: rsync --info=name1 emits bare filenames on their own
+    line. The heuristic must accept paths a user would actually see
+    (well zips, required-files like process_microscopy.py and
+    subfolder/file.txt)."""
+    from services.remote_runner import _looks_like_rsync_filename
+    assert _looks_like_rsync_filename("A01.zip") is True
+    assert _looks_like_rsync_filename("process_microscopy.py") is True
+    assert _looks_like_rsync_filename("_Docs/requirements-remote.txt") is True
+
+
+def test_looks_like_rsync_filename_rejects_progress_and_status_lines():
+    """The heuristic must reject the noise rsync emits alongside
+    filename lines — progress percentages, byte stats, error
+    markers, the file-list announcement, blanks, and the wider
+    stats2 / status surface that pre-cleanup leaked through."""
+    from services.remote_runner import _looks_like_rsync_filename
+    # Empties.
+    assert _looks_like_rsync_filename("") is False
+    assert _looks_like_rsync_filename(" ") is False
+    # Progress line — starts with whitespace + numbers + percent.
+    assert _looks_like_rsync_filename("    12,345  50%  1.20MB/s    0:00:01") is False
+    # The 'sent X / Total ...' summary (capital and lowercase variants).
+    assert _looks_like_rsync_filename("sent 1,234,567 bytes  received 567 bytes  ...") is False
+    assert _looks_like_rsync_filename("Total bytes sent: 1,234,567") is False
+    assert _looks_like_rsync_filename("total size is 1,234  speedup is 1.00") is False
+    # Errors and announcements.
+    assert _looks_like_rsync_filename("rsync: connection unexpectedly closed") is False
+    assert _looks_like_rsync_filename("rsync error: error in socket IO (code 10)") is False
+    assert _looks_like_rsync_filename("building file list ... done") is False
+    assert _looks_like_rsync_filename("sending incremental file list") is False
+    # --info=stats2 multi-line footer — these all start with capitals
+    # and avoid the legacy prefix list. Caught now because they
+    # contain whitespace.
+    assert _looks_like_rsync_filename("Number of files: 96") is False
+    assert _looks_like_rsync_filename("Number of regular files transferred: 12") is False
+    assert _looks_like_rsync_filename("Literal data: 1,234,567 bytes") is False
+    assert _looks_like_rsync_filename("Matched data: 0 bytes") is False
+    assert _looks_like_rsync_filename("File list size: 123") is False
+    assert _looks_like_rsync_filename("File list generation time: 0.001 seconds") is False
+    # Non-fatal warnings.
+    assert _looks_like_rsync_filename("file has vanished: bar.tmp") is False
+    assert _looks_like_rsync_filename("created directory /remote/datasets/abc") is False
+    assert _looks_like_rsync_filename("deleting some_obsolete.zip") is False
+    assert _looks_like_rsync_filename("*deleting subdir/old.tif") is False
+    assert _looks_like_rsync_filename("WARNING: foo failed verification") is False
+    assert _looks_like_rsync_filename("IO error encountered -- skipping file deletion") is False
+    assert _looks_like_rsync_filename("skipping non-regular file \"foo\"") is False
+
+
+def test_ensure_uploaded_upload_cmd_includes_name1_on_modern_rsync(host, tmp_path, monkeypatch):
+    """v5.2.20: per-file logging requires ``--info=name1`` so rsync
+    emits filenames; assert the upload command actually includes
+    that flag on rsync 3.1+."""
+    from services.remote_runner import _rsync_version
+    _rsync_version.cache_clear()
+
+    z = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
+    z.write_bytes(b"\0" * 1024)
+    zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z,))
+    cache = DatasetCache(host)
+    captured = {}
+
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="1\n", returncode=0),
+    )
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 3.2.7  protocol version 31\n",
+            stderr="",
+        )),
+    )
+
+    def capture_streaming(cmd, **kw):
+        captured["cmd"] = list(cmd)
+        return (1024, 0)
+
+    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+
+    cache.ensure_uploaded(zipped)
+    info_flag = next((a for a in captured["cmd"] if a.startswith("--info=")), "")
+    assert "name1" in info_flag, (
+        f"--info= must include 'name1' so rsync emits filename lines for per-file logging; "
+        f"got {info_flag!r}"
+    )
 
 
 def test_conda_run_prefix_default_env():

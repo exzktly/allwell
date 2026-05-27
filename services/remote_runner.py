@@ -1324,6 +1324,7 @@ def _rsync_with_retry(
     timeout: int = 300,
     capture_output: bool = True,
     cwd: str | None = None,
+    stop_event: threading.Event | None = None,
 ) -> subprocess.CompletedProcess:
     """Run an rsync command, retrying on transient network failures.
 
@@ -1342,6 +1343,13 @@ def _rsync_with_retry(
     ``rsync -aR`` recreate the right directory layout on the remote;
     the absolute-path-with-``/./``-pivot trick is fragile on older
     rsync versions, which mirror the full local path instead).
+
+    v5.2.28: ``stop_event`` makes the rsync cancellable. When set, the
+    in-flight rsync subprocess is terminated and the retry loop
+    short-circuits with synthetic ``rc=130`` (SIGINT-style). The
+    Fetcher passes its own stop event through here so the Stop
+    button actually interrupts per-well downloads instead of
+    waiting for each rsync to finish on its own.
     """
     log = log_fn or (lambda _m: None)
     delays = (0.0,) + _RSYNC_RETRY_DELAYS  # delay before each attempt
@@ -1349,20 +1357,36 @@ def _rsync_with_retry(
     last_exc: BaseException | None = None
 
     for attempt, delay in enumerate(delays):
+        if stop_event is not None and stop_event.is_set():
+            log("[remote] rsync cancelled by Stop request.\n")
+            return subprocess.CompletedProcess(
+                cmd, returncode=130, stdout="", stderr="cancelled",
+            )
         if delay > 0:
             log(
                 f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
                 f"in {delay:.0f}s (last exit code "
                 f"{last_result.returncode if last_result else '?'})\n"
             )
-            time.sleep(delay)
+            # Cooperatively interruptible sleep — check stop_event
+            # every 0.25s so a long backoff doesn't deafen Stop.
+            slept = 0.0
+            while slept < delay:
+                if stop_event is not None and stop_event.is_set():
+                    log("[remote] rsync cancelled during retry backoff.\n")
+                    return subprocess.CompletedProcess(
+                        cmd, returncode=130, stdout="", stderr="cancelled",
+                    )
+                step = min(0.25, delay - slept)
+                time.sleep(step)
+                slept += step
         try:
-            result = subprocess.run(
+            result = _rsync_run_cancellable(
                 cmd,
-                capture_output=capture_output,
-                text=True,
                 timeout=timeout,
+                capture_output=capture_output,
                 cwd=cwd,
+                stop_event=stop_event,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             last_exc = exc
@@ -1371,6 +1395,9 @@ def _rsync_with_retry(
         last_result = result
         last_exc = None
         if result.returncode == 0:
+            return result
+        if result.returncode == 130:
+            # Stop fired mid-rsync — don't retry, return immediately.
             return result
         if result.returncode not in _RSYNC_RETRY_CODES:
             # Non-transient — return immediately so the caller sees the
@@ -1384,6 +1411,69 @@ def _rsync_with_retry(
     return subprocess.CompletedProcess(
         cmd, returncode=255, stdout="", stderr=str(last_exc),
     )
+
+
+def _rsync_run_cancellable(
+    cmd: list[str],
+    *,
+    timeout: int,
+    capture_output: bool,
+    cwd: str | None,
+    stop_event: threading.Event | None,
+) -> subprocess.CompletedProcess:
+    """``subprocess.run`` work-alike that polls ``stop_event`` while
+    the child runs and terminates it on cancellation. v5.2.28.
+
+    When ``stop_event`` is None this is equivalent to ``subprocess.run``
+    — the only path that runs without cancellation is the bootstrap
+    ``sync_required_files`` call, which is small and short-lived."""
+    if stop_event is None:
+        return subprocess.run(
+            cmd, capture_output=capture_output, text=True,
+            timeout=timeout, cwd=cwd,
+        )
+    stdout_pipe = subprocess.PIPE if capture_output else None
+    stderr_pipe = subprocess.PIPE if capture_output else None
+    proc = subprocess.Popen(
+        cmd, stdout=stdout_pipe, stderr=stderr_pipe, text=True, cwd=cwd,
+    )
+    deadline = time.monotonic() + timeout
+    rc: int | None = None
+    try:
+        while True:
+            try:
+                rc = proc.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                if stop_event.is_set():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    return subprocess.CompletedProcess(
+                        cmd, returncode=130, stdout="", stderr="cancelled",
+                    )
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    raise subprocess.TimeoutExpired(cmd, timeout)
+                continue
+            break
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+    out, err = ("", "")
+    if capture_output and proc.stdout is not None:
+        try:
+            out = proc.stdout.read()
+        except Exception:
+            out = ""
+    if capture_output and proc.stderr is not None:
+        try:
+            err = proc.stderr.read()
+        except Exception:
+            err = ""
+    assert rc is not None
+    return subprocess.CompletedProcess(cmd, rc, out, err)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1624,7 +1714,13 @@ class Fetcher:
         v5.2.18: emits visible progress lines so the user can see
         what's being downloaded. Pre-v5.2.18 the Fetcher worked
         silently — a long fetch looked like the GUI had hung.
+
+        v5.2.28: short-circuit if the stop event fired between the
+        ``_loop`` check and now (mid-rsync cancellation is handled
+        deeper by ``_rsync_with_retry``).
         """
+        if self._stop.is_set():
+            return
         tmp_zip = Path(tempfile.gettempdir()) / f"allwell-{self.run.run_id}-{well}_out.zip"
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
         csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
@@ -1730,7 +1826,13 @@ class Fetcher:
         # network glitches during the Fetcher's per-well pull don't
         # silently lose a well's output. Non-transient rsync errors
         # (permission, bad path) still fail immediately.
-        result = _rsync_with_retry(argv, log_fn=self._log)
+        #
+        # v5.2.28: pass our own stop event so the Stop button can
+        # actually interrupt the per-well rsync. Pre-v5.2.28 each
+        # in-flight rsync had to run to completion before the
+        # Fetcher noticed the stop_event between queue items —
+        # which on a slow link looked like Stop did nothing.
+        result = _rsync_with_retry(argv, log_fn=self._log, stop_event=self._stop)
         return result.returncode == 0
 
     def _rsync_glob(self, src_glob: str, dest_dir: Path) -> int:
@@ -2007,11 +2109,23 @@ class RemoteRunner:
         expected_well_count = len(zipped.well_zips)
         cache_hit = False
         if expected_well_count > 0:
+            # v5.2.28: surface the path + raw listing so when a user
+            # expects a cache hit but doesn't get one, we can see
+            # whether (a) the run_id drifted between runs (different
+            # remote dir than the prior run wrote to), or (b) the
+            # dir exists but is empty / missing the right files.
+            log(
+                f"[remote] pre-flight: checking {self.host.ssh_alias}:"
+                f"{remote_output} for prior outputs\n"
+            )
             completed_remote = self._list_remote_completed_wells()
             log(
                 f"[remote] pre-flight: remote output dir has "
                 f"{len(completed_remote)}/{expected_well_count} well "
-                f"output zip(s)\n"
+                f"output zip(s) "
+                f"(found wells: "
+                f"{sorted(completed_remote)[:5]}"
+                f"{'…' if len(completed_remote) > 5 else ''})\n"
             )
             if len(completed_remote) >= expected_well_count:
                 cache_hit = True

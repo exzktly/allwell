@@ -303,8 +303,14 @@ def draw_beeswarm(
         elif cell_vals.size:
             jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
                                        max_spread=bar_w)
-            ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
-                            zorder=3, linewidths=0)
+            sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
+                                 zorder=3, linewidths=0)
+            # v5.2.31: tag so the export-style override picks up the
+            # collection and applies marker-size / open-vs-filled /
+            # edge-width prefs. Pre-v5.2.31 only ``ax.lines`` artists
+            # were styled, so beeswarm dots silently ignored the
+            # user's Marker pref changes.
+            sc._aw_marker_collection = True
             m = float(cell_vals.mean())
             ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
                          [m, m], color=color, lw=1.5, zorder=4)
@@ -570,7 +576,9 @@ def draw_fov_pooled_mode(
                 color = _WELL_COLORS[i % len(_WELL_COLORS)]
                 if arr.size:
                     jx, jy = _beeswarm_jitter(arr.tolist(), x_center=float(i), max_spread=bar_w)
-                    ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55, zorder=3, linewidths=0)
+                    sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
+                                         zorder=3, linewidths=0)
+                    sc._aw_marker_collection = True  # v5.2.31: see draw_beeswarm
                     m = float(arr.mean())
                     ax_mean.plot([i - bar_w * 0.6, i + bar_w * 0.6], [m, m],
                                  color=color, lw=1.5, zorder=4)

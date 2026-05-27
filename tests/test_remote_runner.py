@@ -535,6 +535,91 @@ def test_fetcher_ignores_unrelated_lines(host, tmp_path):
     assert run.expected_wells == set()
 
 
+def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
+    """v5.2.18: per-well fetch must emit visible progress lines —
+    start-of-download, size+throughput summary, CSV count, and final
+    materialised confirmation. Pre-v5.2.18 the Fetcher was completely
+    silent during downloads; the user couldn't tell whether the GUI
+    had hung or was making progress."""
+    from services.remote_runner import _RemoteRun
+
+    run = _RemoteRun(
+        run_id="r",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+    )
+    run.well_count_total = 2
+
+    log_lines: list[str] = []
+
+    def fake_rsync(self, argv):
+        # Simulate a successful download: write a 1MB temp zip if the
+        # call is the per-well zip pull.
+        for a in argv:
+            if a.startswith("/") and a.endswith("_out.zip"):
+                Path(a).write_bytes(b"\0" * 1024 * 1024)
+        return True
+
+    monkeypatch.setattr(Fetcher, "_rsync", fake_rsync)
+    monkeypatch.setattr(Fetcher, "_rsync_glob", lambda self, src, dst: 1)
+    monkeypatch.setattr(Fetcher, "_materialize", lambda self, w, z: None)
+
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(
+            host, run, output_filter=OutputFilter.FULL,
+            log_fn=lambda m: log_lines.append(m),
+        )
+        fetcher._fetch_one("A01")  # noqa: SLF001
+        fetcher.cancel()
+
+    blob = "".join(log_lines)
+    # Start line includes a position-of-total prefix.
+    assert "(1/2) A01: starting download" in blob
+    # Zip size and rate.
+    assert "A01: 1.0 MB zip" in blob
+    assert "Mbps" in blob
+    # CSV count.
+    assert "A01: 1 CSV file(s)" in blob
+    # Final materialised marker with running tally.
+    assert "✓ A01: materialised to" in blob
+    assert "1/2 wells fetched" in blob
+
+
+def test_fetcher_fetch_one_warns_when_zip_missing(host, tmp_path, monkeypatch):
+    """If the remote well_out.zip can't be pulled, the warn line must
+    include the remote output dir so the user can investigate."""
+    from services.remote_runner import _RemoteRun
+
+    run = _RemoteRun(
+        run_id="r",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+    )
+
+    log_lines: list[str] = []
+    monkeypatch.setattr(Fetcher, "_rsync", lambda self, argv: False)
+
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(
+            host, run, output_filter=OutputFilter.FULL,
+            log_fn=lambda m: log_lines.append(m),
+        )
+        fetcher._fetch_one("B02")  # noqa: SLF001
+        fetcher.cancel()
+
+    blob = "".join(log_lines)
+    assert "B02: WARN could not pull B02_out.zip" in blob
+    assert "/r/out" in blob  # remote dir surfaced for debugging
+
+
 # ── Verify ──────────────────────────────────────────────────────────────────
 
 

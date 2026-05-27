@@ -1992,6 +1992,7 @@ class RemoteRunner:
         ok: bool,
         *,
         cleanup_mode: str = "none",
+        dry_run: bool = False,
         log_fn: Callable[[str], None] | None = None,
     ) -> bool:
         """Pull top-level artefacts, then verify and clean up.
@@ -1999,6 +2000,13 @@ class RemoteRunner:
         Returns True iff the local manifest checks pass. The remote
         cleanup is only fired on success — a failed manifest leaves the
         remote state in place for retry.
+
+        v5.2.23: when ``dry_run`` is True, the ``rm -rf`` paths are
+        replaced with an ssh probe that surfaces the path, file count,
+        and total bytes that WOULD be removed. The remote files are
+        left in place. Useful for shared machines where the user
+        wants to confirm what gets deleted before turning auto-delete
+        on for real.
         """
         log = log_fn or (lambda _m: None)
         if self._run is None:
@@ -2042,18 +2050,70 @@ class RemoteRunner:
         if cleanup_mode == "none":
             log("[remote] --cleanup-remote=none — leaving everything in place.\n")
             return True
-        self._cache._ssh_run(  # noqa: SLF001
-            ["rm", "-rf", f"{self.host.remote_staging_dir}/runs/{run.run_id}"],
-            check=False,
-        )
-        log(f"[remote] removed run dir {run.run_id}.\n")
-        if cleanup_mode == "all":
+
+        run_dir = f"{self.host.remote_staging_dir}/runs/{run.run_id}"
+        if dry_run:
+            self._log_would_delete(run_dir, label=f"run dir {run.run_id}", log=log)
+        else:
             self._cache._ssh_run(  # noqa: SLF001
-                ["rm", "-rf", self._cache.remote_dataset_dir(run.cache_key)],
+                ["rm", "-rf", run_dir],
                 check=False,
             )
-            log(f"[remote] removed dataset cache {run.cache_key[:8]}.\n")
+            log(f"[remote] removed run dir {run.run_id}.\n")
+        if cleanup_mode == "all":
+            cache_dir = self._cache.remote_dataset_dir(run.cache_key)
+            if dry_run:
+                self._log_would_delete(
+                    cache_dir,
+                    label=f"dataset cache {run.cache_key[:8]}",
+                    log=log,
+                )
+            else:
+                self._cache._ssh_run(  # noqa: SLF001
+                    ["rm", "-rf", cache_dir],
+                    check=False,
+                )
+                log(f"[remote] removed dataset cache {run.cache_key[:8]}.\n")
+        if dry_run:
+            log(
+                "[remote] [DRY-RUN] no files were actually deleted. "
+                "Re-run without --dry-run-cleanup to commit.\n"
+            )
         return True
+
+    def _log_would_delete(
+        self, remote_path: str, *, label: str, log: Callable[[str], None]
+    ) -> None:
+        """v5.2.23 dry-run probe: ssh in, count files + bytes at
+        ``remote_path``, log the result without deleting anything.
+
+        Uses ``_ssh_script`` (stdin-piped to remote bash) so the
+        ``~/.allwell-staging`` default expands correctly on the
+        remote — the v5.2.16 lesson, generalised."""
+        script = (
+            f"if [ ! -e {remote_path} ]; then echo MISSING; exit 0; fi; "
+            f"_b=$(du -sb {remote_path} 2>/dev/null | awk '{{print $1}}'); "
+            f"_f=$(find {remote_path} -type f 2>/dev/null | wc -l | tr -d ' '); "
+            f"echo BYTES $_b; "
+            f"echo FILES $_f"
+        )
+        result = self._cache._ssh_script(script, check=False)  # noqa: SLF001
+        out = (result.stdout if result is not None else "") or ""
+        if "MISSING" in out:
+            log(
+                f"[remote] [DRY-RUN] would delete {label} at {remote_path} "
+                f"— but path doesn't exist on remote (already cleaned up?).\n"
+            )
+            return
+        bytes_match = re.search(r"BYTES\s+(\d+)", out)
+        files_match = re.search(r"FILES\s+(\d+)", out)
+        bytes_n = int(bytes_match.group(1)) if bytes_match else 0
+        files_n = int(files_match.group(1)) if files_match else 0
+        mb = bytes_n / (1024 * 1024)
+        log(
+            f"[remote] [DRY-RUN] would delete {label} at {remote_path} "
+            f"({files_n} file(s), {mb:.1f} MB)\n"
+        )
 
     def _rsync_optional(
         self, src: str, dest: Path, *, log_fn: Callable[[str], None]

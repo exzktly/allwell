@@ -156,6 +156,7 @@ class PipelineRunner:
         # users who want that behaviour now toggle it via the GUI
         # checkbox or pass --cleanup-remote=run on the CLI.
         self._cleanup_remote: str = "none"
+        self._dry_run_cleanup: bool = False
         self._selective_channels: bool = True
 
     def _enqueue(self, event: "Tuple[str, object]") -> None:
@@ -193,6 +194,7 @@ class PipelineRunner:
         remote: Optional[RemoteHost] = None,
         output_filter: str = "full",
         cleanup_remote: str = "none",
+        dry_run_cleanup: bool = False,
         selective_channels: bool = True,
     ) -> None:
         """Spawn the worker thread that runs the pipeline subprocess.
@@ -203,10 +205,10 @@ class PipelineRunner:
         that ignore the kwarg still work.
 
         When ``remote`` is set, the pipeline runs on the named SSH host
-        instead of locally. ``output_filter``, ``cleanup_remote``, and
-        ``selective_channels`` map to the corresponding flags on
-        :func:`scripts.allwell_remote.main` — they're ignored in
-        local mode.
+        instead of locally. ``output_filter``, ``cleanup_remote``,
+        ``dry_run_cleanup``, and ``selective_channels`` map to the
+        corresponding flags on :func:`scripts.allwell_remote.main` —
+        they're ignored in local mode.
         """
         self._remote = remote
         self._remote_runner: Optional[RemoteRunner] = (
@@ -214,6 +216,7 @@ class PipelineRunner:
         )
         self._output_filter = output_filter
         self._cleanup_remote = cleanup_remote
+        self._dry_run_cleanup = dry_run_cleanup
         self._selective_channels = selective_channels
         self._thread = threading.Thread(
             target=self._run_pipeline_thread,
@@ -395,6 +398,7 @@ class PipelineRunner:
             ok = self._remote_runner.verify_and_cleanup(
                 ok=(rc == 0),
                 cleanup_mode=self._cleanup_remote,
+                dry_run=self._dry_run_cleanup,
                 log_fn=lambda m: self._enqueue(("line", m)),
             )
             if rc == 0 and ok:

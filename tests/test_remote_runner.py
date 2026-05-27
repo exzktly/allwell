@@ -366,16 +366,16 @@ def test_ensure_uploaded_raises_when_remote_file_count_mismatches(host, tmp_path
     zipped = _make_zipped(tmp_path, ["A01.zip", "B02.zip", "C03.zip"])  # 3 wells
     cache = DatasetCache(host)
 
-    ssh_calls = []
-
-    def fake_ssh_run(self, argv, *, check):
-        ssh_calls.append(list(argv))
-        # Verification ssh call — return "2" so it appears short.
-        if any("ls -1" in a for a in argv):
-            return MagicMock(stdout="2\n", returncode=0)
-        return MagicMock(stdout="", returncode=0)
-
-    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    # v5.2.16: verification now goes through _ssh_script (preserves
+    # ~/ expansion). _ssh_run is still used for mkdir.
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="2\n", returncode=0),
+    )
     # rsync says success but lied.
     monkeypatch.setattr(
         "services.remote_runner._run_rsync_streaming",
@@ -392,12 +392,14 @@ def test_ensure_uploaded_succeeds_when_count_matches(host, tmp_path, monkeypatch
     zipped = _make_zipped(tmp_path, ["A01.zip", "B02.zip"])
     cache = DatasetCache(host)
 
-    def fake_ssh_run(self, argv, *, check):
-        if any("ls -1" in a for a in argv):
-            return MagicMock(stdout="2\n", returncode=0)
-        return MagicMock(stdout="", returncode=0)
-
-    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="2\n", returncode=0),
+    )
     monkeypatch.setattr(
         "services.remote_runner._run_rsync_streaming",
         lambda *a, **kw: (2048, 0),
@@ -407,6 +409,47 @@ def test_ensure_uploaded_succeeds_when_count_matches(host, tmp_path, monkeypatch
     assert key  # non-empty
     assert sent == 2048
     assert elapsed > 0
+
+
+def test_ensure_uploaded_verification_preserves_tilde_in_script(host, tmp_path, monkeypatch):
+    """v5.2.16 regression: the verification ssh call must NOT
+    shlex-quote the remote_path, because remote_staging_dir is
+    ``~/.allwell-staging`` and single quotes around ``~/...`` kill
+    tilde expansion on the remote — the count comes back 0 and the
+    user sees 'expected 2 found 0' even though rsync transferred fine.
+
+    Pipe a script via _ssh_script so the remote bash parses ``~/``
+    normally."""
+    zipped = _make_zipped(tmp_path, ["A01.zip"])
+    cache = DatasetCache(host)
+
+    captured = {}
+
+    def fake_ssh_script(self, script, *, check):
+        captured["script"] = script
+        return MagicMock(stdout="1\n", returncode=0)
+
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
+    monkeypatch.setattr(
+        "services.remote_runner._run_rsync_streaming",
+        lambda *a, **kw: (1024, 0),
+    )
+
+    cache.ensure_uploaded(zipped)
+    # The remote staging dir starts with ``~/`` (the default). Bash
+    # only expands the tilde when it's unquoted, so the script must
+    # contain bare ``~/`` — NOT ``'~/...`` (single-quoted) or
+    # ``"~/..."`` (double-quoted).
+    assert "~/.allwell-staging" in captured["script"]
+    assert "'~/" not in captured["script"]
+    assert '"~/' not in captured["script"]
+    # And it must actually do the count.
+    assert "ls -1" in captured["script"]
+    assert "wc -l" in captured["script"]
 
 
 # ── Fetcher: stdout observation ─────────────────────────────────────────────
@@ -1096,12 +1139,14 @@ def test_ensure_uploaded_omits_append_verify_on_legacy_rsync(host, tmp_path, mon
     cache = DatasetCache(host)
     captured = {}
 
-    def fake_ssh_run(self, argv, *, check):
-        if any("ls -1" in a for a in argv):
-            return MagicMock(stdout="1\n", returncode=0)
-        return MagicMock(stdout="", returncode=0)
-
-    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="1\n", returncode=0),
+    )
     monkeypatch.setattr(
         "services.remote_runner.subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
@@ -1133,12 +1178,14 @@ def test_ensure_uploaded_includes_append_verify_on_modern_rsync(host, tmp_path, 
     cache = DatasetCache(host)
     captured = {}
 
-    def fake_ssh_run(self, argv, *, check):
-        if any("ls -1" in a for a in argv):
-            return MagicMock(stdout="1\n", returncode=0)
-        return MagicMock(stdout="", returncode=0)
-
-    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="1\n", returncode=0),
+    )
     monkeypatch.setattr(
         "services.remote_runner.subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(

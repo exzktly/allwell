@@ -27,7 +27,7 @@ from services.remote_runner import (
     _detect_local_input_mode,
     _CONDA_ACTIVATE_SNIPPET,
     _conda_run_prefix,
-    _filter_channels_in_place,
+    _filter_channels_in_staging,
     _member_matches,
     _required_tokens,
     _rsync_ssh_transport,
@@ -133,7 +133,7 @@ def test_filter_channels_drops_unused(tmp_path):
         ],
     )
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z,))
-    _filter_channels_in_place(
+    _filter_channels_in_staging(
         tmp_path, (z,), LocalInputMode.ZIP,
         keep_tokens={"NIR", "GFP"},
         log_fn=None,
@@ -150,13 +150,103 @@ def test_filter_channels_noop_when_all_kept(tmp_path):
     members = ["Exp_NIR_A01.tif", "Exp_GFP_A01.tif"]
     z = _make_well_zip(tmp_path, "A01.zip", members)
     size_before = z.stat().st_size
-    _filter_channels_in_place(
+    _filter_channels_in_staging(
         tmp_path, (z,), LocalInputMode.ZIP,
         keep_tokens={"NIR", "GFP"},
         log_fn=None,
     )
     # No rewrite needed.
     assert z.stat().st_size == size_before
+    with zipfile.ZipFile(z, "r") as zf:
+        assert sorted(zf.namelist()) == sorted(members)
+
+
+def test_filter_channels_raises_when_typo_drops_everything(tmp_path):
+    """v5.2.18: if a typo'd channel name matches zero members in a
+    well, refuse to ship an empty zip. The pipeline downstream would
+    crash with a confusing 'no images found' message far from the
+    real cause."""
+    z = _make_well_zip(
+        tmp_path,
+        "A01.zip",
+        ["Exp_NIR_A01_F001.tif", "Exp_GFP_A01_F001.tif"],
+    )
+    # User typoed "GP" instead of "GFP" — neither token matches.
+    with pytest.raises(RuntimeError, match=r"matched zero images.*A01.*typo"):
+        _filter_channels_in_staging(
+            tmp_path, (z,), LocalInputMode.ZIP,
+            keep_tokens={"NUR", "GP"},  # both typoed
+            log_fn=None,
+        )
+
+
+def test_stage_local_zips_with_fluor_filter_preserves_user_input(tmp_path):
+    """v5.2.18: stage_local_zips MUST NOT modify the user's original
+    input zips. Pre-v5.2.18 it rewrote them in place — a typo'd
+    channel name silently deleted frames from the user's dataset.
+    Verify the user's zip is byte-for-byte unchanged after staging
+    a fluor-filter request."""
+    members = [
+        "Exp_NIR_A01_F001.tif",
+        "Exp_GFP_A01_F001.tif",
+        "Exp_mCherry_A01_F001.tif",
+    ]
+    z = _make_well_zip(tmp_path, "A01.zip", members)
+    original_bytes = z.read_bytes()
+    original_size = z.stat().st_size
+    original_mtime = z.stat().st_mtime
+
+    zipped = stage_local_zips(
+        tmp_path,
+        filename_schema="experiment:channel:well:fov",
+        filename_sep="_",
+        nuclear_token="NIR",
+        fluor_tokens=["GFP"],  # drops mCherry
+    )
+
+    # The user's original file is untouched.
+    assert z.read_bytes() == original_bytes
+    assert z.stat().st_size == original_size
+    assert z.stat().st_mtime == original_mtime
+    with zipfile.ZipFile(z, "r") as zf:
+        assert sorted(zf.namelist()) == sorted(members)
+
+    # The staged copy lives in a separate temp dir and HAS been filtered.
+    assert zipped.zip_dir != tmp_path
+    assert len(zipped.well_zips) == 1
+    staged = zipped.well_zips[0]
+    assert staged.parent == zipped.zip_dir
+    with zipfile.ZipFile(staged, "r") as zf:
+        staged_members = zf.namelist()
+    assert any("NIR" in m for m in staged_members)
+    assert any("GFP" in m for m in staged_members)
+    assert not any("mCherry" in m for m in staged_members)
+
+    # A cleanup hook is provided so the temp dir gets removed.
+    assert zipped.cleanup is not None
+    zipped.cleanup()
+    assert not zipped.zip_dir.exists()
+
+
+def test_stage_local_zips_typoed_channel_does_not_corrupt_user_input(tmp_path):
+    """v5.2.18 worst-case scenario: user types nonsense channel
+    names. The staging must (a) NOT modify the user's input, AND
+    (b) raise a helpful error before anything reaches the remote."""
+    members = ["Exp_NIR_A01_F001.tif", "Exp_GFP_A01_F001.tif"]
+    z = _make_well_zip(tmp_path, "A01.zip", members)
+    original_bytes = z.read_bytes()
+
+    with pytest.raises(RuntimeError, match=r"matched zero images"):
+        stage_local_zips(
+            tmp_path,
+            filename_schema="experiment:channel:well:fov",
+            filename_sep="_",
+            nuclear_token="WRONG",
+            fluor_tokens=["ALSO_WRONG"],
+        )
+
+    # User's zip is still pristine after the error.
+    assert z.read_bytes() == original_bytes
     with zipfile.ZipFile(z, "r") as zf:
         assert sorted(zf.namelist()) == sorted(members)
 

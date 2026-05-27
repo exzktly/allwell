@@ -1531,8 +1531,34 @@ class Fetcher:
         Called by the Popen wrapper's ``wait()`` so the run isn't
         reported complete until every well's output has landed.
         """
+        pending_count = self._pending.qsize()
+        if pending_count:
+            self._log(
+                f"[remote] ↓ draining fetcher: {pending_count} well(s) "
+                f"still queued for download\n"
+            )
         self._pending.put(None)
         self._worker.join(timeout=timeout)
+        # v5.2.18: surface the end-of-stream summary so the user
+        # sees a clear "all downloads complete" marker rather than
+        # the run silently going quiet.
+        total = self.run.well_count_total
+        fetched = len(self.run.fetched_wells)
+        if total and fetched == total:
+            self._log(
+                f"[remote] ↓ fetcher: {fetched}/{total} wells downloaded "
+                f"to {self.run.local_output_dir}\n"
+            )
+        elif total:
+            self._log(
+                f"[remote] ↓ fetcher: {fetched}/{total} wells downloaded "
+                f"({total - fetched} missing — verify step will retry)\n"
+            )
+        else:
+            self._log(
+                f"[remote] ↓ fetcher: {fetched} well(s) downloaded "
+                f"(remote never announced total)\n"
+            )
 
     # Internals ──────────────────────────────────────────────────────────
 
@@ -1551,26 +1577,62 @@ class Fetcher:
     def _fetch_one(self, well: str) -> None:
         """Pull a single well's output. The remote pipeline produces
         ``{output_dir}/{well}_out.zip`` and a sibling
-        ``{csv_prefix}_{well}.csv`` (see report §2)."""
+        ``{csv_prefix}_{well}.csv`` (see report §2).
+
+        v5.2.18: emits visible progress lines so the user can see
+        what's being downloaded. Pre-v5.2.18 the Fetcher worked
+        silently — a long fetch looked like the GUI had hung.
+        """
         tmp_zip = Path(tempfile.gettempdir()) / f"allwell-{self.run.run_id}-{well}_out.zip"
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
         csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
 
+        total = self.run.well_count_total or 0
+        position = len(self.run.fetched_wells) + 1
+        prefix = f"({position}/{total}) " if total else ""
+
+        self._log(f"[remote] ↓ {prefix}{well}: starting download from {self.host.ssh_alias}\n")
+
         # Output zip — exists iff the pipeline finished this well. Pull it
         # even under CSV-only mode: we'll discard it after extracting the
         # files we want.
+        t0 = time.monotonic()
         if not self._rsync(
             [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
              "-a", zip_src, to_rsync_path(tmp_zip)]
         ):
-            self._log(f"[remote] warn: could not pull {well}_out.zip; will retry at end.\n")
+            self._log(
+                f"[remote] ↓ {well}: WARN could not pull {well}_out.zip from "
+                f"{self.run.remote_output_dir}; will retry at end of run.\n"
+            )
             return
+
+        zip_elapsed = time.monotonic() - t0
+        zip_size = tmp_zip.stat().st_size if tmp_zip.exists() else 0
+        mb = zip_size / (1024 * 1024)
+        mbps = (mb * 8) / zip_elapsed if zip_elapsed > 0 else 0.0
+        self._log(
+            f"[remote] ↓ {well}: {mb:.1f} MB zip in "
+            f"{_fmt_secs(zip_elapsed)} ({mbps:.0f} Mbps)\n"
+        )
 
         # CSVs live at the top of the remote output_dir, not inside the
         # well zip — pull them separately. A failure here isn't fatal:
         # the per-well CSV is the most important file and any retry can
         # re-pull it.
-        self._rsync_glob(csv_glob_src, self.run.local_output_dir)
+        t1 = time.monotonic()
+        csv_count = self._rsync_glob(csv_glob_src, self.run.local_output_dir)
+        csv_elapsed = time.monotonic() - t1
+        if csv_count > 0:
+            self._log(
+                f"[remote] ↓ {well}: {csv_count} CSV file(s) in "
+                f"{_fmt_secs(csv_elapsed)}\n"
+            )
+        else:
+            self._log(
+                f"[remote] ↓ {well}: WARN no CSV files found at "
+                f"{self.run.remote_output_dir}/*_{well}.csv\n"
+            )
 
         # Now materialize the well's output in the user's output_dir
         # according to local input mode.
@@ -1580,6 +1642,13 @@ class Fetcher:
         except OSError:
             pass
         self.run.fetched_wells.add(well)
+        total_elapsed = time.monotonic() - t0
+        position_done = len(self.run.fetched_wells)
+        tally = f"{position_done}/{total} wells" if total else f"{position_done} wells"
+        self._log(
+            f"[remote] ✓ {well}: materialised to {self.run.local_output_dir} "
+            f"(total {_fmt_secs(total_elapsed)}, {tally} fetched)\n"
+        )
         if self._progress and self.run.well_count_total > 0:
             self._progress(len(self.run.fetched_wells) / self.run.well_count_total)
 
@@ -1622,9 +1691,14 @@ class Fetcher:
         result = _rsync_with_retry(argv, log_fn=self._log)
         return result.returncode == 0
 
-    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> bool:
+    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> int:
         """Pull files matching a glob. Wraps the source in a quoted-glob
-        rsync so the remote side expands ``*``, not the local shell."""
+        rsync so the remote side expands ``*``, not the local shell.
+
+        v5.2.18: returns the count of files successfully pulled
+        (was: bool). The caller logs the count so the user can see
+        how many CSVs landed per well.
+        """
         # We invoke `ssh host 'ls -1 GLOB'` first; rsync's own glob
         # support requires the source to be quoted in a way that's awkward
         # to spell cross-shell.
@@ -1644,16 +1718,16 @@ class Fetcher:
         )
         files = [ln for ln in listing.stdout.splitlines() if ln.strip()]
         if not files:
-            return False
-        ok = True
+            return 0
+        pulled = 0
         dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
         for f in files:
-            if not self._rsync(
+            if self._rsync(
                 [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
                  "-a", f"{host}:{f}", dest_str]
             ):
-                ok = False
-        return ok
+                pulled += 1
+        return pulled
 
 
 # ────────────────────────────────────────────────────────────────────────────

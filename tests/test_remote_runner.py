@@ -949,8 +949,8 @@ def test_sync_required_files_passes_e_flag_to_rsync(host, monkeypatch):
 def test_rsync_supports_info_flag_recognises_modern_rsync(monkeypatch):
     """rsync 3.2.7 (current default on most Linux + recent Git Bash)
     must be detected as supporting --info=...."""
-    from services.remote_runner import _rsync_supports_info_flag
-    _rsync_supports_info_flag.cache_clear()
+    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    _rsync_version.cache_clear()
     monkeypatch.setattr(
         "services.remote_runner.subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
@@ -965,8 +965,8 @@ def test_rsync_supports_info_flag_recognises_modern_rsync(monkeypatch):
 def test_rsync_supports_info_flag_rejects_legacy_rsync(monkeypatch):
     """macOS bundles rsync 2.6.9. Detect it and skip --info=...
     rather than blowing up bootstrap with 'unknown option'."""
-    from services.remote_runner import _rsync_supports_info_flag
-    _rsync_supports_info_flag.cache_clear()
+    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    _rsync_version.cache_clear()
     monkeypatch.setattr(
         "services.remote_runner.subprocess.run",
         MagicMock(return_value=subprocess.CompletedProcess(
@@ -981,8 +981,8 @@ def test_rsync_supports_info_flag_rejects_legacy_rsync(monkeypatch):
 def test_rsync_supports_info_flag_fails_safe_when_rsync_missing(monkeypatch):
     """If rsync isn't on PATH the version probe raises; fail-safe to
     False so the caller omits --info= and doesn't crash."""
-    from services.remote_runner import _rsync_supports_info_flag
-    _rsync_supports_info_flag.cache_clear()
+    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    _rsync_version.cache_clear()
     monkeypatch.setattr(
         "services.remote_runner.subprocess.run",
         MagicMock(side_effect=FileNotFoundError("rsync")),
@@ -994,8 +994,8 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
     """Integration: a host with legacy rsync gets the bare argv
     (no --info=stats0), avoiding the 'unknown option' exit 1 that
     blocked the user's bootstrap."""
-    from services.remote_runner import _rsync_supports_info_flag
-    _rsync_supports_info_flag.cache_clear()
+    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    _rsync_version.cache_clear()
     captured = {}
 
     runner = RemoteRunner(host)
@@ -1025,8 +1025,8 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
 def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatch):
     """Inverse of the above — modern rsync still gets the --info
     flag so the GUI's terser log output is preserved."""
-    from services.remote_runner import _rsync_supports_info_flag
-    _rsync_supports_info_flag.cache_clear()
+    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    _rsync_version.cache_clear()
     captured = {}
     runner = RemoteRunner(host)
     monkeypatch.setattr(
@@ -1047,6 +1047,152 @@ def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatc
     monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
     runner.sync_required_files()
     assert "--info=stats0" in captured["cmd"]
+
+
+# ── v5.2.15: --append-verify gating for legacy rsync ───────────────────────
+
+
+def test_rsync_supports_append_verify_recognises_modern_rsync(monkeypatch):
+    """--append-verify lands in rsync 3.0.0 (2008). Anything newer
+    must be detected as supporting it."""
+    from services.remote_runner import _rsync_supports_append_verify, _rsync_version
+    _rsync_version.cache_clear()
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 3.2.7  protocol version 31\n",
+            stderr="",
+        )),
+    )
+    assert _rsync_supports_append_verify() is True
+
+
+def test_rsync_supports_append_verify_rejects_legacy_rsync(monkeypatch):
+    """macOS's bundled rsync 2.6.9 rejects --append-verify with
+    'Unrecognized option --append-verify' → exit 1. This was the
+    failure that motivated v5.2.15 (user's well-zip upload died
+    with exit 1 right after the v5.2.13 conda-run fix landed)."""
+    from services.remote_runner import _rsync_supports_append_verify, _rsync_version
+    _rsync_version.cache_clear()
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 2.6.9  protocol version 29\n",
+            stderr="",
+        )),
+    )
+    assert _rsync_supports_append_verify() is False
+
+
+def test_ensure_uploaded_omits_append_verify_on_legacy_rsync(host, tmp_path, monkeypatch):
+    """Integration: rsync 2.6.9 must get a bare command WITHOUT
+    --append-verify so it doesn't blow up with 'Unrecognized option'."""
+    from services.remote_runner import _rsync_version
+    _rsync_version.cache_clear()
+
+    zipped = _make_zipped(tmp_path, ["A01.zip"])
+    cache = DatasetCache(host)
+    captured = {}
+
+    def fake_ssh_run(self, argv, *, check):
+        if any("ls -1" in a for a in argv):
+            return MagicMock(stdout="1\n", returncode=0)
+        return MagicMock(stdout="", returncode=0)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 2.6.9  protocol version 29\n",
+            stderr="",
+        )),
+    )
+
+    def capture_streaming(cmd, **kw):
+        captured["cmd"] = list(cmd)
+        return (1024, 0)
+
+    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+
+    cache.ensure_uploaded(zipped)
+    assert "--append-verify" not in captured["cmd"], (
+        f"--append-verify should be omitted on legacy rsync; argv: {captured['cmd']}"
+    )
+
+
+def test_ensure_uploaded_includes_append_verify_on_modern_rsync(host, tmp_path, monkeypatch):
+    """Inverse of the above — modern rsync keeps --append-verify so
+    resumed transfers re-verify the existing tail by checksum."""
+    from services.remote_runner import _rsync_version
+    _rsync_version.cache_clear()
+
+    zipped = _make_zipped(tmp_path, ["A01.zip"])
+    cache = DatasetCache(host)
+    captured = {}
+
+    def fake_ssh_run(self, argv, *, check):
+        if any("ls -1" in a for a in argv):
+            return MagicMock(stdout="1\n", returncode=0)
+        return MagicMock(stdout="", returncode=0)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 3.2.7  protocol version 31\n",
+            stderr="",
+        )),
+    )
+
+    def capture_streaming(cmd, **kw):
+        captured["cmd"] = list(cmd)
+        return (1024, 0)
+
+    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+
+    cache.ensure_uploaded(zipped)
+    assert "--append-verify" in captured["cmd"]
+
+
+def test_ensure_uploaded_error_message_uses_actual_attempt_count(host, tmp_path, monkeypatch):
+    """v5.2.15: pre-v5.2.15 the error always said 'after 4 attempts'
+    even when rc=1 (non-retry code) broke after a single try, which
+    misled debugging. Verify the message now reflects the real count
+    AND points to the rsync: log line as the diagnostic."""
+    from services.remote_runner import _rsync_version
+    _rsync_version.cache_clear()
+
+    zipped = _make_zipped(tmp_path, ["A01.zip"])
+    cache = DatasetCache(host)
+
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="0\n", returncode=0),
+    )
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 3.2.7  protocol version 31\n",
+            stderr="",
+        )),
+    )
+    # rc=1 is non-retry — must break on the first attempt.
+    monkeypatch.setattr(
+        "services.remote_runner._run_rsync_streaming",
+        lambda *a, **kw: (0, 1),
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        cache.ensure_uploaded(zipped)
+    msg = str(exc.value)
+    assert "1 attempt" in msg and "4 attempts" not in msg
+    # Diagnostic breadcrumb so the user knows where to look.
+    assert "rsync:" in msg
 
 
 # ── v5.2.11: ~ quoting + auto_gc gating + cleanup default ───────────────────

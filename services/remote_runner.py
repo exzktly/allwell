@@ -428,6 +428,28 @@ def _conda_run_prefix(env_name: str = "allwell") -> list[str]:
 
 
 @lru_cache(maxsize=1)
+def _rsync_version() -> tuple[int, int]:
+    """Parsed ``(major, minor)`` of the local rsync, or ``(0, 0)`` if
+    rsync is missing / unparseable. Cached for the process lifetime.
+    Shared by ``_rsync_supports_info_flag`` (≥ 3.1) and
+    ``_rsync_supports_append_verify`` (≥ 3.0) so we don't fork+exec
+    ``rsync --version`` twice on startup."""
+    try:
+        result = subprocess.run(
+            [resolve_rsync_binary(), "--version"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return (0, 0)
+    if result.returncode != 0:
+        return (0, 0)
+    first_line = (result.stdout or "").splitlines()[0] if result.stdout else ""
+    match = re.search(r"version\s+(\d+)\.(\d+)", first_line)
+    if not match:
+        return (0, 0)
+    return int(match.group(1)), int(match.group(2))
+
+
 def _rsync_supports_info_flag() -> bool:
     """Whether the local rsync accepts ``--info=...``.
 
@@ -442,20 +464,19 @@ def _rsync_supports_info_flag() -> bool:
     Returns False on any error so the caller defaults to the
     safer "omit --info" path.
     """
-    try:
-        result = subprocess.run(
-            [resolve_rsync_binary(), "--version"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return False
-    if result.returncode != 0:
-        return False
-    first_line = (result.stdout or "").splitlines()[0] if result.stdout else ""
-    match = re.search(r"version\s+(\d+)\.(\d+)", first_line)
-    if not match:
-        return False
-    return (int(match.group(1)), int(match.group(2))) >= (3, 1)
+    return _rsync_version() >= (3, 1)
+
+
+def _rsync_supports_append_verify() -> bool:
+    """Whether the local rsync accepts ``--append-verify``.
+
+    Added in rsync 3.0.0 (2008). macOS's bundled rsync 2.6.9 rejects
+    it with "Unrecognized option --append-verify" → exit 1, which was
+    the failure mode that motivated this probe (v5.2.14 user hit it
+    on macOS). On legacy rsync we drop the flag entirely; ``--partial``
+    alone is still enough to resume an interrupted transfer (just
+    without the tail-checksum verification step)."""
+    return _rsync_version() >= (3, 0)
 
 
 def _rsync_ssh_transport(host: RemoteHost) -> list[str]:
@@ -570,8 +591,14 @@ class DatasetCache:
             *_rsync_ssh_transport(self.host),
             "-aH",
             "--partial",
-            "--append-verify",
         ]
+        # v5.2.15: --append-verify needs rsync ≥ 3.0.0. macOS still
+        # ships rsync 2.6.9 by default and rejects it with
+        # "Unrecognized option --append-verify" → exit 1. Without the
+        # flag, --partial alone still gives resume semantics — we just
+        # lose the tail-checksum verification on the resumed bytes.
+        if _rsync_supports_append_verify():
+            cmd.append("--append-verify")
         # v5.2.10: --info= needs rsync ≥ 3.1.0. Old rsync (macOS's
         # bundled 2.6.9, some HPC clusters) rejects it with exit 1.
         # The progress callback degrades to "stats appear at end" on
@@ -590,6 +617,7 @@ class DatasetCache:
         t0 = time.monotonic()
         sent_bytes = 0
         rc = -1
+        attempts_run = 0  # v5.2.15: actual count, for the error message
         for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
             if stop_event is not None and stop_event.is_set():
                 break
@@ -604,6 +632,7 @@ class DatasetCache:
                 cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
             )
             sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
+            attempts_run += 1
             if rc == 0 or rc not in _RSYNC_RETRY_CODES:
                 break
         elapsed = max(time.monotonic() - t0, 1e-6)
@@ -621,10 +650,12 @@ class DatasetCache:
         if rc != 0:
             raise RuntimeError(
                 f"rsync upload of well zips to {self.host.ssh_alias} "
-                f"failed with exit code {rc} (after "
-                f"{len(_RSYNC_RETRY_DELAYS) + 1} attempts). The remote "
-                f"dataset at {remote_path} is incomplete. Re-run to "
-                f"resume from --partial."
+                f"failed with exit code {rc} (after {attempts_run} "
+                f"attempt{'s' if attempts_run != 1 else ''}). The "
+                f"remote dataset at {remote_path} is incomplete. The "
+                f"specific rsync error appears earlier in the log "
+                f"(look for a line starting with 'rsync:' or 'rsync "
+                f"error:')."
             )
 
         # v5.2.14: belt-and-braces verification. Some rsync failure

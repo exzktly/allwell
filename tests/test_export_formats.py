@@ -100,3 +100,5 @@ def test_macos_pasteboard_write_declines_off_darwin():
     if sys.platform == "darwin":
         pytest.skip("native pasteboard path is exercised only on macOS")
     assert _macos_pasteboard_write(b"%PDF-1.4", b"<svg/>", b"\x89PNG") is False
+
+

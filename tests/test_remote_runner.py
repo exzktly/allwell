@@ -554,6 +554,150 @@ def test_cache_key_changes_when_set_of_wells_changes(tmp_path, host):
 # ── RemoteRunner: argv rewriting ────────────────────────────────────────────
 
 
+# ── v5.2.27: pre-flight cache-hit skips pipeline launch entirely ──────────
+
+
+def _make_spawn_test_runner(host, tmp_path, monkeypatch, *, completed_remote_wells):
+    """Plumb a RemoteRunner whose spawn() can run end-to-end without
+    real ssh/rsync: mock _ssh_run/_ssh_script, ensure_uploaded, popen,
+    and _list_remote_completed_wells return value."""
+    runner = RemoteRunner(host)
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "ensure_uploaded",
+        lambda self, zipped, **kw: ("cachekey" + "0" * 24, 0, 0.01),
+    )
+    monkeypatch.setattr(
+        RemoteRunner, "sync_required_files",
+        lambda self, **kw: None,
+    )
+    # Stub out the remote-completed-wells lister: the test parametrizes
+    # how many wells "exist" on the remote.
+    monkeypatch.setattr(
+        RemoteRunner, "_list_remote_completed_wells",
+        lambda self: set(completed_remote_wells),
+    )
+    # Capture the ssh argv we'd launch so the test can inspect it.
+    captured = {}
+
+    def fake_popen(argv, **kw):
+        captured["argv"] = list(argv)
+        m = MagicMock()
+        m.stdout = MagicMock()
+        m.stdout.__iter__ = lambda self: iter([])
+        m.wait.return_value = 0
+        m.returncode = 0
+        m.pid = 1234
+        return m
+
+    monkeypatch.setattr("services.remote_runner.subprocess.Popen", fake_popen)
+    return runner, captured
+
+
+def test_spawn_skips_pipeline_when_remote_has_all_wells(host, tmp_path, monkeypatch):
+    """v5.2.27: previous run completed every well on the remote, then
+    the local fetch was interrupted. Re-run must NOT re-launch the
+    pipeline — pre-flight detects the cache hit and replaces the
+    pipeline command with ``true`` so the downstream flow just
+    refetches missing local files."""
+    z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
+    z2 = _make_well_zip(tmp_path, "B02.zip", ["x.tif"])
+    zipped = ZippedInput(
+        zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1, z2),
+    )
+    runner, captured = _make_spawn_test_runner(
+        host, tmp_path, monkeypatch,
+        completed_remote_wells={"A01", "B02"},
+    )
+
+    log_lines: list[str] = []
+    runner.spawn(
+        zipped,
+        tmp_path / "out",
+        pipeline_argv=["/usr/bin/python", "/local/process_microscopy.py",
+                       "--input_dir", "/local/in", "--output_dir", "/local/out"],
+        output_filter=OutputFilter.FULL,
+        log_fn=log_lines.append,
+    )
+    blob = "".join(log_lines)
+    # The cache-hit log must surface.
+    assert "FULL CACHE HIT" in blob
+    assert "2/2 well" in blob  # pre-flight count line
+    # And the actual remote command should be ``true`` (skipping the
+    # whole conda-run / process_microscopy launch).
+    ssh_argv = captured["argv"]
+    remote_cmd = ssh_argv[-1]  # last element is the remote command
+    assert "exec true" in remote_cmd
+    assert "process_microscopy" not in remote_cmd
+
+
+def test_spawn_runs_pipeline_when_remote_is_partial(host, tmp_path, monkeypatch):
+    """If only some wells are complete on the remote, the pipeline
+    runs normally — its own per-well skip logic handles the rest."""
+    z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
+    z2 = _make_well_zip(tmp_path, "B02.zip", ["x.tif"])
+    z3 = _make_well_zip(tmp_path, "C03.zip", ["x.tif"])
+    zipped = ZippedInput(
+        zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1, z2, z3),
+    )
+    runner, captured = _make_spawn_test_runner(
+        host, tmp_path, monkeypatch,
+        completed_remote_wells={"A01"},  # only 1 of 3 done
+    )
+    log_lines: list[str] = []
+    runner.spawn(
+        zipped,
+        tmp_path / "out",
+        pipeline_argv=["/usr/bin/python", "/local/process_microscopy.py",
+                       "--input_dir", "/local/in", "--output_dir", "/local/out"],
+        output_filter=OutputFilter.FULL,
+        log_fn=log_lines.append,
+    )
+    blob = "".join(log_lines)
+    assert "FULL CACHE HIT" not in blob
+    assert "1/3 well" in blob  # pre-flight count surfaces the partial
+    # And the actual remote command should still be the pipeline,
+    # not the no-op ``true``.
+    ssh_argv = captured["argv"]
+    remote_cmd = ssh_argv[-1]
+    assert "process_microscopy" in remote_cmd
+
+
+def test_spawn_runs_pipeline_when_remote_is_empty(host, tmp_path, monkeypatch):
+    """First-ever run on a fresh remote: pre-flight finds nothing,
+    pipeline launches normally."""
+    z1 = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
+    zipped = ZippedInput(
+        zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z1,),
+    )
+    runner, captured = _make_spawn_test_runner(
+        host, tmp_path, monkeypatch,
+        completed_remote_wells=set(),
+    )
+    log_lines: list[str] = []
+    runner.spawn(
+        zipped,
+        tmp_path / "out",
+        pipeline_argv=["/usr/bin/python", "/local/process_microscopy.py",
+                       "--input_dir", "/local/in", "--output_dir", "/local/out"],
+        output_filter=OutputFilter.FULL,
+        log_fn=log_lines.append,
+    )
+    blob = "".join(log_lines)
+    assert "FULL CACHE HIT" not in blob
+    assert "0/1 well" in blob
+    ssh_argv = captured["argv"]
+    remote_cmd = ssh_argv[-1]
+    assert "process_microscopy" in remote_cmd
+
+
 # ── v5.2.25: deterministic run_id + remote-aware verify backstop ──────────
 
 

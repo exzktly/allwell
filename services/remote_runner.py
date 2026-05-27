@@ -1988,13 +1988,56 @@ class RemoteRunner:
             local_input_mode=zipped.mode,
         )
 
-        remote_argv = self._build_remote_argv(
-            pipeline_argv,
-            remote_input,
-            remote_output,
-            output_filter,
-            zipped.mode,
-        )
+        # v5.2.27: pre-flight cache-hit check. Before launching the
+        # pipeline, ssh in and count the ``*_out.zip`` files already
+        # present in the remote output dir. If every well in the
+        # input is already represented there, the previous run
+        # finished its compute phase — skip launching the pipeline
+        # entirely and let the verify-backstop + retry loop pull
+        # whatever the user is missing locally. This handles the
+        # case the user reported in v5.2.26+: pipeline completed,
+        # local fetch was interrupted (network drop or Stop button),
+        # re-run should NOT re-analyze.
+        #
+        # The replacement remote command is ``true`` — a no-op shell
+        # builtin that exits 0 immediately. Downstream flow
+        # (PipelineRunner reading stdout to EOF, then
+        # verify_and_cleanup → backstop → _retry_missing_wells) is
+        # unchanged.
+        expected_well_count = len(zipped.well_zips)
+        cache_hit = False
+        if expected_well_count > 0:
+            completed_remote = self._list_remote_completed_wells()
+            log(
+                f"[remote] pre-flight: remote output dir has "
+                f"{len(completed_remote)}/{expected_well_count} well "
+                f"output zip(s)\n"
+            )
+            if len(completed_remote) >= expected_well_count:
+                cache_hit = True
+                log(
+                    "[remote] FULL CACHE HIT — every well has output "
+                    "already; skipping pipeline launch and proceeding "
+                    "straight to verify + fetch.\n"
+                )
+
+        if cache_hit:
+            # Replace the pipeline with a no-op. The shell still runs
+            # ``echo $$ > pidfile`` (so cancel() can find the PID if
+            # the user clicks Stop during the trivial ssh), then exec
+            # ``true``. The ``true`` exits 0 immediately, downstream
+            # verify-and-cleanup runs the v5.2.25 backstop, and the
+            # existing _retry_missing_wells re-pulls anything the
+            # user is missing locally.
+            remote_argv = ["true"]
+        else:
+            remote_argv = self._build_remote_argv(
+                pipeline_argv,
+                remote_input,
+                remote_output,
+                output_filter,
+                zipped.mode,
+            )
 
         # Compose the remote shell command. PID echoed first so the
         # cancel path can target the pipeline directly. v5.2.11: tilde-

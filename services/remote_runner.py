@@ -228,13 +228,33 @@ def stage_local_zips(
             raise RuntimeError(
                 f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
             )
-        if fluor_tokens is not None:
-            return _filter_channels_in_place(
-                input_dir, well_zips, mode,
+        if fluor_tokens is None:
+            # No filtering — use the user's zips directly (read-only).
+            return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
+        # v5.2.18: copy the user's zips into a staging dir BEFORE
+        # filtering. Pre-v5.2.18 the filter rewrote zips in place at
+        # ``input_dir`` — if the user mis-typed a fluor channel name
+        # (e.g. "GP" for "GFP"), every fluor image got dropped from
+        # the user's original dataset on disk. The user's input dir
+        # must be treated as read-only.
+        staging = Path(tempfile.mkdtemp(prefix="allwell-stage-"))
+        try:
+            staged: list[Path] = []
+            for wz in well_zips:
+                dest = staging / wz.name
+                shutil.copy2(wz, dest)
+                staged.append(dest)
+            staged_zips = tuple(staged)
+            zin = _filter_channels_in_staging(
+                staging, staged_zips, mode,
                 keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
                 log_fn=log_fn,
             )
-        return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
+            zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
+            return zin
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
     # Folder or flat mode: shell out to WellPlateZipper. The zipper writes
     # `{well}.zip` files into the staging dir.
@@ -261,7 +281,7 @@ def stage_local_zips(
         )
 
     if fluor_tokens is not None:
-        zin = _filter_channels_in_place(
+        zin = _filter_channels_in_staging(
             staging, well_zips, mode,
             keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
             log_fn=log_fn,
@@ -299,7 +319,7 @@ def _required_tokens(
     return keep
 
 
-def _filter_channels_in_place(
+def _filter_channels_in_staging(
     zip_dir: Path,
     well_zips: tuple[Path, ...],
     mode: LocalInputMode,
@@ -310,6 +330,12 @@ def _filter_channels_in_place(
     """Rewrite each well zip to drop members whose name doesn't contain one
     of ``keep_tokens``. Skipped silently if every member is kept.
 
+    v5.2.18: renamed from ``_filter_channels_in_place``. The caller is
+    expected to have already copied the user's zips into a staging
+    temp dir — this function still rewrites in place RELATIVE to the
+    files it's handed, so passing it the user's original input dir
+    would corrupt the user's dataset (a pre-v5.2.18 bug).
+
     Phase-3 selective staging: this is the lever-1 multiplier — for a
     plate with 4 channels but only 2 in use, this cuts upload in half.
     Idempotent: a zip whose members are already filtered is a no-op.
@@ -319,6 +345,7 @@ def _filter_channels_in_place(
 
     total_in = 0
     total_kept = 0
+    empty_wells: list[str] = []
     for wz in well_zips:
         try:
             with zipfile.ZipFile(wz, "r") as zf:
@@ -328,6 +355,13 @@ def _filter_channels_in_place(
             continue
         total_in += len(members)
         total_kept += sum(keep_mask)
+        # v5.2.18: if filtering drops EVERY member of a well, that's
+        # almost always a typo'd channel name. Refuse to ship an
+        # empty zip — the pipeline would crash with a confusing
+        # "no images found" error far from the real cause.
+        if members and sum(keep_mask) == 0:
+            empty_wells.append(wz.stem)
+            continue
         if all(keep_mask):
             continue
         # Re-write the zip with only the kept members.
@@ -339,6 +373,17 @@ def _filter_channels_in_place(
                 if keep:
                     dst.writestr(src.getinfo(member), src.read(member))
         tmp.replace(wz)
+
+    if empty_wells:
+        sample = ", ".join(empty_wells[:5])
+        more = f" (and {len(empty_wells) - 5} more)" if len(empty_wells) > 5 else ""
+        raise RuntimeError(
+            f"Channel filter '{', '.join(sorted(keep_tokens))}' matched zero "
+            f"images in {len(empty_wells)} well(s): {sample}{more}. "
+            f"Likely a typo in the channel name(s) on the Analyze tab — "
+            f"check your nuclear and fluor channel tokens against the "
+            f"filenames inside the well zips."
+        )
 
     if log_fn and total_in:
         dropped = total_in - total_kept

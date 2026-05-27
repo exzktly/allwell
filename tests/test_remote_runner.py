@@ -468,6 +468,128 @@ def test_cache_key_changes_when_set_of_wells_changes(tmp_path, host):
 # ── RemoteRunner: argv rewriting ────────────────────────────────────────────
 
 
+# ── v5.2.25: deterministic run_id + remote-aware verify backstop ──────────
+
+
+def test_compute_run_id_is_deterministic_for_same_inputs():
+    """v5.2.25: same cache_key + same pipeline argv → same run_id.
+    The whole point of the dedup is that re-running with the same
+    config lands in the same remote output dir."""
+    from services.remote_runner import _compute_run_id
+    argv = [
+        "/usr/bin/python", "process_microscopy.py",
+        "--input_dir", "/in", "--output_dir", "/out",
+        "--nuclear_token", "NIR", "--fluor_tokens", "GFP",
+    ]
+    a = _compute_run_id("abcdef0123456789", argv)
+    b = _compute_run_id("abcdef0123456789", list(argv))
+    assert a == b
+
+
+def test_compute_run_id_changes_when_cache_key_changes():
+    """Different input → different run_id."""
+    from services.remote_runner import _compute_run_id
+    argv = ["--nuclear_token", "NIR"]
+    a = _compute_run_id("aaaaaaaaaaaaaaaa", argv)
+    b = _compute_run_id("bbbbbbbbbbbbbbbb", argv)
+    assert a != b
+
+
+def test_compute_run_id_changes_when_pipeline_args_change():
+    """Different segmentation config → different run_id so the
+    output cache doesn't serve stale results."""
+    from services.remote_runner import _compute_run_id
+    a = _compute_run_id("abcd", ["--nuclear_token", "NIR"])
+    b = _compute_run_id("abcd", ["--nuclear_token", "DAPI"])
+    assert a != b
+
+
+def test_compute_run_id_ignores_input_output_dirs_and_force():
+    """Paths and ``--force`` shouldn't churn the hash: paths are
+    already captured by cache_key, and ``--force`` is a re-run
+    instruction (not a config change) — it should reuse the same
+    cache slot and overwrite the previous outputs in place."""
+    from services.remote_runner import _compute_run_id
+    base = ["--nuclear_token", "NIR"]
+    with_paths = base + ["--input_dir", "/some/path", "--output_dir", "/other"]
+    with_other_paths = base + ["--input_dir", "/different", "--output_dir", "/x"]
+    with_force = base + ["--force"]
+    assert _compute_run_id("k", base) == _compute_run_id("k", with_paths)
+    assert _compute_run_id("k", base) == _compute_run_id("k", with_other_paths)
+    assert _compute_run_id("k", base) == _compute_run_id("k", with_force)
+
+
+def test_list_remote_completed_wells_parses_out_zip_listing(runner_with_run, monkeypatch):
+    """v5.2.25 backstop: ssh-listing of ``*_out.zip`` files in the
+    remote output dir yields the set of completed wells. Used by
+    _verify_local_manifest to discover wells the pipeline skipped
+    (no ``Well X — done.`` marker fires for them)."""
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(
+            stdout=(
+                "/r/out/A01_out.zip\n"
+                "/r/out/B02_out.zip\n"
+                "/r/out/H12_out.zip\n"
+                # Junk that shouldn't parse as a well — make sure
+                # the parser stays strict.
+                "/r/out/random_other.zip\n"
+            ),
+            returncode=0,
+        ),
+    )
+    wells = runner_with_run._list_remote_completed_wells()  # noqa: SLF001
+    assert wells == {"A01", "B02", "H12"}
+
+
+def test_list_remote_completed_wells_handles_empty_dir(runner_with_run, monkeypatch):
+    """Empty listing or no ``*_out.zip`` files → empty set, never raises."""
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="", returncode=0),
+    )
+    assert runner_with_run._list_remote_completed_wells() == set()  # noqa: SLF001
+
+
+def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monkeypatch):
+    """Network blip / missing ssh binary → return empty set, NOT
+    raise. The verify pass falls back to ``expected_wells``-only
+    (same behavior as pre-v5.2.25)."""
+    def fail(self, script, *, check):
+        raise OSError("ssh: no such file")
+    monkeypatch.setattr(DatasetCache, "_ssh_script", fail)
+    assert runner_with_run._list_remote_completed_wells() == set()  # noqa: SLF001
+
+
+def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkeypatch, tmp_path):
+    """End-to-end: pipeline skipped a well silently (no ``done.``
+    marker, so expected_wells doesn't include it). The remote
+    output dir HAS its ``B02_out.zip`` though. Verify must spot
+    that ``B02``'s CSV is missing locally and surface it for the
+    retry pass — that's how a 'deleted one CSV, re-run' user
+    flow gets the CSV back without re-analyzing.
+
+    runner_with_run sets expected_wells={'A01'} and pre-creates
+    *_A01.csv locally. We add B02 to the remote listing and check
+    that B02 ends up flagged as missing."""
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(
+            stdout="/r/out/A01_out.zip\n/r/out/B02_out.zip\n",
+            returncode=0,
+        ),
+    )
+    log_lines: list[str] = []
+    missing = runner_with_run._verify_local_manifest(  # noqa: SLF001
+        log=log_lines.append,
+    )
+    # A01 has its CSV (pre-created in the fixture). B02 doesn't —
+    # the backstop discovered the well, the local check noticed
+    # it's missing.
+    assert any("B02" in m for m in missing)
+    assert not any(m.endswith("A01") for m in missing)
+
+
 def test_remote_argv_swaps_input_output(host):
     runner = RemoteRunner(host)
     local = [
@@ -1270,8 +1392,12 @@ def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
     assert not any(c and c[0] == "rm" for c in rm_calls), (
         f"dry-run must not delete; got rm calls: {rm_calls}"
     )
-    # Two probes: one for the run dir, one for the dataset cache.
-    assert len(script_calls) == 2
+    # Three probes: the v5.2.25 verify backstop (lists *_out.zip on
+    # the remote output dir) plus one dry-run probe per cleanup
+    # target (run dir + dataset cache).
+    assert len(script_calls) == 3
+    dry_run_probes = [s for s in script_calls if "du -sb" in s]
+    assert len(dry_run_probes) == 2
     blob = "".join(log_lines)
     # Both targets appear with [DRY-RUN] prefix, with byte/file counts.
     assert "[DRY-RUN]" in blob
@@ -1313,8 +1439,10 @@ def test_verify_and_cleanup_dry_run_handles_missing_remote_path(runner_with_run,
 
 
 def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, monkeypatch):
-    """dry_run + cleanup_mode='none' = nothing to probe AND nothing
-    to delete. No ssh probes, no rm calls, no '[DRY-RUN]' chatter."""
+    """dry_run + cleanup_mode='none' = nothing to delete and no
+    ``[DRY-RUN]`` chatter in the log. The v5.2.25 verify backstop
+    may run an ``ls`` probe to look for already-completed wells —
+    that's a different concern and stays."""
     runner = runner_with_run
     script_calls: list[str] = []
 
@@ -1337,8 +1465,10 @@ def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, mo
         ok=True, cleanup_mode="none", dry_run=True,
         log_fn=log_lines.append,
     )
-    # Probe shouldn't fire because cleanup_mode=none short-circuits.
-    assert not script_calls
+    # No du-sb dry-run probe should fire — cleanup_mode=none
+    # short-circuits before any cleanup probing.
+    dry_run_probes = [s for s in script_calls if "du -sb" in s]
+    assert dry_run_probes == []
     blob = "".join(log_lines)
     assert "[DRY-RUN]" not in blob
 

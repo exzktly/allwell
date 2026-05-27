@@ -372,6 +372,39 @@ def _canonical_well_from_path(stem: str) -> str | None:
     return canonical_well_label(stem)
 
 
+def _compute_run_id(cache_key: str, pipeline_argv: list[str]) -> str:
+    """Deterministic run_id from input cache_key + pipeline-args
+    hash. Same input + same pipeline config → same run_id, so
+    re-running lands in the existing remote output dir and the
+    pipeline's own ``output_exists_for_well`` logic skips wells
+    whose ``{well}_out.zip`` already exists.
+
+    v5.2.25: skips per-run-irrelevant flags so the cache slot stays
+    stable across a forced-reprocess re-run, and so input/output
+    dir paths don't churn the hash. ``--force`` users will hit the
+    same dir and overwrite the cached outputs (which is what
+    ``--force`` is supposed to mean)."""
+    # Args that affect the bytes of the run output. Excludes the
+    # input/output paths (those are derived from cache_key already)
+    # and ``--force`` (a re-processing knob, not a config change).
+    skip_with_value = {"--input_dir", "--output_dir"}
+    skip_flags = {"--force"}
+    filtered: list[str] = []
+    i = 0
+    while i < len(pipeline_argv):
+        a = pipeline_argv[i]
+        if a in skip_with_value:
+            i += 2
+            continue
+        if a in skip_flags:
+            i += 1
+            continue
+        filtered.append(a)
+        i += 1
+    digest = hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
+    return f"{cache_key[:16]}-{digest}"
+
+
 def _required_tokens(
     nuclear_token: str | None, fluor_tokens: Iterable[str]
 ) -> set[str]:
@@ -1917,7 +1950,16 @@ class RemoteRunner:
             zipped, log_fn=log, progress_fn=progress_fn, stop_event=stop_event
         )
 
-        run_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
+        # v5.2.25: deterministic run_id keyed on the input cache_key
+        # + pipeline-args hash, so re-running the same input with the
+        # same config lands in the same remote output dir. Combined
+        # with ``cleanup_mode=none`` (the default), the pipeline's
+        # own ``output_exists_for_well`` logic then skips wells whose
+        # ``{well}_out.zip`` already exists from a prior run — making
+        # re-runs cheap. The ``[run-]`` prefix marks them visually
+        # different from the timestamp-style dirs older builds left
+        # on the remote.
+        run_id = "run-" + _compute_run_id(key, pipeline_argv)
         remote_input = self._cache.remote_dataset_dir(key)
         remote_output = f"{self.host.remote_staging_dir}/runs/{run_id}/out"
         remote_pidfile = f"{self.host.remote_staging_dir}/runs/{run_id}/run.pid"
@@ -2193,15 +2235,29 @@ class RemoteRunner:
     def _verify_local_manifest(
         self, *, log: Callable[[str], None]
     ) -> list[str]:
-        """Check that every well declared 'done' has its outputs locally.
+        """Check that every well with output on the remote has its
+        CSV locally.
 
         Returns the list of missing paths (empty list = all good).
+
+        v5.2.25: also discovers wells from the remote output dir's
+        ``*_out.zip`` listing — not just the ``Well X — done.`` stdout
+        markers. This catches the cache-hit case where the pipeline
+        skipped already-complete wells (no ``done`` marker emitted)
+        but their outputs still need to land locally, e.g. when the
+        user deleted a CSV and re-ran expecting the system to re-fetch.
         """
         run = self._run
         assert run is not None
+        all_wells = set(run.expected_wells)
+        # Backstop: ask the remote what wells it has ``{well}_out.zip``
+        # for. Pipeline-skipped wells aren't in expected_wells (no
+        # stdout marker fires for them) but their outputs are still
+        # what the user wants locally.
+        for w in self._list_remote_completed_wells():
+            all_wells.add(w)
         missing: list[str] = []
-        for well in sorted(run.expected_wells):
-            # CSV is always expected (full or csv-only modes both keep it).
+        for well in sorted(all_wells):
             csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
             if not csvs:
                 missing.append(f"missing CSV for {well}")
@@ -2215,10 +2271,44 @@ class RemoteRunner:
                 log(f"[remote] verify: … and {len(missing) - 10} more\n")
         else:
             log(
-                f"[remote] verify: all {len(run.expected_wells)} wells "
+                f"[remote] verify: all {len(all_wells)} wells "
                 f"present locally.\n"
             )
         return missing
+
+    def _list_remote_completed_wells(self) -> set[str]:
+        """ssh into the remote and list every ``{well}_out.zip`` in
+        the run's output dir; return the set of well labels. Used by
+        ``_verify_local_manifest`` to discover wells the pipeline
+        skipped (no ``Well X — done.`` marker fires when the
+        ``output_exists_for_well`` early-exit kicks in).
+
+        Uses ``_ssh_script`` so ``~/.allwell-staging`` expands
+        properly on the remote (the v5.2.16 lesson). Any error
+        (ssh missing, network drop, transient timeout) degrades
+        gracefully to an empty set — verify then falls back to the
+        ``expected_wells``-only check just like pre-v5.2.25."""
+        run = self._run
+        if run is None:
+            return set()
+        try:
+            listing = self._cache._ssh_script(  # noqa: SLF001
+                f"ls -1 {run.remote_output_dir}/*_out.zip 2>/dev/null || true",
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return set()
+        wells: set[str] = set()
+        if listing is None or not listing.stdout:
+            return wells
+        for line in listing.stdout.splitlines():
+            stem = Path(line.strip()).name.removesuffix(".zip")
+            if stem.endswith("_out"):
+                well = stem[:-len("_out")]
+                label = _canonical_well_from_path(well)
+                if label is not None:
+                    wells.add(label)
+        return wells
 
     # ── Cancel ──────────────────────────────────────────────────────────
 

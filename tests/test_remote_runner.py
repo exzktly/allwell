@@ -479,6 +479,41 @@ def test_fetcher_observes_well_done_marker(host, tmp_path):
     assert run.expected_wells == {"A01", "B02"}
 
 
+def test_fetcher_observes_well_done_with_logging_prefix(host, tmp_path):
+    """v5.2.17 regression: process_microscopy.py emits
+    ``log.info("Well %s — done.", well_label)`` with a basicConfig
+    formatter that prepends ``YYYY-MM-DD HH:MM:SS  INFO     ``. The
+    pre-v5.2.17 regex anchored on ``^`` and used .match(), so the
+    timestamp-prefixed line never matched and the Fetcher silently
+    pulled zero wells. The user saw 'rsync never completes' after a
+    successful remote run because no per-well rsync ever fired.
+
+    The fix uses .search() against an ``(?:Well\\s+)?`` substring
+    pattern so the actual production log lines parse correctly."""
+    from services.remote_runner import _RemoteRun
+
+    run = _RemoteRun(
+        run_id="x",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+    )
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL)
+        # Exact format the basicConfig formatter produces in
+        # process_microscopy.py: "%(asctime)s  %(levelname)-8s  %(message)s"
+        fetcher.observe("2026-05-27 10:30:45  INFO      Well A01 — done.\n")
+        fetcher.observe("2026-05-27 10:31:02  INFO      Well B02 — done.\n")
+        # Banner with a timestamp prefix must also still match.
+        fetcher.observe("2026-05-27 10:29:00  INFO      Zip mode: 24 well-zip files detected\n")
+        fetcher.cancel()
+    assert run.expected_wells == {"A01", "B02"}
+    assert run.well_count_total == 24
+
+
 def test_fetcher_ignores_unrelated_lines(host, tmp_path):
     from services.remote_runner import _RemoteRun
 

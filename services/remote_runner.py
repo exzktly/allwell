@@ -664,9 +664,17 @@ class DatasetCache:
         # per-file error to stderr but still reports overall success.
         # Count zips on the remote and match against the local well
         # count before letting ``spawn`` proceed.
+        #
+        # v5.2.16: pipe the count script via ``_ssh_script`` (stdin to
+        # remote bash) rather than ``_ssh_run`` (which would
+        # ``shlex.quote`` the ``~/.allwell-staging/...`` path into
+        # single quotes — killing tilde expansion on the remote and
+        # always returning 0). The previous v5.2.14 implementation
+        # falsely reported "expected 2 found 0" for runs whose files
+        # had actually transferred fine.
         expected = len(zipped.well_zips)
-        listing = self._ssh_run(
-            ["sh", "-c", f"ls -1 {shlex.quote(remote_path)}/*.zip 2>/dev/null | wc -l"],
+        listing = self._ssh_script(
+            f"ls -1 {remote_path}/*.zip 2>/dev/null | wc -l",
             check=False,
         )
         try:

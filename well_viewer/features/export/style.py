@@ -32,13 +32,25 @@ def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
 
 def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,
                             png_bytes: bytes) -> bool:
-    """Write the figure to the macOS pasteboard under the UTIs Illustrator reads.
+    """Write the figure to the macOS pasteboard under the UTIs Illustrator
+    AND Microsoft Office read.
 
     Qt's ``QMimeData`` cannot register a payload under a raw macOS UTI
     (``com.adobe.pdf`` / ``public.svg-image``) — it treats the string as a
     MIME type and mangles it — so a vector app pasting from a Qt clipboard
     only ever finds the raster flavour. Writing ``NSPasteboard`` directly is
     the only way to put true vector data where Illustrator looks for it.
+
+    v5.2.30: Microsoft Office on macOS (PowerPoint, Word, Excel) doesn't
+    read the modern ``com.adobe.pdf`` UTI for vector paste — it still
+    keys on the pre-UTI pasteboard-type name ``"Apple PDF pasteboard
+    type"`` (lower-case 'p' in "pasteboard"). Pre-v5.2.30 we declared
+    only the UTI, so Office's vector-paste detection missed the PDF and
+    fell back to the PNG flavour, rasterising the figure. Now we
+    declare the PDF under BOTH names. We also include TIFF
+    alongside PNG because Office prefers TIFF for its raster fallback;
+    apps that don't recognise TIFF still find PNG further down the
+    list.
 
     Returns ``True`` when the native write succeeded; ``False`` on any
     non-macOS platform, missing pyobjc, or error — the caller then falls
@@ -54,17 +66,31 @@ def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,
     try:
         flavours = []
         if pdf_bytes:
+            # PDF goes in TWICE: once under the modern UTI (Adobe,
+            # Preview, recent Cocoa apps) and once under the legacy
+            # NSPasteboard.Name from before macOS adopted UTIs. Office
+            # on macOS still reads the legacy name. Order matters —
+            # the legacy name leads so Office's paste handler picks
+            # PDF before it gets to the raster fallbacks.
+            flavours.append(("Apple PDF pasteboard type", pdf_bytes))
             flavours.append(("com.adobe.pdf", pdf_bytes))
         if svg_bytes:
             flavours.append(("public.svg-image", svg_bytes))
         if png_bytes:
+            # TIFF first: Office prefers it for the raster fallback
+            # over PNG. tiff_bytes is None when PIL/Pillow isn't
+            # available — we just skip it.
+            tiff_bytes = _png_to_tiff(png_bytes)
+            if tiff_bytes:
+                flavours.append(("public.tiff", tiff_bytes))
             flavours.append(("public.png", png_bytes))
         if not flavours:
             return False
         pb = NSPasteboard.generalPasteboard()
         pb.clearContents()
-        # declareTypes_owner_ must list every type before any setData call —
-        # Illustrator picks com.adobe.pdf first because it leads the list.
+        # declareTypes_owner_ must list every type before any setData
+        # call — Illustrator picks the first vector type it
+        # recognises, and Office picks the first one IT recognises.
         pb.declareTypes_owner_([uti for uti, _ in flavours], None)
         wrote = False
         for uti, data in flavours:
@@ -74,6 +100,23 @@ def _macos_pasteboard_write(pdf_bytes: bytes, svg_bytes: bytes,
         return wrote
     except Exception:
         return False
+
+
+def _png_to_tiff(png_bytes: bytes) -> bytes:
+    """Convert PNG bytes to TIFF bytes for the macOS pasteboard's
+    Office-friendly raster fallback. Returns ``b""`` if PIL isn't
+    importable (no Pillow in the environment) or conversion fails."""
+    if not png_bytes:
+        return b""
+    try:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(png_bytes)) as im:
+            out = io.BytesIO()
+            im.save(out, format="TIFF")
+            return out.getvalue()
+    except Exception:
+        return b""
 
 
 def copy_figure_to_clipboard(fig, *, svg_kwargs=None, pdf_kwargs=None) -> str:

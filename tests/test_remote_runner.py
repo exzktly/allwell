@@ -554,6 +554,66 @@ def test_cache_key_changes_when_set_of_wells_changes(tmp_path, host):
 # ── RemoteRunner: argv rewriting ────────────────────────────────────────────
 
 
+# ── v5.2.28: Stop button actually interrupts an in-flight rsync ───────────
+
+
+def test_rsync_with_retry_cancels_when_stop_event_set_before_call():
+    """If the stop event is already set when ``_rsync_with_retry`` is
+    entered, it short-circuits without spawning rsync at all and
+    returns rc=130 (SIGINT-style)."""
+    import threading
+    from services.remote_runner import _rsync_with_retry
+    stop = threading.Event()
+    stop.set()
+    log_lines: list[str] = []
+    result = _rsync_with_retry(
+        ["/bin/sleep", "10"],  # would normally hang for 10 s
+        log_fn=log_lines.append,
+        stop_event=stop,
+    )
+    assert result.returncode == 130
+    assert "cancelled by Stop request" in "".join(log_lines)
+
+
+def test_rsync_with_retry_cancels_during_in_flight_rsync():
+    """The actual bug the user reported: Stop fires WHILE a slow
+    rsync subprocess is running. The runner must terminate that
+    subprocess instead of waiting for it to finish on its own."""
+    import threading
+    import time
+    from services.remote_runner import _rsync_with_retry
+
+    stop = threading.Event()
+
+    def fire_stop_soon():
+        time.sleep(0.3)  # let the rsync get going first
+        stop.set()
+
+    threading.Thread(target=fire_stop_soon, daemon=True).start()
+    t0 = time.monotonic()
+    # Simulate a slow rsync by sleeping; the cancellable runner
+    # should terminate it well before the 10s sleep completes.
+    result = _rsync_with_retry(
+        ["/bin/sleep", "10"],
+        log_fn=None,
+        stop_event=stop,
+        timeout=15,
+    )
+    elapsed = time.monotonic() - t0
+
+    assert result.returncode == 130
+    # Must have terminated within a small window — well under the 10s sleep.
+    assert elapsed < 3.0, f"Stop took {elapsed:.2f}s to interrupt the rsync"
+
+
+def test_rsync_with_retry_no_stop_event_behaves_normally():
+    """When stop_event is None (the bootstrap path), behavior is
+    unchanged from pre-v5.2.28 — just runs the command and returns."""
+    from services.remote_runner import _rsync_with_retry
+    result = _rsync_with_retry(["/bin/true"], log_fn=None)
+    assert result.returncode == 0
+
+
 # ── v5.2.27: pre-flight cache-hit skips pipeline launch entirely ──────────
 
 

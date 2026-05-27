@@ -153,7 +153,9 @@ class AnalyzeTab(QWidget):
         scroll
         # Analyze form sidebar expanded 25% (280→350) per redesign-bug-batch-2:
         # the schema string + per-channel rows often clip at 280 px.
-        scroll.setMinimumWidth(350)
+        # Further +25% (350→438) per user feedback — the per-fluor rows
+        # were still tight when multiple channels were configured.
+        scroll.setMinimumWidth(438)
         form_host = QWidget()
         form_host
         self._form_layout = QVBoxLayout(form_host)
@@ -172,7 +174,7 @@ class AnalyzeTab(QWidget):
         splitter.setStretchFactor(1, 1)
         self._build_log(right)
 
-        splitter.setSizes([360, 600])
+        splitter.setSizes([450, 600])
 
     # ------------------------------------------------------------------
     # Layout helpers
@@ -385,6 +387,9 @@ class AnalyzeTab(QWidget):
         self._browse_btn.setEnabled(False)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
+        # Balancing stretch: input field gets ~50% of the row width
+        # rather than stretching to fill the whole sidebar.
+        ipl.addStretch(1)
         sec.layout().addWidget(in_pick)
 
         self._folder_lock_lbl = QLabel("Define the filename schema above first.", sec)
@@ -492,8 +497,18 @@ class AnalyzeTab(QWidget):
         )
         self._manage_remotes_btn.clicked.connect(self._open_manage_remotes)
         rl.addWidget(self._manage_remotes_btn)
+        rl.addStretch(1)
+        parent.layout().addWidget(remote_widget)
+
+        # Auto-delete checkbox on its own row so the label has room to
+        # breathe and so its enabled/disabled state is visually distinct
+        # from the remote-selection row above.
+        cleanup_row = QWidget(parent)
+        cl_rl = QHBoxLayout(cleanup_row)
+        cl_rl.setContentsMargins(12, 0, 12, 0)
+        cl_rl.setSpacing(8)
         self._cleanup_remote_cb = QCheckBox(
-            "Auto-delete remote files when done", remote_widget,
+            "Auto-delete remote files when done", cleanup_row,
         )
         self._cleanup_remote_cb.setToolTip(
             "v5.2.11+: unchecked (default) = leave everything on the remote "
@@ -501,9 +516,9 @@ class AnalyzeTab(QWidget):
             "verified-successful run, delete both the per-run output dir "
             "AND the cached input on the remote."
         )
-        rl.addWidget(self._cleanup_remote_cb)
-        rl.addStretch(1)
-        parent.layout().addWidget(remote_widget)
+        cl_rl.addWidget(self._cleanup_remote_cb)
+        cl_rl.addStretch(1)
+        parent.layout().addWidget(cleanup_row)
         # Disable the cleanup checkbox until the user picks a remote.
         self._remote_cb.currentIndexChanged.connect(self._refresh_remote_controls)
         self._refresh_remote_controls()

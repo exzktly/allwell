@@ -251,6 +251,39 @@ def test_stage_local_zips_typoed_channel_does_not_corrupt_user_input(tmp_path):
         assert sorted(zf.namelist()) == sorted(members)
 
 
+def test_filter_channels_logs_per_well_progress(tmp_path):
+    """v5.2.20: pre-v5.2.20 the channel filter only emitted ONE
+    summary line at the end of the whole plate. For a 96-well filter
+    that meant total silence for tens of seconds. Now each well
+    contributes a progress line so the user can see the filter
+    chewing through the plate."""
+    # A01 — all kept (no-op). B02 — partial (rewrite). C03 — all kept.
+    a01 = _make_well_zip(tmp_path, "A01.zip", ["NIR_F001.tif", "GFP_F001.tif"])
+    b02 = _make_well_zip(
+        tmp_path, "B02.zip",
+        ["NIR_F001.tif", "GFP_F001.tif", "DAPI_F001.tif"],
+    )
+    c03 = _make_well_zip(tmp_path, "C03.zip", ["NIR_F001.tif", "GFP_F001.tif"])
+
+    lines: list[str] = []
+    _filter_channels_in_staging(
+        tmp_path, (a01, b02, c03), LocalInputMode.ZIP,
+        keep_tokens={"NIR", "GFP"},
+        log_fn=lambda s: lines.append(s),
+    )
+    blob = "".join(lines)
+    # Per-well status with position-of-total prefix.
+    assert "(1/3): A01" in blob
+    assert "(2/3): B02" in blob
+    assert "(3/3): C03" in blob
+    # No-op wells say "all N kept".
+    assert "A01" in blob and "no-op" in blob
+    # The rewrite well reports its before→after size.
+    assert "B02" in blob and "kept 2/3" in blob
+    # End-of-plate summary still fires.
+    assert "summary" in blob and "rewrote 1" in blob
+
+
 # ── DatasetCache: cache-key stability ───────────────────────────────────────
 
 
@@ -1403,6 +1436,100 @@ def test_remote_join_renders_full_command():
     # No single-quoted ~ anywhere (the bug).
     assert "'~/" not in cmd
     assert "'~'" not in cmd
+
+
+def test_looks_like_rsync_filename_accepts_zip_paths():
+    """v5.2.20: rsync --info=name1 emits bare filenames on their own
+    line. The heuristic must accept paths a user would actually see
+    (well zips, required-files like process_microscopy.py and
+    subfolder/file.txt)."""
+    from services.remote_runner import _looks_like_rsync_filename
+    assert _looks_like_rsync_filename("A01.zip") is True
+    assert _looks_like_rsync_filename("process_microscopy.py") is True
+    assert _looks_like_rsync_filename("_Docs/requirements-remote.txt") is True
+
+
+def test_looks_like_rsync_filename_rejects_progress_and_status_lines():
+    """The heuristic must reject the noise rsync emits alongside
+    filename lines — progress percentages, byte stats, error
+    markers, the file-list announcement, blanks, and the wider
+    stats2 / status surface that pre-cleanup leaked through."""
+    from services.remote_runner import _looks_like_rsync_filename
+    # Empties.
+    assert _looks_like_rsync_filename("") is False
+    assert _looks_like_rsync_filename(" ") is False
+    # Progress line — starts with whitespace + numbers + percent.
+    assert _looks_like_rsync_filename("    12,345  50%  1.20MB/s    0:00:01") is False
+    # The 'sent X / Total ...' summary (capital and lowercase variants).
+    assert _looks_like_rsync_filename("sent 1,234,567 bytes  received 567 bytes  ...") is False
+    assert _looks_like_rsync_filename("Total bytes sent: 1,234,567") is False
+    assert _looks_like_rsync_filename("total size is 1,234  speedup is 1.00") is False
+    # Errors and announcements.
+    assert _looks_like_rsync_filename("rsync: connection unexpectedly closed") is False
+    assert _looks_like_rsync_filename("rsync error: error in socket IO (code 10)") is False
+    assert _looks_like_rsync_filename("building file list ... done") is False
+    assert _looks_like_rsync_filename("sending incremental file list") is False
+    # --info=stats2 multi-line footer — these all start with capitals
+    # and avoid the legacy prefix list. Caught now because they
+    # contain whitespace.
+    assert _looks_like_rsync_filename("Number of files: 96") is False
+    assert _looks_like_rsync_filename("Number of regular files transferred: 12") is False
+    assert _looks_like_rsync_filename("Literal data: 1,234,567 bytes") is False
+    assert _looks_like_rsync_filename("Matched data: 0 bytes") is False
+    assert _looks_like_rsync_filename("File list size: 123") is False
+    assert _looks_like_rsync_filename("File list generation time: 0.001 seconds") is False
+    # Non-fatal warnings.
+    assert _looks_like_rsync_filename("file has vanished: bar.tmp") is False
+    assert _looks_like_rsync_filename("created directory /remote/datasets/abc") is False
+    assert _looks_like_rsync_filename("deleting some_obsolete.zip") is False
+    assert _looks_like_rsync_filename("*deleting subdir/old.tif") is False
+    assert _looks_like_rsync_filename("WARNING: foo failed verification") is False
+    assert _looks_like_rsync_filename("IO error encountered -- skipping file deletion") is False
+    assert _looks_like_rsync_filename("skipping non-regular file \"foo\"") is False
+
+
+def test_ensure_uploaded_upload_cmd_includes_name1_on_modern_rsync(host, tmp_path, monkeypatch):
+    """v5.2.20: per-file logging requires ``--info=name1`` so rsync
+    emits filenames; assert the upload command actually includes
+    that flag on rsync 3.1+."""
+    from services.remote_runner import _rsync_version
+    _rsync_version.cache_clear()
+
+    z = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
+    z.write_bytes(b"\0" * 1024)
+    zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z,))
+    cache = DatasetCache(host)
+    captured = {}
+
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_run",
+        lambda self, argv, *, check: MagicMock(stdout="", returncode=0),
+    )
+    monkeypatch.setattr(
+        DatasetCache, "_ssh_script",
+        lambda self, script, *, check: MagicMock(stdout="1\n", returncode=0),
+    )
+    monkeypatch.setattr(
+        "services.remote_runner.subprocess.run",
+        MagicMock(return_value=subprocess.CompletedProcess(
+            [], 0,
+            stdout="rsync  version 3.2.7  protocol version 31\n",
+            stderr="",
+        )),
+    )
+
+    def capture_streaming(cmd, **kw):
+        captured["cmd"] = list(cmd)
+        return (1024, 0)
+
+    monkeypatch.setattr("services.remote_runner._run_rsync_streaming", capture_streaming)
+
+    cache.ensure_uploaded(zipped)
+    info_flag = next((a for a in captured["cmd"] if a.startswith("--info=")), "")
+    assert "name1" in info_flag, (
+        f"--info= must include 'name1' so rsync emits filename lines for per-file logging; "
+        f"got {info_flag!r}"
+    )
 
 
 def test_conda_run_prefix_default_env():

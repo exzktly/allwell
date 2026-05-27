@@ -142,6 +142,15 @@ class LocalInputMode(str, Enum):
     defaults to True), then proceed identically to zip mode. Treated
     like ZIP from the Fetcher's perspective."""
 
+    MIXED = "mixed"
+    """Input has BOTH ``{well}.zip`` files AND ``{well}/`` folders for
+    different wells — the signature of a previous run that died
+    partway through ``compress_input_well_folders`` (or a manual
+    half-conversion). v5.2.21: instead of silently picking ZIP mode
+    and ignoring the remaining folders, treat the input as a resume
+    point: trust the existing zips, and zip the leftover folders
+    into the staging dir so the run includes every well."""
+
 
 @dataclass
 class RunEstimate:
@@ -236,6 +245,19 @@ def stage_local_zips(
             )
         return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
 
+    if mode is LocalInputMode.MIXED:
+        # v5.2.21: input has zips for some wells and folders for
+        # others — the signature of a previous run that died partway
+        # through compress_input_well_folders. Resume by trusting the
+        # existing zips and zipping the leftover folders into a
+        # staging dir.
+        return _stage_mixed_mode(
+            input_dir,
+            fluor_tokens=fluor_tokens,
+            nuclear_token=nuclear_token,
+            log_fn=log_fn,
+        )
+
     # Folder or flat mode: shell out to WellPlateZipper. The zipper writes
     # `{well}.zip` files into the staging dir.
     staging = Path(tempfile.mkdtemp(prefix="allwell-zips-"))
@@ -278,15 +300,56 @@ def stage_local_zips(
 
 
 def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
-    """Mirror the discovery logic in process_microscopy's main()."""
-    if any(input_dir.glob("[A-H][0-9]*.zip")):
+    """Mirror the discovery logic in process_microscopy's main(), with
+    one extension over the local script: detect MIXED mode (zips +
+    folders for different wells) so the staging path can resume from
+    a half-completed prior run rather than silently dropping the
+    unzipped wells.
+    """
+    zip_wells: set[str] = set()
+    for p in input_dir.glob("[A-H][0-9]*.zip"):
+        label = _canonical_well_from_path(p.stem)
+        if label is not None:
+            zip_wells.add(label)
+
+    folder_wells: set[str] = set()
+    try:
+        for p in input_dir.iterdir():
+            if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+                continue
+            label = _canonical_well_from_path(p.name)
+            if label is None:
+                continue
+            # Empty folders don't count — they're often leftovers from
+            # ``compress_folder_images_to_zip_and_remove`` that
+            # interrupted between zip-write and folder-delete.
+            try:
+                if not any(p.iterdir()):
+                    continue
+            except OSError:
+                continue
+            folder_wells.add(label)
+    except OSError:
+        # Drive yanked? Re-raise as a clearer error upstream.
+        raise
+
+    # MIXED iff there's at least one well with a folder that has no
+    # matching zip AND at least one well that DOES have a zip.
+    remaining = folder_wells - zip_wells
+    if zip_wells and remaining:
+        return LocalInputMode.MIXED
+    if zip_wells:
         return LocalInputMode.ZIP
-    if any(
-        p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
-        for p in input_dir.iterdir()
-    ):
+    if folder_wells:
         return LocalInputMode.FOLDER
     return LocalInputMode.FLAT
+
+
+def _canonical_well_from_path(stem: str) -> str | None:
+    """Normalize a path stem like ``A1`` or ``A01`` to canonical
+    ``A01``. Returns None if the stem isn't a 96-well token."""
+    from well_token import canonical_well_label
+    return canonical_well_label(stem)
 
 
 def _required_tokens(
@@ -297,6 +360,150 @@ def _required_tokens(
     if nuclear_token:
         keep.add(nuclear_token.strip())
     return keep
+
+
+def _zip_well_folder(folder: Path, out_zip: Path) -> int:
+    """Atomically zip the TIFs in ``folder`` to ``out_zip``.
+
+    Uses the same ``__aw_tmp_*.pidNNN`` rename pattern as
+    ``process_microscopy.compress_folder_images_to_zip_and_remove`` so
+    a future inspection can tell a partial v5.2.21 mixed-mode resume
+    apart from a partial local-pipeline compression. Returns the
+    number of TIFs zipped (0 → folder had no images, caller should
+    skip).
+    """
+    tifs = sorted(
+        p for p in folder.iterdir()
+        if p.suffix.lower() in (".tif", ".tiff")
+    )
+    if not tifs:
+        return 0
+    tmp = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
+    try:
+        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for t in tifs:
+                zf.write(t, arcname=t.name)
+        tmp.replace(out_zip)
+    except BaseException:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
+    return len(tifs)
+
+
+def _stage_mixed_mode(
+    input_dir: Path,
+    *,
+    fluor_tokens: Iterable[str] | None,
+    nuclear_token: str | None,
+    log_fn: Callable[[str], None] | None,
+) -> ZippedInput:
+    """Resume from a half-completed compression: zip the leftover
+    folders into a staging dir, combine with the existing zips, and
+    return the union.
+
+    v5.2.21 entry point for the MIXED input mode. The detection in
+    ``_detect_local_input_mode`` already established that at least one
+    well has a zip AND at least one DIFFERENT well has a folder of
+    TIFs — exactly the state a network-drop mid-``compress_input_well_folders``
+    leaves behind.
+
+    The user's existing zips are NOT mutated; they stay where they
+    are. The staging dir holds only the newly-zipped wells, and the
+    returned ``ZippedInput.well_zips`` tuple points at both: existing
+    zips by their original path, new zips by their staging path. If
+    a channel filter is requested, BOTH sets are first copied/written
+    into staging and then filtered there — the user's originals stay
+    pristine (same invariant as v5.2.18).
+    """
+    existing_zip_paths = sorted(input_dir.glob("[A-H][0-9]*.zip"))
+    existing_wells: dict[str, Path] = {}
+    for p in existing_zip_paths:
+        label = _canonical_well_from_path(p.stem)
+        if label is not None:
+            existing_wells[label] = p
+
+    folder_wells: dict[str, Path] = {}
+    for p in input_dir.iterdir():
+        if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+            continue
+        label = _canonical_well_from_path(p.name)
+        if label is None or label in existing_wells:
+            continue
+        try:
+            if not any(p.iterdir()):
+                continue
+        except OSError:
+            continue
+        folder_wells[label] = p
+
+    if not folder_wells:
+        # Shouldn't reach here — _detect_local_input_mode wouldn't have
+        # returned MIXED. Defensive: fall back to plain ZIP mode.
+        return ZippedInput(
+            zip_dir=input_dir,
+            mode=LocalInputMode.ZIP,
+            well_zips=tuple(existing_zip_paths),
+            cleanup=None,
+        )
+
+    if log_fn:
+        log_fn(
+            f"[stage] resume detected: {len(existing_wells)} existing "
+            f"zip(s), {len(folder_wells)} leftover folder(s) to zip "
+            f"({sorted(folder_wells)[:5]}{'…' if len(folder_wells) > 5 else ''}).\n"
+        )
+
+    staging = Path(tempfile.mkdtemp(prefix="allwell-resume-"))
+    try:
+        # Zip the leftover folders into staging.
+        for label in sorted(folder_wells):
+            folder = folder_wells[label]
+            target = staging / f"{label}.zip"
+            n = _zip_well_folder(folder, target)
+            if log_fn:
+                log_fn(
+                    f"[stage] zipped {folder.name} → {target.name} "
+                    f"({n} TIF{'s' if n != 1 else ''})\n"
+                )
+
+        new_zip_paths = sorted(staging.glob("[A-H][0-9]*.zip"))
+        all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
+
+        if fluor_tokens is not None:
+            # The v5.2.18 invariant: the channel filter must NOT
+            # mutate the user's originals. Copy ALL zips (existing +
+            # new) into staging, then filter. The originals stay
+            # pristine.
+            staged_for_filter: list[Path] = []
+            for z in existing_zip_paths:
+                dest = staging / z.name
+                if not dest.exists():
+                    shutil.copy2(z, dest)
+                staged_for_filter.append(dest)
+            # New zips are already in staging.
+            staged_for_filter.extend(new_zip_paths)
+            staged_for_filter = sorted(set(staged_for_filter))
+            zin = _filter_channels_in_place(
+                staging, tuple(staged_for_filter), LocalInputMode.MIXED,
+                keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
+                log_fn=log_fn,
+            )
+            zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
+            return zin
+
+        return ZippedInput(
+            zip_dir=staging,
+            mode=LocalInputMode.MIXED,
+            well_zips=all_zips,
+            cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
+        )
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
 
 
 def _filter_channels_in_place(

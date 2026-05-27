@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -84,6 +85,44 @@ def test_detect_flat_mode(tmp_path):
     assert _detect_local_input_mode(tmp_path) is LocalInputMode.FLAT
 
 
+def test_detect_mixed_mode_zips_plus_folders_for_other_wells(tmp_path):
+    """v5.2.21: input dir has zips for some wells AND folders for
+    DIFFERENT wells — the signature of a previous run that died
+    partway through compress_input_well_folders. Must be recognised
+    as MIXED so the staging path can resume."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    _make_well_zip(tmp_path, "A02.zip", ["NIR.tif"])
+    (tmp_path / "B03").mkdir()
+    (tmp_path / "B03" / "NIR.tif").write_bytes(b"\0")
+    (tmp_path / "B04").mkdir()
+    (tmp_path / "B04" / "NIR.tif").write_bytes(b"\0")
+    assert _detect_local_input_mode(tmp_path) is LocalInputMode.MIXED
+
+
+def test_detect_mode_empty_leftover_folders_dont_trigger_mixed(tmp_path):
+    """Compress-and-delete sometimes leaves empty folder husks (the
+    rename completed, the rmtree raced with another process). An
+    empty folder should NOT trigger MIXED detection — it's just
+    cleanup debris, not real loose content."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    (tmp_path / "A01").mkdir()  # empty husk left behind
+    (tmp_path / "B02").mkdir()  # another empty husk
+    assert _detect_local_input_mode(tmp_path) is LocalInputMode.ZIP
+
+
+def test_detect_mode_folder_with_existing_zip_for_same_well_is_zip(tmp_path):
+    """If a well has BOTH a zip AND a folder of TIFs (the truly
+    half-finished case where the zip was written but the folder
+    rmtree never ran), the zip wins — same well, no extra work to do
+    on the leftover folder. MIXED should be reserved for wells with
+    NO existing zip."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    (tmp_path / "A01").mkdir()
+    (tmp_path / "A01" / "NIR.tif").write_bytes(b"\0")
+    # No OTHER wells with folders only — so this is ZIP mode.
+    assert _detect_local_input_mode(tmp_path) is LocalInputMode.ZIP
+
+
 # ── stage_local_zips: zip-input fast path ───────────────────────────────────
 
 
@@ -99,6 +138,98 @@ def test_stage_local_zips_zip_input_passthrough(tmp_path):
     assert zipped.zip_dir == tmp_path  # no copy
     assert len(zipped.well_zips) == 2
     assert zipped.cleanup is None  # no temp dir to clean up
+
+
+def test_stage_local_zips_mixed_mode_resumes_from_leftover_folders(tmp_path):
+    """v5.2.21: a dropped-drive interrupted a prior local
+    compress_input_well_folders run, leaving the input dir with some
+    completed zips and some unzipped folders. The staging step must
+    pick this up as a resume — zip the leftover folders and combine
+    with the existing zips for the union of wells, not silently drop
+    the folders by picking ZIP mode."""
+    _make_well_zip(tmp_path, "A01.zip", ["A01_NIR_F001.tif"])
+    _make_well_zip(tmp_path, "A02.zip", ["A02_NIR_F001.tif"])
+    (tmp_path / "B03").mkdir()
+    (tmp_path / "B03" / "B03_NIR_F001.tif").write_bytes(b"\xff" * 64)
+    (tmp_path / "B03" / "B03_GFP_F001.tif").write_bytes(b"\xff" * 64)
+    (tmp_path / "B04").mkdir()
+    (tmp_path / "B04" / "B04_NIR_F001.tif").write_bytes(b"\xff" * 64)
+
+    logs: list[str] = []
+    zipped = stage_local_zips(
+        tmp_path,
+        filename_schema="well:channel:fov",
+        filename_sep="_",
+        log_fn=logs.append,
+    )
+
+    assert zipped.mode is LocalInputMode.MIXED
+    # Four wells total: 2 existing zips + 2 newly-zipped from folders.
+    assert len(zipped.well_zips) == 4
+    names = sorted(p.name for p in zipped.well_zips)
+    assert names == ["A01.zip", "A02.zip", "B03.zip", "B04.zip"]
+    # The resume log line must surface so the user knows what's
+    # happening (and which wells are being newly zipped).
+    blob = "".join(logs)
+    assert "resume detected" in blob
+    assert "B03" in blob
+    assert "B04" in blob
+
+    # User's existing zips are untouched (path still points at input dir).
+    a01 = next(p for p in zipped.well_zips if p.name == "A01.zip")
+    assert a01.parent == tmp_path
+    # Newly-zipped wells live in the staging dir.
+    b03 = next(p for p in zipped.well_zips if p.name == "B03.zip")
+    assert b03.parent == zipped.zip_dir
+    assert zipped.zip_dir != tmp_path
+
+    # New zips actually contain the source TIFs.
+    with zipfile.ZipFile(b03, "r") as zf:
+        assert sorted(zf.namelist()) == ["B03_GFP_F001.tif", "B03_NIR_F001.tif"]
+
+    # Cleanup tears down the staging dir.
+    assert zipped.cleanup is not None
+    zipped.cleanup()
+    assert not zipped.zip_dir.exists()
+    # The user's zips and folders remain in the input dir post-cleanup.
+    assert (tmp_path / "A01.zip").exists()
+    assert (tmp_path / "B03" / "B03_NIR_F001.tif").exists()
+
+
+def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
+    """If _stage_mixed_mode raises mid-zip (e.g. PermissionError on a
+    folder), the user's pre-existing zips MUST be untouched and the
+    staging dir MUST be cleaned up — no leaked temp dir, no mutation
+    of the input dir."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    original_bytes = (tmp_path / "A01.zip").read_bytes()
+    (tmp_path / "B02").mkdir()
+    (tmp_path / "B02" / "NIR.tif").write_bytes(b"\xff" * 32)
+
+    import services.remote_runner as rr
+
+    def fake_zip_well_folder(folder: Path, out_zip: Path) -> int:
+        raise PermissionError("drive yanked mid-zip")
+
+    original = rr._zip_well_folder
+    rr._zip_well_folder = fake_zip_well_folder
+    try:
+        with pytest.raises(PermissionError, match="drive yanked"):
+            stage_local_zips(
+                tmp_path,
+                filename_schema="well:channel:fov",
+                filename_sep="_",
+            )
+    finally:
+        rr._zip_well_folder = original
+
+    # User's zip is byte-for-byte unchanged.
+    assert (tmp_path / "A01.zip").read_bytes() == original_bytes
+    # Folder is untouched.
+    assert (tmp_path / "B02" / "NIR.tif").exists()
+    # No leaked staging dirs.
+    leaked = list(Path(tempfile.gettempdir()).glob("allwell-resume-*"))
+    assert not leaked, f"staging dir leaked on error: {leaked}"
 
 
 # ── selective channel staging ───────────────────────────────────────────────

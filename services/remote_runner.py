@@ -1492,6 +1492,10 @@ class _RemoteRun:
     remote_pidfile: str
     local_output_dir: Path
     local_input_mode: LocalInputMode
+    # v5.2.29: tracked here so the verify step can check the right
+    # local artifacts (CSV always; out_zip / extracted folder only
+    # when the user opted into the full output set).
+    output_filter: OutputFilter = OutputFilter.FULL
     expected_wells: set[str] = field(default_factory=set)
     fetched_wells: set[str] = field(default_factory=set)
     well_count_total: int = 0
@@ -2088,6 +2092,7 @@ class RemoteRunner:
             remote_pidfile=remote_pidfile,
             local_output_dir=local_output_dir,
             local_input_mode=zipped.mode,
+            output_filter=output_filter,
         )
 
         # v5.2.27: pre-flight cache-hit check. Before launching the
@@ -2402,7 +2407,7 @@ class RemoteRunner:
         self, *, log: Callable[[str], None]
     ) -> list[str]:
         """Check that every well with output on the remote has its
-        CSV locally.
+        full local artifact set.
 
         Returns the list of missing paths (empty list = all good).
 
@@ -2410,8 +2415,20 @@ class RemoteRunner:
         ``*_out.zip`` listing — not just the ``Well X — done.`` stdout
         markers. This catches the cache-hit case where the pipeline
         skipped already-complete wells (no ``done`` marker emitted)
-        but their outputs still need to land locally, e.g. when the
-        user deleted a CSV and re-ran expecting the system to re-fetch.
+        but their outputs still need to land locally.
+
+        v5.2.29: verify the OUT_ZIP / extracted folder too, not just
+        the CSV. Pre-v5.2.29 a resumed run that had pulled the CSV
+        but failed mid-zip-rsync would silently leave the well
+        flagged "complete" — the user would have the measurements
+        but never the QC zip the GUI's Review tab needs.
+
+        The expected local artifacts depend on the user's output
+        filter and input mode:
+        - Always: ``{csv_prefix}_{well}.csv``
+        - FULL filter + ZIP/FLAT mode: also ``{well}_out.zip``
+        - FULL filter + FOLDER mode: also ``{well}/`` directory
+        - CSV_ONLY filter: just the CSV (zip explicitly discarded)
         """
         run = self._run
         assert run is not None
@@ -2423,6 +2440,15 @@ class RemoteRunner:
         for w in self._list_remote_completed_wells():
             all_wells.add(w)
         missing: list[str] = []
+        want_zip_artifact = (
+            run.output_filter is OutputFilter.FULL
+            and run.local_input_mode in (LocalInputMode.ZIP, LocalInputMode.FLAT,
+                                          LocalInputMode.MIXED)
+        )
+        want_folder_artifact = (
+            run.output_filter is OutputFilter.FULL
+            and run.local_input_mode is LocalInputMode.FOLDER
+        )
         for well in sorted(all_wells):
             csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
             if not csvs:
@@ -2430,6 +2456,19 @@ class RemoteRunner:
                 continue
             if any(p.stat().st_size == 0 for p in csvs):
                 missing.append(f"empty CSV for {well}")
+                continue
+            # v5.2.29: also verify the QC artifact for the user's
+            # output mode. A previous run could have pulled the CSV
+            # but failed mid-zip-rsync; without this check the well
+            # is silently flagged complete and the zip stays remote.
+            if want_zip_artifact:
+                out_zip = run.local_output_dir / f"{well}_out.zip"
+                if not out_zip.exists() or out_zip.stat().st_size == 0:
+                    missing.append(f"missing {well}_out.zip locally")
+            elif want_folder_artifact:
+                out_folder = run.local_output_dir / well
+                if not out_folder.is_dir() or not any(out_folder.iterdir()):
+                    missing.append(f"missing {well}/ output folder locally")
         if missing:
             for m in missing[:10]:
                 log(f"[remote] verify: {m}\n")

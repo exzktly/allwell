@@ -304,6 +304,74 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                     ln.set_markerfacecolor(ln_colour)
                     ln.set_markeredgecolor(ln_colour)
 
+        # v5.2.31: ``ax.scatter`` produces a ``PathCollection`` rather
+        # than a ``Line2D`` — pre-v5.2.31 the loop above missed every
+        # scatter-based artist (notably the beeswarm dots), so changing
+        # Marker prefs had no visible effect on them. Renderers that
+        # want scatter artists controlled by the export-style panel
+        # tag their PathCollection with ``_aw_marker_collection =
+        # True``. Other PathCollections (contour, hexbin, errorbar
+        # caps, single-point placeholders) stay untouched.
+        marker_size = float(prefs.get("marker_size", 5.0))
+        marker_edge_width = float(prefs.get("marker_edge_width", 0.8))
+        for coll in ax.collections:
+            if not getattr(coll, "_aw_marker_collection", False):
+                continue
+            # PathCollection ``sizes`` are in points^2 (area), unlike
+            # Line2D ``markersize`` which is points (diameter). Square
+            # the diameter so the visual size matches between the
+            # line- and scatter-based artists on the same plot.
+            try:
+                coll.set_sizes([marker_size * marker_size])
+            except Exception:
+                pass
+            try:
+                coll.set_linewidths([marker_edge_width])
+            except Exception:
+                pass
+            if marker_style and marker_style != "keep":
+                # Per-point face/edge: read the FIRST currently-set
+                # face colour so we preserve the renderer's per-well
+                # colour assignment. Open vs filled is a function of
+                # the user's pref, not the renderer's choice.
+                try:
+                    faces = coll.get_facecolors()
+                    cur_colour = faces[0] if len(faces) else None
+                except Exception:
+                    cur_colour = None
+                if cur_colour is None:
+                    try:
+                        edges = coll.get_edgecolors()
+                        cur_colour = edges[0] if len(edges) else None
+                    except Exception:
+                        cur_colour = None
+                if cur_colour is not None:
+                    if marker_open:
+                        try:
+                            coll.set_facecolor("none")
+                            coll.set_edgecolor(cur_colour)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            coll.set_facecolor(cur_colour)
+                            coll.set_edgecolor(cur_colour)
+                        except Exception:
+                            pass
+                # Marker shape: swap the path in the PathCollection
+                # to the requested marker's path. Each point in the
+                # collection draws the same path, scaled by size.
+                if marker_style.lower() != "none":
+                    try:
+                        from matplotlib.markers import MarkerStyle
+                        ms = MarkerStyle(marker_style)
+                        new_path = ms.get_path().transformed(
+                            ms.get_transform()
+                        )
+                        coll.set_paths([new_path])
+                    except Exception:
+                        pass
+
         show_grid = bool(prefs.get("grid_show", True))
         ax.grid(show_grid, alpha=float(prefs.get("grid_alpha", 0.25)), linestyle=str(prefs.get("grid_style", "--")))
 

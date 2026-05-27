@@ -325,6 +325,90 @@ def test_estimate_warns_when_local_would_win(host, tmp_path):
     assert not est.will_win
 
 
+# ── DatasetCache.ensure_uploaded: error path ────────────────────────────────
+
+
+def _make_zipped(tmp_path, names):
+    """Helper: build a ZippedInput with N tiny well-zips."""
+    zips = []
+    for n in names:
+        p = _make_well_zip(tmp_path, n, ["x.tif"])
+        p.write_bytes(b"\0" * 1024)
+        zips.append(p)
+    return ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=tuple(zips))
+
+
+def test_ensure_uploaded_raises_on_nonzero_rsync_rc(host, tmp_path, monkeypatch):
+    """v5.2.14: pre-v5.2.14 ``ensure_uploaded`` returned even when rsync
+    exited non-zero (e.g. rc=23 'partial transfer due to error'), so
+    ``spawn()`` happily started the pipeline against an incomplete
+    remote input dir. The user saw 'pipeline failed' rather than the
+    real upload-side error. Must now raise."""
+    zipped = _make_zipped(tmp_path, ["A01.zip", "B02.zip"])
+    cache = DatasetCache(host)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", lambda self, argv, *, check: MagicMock(stdout="", returncode=0))
+    # rsync reports rc=23 ("partial transfer due to error") — non-retry.
+    monkeypatch.setattr(
+        "services.remote_runner._run_rsync_streaming",
+        lambda *a, **kw: (0, 23),
+    )
+
+    with pytest.raises(RuntimeError, match="exit code 23"):
+        cache.ensure_uploaded(zipped)
+
+
+def test_ensure_uploaded_raises_when_remote_file_count_mismatches(host, tmp_path, monkeypatch):
+    """v5.2.14: belt-and-braces. rsync can exit 0 yet have skipped
+    some files (source-side read errors, etc.). Verify count after
+    upload and raise on mismatch — the pipeline must not start against
+    a half-empty remote dataset dir."""
+    zipped = _make_zipped(tmp_path, ["A01.zip", "B02.zip", "C03.zip"])  # 3 wells
+    cache = DatasetCache(host)
+
+    ssh_calls = []
+
+    def fake_ssh_run(self, argv, *, check):
+        ssh_calls.append(list(argv))
+        # Verification ssh call — return "2" so it appears short.
+        if any("ls -1" in a for a in argv):
+            return MagicMock(stdout="2\n", returncode=0)
+        return MagicMock(stdout="", returncode=0)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    # rsync says success but lied.
+    monkeypatch.setattr(
+        "services.remote_runner._run_rsync_streaming",
+        lambda *a, **kw: (1024, 0),
+    )
+
+    with pytest.raises(RuntimeError, match=r"expected 3 well zip\(s\).*found 2"):
+        cache.ensure_uploaded(zipped)
+
+
+def test_ensure_uploaded_succeeds_when_count_matches(host, tmp_path, monkeypatch):
+    """Happy path: rsync rc=0 AND remote count matches local → return
+    the cache key tuple, no raise."""
+    zipped = _make_zipped(tmp_path, ["A01.zip", "B02.zip"])
+    cache = DatasetCache(host)
+
+    def fake_ssh_run(self, argv, *, check):
+        if any("ls -1" in a for a in argv):
+            return MagicMock(stdout="2\n", returncode=0)
+        return MagicMock(stdout="", returncode=0)
+
+    monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
+    monkeypatch.setattr(
+        "services.remote_runner._run_rsync_streaming",
+        lambda *a, **kw: (2048, 0),
+    )
+
+    key, sent, elapsed = cache.ensure_uploaded(zipped)
+    assert key  # non-empty
+    assert sent == 2048
+    assert elapsed > 0
+
+
 # ── Fetcher: stdout observation ─────────────────────────────────────────────
 
 

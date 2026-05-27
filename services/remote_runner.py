@@ -608,6 +608,48 @@ class DatasetCache:
                 break
         elapsed = max(time.monotonic() - t0, 1e-6)
 
+        # v5.2.14: pre-v5.2.14 ``ensure_uploaded`` returned even when
+        # rsync exited non-zero (e.g. rc=23 "partial transfer due to
+        # error"). ``spawn()`` then started the pipeline against an
+        # incomplete remote input dir — the user saw "pipeline failed"
+        # without ever seeing the upstream upload failure.
+        #
+        # Fail loud here so the upload error is the user's first signal,
+        # not a downstream "no wells found" or KeyError deep in the
+        # pipeline. The retry loop above already handles transient
+        # codes; reaching here with rc != 0 means a real error.
+        if rc != 0:
+            raise RuntimeError(
+                f"rsync upload of well zips to {self.host.ssh_alias} "
+                f"failed with exit code {rc} (after "
+                f"{len(_RSYNC_RETRY_DELAYS) + 1} attempts). The remote "
+                f"dataset at {remote_path} is incomplete. Re-run to "
+                f"resume from --partial."
+            )
+
+        # v5.2.14: belt-and-braces verification. Some rsync failure
+        # modes (notably source-side read errors on a subset of files)
+        # can result in rc=0 with a partial transfer — rsync logs the
+        # per-file error to stderr but still reports overall success.
+        # Count zips on the remote and match against the local well
+        # count before letting ``spawn`` proceed.
+        expected = len(zipped.well_zips)
+        listing = self._ssh_run(
+            ["sh", "-c", f"ls -1 {shlex.quote(remote_path)}/*.zip 2>/dev/null | wc -l"],
+            check=False,
+        )
+        try:
+            actual = int((listing.stdout or "0").strip())
+        except (TypeError, ValueError):
+            actual = -1
+        if actual != expected:
+            raise RuntimeError(
+                f"Upload verification failed: expected {expected} well "
+                f"zip(s) at {self.host.ssh_alias}:{remote_path}/, found "
+                f"{actual}. rsync reported success but some files did "
+                f"not reach the remote. Re-run to retry."
+            )
+
         # Refresh the bandwidth estimate when we actually moved bytes —
         # cache hits would skew the average toward infinity.
         if sent_bytes > 1_000_000:  # >1 MB → meaningful sample

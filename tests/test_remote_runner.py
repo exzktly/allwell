@@ -146,7 +146,10 @@ def test_stage_local_zips_mixed_mode_resumes_from_leftover_folders(tmp_path):
     completed zips and some unzipped folders. The staging step must
     pick this up as a resume — zip the leftover folders and combine
     with the existing zips for the union of wells, not silently drop
-    the folders by picking ZIP mode."""
+    the folders by picking ZIP mode.
+
+    v5.2.24: new zips now persist in the input dir so the user can
+    see them and so the next run picks them up as plain ZIP mode."""
     _make_well_zip(tmp_path, "A01.zip", ["A01_NIR_F001.tif"])
     _make_well_zip(tmp_path, "A02.zip", ["A02_NIR_F001.tif"])
     (tmp_path / "B03").mkdir()
@@ -174,33 +177,64 @@ def test_stage_local_zips_mixed_mode_resumes_from_leftover_folders(tmp_path):
     assert "resume detected" in blob
     assert "B03" in blob
     assert "B04" in blob
+    # v5.2.24: the log says where the new zips landed.
+    assert "persisted to input dir" in blob
 
-    # User's existing zips are untouched (path still points at input dir).
-    a01 = next(p for p in zipped.well_zips if p.name == "A01.zip")
-    assert a01.parent == tmp_path
-    # Newly-zipped wells live in the staging dir.
-    b03 = next(p for p in zipped.well_zips if p.name == "B03.zip")
-    assert b03.parent == zipped.zip_dir
-    assert zipped.zip_dir != tmp_path
+    # v5.2.24: ALL zips — existing AND newly-zipped — live in the
+    # user's input dir, not in a throwaway tempdir.
+    assert zipped.zip_dir == tmp_path
+    for p in zipped.well_zips:
+        assert p.parent == tmp_path, f"{p} should be in input dir"
+    # Concrete file existence check, post-call.
+    assert (tmp_path / "B03.zip").exists()
+    assert (tmp_path / "B04.zip").exists()
 
     # New zips actually contain the source TIFs.
+    b03 = tmp_path / "B03.zip"
     with zipfile.ZipFile(b03, "r") as zf:
         assert sorted(zf.namelist()) == ["B03_GFP_F001.tif", "B03_NIR_F001.tif"]
 
-    # Cleanup tears down the staging dir.
-    assert zipped.cleanup is not None
-    zipped.cleanup()
-    assert not zipped.zip_dir.exists()
-    # The user's zips and folders remain in the input dir post-cleanup.
-    assert (tmp_path / "A01.zip").exists()
+    # No tempdir was created → no cleanup callback needed.
+    assert zipped.cleanup is None
+    # The source folders are intact too — user verifies before deleting.
     assert (tmp_path / "B03" / "B03_NIR_F001.tif").exists()
 
 
+def test_stage_local_zips_mixed_mode_persisted_zips_survive_for_next_run(tmp_path):
+    """v5.2.24: a second call to stage_local_zips after the first
+    one wrote new zips must see plain ZIP mode (not MIXED) — the
+    persistence is what makes the resume self-healing."""
+    _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
+    (tmp_path / "B02").mkdir()
+    (tmp_path / "B02" / "NIR.tif").write_bytes(b"\xff" * 32)
+
+    # First call: writes B02.zip into tmp_path.
+    first = stage_local_zips(
+        tmp_path,
+        filename_schema="well:channel",
+        filename_sep="_",
+    )
+    assert first.mode is LocalInputMode.MIXED
+    assert (tmp_path / "B02.zip").exists()
+
+    # Second call: same input dir. The detector now sees zips for
+    # both wells, so MIXED → ZIP. No re-zipping happens (the
+    # existing zip wins per v5.2.21 same-well precedence).
+    second = stage_local_zips(
+        tmp_path,
+        filename_schema="well:channel",
+        filename_sep="_",
+    )
+    assert second.mode is LocalInputMode.ZIP
+    assert second.cleanup is None
+    assert set(p.name for p in second.well_zips) == {"A01.zip", "B02.zip"}
+
+
 def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
-    """If _stage_mixed_mode raises mid-zip (e.g. PermissionError on a
-    folder), the user's pre-existing zips MUST be untouched and the
-    staging dir MUST be cleaned up — no leaked temp dir, no mutation
-    of the input dir."""
+    """If _stage_mixed_mode raises mid-zip (e.g. PermissionError on
+    a folder), the user's pre-existing zips MUST be untouched. Any
+    successfully-written new zips persist (resume behavior). No
+    leaked staging tempdir."""
     _make_well_zip(tmp_path, "A01.zip", ["NIR.tif"])
     original_bytes = (tmp_path / "A01.zip").read_bytes()
     (tmp_path / "B02").mkdir()
@@ -217,19 +251,71 @@ def test_stage_local_zips_mixed_mode_preserves_user_zips_on_error(tmp_path):
         with pytest.raises(PermissionError, match="drive yanked"):
             stage_local_zips(
                 tmp_path,
-                filename_schema="well:channel:fov",
+                filename_schema="well:channel",
                 filename_sep="_",
             )
     finally:
         rr._zip_well_folder = original
 
-    # User's zip is byte-for-byte unchanged.
+    # User's existing zip is byte-for-byte unchanged.
     assert (tmp_path / "A01.zip").read_bytes() == original_bytes
     # Folder is untouched.
     assert (tmp_path / "B02" / "NIR.tif").exists()
-    # No leaked staging dirs.
+    # No partial zip survived (atomic rename inside _zip_well_folder).
+    assert not (tmp_path / "B02.zip").exists()
+    # No leaked staging dirs in /tmp.
     leaked = list(Path(tempfile.gettempdir()).glob("allwell-resume-*"))
     assert not leaked, f"staging dir leaked on error: {leaked}"
+
+
+def test_stage_local_zips_mixed_mode_with_fluor_filter_still_copies_to_tempdir(tmp_path):
+    """v5.2.18 invariant: with a channel filter, the filter must NOT
+    mutate the user's input dir. New zips still land in input_dir
+    (for the user to see), but the FILTERED versions go into a temp
+    staging dir and the originals stay full-channel."""
+    _make_well_zip(
+        tmp_path, "A01.zip",
+        ["A01_NIR.tif", "A01_GFP.tif", "A01_mCherry.tif"],
+    )
+    a01_before = (tmp_path / "A01.zip").read_bytes()
+    (tmp_path / "B02").mkdir()
+    (tmp_path / "B02" / "B02_NIR.tif").write_bytes(b"\xff" * 32)
+    (tmp_path / "B02" / "B02_GFP.tif").write_bytes(b"\xff" * 32)
+    (tmp_path / "B02" / "B02_mCherry.tif").write_bytes(b"\xff" * 32)
+
+    zipped = stage_local_zips(
+        tmp_path,
+        filename_schema="well:channel",
+        filename_sep="_",
+        nuclear_token="NIR",
+        fluor_tokens=["GFP"],  # drops mCherry
+    )
+
+    # The newly-zipped well lives in input_dir AND retains full
+    # channel set (filter ran on a copy, not on this file).
+    b02_in_input = tmp_path / "B02.zip"
+    assert b02_in_input.exists()
+    with zipfile.ZipFile(b02_in_input, "r") as zf:
+        assert "B02_mCherry.tif" in zf.namelist()
+
+    # User's existing A01.zip in input_dir is byte-for-byte unchanged.
+    assert (tmp_path / "A01.zip").read_bytes() == a01_before
+
+    # The returned well_zips point at the FILTERED copies in the
+    # temp staging dir.
+    assert zipped.zip_dir != tmp_path
+    assert zipped.cleanup is not None
+    for p in zipped.well_zips:
+        assert p.parent == zipped.zip_dir
+    # Filtered copies dropped mCherry.
+    with zipfile.ZipFile(zipped.zip_dir / "B02.zip", "r") as zf:
+        assert "B02_mCherry.tif" not in zf.namelist()
+
+    zipped.cleanup()
+    assert not zipped.zip_dir.exists()
+    # Input dir survives cleanup.
+    assert (tmp_path / "A01.zip").exists()
+    assert (tmp_path / "B02.zip").exists()
 
 
 # ── selective channel staging ───────────────────────────────────────────────

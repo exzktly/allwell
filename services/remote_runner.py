@@ -455,22 +455,28 @@ def _stage_mixed_mode(
     log_fn: Callable[[str], None] | None,
 ) -> ZippedInput:
     """Resume from a half-completed compression: zip the leftover
-    folders into a staging dir, combine with the existing zips, and
-    return the union.
+    folders, combine with the existing zips, and return the union.
 
-    v5.2.21 entry point for the MIXED input mode. The detection in
-    ``_detect_local_input_mode`` already established that at least one
-    well has a zip AND at least one DIFFERENT well has a folder of
-    TIFs — exactly the state a network-drop mid-``compress_input_well_folders``
-    leaves behind.
+    v5.2.21 introduced this entry point for the MIXED input mode.
+    Detection in ``_detect_local_input_mode`` already established
+    that at least one well has a zip AND at least one DIFFERENT well
+    has a folder of TIFs — exactly the state a network-drop
+    mid-``compress_input_well_folders`` leaves behind.
 
-    The user's existing zips are NOT mutated; they stay where they
-    are. The staging dir holds only the newly-zipped wells, and the
-    returned ``ZippedInput.well_zips`` tuple points at both: existing
-    zips by their original path, new zips by their staging path. If
-    a channel filter is requested, BOTH sets are first copied/written
-    into staging and then filtered there — the user's originals stay
-    pristine (same invariant as v5.2.18).
+    v5.2.24: the newly-zipped wells now land in ``input_dir`` itself
+    (next to the existing ``{well}.zip`` files) rather than in a
+    throwaway temp dir. The user can SEE the new zips, and the next
+    run picks them up as plain ZIP mode without re-zipping. Source
+    folders are left in place so the user can verify what was kept
+    before deleting them manually — the v5.2.21 same-well
+    zip+folder detection ensures the leftover folders don't trigger
+    a re-zip on the next run.
+
+    The v5.2.18 invariant still holds for the channel-filter case:
+    when ``fluor_tokens`` is restricted, ALL zips (existing + new)
+    are copied into a temp staging dir and filtered there. The
+    originals in ``input_dir`` — including the just-written ones —
+    are never mutated by the filter.
     """
     existing_zip_paths = sorted(input_dir.glob("[A-H][0-9]*.zip"))
     existing_wells: dict[str, Path] = {}
@@ -510,53 +516,56 @@ def _stage_mixed_mode(
             f"({sorted(folder_wells)[:5]}{'…' if len(folder_wells) > 5 else ''}).\n"
         )
 
-    staging = Path(tempfile.mkdtemp(prefix="allwell-resume-"))
-    try:
-        # Zip the leftover folders into staging.
-        for label in sorted(folder_wells):
-            folder = folder_wells[label]
-            target = staging / f"{label}.zip"
-            n = _zip_well_folder(folder, target)
-            if log_fn:
-                log_fn(
-                    f"[stage] zipped {folder.name} → {target.name} "
-                    f"({n} TIF{'s' if n != 1 else ''})\n"
-                )
+    # v5.2.24: write new zips directly into input_dir. ``_zip_well_folder``
+    # uses an atomic ``__aw_tmp_*.pidNNN`` rename so a mid-run failure
+    # leaves either a complete zip or no zip — never a partial. Successful
+    # zips persist across a failure: the next run sees fewer leftover
+    # folders and resumes faster.
+    new_zip_paths: list[Path] = []
+    for label in sorted(folder_wells):
+        folder = folder_wells[label]
+        target = input_dir / f"{label}.zip"
+        n = _zip_well_folder(folder, target)
+        new_zip_paths.append(target)
+        if log_fn:
+            log_fn(
+                f"[stage] zipped {folder.name} → {target.name} "
+                f"({n} TIF{'s' if n != 1 else ''}) — persisted to "
+                f"input dir.\n"
+            )
 
-        new_zip_paths = sorted(staging.glob("[A-H][0-9]*.zip"))
-        all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
+    all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
 
-        if fluor_tokens is not None:
-            # The v5.2.18 invariant: the channel filter must NOT
-            # mutate the user's originals. Copy ALL zips (existing +
-            # new) into staging, then filter. The originals stay
-            # pristine.
-            staged_for_filter: list[Path] = []
-            for z in existing_zip_paths:
+    if fluor_tokens is not None:
+        # v5.2.18 invariant: the channel filter must NOT mutate the
+        # user's input dir. Copy ALL zips (existing + new) into a
+        # temp staging dir and filter there. The originals in
+        # input_dir stay pristine.
+        staging = Path(tempfile.mkdtemp(prefix="allwell-stage-"))
+        try:
+            staged: list[Path] = []
+            for z in all_zips:
                 dest = staging / z.name
-                if not dest.exists():
-                    shutil.copy2(z, dest)
-                staged_for_filter.append(dest)
-            # New zips are already in staging.
-            staged_for_filter.extend(new_zip_paths)
-            staged_for_filter = sorted(set(staged_for_filter))
+                shutil.copy2(z, dest)
+                staged.append(dest)
             zin = _filter_channels_in_staging(
-                staging, tuple(staged_for_filter), LocalInputMode.MIXED,
+                staging, tuple(staged), LocalInputMode.MIXED,
                 keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
                 log_fn=log_fn,
             )
             zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
             return zin
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
-        return ZippedInput(
-            zip_dir=staging,
-            mode=LocalInputMode.MIXED,
-            well_zips=all_zips,
-            cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
-        )
-    except Exception:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise
+    # Non-filter path: zips live in input_dir, no cleanup needed.
+    return ZippedInput(
+        zip_dir=input_dir,
+        mode=LocalInputMode.MIXED,
+        well_zips=all_zips,
+        cleanup=None,
+    )
 
 
 def _filter_channels_in_staging(

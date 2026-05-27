@@ -61,7 +61,18 @@ from services.remote_config import (
 
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
-_RE_WELL_DONE = re.compile(r"^(?P<well>[A-Ha-h]\d{2})\s+—\s+done\.")
+#
+# v5.2.17: the actual line emitted by ``process_microscopy.py`` is
+# ``log.info("Well %s — done.", well_label)``, which the basicConfig
+# formatter renders as ``2026-05-27 10:30:45  INFO      Well A01 —
+# done.`` — i.e. the line does NOT start with the well label, it
+# starts with the timestamp. The previous regex anchored on ``^`` and
+# was matched (not searched), so it never fired in production. As a
+# result the Fetcher never pulled any per-well outputs and the user
+# saw "rsync never completes". Match with ``.search()`` against the
+# "Well A01 — done." substring instead. Also support the legacy bare
+# ``A01 — done.`` form just in case anything still emits it.
+_RE_WELL_DONE = re.compile(r"(?:\bWell\s+)?(?P<well>[A-Ha-h]\d{2})\s+—\s+done\.")
 _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well")
 
 # Default output-filter glob set: just CSVs and the top-level metadata
@@ -1134,7 +1145,11 @@ class Fetcher:
         m = _RE_MODE_WELLS.search(stdout_line)
         if m:
             self.run.well_count_total = int(m.group(1))
-        m = _RE_WELL_DONE.match(stdout_line.strip())
+        # v5.2.17: use .search not .match — the line carries a
+        # ``YYYY-MM-DD HH:MM:SS  INFO`` prefix from the basicConfig
+        # formatter in ``process_microscopy.py``. Without .search the
+        # regex never matches and per-well rsync never fires.
+        m = _RE_WELL_DONE.search(stdout_line)
         if m:
             well = m.group("well").upper()
             self.run.expected_wells.add(well)

@@ -1289,7 +1289,10 @@ def test_fetcher_fetch_one_warns_when_zip_missing(host, tmp_path, monkeypatch):
 # ── Verify ──────────────────────────────────────────────────────────────────
 
 
-def test_verify_passes_when_all_csvs_present(host, tmp_path):
+def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
+    """v5.2.29: verify now demands both the CSV AND the per-well
+    out_zip when output_filter=FULL (the default). Pre-create both
+    to confirm the happy path stays green."""
     from services.remote_runner import _RemoteRun
 
     runner = RemoteRunner(host)
@@ -1307,11 +1310,105 @@ def test_verify_passes_when_all_csvs_present(host, tmp_path):
 
     (tmp_path / "measurements_A01.csv").write_text("col1,col2\n1,2\n")
     (tmp_path / "measurements_B02.csv").write_text("col1,col2\n3,4\n")
+    (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    (tmp_path / "B02_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
     missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
     assert missing == []
     assert any("all 2 wells" in m for m in logs)
+
+
+def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
+    """v5.2.29: the user reported that on resume, a well with the
+    CSV present locally would NOT trigger a re-pull of the missing
+    out_zip — verify treated the CSV alone as 'complete'. Now the
+    out_zip must also be present (under FULL filter + ZIP mode) for
+    a well to count as complete, so the existing retry path re-pulls
+    the missing zip."""
+    from services.remote_runner import _RemoteRun
+
+    runner = RemoteRunner(host)
+    run = _RemoteRun(
+        run_id="x",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+    )
+    run.expected_wells = {"A01", "B02"}
+    runner._run = run  # noqa: SLF001
+
+    # Both CSVs present.
+    (tmp_path / "measurements_A01.csv").write_text("ok\n")
+    (tmp_path / "measurements_B02.csv").write_text("ok\n")
+    # Only A01 has its zip; B02's never made it back.
+    (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+
+    logs: list[str] = []
+    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    assert any("B02_out.zip" in m for m in missing)
+    assert not any("A01" in m for m in missing)
+
+
+def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
+    """In CSV_ONLY mode the user has explicitly opted out of the
+    per-well zip — verify must NOT flag the absent zip as missing."""
+    from services.remote_runner import _RemoteRun
+
+    runner = RemoteRunner(host)
+    run = _RemoteRun(
+        run_id="x",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.ZIP,
+        output_filter=OutputFilter.CSV_ONLY,
+    )
+    run.expected_wells = {"A01"}
+    runner._run = run  # noqa: SLF001
+
+    (tmp_path / "measurements_A01.csv").write_text("ok\n")
+    # No A01_out.zip — but CSV_ONLY user doesn't want it.
+
+    logs: list[str] = []
+    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    assert missing == []
+
+
+def test_verify_flags_missing_folder_in_folder_mode(host, tmp_path):
+    """In FOLDER mode (local input was per-well subfolders) the
+    Fetcher extracts the remote out_zip into ``local_output_dir/<well>/``.
+    Verify must check for that extracted folder, not the zip."""
+    from services.remote_runner import _RemoteRun
+
+    runner = RemoteRunner(host)
+    run = _RemoteRun(
+        run_id="x",
+        cache_key="k",
+        remote_input_dir="/r/in",
+        remote_output_dir="/r/out",
+        remote_pidfile="/r/pid",
+        local_output_dir=tmp_path,
+        local_input_mode=LocalInputMode.FOLDER,
+    )
+    run.expected_wells = {"A01", "B02"}
+    runner._run = run  # noqa: SLF001
+
+    (tmp_path / "measurements_A01.csv").write_text("ok\n")
+    (tmp_path / "measurements_B02.csv").write_text("ok\n")
+    # A01 has its extracted folder, B02 doesn't.
+    (tmp_path / "A01").mkdir()
+    (tmp_path / "A01" / "img.tif").write_bytes(b"\0")
+
+    logs: list[str] = []
+    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    assert any("B02" in m and "output folder" in m for m in missing)
+    assert not any("A01" in m for m in missing)
 
 
 def test_verify_reports_missing_csv(host, tmp_path):
@@ -1587,6 +1684,11 @@ def runner_with_run(host, tmp_path):
     run.expected_wells = {"A01"}
     runner._run = run  # noqa: SLF001
     (tmp_path / "x_A01.csv").write_text("ok\n")
+    # v5.2.29: the verify step now also requires the per-well
+    # out_zip / extracted folder when output_filter=FULL (the
+    # default). Pre-create the zip so existing happy-path tests
+    # stay green.
+    (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
     return runner
 
 

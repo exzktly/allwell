@@ -385,6 +385,7 @@ class AnalyzeTab(QWidget):
         self._browse_btn.setEnabled(False)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
+        ipl.addStretch(1)
         sec.layout().addWidget(in_pick)
 
         self._folder_lock_lbl = QLabel("Define the filename schema above first.", sec)

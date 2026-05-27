@@ -308,29 +308,62 @@ def _filter_channels_in_place(
     log_fn: Callable[[str], None] | None,
 ) -> ZippedInput:
     """Rewrite each well zip to drop members whose name doesn't contain one
-    of ``keep_tokens``. Skipped silently if every member is kept.
+    of ``keep_tokens``.
 
     Phase-3 selective staging: this is the lever-1 multiplier — for a
     plate with 4 channels but only 2 in use, this cuts upload in half.
     Idempotent: a zip whose members are already filtered is a no-op.
+
+    v5.2.20: emits a per-well log line so the user sees a steady stream
+    of progress during a 96-well filter rather than wondering whether
+    the GUI has hung. No-op wells (everything already matches) get an
+    ``all N kept (no-op)`` line; rewritten wells report before/after
+    size and elapsed time. The end-of-plate summary fires only when at
+    least one well was actually rewritten.
     """
     if not keep_tokens:
         return ZippedInput(zip_dir=zip_dir, mode=mode, well_zips=well_zips, cleanup=None)
 
+    n_total = len(well_zips)
     total_in = 0
     total_kept = 0
-    for wz in well_zips:
+    rewrote = 0
+    for idx, wz in enumerate(well_zips, start=1):
         try:
             with zipfile.ZipFile(wz, "r") as zf:
                 members = zf.namelist()
             keep_mask = [_member_matches(m, keep_tokens) for m in members]
-        except (OSError, zipfile.BadZipFile):
+        except (OSError, zipfile.BadZipFile) as exc:
+            if log_fn:
+                log_fn(
+                    f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                    f"WARN unreadable ({exc.__class__.__name__}: {exc}); skipping\n"
+                )
             continue
+        # Empty zip — nothing to filter, but distinct from "all kept".
+        # all([]) is True in Python, which would otherwise silently
+        # bucket this into the no-op branch with a misleading
+        # "all 0 kept" line.
+        if not members:
+            if log_fn:
+                log_fn(
+                    f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                    f"WARN empty zip; skipping\n"
+                )
+            continue
+        kept = sum(keep_mask)
         total_in += len(members)
-        total_kept += sum(keep_mask)
-        if all(keep_mask):
+        total_kept += kept
+        if kept == len(members):
+            if log_fn:
+                log_fn(
+                    f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                    f"all {kept} kept (no-op)\n"
+                )
             continue
         # Re-write the zip with only the kept members.
+        t0 = time.monotonic()
+        size_before = wz.stat().st_size
         tmp = wz.with_suffix(".zip.tmp")
         with zipfile.ZipFile(wz, "r") as src, zipfile.ZipFile(
             tmp, "w", compression=zipfile.ZIP_DEFLATED
@@ -338,15 +371,33 @@ def _filter_channels_in_place(
             for member, keep in zip(members, keep_mask):
                 if keep:
                     dst.writestr(src.getinfo(member), src.read(member))
+        # Read the size from the temp before replace — one stat
+        # syscall instead of two, and avoids any race where another
+        # process might mutate `wz` between rename and stat.
+        size_after = tmp.stat().st_size
         tmp.replace(wz)
-
-    if log_fn and total_in:
-        dropped = total_in - total_kept
-        if dropped:
+        rewrote += 1
+        if log_fn:
+            mb_in = size_before / (1024 * 1024)
+            mb_out = size_after / (1024 * 1024)
+            elapsed = time.monotonic() - t0
             log_fn(
-                f"[remote] selective staging: kept {total_kept}/{total_in} "
-                f"channel images (dropped {dropped} unused).\n"
+                f"[remote] filter ({idx}/{n_total}): {wz.stem} → "
+                f"kept {kept}/{len(members)} ({mb_in:.1f}→{mb_out:.1f} MB) "
+                f"in {_fmt_secs(elapsed)}\n"
             )
+
+    # Only emit the summary when at least one well was actually
+    # rewritten — pre-cleanup the summary fired for any non-empty
+    # plate, including the "all channels matched everywhere" case
+    # where the line was pure noise.
+    if log_fn and rewrote:
+        dropped = total_in - total_kept
+        log_fn(
+            f"[remote] filter: summary — kept {total_kept}/{total_in} "
+            f"images across {n_total} well(s), rewrote {rewrote}, "
+            f"dropped {dropped}.\n"
+        )
     return ZippedInput(zip_dir=zip_dir, mode=mode, well_zips=well_zips, cleanup=None)
 
 
@@ -614,11 +665,22 @@ class DatasetCache:
         # bundled 2.6.9, some HPC clusters) rejects it with exit 1.
         # The progress callback degrades to "stats appear at end" on
         # legacy rsync, but the transfer itself still works.
+        # v5.2.20: add ``name1`` so rsync emits a bare filename per
+        # transferred file. ``_run_rsync_streaming`` forwards those
+        # lines as ``[remote] ↑ <filename>`` so the user can see
+        # which well is in flight.
         if _rsync_supports_info_flag():
-            cmd.append("--info=stats2,progress2")
-        cmd += [*sources, dest]
+            cmd.append("--info=name1,stats2,progress2")
         if log_fn:
-            log_fn(f"[remote] $ {' '.join(shlex.quote(c) for c in cmd[:6])} … → {dest}\n")
+            # Log the full flag list so the user can see every gating
+            # flag (--append-verify, --info=name1,...) in the log;
+            # pre-cleanup we sliced ``cmd[:6]`` which truncated before
+            # the --info flag on modern rsync.
+            log_fn(
+                f"[remote] $ {' '.join(shlex.quote(c) for c in cmd)} … → {dest} "
+                f"({len(sources)} file(s))\n"
+            )
+        cmd += [*sources, dest]
 
         # Bounded retry on transient network failures (v5.1.1). The
         # ``--partial`` flag means each retry resumes where the previous
@@ -822,6 +884,39 @@ class DatasetCache:
             return exc  # type: ignore[return-value]
 
 
+_RSYNC_FILENAME_RE = re.compile(
+    # Positive match: a single token (NO whitespace anywhere) that
+    # either contains a path separator (e.g. ``subdir/foo.tif``) or
+    # ends with a 1–8 character extension (e.g. ``A01.zip``,
+    # ``process_microscopy.py``, ``_Docs/requirements-remote.txt``).
+    r"^\S+(?:[/\\]\S+|\.[A-Za-z0-9]{1,8})$"
+)
+
+
+def _looks_like_rsync_filename(line: str) -> bool:
+    """Return True iff ``line`` looks like an rsync ``--info=name1``
+    filename emission (vs progress, stats, warning, or error noise).
+
+    Uses a POSITIVE match rather than elimination. The original
+    negate-known-prefixes approach was leaky — rsync emits dozens of
+    status lines (``total size is X``, ``Number of files: N``,
+    ``sending incremental file list``, ``created directory /foo``,
+    ``file has vanished: x.tmp``, ``deleting old.zip``, etc.) and
+    every new one would silently get misclassified as a "filename"
+    until the prefix list was extended.
+
+    The positive form keys on two observations: (a) every transferred
+    filename rsync emits with ``--info=name1`` is a single
+    whitespace-free token, and (b) every status/diagnostic line
+    contains whitespace (the prose part). So a no-whitespace line
+    that also looks like a path is the filename; anything else is
+    noise.
+    """
+    if not line:
+        return False
+    return bool(_RSYNC_FILENAME_RE.match(line))
+
+
 def _run_rsync_streaming(
     cmd: list[str],
     *,
@@ -850,6 +945,14 @@ def _run_rsync_streaming(
     progress_re = re.compile(r"(\d[\d,]*)\s+(\d+)%\s+(\S+)\s+\S+(?:\s+\(.*\))?")
     bytes_sent_re = re.compile(r"^[Tt]otal transferred file size:\s+([\d,]+)\s+bytes")
     bytes_actual_re = re.compile(r"^sent\s+([\d,]+)\s+bytes")
+    # v5.2.20: when --info=name1 is on, rsync emits a bare filename
+    # per transferred file. Detect them by elimination — they're
+    # non-empty lines that aren't a progress line, a stats footer,
+    # an rsync error line, or one of the well-known directory or
+    # incremental-listing markers. Captures both the well-zip names
+    # (e.g. "A01.zip") and the required-files names (e.g.
+    # "process_microscopy.py", "_Docs/requirements-remote.txt").
+    file_count = 0
 
     try:
         assert proc.stdout is not None
@@ -877,8 +980,12 @@ def _run_rsync_streaming(
                 m = bytes_sent_re.match(line)
                 if m:
                     sent_bytes = int(m.group(1).replace(",", ""))
-            if log_fn and line.startswith(("sent ", "Total ", "rsync:", "rsync error")):
-                log_fn(f"[remote] {line}\n")
+            if log_fn:
+                if line.startswith(("sent ", "Total ", "rsync:", "rsync error")):
+                    log_fn(f"[remote] {line}\n")
+                elif _looks_like_rsync_filename(line):
+                    file_count += 1
+                    log_fn(f"[remote] ↑ ({file_count}) {line}\n")
         proc.wait()
     finally:
         if proc.poll() is None:

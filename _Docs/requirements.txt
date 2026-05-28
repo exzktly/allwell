@@ -48,20 +48,34 @@
 # keras/protobuf/StarDist stack identical across platforms. For GPU on
 # Windows, use WSL2 (out of scope here).
 #
-# Use Miniforge so `mamba` is available on Windows. From the "Miniforge Prompt":
+# Use Miniforge so `mamba` is available on Windows. From the "Miniforge
+# Prompt" (or PowerShell with `mamba init powershell` run once), in the
+# repo root:
 #
-#   mamba create -n allwell python=3.10.14 setuptools=69.5.1 \
-#       "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py \
-#       pyside6 -c conda-forge -y
+#   mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py vs2015_runtime -c conda-forge -y
 #   mamba activate allwell
-#   pip install --no-build-isolation -r requirements.txt
-#   scripts/build_executable.sh --clean   # produces dist/AllWell/
+#   pip install --no-build-isolation -r _Docs\requirements.txt
+#   python all_well.py
+#
+# To produce a frozen Windows bundle (optional; only for distribution):
+#
+#   powershell scripts\build_executable.ps1 -Clean   # produces dist\AllWell\
 #
 # Notes:
-#   - Install pyside6 from conda-forge (brings vc/vs2015_runtime; avoids
-#     needing admin rights to install vcredist).
+#   - The mamba step pulls in `vs2015_runtime` from conda-forge so the
+#     MSVC redistributable DLLs PySide6 needs are available without
+#     admin rights. PySide6 itself is installed by pip from the
+#     `PySide6==6.7.3` pin below — installing it via conda first
+#     would be redundant (pip would reinstall it from PyPI and clobber
+#     the conda build).
+#   - The command is a single line on purpose. Bash-style `\`
+#     continuations do NOT work in PowerShell (use `` ` ``) or in
+#     the Miniforge Prompt / cmd.exe (use `^`). Keeping it on one
+#     line works in all three.
 #   - numba/llvmlite Windows wheels bundle the LLVM runtime; no separate
 #     MSVC install needed for them.
+#   - tensorflow==2.13.0 has Windows wheels for Python 3.10 and 3.11
+#     only. Python 3.12+ will fail at the pip step.
 #   - The same setuptools<70 / pkg_resources rationale documented above
 #     applies on Windows.
 #

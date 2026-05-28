@@ -152,6 +152,76 @@ batch processing on headless workers:
 python process_microscopy.py --help
 ```
 
+### Windows (from source)
+
+Native Windows runs CPU-only — TensorFlow dropped native Windows GPU
+support after 2.10, and AllWell pins `tensorflow==2.13.0` for stack
+consistency. For GPU on Windows, use WSL2 (out of scope here).
+
+You'll need:
+
+- **Miniforge** (gives you `mamba`). Download the Windows installer from
+  <https://github.com/conda-forge/miniforge/releases/latest> and run it.
+- **Git for Windows** — already required if you also want to drive a
+  remote Linux host (see
+  [`REMOTE_EXECUTION_WINDOWS.md`](REMOTE_EXECUTION_WINDOWS.md)). Install
+  from <https://git-scm.com/download/win> with the default options.
+- **Python 3.10 or 3.11.** TensorFlow 2.13.0 has Windows wheels for
+  those two versions only; 3.12+ will fail at the pip step. The
+  `mamba create` line below pins 3.10.14 so you don't have to think
+  about this.
+
+Open the **Miniforge Prompt** (start menu) and `cd` to the repo root.
+Create the env:
+
+```powershell
+mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py vs2015_runtime -c conda-forge -y
+mamba activate allwell
+```
+
+The command is one line on purpose: PowerShell's continuation character
+is `` ` ``, the Miniforge Prompt's is `^`, and bash's `\` works in
+neither — keeping it single-line works in all three.
+
+`vs2015_runtime` brings the MSVC redistributable DLLs PySide6 needs
+without requiring admin rights to install vcredist system-wide.
+
+Install the pip-managed packages. Use the full path to the requirements
+file from repo root:
+
+```powershell
+pip install --no-build-isolation -r _Docs\requirements.txt
+```
+
+Verify TensorFlow is CPU-only as expected:
+
+```powershell
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('CPU'))"
+# expected: [PhysicalDevice(name='/physical_device:CPU:0', device_type='CPU')]
+```
+
+Run it:
+
+```powershell
+python all_well.py
+python all_well.py --data_dir C:\path\to\results
+```
+
+To produce a distributable Windows bundle (optional — only if you want
+`AllWell.exe` for users who don't have the env):
+
+```powershell
+.\scripts\build_executable.ps1 -Clean
+```
+
+The output is `dist\AllWell\AllWell.exe`. The spec's macOS `.app`
+`BUNDLE` step is a no-op off macOS, so no `AllWell.app` is produced.
+
+If you also want to drive a remote Linux host from this Windows machine,
+see [`REMOTE_EXECUTION_WINDOWS.md`](REMOTE_EXECUTION_WINDOWS.md) — the
+remote-execution bootstrap reuses the same `allwell` env (and the same
+Git-for-Windows `ssh.exe` / `rsync.exe`).
+
 ---
 
 ## Quick start
@@ -553,6 +623,29 @@ dist/AllWell.app/Contents/MacOS/AllWell 2>&1 | head -100
 **`No module named 'pkg_resources'`.** — `setuptools` was upgraded past v70
 in the mamba environment. Recreate the environment from scratch. Don't
 `pip install setuptools` and don't `mamba update --all`.
+
+**Windows: `VCRUNTIME140_1.dll` was not found / PySide6 import crashes.**
+— The conda-forge MSVC redistributable isn't visible to PySide6. Verify
+`vs2015_runtime` is in the env (`mamba list vs2015_runtime`) and
+re-activate the env so the conda `DLLs` directory is on PATH:
+```powershell
+mamba deactivate
+mamba activate allwell
+python -c "from PySide6 import QtWidgets; print('OK')"
+```
+
+**Windows: `pip install` fails on tensorflow with "no matching
+distribution".** — TensorFlow 2.13.0 ships Windows wheels for Python
+3.10 and 3.11 only. Confirm with `python --version`. If you're on
+3.12+, recreate the env pinning `python=3.10.14`.
+
+**Windows: `scripts\build_executable.ps1` reports "PyInstaller is not
+importable".** — The active env doesn't have the deps installed.
+Activate the env first and re-run pip:
+```powershell
+mamba activate allwell
+pip install --no-build-isolation -r _Docs\requirements.txt
+```
 
 **`No GPU device found` / TensorFlow not using Metal.** — Install
 `tensorflow-metal`:

@@ -319,7 +319,10 @@ def test_resolve_ssh_binary_posix(monkeypatch):
 
 def test_resolve_ssh_binary_windows_uses_git_bash(monkeypatch):
     _force_windows(monkeypatch)
-    # Pretend the Git Bash ssh.exe exists on this fake Windows host.
+    # Pretend Git for Windows is installed at the system-wide location
+    # AND every probed path is a real file. The first candidate wins.
+    monkeypatch.setenv("ProgramFiles", r"C:\Program Files")
+    monkeypatch.setattr("services.remote_config.shutil.which", lambda _name: None)
     monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: True)
     result = resolve_ssh_binary()
     assert result.endswith("ssh.exe")
@@ -328,7 +331,51 @@ def test_resolve_ssh_binary_windows_uses_git_bash(monkeypatch):
 def test_resolve_ssh_binary_windows_falls_back_when_git_bash_missing(monkeypatch):
     _force_windows(monkeypatch)
     monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: False)
+    monkeypatch.setattr("services.remote_config.shutil.which", lambda _name: None)
     assert resolve_ssh_binary() == "ssh"
+
+
+def test_resolve_ssh_binary_windows_per_user_install(monkeypatch):
+    """The default per-user Git for Windows install lands under
+    ``%LOCALAPPDATA%\\Programs\\Git\\``, NOT ``C:\\Program Files\\Git\\``.
+    AllWell must detect either layout — previously the hardcoded
+    ``Program Files`` path missed every per-user install and ssh
+    silently fell back to native Windows OpenSSH (or no ssh at all)."""
+    _force_windows(monkeypatch)
+    monkeypatch.setattr("services.remote_config.shutil.which", lambda _name: None)
+    monkeypatch.setenv("LOCALAPPDATA", "/home/alice/AppData/Local")
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("ProgramW6432", raising=False)
+    expected = "/home/alice/AppData/Local/Programs/Git/usr/bin/ssh.exe"
+    monkeypatch.setattr(
+        "services.remote_config.Path.is_file",
+        lambda self: str(self) == expected,
+    )
+    assert resolve_ssh_binary() == expected
+
+
+def test_resolve_ssh_binary_windows_via_path_discovery(monkeypatch):
+    """When git.exe is on PATH at a non-standard location (scoop,
+    chocolatey, custom install), AllWell derives the usr/bin
+    directory from it. This is what saves users whose Git install
+    is at e.g. ``C:\\Users\\bob\\scoop\\apps\\git\\current\\``."""
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(
+        "services.remote_config.shutil.which",
+        lambda name: "/home/bob/scoop/apps/git/current/cmd/git.exe" if name == "git" else None,
+    )
+    # No env-var-based discovery should win — only the PATH-derived one.
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("ProgramW6432", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    expected = "/home/bob/scoop/apps/git/current/usr/bin/ssh.exe"
+    monkeypatch.setattr(
+        "services.remote_config.Path.is_file",
+        lambda self: str(self) == expected,
+    )
+    assert resolve_ssh_binary() == expected
 
 
 def test_resolve_rsync_binary_posix(monkeypatch):
@@ -338,9 +385,48 @@ def test_resolve_rsync_binary_posix(monkeypatch):
 
 def test_resolve_rsync_binary_windows_uses_git_bash(monkeypatch):
     _force_windows(monkeypatch)
+    monkeypatch.setenv("ProgramFiles", r"C:\Program Files")
+    monkeypatch.setattr("services.remote_config.shutil.which", lambda _name: None)
     monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: True)
     result = resolve_rsync_binary()
     assert result.endswith("rsync.exe")
+
+
+def test_resolve_rsync_binary_windows_falls_through_to_cwrsync(monkeypatch):
+    """When Git for Windows doesn't have rsync but cwRsync is
+    installed, the framework must auto-detect cwRsync rather than
+    falling through to a non-existent PATH ``rsync``."""
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(
+        "services.remote_config.Path.is_file",
+        # Only cwRsync's standard location returns True.
+        lambda self: str(self) == r"C:\Program Files\cwRsync\bin\rsync.exe",
+    )
+    # PATH lookup must NOT be the winner (cwRsync wins first).
+    monkeypatch.setattr("shutil.which", lambda _name: r"C:\bogus\rsync.exe")
+    result = resolve_rsync_binary()
+    assert "cwRsync" in result, result
+
+
+def test_resolve_rsync_binary_windows_raises_when_nothing_found(monkeypatch):
+    """The whole point of the v5.x.x change: when rsync is not
+    installed anywhere, we raise a clear FileNotFoundError with
+    install guidance, INSTEAD of letting subprocess raise the
+    cryptic ``[WinError 2] The system cannot find the file
+    specified`` deep inside a sync helper."""
+    _force_windows(monkeypatch)
+    monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: False)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    with pytest.raises(FileNotFoundError) as exc_info:
+        resolve_rsync_binary()
+    msg = str(exc_info.value)
+    # The message must name each of the documented install routes so
+    # users with different package-manager preferences each have a
+    # path forward.
+    assert "rsync.exe is not installed" in msg
+    assert "Git for Windows" in msg
+    assert "cwRsync" in msg
+    assert "MSYS2" in msg
 
 
 def test_ssh_argv_on_windows_omits_controlmaster(monkeypatch):

@@ -14,10 +14,26 @@ and the bootstrap script all work natively on Windows now.
    ```
 2. **Git for Windows.** Install from <https://git-scm.com/download/win>.
    The default options are fine — accept everything. This gives you
-   `ssh.exe` and `rsync.exe` at
-   `C:\Program Files\Git\usr\bin\`. AllWell detects them automatically;
-   you do not need to add them to PATH.
-3. **AllWell's Python dependencies** (only if you're running the GUI or
+   `ssh.exe` at `C:\Program Files\Git\usr\bin\`. AllWell detects it
+   automatically; you do not need to add it to PATH.
+3. **rsync for Windows.** Git for Windows does NOT bundle `rsync.exe`
+   by default. AllWell needs it for every file sync to the remote.
+   Pick any one of:
+   - **Easiest:** download a recent `rsync.exe` + `msys-2.0.dll` from
+     the MSYS2 package mirror
+     (<https://repo.msys2.org/msys/x86_64/>) and copy both into
+     `C:\Program Files\Git\usr\bin\` alongside `ssh.exe`.
+   - **cwRsync** (paid + free editions): <https://itefix.net/cwrsync>.
+     Install to the default location and AllWell finds it.
+   - **MSYS2**: install MSYS2 (<https://www.msys2.org/>), open an
+     MSYS2 shell, run `pacman -S rsync`. AllWell auto-detects
+     `C:\msys64\usr\bin\rsync.exe`.
+
+   AllWell probes all three locations plus `rsync` on PATH. If none
+   match, the bootstrap aborts with an actionable error explaining
+   the install options above — there's no silent
+   `[WinError 2] The system cannot find the file specified`.
+4. **AllWell's Python dependencies** (only if you're running the GUI or
    driving the runner directly from your Windows machine — not needed
    if you only use `scripts\bootstrap_remote.ps1`).
 
@@ -34,7 +50,7 @@ and the bootstrap script all work natively on Windows now.
    ```
    Use Python 3.10 or 3.11 — TensorFlow 2.13.0 has no Windows wheel
    for 3.12+.
-4. **An SSH key configured for the remote.** Standard Windows SSH config
+5. **An SSH key configured for the remote.** Standard Windows SSH config
    lives at `%USERPROFILE%\.ssh\config`. Add the alias you want to use:
    ```
    Host bigbox
@@ -101,17 +117,26 @@ Or use the GUI: open AllWell, go to **Analyze**, pick `bigbox` from the
 
 ## Troubleshooting
 
-- **`ssh: command not found` or `rsync: command not found`** — the
-  framework didn't find Git for Windows. Reinstall it; the default
-  install path is `C:\Program Files\Git\`.
+- **`ssh: command not found`** — the framework didn't find Git for
+  Windows. Reinstall it; the default install path is
+  `C:\Program Files\Git\`.
+- **`rsync.exe is not installed on this Windows machine ...`** or
+  **`[WinError 2] The system cannot find the file specified`** during
+  bootstrap sync — Git for Windows does NOT ship rsync. Install it
+  via one of the three options under prerequisite #3 above (drop
+  rsync.exe + msys-2.0.dll into Git's `usr\bin\`, install cwRsync,
+  or install MSYS2). The bootstrap auto-detects rsync at any of
+  those locations.
 - **`UNC paths aren't supported by rsync on Windows`** — your
   `--input_dir` points at a UNC share like `\\fileserver\plates`.
   Map the share to a drive letter first (`net use Z: \\fileserver\plates`)
   and pass `Z:\plates`.
 - **Slow bandwidth probe** — the 50 MB upload includes SSH handshake +
-  cipher negotiation, which is per-connection overhead. Subsequent
-  runs use ControlMaster for the same TCP connection and are much
-  faster.
+  cipher negotiation, which is per-connection overhead. On Windows
+  the framework runs without ControlMaster (Cygwin's Unix-socket
+  emulation is unreliable on Windows), so every ssh call pays a
+  fresh handshake — a few hundred ms each. Total bootstrap overhead
+  is still bounded by the conda/pip installs, not by this.
 - **WSL2 alternative** — if you have Ubuntu installed under WSL2, you
   can run the bash wrapper from inside WSL2 instead. From AllWell's
   point of view that's just a Linux client.

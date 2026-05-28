@@ -878,6 +878,23 @@ def write_or_update_remotes_toml(
 def main(argv: list[str] | None = None) -> int:
     args = _argv_parser().parse_args(argv)
 
+    # v5.x.x: reconfigure stdout/stderr to UTF-8 with errors='replace'
+    # BEFORE any output. On Windows, the default console codec is
+    # cp1252 (or whichever ANSI codepage the user's locale picked),
+    # which cannot encode the ``→`` / ``…`` / ``✓`` glyphs used in
+    # the bootstrap's progress messages. Without this, the very first
+    # say() that mentions a remote path crashes with
+    # ``UnicodeEncodeError: 'charmap' codec can't encode character
+    # '→'``. ``errors='replace'`` is a graceful-degradation
+    # fallback for older Windows consoles that still can't render
+    # UTF-8 even after reconfigure — the script keeps going and the
+    # user sees a ``?`` instead of a crashed bootstrap.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, OSError):  # noqa: BLE001 — Python <3.7, or already-wrapped stream
+            pass
+
     # v5.2.11: open a per-invocation debug log on the LOCAL machine.
     # Tee Python stdout/stderr into it so every say(), every probe
     # result, and every ssh stderr ends up in the log alongside what

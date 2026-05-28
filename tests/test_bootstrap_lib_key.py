@@ -316,3 +316,56 @@ def test_write_or_update_remotes_toml_preserves_user_ssh_alias(tmp_path, monkeyp
     # And measured_bandwidth_mbps did get updated, proving the rewrite
     # ran (this isn't a no-op test).
     assert "measured_bandwidth_mbps = 42.00" in text
+
+
+# ── _ssh_run: Windows CRLF guard (v5.x.x) ──────────────────────────────────
+
+
+def test_ssh_run_pipes_string_input_as_bytes(monkeypatch):
+    """When the caller passes ``input=<script>`` the script must reach
+    ``subprocess.run`` as bytes (not as a text-mode string) so Python
+    does NOT translate ``\\n`` → ``\\r\\n`` when writing to ssh's stdin
+    pipe on Windows. The remote bash otherwise bails on every line
+    with ``bash: line 1: $'\\r': command not found`` and the bootstrap
+    aborts before doing anything useful."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["input"] = kwargs.get("input")
+        captured["text"] = kwargs.get("text")
+        return MagicMock(returncode=0, stdout=b"ok\n", stderr=b"")
+
+    monkeypatch.setattr(bl.subprocess, "run", fake_run)
+    bl._ssh_run("bigbox", ["bash", "-s"], input="set -e\necho hi\n")
+
+    assert isinstance(captured["input"], (bytes, bytearray)), (
+        f"input must be bytes, got {type(captured['input']).__name__}; "
+        "text-mode would re-translate \\n on Windows."
+    )
+    assert b"\r" not in captured["input"], (
+        "CR leaked into the input; bash on the remote would bail "
+        r"with `bash: line 1: $'\r': command not found`."
+    )
+    # text= must NOT be True — otherwise subprocess would re-translate
+    # the bytes-or-str we pass back to a text stream on the pipe.
+    assert captured["text"] is not True
+
+
+def test_ssh_run_returns_text_stdout_when_subprocess_yields_bytes(monkeypatch):
+    """The bytes-mode fix must still hand callers ``str``-typed
+    ``.stdout`` / ``.stderr`` so the rest of the bootstrap (which
+    parses probe output line-by-line as text) keeps working."""
+
+    def fake_run(cmd, **kwargs):
+        return MagicMock(
+            returncode=0,
+            stdout=b"has_conda=true\nhas_env=true\n",
+            stderr=b"",
+            args=cmd,
+        )
+
+    monkeypatch.setattr(bl.subprocess, "run", fake_run)
+    result = bl._ssh_run("bigbox", ["bash", "-s"], input="echo")
+    assert isinstance(result.stdout, str)
+    assert "has_conda=true" in result.stdout
+    assert result.returncode == 0

@@ -62,7 +62,7 @@
 # Then create the env (one line — bash `\` does not work in PowerShell
 # or in the Miniforge Prompt):
 #
-#   mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py vs2015_runtime -c conda-forge -y
+#   mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib-base pillow imageio h5py vs2015_runtime -c conda-forge -y
 #   mamba activate allwell
 #   pip install --no-build-isolation -r _Docs\requirements.txt
 #   python all_well.py
@@ -79,6 +79,12 @@
 #     below. Conda-installed Qt packages cannot be uninstalled by pip
 #     (no RECORD file), so a mixed install will fail with
 #     `Cannot uninstall Shiboken6 6.x.y` on the next pip run.
+#   - The mamba step uses `matplotlib-base` (not `matplotlib`) on
+#     purpose. The conda-forge `matplotlib` meta-package pulls in
+#     `pyside6` (its preferred Qt binding) as a transitive dep, which
+#     drags in the latest `shiboken6` — same uninstall failure as
+#     above. `matplotlib-base` is all of matplotlib without the Qt
+#     binding; PySide6 from pip supplies the Qt backend at runtime.
 #   - The command is a single line on purpose. Bash-style `\`
 #     continuations do NOT work in PowerShell (use `` ` ``) or in
 #     the Miniforge Prompt / cmd.exe (use `^`). Keeping it on one

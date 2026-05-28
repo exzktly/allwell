@@ -160,6 +160,26 @@ def test_write_remote_ssh_key_path_round_trip(tmp_path):
     assert reloaded["keyed"].ssh_key_path == ""
 
 
+def test_write_remote_windows_path_with_backslashes(tmp_path):
+    """A Windows-style ssh_key_path with backslashes must be escaped
+    so the TOML parser doesn't read ``\\U`` (from ``\\Users``) as the
+    start of a ``\\Uxxxxxxxx`` Unicode escape and reject the file with
+    ``invalid hex value``. The path must also round-trip verbatim."""
+    cfg = tmp_path / "remotes.toml"
+    win_path = r"C:\Users\me\.ssh\allwell_bigbox"
+    write_remote(
+        _make_host("bigbox", ssh_key_path=win_path),
+        path=cfg,
+    )
+    # Round-trip via the real loader — this would raise
+    # tomli.TOMLDecodeError under the pre-fix formatter.
+    reloaded = load_remotes(cfg)
+    assert reloaded["bigbox"].ssh_key_path == win_path
+    # The on-disk representation must escape the backslashes.
+    raw = cfg.read_text(encoding="utf-8")
+    assert r"C:\\Users\\me\\.ssh\\allwell_bigbox" in raw
+
+
 # ── delete_remote ──────────────────────────────────────────────────────────
 
 

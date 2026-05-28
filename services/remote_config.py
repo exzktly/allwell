@@ -263,27 +263,49 @@ def get_remote(name: str, path: Path | None = None) -> RemoteHost | None:
     return load_remotes(path).get(name)
 
 
+def _toml_string(value: str) -> str:
+    """Render ``value`` as a TOML basic string with proper escaping.
+
+    TOML basic strings use ``\\``-escape sequences (``\\\\``, ``\\"``,
+    ``\\n`` …) and reserve unescaped ``\\u`` / ``\\U`` as Unicode escape
+    introducers. Naively interpolating a Windows path like
+    ``C:\\Users\\me\\.ssh\\allwell_foo`` into ``"..."`` produces invalid
+    TOML — ``\\U`` is read as the start of a ``\\Uxxxxxxxx`` escape and
+    the parser errors with ``invalid hex value`` at the first non-hex
+    character. Escape every backslash and embedded quote so the value
+    round-trips through any TOML reader.
+    """
+    escaped = (
+        value.replace("\\", "\\\\")
+             .replace('"', '\\"')
+             .replace("\n", "\\n")
+             .replace("\r", "\\r")
+             .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
 def _format_block(host: RemoteHost) -> str:
     """Render a ``RemoteHost`` as a TOML ``[remote.<name>]`` block.
 
     Single source of truth for what a remote looks like on disk; called
     by both :func:`write_remote` and ``scripts/_bootstrap_lib.py``.
     """
-    extras = ", ".join(f'"{x}"' for x in host.extra_args)
+    extras = ", ".join(_toml_string(x) for x in host.extra_args)
     # ssh_key_path is only emitted when set, to keep the common-case
     # (no custom key) block tidy and not parade an empty line at the
     # user. Loaders default the field to "" when absent.
     key_line = (
-        f"ssh_key_path = \"{host.ssh_key_path}\"\n"
+        f"ssh_key_path = {_toml_string(host.ssh_key_path)}\n"
         if host.ssh_key_path else ""
     )
     return (
         f"[remote.{host.name}]\n"
-        f"ssh_alias = \"{host.ssh_alias}\"\n"
+        f"ssh_alias = {_toml_string(host.ssh_alias)}\n"
         f"{key_line}"
-        f"remote_project_dir = \"{host.remote_project_dir}\"\n"
-        f"remote_staging_dir = \"{host.remote_staging_dir}\"\n"
-        f"remote_python = \"{host.remote_python}\"\n"
+        f"remote_project_dir = {_toml_string(host.remote_project_dir)}\n"
+        f"remote_staging_dir = {_toml_string(host.remote_staging_dir)}\n"
+        f"remote_python = {_toml_string(host.remote_python)}\n"
         f"cpu_only = {'true' if host.cpu_only else 'false'}\n"
         f"extra_args = [{extras}]\n"
         f"cache_budget_gb = {host.cache_budget_gb}\n"

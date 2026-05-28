@@ -16,6 +16,21 @@
 
 $ErrorActionPreference = 'Stop'
 
+# Force UTF-8 on Python's stdout/stderr so the bootstrap's progress
+# messages (which contain ``→``, ``…``, etc.) don't crash with
+# ``UnicodeEncodeError: 'charmap' codec can't encode character`` on a
+# console whose codepage is cp1252. ``_bootstrap_lib.py`` ALSO calls
+# ``sys.stdout.reconfigure(encoding='utf-8')`` at startup, but the
+# very earliest argparse/usage output can fire before that runs, and
+# some older Python builds don't honour reconfigure for already-piped
+# streams. Setting the env var here is the bulletproof fallback.
+$env:PYTHONIOENCODING = 'utf-8'
+# Match the PowerShell host's output encoding too, so any text the
+# Python child prints is decoded by PowerShell as UTF-8 instead of
+# the default OEM codepage (which would render ``→`` as ``ΓåÆ``).
+$prevConsoleEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $libPath = Join-Path $here '_bootstrap_lib.py'
 
@@ -46,9 +61,16 @@ foreach ($a in $args) {
 }
 
 # 'py' takes a -3 selector; plain 'python'/'python3' doesn't.
-if ($pythonCmd -eq 'py') {
-    & $pythonCmd -3 $libPath @pyArgs
-} else {
-    & $pythonCmd $libPath @pyArgs
+try {
+    if ($pythonCmd -eq 'py') {
+        & $pythonCmd -3 $libPath @pyArgs
+    } else {
+        & $pythonCmd $libPath @pyArgs
+    }
+    $code = $LASTEXITCODE
+} finally {
+    # Restore the host's previous output encoding so we don't leave the
+    # session in a half-modified state.
+    [Console]::OutputEncoding = $prevConsoleEncoding
 }
-exit $LASTEXITCODE
+exit $code

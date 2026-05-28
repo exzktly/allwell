@@ -19,10 +19,21 @@ and the bootstrap script all work natively on Windows now.
    you do not need to add them to PATH.
 3. **AllWell's Python dependencies** (only if you're running the GUI or
    driving the runner directly from your Windows machine — not needed
-   if you only use `scripts\bootstrap_remote.ps1`):
+   if you only use `scripts\bootstrap_remote.ps1`).
+
+   For the GUI install, follow the full
+   [Windows (from source)](README_WellViewer.md#windows-from-source)
+   section of the main README — it uses Miniforge + mamba so the
+   `setuptools<70` / `pkg_resources` and MSVC-runtime constraints
+   are handled correctly.
+
+   If you only need a minimal install for `scripts\allwell_remote.py`
+   (no GUI, no PySide6), a system-Python pip install is enough:
    ```powershell
-   python -m pip install -r _Docs\requirements.txt
+   python -m pip install --no-build-isolation -r _Docs\requirements-remote.txt
    ```
+   Use Python 3.10 or 3.11 — TensorFlow 2.13.0 has no Windows wheel
+   for 3.12+.
 4. **An SSH key configured for the remote.** Standard Windows SSH config
    lives at `%USERPROFILE%\.ssh\config`. Add the alias you want to use:
    ```

@@ -343,6 +343,43 @@ def test_resolve_rsync_binary_windows_uses_git_bash(monkeypatch):
     assert result.endswith("rsync.exe")
 
 
+def test_resolve_rsync_binary_windows_falls_through_to_cwrsync(monkeypatch):
+    """When Git for Windows doesn't have rsync but cwRsync is
+    installed, the framework must auto-detect cwRsync rather than
+    falling through to a non-existent PATH ``rsync``."""
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(
+        "services.remote_config.Path.is_file",
+        # Only cwRsync's standard location returns True.
+        lambda self: str(self) == r"C:\Program Files\cwRsync\bin\rsync.exe",
+    )
+    # PATH lookup must NOT be the winner (cwRsync wins first).
+    monkeypatch.setattr("shutil.which", lambda _name: r"C:\bogus\rsync.exe")
+    result = resolve_rsync_binary()
+    assert "cwRsync" in result, result
+
+
+def test_resolve_rsync_binary_windows_raises_when_nothing_found(monkeypatch):
+    """The whole point of the v5.x.x change: when rsync is not
+    installed anywhere, we raise a clear FileNotFoundError with
+    install guidance, INSTEAD of letting subprocess raise the
+    cryptic ``[WinError 2] The system cannot find the file
+    specified`` deep inside a sync helper."""
+    _force_windows(monkeypatch)
+    monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: False)
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    with pytest.raises(FileNotFoundError) as exc_info:
+        resolve_rsync_binary()
+    msg = str(exc_info.value)
+    # The message must name each of the documented install routes so
+    # users with different package-manager preferences each have a
+    # path forward.
+    assert "rsync.exe is not installed" in msg
+    assert "Git for Windows" in msg
+    assert "cwRsync" in msg
+    assert "MSYS2" in msg
+
+
 def test_ssh_argv_on_windows_omits_controlmaster(monkeypatch):
     """ControlMaster is POSIX-only — disable on Windows. Cygwin's
     Unix-socket emulation (used by Git for Windows' ssh.exe) and

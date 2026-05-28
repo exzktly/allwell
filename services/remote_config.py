@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -186,18 +187,59 @@ def resolve_ssh_binary() -> str:
     return "ssh"
 
 
+# Common locations rsync.exe may land on a Windows machine, in
+# preference order. Git for Windows' installer does NOT bundle rsync by
+# default — many users discover this only when AllWell first calls
+# rsync and Python raises ``[WinError 2] The system cannot find the
+# file specified``. Probe a handful of well-known third-party paths so
+# users who installed rsync via cwRsync, MSYS2, or scoop don't need to
+# add it to PATH manually.
+_WINDOWS_RSYNC_CANDIDATES: tuple[Path, ...] = (
+    _GIT_BASH_BIN_DIR / "rsync.exe",                          # user dropped it into Git for Windows
+    Path(r"C:\Program Files\cwRsync\bin\rsync.exe"),          # cwRsync (itefix.net)
+    Path(r"C:\Program Files (x86)\cwRsync\bin\rsync.exe"),
+    Path(r"C:\msys64\usr\bin\rsync.exe"),                     # MSYS2
+    Path(r"C:\tools\msys64\usr\bin\rsync.exe"),               # scoop install msys2
+    Path(r"C:\cygwin64\bin\rsync.exe"),                       # Cygwin
+)
+
+
 def resolve_rsync_binary() -> str:
     """Return the rsync executable this framework should use.
 
-    On Windows: prefer Git for Windows' rsync.exe; fall back to plain
-    ``rsync`` (which on Windows usually means "user has cwRsync or
-    similar on PATH"). On POSIX: always plain ``rsync``.
+    On Windows we probe a handful of common third-party install
+    locations because Git for Windows' default installer does NOT
+    bundle rsync.exe — only ssh.exe. Fall back to ``rsync`` on PATH
+    if none of those match, and raise a clear ``FileNotFoundError``
+    with installation guidance if rsync still isn't found (instead
+    of letting ``subprocess.run`` raise ``[WinError 2] The system
+    cannot find the file specified`` deep inside a sync helper).
+    On POSIX: always plain ``rsync`` (every Linux/macOS system the
+    framework supports ships rsync in the base install).
     """
-    if _is_windows():
-        git_bash_rsync = _GIT_BASH_BIN_DIR / "rsync.exe"
-        if git_bash_rsync.is_file():
-            return str(git_bash_rsync)
-    return "rsync"
+    if not _is_windows():
+        return "rsync"
+    for candidate in _WINDOWS_RSYNC_CANDIDATES:
+        if candidate.is_file():
+            return str(candidate)
+    on_path = shutil.which("rsync")
+    if on_path:
+        return on_path
+    raise FileNotFoundError(
+        "rsync.exe is not installed on this Windows machine. The Git "
+        "for Windows installer ships ssh.exe but NOT rsync, so AllWell "
+        "cannot sync files to the remote until rsync is available. "
+        "Pick ONE of:\n"
+        "  1. Drop rsync.exe and msys-2.0.dll into "
+        "\"C:\\Program Files\\Git\\usr\\bin\\\" (download from a recent "
+        "MSYS2 package: https://repo.msys2.org/msys/x86_64/).\n"
+        "  2. Install cwRsync from https://itefix.net/cwrsync (free "
+        "version is fine).\n"
+        "  3. Install MSYS2 (https://www.msys2.org/), then "
+        "``pacman -S rsync`` in an MSYS2 shell.\n"
+        "Then re-run the bootstrap. AllWell auto-detects rsync at any "
+        "of the locations above without needing PATH edits."
+    )
 
 
 def to_rsync_path(p: Path | str) -> str:

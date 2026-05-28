@@ -232,14 +232,17 @@ def _ssh_binary() -> str:
 def _rsync_binary() -> str:
     """Return the rsync executable to use.
 
-    Same logic as ``_ssh_binary``: prefer the Git-for-Windows-bundled
-    rsync on Windows, fall back to PATH.
+    Defers to ``services.remote_config.resolve_rsync_binary`` which
+    probes multiple common Windows install locations (Git for Windows,
+    cwRsync, MSYS2, Cygwin) and raises a clear ``FileNotFoundError``
+    with installation guidance when rsync is missing — Git for Windows
+    does NOT bundle rsync by default, which used to surface as a
+    cryptic ``[WinError 2] The system cannot find the file specified``
+    deep inside the bandwidth probe.
     """
-    if os.name == "nt":
-        git_bash_rsync = Path(r"C:\Program Files\Git\usr\bin\rsync.exe")
-        if git_bash_rsync.is_file():
-            return str(git_bash_rsync)
-    return "rsync"
+    sys.path.insert(0, str(REPO_ROOT))
+    from services.remote_config import resolve_rsync_binary
+    return resolve_rsync_binary()
 
 
 def _to_rsync_path(p: Path | str) -> str:
@@ -1027,14 +1030,30 @@ def main(argv: list[str] | None = None) -> int:
         ssh_target, probe, args.force, ssh_key_path=key_path,
     )
 
-    # 5. Sync required files.
-    sync_required_files(ssh_target, ssh_key_path=key_path)
+    # 5. Sync required files. The most common Windows-specific
+    # failure here is a missing rsync.exe — Git for Windows installs
+    # ssh.exe but not rsync. ``resolve_rsync_binary`` raises
+    # ``FileNotFoundError`` with installation guidance when that
+    # happens; catch it so the user sees the actionable message
+    # instead of a Python traceback.
+    try:
+        sync_required_files(ssh_target, ssh_key_path=key_path)
+    except FileNotFoundError as exc:
+        print(f"\nERROR: {exc}\n", file=sys.stderr)
+        return 3
 
     # 6. Install pip deps (skipped if TF already importable).
     install_pip_deps(ssh_target, probe, ssh_key_path=key_path)
 
-    # 7. Bandwidth probe.
-    mbps = measure_bandwidth(ssh_target, ssh_key_path=key_path)
+    # 7. Bandwidth probe. Also rsync-bound; same FileNotFoundError
+    # catch as the sync step (covers the path where rsync was
+    # installed between step 5 and step 7, which is mostly
+    # theoretical but cheap to defend).
+    try:
+        mbps = measure_bandwidth(ssh_target, ssh_key_path=key_path)
+    except FileNotFoundError as exc:
+        print(f"\nERROR: {exc}\n", file=sys.stderr)
+        return 3
 
     # 8. Write remotes.toml. Uses the SECTION name (args.alias) so a
     # user who set up [remote.j] keeps that section, but

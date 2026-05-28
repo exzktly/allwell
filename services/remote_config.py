@@ -123,10 +123,23 @@ class RemoteHost:
 
 
 def _controlpath_template() -> str:
-    """OpenSSH ControlPath template per-user, per-host, per-port."""
+    """OpenSSH ControlPath template per-user, per-host, per-port.
+
+    On POSIX the default ``%r@%h:%p`` expansion is fine. On Windows the
+    expanded path lives on an NTFS / FAT filesystem where ``:`` is
+    reserved (only legal as the drive-letter separator). A literal
+    ``allwell-cm-user@host:22`` cannot be created as a file — Cygwin's
+    OpenSSH (the Git-for-Windows binary we prefer) attempts the bind,
+    Windows rejects the filename, ssh exits ``-1`` and Python surfaces
+    it as ``4294967295`` (= 0xFFFFFFFF unsigned). Substitute ``_`` for
+    ``:`` on Windows so the socket lands at a valid filename without
+    changing the per-(user, host, port) uniqueness the template
+    guarantees.
+    """
     base = Path(os.environ.get("XDG_RUNTIME_DIR") or Path.home() / ".ssh")
     base.mkdir(parents=True, exist_ok=True)
-    return str(base / "allwell-cm-%r@%h:%p")
+    sep = "_" if _is_windows() else ":"
+    return str(base / f"allwell-cm-%r@%h{sep}%p")
 
 
 # Git for Windows ships ssh.exe and rsync.exe at a predictable location.

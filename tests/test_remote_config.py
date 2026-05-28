@@ -13,6 +13,7 @@ import pytest
 
 from services.remote_config import (
     RemoteHost,
+    _controlpath_template,
     get_remote,
     load_remotes,
     resolve_rsync_binary,
@@ -366,3 +367,30 @@ def test_default_config_path_posix_unchanged(monkeypatch):
     monkeypatch.delenv("ALLWELL_REMOTES", raising=False)
     from services.remote_config import default_config_path
     assert str(default_config_path()).endswith(".config/allwell/remotes.toml")
+
+
+def test_controlpath_template_windows_avoids_colon(monkeypatch):
+    """On Windows the OpenSSH ``%r@%h:%p`` default expands to a path
+    containing ``:``, which Windows filesystems reserve. Cygwin's
+    OpenSSH (Git for Windows) then can't create the control socket
+    and ssh exits ``-1`` (= 4294967295 unsigned). The template must
+    substitute ``_`` for ``:`` on Windows so the expanded filename is
+    valid; the per-(user, host, port) uniqueness is preserved."""
+    _force_windows(monkeypatch)
+    tpl = _controlpath_template()
+    # The expansion vars stay intact …
+    assert "%r" in tpl and "%h" in tpl and "%p" in tpl
+    # … but the host/port separator is ``_``, not ``:``, after the
+    # drive-letter (if any) prefix.
+    drive, rest = os.path.splitdrive(tpl)
+    assert ":" not in rest, (
+        f"Windows ControlPath must not contain ':' after the drive prefix; "
+        f"got {tpl!r}"
+    )
+    assert "%h_%p" in tpl
+
+
+def test_controlpath_template_posix_unchanged(monkeypatch):
+    _force_posix(monkeypatch)
+    tpl = _controlpath_template()
+    assert tpl.endswith("allwell-cm-%r@%h:%p")

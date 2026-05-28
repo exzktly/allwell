@@ -173,11 +173,9 @@ You'll need:
 
 Open the **Miniforge Prompt** (start menu) and `cd` to the repo root.
 
-If you previously created an `allwell` env from an older version of
-these instructions (the ones that included `pyside6` in the mamba
-step), remove it first — pip cannot uninstall conda-installed packages
-to satisfy the `PySide6==6.7.3` pin (see the Troubleshooting entry on
-shiboken6 below):
+If an `allwell` env already exists from a previous attempt, remove it
+first — pip cannot uninstall conda-installed Qt packages to satisfy the
+`PySide6==6.7.3` pin (see the shiboken6 Troubleshooting entry below):
 
 ```powershell
 mamba env remove -n allwell -y
@@ -186,7 +184,7 @@ mamba env remove -n allwell -y
 Create the env:
 
 ```powershell
-mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py vs2015_runtime -c conda-forge -y
+mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib-base pillow imageio h5py vs2015_runtime -c conda-forge -y
 mamba activate allwell
 ```
 
@@ -194,8 +192,16 @@ The command is one line on purpose: PowerShell's continuation character
 is `` ` ``, the Miniforge Prompt's is `^`, and bash's `\` works in
 neither — keeping it single-line works in all three.
 
-`vs2015_runtime` brings the MSVC redistributable DLLs PySide6 needs
-without requiring admin rights to install vcredist system-wide.
+Two non-obvious package choices:
+
+- `matplotlib-base` (not `matplotlib`). The conda-forge `matplotlib`
+  meta-package pulls in `pyside6` as a transitive dep (its preferred
+  Qt binding), which drags in the latest `shiboken6`. Pip then can't
+  downgrade it to `shiboken6==6.7.3` because conda packages have no
+  RECORD file. `matplotlib-base` is all of matplotlib without any Qt
+  binding; PySide6 from pip supplies the Qt backend at runtime.
+- `vs2015_runtime` brings the MSVC redistributable DLLs PySide6 needs
+  without requiring admin rights to install vcredist system-wide.
 
 Install the pip-managed packages. Use the full path to the requirements
 file from repo root:
@@ -636,21 +642,31 @@ in the mamba environment. Recreate the environment from scratch. Don't
 `pip install setuptools` and don't `mamba update --all`.
 
 **Windows: `Cannot uninstall Shiboken6 6.x.y, RECORD file not found`
-during `pip install`.** — A previous `mamba create` (from older
-instructions) installed `pyside6`/`shiboken6` from conda-forge, and
-pip cannot remove conda-managed packages to install the pinned
-`PySide6==6.7.3` (the matching `shiboken6==6.7.3` pulls down with it).
-Recreate the env from scratch:
+during `pip install`.** — A conda-installed `shiboken6` (or `pyside6`)
+is sitting in the env, and pip cannot uninstall it to satisfy the
+`PySide6==6.7.3` pin (conda packages have no `RECORD` manifest pip can
+read). Two common sources:
+
+1. An older `mamba create` line listed `pyside6` explicitly.
+2. The conda-forge `matplotlib` meta-package pulled `pyside6` in as a
+   transitive dep. **This is the gotcha.** The fix is to use
+   `matplotlib-base` instead — same matplotlib, no Qt binding.
+
+Bulletproof recovery (one block, paste into Miniforge Prompt at repo
+root):
+
 ```powershell
 mamba deactivate
 mamba env remove -n allwell -y
-mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py vs2015_runtime -c conda-forge -y
+mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib-base pillow imageio h5py vs2015_runtime -c conda-forge -y
 mamba activate allwell
 pip install --no-build-isolation -r _Docs\requirements.txt
 ```
-Do NOT include `pyside6` in the mamba step — it's installed by pip
-from the requirements file. The conda `vs2015_runtime` package
-supplies the MSVC DLLs that PySide6 needs.
+
+Do NOT include `pyside6` or `matplotlib` in the mamba step — both pull
+shiboken6 in via conda where pip can't remove it. PySide6 is installed
+by pip from the requirements file; `vs2015_runtime` from conda supplies
+the MSVC DLLs PySide6 needs.
 
 **Windows: `VCRUNTIME140_1.dll` was not found / PySide6 import crashes.**
 — The conda-forge MSVC redistributable isn't visible to PySide6. Verify

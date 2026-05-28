@@ -251,13 +251,17 @@ def test_update_bandwidth_missing_file_is_silent(tmp_path):
     update_bandwidth("ghost", 50.0, path=tmp_path / "nope.toml")
 
 
-def test_ssh_argv_shape():
+def test_ssh_argv_shape(monkeypatch):
+    # Force POSIX explicitly: this test asserts on ControlMaster,
+    # which is POSIX-only after v5.x.x (Windows skips it to avoid
+    # the Cygwin Unix-socket failures that yield exit 4294967295).
+    _force_posix(monkeypatch)
     host = RemoteHost(name="x", ssh_alias="my-alias")
     argv = host.ssh_argv()
     assert argv[0] == "ssh"
     assert "-tt" in argv
     assert "my-alias" in argv
-    # ControlMaster wires for connection reuse.
+    # ControlMaster wires for connection reuse on POSIX.
     assert any("ControlMaster=auto" in a for a in argv)
     assert any("ControlPersist=60s" in a for a in argv)
 
@@ -339,15 +343,44 @@ def test_resolve_rsync_binary_windows_uses_git_bash(monkeypatch):
     assert result.endswith("rsync.exe")
 
 
-def test_ssh_argv_on_windows_keeps_controlmaster(monkeypatch):
-    """Git Bash's OpenSSH (Cygwin build) supports ControlMaster cleanly,
-    so we keep it on Windows too."""
+def test_ssh_argv_on_windows_omits_controlmaster(monkeypatch):
+    """ControlMaster is POSIX-only — disable on Windows. Cygwin's
+    Unix-socket emulation (used by Git for Windows' ssh.exe) and
+    native Windows OpenSSH (no Unix sockets at all) each have
+    real-world failure modes — antivirus, MAX_PATH, mismatched HOME,
+    ownership-bit translation — that make the multiplexer exit -1
+    (= 4294967295 unsigned) before the requested command runs.
+    Skipping ControlMaster on Windows costs one TCP handshake per
+    invocation but avoids the entire failure class."""
     _force_windows(monkeypatch)
     monkeypatch.setattr("services.remote_config.Path.is_file", lambda self: True)
     host = RemoteHost(name="x", ssh_alias="alias")
     argv = host.ssh_argv()
-    assert any("ControlMaster=auto" in a for a in argv)
+    assert not any("ControlMaster" in a for a in argv), (
+        f"ControlMaster must be off on Windows; argv was: {argv}"
+    )
+    assert not any("ControlPath" in a for a in argv)
+    assert not any("ControlPersist" in a for a in argv)
+    # ServerAliveInterval must still be there — it's portable and
+    # keeps long-running pipeline ssh's from being killed by NAT.
+    assert any("ServerAliveInterval=30" in a for a in argv)
+    # The Git Bash binary preference is unchanged.
     assert argv[0].endswith("ssh.exe")
+    # Other framework features still apply.
+    assert "-tt" in argv
+    assert "alias" in argv
+
+
+def test_ssh_argv_on_posix_keeps_controlmaster(monkeypatch):
+    """Mirror of the above for the POSIX side: ControlMaster IS
+    enabled (the original behavior), since Unix sockets work
+    natively there."""
+    _force_posix(monkeypatch)
+    host = RemoteHost(name="x", ssh_alias="alias")
+    argv = host.ssh_argv()
+    assert any("ControlMaster=auto" in a for a in argv)
+    assert any("ControlPath=" in a for a in argv)
+    assert any("ControlPersist=60s" in a for a in argv)
 
 
 def test_default_config_path_windows_prefers_appdata_when_file_exists(monkeypatch, tmp_path):

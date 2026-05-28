@@ -217,16 +217,17 @@ def _argv_parser() -> argparse.ArgumentParser:
 def _ssh_binary() -> str:
     """Return the ssh executable to use.
 
-    On Windows prefer Git for Windows' OpenSSH (Cygwin build) so the same
-    binary that ``services.remote_runner`` uses runs here too — keeps the
-    ControlMaster path identical between the bootstrap and per-run code.
-    Falls back to whatever ``ssh`` is on PATH.
+    Defers to ``services.remote_config.resolve_ssh_binary``, which
+    discovers Git for Windows' ssh.exe at whichever install root the
+    user actually picked (system-wide, 32-bit, per-user under
+    ``%LOCALAPPDATA%``, scoop, etc.) instead of hardcoding
+    ``C:\\Program Files\\Git\\usr\\bin``. Keeps the bootstrap and the
+    runner using identical binaries for ControlMaster (POSIX) and
+    accept-new (everywhere) consistency.
     """
-    if os.name == "nt":
-        git_bash_ssh = Path(r"C:\Program Files\Git\usr\bin\ssh.exe")
-        if git_bash_ssh.is_file():
-            return str(git_bash_ssh)
-    return "ssh"
+    sys.path.insert(0, str(REPO_ROOT))
+    from services.remote_config import resolve_ssh_binary
+    return resolve_ssh_binary()
 
 
 def _rsync_binary() -> str:

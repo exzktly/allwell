@@ -156,11 +156,60 @@ def _controlpath_template() -> str:
     return str(base / f"allwell-cm-%r@%h{sep}%p")
 
 
-# Git for Windows ships ssh.exe and rsync.exe at a predictable location.
-# When the local machine is Windows we use these explicitly rather than
-# trusting PATH: native Windows OpenSSH has flaky ControlMaster support,
-# and there's no native Windows rsync at all.
-_GIT_BASH_BIN_DIR = Path(r"C:\Program Files\Git\usr\bin")
+# Git for Windows can land in a handful of locations depending on
+# whether the user picked the system-wide or per-user installer, ran
+# a 32-bit installer on a 64-bit OS, or routed the install through
+# scoop / chocolatey / winget. We probe each in turn (most specific
+# first, PATH last) so AllWell's helpers find the bundled tools
+# regardless of where the user dropped the install.
+#
+# The function form (not a module-level constant) keeps the candidate
+# list up-to-date with the live ``%LOCALAPPDATA%`` / ``%ProgramFiles%``
+# environment — important because tests monkeypatch these env vars to
+# simulate different install layouts.
+def _git_bash_bin_dirs() -> tuple[Path, ...]:
+    """Return Git for Windows' candidate ``usr\\bin\\`` directories.
+
+    Probes:
+
+    1. The parent of any ``git.exe`` on PATH (handles every install
+       location automatically — Program Files, Program Files (x86),
+       per-user under %LOCALAPPDATA%, scoop, chocolatey, custom paths,
+       etc., as long as the installer added Git to PATH which every
+       Git for Windows install does by default).
+    2. ``%ProgramFiles%\\Git\\usr\\bin`` — the system-wide install.
+    3. ``%ProgramFiles(x86)%\\Git\\usr\\bin`` — older 32-bit installs.
+    4. ``%LOCALAPPDATA%\\Programs\\Git\\usr\\bin`` — the per-user
+       installer (the default when running as a non-admin user, which
+       a lot of corporate-managed Windows boxes default to).
+
+    Returns the tuple of candidates in preference order; callers
+    typically pick the first one whose ``X.exe`` exists.
+    """
+    candidates: list[Path] = []
+    on_path = shutil.which("git")
+    if on_path:
+        # Git's install layout is ``<root>\cmd\git.exe`` (the wrapper
+        # that ends up on PATH) → derive ``<root>\usr\bin``.
+        git_root = Path(on_path).resolve().parent.parent
+        candidates.append(git_root / "usr" / "bin")
+    for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        root = os.environ.get(env_var)
+        if root:
+            candidates.append(Path(root) / "Git" / "usr" / "bin")
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(Path(local_appdata) / "Programs" / "Git" / "usr" / "bin")
+    # De-dupe while preserving order — multiple env vars may resolve
+    # to the same directory.
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for c in candidates:
+        key = str(c).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
+    return tuple(unique)
 
 
 def _is_windows() -> bool:
@@ -177,31 +226,19 @@ def _is_windows() -> bool:
 def resolve_ssh_binary() -> str:
     """Return the ssh executable this framework should use.
 
-    On Windows: prefer Git for Windows' ssh.exe (Cygwin OpenSSH); fall
-    back to plain ``ssh``. On POSIX: always plain ``ssh``.
+    On Windows: prefer Git for Windows' ssh.exe (Cygwin OpenSSH) from
+    whichever install location is present (system-wide, 32-bit,
+    per-user, scoop, etc. — see :func:`_git_bash_bin_dirs`). Fall back
+    to plain ``ssh`` if no Git for Windows is found, in which case
+    Windows' native OpenSSH (or any other ssh on PATH) is used.
+    On POSIX: always plain ``ssh``.
     """
     if _is_windows():
-        git_bash_ssh = _GIT_BASH_BIN_DIR / "ssh.exe"
-        if git_bash_ssh.is_file():
-            return str(git_bash_ssh)
+        for bin_dir in _git_bash_bin_dirs():
+            candidate = bin_dir / "ssh.exe"
+            if candidate.is_file():
+                return str(candidate)
     return "ssh"
-
-
-# Common locations rsync.exe may land on a Windows machine, in
-# preference order. Git for Windows' installer does NOT bundle rsync by
-# default — many users discover this only when AllWell first calls
-# rsync and Python raises ``[WinError 2] The system cannot find the
-# file specified``. Probe a handful of well-known third-party paths so
-# users who installed rsync via cwRsync, MSYS2, or scoop don't need to
-# add it to PATH manually.
-_WINDOWS_RSYNC_CANDIDATES: tuple[Path, ...] = (
-    _GIT_BASH_BIN_DIR / "rsync.exe",                          # user dropped it into Git for Windows
-    Path(r"C:\Program Files\cwRsync\bin\rsync.exe"),          # cwRsync (itefix.net)
-    Path(r"C:\Program Files (x86)\cwRsync\bin\rsync.exe"),
-    Path(r"C:\msys64\usr\bin\rsync.exe"),                     # MSYS2
-    Path(r"C:\tools\msys64\usr\bin\rsync.exe"),               # scoop install msys2
-    Path(r"C:\cygwin64\bin\rsync.exe"),                       # Cygwin
-)
 
 
 def resolve_rsync_binary() -> str:
@@ -219,7 +256,18 @@ def resolve_rsync_binary() -> str:
     """
     if not _is_windows():
         return "rsync"
-    for candidate in _WINDOWS_RSYNC_CANDIDATES:
+    # Each Git for Windows install root + the third-party rsync homes.
+    candidates: list[Path] = []
+    for bin_dir in _git_bash_bin_dirs():
+        candidates.append(bin_dir / "rsync.exe")
+    candidates += [
+        Path(r"C:\Program Files\cwRsync\bin\rsync.exe"),
+        Path(r"C:\Program Files (x86)\cwRsync\bin\rsync.exe"),
+        Path(r"C:\msys64\usr\bin\rsync.exe"),
+        Path(r"C:\tools\msys64\usr\bin\rsync.exe"),
+        Path(r"C:\cygwin64\bin\rsync.exe"),
+    ]
+    for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
     on_path = shutil.which("rsync")
@@ -230,9 +278,9 @@ def resolve_rsync_binary() -> str:
         "for Windows installer ships ssh.exe but NOT rsync, so AllWell "
         "cannot sync files to the remote until rsync is available. "
         "Pick ONE of:\n"
-        "  1. Drop rsync.exe and msys-2.0.dll into "
-        "\"C:\\Program Files\\Git\\usr\\bin\\\" (download from a recent "
-        "MSYS2 package: https://repo.msys2.org/msys/x86_64/).\n"
+        "  1. Drop rsync.exe and msys-2.0.dll into your Git for Windows "
+        "``usr\\bin\\`` directory (download from a recent MSYS2 package: "
+        "https://repo.msys2.org/msys/x86_64/).\n"
         "  2. Install cwRsync from https://itefix.net/cwrsync (free "
         "version is fine).\n"
         "  3. Install MSYS2 (https://www.msys2.org/), then "

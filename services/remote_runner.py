@@ -1174,15 +1174,31 @@ class DatasetCache:
         PATH on the remote (it is, for every host our framework supports).
         """
         cmd = self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"]
+        # v5.x.x: pipe the script as bytes, not as a text-mode string.
+        # On Windows, text=True translates ``\n`` → ``\r\n`` when
+        # writing to ssh's stdin pipe; the remote bash then sees ``\r``
+        # at the end of every line and bails with
+        # ``bash: line 1: $'\r': command not found``. Decode the
+        # captured streams on the way back so the CompletedProcess
+        # ``.stdout`` / ``.stderr`` remain ``str``.
         try:
-            return subprocess.run(
-                cmd, input=script,
-                capture_output=True, text=True, check=check,
+            raw = subprocess.run(
+                cmd, input=script.encode("utf-8"),
+                capture_output=True, check=check,
             )
         except subprocess.CalledProcessError as exc:
+            if isinstance(exc.stdout, (bytes, bytearray)):
+                exc.stdout = exc.stdout.decode("utf-8", errors="replace")
+            if isinstance(exc.stderr, (bytes, bytearray)):
+                exc.stderr = exc.stderr.decode("utf-8", errors="replace")
             if check:
                 raise
             return exc  # type: ignore[return-value]
+        return subprocess.CompletedProcess(
+            raw.args, raw.returncode,
+            raw.stdout.decode("utf-8", errors="replace") if raw.stdout else "",
+            raw.stderr.decode("utf-8", errors="replace") if raw.stderr else "",
+        )
 
 
 _RSYNC_FILENAME_RE = re.compile(
@@ -1857,14 +1873,20 @@ class Fetcher:
         # any ~ in path_glob normally — wrapping in shlex.quote here
         # would lose tilde expansion and the listing would silently
         # return nothing.
+        # v5.x.x: input as bytes so Windows text=True doesn't translate
+        # ``\n`` → ``\r\n`` and trip the remote bash with
+        # ``$'\r': command not found``.
         listing = subprocess.run(
             self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-            input=f"ls -1 {path_glob} 2>/dev/null || true",
+            input=f"ls -1 {path_glob} 2>/dev/null || true".encode("utf-8"),
             capture_output=True,
-            text=True,
             timeout=60,
         )
-        files = [ln for ln in listing.stdout.splitlines() if ln.strip()]
+        listing_stdout = (
+            listing.stdout.decode("utf-8", errors="replace")
+            if listing.stdout else ""
+        )
+        files = [ln for ln in listing_stdout.splitlines() if ln.strip()]
         if not files:
             return 0
         pulled = 0
@@ -2378,13 +2400,20 @@ class RemoteRunner:
             try:
                 listing = subprocess.run(
                     host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-                    input=f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true",
-                    capture_output=True, text=True, timeout=30,
+                    # v5.x.x: bytes input — see _ssh_script for the
+                    # Windows CRLF rationale.
+                    input=f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true".encode("utf-8"),
+                    capture_output=True, timeout=30,
                 )
             except (subprocess.TimeoutExpired, OSError) as exc:
                 log(f"[remote] retry: listing {well} failed: {exc}\n")
                 continue
-            files = [ln for ln in (listing.stdout or "").splitlines() if ln.strip()]
+            files = [
+                ln for ln in (
+                    listing.stdout.decode("utf-8", errors="replace")
+                    if listing.stdout else ""
+                ).splitlines() if ln.strip()
+            ]
             for f in files:
                 _rsync_with_retry(
                     [resolve_rsync_binary(), *_rsync_ssh_transport(host),

@@ -308,19 +308,39 @@ def _ssh_run(
     # doesn't reach the child's fd 1/2. The log still records the
     # local say() narration that brackets each step.
     _log_to_file(f"$ {' '.join(shlex.quote(c) for c in cmd)}")
+    # v5.x.x: pass input as bytes, not as a text-mode string. Python's
+    # text=True writes translate ``\n`` → ``os.linesep`` when feeding
+    # the subprocess stdin pipe, so on Windows the LF-only bash
+    # heredocs (``_PROBE_SCRIPT`` et al.) arrive at the remote with
+    # ``\r\n`` and bash bails with
+    # ``bash: line 1: $'\r': command not found``. Run binary, then
+    # decode stdout/stderr back to ``str`` (and any
+    # ``CalledProcessError`` fields too) so the rest of the bootstrap
+    # — which expects text-mode return values — keeps working.
+    input_bytes = input.encode("utf-8") if input is not None else None
     result = subprocess.run(
         cmd,
         capture_output=capture,
-        text=True,
-        check=check,
-        input=input,
+        check=False,
+        input=input_bytes,
     )
+    stdout = (result.stdout.decode("utf-8", errors="replace")
+              if isinstance(result.stdout, (bytes, bytearray)) else "")
+    stderr = (result.stderr.decode("utf-8", errors="replace")
+              if isinstance(result.stderr, (bytes, bytearray)) else "")
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, cmd, output=stdout, stderr=stderr,
+        )
     if capture:
-        if result.stdout:
-            _log_to_file(f"--- stdout ---\n{result.stdout.rstrip()}")
-        if result.stderr:
-            _log_to_file(f"--- stderr ---\n{result.stderr.rstrip()}")
+        if stdout:
+            _log_to_file(f"--- stdout ---\n{stdout.rstrip()}")
+        if stderr:
+            _log_to_file(f"--- stderr ---\n{stderr.rstrip()}")
         _log_to_file(f"--- exit {result.returncode} ---")
+        return subprocess.CompletedProcess(
+            result.args, result.returncode, stdout, stderr,
+        )
     return result
 
 

@@ -50,7 +50,17 @@
 #
 # Use Miniforge so `mamba` is available on Windows. From the "Miniforge
 # Prompt" (or PowerShell with `mamba init powershell` run once), in the
-# repo root:
+# repo root.
+#
+# IMPORTANT: If you previously created the `allwell` env using older
+# instructions that listed `pyside6` in the mamba step, remove it first.
+# Conda-installed shiboken6/pyside6 cannot be uninstalled by pip when
+# the `PySide6==6.7.3` pin below tries to downgrade them:
+#
+#   mamba env remove -n allwell -y
+#
+# Then create the env (one line — bash `\` does not work in PowerShell
+# or in the Miniforge Prompt):
 #
 #   mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py vs2015_runtime -c conda-forge -y
 #   mamba activate allwell
@@ -64,10 +74,11 @@
 # Notes:
 #   - The mamba step pulls in `vs2015_runtime` from conda-forge so the
 #     MSVC redistributable DLLs PySide6 needs are available without
-#     admin rights. PySide6 itself is installed by pip from the
-#     `PySide6==6.7.3` pin below — installing it via conda first
-#     would be redundant (pip would reinstall it from PyPI and clobber
-#     the conda build).
+#     admin rights. Do NOT add `pyside6` to the mamba step — PySide6
+#     and shiboken6 are installed by pip from the pinned versions
+#     below. Conda-installed Qt packages cannot be uninstalled by pip
+#     (no RECORD file), so a mixed install will fail with
+#     `Cannot uninstall Shiboken6 6.x.y` on the next pip run.
 #   - The command is a single line on purpose. Bash-style `\`
 #     continuations do NOT work in PowerShell (use `` ` ``) or in
 #     the Miniforge Prompt / cmd.exe (use `^`). Keeping it on one

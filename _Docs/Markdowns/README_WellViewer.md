@@ -172,6 +172,17 @@ You'll need:
   about this.
 
 Open the **Miniforge Prompt** (start menu) and `cd` to the repo root.
+
+If you previously created an `allwell` env from an older version of
+these instructions (the ones that included `pyside6` in the mamba
+step), remove it first — pip cannot uninstall conda-installed packages
+to satisfy the `PySide6==6.7.3` pin (see the Troubleshooting entry on
+shiboken6 below):
+
+```powershell
+mamba env remove -n allwell -y
+```
+
 Create the env:
 
 ```powershell
@@ -623,6 +634,23 @@ dist/AllWell.app/Contents/MacOS/AllWell 2>&1 | head -100
 **`No module named 'pkg_resources'`.** — `setuptools` was upgraded past v70
 in the mamba environment. Recreate the environment from scratch. Don't
 `pip install setuptools` and don't `mamba update --all`.
+
+**Windows: `Cannot uninstall Shiboken6 6.x.y, RECORD file not found`
+during `pip install`.** — A previous `mamba create` (from older
+instructions) installed `pyside6`/`shiboken6` from conda-forge, and
+pip cannot remove conda-managed packages to install the pinned
+`PySide6==6.7.3` (the matching `shiboken6==6.7.3` pulls down with it).
+Recreate the env from scratch:
+```powershell
+mamba deactivate
+mamba env remove -n allwell -y
+mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py vs2015_runtime -c conda-forge -y
+mamba activate allwell
+pip install --no-build-isolation -r _Docs\requirements.txt
+```
+Do NOT include `pyside6` in the mamba step — it's installed by pip
+from the requirements file. The conda `vs2015_runtime` package
+supplies the MSVC DLLs that PySide6 needs.
 
 **Windows: `VCRUNTIME140_1.dll` was not found / PySide6 import crashes.**
 — The conda-forge MSVC redistributable isn't visible to PySide6. Verify

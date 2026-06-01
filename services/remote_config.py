@@ -241,6 +241,51 @@ def resolve_ssh_binary() -> str:
     return "ssh"
 
 
+def resolve_ssh_for_rsync() -> str:
+    """Return an ssh.exe that's binary-compatible with the resolved rsync.
+
+    On Windows, rsync.exe and ssh.exe must come from the SAME MSYS /
+    Cygwin runtime. Cygwin's fork() emulation duplicates the parent's
+    handle table into the child before exec'ing ssh; if the child
+    process's first action is to load a DIFFERENT msys-2.0.dll (or
+    cygwin1.dll) than the parent's, the dup() of stdin/stdout/stderr
+    fails before the SSH binary ever starts. rsync reports this as:
+
+        dup() in/out/err failed
+        rsync error: error in IPC code (code 14) at pipe.c
+
+    …or sometimes as exit 12 ("connection unexpectedly closed,
+    0 bytes received") depending on where in the protocol the death
+    is detected.
+
+    The common Windows case: rsync comes from MSYS2 at
+    ``C:\\msys64\\usr\\bin\\rsync.exe``, but :func:`resolve_ssh_binary`
+    returns Git for Windows' ssh at
+    ``C:\\Program Files\\Git\\usr\\bin\\ssh.exe``. Git for Windows
+    ships its OWN MSYS2 runtime, different from the standalone MSYS2
+    install — fork-emulation across the boundary breaks.
+
+    Fix: prefer ssh.exe in the same directory as the resolved rsync.
+    Fall back to :func:`resolve_ssh_binary` if no co-located ssh
+    exists (rsync may be cwRsync / Cygwin / etc., each of which
+    ships its own ssh in the same folder anyway).
+
+    On POSIX this is the same as :func:`resolve_ssh_binary`.
+    """
+    if not _is_windows():
+        return resolve_ssh_binary()
+    try:
+        rsync_path = Path(resolve_rsync_binary())
+    except FileNotFoundError:
+        # No rsync at all — let the caller hit the actionable
+        # FileNotFoundError from resolve_rsync_binary directly.
+        return resolve_ssh_binary()
+    paired = rsync_path.parent / "ssh.exe"
+    if paired.is_file():
+        return str(paired)
+    return resolve_ssh_binary()
+
+
 def resolve_rsync_binary() -> str:
     """Return the rsync executable this framework should use.
 

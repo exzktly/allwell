@@ -378,6 +378,79 @@ def test_resolve_ssh_binary_windows_via_path_discovery(monkeypatch):
     assert resolve_ssh_binary() == expected
 
 
+def test_resolve_ssh_for_rsync_prefers_co_located_ssh(monkeypatch):
+    """When rsync.exe and ssh.exe live in the same ``usr\\bin\\``
+    directory on Windows, AllWell must pair them. Mismatched MSYS /
+    Cygwin runtimes (MSYS2 rsync + Git for Windows ssh) break
+    Cygwin's fork-emulation with ``dup() in/out/err failed``, which
+    surfaces as rsync exit 12 / "connection unexpectedly closed"."""
+    from services.remote_config import resolve_ssh_for_rsync
+    _force_windows(monkeypatch)
+    msys_rsync = "/tmp/msys64/usr/bin/rsync.exe"
+    msys_ssh   = "/tmp/msys64/usr/bin/ssh.exe"
+    git_ssh    = "/tmp/git/usr/bin/ssh.exe"
+    monkeypatch.setattr(
+        "services.remote_config.resolve_rsync_binary",
+        lambda: msys_rsync,
+    )
+    monkeypatch.setattr(
+        "services.remote_config.resolve_ssh_binary",
+        lambda: git_ssh,
+    )
+    monkeypatch.setattr(
+        "services.remote_config.Path.is_file",
+        lambda self: str(self) == msys_ssh,
+    )
+    assert resolve_ssh_for_rsync() == msys_ssh
+
+
+def test_resolve_ssh_for_rsync_falls_back_when_no_paired_ssh(monkeypatch):
+    """If rsync was found but no ssh sits next to it (e.g., user
+    installed rsync via cwRsync, removed its ssh), fall back to the
+    normal :func:`resolve_ssh_binary` (Git for Windows etc.)."""
+    from services.remote_config import resolve_ssh_for_rsync
+    _force_windows(monkeypatch)
+    monkeypatch.setattr(
+        "services.remote_config.resolve_rsync_binary",
+        lambda: "/tmp/orphan/rsync.exe",
+    )
+    monkeypatch.setattr(
+        "services.remote_config.resolve_ssh_binary",
+        lambda: "/tmp/git/usr/bin/ssh.exe",
+    )
+    monkeypatch.setattr(
+        "services.remote_config.Path.is_file",
+        lambda self: False,
+    )
+    assert resolve_ssh_for_rsync() == "/tmp/git/usr/bin/ssh.exe"
+
+
+def test_resolve_ssh_for_rsync_graceful_when_rsync_missing(monkeypatch):
+    """If ``resolve_rsync_binary`` raises (no rsync anywhere),
+    :func:`resolve_ssh_for_rsync` must NOT propagate that — the
+    caller will hit the actionable FileNotFoundError when it
+    actually invokes rsync. Until then just return the normal ssh
+    so the rest of argv construction doesn't blow up."""
+    from services.remote_config import resolve_ssh_for_rsync
+    _force_windows(monkeypatch)
+    def raises():
+        raise FileNotFoundError("no rsync")
+    monkeypatch.setattr(
+        "services.remote_config.resolve_rsync_binary", raises,
+    )
+    monkeypatch.setattr(
+        "services.remote_config.resolve_ssh_binary",
+        lambda: "/tmp/git/usr/bin/ssh.exe",
+    )
+    assert resolve_ssh_for_rsync() == "/tmp/git/usr/bin/ssh.exe"
+
+
+def test_resolve_ssh_for_rsync_posix_passthrough(monkeypatch):
+    from services.remote_config import resolve_ssh_for_rsync
+    _force_posix(monkeypatch)
+    assert resolve_ssh_for_rsync() == "ssh"
+
+
 def test_resolve_rsync_binary_posix(monkeypatch):
     _force_posix(monkeypatch)
     assert resolve_rsync_binary() == "rsync"

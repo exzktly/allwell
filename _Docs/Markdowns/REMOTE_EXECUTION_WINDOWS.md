@@ -18,20 +18,100 @@ and the bootstrap script all work natively on Windows now.
    automatically; you do not need to add it to PATH.
 3. **rsync for Windows.** Git for Windows does NOT bundle `rsync.exe`
    by default. AllWell needs it for every file sync to the remote.
-   Pick any one of:
-   - **Easiest:** download a recent `rsync.exe` + `msys-2.0.dll` from
-     the MSYS2 package mirror
-     (<https://repo.msys2.org/msys/x86_64/>) and copy both into
-     `C:\Program Files\Git\usr\bin\` alongside `ssh.exe`.
-   - **cwRsync** (paid + free editions): <https://itefix.net/cwrsync>.
-     Install to the default location and AllWell finds it.
-   - **MSYS2**: install MSYS2 (<https://www.msys2.org/>), open an
-     MSYS2 shell, run `pacman -S rsync`. AllWell auto-detects
-     `C:\msys64\usr\bin\rsync.exe`.
+   The recommended path is **MSYS2** — it gives you rsync AND a
+   matching ssh.exe (the two must come from the same MSYS runtime
+   or rsync exits 12 with a `dup() in/out/err failed` error mid-sync).
 
-   AllWell probes all three locations plus `rsync` on PATH. If none
-   match, the bootstrap aborts with an actionable error explaining
-   the install options above — there's no silent
+   ### Recommended: MSYS2 via `pacman`
+
+   1. Install MSYS2 from <https://www.msys2.org/> (use the default
+      install location `C:\msys64\`).
+   2. Open the **MSYS2 MSYS** shell (start menu).
+   3. Install rsync + ssh into the same `usr\bin\`:
+      ```bash
+      pacman -Sy rsync openssh
+      ```
+      `openssh` matters: AllWell pairs ssh.exe with rsync.exe from
+      the same directory to avoid cross-runtime fork failures.
+   4. Add `C:\msys64\usr\bin\` to your **user** PATH so AllWell's
+      `shutil.which` discovery finds them (MSYS2 doesn't add itself
+      to PATH by default). In an admin-free PowerShell:
+      ```powershell
+      [Environment]::SetEnvironmentVariable(
+          "Path",
+          [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\msys64\usr\bin",
+          "User"
+      )
+      ```
+      Open a **new** PowerShell / Miniforge Prompt afterwards — existing
+      sessions inherit the old PATH and won't see rsync until restarted.
+
+   ### Troubleshooting: pacman fails on TLS / certificate verification
+
+   On a Windows machine with a broken or corporate-MITM'd root-CA
+   store, `pacman -Sy` may fail with an OpenSSL / certificate error
+   while trying to refresh the package database. Bypass both checks
+   by editing `/etc/pacman.conf` inside the MSYS2 shell and adding
+   these lines under `[options]`:
+
+   ```ini
+   SigLevel = Never
+   XferCommand = /usr/bin/curl -k -L -C - -f -o %o %u
+   ```
+
+   - **`XferCommand = curl -k`** replaces pacman's built-in libcurl
+     downloader with the external curl binary, passing `-k` to skip
+     TLS verification entirely.
+   - **`SigLevel = Never`** disables GPG signature checks on the
+     downloaded packages (otherwise pacman fetches the package fine
+     but refuses to install because the keyring can't be refreshed,
+     which also needs network access).
+
+   After editing, save and re-run `pacman -Sy rsync openssh`. This
+   bypass is a workaround, not a permanent recommendation — once
+   your CA store is fixed, remove both lines from `pacman.conf`
+   and let pacman go back to verifying signatures.
+
+   ### Alternative: manual MSYS2 package extraction
+
+   If pacman is blocked entirely (no network, no shell), download
+   the packages by hand from the MSYS2 mirror
+   (<https://repo.msys2.org/msys/x86_64/>) in a browser and extract
+   each `.pkg.tar.zst` with 7-Zip (two passes: `.zst` → `.tar` →
+   folder). Drop every DLL from each `usr/bin/` into Git for
+   Windows' `usr\bin\` alongside `ssh.exe`. You'll need:
+
+   | Package | Provides |
+   |---|---|
+   | `rsync-*` | `rsync.exe` |
+   | `msys2-runtime-*` | `msys-2.0.dll` (only if Git for Windows' is too old) |
+   | `libxxhash-*` | `msys-xxhash-0.dll` |
+   | `libzstd-*` | `msys-zstd-1.dll` |
+   | `liblz4-*` | `msys-lz4-1.dll` |
+   | `libopenssl-*` | `msys-crypto-*.dll`, `msys-ssl-*.dll` |
+   | `libiconv-*` | `msys-iconv-2.dll` (Git already ships this — usually fine) |
+
+   To find the next missing DLL after extracting, `cd` into the
+   target folder in cmd and run `rsync.exe --version` — Windows
+   pops up a dialog naming the first missing dependency, then repeat
+   until rsync prints its version. **Use ONLY when MSYS2 pacman
+   cannot be made to work** — the package list above is rsync 3.4.x
+   today and the deps drift over time. Pacman keeps it in sync
+   automatically; manual extraction is point-in-time.
+
+   ### Defunct: cwRsync
+
+   The free cwRsync builds at `https://itefix.net/cwrsync` have
+   been discontinued. AllWell still probes the standard cwRsync
+   install paths for backwards compatibility with existing setups,
+   but new installs should use MSYS2.
+
+   ---
+
+   AllWell auto-detects rsync at any of the install paths above
+   (MSYS2's `C:\msys64\usr\bin\`, Git's `usr\bin\`, cwRsync, Cygwin,
+   anywhere on PATH). If none match, the bootstrap aborts with an
+   actionable error pointing back here — there's no silent
    `[WinError 2] The system cannot find the file specified`.
 4. **AllWell's Python dependencies** (only if you're running the GUI or
    driving the runner directly from your Windows machine — not needed
@@ -123,10 +203,19 @@ Or use the GUI: open AllWell, go to **Analyze**, pick `bigbox` from the
 - **`rsync.exe is not installed on this Windows machine ...`** or
   **`[WinError 2] The system cannot find the file specified`** during
   bootstrap sync — Git for Windows does NOT ship rsync. Install it
-  via one of the three options under prerequisite #3 above (drop
-  rsync.exe + msys-2.0.dll into Git's `usr\bin\`, install cwRsync,
-  or install MSYS2). The bootstrap auto-detects rsync at any of
-  those locations.
+  via MSYS2 + `pacman -Sy rsync openssh`, then add `C:\msys64\usr\bin\`
+  to PATH (full instructions under prerequisite #3 above, including
+  the pacman SSL-bypass workaround if your machine's root-CA store
+  is broken).
+- **`rsync: connection unexpectedly closed (0 bytes received so far)`
+  / `code 12` / `dup() in/out/err failed`** — rsync.exe and ssh.exe
+  are loading DIFFERENT MSYS / Cygwin runtimes. Cygwin's
+  fork-emulation duplicates the parent's handle table into the child,
+  then fails when the child loads an incompatible `msys-2.0.dll`.
+  The framework picks an ssh.exe that's co-located with rsync.exe to
+  avoid this, but only if you installed both — make sure you ran
+  `pacman -Sy rsync openssh` (not just `rsync`) under MSYS2, so both
+  binaries live in `C:\msys64\usr\bin\` together.
 - **`UNC paths aren't supported by rsync on Windows`** — your
   `--input_dir` points at a UNC share like `\\fileserver\plates`.
   Map the share to a drive letter first (`net use Z: \\fileserver\plates`)

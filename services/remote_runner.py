@@ -55,6 +55,7 @@ from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
     resolve_ssh_binary,
+    resolve_ssh_for_rsync,
     to_rsync_path,
     update_bandwidth,
 )
@@ -862,12 +863,21 @@ def _rsync_ssh_transport(host: RemoteHost) -> list[str]:
       kills rsync with exit 255 "Host key verification failed", same
       class of failure the bootstrap's ``_ssh_run`` had before v5.2.3.
 
+    v5.x.x: the ssh binary is pulled via :func:`resolve_ssh_for_rsync`
+    (not :func:`resolve_ssh_binary`) so that on Windows we pick an
+    ssh.exe from the SAME MSYS / Cygwin runtime as the resolved
+    rsync.exe. Mismatched runtimes (MSYS2 rsync + Git for Windows
+    ssh, the two ship different msys-2.0.dll versions) make
+    Cygwin's fork-emulation fail with ``dup() in/out/err failed``
+    before ssh runs, surfacing as rsync exit 12 / "connection
+    unexpectedly closed".
+
     This helper centralises the policy so every call site (there are
     seven as of v5.2.5: cache upload, file sync, per-well fetch, glob
     pull, optional pull, two end-of-run retries) gets the same options.
     """
     ssh_inner = [
-        resolve_ssh_binary(),
+        resolve_ssh_for_rsync(),
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
         "-o", "BatchMode=yes",

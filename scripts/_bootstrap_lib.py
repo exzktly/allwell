@@ -752,9 +752,19 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
     # _ssh_run. Without these, a first-contact bootstrap survives
     # probe_host (because that ssh now has accept-new) only to fail
     # again here at the bandwidth probe, where rsync uses its own ssh.
+    # v5.x.x: use ``resolve_ssh_for_rsync`` (NOT a literal "ssh") so
+    # the ssh binary comes from the same MSYS / Cygwin runtime as the
+    # rsync we're about to invoke. Otherwise on Windows the runner's
+    # earlier sync_required_files succeeds (it uses the paired
+    # resolver) but the bandwidth probe falls back to PATH's ssh
+    # (usually Git for Windows', a different MSYS instance than
+    # MSYS2's rsync) and ``dup() in/out/err failed`` kills the fork
+    # → rsync exit 12 / ``connection unexpectedly closed``.
+    sys.path.insert(0, str(REPO_ROOT))
+    from services.remote_config import resolve_ssh_for_rsync
     rsync_argv = [_rsync_binary(), "-a"]
     ssh_inner = [
-        "ssh",
+        resolve_ssh_for_rsync(),
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=15",
         # v5.2.8: BatchMode=yes so rsync's transport ssh fails fast
@@ -768,7 +778,13 @@ def measure_bandwidth(alias: str, *, ssh_key_path: str = "") -> float:
         # through whatever shell rsync invokes underneath.
         expanded_key = str(Path(ssh_key_path).expanduser())
         ssh_inner += ["-i", shlex.quote(expanded_key)]
-    rsync_argv += ["-e", " ".join(ssh_inner)]
+    # Quote the ssh binary path too — on Windows it can contain
+    # spaces (``C:\Program Files\Git\usr\bin\ssh.exe``) and pacman /
+    # cygwin paths can contain other shell metacharacters.
+    rsync_argv += ["-e", " ".join(
+        shlex.quote(a) if i == 0 else a
+        for i, a in enumerate(ssh_inner)
+    )]
     rsync_argv += [
         _to_rsync_path(local_probe),
         f"{alias}:/tmp/allwell-bw-probe",

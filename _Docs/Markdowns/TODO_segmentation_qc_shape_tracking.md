@@ -279,17 +279,23 @@ main
   via the sub-tabs) + app-smoke builds/switches the 5-sub-tab Tracking tab; guardrails green.
   **On-screen visual pass pending (user).**
 
-### ☐ PR5d — Tracking: analytics + export
+### ◐ PR5d — Tracking: analytics + export
 - **Branch:** `claude/feat-tracking-analytics`  **Base:** `claude/feat-tracking-edit`  **Depends on:** PR5c.
 - **Tasks:**
+  - ✅ Motility metrics (`motility.py`): per-(fov, track) speed/displacement/directionality/MSD/
+    turning-angle + the Analytics sub-tab's directionality histogram + summary ("local plots").
+  - ✅ Export (`export.py`): per-track motility CSV, CTC `man_track.txt`, lineage JSON — wired to
+    the Analytics sub-tab's Export buttons (QFileDialog).
   - ☐ `TrackGroup` (`domain/batch_models`) + `track_id` grouping branch in `collect_line_series`
-    / `well_aggregate_stats`.
-  - ☐ Motility metrics (speed, displacement, directionality, MSD, turning angle) + local plots.
-  - ☐ Export (tracks CSV, CTC, lineage JSON, figures) via `features/export`.
-- **Commits:** `feat(tracking): track_id plot grouping` · `feat(tracking): motility analytics` ·
-  `feat(tracking): track export (CSV/CTC/figures)`
-- **BW-compat gate:** grouping inactive without tracks; existing plots unchanged.
-- **Verification:** per-track time courses + exports; legacy plots unchanged; `pytest tests/`.
+    / `well_aggregate_stats` (group the **main** line/bar plots by track) — **deferred**: deep
+    aggregation hot-path integration; the Analytics sub-tab already gives per-track analytics.
+- **Commits (landed):** `feat(tracking): motility metrics + export writers` ·
+  `feat(tracking): Analytics sub-tab — motility summary + export`
+- **BW-compat gate:** ✅ analytics/export operate only on tracked rows; empty on legacy datasets;
+  existing plots unchanged (no main-plot grouping added yet).
+- **Verification:** ✅ `tests/test_tracking_analytics.py` (7: motility straight/zig-zag/per-FOV/
+  empty; CSV/CTC/JSON export) + `test_tracking_tab.py` (analytics refresh + export) + app-smoke
+  builds/switches the 6-sub-tab Tracking tab. **On-screen visual pass pending (user).**
 
 ### ☐ PR5e — Tracking: trackastra engine
 - **Branch:** `claude/feat-tracking-trackastra`  **Base:** `claude/feat-tracking-core`

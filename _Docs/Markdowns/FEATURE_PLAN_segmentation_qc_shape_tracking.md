@@ -106,14 +106,60 @@ Add two new `--segmentation_method` choices alongside the existing `stardist_nuc
 - Add both names to the `if/elif/else` segmentation dispatch (`:1401-1427`).
 - Add both to the argparse `choices` in `build_parser` (`:3119`).
 - Thread the new option through `process_image_group(...)` (signature `:1321-1338`).
-- For label-free, `--nuclear_token` is reused as the **segmentation channel** (the
-  brightfield/phase channel). Intensity measurement on the fluorescence channels is
-  unchanged.
 - GUI: extend `_seg_method_cb` items (`analyze_tab.py:294-299`) and the hint/visibility
   logic in `_refresh_segmentation_hints` (`:707-724`) so the labels make sense in
   label-free mode (e.g. "Segmentation channel" instead of "Nuclear channel").
 
-### 4.3 Dependencies
+### 4.3 Marking the phase / brightfield image on ingestion
+
+Label-free segmentation runs on a **phase / brightfield image, not a fluorescent nuclear
+stain**. That image must be **explicitly designated on ingestion** — exactly the way an
+smFISH channel is flagged today — rather than silently reusing the `--nuclear_token`
+field. This makes the phase channel a first-class, self-describing input: the pipeline
+records which token is the phase image, and the segmenter reads that channel.
+
+**GUI — a per-channel "Phase" checkbox (mirrors the smFISH checkbox).** Channel rows are
+built by `_fluor_add_row` (`analyze_tab.py:639-665`) as `(edit, smfish_cb, remove_btn)`
+tuples, with the smFISH flag gathered by `_smfish_tokens_list` (`:683-684`). Add a sibling
+**`phase_cb`** checkbox to each row so the tuple becomes `(edit, smfish_cb, phase_cb,
+remove_btn)`, and add a `_phase_token()` getter that returns the single checked token
+(parallel to `_smfish_tokens_list`). Behavior:
+
+- The Phase checkbox is **mutually exclusive** across rows (checking one unchecks the
+  others) — there is exactly one phase image per experiment, unlike smFISH which allows
+  several.
+- A channel **cannot be both phase and smFISH**; checking one disables the other on that
+  row.
+- The phase channel is the **segmentation input** for label-free methods and is **excluded
+  from fluorescence intensity quantification** by default (it is not a fluor measurement
+  channel), the same way the nuclear channel is treated today.
+- Validation (extend `_segmentation_validation_errors`, `:689-705`): when the selected
+  method is `cellpose` or `classical_threshold`, **exactly one** phase channel must be
+  designated, and the nuclear-stain field becomes optional / hidden (toggle visibility in
+  `_refresh_segmentation_hints`, `:707-724`). When a StarDist method is selected, the Phase
+  checkboxes are ignored and `--nuclear_token` is required as today.
+
+**Args.** Add `--phase_token <token>` in `build_parser` (`process_microscopy.py:3119`),
+mapped from `_phase_token()` in `_collect_run_options` (`analyze_tab.py:992-1022`) and
+appended in `build_pipeline_args` (`services/pipeline_service.py:23-104`) when non-empty —
+mirroring how `--smfish_tokens` is wired.
+
+**Pipeline — label the image on ingestion.** Mirror the smFISH role machinery in
+`well_viewer/data/image_identity.py`: add a **`Role.PHASE`** to the `Role` enum and a
+`RoleSpec` to `ROLE_CATALOG` (the `SMFISH` role at `:101` is the template; e.g.
+`suffix="_phase"` for any processed phase output), and add the `"phase" → Role.PHASE` entry
+to the kind→role mapping (`:122`). On ingestion the phase image is classified/tagged by its
+token via `classify_member`, so every downstream consumer (the segmenter, the Review image
+viewer, overlays) can identify the segmentation channel unambiguously. The label-free
+segmenters (`_segment_cellpose` / `_segment_classical`) read the **phase** channel as their
+input instead of the nuclear stain.
+
+**Sidecar.** Record the phase token as a top-level `phase_token` key in the fresh `info`
+dict in `write_pipeline_info` (`:3056-3082`) — exactly where `smfish_tokens` is written
+(`:3071`) — so the Review side knows which channel is the phase / segmentation image. (Not
+the preserved-keys loop; it describes this run's configuration.)
+
+### 4.4 Dependencies
 
 - Add `cellpose` (pulls PyTorch) to `_Docs/requirements.txt` **and**
   `_Docs/requirements-remote.txt` — headless workers segment too (§6.2).
@@ -512,9 +558,11 @@ builder (alongside `_sidebar_stats_frame` etc.). Figures register via `ctx.widge
 1. Run the pipeline headless on a small dataset:
    `python process_microscopy.py --input_dir … --output_dir … --shape_features eccentricity
    solidity --flatfield gaussian --qc_remove_debris …`.
+   For label-free, designate a **phase** channel via the per-channel checkbox and pick the
+   `cellpose` or `classical_threshold` method (no `--nuclear_token` required).
 2. Confirm the per-well CSVs gained `shape_*` columns (and `track_id` once tracking is
-   built), and that `pipeline_info.json` carries the `shape_features` and `qc_options`
-   blocks (and a `tracks.json` sidecar exists once tracking is built).
+   built), and that `pipeline_info.json` carries the `shape_features`, `qc_options`, and
+   `phase_token` blocks (and a `tracks.json` sidecar exists once tracking is built).
 3. Open the dataset in Review; confirm the **Shape Features** dropdown section appears and
    that selecting one drives the line / bar / scatter / distribution plots; confirm the
    **Tracking** tab and its sub-tabs (once built).
@@ -535,6 +583,8 @@ builder (alongside `_sidebar_stats_frame` etc.). Figures register via `ctx.widge
 | `write_pipeline_info` (+ preserved keys) | `process_microscopy.py:3038-3112` (`:3092-3099`) |
 | `build_parser` | `process_microscopy.py:3119` |
 | Analyze form: seg method / hints / pickers | `analyze_tab.py:294-299`, `:707-724`, `:374-393` |
+| Channel rows + smFISH checkbox (phase mirrors this) | `analyze_tab.py:639-684` |
+| Role enum + `ROLE_CATALOG` (add `Role.PHASE`) | `well_viewer/data/image_identity.py:59-122` |
 | Analyze form: collect options | `analyze_tab.py:992-1022` |
 | Args assembly | `services/pipeline_service.py:23-104` |
 | Channel/smfish/metric detection | `well_viewer/data/data_loading.py:147-162` |

@@ -4337,6 +4337,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Debris removal: maximum region area in px (0 = no upper bound).")
     p.add_argument("--qc_min_solidity", type=float, default=0.0,
                    help="Debris removal: minimum region solidity 0-1 (0 = no bound).")
+    # ── Cell tracking (optional post-pass) ───────────────────────────────────
+    p.add_argument("--track", action="store_true",
+                   help="After processing, link cells across timepoints and write "
+                        "track_id/track_parent_id/tree_id columns + a tracks.json sidecar.")
+    p.add_argument("--track_engine", default="greedy", choices=("greedy", "btrack"),
+                   help="Tracking engine for --track (greedy = dependency-free default).")
+    p.add_argument("--track_max_distance", type=float, default=30.0,
+                   help="Max frame-to-frame linking distance in px (--track).")
+    p.add_argument("--track_max_gap", type=int, default=1,
+                   help="Max gap frames for gap-closing (--track).")
+    p.add_argument("--track_allow_division", action="store_true",
+                   help="Enable lineage branching where the engine supports it (--track).")
 
     p.add_argument("--no_save_tophat",   action="store_true",
                    help="Do not save top-hat/smFISH intermediate TIFFs")
@@ -4787,6 +4799,33 @@ def main() -> None:
             log.info("Auto-threshold pass produced no new defaults.")
     except Exception as exc:
         log.warning("Auto-threshold pass failed: %s", exc)
+
+    # Optional cell-tracking post-pass: link cells across timepoints and write
+    # track_id / track_parent_id / tree_id into each per-well CSV + tracks.json.
+    # Reuses the Qt-free engine adapters (well_viewer.features.tracking), so it
+    # works headlessly. Any failure is logged and the run still succeeds.
+    if getattr(args, "track", False):
+        try:
+            from well_viewer.features.tracking.worker import write_tracks_to_csvs
+            from well_viewer.features.tracking.engines import EngineParams
+            well_to_csv = {}
+            for csv_path in sorted(output_dir.glob(f"{args.csv_prefix}_*.csv")):
+                well = csv_path.stem[len(args.csv_prefix) + 1:]
+                well_to_csv[well] = csv_path
+            params = EngineParams(
+                max_distance=float(args.track_max_distance),
+                max_gap_frames=int(args.track_max_gap),
+                allow_division=bool(args.track_allow_division),
+            )
+            log.info("Tracking post-pass (%s) over %d well(s)…",
+                     args.track_engine, len(well_to_csv))
+            tracked = write_tracks_to_csvs(
+                output_dir, well_to_csv, engine=args.track_engine, params=params,
+                status_cb=lambda m: log.info("  %s", m),
+            )
+            log.info("Tracking post-pass complete: %d well(s) tracked.", len(tracked))
+        except Exception as exc:
+            log.warning("Tracking post-pass failed: %s", exc)
 
 
 if __name__ == "__main__":

@@ -155,8 +155,8 @@ well_viewer/
 │   │                 cell_gating_tab_view.py
 │   ├── export/       service.py, style.py, sidebar_view.py
 │   ├── tracking/     engines/ (greedy/btrack/…), model.py, orchestrator.py,
-│   │                 worker.py, tab_view.py, edit.py, pruning.py
-│   │                 (Qt-free core + the Tracking tab)
+│   │                 worker.py, tab_view.py, edit.py, pruning.py,
+│   │                 motility.py, export.py, track_plots.py
 │   └── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
 │                     scatter_panel.py, _common.py, _line_series_runner.py,
 │                     well_grid_button.py
@@ -601,6 +601,18 @@ with a snapshot **undo** stack, persisting the edited CSV + a rebuilt
 cleanup — `PruneRules(min_frames, min_displacement)` with Preview + Apply). All
 edits touch only the additive track columns, so the rest of the dataset is
 untouched.
+
+Two final sub-tabs cover analytics (`motility.py` / `export.py` /
+`track_plots.py`): **Analytics** (per-`(fov, track)` motility — speed,
+displacement, directionality, MSD, turning angle — a summary + directionality
+histogram + export to motility CSV / CTC `man_track.txt` / lineage JSON) and
+**Track Plots** (per-track time-series of any metric, driven by the well picker:
+multi-well, one colour per well, optional per-well average track, live on
+`selection_changed`). **Design note:** the original plan to group the *main*
+line/bar plots by track (`TrackGroup` + a `collect_line_series` branch) was
+intentionally dropped — that path is well-pooled aggregation (`well_aggregate_stats`),
+the wrong unit for per-cell time-series. Track plotting lives in its own sub-tab;
+the main plots are unchanged.
 
 `persistence.json` is a single consolidated viewer-state document managed by
 `_doc.py`. On first load it migrates any legacy `ratios.json`,

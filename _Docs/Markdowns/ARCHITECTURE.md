@@ -153,7 +153,7 @@ well_viewer/
 │   │                 label_editor_view.py, replicate_panel_view.py,
 │   │                 cell_gating_tab_view.py
 │   ├── export/       service.py, style.py, sidebar_view.py
-│   ├── tracking/     engines/ (greedy/btrack/…), model.py, orchestrator.py,
+│   ├── tracking/     engines/ (greedy/btrack/trackastra), model.py, orchestrator.py,
 │   │                 worker.py, tab_view.py, edit.py, pruning.py,
 │   │                 motility.py, export.py, track_plots.py
 │   └── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
@@ -612,6 +612,15 @@ line/bar plots by track (`TrackGroup` + a `collect_line_series` branch) was
 intentionally dropped — that path is well-pooled aggregation (`well_aggregate_stats`),
 the wrong unit for per-cell time-series. Track plotting lives in its own sub-tab;
 the main plots are unchanged.
+
+A third engine, **trackastra** (transformer; `engines/trackastra_engine.py`,
+guarded), extends the same registry. Unlike the centroid engines it needs raw
+images **and** label masks per frame, so `FrameDetections` carries optional
+image/mask arrays that the worker loads from `<well>_out.zip`; the adapter runs
+`Trackastra.from_pretrained(model, device).track(imgs, masks, mode)` and maps the
+relabeled masks back to `(frame, nid)` nodes. The `ilp` linking mode is guarded
+behind the optional `motile` solver (disabled with a "needs motile" hint when
+absent).
 
 `persistence.json` is a single consolidated viewer-state document managed by
 `_doc.py`. On first load it migrates any legacy `ratios.json`,

@@ -34,7 +34,7 @@ from well_viewer.features.tracking.worker import track_wells_async
 
 _logger = logging.getLogger("well_viewer")
 
-_SUBTABS = ("Setup & Run", "Track Viewer")
+_SUBTABS = ("Setup & Run", "Track Viewer", "Lineage", "Editor", "Pruning")
 
 
 class _WorkerBridge(QObject):
@@ -94,6 +94,21 @@ def build_tracking_tab(app, parent: QWidget) -> None:
     _build_viewer(app, viewer_page)
     stack.addPage("Track Viewer", viewer_page)
 
+    lineage_page = QWidget()
+    QVBoxLayout(lineage_page).setContentsMargins(0, 0, 0, 0)
+    _build_lineage(app, lineage_page)
+    stack.addPage("Lineage", lineage_page)
+
+    editor_page = QWidget()
+    QVBoxLayout(editor_page).setContentsMargins(0, 0, 0, 0)
+    _build_editor(app, editor_page)
+    stack.addPage("Editor", editor_page)
+
+    pruning_page = QWidget()
+    QVBoxLayout(pruning_page).setContentsMargins(0, 0, 0, 0)
+    _build_pruning(app, pruning_page)
+    stack.addPage("Pruning", pruning_page)
+
     def _on_bar(idx: int = 0) -> None:
         target = bar.tabText(idx)
         if target:
@@ -110,6 +125,12 @@ def build_tracking_tab(app, parent: QWidget) -> None:
                 bar.blockSignals(blocked)
         if name == "Track Viewer":
             _refresh_viewer(app)
+        elif name == "Lineage":
+            _refresh_lineage(app)
+        elif name == "Editor":
+            _refresh_editor(app)
+        elif name == "Pruning":
+            _refresh_pruning(app)
     stack.currentChanged.connect(_on_stack)
 
 
@@ -364,6 +385,346 @@ def _refresh_viewer(app) -> None:
     ax.set_aspect("equal", adjustable="datalim")
     if summary is not None:
         summary.setText(f"{well}: {n_tracks} track(s).")
+    canvas.draw_idle()
+
+
+# ── Edit / prune shared helpers ──────────────────────────────────────────────
+
+def _editor_for(app, well: str):
+    """Return a per-well :class:`TrackEditor` bound to the cached DataFrame."""
+    from well_viewer.features.tracking.edit import TrackEditor
+    cache = getattr(app, "_tracking_editors", None)
+    if cache is None:
+        cache = app._tracking_editors = {}
+    df = app._get_rows(well)
+    ed = cache.get(well)
+    if ed is None or ed.df is not df:
+        ed = TrackEditor(df)
+        cache[well] = ed
+    return ed
+
+
+def _refresh_after_edit(app) -> None:
+    if hasattr(app, "_invalidate_stats_cache"):
+        app._invalidate_stats_cache()
+    try:
+        app._redraw()
+    except Exception:
+        _logger.exception("Tracking edit: redraw failed")
+    rc = getattr(app, "_refresh_review_csv", None)
+    if callable(rc):
+        try:
+            rc()
+        except Exception:
+            _logger.exception("Tracking edit: Review CSV refresh failed")
+    _refresh_viewer(app)
+    _refresh_lineage(app)
+    _refresh_editor(app)
+    _refresh_pruning(app)
+
+
+def _persist_well(app, well: str, df) -> None:
+    """Write the edited well CSV + rebuild its tracks.json entry, then refresh."""
+    from well_viewer.persistence._io import atomic_write_text
+    from well_viewer.persistence import tracking as _tp
+    from well_viewer.features.tracking.model import payload_from_df
+    path = dict(getattr(app._app_state.dataset, "well_paths", {}) or {}).get(well)
+    if path:
+        try:
+            atomic_write_text(Path(path), df.to_csv(index=False))
+        except OSError:
+            _logger.exception("Tracking edit: failed to write %s", path)
+    out_dir = getattr(app._app_state.dataset, "data_dir", None)
+    if out_dir:
+        wells = _tp.load_tracks(out_dir)
+        wells[well] = payload_from_df(well, df)
+        _tp.save_tracks(out_dir, wells)
+    _refresh_after_edit(app)
+
+
+def _verb_row(parent, lay, label, fields):
+    """Add a row: muted label + one QLineEdit per (placeholder,width) in *fields*.
+    Returns the list of QLineEdits (the Apply button is added by the caller)."""
+    row = QHBoxLayout()
+    lbl = QLabel(label, parent)
+    lbl.setObjectName("Muted")
+    lbl.setFixedWidth(130)
+    row.addWidget(lbl)
+    edits = []
+    for placeholder, width in fields:
+        e = QLineEdit(parent)
+        e.setPlaceholderText(placeholder)
+        e.setFixedWidth(width)
+        row.addWidget(e)
+        edits.append(e)
+    lay.addLayout(row)
+    return row, edits
+
+
+def _as_int(edit, default=None):
+    try:
+        return int(float(edit.text().strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+# ── Editor sub-tab ───────────────────────────────────────────────────────────
+
+def _build_editor(app, parent: QWidget) -> None:
+    lay = parent.layout() or QVBoxLayout(parent)
+    lay.setContentsMargins(12, 10, 12, 10)
+    lay.setSpacing(6)
+
+    def _well_or_status():
+        well = _active_well(app)
+        if well is None:
+            app._tracking_editor_status.setText("Select a well on the left.")
+        return well
+
+    def _do(fn):
+        well = _well_or_status()
+        if well is None:
+            return
+        ed = _editor_for(app, well)
+        try:
+            msg = fn(ed)
+        except Exception as exc:  # noqa: BLE001
+            app._tracking_editor_status.setText(f"Edit failed: {exc}")
+            return
+        _persist_well(app, well, ed.df)
+        app._tracking_editor_status.setText(msg)
+
+    _, relabel = _verb_row(parent, lay, "Relabel", [("old id", 70), ("new id", 70)])
+    rb = QPushButton("Apply", parent)
+    rb.clicked.connect(lambda: _do(lambda ed: (
+        f"Relabelled {ed.relabel(_as_int(relabel[0], -1), _as_int(relabel[1], -1))} cell(s).")))
+    _attach(lay, rb)
+
+    _, merge = _verb_row(parent, lay, "Merge (into ← from)", [("into id", 70), ("from id", 70)])
+    mb = QPushButton("Apply", parent)
+    mb.clicked.connect(lambda: _do(lambda ed: (
+        f"Merged {ed.merge(_as_int(merge[0], -1), _as_int(merge[1], -1))} cell(s).")))
+    _attach(lay, mb)
+
+    _, split = _verb_row(parent, lay, "Split (id @ tp)", [("track id", 70), ("timepoint", 90)])
+    sb = QPushButton("Apply", parent)
+    sb.clicked.connect(lambda: _do(lambda ed: (
+        f"Split → new track {ed.split(_as_int(split[0], -1), split[1].text().strip())}.")))
+    _attach(lay, sb)
+
+    _, delete = _verb_row(parent, lay, "Delete", [("track id", 70)])
+    db = QPushButton("Apply", parent)
+    db.clicked.connect(lambda: _do(lambda ed: (
+        f"Deleted {ed.delete(_as_int(delete[0], -1))} cell(s).")))
+    _attach(lay, db)
+
+    _, div = _verb_row(parent, lay, "Division (parent→child)", [("parent", 70), ("child", 70)])
+    vb = QPushButton("Apply", parent)
+    vb.clicked.connect(lambda: _do(lambda ed: (
+        "Division assigned." if ed.assign_division(_as_int(div[0], -1), _as_int(div[1], -1))
+        else "Division not assigned (check ids).")))
+    _attach(lay, vb)
+
+    ub = QPushButton("Undo last edit", parent)
+
+    def _undo():
+        well = _well_or_status()
+        if well is None:
+            return
+        ed = _editor_for(app, well)
+        if ed.undo():
+            _persist_well(app, well, ed.df)
+            app._tracking_editor_status.setText("Undid last edit.")
+        else:
+            app._tracking_editor_status.setText("Nothing to undo.")
+    ub.clicked.connect(_undo)
+    lay.addWidget(ub)
+
+    app._tracking_editor_status = QLabel("Edit the active well's tracks.", parent)
+    app._tracking_editor_status.setObjectName("Muted")
+    app._tracking_editor_status.setWordWrap(True)
+    lay.addWidget(app._tracking_editor_status)
+    lay.addStretch(1)
+
+
+def _attach(lay, btn) -> None:
+    """Append *btn* to the most-recently added row layout."""
+    item = lay.itemAt(lay.count() - 1)
+    if item is not None and item.layout() is not None:
+        item.layout().addWidget(btn)
+        item.layout().addStretch(1)
+    else:
+        lay.addWidget(btn)
+
+
+def _refresh_editor(app) -> None:
+    lbl = getattr(app, "_tracking_editor_status", None)
+    if lbl is None:
+        return
+    well = _active_well(app)
+    if well is None:
+        lbl.setText("Select a well on the left.")
+        return
+    try:
+        ids = _editor_for(app, well).track_ids()
+    except Exception:
+        ids = []
+    lbl.setText(f"{well}: {len(ids)} track(s). Enter ids above and Apply.")
+
+
+# ── Pruning sub-tab ──────────────────────────────────────────────────────────
+
+def _build_pruning(app, parent: QWidget) -> None:
+    lay = parent.layout() or QVBoxLayout(parent)
+    lay.setContentsMargins(12, 10, 12, 10)
+    lay.setSpacing(6)
+
+    _, mf = _verb_row(parent, lay, "Min frames", [("e.g. 3", 70)])
+    _, md = _verb_row(parent, lay, "Min displacement (px)", [("e.g. 10", 70)])
+    app._tracking_prune_min_frames = mf[0]
+    app._tracking_prune_min_disp = md[0]
+
+    btns = QHBoxLayout()
+    pv = QPushButton("Preview", parent)
+    pv.clicked.connect(lambda: _prune(app, apply_now=False))
+    btns.addWidget(pv)
+    ap = QPushButton("Apply", parent)
+    ap.clicked.connect(lambda: _prune(app, apply_now=True))
+    btns.addWidget(ap)
+    btns.addStretch(1)
+    lay.addLayout(btns)
+
+    app._tracking_prune_status = QLabel(
+        "Drop short / low-motion tracks. Preview first.", parent)
+    app._tracking_prune_status.setObjectName("Muted")
+    app._tracking_prune_status.setWordWrap(True)
+    lay.addWidget(app._tracking_prune_status)
+    lay.addStretch(1)
+
+
+def _prune_rules(app):
+    from well_viewer.features.tracking.pruning import PruneRules
+    mf = _as_int(app._tracking_prune_min_frames, 0) or 0
+    try:
+        md = float(app._tracking_prune_min_disp.text().strip() or 0)
+    except (TypeError, ValueError):
+        md = 0.0
+    return PruneRules(min_frames=mf, min_displacement=md)
+
+
+def _prune(app, *, apply_now: bool) -> None:
+    from well_viewer.features.tracking import pruning
+    well = _active_well(app)
+    if well is None:
+        app._tracking_prune_status.setText("Select a well on the left.")
+        return
+    rules = _prune_rules(app)
+    if not rules.active:
+        app._tracking_prune_status.setText("Set a min-frames or min-displacement rule first.")
+        return
+    df = app._get_rows(well)
+    n_tracks, n_cells = pruning.preview(df, rules)
+    if not apply_now:
+        app._tracking_prune_status.setText(
+            f"Would drop {n_tracks} track(s) / {n_cells} cell(s). Click Apply to prune.")
+        return
+    dropped = pruning.evaluate(df, rules)
+    pruning.apply(df, dropped)
+    _persist_well(app, well, df)
+    app._tracking_prune_status.setText(f"Pruned {len(dropped)} track(s).")
+
+
+def _refresh_pruning(app) -> None:
+    lbl = getattr(app, "_tracking_prune_status", None)
+    if lbl is not None and _active_well(app) is None:
+        lbl.setText("Select a well on the left.")
+
+
+# ── Lineage sub-tab ──────────────────────────────────────────────────────────
+
+def _build_lineage(app, parent: QWidget) -> None:
+    lay = parent.layout() or QVBoxLayout(parent)
+    lay.setContentsMargins(0, 0, 0, 0)
+    top = QHBoxLayout()
+    top.setContentsMargins(12, 6, 12, 6)
+    app._tracking_lineage_summary = QLabel("No lineage yet.", parent)
+    app._tracking_lineage_summary.setObjectName("Muted")
+    top.addWidget(app._tracking_lineage_summary)
+    top.addStretch(1)
+    rb = QPushButton("Refresh", parent)
+    rb.clicked.connect(lambda: _refresh_lineage(app))
+    top.addWidget(rb)
+    lay.addLayout(top)
+
+    fig = app._tracking_Figure(figsize=(5, 5))
+    app._tracking_lineage_fig = fig
+    app._tracking_lineage_ax = fig.add_subplot(111)
+    canvas = app._tracking_FigureCanvas(fig)
+    app._tracking_lineage_canvas = canvas
+    lay.addWidget(canvas, 1)
+
+
+def _refresh_lineage(app) -> None:
+    ax = getattr(app, "_tracking_lineage_ax", None)
+    canvas = getattr(app, "_tracking_lineage_canvas", None)
+    summary = getattr(app, "_tracking_lineage_summary", None)
+    if ax is None or canvas is None:
+        return
+    ax.clear()
+    well = _active_well(app)
+    df = None
+    if well is not None:
+        try:
+            df = app._get_rows(well)
+        except Exception:
+            df = None
+
+    import pandas as pd
+    from well_viewer.features.tracking.model import TRACK_ID_COL, TRACK_PARENT_COL
+    from well_viewer.data.data_loading import parse_timepoint_hours
+    have = (df is not None and not df.empty and TRACK_ID_COL in df.columns
+            and "timepoint" in df.columns)
+    if not have:
+        ax.text(0.5, 0.5, "No lineage for this well.", ha="center", va="center",
+                transform=ax.transAxes, color="#94A3B8")
+        ax.set_axis_off()
+        if summary is not None:
+            summary.setText("No lineage yet.")
+        canvas.draw_idle()
+        return
+
+    tid = pd.to_numeric(df[TRACK_ID_COL], errors="coerce")
+    parent = (pd.to_numeric(df[TRACK_PARENT_COL], errors="coerce")
+              if TRACK_PARENT_COL in df.columns else pd.Series([-1] * len(df)))
+    valid = df[tid.notna() & (tid >= 0)]
+    ids = sorted({int(v) for v in tid.dropna() if int(v) >= 0})
+    lane = {t: i for i, t in enumerate(ids)}
+    last_pt = {}  # track_id -> (x, y_max)
+    first_pt = {}
+    parent_of = {}
+    for t in ids:
+        grp = valid[pd.to_numeric(valid[TRACK_ID_COL], errors="coerce") == t]
+        ys = sorted(parse_timepoint_hours(str(v)) or 0.0 for v in grp["timepoint"])
+        x = lane[t]
+        ax.plot([x, x], [min(ys), max(ys)], "-", linewidth=2, alpha=0.85)
+        first_pt[t] = (x, min(ys))
+        last_pt[t] = (x, max(ys))
+        p = pd.to_numeric(grp[TRACK_PARENT_COL], errors="coerce")
+        pv = int(p.iloc[0]) if len(p) and pd.notna(p.iloc[0]) else -1
+        parent_of[t] = pv
+    # division edges: parent's last point → child's first point
+    n_div = 0
+    for t, p in parent_of.items():
+        if p in last_pt and t in first_pt:
+            (px, py), (cx, cy) = last_pt[p], first_pt[t]
+            ax.plot([px, cx], [py, cy], "--", linewidth=1, color="#94A3B8")
+            n_div += 1
+    ax.set_xlabel("track")
+    ax.set_ylabel("time (h)")
+    ax.set_title(f"{well} — {len(ids)} track(s), {n_div} division link(s)")
+    ax.invert_yaxis()
+    if summary is not None:
+        summary.setText(f"{well}: {len(ids)} track(s), {n_div} division(s).")
     canvas.draw_idle()
 
 

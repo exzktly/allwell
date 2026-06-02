@@ -58,3 +58,34 @@ def test_run_tracking_requires_dataset(viewer_app):
     app._app_state.dataset.data_dir = None
     tab_view._run_tracking(app)
     assert "dataset" in app._tracking_status_lbl.text().lower()
+
+
+def test_tracking_subtabs(viewer_app, monkeypatch):
+    app = _build_tab(viewer_app)
+    from well_viewer.features.tracking import tab_view
+    df = pd.DataFrame({
+        "well": ["A01"] * 5, "fov": ["F001"] * 5,
+        "timepoint": ["0", "0", "24h", "24h", "0"], "nucleus_id": [1, 2, 1, 2, 3],
+        "shape_centroid_row": [10, 50, 12, 52, 80],
+        "shape_centroid_col": [10, 50, 12, 52, 80],
+        "track_id": [1, 2, 1, 2, 3], "track_parent_id": [-1, 1, -1, 1, -1],
+        "tree_id": [1, 1, 1, 1, 3],
+    })
+    monkeypatch.setattr(tab_view, "_active_well", lambda _a: "A01")
+    monkeypatch.setattr(app, "_get_rows", lambda w: df, raising=False)
+
+    # Lineage view summarises tracks + division links.
+    tab_view._refresh_lineage(app)
+    assert "track(s)" in app._tracking_lineage_summary.text()
+    assert "division" in app._tracking_lineage_summary.text()
+
+    # Editor operates on the active well's df (relabel via the cached editor).
+    ed = tab_view._editor_for(app, "A01")
+    assert ed.relabel(1, 9) == 2
+    assert set(df[df["nucleus_id"] == 1]["track_id"]) == {9}
+
+    # Pruning preview reports what the rules would drop (1-frame track 3).
+    app._tracking_prune_min_frames.setText("2")
+    app._tracking_prune_min_disp.setText("0")
+    tab_view._prune(app, apply_now=False)
+    assert "Would drop" in app._tracking_prune_status.text()

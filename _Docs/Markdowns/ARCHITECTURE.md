@@ -792,6 +792,17 @@ and the channel dropdown surfaces them as **sectioned virtual channels** (a
 metric combo collapsed and all-cells (`threshold=-1`) aggregation — they are
 channel-independent, so they bypass the per-channel intensity gate.
 
+**Quality-control stage.** Two optional QC steps run inside `process_image_group`.
+**Flat-field correction** (`--flatfield {none,empty_well,gaussian,basic}`, via
+`apply_flatfield` with a mean-1 field) runs *before* top-hat: `gaussian`
+self-estimates per image, while `basic` (a **pure-numpy BaSiC** — median stack +
+smooth, no jax) and `empty_well` use a per-channel field precomputed once in
+`main()` by `build_flatfield_models`. **Debris removal** (`--qc_remove_debris` +
+min/max area + min-solidity, via `filter_debris`) drops out-of-bounds label
+regions, **reusing the same `regionprops` pass** as the shape features. The
+settings are recorded as a `qc_options` block in `pipeline_info.json`
+(`read_pipeline_info` defaults it to `{}` on legacy sidecars).
+
 ### 6.3 `all_well_launcher.py`
 
 PyInstaller entry point. Two responsibilities:

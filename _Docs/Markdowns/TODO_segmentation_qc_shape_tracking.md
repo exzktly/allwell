@@ -260,16 +260,24 @@ main
 - **BW-compat gate:** empty-state when no tracks; no crash on legacy datasets.
 - **Verification:** open Tracking tab on tracked + legacy datasets; `pytest tests/`.
 
-### ☐ PR5c — Tracking: lineage + editor + pruning
+### ✅ PR5c — Tracking: lineage + editor + pruning
 - **Branch:** `claude/feat-tracking-edit`  **Base:** `claude/feat-tracking-ui`  **Depends on:** PR5b.
 - **Tasks:**
-  - ☐ Lineage Tree sub-tab (arboretum-style, from `tracks.json`).
-  - ☐ Editor sub-tab (link/split/merge/assign-division/relabel/delete + undo stack).
-  - ☐ Pruning/QC sub-tab (rule-based bulk cleanup + preview).
-- **Commits:** `feat(tracking): lineage tree` · `feat(tracking): track editor + undo` ·
-  `feat(tracking): pruning/QC rules`
-- **BW-compat gate:** edits fingerprinted; dropped if segmentation changed.
-- **Verification:** edit/prune round-trips persist to `tracks.json`; `pytest tests/`.
+  - ✅ Lineage sub-tab — matplotlib lineage view per well (track time-segments in lanes +
+    dashed parent→child division links) from the track columns.
+  - ✅ Editor sub-tab — relabel / merge / split / delete / assign+clear-division + Undo,
+    driving a per-well cached `TrackEditor` (Qt-free `edit.py`, snapshot undo stack); each edit
+    writes the well CSV back + rebuilds its `tracks.json` entry (`model.payload_from_df`).
+  - ✅ Pruning/QC sub-tab — `PruneRules(min_frames, min_displacement)` with Preview (count) +
+    Apply (Qt-free `pruning.py`).
+- **Commits (landed):** `feat(tracking): track-edit (undo) + rule-based pruning cores` ·
+  `feat(tracking): Lineage / Editor / Pruning sub-tabs`
+- **BW-compat gate:** ✅ edits/pruning operate only on the additive track columns; re-persisted
+  `tracks.json` carries fingerprints; no-op on datasets without tracks.
+- **Verification:** ✅ `tests/test_tracking_edit.py` (9: relabel/merge/delete/split/division +
+  undo, pruning rules + preview, payload rebuild) + `test_tracking_tab.py` (lineage/editor/prune
+  via the sub-tabs) + app-smoke builds/switches the 5-sub-tab Tracking tab; guardrails green.
+  **On-screen visual pass pending (user).**
 
 ### ☐ PR5d — Tracking: analytics + export
 - **Branch:** `claude/feat-tracking-analytics`  **Base:** `claude/feat-tracking-edit`  **Depends on:** PR5c.

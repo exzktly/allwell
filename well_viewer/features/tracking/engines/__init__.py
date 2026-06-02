@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List
 
-from . import greedy, btrack_engine
+from . import greedy, btrack_engine, trackastra_engine
 from .base import (  # re-export the public types
     Detection, EngineParams, FrameDetections, TrackResult, UNTRACKED,
 )
@@ -40,6 +40,7 @@ def _register(mod) -> None:
 
 _register(greedy)
 _register(btrack_engine)
+_register(trackastra_engine)
 
 DEFAULT_ENGINE = greedy.NAME
 

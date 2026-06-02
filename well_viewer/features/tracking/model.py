@@ -44,11 +44,17 @@ def build_frames_from_df(
     nid_col: str = "nucleus_id",
     row_col: str = CENTROID_ROW_COL,
     col_col: str = CENTROID_COL_COL,
+    frame_image_loader=None,
 ) -> "Tuple[List[FrameDetections], Dict[str, int]]":
     """Assemble ordered :class:`FrameDetections` from one (well, fov) DataFrame.
 
     Returns ``(frames, tp_to_frame)``. Requires the centroid columns; raises
     ``KeyError`` if they are absent (tracking needs §C centroids).
+
+    ``frame_image_loader`` (optional) is ``loader(timepoint) -> (image, mask)``;
+    when given, each frame carries the raw image + label mask the mask-based
+    engines (trackastra) consume. Loader failures attach ``None`` (the engine
+    then errors clearly).
     """
     for col in (tp_col, nid_col, row_col, col_col):
         if col not in df.columns:
@@ -65,7 +71,14 @@ def build_frames_from_df(
             if pd.isna(row) or pd.isna(col):
                 continue
             dets.append(Detection(nid=int(r[nid_col]), row=float(row), col=float(col)))
-        frames.append(FrameDetections(frame=tp_to_frame[tp], timepoint=tp, detections=dets))
+        image = mask = None
+        if frame_image_loader is not None:
+            try:
+                image, mask = frame_image_loader(tp)
+            except Exception:
+                image = mask = None
+        frames.append(FrameDetections(frame=tp_to_frame[tp], timepoint=tp,
+                                      detections=dets, image=image, mask=mask))
     return frames, tp_to_frame
 
 

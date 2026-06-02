@@ -33,10 +33,17 @@ class Detection:
 
 @dataclass(frozen=True)
 class FrameDetections:
-    """All detections at one timepoint, in time order."""
+    """All detections at one timepoint, in time order.
+
+    ``image`` / ``mask`` are optional per-frame arrays (loaded from
+    ``<well>_out.zip`` by the worker) that the mask-based engines (trackastra,
+    OverLapTrack) consume; centroid engines (greedy, btrack) ignore them.
+    """
     frame: int                     # 0-based ordinal (sorted by timepoint)
     timepoint: str                 # original timepoint label
     detections: List[Detection]
+    image: object = None           # 2-D raw image (np.ndarray) or None
+    mask: object = None            # 2-D integer label mask (np.ndarray) or None
 
 
 @dataclass(frozen=True)

@@ -28,12 +28,56 @@ from .orchestrator import track_well
 logger = logging.getLogger("well_viewer")
 
 
+_MASK_ENGINES = ("trackastra",)
+
+
+def _engine_needs_masks(engine: str) -> bool:
+    return engine in _MASK_ENGINES
+
+
 def _well_fingerprint(out_dir: Path, well: str) -> str:
     zip_path = out_dir / f"{well}_out.zip"
     try:
         return f"{zip_path.stat().st_mtime_ns}"
     except OSError:
         return ""
+
+
+def _zip_image_loader(out_dir: Path, well: str):
+    """Return ``loader(fov, tp) -> (image, mask)`` reading from <well>_out.zip,
+    or ``None`` if the zip is missing. Used by the mask-based engines
+    (trackastra). Best-effort name matching on fov/timepoint tokens; missing
+    files yield ``None`` (the engine then errors clearly). Dev-env-verified."""
+    zip_path = Path(out_dir) / f"{well}_out.zip"
+    if not zip_path.exists():
+        return None
+    import zipfile
+    try:
+        names = zipfile.ZipFile(zip_path).namelist()
+    except OSError:
+        return None
+
+    def _loader(fov, tp):
+        import io
+        import zipfile as zf
+        from tifffile import imread
+        fov_s, tp_s = str(fov), str(tp)
+
+        def _pick(pred):
+            return next((n for n in names if pred(n)), None)
+
+        label_name = _pick(lambda n: n.endswith("_labels.tif") and fov_s in n and tp_s in n)
+        img_name = _pick(lambda n: n.endswith(".tif") and "_labels" not in n
+                         and fov_s in n and tp_s in n)
+        image = mask = None
+        with zf.ZipFile(zip_path) as z:
+            if label_name:
+                mask = imread(io.BytesIO(z.read(label_name)))
+            if img_name:
+                image = imread(io.BytesIO(z.read(img_name)))
+        return image, mask
+
+    return _loader
 
 
 def _drop_case_equivalent_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -72,10 +116,12 @@ def write_tracks_to_csvs(
         if df.empty:
             continue
         df = _drop_case_equivalent_columns(df)
+        loader = _zip_image_loader(out_dir, well) if _engine_needs_masks(engine) else None
         try:
             df, payload = track_well(
                 df, well, engine=engine, params=params,
                 fingerprints={well: _well_fingerprint(out_dir, well)},
+                image_loader=loader,
             )
         except KeyError as exc:
             # Missing centroid columns (pre-§C dataset) — skip with a clear note.

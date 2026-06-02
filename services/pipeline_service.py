@@ -140,6 +140,20 @@ def build_pipeline_args(
                 v = 0.0
             if v > 0:
                 args += [flag, str(v)]
+    # Cell tracking post-pass.
+    if opts.get("track"):
+        args.append("--track")
+        args += ["--track_engine", str(opts.get("track_engine", "greedy") or "greedy")]
+        try:
+            args += ["--track_max_distance", str(float(opts.get("track_max_distance", 30.0) or 30.0))]
+        except (TypeError, ValueError):
+            pass
+        try:
+            args += ["--track_max_gap", str(int(opts.get("track_max_gap", 1) or 1))]
+        except (TypeError, ValueError):
+            pass
+        if opts.get("track_allow_division"):
+            args.append("--track_allow_division")
 
     try:
         tf = int(opts["tf_threads"])

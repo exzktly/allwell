@@ -38,6 +38,8 @@ from services.remote_config import load_remotes
 from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
+from widgets.chip_group import ChipGroup
+import shape_features_core as _sfc
 
 # ---------------------------------------------------------------------------
 # Schema vocabulary — kept in sync with process_microscopy.py
@@ -245,6 +247,7 @@ class AnalyzeTab(QWidget):
         self._build_folders_section(parent)
         self._refresh_schema_preview()
         self._build_tophat_section(parent)
+        self._build_shape_features_section(parent)
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
         self._build_run_controls(parent)
@@ -428,6 +431,27 @@ class AnalyzeTab(QWidget):
         hint = QLabel("Fluor radius applies to all fluorescent channels.", sec)
         hint.setObjectName("Muted")
         sec.layout().addWidget(hint)
+
+    # Sensible default morphology features (centroids are always emitted by the
+    # pipeline regardless of selection, so they are not offered as chips).
+    _SHAPE_DEFAULTS = ("area", "eccentricity", "solidity", "perimeter")
+
+    def _build_shape_features_section(self, parent: QWidget) -> None:
+        sec = self._section(parent, "Shape Metrics")
+
+        hint = QLabel(
+            "Per-cell morphology features to measure (emitted as shape_… "
+            "columns; cell centroids are always recorded).", sec)
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        sec.layout().addWidget(hint)
+
+        self._shape_chips = ChipGroup(sec, exclusive=False)
+        for key in _sfc.SELECTABLE_KEYS:
+            feat = _sfc.BY_KEY[key]
+            self._shape_chips.addChip(feat.label, data=key)
+        self._shape_chips.setCheckedData(list(self._SHAPE_DEFAULTS))
+        sec.layout().addWidget(self._shape_chips)
 
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Output Options")
@@ -1067,6 +1091,7 @@ class AnalyzeTab(QWidget):
             filename_schema=self._build_schema_arg(),
             filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
             smfish_tokens=self._smfish_tokens_list(),
+            shape_features=list(self._shape_chips.checkedData()),
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=min_area,

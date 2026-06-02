@@ -88,6 +88,10 @@ def build_pipeline_args(
     if smfish:
         args += ["--smfish_tokens"] + list(smfish)
 
+    shape_features = opts.get("shape_features", [])
+    if shape_features:
+        args += ["--shape_features"] + list(shape_features)
+
     try:
         tf = int(opts["tf_threads"])
         if tf != 0:

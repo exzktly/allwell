@@ -10,7 +10,10 @@ chip selector + `detect_shape_features` + the full Review dropdown wiring (secti
 metric collapse, virtual-channel routing, all-cells aggregation, scatter-gate bypass).
 A headless PySide6 (offscreen) env now runs the suite; `test_shape_features.py` +
 `test_backwards_compat.py` + full suite green (8 unrelated pre-existing remote/rsync failures).
-**Next: PR3 (QC tooling) or PR5a (tracking core) — both base on PR2.**
+✅ PR3 (QC tooling) **complete & verified headless** — flat-field (none/empty_well/gaussian/
+pure-numpy basic) + debris removal + `qc_options` sidecar + Analyze "Quality Control" section
+(`test_qc_tooling.py` 8/8; full-app smoke builds the section). Base = PR2.
+**Next: PR4 (label-free seg, base PR1) or PR5a (tracking core, base PR2).**
 
 ## Confirmed decisions
 - **Dependencies:** all new packages in **core** requirements, pinned to one mutually
@@ -180,21 +183,26 @@ main
   confirmed failing on base). Set up: `apt install libegl1 …`; `QT_QPA_PLATFORM=offscreen`.
   Visual polish (section styling) is the only thing left for a real-display dev-env pass.
 
-### ☐ PR3 — QC tooling (§B)
+### ✅ PR3 — QC tooling (§B)
 - **Branch:** `claude/feat-qc-tooling`  **Base:** `claude/feat-shape-features`
   **Depends on:** PR2 (debris reuses the regionprops pass).
 - **Tasks:**
-  - ☐ Background-well reference (`--background_well` / `--background_mode`) + `load_background_reference`.
-  - ☐ Flat-field `--flatfield {none,empty_well,gaussian,basic}` via `apply_flatfield`;
-    **pure-numpy BaSiC** estimator (no jax) computed once in `main()`.
-  - ☐ Debris removal (`--qc_remove_debris` + bounds) reusing §C regionprops.
-  - ☐ `qc_options` block in the fresh `pipeline_info` `info` dict.
-  - ☐ Analyze "Quality Control" section + options plumbing.
-- **Commits:** `feat(pipeline): background-well + flat-field (empty/gaussian/basic) correction` ·
-  `feat(pipeline): debris removal filter` · `feat(analyze): quality-control options`
-- **BW-compat gate:** QC off by default; old datasets unaffected; re-run preserves user blocks.
-- **Verification:** run with each flat-field mode; confirm `qc_options` sidecar; legacy re-run
-  preserves `cell_gating`; `pytest tests/`.
+  - ✅ Flat-field `--flatfield {none,empty_well,gaussian,basic}` via `apply_flatfield`
+    (mean-1 field); `gaussian` self-estimated per image; **pure-numpy BaSiC** (`basic`) +
+    `empty_well` (`--background_well`) precomputed per channel in `main()` via
+    `build_flatfield_models` (no jax/basicpy).
+  - ✅ Debris removal (`--qc_remove_debris` + min/max area + min-solidity) via `filter_debris`,
+    reusing §C regionprops.
+  - ✅ `qc_options` block in the fresh `pipeline_info` `info` dict (read defaults to `{}`).
+  - ✅ Analyze "Quality Control" section + `_collect_run_options` + `build_pipeline_args` plumbing.
+- **Commits (landed):** `feat(pipeline): flat-field correction + debris removal + qc_options` ·
+  `feat(analyze): Quality Control section + QC arg plumbing`
+- **BW-compat gate:** ✅ QC off by default (`none` / unchecked); old datasets unaffected;
+  `qc_options` written fresh per run (user analysis blocks like `cell_gating` untouched).
+- **Verification:** ✅ `tests/test_qc_tooling.py` (8): flat-field estimators/application, debris
+  bounds + solidity, `build_flatfield_models` over synthetic TIFFs, Analyze→CLI mapping; full-app
+  smoke (`test_app_smoke`/`interaction`/`characterization`) builds the QC section. Headless
+  PySide6. **Visual + a real `--flatfield basic` end-to-end run are the dev-env pass.**
 
 ### ☐ PR4 — Label-free segmentation + phase ingestion (§A)
 - **Branch:** `claude/feat-labelfree-phase`  **Base:** `claude/feat-foundation-deps-core`

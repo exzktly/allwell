@@ -4,12 +4,7 @@ Living status tracker for the four tentpole features. Design spec:
 [`FEATURE_PLAN_segmentation_qc_shape_tracking.md`](FEATURE_PLAN_segmentation_qc_shape_tracking.md)
 (§A label-free seg · §B QC · §C shape features · §D tracking).
 
-**Current status:** ✅ PR1 (foundation) · ✅ PR2 (shape features) · ✅ PR3 (QC tooling) — all
-complete & verified headless. ✅ QC editor — non-destructive QC layer edited in the Segmentation
-tab (composes with manual curation; legacy `cell_area_threshold` retired). ✅ PR4 (label-free seg
-+ phase ingestion) — cellpose + classical segmenters, `Role.PHASE`, per-channel Phase checkbox,
-`--phase_token`/`--cellpose_diameter` (`test_labelfree_phase.py` 5/5; full-app smoke green).
-Stack is now linear: PR1→PR2→PR3→QC→PR4→PR5. **Next: PR5 (tracking chain).**
+**Current status:** ✅ PR1 · ✅ PR2 (shape) · ✅ PR3 (QC tooling) · ✅ QC editor (non-destructive QC layer in the Segmentation tab; legacy `cell_area_threshold` retired) · ✅ PR4 (label-free seg + phase ingestion) — all complete & verified headless. Stack is linear: PR1→PR2→PR3→QC→PR4→PR5. ◐ PR5 (tracking chain) in progress: PR5a core (greedy + guarded btrack engines + data model + orchestrator + `tracks.json` persistence; `test_tracking_core.py` 8/8). **Next: PR5b–e (worker/`--track`, Review Tracking tab, edit, analytics, trackastra).**
 
 ## Confirmed decisions
 - **Dependencies:** all new packages in **core** requirements, pinned to one mutually
@@ -227,24 +222,32 @@ main
   `--segmentation_method cellpose` run on brightfield images is the dev-env pass** (cellpose's
   torch model isn't exercised in the sandbox).
 
-### ☐ PR5a — Tracking core (§D)
+### ◐ PR5a — Tracking core (§D)
 - **Branch:** `claude/feat-tracking-core`  **Base:** `claude/feat-shape-features`
   **Depends on:** PR2 (centroids); PR1 deps (btrack) via PR2.
 - **Tasks:**
-  - ☐ Data model: additive `track_id` / `track_parent_id` / `tree_id` columns; versioned,
-    `<well>_out.zip`-fingerprinted `tracks.json`.
-  - ☐ Engine adapter interface (`run(frames, params) -> TrackResult`); **btrack** engine in
-    `features/tracking/engines/` (guarded imports, Qt-free). (laptrack dropped — incompatible
-    with the numpy-1.24/pandas-2.2 core; btrack covers the lightweight/lineage role.)
-  - ☐ Post-pass worker (`features/tracking/worker.py`) copying the smFISH `_WorkerBridge`
-    pattern (`CellKey` keys, `atomic_write_text`, cache-drop → redraw → refresh).
-  - ☐ `persistence/tracking.py` (load/save, registered with `PersistenceRegistry`).
-  - ☐ Optional headless `--track` post-pass in `process_microscopy.main()`.
-- **Commits:** `feat(tracking): track data model + tracks.json sidecar` ·
-  `feat(tracking): btrack engine adapter` · `feat(tracking): post-pass worker + persistence`
-- **BW-compat gate:** no `tracks.json`/`track_id` on old datasets ⇒ no-op; grouping inactive.
-- **Verification:** run tracking on a timelapse; confirm `track_id` columns + `tracks.json`;
-  open legacy dataset (no tracks); `pytest tests/`.
+  - ✅ Data model (`model.py`): additive `track_id`/`track_parent_id`/`tree_id` columns;
+    DataFrame⇄frames; versioned `tracks.json` payload (nodes/tracks/lineage/trees).
+  - ✅ Engine adapter interface (`run(frames, params) -> TrackResult`) in
+    `features/tracking/engines/` — **greedy** (dependency-free LAP, the lightweight default
+    replacing dropped laptrack) + **btrack** (guarded, Bayesian/lineage); registry with
+    availability + clear errors.
+  - ✅ Qt-free orchestrator (`orchestrator.py`): per-FOV tracking with track-id offsets;
+    `track_well()` → `(tracked_df, tracks.json payload)`.
+  - ✅ `persistence/tracking.py` (Qt-free `save_tracks`/`load_tracks` with `<well>_out.zip`
+    fingerprint staleness; app wrappers; registered with `PersistenceRegistry`).
+  - ☐ Post-pass **GUI worker** (`features/tracking/worker.py`, smFISH `_WorkerBridge` pattern)
+    — deferred to PR5b (it calls `orchestrator.track_well`; needs the GUI bridge it triggers).
+  - ☐ Optional headless `--track` post-pass in `process_microscopy.main()` (calls the same
+    Qt-free `orchestrator`) — deferred/optional.
+- **Commits (landed):** `feat(tracking): track data model + engine adapters` ·
+  `feat(tracking): tracks.json persistence + registry registration`
+- **BW-compat gate:** ✅ no `tracks.json`/`track_id` on old datasets ⇒ `load_tracks` → `{}`
+  (no crash); the three columns are additive/optional; grouping inactive.
+- **Verification:** ✅ `tests/test_tracking_core.py` (8): greedy linking (+ distance gate +
+  gap closing), orchestrator FOV-offset, `track_well` columns/payload, persistence roundtrip +
+  staleness, engine registry + btrack guard; app-construction + bw-compat green. Headless.
+  **A real btrack/timelapse run is the dev-env pass (btrack's torch-free model not in sandbox).**
 
 ### ☐ PR5b — Tracking UI: tab + viewer
 - **Branch:** `claude/feat-tracking-ui`  **Base:** `claude/feat-tracking-core`  **Depends on:** PR5a.

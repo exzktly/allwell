@@ -1044,6 +1044,173 @@ def compute_shape_features(
     return out
 
 
+# ── Quality control: flat-field correction + debris removal ──────────────────
+
+FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
+_FLATFIELD_SIGMA = 50.0  # Gaussian smoothing scale (px) for illumination estimation
+
+
+def _normalize_flatfield(field: np.ndarray) -> "np.ndarray | None":
+    """Normalize an illumination field to mean 1.0 so dividing by it preserves
+    overall image scale. Returns None if the field is degenerate."""
+    field = np.asarray(field, dtype=np.float32)
+    m = float(np.mean(field)) if field.size else 0.0
+    if not np.isfinite(m) or m <= 0.0:
+        return None
+    out = field / m
+    out[~np.isfinite(out)] = 1.0
+    out[out <= 0.0] = 1.0
+    return out.astype(np.float32)
+
+
+def estimate_gaussian_flatfield(image: np.ndarray, sigma: float = _FLATFIELD_SIGMA) -> "np.ndarray | None":
+    """Estimate a smooth illumination field by heavily Gaussian-blurring *image*.
+
+    Dividing the image by the returned mean-1 field flattens slow illumination
+    gradients (vignetting / uneven excitation) while preserving cell-scale
+    structure. Self-referential: computed per image, no reference well needed.
+    """
+    from scipy.ndimage import gaussian_filter
+    blurred = gaussian_filter(np.asarray(image, dtype=np.float32), sigma=float(sigma))
+    return _normalize_flatfield(blurred)
+
+
+def estimate_basic_flatfield(stack, sigma: float = _FLATFIELD_SIGMA) -> "np.ndarray | None":
+    """Pure-numpy BaSiC-style flat-field from a stack of single-channel images.
+
+    Estimates the multiplicative illumination profile shared across the stack:
+    the per-pixel median (robust to cells/debris that move between fields),
+    smoothed and normalized to mean 1. This approximates BaSiC's flat-field
+    without its L1/low-rank optimisation — and without ``jax``/``basicpy``.
+    Returns None when the stack is empty or shapes are inconsistent.
+    """
+    from scipy.ndimage import gaussian_filter
+    arrs = [np.asarray(a, dtype=np.float32) for a in stack]
+    arrs = [a for a in arrs if a.ndim == 2]
+    if not arrs:
+        return None
+    shp = arrs[0].shape
+    arrs = [a for a in arrs if a.shape == shp]
+    if not arrs:
+        return None
+    median = np.median(np.stack(arrs, axis=0), axis=0)
+    return _normalize_flatfield(gaussian_filter(median, sigma=float(sigma)))
+
+
+def apply_flatfield(image: np.ndarray, flatfield: "np.ndarray | None") -> np.ndarray:
+    """Divide *image* by a mean-1 *flatfield* (no-op when None or shape-mismatched).
+
+    Returns float32; the mean-1 normalization keeps intensity magnitudes
+    comparable to the uncorrected image so downstream gating thresholds still
+    make sense.
+    """
+    if flatfield is None:
+        return image
+    img = np.asarray(image, dtype=np.float32)
+    ff = np.asarray(flatfield, dtype=np.float32)
+    if ff.shape != img.shape:
+        return image
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = img / ff
+    out[~np.isfinite(out)] = 0.0
+    return out
+
+
+def filter_debris(
+    labels: np.ndarray,
+    *,
+    min_area: "float | None" = None,
+    max_area: "float | None" = None,
+    min_solidity: "float | None" = None,
+) -> "tuple[np.ndarray, int]":
+    """Zero out label regions outside the size / solidity bounds (debris, merged
+    blobs, fragments). Reuses the §C ``regionprops`` pass. Returns
+    ``(cleaned_labels, n_removed)``; a no-op (returns the input) when nothing
+    matches or no bounds are given.
+    """
+    if labels is None or not np.any(labels):
+        return labels, 0
+    if min_area is None and max_area is None and min_solidity is None:
+        return labels, 0
+    from skimage.measure import regionprops_table
+    props = ["label", "area"]
+    if min_solidity is not None:
+        props.append("solidity")
+    table = regionprops_table(labels, properties=tuple(props))
+    remove = np.zeros(len(table["label"]), dtype=bool)
+    if min_area is not None:
+        remove |= table["area"] < float(min_area)
+    if max_area is not None:
+        remove |= table["area"] > float(max_area)
+    if min_solidity is not None:
+        remove |= table["solidity"] < float(min_solidity)
+    bad_ids = [int(lbl) for lbl, rm in zip(table["label"], remove) if rm]
+    if not bad_ids:
+        return labels, 0
+    cleaned = labels.copy()
+    cleaned[np.isin(labels, bad_ids)] = 0
+    return cleaned, len(bad_ids)
+
+
+def build_flatfield_models(
+    input_dir: Path,
+    *,
+    tokens: "list[str]",
+    schema: "list[str] | None",
+    sep: str,
+    mode: str,
+    background_well: str = "",
+    max_samples: int = 30,
+) -> "dict[str, np.ndarray]":
+    """Precompute per-channel flat-field models for the ``basic`` / ``empty_well`` modes.
+
+    Globs the input tree for TIFFs, groups them by channel token (parsed from
+    the filename schema), evenly samples up to *max_samples* per channel, and
+    estimates one BaSiC-style field per token via :func:`estimate_basic_flatfield`.
+    For ``empty_well`` only files belonging to *background_well* are used.
+    Returns ``{token_lower: flatfield}``; channels with no usable images are
+    omitted (so :func:`apply_flatfield` no-ops them). Operates on TIFFs present
+    on disk — zip-mode wells (still compressed) yield no models.
+    """
+    if mode not in ("basic", "empty_well"):
+        return {}
+    fields = list(schema or [])
+    chan_idx = fields.index("channel") if "channel" in fields else -1
+    well_idx = fields.index("well") if "well" in fields else -1
+    if chan_idx < 0:
+        return {}
+    want = {str(t).strip().lower() for t in (tokens or [])}
+    bg = str(background_well or "").strip().lower()
+    if mode == "empty_well" and (well_idx < 0 or not bg):
+        return {}
+    by_token: "dict[str, list[Path]]" = {}
+    for path in sorted(input_dir.rglob("*.tif*")):
+        parts = path.stem.split(sep)
+        if chan_idx >= len(parts):
+            continue
+        tok = parts[chan_idx].strip().lower()
+        if want and tok not in want:
+            continue
+        if mode == "empty_well":
+            if well_idx >= len(parts) or parts[well_idx].strip().lower() != bg:
+                continue
+        by_token.setdefault(tok, []).append(path)
+    models: "dict[str, np.ndarray]" = {}
+    for tok, paths in by_token.items():
+        step = max(1, len(paths) // max_samples)
+        sample = paths[::step][:max_samples]
+        imgs = []
+        for p in sample:
+            try:
+                imgs.append(load_2d_gray(p))
+            except Exception:
+                continue
+        field = estimate_basic_flatfield(imgs)
+        if field is not None:
+            models[tok] = field
+    return models
+
+
 def save_overlay(nir_raw: np.ndarray, labels: np.ndarray, out_path: Path) -> None:
     """Save an 8-bit RGB PNG with nucleus boundaries drawn in red."""
     mn, mx = nir_raw.min(), nir_raw.max()
@@ -1457,6 +1624,12 @@ def process_image_group(
     cytoplasm_token: str = "",
     min_nucleus_area_px: int = 50,
     shape_features: "list[str] | None" = None,
+    flatfield_mode: str = "none",
+    flatfield_models: "dict | None" = None,
+    qc_remove_debris: bool = False,
+    qc_min_area: "float | None" = None,
+    qc_max_area: "float | None" = None,
+    qc_min_solidity: "float | None" = None,
 ) -> list[dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
@@ -1492,6 +1665,21 @@ def process_image_group(
             )
         fluor_raws.append(img)
         log.info("  load fluor:  %.1f s  %s", time.perf_counter() - _t, fp.name)
+
+    # QC flat-field correction (before top-hat so the background subtraction
+    # operates on evenly-illuminated images). gaussian = self-estimated per
+    # image; basic / empty_well = a per-channel field precomputed once in main()
+    # and passed via flatfield_models (keyed by lower-cased channel token).
+    if flatfield_mode and flatfield_mode != "none":
+        def _flatfield_for(token: str, img: np.ndarray):
+            if flatfield_mode == "gaussian":
+                return estimate_gaussian_flatfield(img)
+            return (flatfield_models or {}).get(str(token).lower())
+        _t = time.perf_counter()
+        nir_raw = apply_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
+        fluor_raws = [apply_flatfield(f, _flatfield_for(tok, f))
+                      for f, tok in zip(fluor_raws, fluor_tokens)]
+        log.info("  flatfield:   %.1f s  (mode=%s)", time.perf_counter() - _t, flatfield_mode)
 
     # Top-hat on nuclear channel.
     _t = time.perf_counter()
@@ -1549,6 +1737,17 @@ def process_image_group(
         labels = _segment_stardist_nuclei(nir_corr)
         log.info("  stardist:    %.1f s  (%d nuclei detected)",
                  time.perf_counter() - _t, len(np.unique(labels)) - 1)
+
+    # QC debris removal: drop label regions outside the size/solidity bounds
+    # (debris, fragments, merged blobs) before measurement. Reuses the §C
+    # regionprops machinery.
+    if qc_remove_debris:
+        labels, _n_debris = filter_debris(
+            labels, min_area=qc_min_area, max_area=qc_max_area,
+            min_solidity=qc_min_solidity,
+        )
+        if _n_debris:
+            log.info("  debris:      removed %d region(s)", _n_debris)
 
     # Save QC images.
     # Keep schema tokens in output stems so output names stay harmonized with
@@ -3384,6 +3583,7 @@ def write_pipeline_info(
     cytoplasm_token: str,
     min_nucleus_area_px: int,
     shape_features: "list[str] | None" = None,
+    qc_options: "dict | None" = None,
     execution_options: "dict | None" = None,
 ) -> Path:
     """Serialize the run metadata sidecar to ``<output_dir>/pipeline_info.json``."""
@@ -3408,6 +3608,7 @@ def write_pipeline_info(
         ),
         "smfish_tokens": list(smfish_tokens or []),
         "shape_features": [str(s).strip().lower() for s in (shape_features or []) if str(s).strip()],
+        "qc_options": dict(qc_options or {}),
         "segmentation_method": segmentation_method,
         "cytoplasm_token": cytoplasm_token,
         "min_nucleus_area_px": int(min_nucleus_area_px),
@@ -3540,6 +3741,25 @@ def build_parser() -> argparse.ArgumentParser:
                         "(e.g. eccentricity solidity perimeter major_axis_length). "
                         "Cell centroids (shape_centroid_row/col) are always emitted.")
 
+    # ── Quality control ──────────────────────────────────────────────────────
+    p.add_argument("--flatfield", choices=FLATFIELD_MODES, default="none",
+                   help="Flat-field illumination correction applied before top-hat. "
+                        "'gaussian' self-estimates a field per image; 'basic' estimates "
+                        "one field per channel from a sample of the dataset (pure-numpy "
+                        "BaSiC); 'empty_well' uses --background_well as the reference.")
+    p.add_argument("--background_well", default="",
+                   help="Well label of an empty/background well used as the flat-field "
+                        "reference when --flatfield=empty_well.")
+    p.add_argument("--qc_remove_debris", action="store_true",
+                   help="Remove segmented regions whose size/solidity fall outside the "
+                        "QC bounds below (debris, fragments, merged blobs).")
+    p.add_argument("--qc_min_area", type=float, default=0.0,
+                   help="Debris removal: minimum region area in px (0 = no lower bound).")
+    p.add_argument("--qc_max_area", type=float, default=0.0,
+                   help="Debris removal: maximum region area in px (0 = no upper bound).")
+    p.add_argument("--qc_min_solidity", type=float, default=0.0,
+                   help="Debris removal: minimum region solidity 0-1 (0 = no bound).")
+
     p.add_argument("--no_save_tophat",   action="store_true",
                    help="Do not save top-hat/smFISH intermediate TIFFs")
     p.add_argument(
@@ -3666,6 +3886,14 @@ def main() -> None:
             cytoplasm_token=args.cytoplasm_token or "",
             min_nucleus_area_px=args.min_nucleus_area_px,
             shape_features=list(args.shape_features or []),
+            qc_options={
+                "flatfield": args.flatfield,
+                "background_well": args.background_well or "",
+                "remove_debris": bool(args.qc_remove_debris),
+                "min_area": float(args.qc_min_area or 0.0),
+                "max_area": float(args.qc_max_area or 0.0),
+                "min_solidity": float(args.qc_min_solidity or 0.0),
+            },
             execution_options=vars(args),
         )
         log.info("Wrote sidecar : %s", info_path)
@@ -3787,12 +4015,34 @@ def main() -> None:
         cytoplasm_token=args.cytoplasm_token,
         min_nucleus_area_px=args.min_nucleus_area_px,
         shape_features=list(args.shape_features or []),
+        flatfield_mode=args.flatfield,
+        flatfield_models={},
+        qc_remove_debris=args.qc_remove_debris,
+        qc_min_area=(args.qc_min_area or None),
+        qc_max_area=(args.qc_max_area or None),
+        qc_min_solidity=(args.qc_min_solidity or None),
     )
 
     # If the selected input is an "in" directory, normalise any loose TIF/TIFF
     # files into per-well folders before selecting processing mode.
     if input_dir.name.lower() == "in":
         organize_loose_tifs_into_well_folders(input_dir, schema=schema, sep=sep)
+
+    # Precompute per-channel flat-field models once (basic / empty_well). The
+    # gaussian mode needs no precompute (estimated per image in the worker), and
+    # 'none' is a no-op. Done after the loose-TIF organize so the files are on
+    # disk under input_dir.
+    if args.flatfield in ("basic", "empty_well"):
+        shared_kwargs["flatfield_models"] = build_flatfield_models(
+            input_dir,
+            tokens=fluor_tokens_for_quant,
+            schema=schema,
+            sep=sep,
+            mode=args.flatfield,
+            background_well=args.background_well,
+        )
+        log.info("Flat-field (%s): built field(s) for channel(s): %s",
+                 args.flatfield, sorted(shared_kwargs["flatfield_models"]) or "(none found)")
 
     # ── Decide mode: zip, folder, or flat ───────────────────────────────────
     well_zips    = find_well_zips(input_dir)

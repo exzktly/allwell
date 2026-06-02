@@ -779,6 +779,19 @@ Output dir
 └── (transient tmp_<well>/ directories deleted on success)
 ```
 
+**Per-cell shape features.** `compute_shape_features(labels, selected)` runs one
+`skimage.regionprops_table` pass per FOV and merges `shape_<feature>` columns
+(area/eccentricity/solidity/perimeter/…, plus the **always-on**
+`shape_centroid_row/col` that cell tracking links across timepoints) into each
+cell record; the selection comes from `--shape_features` and is recorded in
+`pipeline_info.json`. The feature catalog lives in the Qt-free repo-root
+`shape_features_core.py` so the pipeline (emit) and the GUI (detect/label) can't
+drift. On the Review side `data_loading.detect_shape_features` finds the columns
+and the channel dropdown surfaces them as **sectioned virtual channels** (a
+"Shape Features" group via `ui_helpers.set_combo_values_sectioned`), with the
+metric combo collapsed and all-cells (`threshold=-1`) aggregation — they are
+channel-independent, so they bypass the per-channel intensity gate.
+
 ### 6.3 `all_well_launcher.py`
 
 PyInstaller entry point. Two responsibilities:

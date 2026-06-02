@@ -41,6 +41,7 @@ def track_dataframe(
     fov_col: str = "fov",
     tp_col: str = "timepoint",
     nid_col: str = "nucleus_id",
+    image_loader=None,
 ) -> "Tuple[pd.DataFrame, List[Tuple[str, List[FrameDetections], TrackResult]]]":
     """Track one well's DataFrame in place; return ``(df, groups)``.
 
@@ -65,7 +66,9 @@ def track_dataframe(
             sub = df[df[fov_col].astype(str) == fov]
         else:
             sub = df
-        frames, tp_to_frame = build_frames_from_df(sub, tp_col=tp_col, nid_col=nid_col)
+        frame_loader = (lambda tp, _f=fov: image_loader(_f, tp)) if image_loader else None
+        frames, tp_to_frame = build_frames_from_df(
+            sub, tp_col=tp_col, nid_col=nid_col, frame_image_loader=frame_loader)
         result = run_tracking(engine, frames, params)
         result = _offset_result(result, offset)
         assigned = assign_track_columns(sub.copy(), result, tp_to_frame,
@@ -86,11 +89,13 @@ def track_well(
     engine: str = DEFAULT_ENGINE,
     params: Optional[EngineParams] = None,
     fingerprints: "dict | None" = None,
+    image_loader=None,
     **cols,
 ) -> "Tuple[pd.DataFrame, dict]":
     """Track one well and return ``(tracked_df, tracks_json_payload)``."""
     params = params or EngineParams()
-    df, groups = track_dataframe(df, engine=engine, params=params, **cols)
+    df, groups = track_dataframe(df, engine=engine, params=params,
+                                 image_loader=image_loader, **cols)
     payload = tracks_json_payload(
         well=well, groups=groups, engine=engine,
         params={"max_distance": params.max_distance,

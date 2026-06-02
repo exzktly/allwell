@@ -4354,7 +4354,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--track", action="store_true",
                    help="After processing, link cells across timepoints and write "
                         "track_id/track_parent_id/tree_id columns + a tracks.json sidecar.")
-    p.add_argument("--track_engine", default="greedy", choices=("greedy", "btrack"),
+    p.add_argument("--track_engine", default="greedy", choices=("greedy", "btrack", "trackastra"),
                    help="Tracking engine for --track (greedy = dependency-free default).")
     p.add_argument("--track_max_distance", type=float, default=30.0,
                    help="Max frame-to-frame linking distance in px (--track).")

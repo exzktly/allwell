@@ -655,7 +655,7 @@ class AnalyzeTab(QWidget):
 
         r = self._row(sec, "Engine")
         self._track_engine_cb = QComboBox(r)
-        self._track_engine_cb.addItems(["greedy", "btrack"])
+        self._track_engine_cb.addItems(["greedy", "btrack", "trackastra"])
         r.layout().addWidget(self._track_engine_cb)
         r.layout().addStretch(1)
 

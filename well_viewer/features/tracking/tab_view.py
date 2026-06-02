@@ -196,6 +196,17 @@ def _build_setup(app, parent: QWidget) -> None:
     app._tracking_division_cb = QCheckBox("Allow division / lineage branching", parent)
     lay.addWidget(app._tracking_division_cb)
 
+    # trackastra linking mode (ignored by the centroid engines). 'ilp' needs motile.
+    lr = _row("Linking mode (trackastra)")
+    app._tracking_link_mode_cb = QComboBox(parent)
+    from well_viewer.features.tracking.engines.trackastra_engine import LINKING_MODES, ilp_available
+    for m in LINKING_MODES:
+        app._tracking_link_mode_cb.addItem(m + ("" if m != "ilp" or ilp_available() else " (needs motile)"),
+                                           userData=m)
+    app._tracking_link_mode_cb.setCurrentIndex(1)  # "greedy"
+    lr.addWidget(app._tracking_link_mode_cb)
+    lr.addStretch(1)
+
     btns = QHBoxLayout()
     app._tracking_run_btn = QPushButton("Run Tracking", parent)
     app._tracking_run_btn.clicked.connect(lambda: _run_tracking(app))
@@ -234,10 +245,13 @@ def _params_from_ui(app) -> EngineParams:
         except (TypeError, ValueError):
             return default
 
+    mode_cb = getattr(app, "_tracking_link_mode_cb", None)
+    extra = {"linking_mode": mode_cb.currentData()} if mode_cb is not None else {}
     return EngineParams(
         max_distance=_f(app._tracking_max_dist_edit, 30.0),
         max_gap_frames=_i(app._tracking_max_gap_edit, 1),
         allow_division=app._tracking_division_cb.isChecked(),
+        extra=extra,
     )
 
 

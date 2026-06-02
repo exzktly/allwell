@@ -22,7 +22,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTabBar, QVBoxLayout, QWidget,
 )
 
@@ -34,7 +34,7 @@ from well_viewer.features.tracking.worker import track_wells_async
 
 _logger = logging.getLogger("well_viewer")
 
-_SUBTABS = ("Setup & Run", "Track Viewer", "Lineage", "Editor", "Pruning")
+_SUBTABS = ("Setup & Run", "Track Viewer", "Lineage", "Editor", "Pruning", "Analytics")
 
 
 class _WorkerBridge(QObject):
@@ -109,6 +109,11 @@ def build_tracking_tab(app, parent: QWidget) -> None:
     _build_pruning(app, pruning_page)
     stack.addPage("Pruning", pruning_page)
 
+    analytics_page = QWidget()
+    QVBoxLayout(analytics_page).setContentsMargins(0, 0, 0, 0)
+    _build_analytics(app, analytics_page)
+    stack.addPage("Analytics", analytics_page)
+
     def _on_bar(idx: int = 0) -> None:
         target = bar.tabText(idx)
         if target:
@@ -131,6 +136,8 @@ def build_tracking_tab(app, parent: QWidget) -> None:
             _refresh_editor(app)
         elif name == "Pruning":
             _refresh_pruning(app)
+        elif name == "Analytics":
+            _refresh_analytics(app)
     stack.currentChanged.connect(_on_stack)
 
 
@@ -421,6 +428,7 @@ def _refresh_after_edit(app) -> None:
     _refresh_lineage(app)
     _refresh_editor(app)
     _refresh_pruning(app)
+    _refresh_analytics(app)
 
 
 def _persist_well(app, well: str, df) -> None:
@@ -726,6 +734,111 @@ def _refresh_lineage(app) -> None:
     if summary is not None:
         summary.setText(f"{well}: {len(ids)} track(s), {n_div} division(s).")
     canvas.draw_idle()
+
+
+# ── Analytics sub-tab ────────────────────────────────────────────────────────
+
+def _build_analytics(app, parent: QWidget) -> None:
+    lay = parent.layout() or QVBoxLayout(parent)
+    lay.setContentsMargins(0, 0, 0, 0)
+
+    top = QHBoxLayout()
+    top.setContentsMargins(12, 6, 12, 6)
+    app._tracking_analytics_summary = QLabel("No tracks yet.", parent)
+    app._tracking_analytics_summary.setObjectName("Muted")
+    top.addWidget(app._tracking_analytics_summary)
+    top.addStretch(1)
+    rb = QPushButton("Refresh", parent)
+    rb.clicked.connect(lambda: _refresh_analytics(app))
+    top.addWidget(rb)
+    lay.addLayout(top)
+
+    fig = app._tracking_Figure(figsize=(5, 4))
+    app._tracking_analytics_fig = fig
+    app._tracking_analytics_ax = fig.add_subplot(111)
+    app._tracking_analytics_canvas = app._tracking_FigureCanvas(fig)
+    lay.addWidget(app._tracking_analytics_canvas, 1)
+
+    exp = QHBoxLayout()
+    exp.setContentsMargins(12, 6, 12, 6)
+    exp.addWidget(QLabel("Export:", parent))
+    for label, kind in (("Motility CSV", "motility"), ("CTC man_track", "ctc"),
+                        ("Lineage JSON", "lineage")):
+        b = QPushButton(label, parent)
+        b.clicked.connect(lambda _=False, k=kind: _export(app, k))
+        exp.addWidget(b)
+    exp.addStretch(1)
+    lay.addLayout(exp)
+
+
+def _refresh_analytics(app) -> None:
+    ax = getattr(app, "_tracking_analytics_ax", None)
+    canvas = getattr(app, "_tracking_analytics_canvas", None)
+    summary = getattr(app, "_tracking_analytics_summary", None)
+    if ax is None or canvas is None:
+        return
+    ax.clear()
+    well = _active_well(app)
+    df = None
+    if well is not None:
+        try:
+            df = app._get_rows(well)
+        except Exception:
+            df = None
+    from well_viewer.features.tracking.motility import compute_track_motility
+    m = compute_track_motility(df) if df is not None else None
+    if m is None or m.empty:
+        ax.text(0.5, 0.5, "No tracks for this well.", ha="center", va="center",
+                transform=ax.transAxes, color="#94A3B8")
+        ax.set_axis_off()
+        if summary is not None:
+            summary.setText("No tracks yet.")
+        canvas.draw_idle()
+        return
+    ax.hist(m["directionality"].to_numpy(), bins=10, range=(0, 1),
+            color="#3B82F6", alpha=0.85)
+    ax.set_xlabel("directionality (net / total)")
+    ax.set_ylabel("tracks")
+    ax.set_title(f"{well} — {len(m)} track(s)")
+    if summary is not None:
+        summary.setText(
+            f"{well}: {len(m)} track(s) · mean speed {m['mean_speed'].mean():.2f} px/h · "
+            f"mean directionality {m['directionality'].mean():.2f}")
+    canvas.draw_idle()
+
+
+def _export(app, kind: str) -> None:
+    well = _active_well(app)
+    if well is None:
+        return
+    try:
+        df = app._get_rows(well)
+    except Exception:
+        df = None
+    if df is None or df.empty:
+        return
+    from well_viewer.features.tracking import export as _exp
+    defaults = {"motility": (f"{well}_motility.csv", "CSV (*.csv)"),
+                "ctc": (f"{well}_man_track.txt", "Text (*.txt)"),
+                "lineage": (f"{well}_lineage.json", "JSON (*.json)")}
+    fname, filt = defaults[kind]
+    path, _ = QFileDialog.getSaveFileName(
+        app._tracking_frame, f"Export {kind}", fname, filt)
+    if not path:
+        return
+    try:
+        if kind == "motility":
+            _exp.export_motility_csv(df, path)
+        elif kind == "ctc":
+            _exp.export_ctc_man_track(df, path)
+        else:
+            _exp.export_lineage_json(df, path, well=well)
+    except Exception:
+        _logger.exception("Tracking export (%s) failed", kind)
+        return
+    summary = getattr(app, "_tracking_analytics_summary", None)
+    if summary is not None:
+        summary.setText(f"Exported {kind} → {Path(path).name}")
 
 
 # ── Tab-switch hook ──────────────────────────────────────────────────────────

@@ -89,3 +89,28 @@ def test_tracking_subtabs(viewer_app, monkeypatch):
     app._tracking_prune_min_disp.setText("0")
     tab_view._prune(app, apply_now=False)
     assert "Would drop" in app._tracking_prune_status.text()
+
+
+def test_tracking_analytics_subtab(viewer_app, monkeypatch, tmp_path):
+    app = _build_tab(viewer_app)
+    from well_viewer.features.tracking import tab_view
+    df = pd.DataFrame({
+        "well": ["A01"] * 4, "fov": ["F001"] * 4,
+        "timepoint": ["0", "1", "2", "3"], "nucleus_id": [1, 1, 1, 1],
+        "shape_centroid_row": [10, 12, 14, 16], "shape_centroid_col": [10, 10, 10, 10],
+        "track_id": [1, 1, 1, 1], "track_parent_id": [-1] * 4, "tree_id": [1] * 4,
+    })
+    monkeypatch.setattr(tab_view, "_active_well", lambda _a: "A01")
+    monkeypatch.setattr(app, "_get_rows", lambda w: df, raising=False)
+
+    tab_view._refresh_analytics(app)
+    assert "track(s)" in app._tracking_analytics_summary.text()
+    assert "directionality" in app._tracking_analytics_summary.text()
+
+    # Export via the handler (file dialog stubbed to a temp path).
+    out = tmp_path / "A01_motility.csv"
+    monkeypatch.setattr(tab_view.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(out), "CSV (*.csv)")))
+    tab_view._export(app, "motility")
+    assert out.exists()
+    assert "Exported" in app._tracking_analytics_summary.text()

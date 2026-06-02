@@ -4,11 +4,12 @@ Living status tracker for the four tentpole features. Design spec:
 [`FEATURE_PLAN_segmentation_qc_shape_tracking.md`](FEATURE_PLAN_segmentation_qc_shape_tracking.md)
 (§A label-free seg · §B QC · §C shape features · §D tracking).
 
-**Current status:** ◐ PR1 (foundation) — `todo.md` ✅ · dependency set **empirically resolved
-AND installed+imported together** in a clean venv ✅ (laptrack dropped; btrack+trackastra
-in-core) · `requirements-remote.txt` updated ✅ · `shape_features_core.py` added ✅ ·
-remaining: py3.10 + Metal-GPU + StarDist-determinism re-confirm on dev env; then
-`shape_features_core` wiring continues.
+**Current status:** ✅ PR1 (foundation) code-complete — deps empirically resolved + installed +
+import-coexistence verified (laptrack dropped; btrack+trackastra in-core); `requirements-remote.txt`,
+PyInstaller spec, `shape_features_core.py`, `read_pipeline_info` bw-compat defaults, and the
+`tests/test_backwards_compat.py` harness all landed. Remaining for PR1 = **dev-env-only**
+verification (py3.10 install, Metal GPU, StarDist determinism, `pytest`, held tifffile/imagecodecs
+pins). **Next: PR2 — shape features.**
 
 ## Confirmed decisions
 - **Dependencies:** all new packages in **core** requirements, pinned to one mutually
@@ -138,7 +139,8 @@ main
     parses; `shape_features_core` catalog invariants).
   - ☐ Real install + import + GPU verification on the py3.10 dev env (Part 1 remaining gate);
     run `pytest tests/test_backwards_compat.py` there (sandbox lacks pytest/Qt).
-  - ☐ Update PyInstaller spec `hiddenimports` (cellpose/torch/trackastra/btrack).
+  - ✅ Update PyInstaller spec `hiddenimports`/binaries via `collect_all` for
+    torch/torchvision/cellpose/btrack/trackastra/kornia/lightning (build-verify on dev env).
   - ☐ Stamp `schema_version` in `process_microscopy.write_pipeline_info` (deferred to PR2,
     bundled with the first feature that writes a new key).
 - **Commits:**

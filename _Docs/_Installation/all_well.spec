@@ -428,11 +428,30 @@ _icd_datas, _icd_binaries, _icd_hidden = collect_all("imagecodecs")
 datas         += _icd_datas
 hiddenimports += _icd_hidden
 
+# Label-free segmentation (cellpose) + cell tracking (btrack / trackastra).
+# torch / torchvision carry large compiled extensions; cellpose, btrack,
+# trackastra, kornia and lightning each have submodules and (trackastra) bundled
+# data (pretrained-model configs). collect_all grabs the Python shims, the
+# .so/.dylib binaries, and data files so the frozen app can segment and track
+# without a Python toolchain present. The macOS/Windows build wheels are
+# CPU/MPS (no CUDA), so the torch payload stays manageable.
+# NOTE: not yet exercised by a frozen build — verify on the dev env via
+# build_all_well.sh / build_executable.ps1 (prune unused torch backends if the
+# bundle grows too large). cellpose/trackastra download model weights at
+# runtime; those are not bundled.
+_ml_binaries = []
+for _pkg in ("torch", "torchvision", "cellpose", "btrack", "trackastra",
+             "kornia", "lightning", "pytorch_lightning", "torchmetrics"):
+    _ml_d, _ml_b, _ml_h = collect_all(_pkg)
+    datas         += _ml_d
+    _ml_binaries  += _ml_b
+    hiddenimports += _ml_h
+
 # Collect data files
 datas += collect_data_files("numba")
 datas += collect_data_files("skimage")
 
-_extra_binaries = _csn_binaries + _req_binaries + _icd_binaries
+_extra_binaries = _csn_binaries + _req_binaries + _icd_binaries + _ml_binaries
 
 a = Analysis(
     [str(_parent / "all_well_launcher.py")],

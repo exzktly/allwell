@@ -62,6 +62,18 @@ def build_pipeline_args(
     cytoplasm_token = (opts.get("cytoplasm_token") or "").strip()
     if segmentation_method == "stardist_seeded_watershed_cell" and cytoplasm_token:
         args += ["--cytoplasm_token", cytoplasm_token]
+    # Label-free methods segment the designated phase channel.
+    if segmentation_method in ("cellpose", "classical_threshold"):
+        phase_token = (opts.get("phase_token") or "").strip()
+        if phase_token:
+            args += ["--phase_token", phase_token]
+        if segmentation_method == "cellpose":
+            try:
+                diam = float(opts.get("cellpose_diameter", 0) or 0)
+            except (TypeError, ValueError):
+                diam = 0.0
+            if diam > 0:
+                args += ["--cellpose_diameter", str(diam)]
     try:
         args += ["--tophat_radius_nir", str(int(opts["tophat_radius_nir"]))]
     except (TypeError, ValueError, KeyError):

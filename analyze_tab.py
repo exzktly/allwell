@@ -130,7 +130,7 @@ class AnalyzeTab(QWidget):
         self._well_done  = 0
         self._zipper_done = 0
         self._on_pipeline_complete = on_pipeline_complete
-        self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QPushButton]] = []
+        self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QCheckBox, QPushButton]] = []
         self._schema_cbs: list[QComboBox] = []
 
         self._build_ui()
@@ -303,13 +303,17 @@ class AnalyzeTab(QWidget):
 
         seg_row = self._row(sec, "Segmentation")
         self._seg_method_cb = QComboBox(seg_row)
-        self._seg_method_cb.addItems(["stardist_nuclei", "stardist_seeded_watershed_cell"])
+        self._seg_method_cb.addItems([
+            "stardist_nuclei", "stardist_seeded_watershed_cell",
+            "cellpose", "classical_threshold",
+        ])
         self._seg_method_cb.setFixedWidth(170)
         seg_row.layout().addWidget(self._seg_method_cb)
         seg_row.layout().addStretch(1)
         self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())
 
         nuc_row = self._row(sec, "Nuclear (seg)")
+        self._nuclear_row_widget = nuc_row
         self._nuclear_token_edit = self._entry(nuc_row, "NIR")
         nuc_row.layout().addStretch(1)
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_schema_preview())
@@ -318,7 +322,8 @@ class AnalyzeTab(QWidget):
         fl_title = QLabel("Fluorescent channels", sec)
         fl_title.setContentsMargins(0, 6, 0, 2)
         sec.layout().addWidget(fl_title)
-        fl_hint = QLabel("Mark smFISH channels with the checkbox on each row.", sec)
+        fl_hint = QLabel("Mark smFISH channels, or one channel as Phase for "
+                         "label-free segmentation, with the checkboxes on each row.", sec)
         fl_hint.setObjectName("Muted")
         sec.layout().addWidget(fl_hint)
 
@@ -820,9 +825,29 @@ class AnalyzeTab(QWidget):
 
         smfish_cb = QCheckBox("smFISH", row)
         rl.addWidget(smfish_cb)
+
+        phase_cb = QCheckBox("Phase", row)
+        rl.addWidget(phase_cb)
         rl.addStretch(1)
 
-        self._fluor_rows.append((edit, smfish_cb, remove_btn))
+        self._fluor_rows.append((edit, smfish_cb, phase_cb, remove_btn))
+
+        # Phase is single across the experiment (mutually exclusive across rows)
+        # and cannot coexist with smFISH on the same channel.
+        def _on_phase_toggled(checked: bool, this_cb=phase_cb, this_sm=smfish_cb) -> None:
+            if checked:
+                this_sm.setChecked(False)
+                for _e, _s, _p, _b in self._fluor_rows:
+                    if _p is not this_cb:
+                        _p.setChecked(False)
+            self._refresh_segmentation_hints()
+
+        def _on_smfish_toggled(checked: bool, this_ph=phase_cb) -> None:
+            if checked:
+                this_ph.setChecked(False)
+
+        phase_cb.toggled.connect(_on_phase_toggled)
+        smfish_cb.toggled.connect(_on_smfish_toggled)
         remove_btn.clicked.connect(
             lambda _=False, r=row, b=remove_btn: self._fluor_remove_row(r, b)
         )
@@ -833,21 +858,28 @@ class AnalyzeTab(QWidget):
     def _fluor_remove_row(self, row: QWidget, remove_btn: QPushButton) -> None:
         if len(self._fluor_rows) <= 1:
             return
-        self._fluor_rows = [(e, s, b) for e, s, b in self._fluor_rows if b is not remove_btn]
+        self._fluor_rows = [(e, s, p, b) for e, s, p, b in self._fluor_rows if b is not remove_btn]
         row.deleteLater()
         self._fluor_refresh_remove_buttons()
         self._refresh_schema_preview()
 
     def _fluor_refresh_remove_buttons(self) -> None:
         only_one = len(self._fluor_rows) == 1
-        for _, _, btn in self._fluor_rows:
+        for _, _, _, btn in self._fluor_rows:
             btn.setEnabled(not only_one)
 
     def _fluor_tokens_list(self) -> list[str]:
-        return [e.text().strip() for e, _, _ in self._fluor_rows if e.text().strip()]
+        return [e.text().strip() for e, _, _, _ in self._fluor_rows if e.text().strip()]
 
     def _smfish_tokens_list(self) -> list[str]:
-        return [e.text().strip() for e, s, _ in self._fluor_rows if s.isChecked() and e.text().strip()]
+        return [e.text().strip() for e, s, _, _ in self._fluor_rows if s.isChecked() and e.text().strip()]
+
+    def _phase_token(self) -> str:
+        """The single channel token flagged as the phase/brightfield image (or '')."""
+        for e, _s, p, _b in self._fluor_rows:
+            if p.isChecked() and e.text().strip():
+                return e.text().strip()
+        return ""
 
     # ------------------------------------------------------------------
     # Segmentation hints
@@ -868,6 +900,11 @@ class AnalyzeTab(QWidget):
                     errors.append("Minimum nucleus area must be a positive integer.")
             except ValueError:
                 errors.append("Minimum nucleus area must be a positive integer.")
+        elif method in ("cellpose", "classical_threshold"):
+            if not self._phase_token():
+                errors.append(
+                    "Label-free segmentation requires exactly one channel marked "
+                    "'Phase' (the brightfield/phase image to segment).")
         return errors
 
     def _background_well_validation_error(self) -> Optional[str]:
@@ -903,17 +940,23 @@ class AnalyzeTab(QWidget):
             return
         method = self._seg_method_cb.currentText()
         watershed = method == "stardist_seeded_watershed_cell"
+        label_free = method in ("cellpose", "classical_threshold")
         self._cyto_row_widget.setVisible(watershed)
         self._area_row_widget.setVisible(watershed)
+        # Label-free methods segment the Phase channel, not a nuclear stain —
+        # the nuclear-token row is irrelevant there.
+        if hasattr(self, "_nuclear_row_widget"):
+            self._nuclear_row_widget.setVisible(not label_free)
         if watershed:
             errors = self._segmentation_validation_errors()
-            if errors:
-                self._segmentation_hint_lbl.setText("  ".join(errors))
-            else:
-                self._segmentation_hint_lbl.setText(
-                    "Watershed mode uses StarDist seeds + cytoplasm mask "
-                    "and also quantifies the cytoplasm channel."
-                )
+            self._segmentation_hint_lbl.setText("  ".join(errors) if errors else (
+                "Watershed mode uses StarDist seeds + cytoplasm mask "
+                "and also quantifies the cytoplasm channel."))
+        elif label_free:
+            errors = self._segmentation_validation_errors()
+            self._segmentation_hint_lbl.setText("  ".join(errors) if errors else (
+                "Label-free mode segments the channel marked 'Phase' "
+                "(no nuclear stain required)."))
         else:
             self._segmentation_hint_lbl.setText("")
 
@@ -1244,6 +1287,7 @@ class AnalyzeTab(QWidget):
             qc_min_area=_safe_qc_float(self._qc_min_area_edit.text()),
             qc_max_area=_safe_qc_float(self._qc_max_area_edit.text()),
             qc_min_solidity=_safe_qc_float(self._qc_min_solidity_edit.text()),
+            phase_token=self._phase_token(),
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=min_area,

@@ -286,9 +286,14 @@ main
     turning-angle + the Analytics sub-tab's directionality histogram + summary ("local plots").
   - ✅ Export (`export.py`): per-track motility CSV, CTC `man_track.txt`, lineage JSON — wired to
     the Analytics sub-tab's Export buttons (QFileDialog).
-  - ☐ `TrackGroup` (`domain/batch_models`) + `track_id` grouping branch in `collect_line_series`
-    / `well_aggregate_stats` (group the **main** line/bar plots by track) — **deferred**: deep
-    aggregation hot-path integration; the Analytics sub-tab already gives per-track analytics.
+  - ✅→**design change** `TrackGroup` + `track_id` grouping branch in `collect_line_series` /
+    `well_aggregate_stats` was **intentionally dropped**. The main plotting path is *well-pooled*
+    aggregation (`well_aggregate_stats`: one mean per well, SD across wells, fluor-gating,
+    rep-sets) — the wrong unit for per-cell time-series, so grafting `track_id` in would be a
+    foreign branch on a hot path. Instead, per-track plotting lives in a **separate "Track Plots"
+    sub-tab** (`track_plots.py` + the Tracking tab): multi-well via the well picker, one colour
+    per well, optional per-well average track, live on `selection_changed`. Additive — the main
+    plots are untouched.
 - **Commits (landed):** `feat(tracking): motility metrics + export writers` ·
   `feat(tracking): Analytics sub-tab — motility summary + export`
 - **BW-compat gate:** ✅ analytics/export operate only on tracked rows; empty on legacy datasets;

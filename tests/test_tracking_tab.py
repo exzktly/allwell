@@ -114,3 +114,43 @@ def test_tracking_analytics_subtab(viewer_app, monkeypatch, tmp_path):
     tab_view._export(app, "motility")
     assert out.exists()
     assert "Exported" in app._tracking_analytics_summary.text()
+
+
+def test_track_plots_subtab(viewer_app, monkeypatch):
+    app = _build_tab(viewer_app)
+    from well_viewer.features.tracking import tab_view
+
+    def _df(well, base):
+        rows = []
+        for tp, a, b in (("0", base, base + 50), ("24h", base + 10, base + 60)):
+            rows.append(dict(well=well, fov="F001", timepoint=tp, nucleus_id=1,
+                             shape_centroid_row=1, shape_centroid_col=1,
+                             gfp_mean_intensity=a, track_id=1, track_parent_id=-1, tree_id=1))
+            rows.append(dict(well=well, fov="F001", timepoint=tp, nucleus_id=2,
+                             shape_centroid_row=2, shape_centroid_col=2,
+                             gfp_mean_intensity=b, track_id=2, track_parent_id=-1, tree_id=2))
+        return pd.DataFrame(rows)
+
+    dfs = {"A01": _df("A01", 100), "A02": _df("A02", 300)}
+    monkeypatch.setattr(app, "_get_rows", lambda w: dfs[w], raising=False)
+    app._app_state.dataset.well_paths = {"A01": "a.csv", "A02": "b.csv"}
+    app._app_state.selection.selected_wells = {"A01", "A02"}
+
+    tab_view._refresh_track_plots(app)
+    # metric combo populated from the data; gfp metric available
+    metrics = [app._tracking_tp_metric_cb.itemText(i)
+               for i in range(app._tracking_tp_metric_cb.count())]
+    assert "gfp_mean_intensity" in metrics
+    # both wells plotted; two distinct legend colours (one per well) + averages
+    ax = app._tracking_tp_ax
+    labels = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert any("A01" in l for l in labels) and any("A02" in l for l in labels)
+    line_colors = {ln.get_color() for ln in ax.get_lines() if ln.get_xdata() is not None}
+    assert len(line_colors) >= 2          # at least one colour per well
+    assert "2 well(s)" in app._tracking_tp_summary.text()
+    assert "4 track(s)" in app._tracking_tp_summary.text()
+
+    # toggling the average off still plots (individual tracks only)
+    app._tracking_tp_avg_cb.setChecked(False)
+    tab_view._refresh_track_plots(app)
+    assert "individual tracks only" in app._tracking_tp_summary.text()

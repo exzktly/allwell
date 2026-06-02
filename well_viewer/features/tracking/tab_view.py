@@ -34,7 +34,7 @@ from well_viewer.features.tracking.worker import track_wells_async
 
 _logger = logging.getLogger("well_viewer")
 
-_SUBTABS = ("Setup & Run", "Track Viewer", "Lineage", "Editor", "Pruning", "Analytics")
+_SUBTABS = ("Setup & Run", "Track Viewer", "Track Plots", "Lineage", "Editor", "Pruning", "Analytics")
 
 
 class _WorkerBridge(QObject):
@@ -94,6 +94,11 @@ def build_tracking_tab(app, parent: QWidget) -> None:
     _build_viewer(app, viewer_page)
     stack.addPage("Track Viewer", viewer_page)
 
+    track_plots_page = QWidget()
+    QVBoxLayout(track_plots_page).setContentsMargins(0, 0, 0, 0)
+    _build_track_plots(app, track_plots_page)
+    stack.addPage("Track Plots", track_plots_page)
+
     lineage_page = QWidget()
     QVBoxLayout(lineage_page).setContentsMargins(0, 0, 0, 0)
     _build_lineage(app, lineage_page)
@@ -130,6 +135,8 @@ def build_tracking_tab(app, parent: QWidget) -> None:
                 bar.blockSignals(blocked)
         if name == "Track Viewer":
             _refresh_viewer(app)
+        elif name == "Track Plots":
+            _refresh_track_plots(app)
         elif name == "Lineage":
             _refresh_lineage(app)
         elif name == "Editor":
@@ -139,6 +146,15 @@ def build_tracking_tab(app, parent: QWidget) -> None:
         elif name == "Analytics":
             _refresh_analytics(app)
     stack.currentChanged.connect(_on_stack)
+
+    # Live update: the Track Plots view reads the well-plate selection, so refresh
+    # it whenever the selection changes while that sub-tab is showing.
+    bus = getattr(app, "_event_bus", None)
+    if bus is not None:
+        def _on_selection_changed(_state=None) -> None:
+            if stack.currentName() == "Track Plots":
+                _refresh_track_plots(app)
+        bus.selection_changed.connect(_on_selection_changed)
 
 
 # ── Setup & Run ──────────────────────────────────────────────────────────────
@@ -841,11 +857,159 @@ def _export(app, kind: str) -> None:
         summary.setText(f"Exported {kind} → {Path(path).name}")
 
 
+# ── Track Plots sub-tab ──────────────────────────────────────────────────────
+
+def _selected_wells(app) -> "list[str]":
+    sel = sorted(app._app_state.selection.selected_wells or [])
+    if sel:
+        return sel
+    paths = dict(getattr(app._app_state.dataset, "well_paths", {}) or {})
+    active = _active_well(app)
+    return [active] if active in paths else list(paths)[:1]
+
+
+def _build_track_plots(app, parent: QWidget) -> None:
+    lay = parent.layout() or QVBoxLayout(parent)
+    lay.setContentsMargins(0, 0, 0, 0)
+
+    top = QHBoxLayout()
+    top.setContentsMargins(12, 6, 12, 6)
+    top.addWidget(QLabel("Metric", parent))
+    app._tracking_tp_metric_cb = QComboBox(parent)
+    app._tracking_tp_metric_cb.setMinimumWidth(180)
+    app._tracking_tp_metric_cb.currentIndexChanged.connect(lambda _i: _refresh_track_plots(app))
+    top.addWidget(app._tracking_tp_metric_cb)
+    app._tracking_tp_avg_cb = QCheckBox("Show average track (per well)", parent)
+    app._tracking_tp_avg_cb.setChecked(True)
+    app._tracking_tp_avg_cb.toggled.connect(lambda _b: _refresh_track_plots(app))
+    top.addWidget(app._tracking_tp_avg_cb)
+    top.addStretch(1)
+    rb = QPushButton("Refresh", parent)
+    rb.clicked.connect(lambda: _refresh_track_plots(app))
+    top.addWidget(rb)
+    lay.addLayout(top)
+
+    fig = app._tracking_Figure(figsize=(6, 4))
+    app._tracking_tp_fig = fig
+    app._tracking_tp_ax = fig.add_subplot(111)
+    app._tracking_tp_canvas = app._tracking_FigureCanvas(fig)
+    lay.addWidget(app._tracking_tp_canvas, 1)
+
+    app._tracking_tp_summary = QLabel("Select wells on the left to plot tracks.", parent)
+    app._tracking_tp_summary.setObjectName("Muted")
+    app._tracking_tp_summary.setContentsMargins(12, 2, 12, 6)
+    lay.addWidget(app._tracking_tp_summary)
+
+
+def _populate_tp_metric_combo(app, wells) -> str:
+    """Fill the metric combo with the union of plottable metrics across *wells*,
+    preserving the current selection. Returns the active metric ('' if none)."""
+    from well_viewer.features.tracking.track_plots import plottable_metrics
+    cb = app._tracking_tp_metric_cb
+    metrics: "list[str]" = []
+    seen = set()
+    for well in wells:
+        try:
+            df = app._get_rows(well)
+        except Exception:
+            continue
+        for m in plottable_metrics(df):
+            if m not in seen:
+                seen.add(m)
+                metrics.append(m)
+    prev = cb.currentText()
+    current = [cb.itemText(i) for i in range(cb.count())]
+    if metrics != current:
+        blocked = cb.blockSignals(True)
+        try:
+            cb.clear()
+            cb.addItems(metrics)
+            if prev in metrics:
+                cb.setCurrentIndex(metrics.index(prev))
+        finally:
+            cb.blockSignals(blocked)
+    return cb.currentText()
+
+
+def _refresh_track_plots(app) -> None:
+    ax = getattr(app, "_tracking_tp_ax", None)
+    canvas = getattr(app, "_tracking_tp_canvas", None)
+    summary = getattr(app, "_tracking_tp_summary", None)
+    if ax is None or canvas is None:
+        return
+    ax.clear()
+    wells = _selected_wells(app)
+    metric = _populate_tp_metric_combo(app, wells) if wells else ""
+
+    if not wells or not metric:
+        ax.text(0.5, 0.5, "Select wells on the left and a metric to plot tracks.",
+                ha="center", va="center", transform=ax.transAxes, color="#94A3B8")
+        ax.set_axis_off()
+        if summary is not None:
+            summary.setText("Select wells on the left to plot tracks.")
+        canvas.draw_idle()
+        return
+
+    import matplotlib as mpl
+    from well_viewer.features.tracking.track_plots import compute_track_series
+    palette = mpl.rcParams["axes.prop_cycle"].by_key().get("color", ["#3B82F6"])
+    show_avg = app._tracking_tp_avg_cb.isChecked()
+
+    total_tracks = 0
+    plotted_wells = 0
+    for i, well in enumerate(wells):
+        try:
+            df = app._get_rows(well)
+        except Exception:
+            continue
+        ts = compute_track_series(df, metric)
+        if ts.n_tracks == 0:
+            continue
+        color = palette[i % len(palette)]
+        for _tid, t, v in ts.tracks:
+            ax.plot(t, v, "-", color=color, linewidth=0.7, alpha=0.35)
+        if show_avg and ts.avg_times.size:
+            ax.plot(ts.avg_times, ts.avg_values, "-", color=color, linewidth=2.2,
+                    label=f"{well} (avg, n={ts.n_tracks})")
+        else:
+            # still give the well a legend handle even without the average line
+            ax.plot([], [], "-", color=color, linewidth=2, label=f"{well} (n={ts.n_tracks})")
+        total_tracks += ts.n_tracks
+        plotted_wells += 1
+
+    if total_tracks == 0:
+        ax.text(0.5, 0.5, "No tracks in the selected well(s).\nRun tracking first.",
+                ha="center", va="center", transform=ax.transAxes, color="#94A3B8")
+        ax.set_axis_off()
+        if summary is not None:
+            summary.setText("No tracks in the selected well(s).")
+        canvas.draw_idle()
+        return
+
+    ax.set_xlabel("time (h)")
+    ax.set_ylabel(metric)
+    ax.set_title(f"{metric} per track — {plotted_wells} well(s), {total_tracks} track(s)")
+    if plotted_wells <= 12:
+        ax.legend(fontsize=7, loc="best")
+    if summary is not None:
+        avg_note = "average track per well shown" if show_avg else "individual tracks only"
+        summary.setText(f"{plotted_wells} well(s) · {total_tracks} track(s) · {avg_note}.")
+    canvas.draw_idle()
+
+
 # ── Tab-switch hook ──────────────────────────────────────────────────────────
 
 def tracking_sync_from_app(app) -> None:
     """Refresh the Tracking tab when it becomes active or the well changes."""
-    if getattr(app, "_tracking_notebook", None) is None:
+    nb = getattr(app, "_tracking_notebook", None)
+    if nb is None:
         return
-    if app._tracking_notebook.currentName() == "Track Viewer":
-        _refresh_viewer(app)
+    name = nb.currentName()
+    refresher = {
+        "Track Viewer": _refresh_viewer,
+        "Track Plots": _refresh_track_plots,
+        "Lineage": _refresh_lineage,
+        "Analytics": _refresh_analytics,
+    }.get(name)
+    if refresher is not None:
+        refresher(app)

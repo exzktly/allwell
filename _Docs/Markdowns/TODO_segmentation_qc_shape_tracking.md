@@ -302,16 +302,26 @@ main
   empty; CSV/CTC/JSON export) + `test_tracking_tab.py` (analytics refresh + export) + app-smoke
   builds/switches the 6-sub-tab Tracking tab. **On-screen visual pass pending (user).**
 
-### ☐ PR5e — Tracking: trackastra engine
-- **Branch:** `claude/feat-tracking-trackastra`  **Base:** `claude/feat-tracking-core`
-  **Depends on:** PR5a (+ PR1 torch/trackastra deps).
+### ✅ PR5e — Tracking: trackastra engine
+- **Branch:** `claude/feat-tracking-trackastra`  **Base:** `claude/feat-tracking-analytics`
+  **Depends on:** PR5a (engine registry) + PR1 torch/trackastra deps.
 - **Tasks:**
-  - ☐ trackastra engine adapter (`from_pretrained`, `track(imgs, masks, mode=…)`); model/device/
-    linking-mode controls; weight-download progress.
-  - ☐ Optional `ilp` mode behind `motile` (guarded; disabled with a hint if absent).
-- **Commits:** `feat(tracking): trackastra engine` · `feat(tracking): optional ILP linking`
-- **BW-compat gate:** engine selectable only when installed; greedy default.
-- **Verification:** trackastra greedy run on a sample; `pytest tests/`.
+  - ✅ trackastra engine adapter (`engines/trackastra_engine.py`, guarded): assembles (T,Y,X)
+    image+mask stacks, `Trackastra.from_pretrained(model, device).track(imgs, masks, mode)`,
+    maps the relabeled masks back to `(frame, nid)` via `result_from_tracked_masks` (pure numpy,
+    unit-tested). `FrameDetections` gains optional image/mask; `build_frames`/`orchestrator`/
+    `worker` plumb a `<well>_out.zip` image/mask loader. Engine shown in the Analyze + Setup&Run
+    + CLI pickers (disabled label when absent); linking-mode control feeds `EngineParams.extra`.
+  - ✅ Optional `ilp` mode behind `motile` (guarded; `ilp_available()` + "needs motile" label +
+    clear runtime error).
+- **Commits (landed):** `feat(tracking): trackastra engine adapter + image/mask plumbing` ·
+  `feat(tracking): expose trackastra in engine pickers + linking-mode control`
+- **BW-compat gate:** ✅ engine guarded (greedy default); image/mask fields additive; centroid
+  engines unaffected.
+- **Verification:** ✅ `tests/test_tracking_trackastra.py` (5: registry, mask→TrackResult
+  conversion, guard-when-absent, ilp_available, image-loader attach/failure) + tracking suite +
+  app-smoke green. **The trackastra model run + zip image/mask loading are dev-env-verified
+  (trackastra/torch not in the sandbox; needs real `<well>_out.zip` masks + a GPU/MPS).**
 
 ---
 

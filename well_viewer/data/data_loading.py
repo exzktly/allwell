@@ -162,6 +162,22 @@ def detect_smfish_channels(df: pd.DataFrame) -> List[str]:
                    if c.endswith(suffix) and len(c) > len(suffix)})
 
 
+def detect_shape_features(df: pd.DataFrame) -> List[str]:
+    """Return the per-cell ``shape_*`` columns present in *df*, in catalog order.
+
+    Channel-independent morphology columns emitted by the pipeline's
+    ``compute_shape_features`` pass. Empty on datasets analyzed before the
+    shape-feature work (backwards-compatible — the Review "Shape Features"
+    dropdown section simply does not appear). Order follows the
+    :mod:`shape_features_core` catalog so the dropdown is deterministic.
+    """
+    if df is None or df.empty:
+        return []
+    import shape_features_core as sfc
+    present = set(df.columns)
+    return [c for c in sfc.ALL_COLUMNS if c in present]
+
+
 def detect_nuclear_channel_token(df: pd.DataFrame) -> str:
     """Return the nuclear/segmentation channel token from CSV ``channel`` column."""
     if df is None or df.empty or "channel" not in df.columns:

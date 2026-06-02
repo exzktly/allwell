@@ -803,6 +803,20 @@ regions, **reusing the same `regionprops` pass** as the shape features. The
 settings are recorded as a `qc_options` block in `pipeline_info.json`
 (`read_pipeline_info` defaults it to `{}` on legacy sidecars).
 
+**Segmentation engines + phase ingestion (label-free).** `--segmentation_method`
+selects the segmenter in `process_image_group`'s dispatch: the StarDist methods
+(`stardist_nuclei`, `stardist_seeded_watershed_cell`) need a fluorescent nuclear
+stain, while the **label-free** methods — `cellpose` (Cellpose `cyto3`, torch
+model lazy-loaded per worker into `_CELLPOSE_MODEL`; `_worker_init` skips the
+StarDist/TF load for these) and `classical_threshold` (Otsu + distance-transform
+watershed, no model) — segment a **phase / brightfield** channel instead. That
+channel is designated on ingestion via a per-row **Phase** checkbox
+(`analyze_tab._phase_token()`, mutually exclusive, not also smFISH) → the
+`--phase_token` arg; `main()` maps the phase token onto the nuclear slot so all
+existing per-FOV grouping is reused. The phase channel is a first-class role
+(`image_identity.Role.PHASE`, suffix `_phase`), and the token is recorded as
+`phase_token` in `pipeline_info.json` so Review knows the segmentation channel.
+
 ### 6.3 `all_well_launcher.py`
 
 PyInstaller entry point. Two responsibilities:

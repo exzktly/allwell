@@ -1,0 +1,18 @@
+{
+  "schema": "experiment:channel:well:fov:timepoint",
+  "separator": "_",
+  "schema_fields": ["experiment", "channel", "well", "fov", "timepoint"],
+  "nuclear_token": "NIR",
+  "well_index": 2,
+  "channel_index": 1,
+  "fov_index": 3,
+  "tp_index": 4,
+  "fluor_tokens": ["NIR", "GFP"],
+  "smfish_tokens": [],
+  "segmentation_method": "stardist_nuclei",
+  "cytoplasm_token": "",
+  "min_nucleus_area_px": 50,
+  "available_timepoints": ["0", "24h", "48h"],
+  "available_fovs": ["F001", "F002"],
+  "cell_gating": {"thresh_frac_on": {"gfp": 123.4}}
+}

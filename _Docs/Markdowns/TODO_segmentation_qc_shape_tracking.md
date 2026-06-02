@@ -129,12 +129,18 @@ main
   - ✅ Update `_Docs/requirements-remote.txt` with the verified set (`typing-extensions==4.5.0`,
     `torch==2.0.1`, `torchvision==0.15.2`, `cellpose==3.1.1.2`, `btrack==0.6.5`,
     `trackastra==0.3.2`, `kornia==0.7.0`, `lightning==2.0.9.post0`).
-  - ☐ Real install + import + GPU verification on the py3.10 dev env (Part 1 remaining gate).
+  - ✅ Add Qt-free `shape_features_core.py` (catalog; `centroid_row/col` always-on; self-tested).
+  - ✅ Add `read_pipeline_info` backwards-compat defaults for the new keys
+    (`shape_features=[]`, `qc_options={}`, `phase_token=""`, `segmentation_method`,
+    `schema_version=1`) in `well_viewer/domain/viewer_state.py`.
+  - ✅ Add `tests/fixtures/legacy_dataset/` + `tests/test_backwards_compat.py` (validated
+    standalone: 14/14 assertions pass — legacy sidecar → empty defaults; new-key sidecar
+    parses; `shape_features_core` catalog invariants).
+  - ☐ Real install + import + GPU verification on the py3.10 dev env (Part 1 remaining gate);
+    run `pytest tests/test_backwards_compat.py` there (sandbox lacks pytest/Qt).
   - ☐ Update PyInstaller spec `hiddenimports` (cellpose/torch/trackastra/btrack).
-  - ☐ Add Qt-free `shape_features_core.py` (key → regionprops property + label + value-kind;
-    `centroid_row/col` always-on).
-  - ☐ Bump `pipeline_info` schema version + add `read_pipeline_info` defaults for new keys.
-  - ☐ Add `tests/fixtures/legacy_dataset/` + `tests/test_backwards_compat.py`.
+  - ☐ Stamp `schema_version` in `process_microscopy.write_pipeline_info` (deferred to PR2,
+    bundled with the first feature that writes a new key).
 - **Commits:**
   `build: pin unified dependency set (torch 2.0.1 line; cellpose/trackastra/btrack)` ·
   `feat: add shape_features_core shared catalog` ·

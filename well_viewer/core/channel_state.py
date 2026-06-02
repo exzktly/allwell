@@ -19,6 +19,7 @@ from well_viewer.domain.ratio_models import (
     is_ratio_key,
     ratio_name_from_key,
 )
+from shape_features_core import is_shape_column
 
 
 @dataclass
@@ -34,6 +35,10 @@ class ChannelState:
     fluor_channels: list[str] = field(default_factory=list)
     review_image_channels: list[str] = field(default_factory=list)
     smfish_channels: set[str] = field(default_factory=set)
+    # Channel-independent ``shape_*`` columns present in the loaded CSVs. Like
+    # ratios, a shape feature is a single value per cell selectable in the plot
+    # dropdown; its ``active_val_col`` is the column name itself.
+    shape_features: list[str] = field(default_factory=list)
 
     active_channel: str = "gfp"
     active_image_channel: str = "gfp"
@@ -54,10 +59,14 @@ class ChannelState:
         """The ``<channel>_<metric>`` column for the active non-ratio channel."""
         return f"{self.active_channel}_{self.active_metric}"
 
+    def is_shape_active(self) -> bool:
+        """True when the active value column is a ``shape_*`` feature."""
+        return is_shape_column(self.active_val_col)
+
     def sync_val_col(self) -> None:
         """Recompute ``active_val_col`` from channel + metric — unless a ratio
-        is active, in which case the ratio key already lives there."""
-        if not is_ratio_key(self.active_val_col):
+        or shape feature is active, in which case the key already lives there."""
+        if not is_ratio_key(self.active_val_col) and not self.is_shape_active():
             self.active_val_col = self.derive_val_col()
 
     def normalize_metric(self) -> None:
@@ -83,6 +92,16 @@ class ChannelState:
         if was_ratio or channel not in self.smfish_channels:
             self.active_metric = "mean_intensity"
         self.active_val_col = self.derive_val_col()
+        return True
+
+    def set_active_shape_feature(self, column: str) -> bool:
+        """Switch to a ``shape_*`` virtual channel. The column name is the value
+        column directly (no ``<channel>_<metric>`` composition). Returns True
+        when the active value column actually changed."""
+        if column == self.active_val_col:
+            return False
+        self.active_channel = column
+        self.active_val_col = column
         return True
 
     def set_active_ratio(self, ratio: RatioMetric) -> bool:

@@ -41,6 +41,56 @@ def set_combo_values(combo: object, values: List[str]) -> None:
     combo["values"] = vals  # type: ignore[index]
 
 
+def set_combo_values_sectioned(combo: object, sections: List[Tuple[str, List[str]]]) -> None:
+    """Populate *combo* with grouped values under non-selectable section headers.
+
+    ``sections`` is a list of ``(header, values)``. A ``header`` of ``""`` emits
+    its values with no header row (the default/top group). Header rows are
+    inserted as disabled items on the combo's own ``QStandardItemModel`` — the
+    same mechanism :func:`populate_metric_combo` uses to grey out
+    ``smFISH Count`` — so the user cannot select them and ``findText`` /
+    ``currentText`` / ``setCurrentText`` operate on the real values exactly as
+    with :func:`set_combo_values`. The previous selection is preserved when it
+    still exists; otherwise the first selectable value is chosen.
+
+    Empty groups (no values) are skipped, so a header never appears without
+    entries beneath it.
+    """
+    if combo is None or not (hasattr(combo, "clear") and hasattr(combo, "addItem")):
+        return
+    prev_text = combo.currentText() if hasattr(combo, "currentText") else ""
+    block = getattr(combo, "blockSignals", None)
+    if callable(block):
+        block(True)
+    try:
+        combo.clear()
+        selectable: List[str] = []
+        for header, values in sections:
+            vals = [str(v) for v in (values or [])]
+            if not vals:
+                continue
+            if header:
+                combo.addItem(f"— {header} —")
+                model = combo.model() if hasattr(combo, "model") else None
+                item = model.item(combo.count() - 1) if model is not None else None
+                if item is not None:
+                    # Disabled → not selectable / skipped on keyboard navigation.
+                    item.setEnabled(False)
+                    item.setData("header", Qt.UserRole + 1)
+            for v in vals:
+                combo.addItem(v)
+                selectable.append(v)
+        target = prev_text if (prev_text and prev_text in selectable) else (
+            selectable[0] if selectable else "")
+        if target and hasattr(combo, "findText"):
+            idx = combo.findText(target)
+            if idx >= 0 and hasattr(combo, "setCurrentIndex"):
+                combo.setCurrentIndex(idx)
+    finally:
+        if callable(block):
+            block(False)
+
+
 def wrap_with_empty_state(
     app: Any,
     host: QWidget,

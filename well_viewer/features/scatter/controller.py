@@ -15,6 +15,7 @@ from well_viewer.domain.stats_compute import well_aggregate_stats
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.channel_state_controller import populate_metric_combo
 from well_viewer.domain.ratio_models import is_ratio_key
+from shape_features_core import is_shape_column
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -83,11 +84,14 @@ def collect_scatter_data(
         target_tps = [float(t) for t in (timepoints_h or [])]
     target_arr = np.asarray(target_tps, dtype=float)
 
-    # smFISH counts are integer spot tallies, not fluorescence intensities,
-    # so the per-channel fluor-gate (an intensity floor like 50–1500) would
-    # gate out every count cell. Bypass the gate on count axes.
-    is_count_x = isinstance(col_x, str) and col_x.endswith("_smfish_count")
-    is_count_y = isinstance(col_y, str) and col_y.endswith("_smfish_count")
+    # smFISH counts are integer spot tallies and shape features are morphology
+    # values — neither is a fluorescence intensity, so the per-channel
+    # fluor-gate (an intensity floor like 50–1500) would gate out every such
+    # cell. Bypass the gate on count / shape axes.
+    def _gate_exempt(col) -> bool:
+        return isinstance(col, str) and (col.endswith("_smfish_count") or is_shape_column(col))
+    is_count_x = _gate_exempt(col_x)
+    is_count_y = _gate_exempt(col_y)
 
     def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, list]]:
         df = app._get_rows(well_label)

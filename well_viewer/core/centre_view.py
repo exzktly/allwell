@@ -712,6 +712,10 @@ def build_centre(app, parent: QWidget) -> None:
         from well_viewer.features.batch_export.tab_view import build_batch_export_tab
         build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
+    def _build_tracking() -> None:
+        from well_viewer.features.tracking.tab_view import build_tracking_tab
+        build_tracking_tab(app, tab_frames["Tracking"])
+
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         ("Analysis", [
             # "Plotting" is a single top-level tab that contains Line Graphs,
@@ -731,6 +735,11 @@ def build_centre(app, parent: QWidget) -> None:
             # segmentation surfaces share one rail entry.
             ("Image Table", _build_image_table),
             ("Segmentation", _build_cell_segmentation),
+        ]),
+        ("Tracking", [
+            # Cell tracking: Setup & Run (engine + params + Run/Cancel) and a
+            # Track Viewer, as a top-level rail entry of its own.
+            ("Tracking", _build_tracking),
         ]),
         ("Data", [
             ("Review CSV", _build_review_csv),

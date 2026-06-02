@@ -110,6 +110,17 @@ def on_tab_change(app, _e=None) -> None:
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
 
+    elif tab == "Tracking":
+        # Standard well-plate picker (pick wells to track / view), plus a
+        # viewer refresh for the active well.
+        app._sidebar_main_frame.setVisible(True)
+        app._refresh_sidebar_map()
+        try:
+            from well_viewer.features.tracking.tab_view import tracking_sync_from_app
+            tracking_sync_from_app(app)
+        except Exception:
+            pass
+
     else:
         # Line Graphs, Bar Plots, or Scatter -- unified picker always shown
         app._sidebar_main_frame.setVisible(True)

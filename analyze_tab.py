@@ -111,6 +111,18 @@ def _safe_seg_float(text: str, default: float) -> float:
         return default
 
 
+def _safe_track_float(text: str, default: float) -> float:
+    try:
+        return float(str(text).strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_track_int(text: str, default: int) -> int:
+    try:
+        return int(float(str(text).strip() or default))
+    except (TypeError, ValueError):
+        return default
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
@@ -266,6 +278,7 @@ class AnalyzeTab(QWidget):
         self._refresh_schema_preview()
         self._build_shape_features_section(parent)
         self._build_qc_section(parent)
+        self._build_tracking_section(parent)
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
         self._build_run_controls(parent)
@@ -636,6 +649,39 @@ class AnalyzeTab(QWidget):
                 row.setEnabled(on)
         self._qc_remove_debris_cb.toggled.connect(_sync_debris)
         _sync_debris()
+    def _build_tracking_section(self, parent: QWidget) -> None:
+        sec = self._section(parent, "Cell Tracking")
+
+        self._track_cb = QCheckBox(
+            "Link cells across timepoints after processing (writes track_id "
+            "columns + tracks.json)", sec)
+        sec.layout().addWidget(self._track_cb)
+
+        r = self._row(sec, "Engine")
+        self._track_engine_cb = QComboBox(r)
+        self._track_engine_cb.addItems(["greedy", "btrack"])
+        r.layout().addWidget(self._track_engine_cb)
+        r.layout().addStretch(1)
+
+        rd = self._row(sec, "Max link distance (px)")
+        self._track_max_dist_edit = self._entry(rd, "30", width=80)
+        rd.layout().addStretch(1)
+
+        rg = self._row(sec, "Max gap frames")
+        self._track_max_gap_edit = self._entry(rg, "1", width=80)
+        rg.layout().addStretch(1)
+
+        self._track_division_cb = QCheckBox("Allow division / lineage branching", sec)
+        sec.layout().addWidget(self._track_division_cb)
+
+        # Tracking controls are only meaningful when enabled.
+        def _sync_enabled(_=None) -> None:
+            on = self._track_cb.isChecked()
+            for w in (self._track_engine_cb, self._track_max_dist_edit,
+                      self._track_max_gap_edit, self._track_division_cb):
+                w.setEnabled(on)
+        self._track_cb.toggled.connect(_sync_enabled)
+        _sync_enabled()
 
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Output Options")
@@ -1401,6 +1447,11 @@ class AnalyzeTab(QWidget):
             qc_max_area=_safe_qc_float(self._qc_max_area_edit.text()),
             qc_min_solidity=_safe_qc_float(self._qc_min_solidity_edit.text()),
             phase_token=self._phase_token(),
+            track=self._track_cb.isChecked(),
+            track_engine=self._track_engine_cb.currentText(),
+            track_max_distance=_safe_track_float(self._track_max_dist_edit.text(), 30.0),
+            track_max_gap=_safe_track_int(self._track_max_gap_edit.text(), 1),
+            track_allow_division=self._track_division_cb.isChecked(),
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=min_area,

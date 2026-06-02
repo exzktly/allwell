@@ -4,9 +4,11 @@ Living status tracker for the four tentpole features. Design spec:
 [`FEATURE_PLAN_segmentation_qc_shape_tracking.md`](FEATURE_PLAN_segmentation_qc_shape_tracking.md)
 (§A label-free seg · §B QC · §C shape features · §D tracking).
 
-**Current status:** ◐ PR1 (foundation) — `todo.md` ✅ · dependency set **empirically resolved**
-via `pip --dry-run` ✅ (laptrack dropped; btrack+trackastra in-core) · `requirements-remote.txt`
-updated ✅ · full install + import + GPU verification on the py3.10 dev env ☐ next.
+**Current status:** ◐ PR1 (foundation) — `todo.md` ✅ · dependency set **empirically resolved
+AND installed+imported together** in a clean venv ✅ (laptrack dropped; btrack+trackastra
+in-core) · `requirements-remote.txt` updated ✅ · `shape_features_core.py` added ✅ ·
+remaining: py3.10 + Metal-GPU + StarDist-determinism re-confirm on dev env; then
+`shape_features_core` wiring continues.
 
 ## Confirmed decisions
 - **Dependencies:** all new packages in **core** requirements, pinned to one mutually
@@ -50,18 +52,23 @@ break TF).
 | ~~laptrack~~ | **DROPPED** | ✗ no version fits: `>=0.16.1` needs `numpy>=1.26`; `<=0.16.0` needs `pandas<2.0` (vs pandas 2.2.3). btrack covers the lightweight/lineage role. |
 | motile (ILP) | optional extra only | needs SCIP/Gurobi; trackastra defaults to `greedy` |
 
-### Empirical results (resolved on py3.11 sandbox via `pip install --dry-run`)
-- ✅ Full set resolves with **no conflicts**: TF 2.13.0 + torch 2.0.1 + torchvision 0.15.2 +
-  typing-extensions 4.5.0 + numpy 1.24.3 + numba 0.57.1 + pandas 2.2.3 + cellpose 3.1.1.2 +
-  btrack 0.6.5 + trackastra 0.3.2 + lightning 2.0.9.post0 + kornia 0.7.0.
+### Empirical results (py3.11 sandbox — `pip --dry-run` AND a real clean-venv install)
+- ✅ Full set resolves with **no conflicts** (dry-run) and **installs together** (real venv):
+  TF-cpu 2.13.0 + torch 2.0.1 + torchvision 0.15.2 + typing-extensions 4.5.0 + numpy 1.24.3 +
+  numba 0.57.1 + cellpose 3.1.1.2 + btrack 0.6.5 + trackastra 0.3.2 + lightning 2.0.9.post0 +
+  kornia 0.7.0 + pydantic 1.10.26.
+- ✅ **Import coexistence verified**: all 15 modules import in one interpreter;
+  `cellpose.models` + `btrack.BayesianTracker` + `trackastra.model.Trackastra` + `tensorflow`
+  load together (no binary clash; `tf` sees CPU, torch 2.0.1).
 - ✅ Both earlier risks resolved: **btrack → pydantic 1.10.26 (v1)** (no typing-ext clash);
   **trackastra's lightning/kornia chain** resolves on the torch-2.0.1 line.
 - ❌ **laptrack is incompatible** and was dropped (numpy/pandas squeeze above).
+- ⚠ torch installed as `2.0.1+cu117` (PyPI default pulled the CUDA build); the project's
+  macOS-arm64 (MPS) / Windows-CPU / Linux-`+cpu` wheels differ — confirm per platform.
 
 ### Remaining gate tasks (run on the py3.10 `allwell` dev env, not the CI sandbox)
-- ☐ Real `pip install --no-build-isolation` of the updated requirements on **py3.10.14**
-  (sandbox is py3.11 — re-confirm the resolve holds on 3.10).
-- ☐ `import tensorflow, torch, cellpose, trackastra, btrack, stardist, csbdeep` all succeed.
+- ✅ Resolve + install + import coexistence (done in py3.11 sandbox; see above).
+- ☐ Re-confirm on **py3.10.14** (target) incl. `stardist`/`csbdeep` (need build, omitted in sandbox).
 - ☐ Confirm the new deps coexist with the project's **held** `tifffile==2023.9.26` /
   `imagecodecs==2023.9.18` / conda `scikit-image`/`scipy` pins (the dry-run let those float
   to latest — pin them and re-resolve).

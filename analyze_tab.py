@@ -41,6 +41,14 @@ from ui.theme import (
 from widgets.checkable_dropdown import CheckableDropdown
 import shape_features_core as _sfc
 
+
+def _safe_qc_float(text: str) -> float:
+    """Parse a QC bound from a text field; 0.0 (= no bound) on empty/invalid."""
+    try:
+        return float(str(text).strip() or "0")
+    except (TypeError, ValueError):
+        return 0.0
+
 # ---------------------------------------------------------------------------
 # Schema vocabulary — kept in sync with process_microscopy.py
 # ---------------------------------------------------------------------------
@@ -248,6 +256,7 @@ class AnalyzeTab(QWidget):
         self._refresh_schema_preview()
         self._build_tophat_section(parent)
         self._build_shape_features_section(parent)
+        self._build_qc_section(parent)
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
         self._build_run_controls(parent)
@@ -469,6 +478,38 @@ class AnalyzeTab(QWidget):
         crl.addWidget(self._shape_chips)
         crl.addStretch(1)
         sec.layout().addWidget(chip_row)
+
+    def _build_qc_section(self, parent: QWidget) -> None:
+        sec = self._section(parent, "Quality Control")
+
+        r = self._row(sec, "Flat-field correction")
+        self._flatfield_cb = QComboBox(r)
+        self._flatfield_cb.addItems(["none", "empty_well", "gaussian", "basic"])
+        r.layout().addWidget(self._flatfield_cb)
+        r.layout().addStretch(1)
+
+        rbw = self._row(sec, "Background well")
+        self._background_well_edit = self._entry(rbw, "", width=120)
+        rbw.layout().addStretch(1)
+
+        def _sync_bg(_=None) -> None:
+            self._background_well_edit.setEnabled(
+                self._flatfield_cb.currentText() == "empty_well")
+        self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
+        _sync_bg()
+
+        self._qc_remove_debris_cb = QCheckBox(
+            "Remove debris (drop regions outside the size / solidity bounds)", sec)
+        sec.layout().addWidget(self._qc_remove_debris_cb)
+
+        ra = self._row(sec, "Min / Max area (px)")
+        self._qc_min_area_edit = self._entry(ra, "0", width=80)
+        self._qc_max_area_edit = self._entry(ra, "0", width=80)
+        ra.layout().addStretch(1)
+
+        rs = self._row(sec, "Min solidity (0-1)")
+        self._qc_min_solidity_edit = self._entry(rs, "0", width=80)
+        rs.layout().addStretch(1)
 
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Output Options")
@@ -1109,6 +1150,12 @@ class AnalyzeTab(QWidget):
             filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
             smfish_tokens=self._smfish_tokens_list(),
             shape_features=list(self._shape_chips.checkedData()),
+            flatfield=self._flatfield_cb.currentText(),
+            background_well=self._background_well_edit.text().strip(),
+            qc_remove_debris=self._qc_remove_debris_cb.isChecked(),
+            qc_min_area=_safe_qc_float(self._qc_min_area_edit.text()),
+            qc_max_area=_safe_qc_float(self._qc_max_area_edit.text()),
+            qc_min_solidity=_safe_qc_float(self._qc_min_solidity_edit.text()),
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=min_area,

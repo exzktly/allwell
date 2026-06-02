@@ -92,6 +92,25 @@ def build_pipeline_args(
     if shape_features:
         args += ["--shape_features"] + list(shape_features)
 
+    # Quality control: flat-field correction + debris removal.
+    flatfield = str(opts.get("flatfield", "none") or "none")
+    if flatfield and flatfield != "none":
+        args += ["--flatfield", flatfield]
+        bg = str(opts.get("background_well", "") or "").strip()
+        if flatfield == "empty_well" and bg:
+            args += ["--background_well", bg]
+    if opts.get("qc_remove_debris"):
+        args.append("--qc_remove_debris")
+        for flag, key in (("--qc_min_area", "qc_min_area"),
+                          ("--qc_max_area", "qc_max_area"),
+                          ("--qc_min_solidity", "qc_min_solidity")):
+            try:
+                v = float(opts.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                v = 0.0
+            if v > 0:
+                args += [flag, str(v)]
+
     try:
         tf = int(opts["tf_threads"])
         if tf != 0:

@@ -102,6 +102,59 @@ def assign_track_columns(
     return df
 
 
+def payload_from_df(
+    well: str,
+    df: pd.DataFrame,
+    *,
+    engine: str = "manual",
+    params: "dict | None" = None,
+    fingerprints: "Dict[str, str] | None" = None,
+    fov_col: str = "fov",
+    tp_col: str = "timepoint",
+    nid_col: str = "nucleus_id",
+) -> dict:
+    """Rebuild a ``tracks.json`` payload from an already-tracked DataFrame.
+
+    Used after manual edits / pruning re-write the track columns, so the lineage
+    sidecar stays in sync with the CSV (the source of truth for the columns).
+    """
+    nodes: List[dict] = []
+    tracks: "Dict[int, List[list]]" = {}
+    lineage: Dict[int, int] = {}
+    trees: Dict[int, int] = {}
+    if df is not None and not df.empty and TRACK_ID_COL in df.columns:
+        tid = pd.to_numeric(df[TRACK_ID_COL], errors="coerce")
+        valid = df[tid.notna() & (tid >= 0)]
+        fovs = valid[fov_col].astype(str) if fov_col in valid.columns else pd.Series(["1"] * len(valid))
+        for _, r in valid.assign(_fov=fovs.values).iterrows():
+            t = int(r[TRACK_ID_COL])
+            fov = str(r["_fov"])
+            row = r.get(CENTROID_ROW_COL)
+            col = r.get(CENTROID_COL_COL)
+            nodes.append({
+                "well": well, "fov": fov, "timepoint": str(r.get(tp_col, "")),
+                "nid": int(r[nid_col]) if str(r.get(nid_col, "")).strip() not in ("", "nan") else -1,
+                "row": float(row) if pd.notna(row) else None,
+                "col": float(col) if pd.notna(col) else None,
+                "track_id": t,
+            })
+            tracks.setdefault(t, []).append([fov, str(r.get(tp_col, "")), nodes[-1]["nid"]])
+            if TRACK_PARENT_COL in df.columns:
+                p = pd.to_numeric(pd.Series([r.get(TRACK_PARENT_COL)]), errors="coerce").iloc[0]
+                lineage[t] = int(p) if pd.notna(p) else -1
+            if TREE_ID_COL in df.columns:
+                tr = pd.to_numeric(pd.Series([r.get(TREE_ID_COL)]), errors="coerce").iloc[0]
+                trees[t] = int(tr) if pd.notna(tr) else t
+    return {
+        "version": TRACKS_JSON_VERSION, "well": well, "engine": engine,
+        "params": dict(params or {}), "fingerprints": dict(fingerprints or {}),
+        "nodes": nodes,
+        "tracks": {str(k): v for k, v in tracks.items()},
+        "lineage": {str(k): v for k, v in lineage.items()},
+        "trees": {str(k): v for k, v in trees.items()},
+    }
+
+
 def tracks_json_payload(
     *,
     well: str,

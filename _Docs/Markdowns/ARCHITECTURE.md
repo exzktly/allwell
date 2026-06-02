@@ -155,7 +155,8 @@ well_viewer/
 │   │                 cell_gating_tab_view.py
 │   ├── export/       service.py, style.py, sidebar_view.py
 │   ├── tracking/     engines/ (greedy/btrack/…), model.py, orchestrator.py,
-│   │                 worker.py, tab_view.py (Qt-free core + the Tracking tab)
+│   │                 worker.py, tab_view.py, edit.py, pruning.py
+│   │                 (Qt-free core + the Tracking tab)
 │   └── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
 │                     scatter_panel.py, _common.py, _line_series_runner.py,
 │                     well_grid_button.py
@@ -591,6 +592,15 @@ nested `NamedPageStack` of sub-pages — **Setup & Run** (engine picker + params
 Run/Cancel) and **Track Viewer** (per-track centroid trajectories) — with more
 sub-tabs added by later PRs. The Analyze form also gains a "Cell Tracking"
 section that chains the `--track` post-pass onto a pipeline run.
+
+Manual correction lives in three more sub-tabs (Qt-free cores in `edit.py` /
+`pruning.py`): **Lineage** (a matplotlib lineage view with division links),
+**Editor** (`TrackEditor` — relabel / merge / split / delete / assign-division
+with a snapshot **undo** stack, persisting the edited CSV + a rebuilt
+`tracks.json` via `model.payload_from_df`), and **Pruning** (rule-based bulk
+cleanup — `PruneRules(min_frames, min_displacement)` with Preview + Apply). All
+edits touch only the additive track columns, so the rest of the dataset is
+untouched.
 
 `persistence.json` is a single consolidated viewer-state document managed by
 `_doc.py`. On first load it migrates any legacy `ratios.json`,

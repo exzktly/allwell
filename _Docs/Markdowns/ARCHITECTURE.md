@@ -154,6 +154,8 @@ well_viewer/
 │   │                 label_editor_view.py, replicate_panel_view.py,
 │   │                 cell_gating_tab_view.py
 │   ├── export/       service.py, style.py, sidebar_view.py
+│   ├── tracking/     engines/ (greedy/btrack/…), model.py, orchestrator.py
+│   │                 (Qt-free, pipeline-importable; UI/worker added by later PRs)
 │   └── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
 │                     scatter_panel.py, _common.py, _line_series_runner.py,
 │                     well_grid_button.py
@@ -562,6 +564,19 @@ Every "save state into the dataset folder" path lives under
 | `persistence.json::view_state` | `view_state.py` | Active tab, selected wells, channel/metric, fold-change scopes, per-tab combos, export-style prefs. Saved on dataset switch + app close. |
 | `cell_overrides.json` | `cell_overrides.py` | Per-cell `Included` overrides set on the Segmentation tab (kept separate — large + write-heavy). |
 | `bar_groups.json` | `bar_groups.py` | User-picked file for bar-plot group state (no auto-save). |
+| `tracks.json` | `tracking.py` | Cell-lineage graph per well (nodes/tracks/lineage) + the engine params. `<well>_out.zip`-fingerprinted, so a pipeline re-run drops stale tracks on load (the `cell_overrides` staleness pattern). |
+
+**Cell tracking subsystem (`features/tracking/`, Qt-free core).** Tracking links
+cells across timepoints by holding `(well, fov)` fixed and matching the §C
+centroids frame-to-frame. Each engine sits behind one adapter contract —
+`run(frames, params) -> TrackResult` — in `engines/`: **greedy** (dependency-free
+nearest-neighbour LAP via `scipy.linear_sum_assignment`, the lightweight default
+that replaced dropped laptrack) and **btrack** (guarded Bayesian/lineage), with a
+registry that reports availability. `model.py` converts a per-well DataFrame ⇄
+frames and writes the **additive** `track_id` / `track_parent_id` / `tree_id`
+columns; `orchestrator.track_well()` tracks each FOV (with per-FOV id offsets)
+and emits the `tracks.json` payload. The whole core is numpy/pandas-only so the
+pipeline and a GUI worker can both import it.
 
 `persistence.json` is a single consolidated viewer-state document managed by
 `_doc.py`. On first load it migrates any legacy `ratios.json`,

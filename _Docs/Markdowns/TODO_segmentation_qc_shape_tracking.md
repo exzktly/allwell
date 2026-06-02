@@ -4,8 +4,9 @@ Living status tracker for the four tentpole features. Design spec:
 [`FEATURE_PLAN_segmentation_qc_shape_tracking.md`](FEATURE_PLAN_segmentation_qc_shape_tracking.md)
 (§A label-free seg · §B QC · §C shape features · §D tracking).
 
-**Current status:** ◐ PR1 (foundation) — `todo.md` ✅ · dependency set resolved (candidate) ✅ ·
-empirical install gate ☐ next.
+**Current status:** ◐ PR1 (foundation) — `todo.md` ✅ · dependency set **empirically resolved**
+via `pip --dry-run` ✅ (laptrack dropped; btrack+trackastra in-core) · `requirements-remote.txt`
+updated ✅ · full install + import + GPU verification on the py3.10 dev env ☐ next.
 
 ## Confirmed decisions
 - **Dependencies:** all new packages in **core** requirements, pinned to one mutually
@@ -33,44 +34,41 @@ entire ML stack must be pinned to the **Torch 2.0.1 line**, and every transitive
 4.5` — no floating versions (a loose `lightning`/`kornia` pin would drag in newer Torch and
 break TF).
 
-### Resolved candidate pin set (in-core)
-| Package | Pin | Rationale |
+### Resolved pin set (in-core) — EMPIRICALLY VERIFIED (`pip --dry-run`, full set, no conflicts)
+| Package | Pin | Rationale / verified resolution |
 |---|---|---|
 | numpy | `==1.24.3` | TF 2.13 cap `<=1.24.3`; numba `<1.25` |
-| typing-extensions | `==4.5.0` | highest under TF's `<4.6`; satisfies torch 2.0.1 + lightning 2.0.x |
-| tensorflow / keras / tensorboard / protobuf | `2.13.0` / `2.13.1` / `2.13.0` / `3.20.3` | existing; hold tensorboard at 2.13 so trackastra can't bump it |
+| typing-extensions | `==4.5.0` | ceiling under TF's `<4.6`; resolves with torch 2.0.1 ✅ |
+| tensorflow / keras / tensorboard / protobuf | `2.13.0` / `2.13.1` / `2.13.0` / `3.20.3` | existing |
 | numba / llvmlite / stardist / csbdeep | `0.57.1` / `0.40.1` / `0.9.1` / `0.8.0` | existing |
-| torch / torchvision | `==2.0.1` / `==0.15.2` | last line compatible with `typing-extensions<4.6`; numpy-1.24 safe; shared by cellpose + trackastra |
-| cellpose | `==3.1.1.2` | cyto3; `numpy>=1.20`, `torch>=1.6`, `numba>=0.43` — all satisfied (the "numpy 1.26" advice is perf, not a hard pin) |
-| laptrack | `==0.16.2` | pure-Python; py3.10; numpy/scipy/networkx only |
-| btrack | `==0.6.5` **+ force `pydantic<2`** | ⚠ pydantic v2 needs `typing-extensions>=4.6.1` → conflicts with TF; must resolve on pydantic v1 |
-| trackastra | `==0.1.x` **+ pin `lightning==2.0.9.post0`, `kornia==0.7.0`** | ⚠ heaviest; transitive chain must be pinned to the torch-2.0.1 line; `tensorboard` held at 2.13 |
+| torch / torchvision | `==2.0.1` / `==0.15.2` | last line compatible with `typing-extensions<4.6`; resolves with TF 2.13 ✅ |
+| cellpose | `==3.1.1.2` | cyto3; resolves on numpy 1.24.3 (`numpy<2.1,>=1.20`) ✅ |
+| btrack | `==0.6.5` | cell tracking (Bayesian + lineage); **pulls pydantic 1.10.26 (v1)** → no typing-ext clash ✅ |
+| trackastra | `==0.3.2` | transformer tracking; resolves with `kornia==0.7.0` + `lightning==2.0.9.post0` ✅ |
+| kornia / lightning | `==0.7.0` / `==2.0.9.post0` | pinned to hold trackastra on the torch-2.0.1 line ✅ |
 | BaSiC | (none) | pure-numpy reimplementation — **no basicpy/jax** |
+| ~~laptrack~~ | **DROPPED** | ✗ no version fits: `>=0.16.1` needs `numpy>=1.26`; `<=0.16.0` needs `pandas<2.0` (vs pandas 2.2.3). btrack covers the lightweight/lineage role. |
 | motile (ILP) | optional extra only | needs SCIP/Gurobi; trackastra defaults to `greedy` |
 
-### Two high-risk transitive pins (must confirm empirically)
-1. **btrack ↔ pydantic v2.** pydantic 2 requires `typing-extensions>=4.6.1`, which TF 2.13
-   forbids. Resolution: install btrack against **pydantic v1** (`pydantic<2`); if 0.6.5 hard-
-   requires pydantic 2, drop to the newest btrack that supports pydantic 1.
-2. **trackastra ↔ lightning/kornia.** A loose `lightning`/`kornia` would pull newer Torch
-   (≥2.1) and bump `typing-extensions`/`tensorboard`. Resolution: pin `lightning==2.0.9.post0`
-   + `kornia==0.7.0` (both accept Torch 2.0.1 + `typing-extensions 4.5`) and hold
-   `tensorboard==2.13.0`. If trackastra hard-requires Torch≥2.1, it cannot share the TF-2.13
-   env → fall back to running it out-of-process (separate env) while laptrack+btrack stay
-   in-core.
+### Empirical results (resolved on py3.11 sandbox via `pip install --dry-run`)
+- ✅ Full set resolves with **no conflicts**: TF 2.13.0 + torch 2.0.1 + torchvision 0.15.2 +
+  typing-extensions 4.5.0 + numpy 1.24.3 + numba 0.57.1 + pandas 2.2.3 + cellpose 3.1.1.2 +
+  btrack 0.6.5 + trackastra 0.3.2 + lightning 2.0.9.post0 + kornia 0.7.0.
+- ✅ Both earlier risks resolved: **btrack → pydantic 1.10.26 (v1)** (no typing-ext clash);
+  **trackastra's lightning/kornia chain** resolves on the torch-2.0.1 line.
+- ❌ **laptrack is incompatible** and was dropped (numpy/pandas squeeze above).
 
-### Gate tasks
-- ✅ Resolve the concrete candidate pin set above (typing-extensions wall identified; torch
-  pinned to 2.0.1 line).
-- ☐ Scratch conda env (py3.10.14, numpy 1.24.3): `pip install --no-build-isolation` the set →
-  resolve with **no conflicts** (special attention to btrack/pydantic and trackastra/lightning).
-- ☐ `import tensorflow, torch, cellpose, trackastra, btrack, laptrack, stardist, csbdeep` all succeed.
+### Remaining gate tasks (run on the py3.10 `allwell` dev env, not the CI sandbox)
+- ☐ Real `pip install --no-build-isolation` of the updated requirements on **py3.10.14**
+  (sandbox is py3.11 — re-confirm the resolve holds on 3.10).
+- ☐ `import tensorflow, torch, cellpose, trackastra, btrack, stardist, csbdeep` all succeed.
+- ☐ Confirm the new deps coexist with the project's **held** `tifffile==2023.9.26` /
+  `imagecodecs==2023.9.18` / conda `scikit-image`/`scipy` pins (the dry-run let those float
+  to latest — pin them and re-resolve).
 - ☐ `tf.config.list_physical_devices('GPU')` still detects Metal on Apple Silicon.
 - ☐ StarDist segmentation output unchanged vs current pins (determinism check).
-- ☐ Resolve the same set against `requirements-remote.txt` on the remote platform (Linux
-  aarch64 wheel availability for torch 2.0.1 / trackastra).
-- ☐ If btrack or trackastra cannot resolve in-core → apply the documented fallback (pydantic-v1
-  btrack; out-of-process trackastra) and record it here.
+- ☐ Linux remote: torch 2.0.1 CPU wheels via the `+cpu` index (avoid the CUDA wheel pull);
+  confirm aarch64 wheel availability for torch/trackastra.
 
 ---
 
@@ -120,17 +118,18 @@ main
 - **Tasks:**
   - ✅ Create the roadmap (`TODO_segmentation_qc_shape_tracking.md`, this file).
   - ✅ Resolve the concrete candidate dependency pin set (Part 1).
-  - ☐ Run the **empirical dependency gate** (Part 1) and lock the verified set.
-  - ☐ Update `_Docs/requirements.txt` + `_Docs/requirements-remote.txt` with the pinned set
-    (add `typing-extensions==4.5.0`, `torch==2.0.1`, `torchvision==0.15.2`, `cellpose==3.1.1.2`,
-    `btrack` (pydantic-v1), `laptrack==0.16.2`, `trackastra`+`lightning==2.0.9.post0`+`kornia==0.7.0`).
-  - ☐ Update PyInstaller spec `hiddenimports` (cellpose/torch/trackastra/btrack/laptrack).
+  - ✅ Run the **empirical dependency gate** (`pip --dry-run`, full set resolves; laptrack dropped).
+  - ✅ Update `_Docs/requirements-remote.txt` with the verified set (`typing-extensions==4.5.0`,
+    `torch==2.0.1`, `torchvision==0.15.2`, `cellpose==3.1.1.2`, `btrack==0.6.5`,
+    `trackastra==0.3.2`, `kornia==0.7.0`, `lightning==2.0.9.post0`).
+  - ☐ Real install + import + GPU verification on the py3.10 dev env (Part 1 remaining gate).
+  - ☐ Update PyInstaller spec `hiddenimports` (cellpose/torch/trackastra/btrack).
   - ☐ Add Qt-free `shape_features_core.py` (key → regionprops property + label + value-kind;
     `centroid_row/col` always-on).
   - ☐ Bump `pipeline_info` schema version + add `read_pipeline_info` defaults for new keys.
   - ☐ Add `tests/fixtures/legacy_dataset/` + `tests/test_backwards_compat.py`.
 - **Commits:**
-  `build: pin unified dependency set (torch 2.0.1 line; cellpose/trackastra/btrack/laptrack)` ·
+  `build: pin unified dependency set (torch 2.0.1 line; cellpose/trackastra/btrack)` ·
   `feat: add shape_features_core shared catalog` ·
   `test: legacy-dataset backwards-compat harness`
 - **BW-compat gate:** `read_pipeline_info` returns sane defaults on a legacy sidecar; harness green.
@@ -195,18 +194,19 @@ main
 
 ### ☐ PR5a — Tracking core (§D)
 - **Branch:** `claude/feat-tracking-core`  **Base:** `claude/feat-shape-features`
-  **Depends on:** PR2 (centroids); PR1 deps (laptrack/btrack) via PR2.
+  **Depends on:** PR2 (centroids); PR1 deps (btrack) via PR2.
 - **Tasks:**
   - ☐ Data model: additive `track_id` / `track_parent_id` / `tree_id` columns; versioned,
     `<well>_out.zip`-fingerprinted `tracks.json`.
-  - ☐ Engine adapter interface (`run(frames, params) -> TrackResult`); **laptrack** + **btrack**
-    engines in `features/tracking/engines/` (guarded imports, Qt-free).
+  - ☐ Engine adapter interface (`run(frames, params) -> TrackResult`); **btrack** engine in
+    `features/tracking/engines/` (guarded imports, Qt-free). (laptrack dropped — incompatible
+    with the numpy-1.24/pandas-2.2 core; btrack covers the lightweight/lineage role.)
   - ☐ Post-pass worker (`features/tracking/worker.py`) copying the smFISH `_WorkerBridge`
     pattern (`CellKey` keys, `atomic_write_text`, cache-drop → redraw → refresh).
   - ☐ `persistence/tracking.py` (load/save, registered with `PersistenceRegistry`).
   - ☐ Optional headless `--track` post-pass in `process_microscopy.main()`.
 - **Commits:** `feat(tracking): track data model + tracks.json sidecar` ·
-  `feat(tracking): laptrack + btrack engine adapters` · `feat(tracking): post-pass worker + persistence`
+  `feat(tracking): btrack engine adapter` · `feat(tracking): post-pass worker + persistence`
 - **BW-compat gate:** no `tracks.json`/`track_id` on old datasets ⇒ no-op; grouping inactive.
 - **Verification:** run tracking on a timelapse; confirm `track_id` columns + `tracks.json`;
   open legacy dataset (no tracks); `pytest tests/`.

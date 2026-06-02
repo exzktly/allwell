@@ -153,8 +153,8 @@ well_viewer/
 │   │                 label_editor_view.py, replicate_panel_view.py,
 │   │                 cell_gating_tab_view.py
 │   ├── export/       service.py, style.py, sidebar_view.py
-│   ├── tracking/     engines/ (greedy/btrack/…), model.py, orchestrator.py
-│   │                 (Qt-free, pipeline-importable; UI/worker added by later PRs)
+│   ├── tracking/     engines/ (greedy/btrack/…), model.py, orchestrator.py,
+│   │                 worker.py, tab_view.py (Qt-free core + the Tracking tab)
 │   └── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
 │                     scatter_panel.py, _common.py, _line_series_runner.py,
 │                     well_grid_button.py
@@ -576,6 +576,20 @@ frames and writes the **additive** `track_id` / `track_parent_id` / `tree_id`
 columns; `orchestrator.track_well()` tracks each FOV (with per-FOV id offsets)
 and emits the `tracks.json` payload. The whole core is numpy/pandas-only so the
 pipeline and a GUI worker can both import it.
+
+Tracking runs as a **whole-well post-pass** (unlike per-FOV segmentation):
+`worker.py`'s `track_wells_async` launches a daemon thread that calls the
+orchestrator over the selected wells, writes the track columns back to each CSV
+(`atomic_write_text`) + `tracks.json`, and marshals status/done/after-csv to the
+GUI thread via a `_WorkerBridge` — the smFISH worker contract verbatim
+(§5.5/§15). The same Qt-free core is reachable headlessly via
+`process_microscopy.main()`'s `--track` post-pass. On the Review side a top-level
+**"Tracking" rail tab** (`tab_view.build_tracking_tab`, registered in
+`centre_view`'s rail groups + a `tab_controller.on_tab_change` branch) hosts a
+nested `NamedPageStack` of sub-pages — **Setup & Run** (engine picker + params +
+Run/Cancel) and **Track Viewer** (per-track centroid trajectories) — with more
+sub-tabs added by later PRs. The Analyze form also gains a "Cell Tracking"
+section that chains the `--track` post-pass onto a pipeline run.
 
 `persistence.json` is a single consolidated viewer-state document managed by
 `_doc.py`. On first load it migrates any legacy `ratios.json`,

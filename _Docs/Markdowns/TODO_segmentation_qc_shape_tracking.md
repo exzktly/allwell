@@ -4,16 +4,12 @@ Living status tracker for the four tentpole features. Design spec:
 [`FEATURE_PLAN_segmentation_qc_shape_tracking.md`](FEATURE_PLAN_segmentation_qc_shape_tracking.md)
 (§A label-free seg · §B QC · §C shape features · §D tracking).
 
-**Current status:** ✅ PR1 (foundation) code-complete (dev-env verification pending).
-✅ PR2 (shape features) **complete & verified headless** — pipeline emit + sidecar + Analyze
-chip selector + `detect_shape_features` + the full Review dropdown wiring (sectioned combo,
-metric collapse, virtual-channel routing, all-cells aggregation, scatter-gate bypass).
-A headless PySide6 (offscreen) env now runs the suite; `test_shape_features.py` +
-`test_backwards_compat.py` + full suite green (8 unrelated pre-existing remote/rsync failures).
-✅ PR3 (QC tooling) **complete & verified headless** — flat-field (none/empty_well/gaussian/
-pure-numpy basic) + debris removal + `qc_options` sidecar + Analyze "Quality Control" section
-(`test_qc_tooling.py` 8/8; full-app smoke builds the section). Base = PR2.
-**Next: PR4 (label-free seg, base PR1) or PR5a (tracking core, base PR2).**
+**Current status:** ✅ PR1 (foundation) · ✅ PR2 (shape features) · ✅ PR3 (QC tooling) — all
+complete & verified headless. ✅ QC editor — non-destructive QC layer edited in the Segmentation
+tab (composes with manual curation; legacy `cell_area_threshold` retired). ✅ PR4 (label-free seg
++ phase ingestion) — cellpose + classical segmenters, `Role.PHASE`, per-channel Phase checkbox,
+`--phase_token`/`--cellpose_diameter` (`test_labelfree_phase.py` 5/5; full-app smoke green).
+Stack is now linear: PR1→PR2→PR3→QC→PR4→PR5. **Next: PR5 (tracking chain).**
 
 ## Confirmed decisions
 - **Dependencies:** all new packages in **core** requirements, pinned to one mutually
@@ -204,25 +200,32 @@ main
   smoke (`test_app_smoke`/`interaction`/`characterization`) builds the QC section. Headless
   PySide6. **Visual + a real `--flatfield basic` end-to-end run are the dev-env pass.**
 
-### ☐ PR4 — Label-free segmentation + phase ingestion (§A)
+### ✅ PR4 — Label-free segmentation + phase ingestion (§A)
 - **Branch:** `claude/feat-labelfree-phase`  **Base:** `claude/feat-foundation-deps-core`
-  **Depends on:** PR1 (deps). Folds in the merged `claude/feature-plan-phase-ingestion` doc.
+  **Depends on:** PR1 (deps). Folds in the merged phase-ingestion design (FEATURE_PLAN §4.3).
 - **Tasks:**
-  - ☐ `_segment_cellpose` (cyto3, model cached in `_worker_init`) + `_segment_classical`
-    (Otsu+watershed via `auto_threshold_core`); add to dispatch + argparse `choices`.
-  - ☐ Per-channel **Phase** checkbox (mutually exclusive; not also smFISH) →
-    `(edit, smfish_cb, phase_cb, remove_btn)` + `_phase_token()`.
-  - ☐ `--phase_token` arg; `Role.PHASE` in `image_identity.ROLE_CATALOG` (+ kind→role map);
-    segmenters read the phase channel.
-  - ☐ `phase_token` in the fresh `pipeline_info` `info` dict; validation in
-    `_segmentation_validation_errors` + `_refresh_segmentation_hints`.
-- **Commits:** `feat(pipeline): label-free segmentation (cellpose + classical)` ·
-  `feat(analyze): per-channel phase-image designation` ·
-  `feat(identity): Role.PHASE classification on ingestion`
-- **BW-compat gate:** StarDist path unchanged; legacy filenames classify identically; datasets
-  without `phase_token` segment exactly as before.
-- **Verification:** run label-free on a brightfield set; confirm masks + `phase_token`; run a
-  legacy StarDist dataset unchanged; `pytest tests/`.
+  - ✅ `_segment_cellpose` (cyto3, lazy-loaded `_CELLPOSE_MODEL`, guarded import) +
+    `_segment_classical` (Otsu + EDT watershed); dispatch + argparse `choices`;
+    `_worker_init` skips the StarDist/TF load for label-free workers.
+  - ✅ Per-channel **Phase** checkbox (mutually exclusive across rows; not also smFISH) →
+    rows are `(edit, smfish_cb, phase_cb, remove_btn)` + `_phase_token()`.
+  - ✅ `--phase_token` (+ `--cellpose_diameter`) args; `Role.PHASE` in
+    `image_identity.ROLE_CATALOG` (+ kind→role map); `main()` maps the phase token onto the
+    nuclear slot so the segmenters read it (reusing all grouping).
+  - ✅ `phase_token` in the fresh `pipeline_info` `info` dict (read defaults to `""`);
+    validation in `_segmentation_validation_errors` + nuclear-row hide in
+    `_refresh_segmentation_hints`.
+- **Commits (landed):** `feat(pipeline): label-free segmentation (cellpose + classical)` ·
+  `feat(identity): Role.PHASE classification on ingestion` ·
+  `feat(analyze): per-channel phase designation + label-free plumbing`
+- **BW-compat gate:** ✅ StarDist path unchanged (default; `_worker_init` loads it for the
+  StarDist methods as before); legacy filenames classify identically; datasets without
+  `phase_token` segment exactly as before.
+- **Verification:** ✅ `tests/test_labelfree_phase.py` (5): Role.PHASE, classical segmenter +
+  cellpose guard, arg mapping, Phase-checkbox mutual-exclusivity + validation;
+  `test_image_identity` (52) + full-app smoke green. Headless PySide6. **A real label-free
+  `--segmentation_method cellpose` run on brightfield images is the dev-env pass** (cellpose's
+  torch model isn't exercised in the sandbox).
 
 ### ☐ PR5a — Tracking core (§D)
 - **Branch:** `claude/feat-tracking-core`  **Base:** `claude/feat-shape-features`

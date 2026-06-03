@@ -793,7 +793,6 @@ def draw_per_cell_bar_mode(
             threshold=threshold, val_col=app._app_state.channel.active_val_col,
             use_sem=app._app_state.plot.use_sem,
             per_fov_spread=app._use_fov_spread_active(),
-            cell_area_threshold=app._get_cell_area_threshold(),
             fluor_gates=app._get_all_fluor_gates(),
         )
     else:
@@ -852,7 +851,6 @@ def draw_per_well_n_bars(
     """
     from matplotlib.ticker import MaxNLocator
     from well_viewer.domain.stats_compute import aggregate_group
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     per_fov_spread = app._use_fov_spread_active()
     use_sem = bool(app._app_state.plot.use_sem)
@@ -871,7 +869,6 @@ def draw_per_well_n_bars(
             pts = aggregate_group(app,
                 pool_groups[lbl], threshold=threshold, use_sem=use_sem,
                 val_col=app._app_state.channel.active_val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
@@ -879,7 +876,6 @@ def draw_per_well_n_bars(
             pts = aggregate_well(app,
                 lbl, threshold=threshold, use_sem=use_sem,
                 val_col=app._app_state.channel.active_val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )

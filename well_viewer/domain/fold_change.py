@@ -341,7 +341,7 @@ def resolve_control_wells(app, control_label: str) -> List[str]:
 
 
 def control_pts_for_line(app, control_label: str, *, threshold: float,
-                         val_col: str, cell_area_threshold: float,
+                         val_col: str,
                          fluor_gates) -> list:
     """Aggregate the control selection as a single pooled series.
 
@@ -355,14 +355,13 @@ def control_pts_for_line(app, control_label: str, *, threshold: float,
     return aggregate_group(app, 
         wells, threshold=threshold, use_sem=False,
         val_col=val_col,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
     )
 
 
 def control_mean_at(app, control_label: str, target_t: float, *,
                     threshold: float, val_col: str,
-                    cell_area_threshold: float, fluor_gates) -> Optional[float]:
+                    fluor_gates) -> Optional[float]:
     """Return the control's pooled mean at *target_t* (or None).
 
     .. deprecated:: Use :func:`control_mean_at_for_bar` /
@@ -374,7 +373,7 @@ def control_mean_at(app, control_label: str, target_t: float, *,
     """
     pts = control_pts_for_line(
         app, control_label, threshold=threshold, val_col=val_col,
-        cell_area_threshold=cell_area_threshold, fluor_gates=fluor_gates,
+        fluor_gates=fluor_gates,
     )
     means = pts_to_mean_by_t(pts)
     return _match_control_mean(target_t, means)
@@ -405,7 +404,7 @@ def member_mean_series(
     app, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Dict[float, float]:
     """``{t: mean}`` for a member (rep-set name or well token).
 
@@ -437,7 +436,6 @@ def member_mean_series(
             pts = aggregate_well(app, 
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
@@ -461,7 +459,6 @@ def member_mean_series(
         pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
@@ -475,7 +472,7 @@ def control_mean_at_for_bar(
     app, control_label: str, target_t: float, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Optional[float]:
     """Control mean at *target_t* using the same stat the bar plot uses.
 
@@ -489,7 +486,6 @@ def control_mean_at_for_bar(
         app, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
     )
     return _match_control_mean(target_t, series)
@@ -499,7 +495,7 @@ def build_cell_scaling(
     app, wells, *, fc_state: Tuple[bool, str, bool], target_t: float,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Dict[str, float]:
     """Per-well multiplicative denominator for per-cell violin/beeswarm plots.
 
@@ -526,7 +522,6 @@ def build_cell_scaling(
             app, fc_ctrl_lbl, target_t,
             threshold=threshold, val_col=val_col,
             use_sem=use_sem, per_fov_spread=per_fov_spread,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
         if control_mean is None:
@@ -545,7 +540,6 @@ def build_cell_scaling(
                 app, w,
                 threshold=threshold, val_col=val_col, use_sem=use_sem,
                 per_fov_spread=per_fov_spread,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
             if t0 is None or not math.isfinite(t0) or t0 == 0:
@@ -560,7 +554,7 @@ def member_first_tp_value(
     app, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Optional[float]:
     """Earliest finite mean for a member (using the member's own stat).
 
@@ -574,7 +568,6 @@ def member_first_tp_value(
         app, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
     )
     if not series:
@@ -587,7 +580,7 @@ def member_stats_series(
     app, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Dict[float, Tuple[float, float]]:
     """``{t: (mean, spread)}`` for a member — like :func:`member_mean_series`
     but also returns the spread so callers can propagate error properly.
@@ -606,7 +599,6 @@ def member_stats_series(
             pts = aggregate_well(app, 
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
@@ -632,7 +624,6 @@ def member_stats_series(
         pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
@@ -653,7 +644,7 @@ def control_stats_at_for_bar(
     app, control_label: str, target_t: float, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Optional[Tuple[float, float]]:
     """``(mean, spread)`` of the control at *target_t* using the bar's stat.
 
@@ -666,7 +657,6 @@ def control_stats_at_for_bar(
         app, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
     )
     if not series:
@@ -682,7 +672,7 @@ def control_stats_at_for_bar(
 def control_stats_at(
     app, control_label: str, target_t: float, *,
     threshold: float, val_col: str,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Optional[Tuple[float, float]]:
     """``(mean, spread)`` of the pooled control at *target_t* (batch stat).
 
@@ -692,7 +682,7 @@ def control_stats_at(
     """
     pts = control_pts_for_line(
         app, control_label, threshold=threshold, val_col=val_col,
-        cell_area_threshold=cell_area_threshold, fluor_gates=fluor_gates,
+        fluor_gates=fluor_gates,
     )
     if not pts:
         return None
@@ -713,7 +703,7 @@ def member_first_tp_stats(
     app, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
-    cell_area_threshold: float, fluor_gates,
+    fluor_gates,
 ) -> Optional[Tuple[float, float]]:
     """``(mean, spread)`` for the member's earliest finite tp.
 
@@ -725,7 +715,6 @@ def member_first_tp_stats(
         app, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
     )
     if not series:

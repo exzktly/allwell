@@ -195,7 +195,6 @@ def collect_bar_items(
     if fc_state is None:
         fc_state = _fc.fold_change_state(app)
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     per_fov_spread = app._use_fov_spread_active()
 
@@ -218,7 +217,6 @@ def collect_bar_items(
                 app, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=app._app_state.channel.active_val_col,
                 use_sem=use_sem, per_fov_spread=per_fov_spread,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
             if ctrl_stats is None:
@@ -265,7 +263,6 @@ def collect_bar_items(
                         app, rset.name,
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
-                        cell_area_threshold=cell_area_threshold,
                         fluor_gates=fluor_gates,
                     )
                     if stats is not None:
@@ -341,7 +338,6 @@ def collect_bar_items(
             pts = aggregate_well(app,
                 label, threshold=threshold, use_sem=use_sem,
                 val_col=app._app_state.channel.active_val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
@@ -434,7 +430,6 @@ def collect_bar_items_for_group(
     use_sem: bool,
     per_fov_spread: bool,
     fc_state: Tuple[bool, str, bool],
-    cell_area_threshold: Optional[float] = None,
     fluor_gates: Optional[dict] = None,
     pool_replicates: bool = True,
     group_mode: str = "well",
@@ -454,8 +449,6 @@ def collect_bar_items_for_group(
     Pass :data:`FC_STATE_OFF` to skip fold-change scaling and get raw
     aggregated values (used by the additive CSV emitter).
     """
-    if cell_area_threshold is None:
-        cell_area_threshold = app._get_cell_area_threshold()
     if fluor_gates is None:
         fluor_gates = app._get_all_fluor_gates()
 
@@ -512,7 +505,6 @@ def collect_bar_items_for_group(
             ctrl_stats = _fc.control_stats_at(
                 app, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
             if ctrl_stats is not None:
@@ -525,7 +517,6 @@ def collect_bar_items_for_group(
             pts = aggregate_group(app,
                 wells, threshold=threshold, use_sem=use_sem,
                 val_col=val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
@@ -675,7 +666,6 @@ def collect_bar_items_fov_pooled(
             threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
 
     val_col = app._app_state.channel.active_val_col
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates() or {}
     ratios = app._app_state.channel.ratio_index
 
@@ -694,7 +684,7 @@ def collect_bar_items_fov_pooled(
         if "area_px" in df.columns:
             area = _pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
             with _np.errstate(invalid="ignore"):
-                mask &= _np.isfinite(area) & (area > cell_area_threshold)
+                mask &= _np.isfinite(area) 
         for channel, gate in fluor_gates.items():
             col = f"{channel}_mean_intensity"
             if col not in df.columns:

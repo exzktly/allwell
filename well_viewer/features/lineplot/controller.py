@@ -182,7 +182,6 @@ def collect_line_series(
     if val_col is None:
         val_col = app._app_state.channel.active_val_col
 
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     active_rsets = app._rep_sets_active()
     rep_per_fov = app._use_fov_spread_active() if active_rsets else False
@@ -198,7 +197,6 @@ def collect_line_series(
             app, fc_ctrl_lbl,
             threshold=threshold, val_col=val_col,
             use_sem=use_sem, per_fov_spread=rep_per_fov or per_fov_spread,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
 
@@ -219,7 +217,6 @@ def collect_line_series(
                 for t, *_ in aggregate_well(app, 
                     lbl, threshold=threshold, use_sem=False,
                     val_col=val_col,
-                    cell_area_threshold=cell_area_threshold,
                     fluor_gates=fluor_gates,
                 ):
                     all_tps.add(t)
@@ -227,7 +224,6 @@ def collect_line_series(
                     rows = app._get_rows(lbl)
                     cdf_vals.extend(all_fluor_values_filtered(
                         rows, val_col=val_col,
-                        cell_area_threshold=cell_area_threshold,
                         fluor_gates=fluor_gates,
                         ratios=app._app_state.channel.ratio_index,
                     ))
@@ -276,7 +272,6 @@ def collect_line_series(
         pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
@@ -293,7 +288,6 @@ def collect_line_series(
             rows = app._get_rows(label)
             cdf_vals = list(all_fluor_values_filtered(
                 rows, val_col=val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
                 ratios=app._app_state.channel.ratio_index,
             ))

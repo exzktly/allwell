@@ -358,7 +358,6 @@ def aggregate_with_threshold_df(
     use_sem: bool = False,
     tp_col: str = "timepoint_hours",
     val_col: str = "gfp_mean_intensity",
-    cell_area_threshold: float = 0.0,
     fluor_gates: Optional[Dict[str, float]] = None,
     per_fov_spread: bool = False,
     ratios: Optional[Dict[str, RatioMetric]] = None,
@@ -394,8 +393,8 @@ def aggregate_with_threshold_df(
             # rather than letting `~(NaN <= x)` keep them. Without this,
             # aggregation kept NaN-area cells but raw filtering dropped
             # them — same dataset, different counts.
-            mask &= np.isfinite(area) & (area > cell_area_threshold)
-    elif 0.0 <= cell_area_threshold:
+            mask &= np.isfinite(area) 
+    else:
         return []
 
     for channel, gate in fluor_gates.items():
@@ -556,7 +555,6 @@ def _all_fluor_values(df: pd.DataFrame, val_col: str = "gfp_mean_intensity") -> 
 def _all_fluor_values_filtered(
     df: pd.DataFrame,
     val_col: str = "gfp_mean_intensity",
-    cell_area_threshold: float = 0.0,
     fluor_gates: Optional[Dict[str, float]] = None,
     ratios: Optional[Dict[str, RatioMetric]] = None,
     tp_filter: Optional[float] = None,
@@ -573,8 +571,8 @@ def _all_fluor_values_filtered(
     if "area_px" in df.columns:
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) & (area > cell_area_threshold)
-    elif cell_area_threshold >= 0.0:
+            mask &= np.isfinite(area) 
+    else:
         return np.empty(0, dtype=float)
 
     for channel, gate in fluor_gates.items():

@@ -194,7 +194,6 @@ def redraw_distribution(app) -> None:
         return
 
     val_col = app._app_state.channel.active_val_col
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     ratios = app._app_state.channel.ratio_index
 
@@ -221,7 +220,6 @@ def redraw_distribution(app) -> None:
         tp_filter = tp_h if math.isfinite(tp_h) else None
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             ratios=ratios,
             tp_filter=tp_filter,

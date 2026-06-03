@@ -463,7 +463,6 @@ class ScatterBatchExportPanel(BatchExportPanel):
             scatter_data = _collect_scatter_data(
                 self._app, col_x, col_y, tp_h,
                 well_colors=WELL_COLORS,
-                cell_area_threshold=self._app._get_cell_area_threshold(),
                 fluor_gate_x=self._app._get_fluor_gate(ch_x_base),
                 fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
             )
@@ -584,7 +583,6 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 scatter_data = _collect_scatter_data(
                     self._app, col_x, col_y, tp_h,
                     well_colors=WELL_COLORS,
-                    cell_area_threshold=self._app._get_cell_area_threshold(),
                     fluor_gate_x=self._app._get_fluor_gate(ch_x_base),
                     fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
                 )

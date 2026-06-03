@@ -323,12 +323,11 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
 
     above_by_nid: Optional[Dict[int, bool]] = None
     if bool(app._app_state.review_image.binary_mask):
-        cell_area_threshold = app._get_cell_area_threshold()
         fluor_gates = app._get_all_fluor_gates()
         threshold = app._get_thresh_frac_on()
         tm_key = (
             well, fov, tp, app._app_state.review_image.override_version,
-            app._app_state.channel.active_val_col, threshold, cell_area_threshold,
+            app._app_state.channel.active_val_col, threshold,
             tuple(sorted(fluor_gates.items())),
         )
         above_by_nid = app._app_state.review_image.threshold_map_cache.get(tm_key)

@@ -853,15 +853,6 @@ def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
 
 
 
-def get_cell_area_threshold(app) -> float:
-    """Retired — cell-area gating now lives in the QC layer
-    (``well_viewer/features/qc``), enforced via ``QC_Pass`` at the
-    ``df_included_mask`` chokepoint. Returns 0.0 so the legacy direct
-    area filter threaded through scatter / export / gating is a no-op; the
-    QC gate (edited in the Segmentation tab) is the single source of truth."""
-    return 0.0
-
-
 
 def get_fluor_gate(app, channel: str) -> float:
     """Get FluorGating threshold for a channel."""

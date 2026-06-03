@@ -213,10 +213,9 @@ def test_resolve_control_wells_well_suffix_bypasses_repset(mock_app):
 # ── member_mean_series / control_mean_at_for_bar ────────────────────────────
 
 def _kw(threshold=50.0, val_col="gfp", use_sem=True, per_fov_spread=False,
-        cell_area_threshold=0.0, fluor_gates=None):
+        fluor_gates=None):
     return dict(threshold=threshold, val_col=val_col, use_sem=use_sem,
                 per_fov_spread=per_fov_spread,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates or {})
 
 

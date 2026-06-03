@@ -620,7 +620,6 @@ def review_build_threshold_map(
     (c) ``row[active_val_col] > thresh_frac_on``.
     """
     center = _np.asarray(mask_arr)
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     threshold = app._get_thresh_frac_on()
     val_col = app._app_state.channel.active_val_col
@@ -643,7 +642,7 @@ def review_build_threshold_map(
     if "area_px" in sub.columns:
         area = pd.to_numeric(sub["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) & (area > cell_area_threshold)
+            mask &= np.isfinite(area) 
     for chan, gate in fluor_gates.items():
         col = f"{chan}_mean_intensity"
         if col not in sub.columns:

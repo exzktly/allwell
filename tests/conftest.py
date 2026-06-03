@@ -83,14 +83,13 @@ class MockApp:
         return self.fc_vs_t0_on
 
     def _aggregate_well(self, label: str, *, threshold: float, use_sem: bool,
-                        val_col: str, cell_area_threshold: float,
+                        val_col: str,
                         fluor_gates, per_fov_spread: bool = False,
                         tp_col: str = "timepoint_hours") -> List[tuple]:
         return list(self.per_well_pts.get(label, []))
 
     def _aggregate_group(self, wells: List[str], *, threshold: float,
-                         use_sem: bool, val_col: str,
-                         cell_area_threshold: float, fluor_gates,
+                         use_sem: bool, val_col: str, fluor_gates,
                          per_fov_spread: bool = False,
                          tp_col: str = "timepoint_hours") -> List[tuple]:
         # Pool-of-cells approximation: average means across wells per tp.
@@ -135,9 +134,6 @@ class MockApp:
 
     def _get_thresh_frac_on(self, channel: str) -> float:
         return 50.0
-
-    def _get_cell_area_threshold(self) -> float:
-        return 0.0
 
     def _get_all_fluor_gates(self) -> dict:
         return {}

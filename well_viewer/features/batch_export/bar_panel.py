@@ -282,7 +282,6 @@ class BarBatchExportPanel(BatchExportPanel):
                 _ch = _ch_selected
                 _metric = self._selected_export_metric_key("_bar_channel_cb")
                 _well_labels = _well_labels_map(self._app)
-                _cell_area_threshold = self._app._get_cell_area_threshold()
                 _fluor_gates = self._app._get_all_fluor_gates()
                 _per_fov_spread = self._app._use_fov_spread_active()
 
@@ -292,7 +291,6 @@ class BarBatchExportPanel(BatchExportPanel):
                     val_col=_val_col, threshold=threshold,
                     use_sem=use_sem, per_fov_spread=_per_fov_spread,
                     fc_state=FC_STATE_OFF,
-                    cell_area_threshold=_cell_area_threshold,
                     fluor_gates=_fluor_gates,
                     pool_replicates=pool_replicates,
                     group_mode=group_mode,
@@ -303,7 +301,6 @@ class BarBatchExportPanel(BatchExportPanel):
                         val_col=_val_col, threshold=threshold,
                         use_sem=use_sem, per_fov_spread=_per_fov_spread,
                         fc_state=panel_fc_state,
-                        cell_area_threshold=_cell_area_threshold,
                         fluor_gates=_fluor_gates,
                         pool_replicates=pool_replicates,
                         group_mode=group_mode,

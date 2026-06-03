@@ -22,7 +22,6 @@ def save_to_pipeline_info(app) -> None:
         save_gating_to_pipeline_info,
     )
     from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     # Persist every key that has a Cell Gating row, including ratio entries
     # (keyed by ``ratio:<name>``). Iterating only ``app._app_state.channel.fluor_channels``
@@ -32,7 +31,7 @@ def save_to_pipeline_info(app) -> None:
         for key in (app._cell_gating_thresh_frac_edits or {}).keys()
     }
     block = build_gating_block(
-        cell_area_threshold, fluor_gates, thresh_frac_on,
+        fluor_gates, thresh_frac_on,
     )
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
 

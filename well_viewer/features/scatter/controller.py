@@ -40,7 +40,6 @@ def collect_scatter_data(
     timepoints_h,
     *,
     well_colors: List[str],
-    cell_area_threshold: float = 0.0,
     fluor_gate_x: float = 0.0,
     fluor_gate_y: float = 0.0,
     ratios: Optional[Dict[str, Any]] = None,
@@ -60,7 +59,6 @@ def collect_scatter_data(
         col_y: Y-axis column name (e.g., "mcherry_mean_intensity" or "mcherry_smfish_count")
         timepoints_h: One target timepoint or a list of them
         well_colors: List of color strings for coloring groups/wells
-        cell_area_threshold: Minimum cell area in pixels; cells below are excluded
         fluor_gate_x: FluorGating threshold for X channel; cells below are excluded
         fluor_gate_y: FluorGating threshold for Y channel; cells below are excluded
 
@@ -113,7 +111,7 @@ def collect_scatter_data(
                 mask &= finite & tp_match
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) & (area > cell_area_threshold)
+            mask &= np.isfinite(area) 
         x = resolve_value_series(df, col_x, ratios).to_numpy()
         y = resolve_value_series(df, col_y, ratios).to_numpy()
         gate_x_mask = np.ones_like(x, dtype=bool) if is_count_x else (x > fluor_gate_x)
@@ -229,7 +227,6 @@ def redraw_scatter(
     timepoints_h,
     *,
     well_colors: List[str],
-    cell_area_threshold: float = 0.0,
     fluor_gate_x: float = 0.0,
     fluor_gate_y: float = 0.0,
 ) -> None:
@@ -244,7 +241,6 @@ def redraw_scatter(
         col_y: Y-axis column name (e.g., "mcherry_mean_intensity" or "mcherry_smfish_count")
         timepoints_h: One timepoint or a list of timepoints in hours
         well_colors: List of colors for groups/wells
-        cell_area_threshold: Minimum cell area in pixels; cells below are excluded
         fluor_gate_x: FluorGating threshold for X channel; cells below are excluded
         fluor_gate_y: FluorGating threshold for Y channel; cells below are excluded
     """
@@ -310,7 +306,6 @@ def redraw_scatter(
         col_y,
         tps_list,
         well_colors=well_colors,
-        cell_area_threshold=cell_area_threshold,
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )
@@ -516,7 +511,6 @@ def collect_scatter_agg_data(
     # every cell with a defined ratio contributes to the well-level mean.
     threshold_x = 0.0 if metric_x == "ratio" else app._get_thresh_frac_on(ch_x)
     threshold_y = 0.0 if metric_y == "ratio" else app._get_thresh_frac_on(ch_y)
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()  # Apply all channel gates
     ratios = app._app_state.channel.ratio_index
     label_to_key = getattr(app, "_label_to_channel_key", None) or {}
@@ -593,7 +587,6 @@ def collect_scatter_agg_data(
             wells, tp,
             threshold=threshold,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             use_sem=use_sem,
             per_fov_spread=per_fov,
@@ -824,7 +817,6 @@ def redraw_scatter_orchestrate(app) -> None:
     ch_x_base = ch_x_entry.split(" ")[0]
     ch_y_base = ch_y_entry.split(" ")[0]
 
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gate_x = app._get_fluor_gate(ch_x_base)
     fluor_gate_y = app._get_fluor_gate(ch_y_base)
 
@@ -840,7 +832,6 @@ def redraw_scatter_orchestrate(app) -> None:
         col_y,
         tps_h,
         well_colors=WELL_COLORS,
-        cell_area_threshold=cell_area_threshold,
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )

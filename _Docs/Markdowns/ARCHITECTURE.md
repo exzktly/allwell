@@ -1533,4 +1533,6 @@ need to grep for is in plain sight.
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **5.5.1 (PR2).** Shape features flow pipeline→CSV→Review as sectioned virtual channels. Analyze's selector is now a compact `widgets/checkable_dropdown.CheckableDropdown` (replacing the wide chip grid); the Review channel combo builds sectioned entries via `set_combo_values_sectioned`, fixing shape metrics dropping out on plot sub-tab switches.
+
 - **5.5.0 (PR1).** `shape_features_core` added as the shared feature catalogue; the PyInstaller spec `collect_all`s torch/cellpose/btrack/trackastra; viewer read paths gained backwards-compat defaults (see the bw-compat test harness).

@@ -204,6 +204,15 @@ class ZippedInput:
     """Optional callback that removes any temporary staging directory the
     zipper created. ``None`` when the input was already in zip form."""
 
+    on_pipeline_success: Callable[[], None] | None = None
+    """Optional callback fired ONLY after a clean pipeline run-to-
+    completion. Used to delete source loose TIFs / well folders that
+    were zipped into ``input_dir`` in-place, so a successful run
+    converts the user's input folder from loose-TIF mode to zip mode
+    (next run sees only zips, skips the zipper entirely). Never
+    fires on failure / cancel / partial completion — loose sources
+    stay intact so the user can re-run from scratch."""
+
 
 def stage_local_zips(
     input_dir: Path,
@@ -280,12 +289,44 @@ def stage_local_zips(
         )
 
     # Folder or flat mode: shell out to WellPlateZipper. The zipper writes
-    # `{well}.zip` files into the staging dir.
-    staging = Path(tempfile.mkdtemp(prefix="allwell-zips-"))
+    # ``{well}.zip`` files directly into ``input_dir`` (alongside the
+    # source loose TIFs / well folders). Source artifacts persist
+    # through the entire run so a failure can be re-tried from scratch;
+    # ``on_pipeline_success`` deletes them on clean completion so the
+    # input dir converts from loose-TIF / folder mode to plain ZIP mode
+    # for future runs (next ``_detect_local_input_mode`` call returns
+    # ``ZIP`` and the zipper is skipped). This replaces the old behavior
+    # of staging into ``tempfile.mkdtemp(prefix="allwell-zips-")``,
+    # which (1) ate temp-dir space on machines with small /tmp, and
+    # (2) discarded all zips at run end, forcing a full re-zip on
+    # every re-run.
+    #
+    # Snapshot the source artifacts BEFORE running the zipper so the
+    # post-success deletion sees exactly the set the user started with,
+    # not the post-zipper state where the zipper's own output sits
+    # alongside the originals.
+    source_loose_tifs: tuple[Path, ...] = tuple()
+    source_well_folders: tuple[Path, ...] = tuple()
+    if mode is LocalInputMode.FLAT:
+        source_loose_tifs = tuple(sorted(
+            p for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF")
+            for p in input_dir.glob(pat)
+        ))
+    elif mode is LocalInputMode.FOLDER:
+        source_well_folders = tuple(sorted(
+            p for p in input_dir.iterdir()
+            if p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
+        ))
+
+    # Capture zips that existed BEFORE this stage runs — we must NOT
+    # delete those on a partial-zipper failure (they could be user
+    # data from a prior run).
+    pre_existing_zips = {p for p in input_dir.glob("[A-H][0-9]*.zip")}
+
     try:
         run_zipper(
             input_dir,
-            staging,
+            input_dir,
             log_fn=log_fn,
             progress_fn=None,
             filename_schema=filename_schema,
@@ -293,30 +334,57 @@ def stage_local_zips(
             proc_hook=proc_hook,
         )
     except Exception:
-        shutil.rmtree(staging, ignore_errors=True)
+        # Roll back ONLY the zips we created in this aborted run.
+        # Source TIFs / folders stay intact so the user can re-run.
+        for p in input_dir.glob("[A-H][0-9]*.zip"):
+            if p not in pre_existing_zips:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
         raise
 
-    well_zips = tuple(sorted(staging.glob("[A-H][0-9]*.zip")))
+    well_zips = tuple(sorted(input_dir.glob("[A-H][0-9]*.zip")))
     if not well_zips:
-        shutil.rmtree(staging, ignore_errors=True)
         raise RuntimeError(
             "WellPlateZipper produced no per-well zips; check filename_schema and separator."
         )
 
+    def _on_success() -> None:
+        """Delete the source loose TIFs / well folders this stage
+        consumed, so the input dir is now pure zip mode."""
+        for tif in source_loose_tifs:
+            try:
+                tif.unlink()
+            except OSError:
+                pass
+        for folder in source_well_folders:
+            try:
+                shutil.rmtree(folder)
+            except OSError:
+                pass
+
     if fluor_tokens is not None:
+        # Filter modifies zips in place. Safe here because the zips
+        # we just wrote are scratch artifacts (the user's "real" data
+        # is the loose TIFs / folders we snapshotted above, still
+        # intact). The v5.2.18 "don't mutate user's input" invariant
+        # is preserved by treating the loose sources as the canonical
+        # form until the run succeeds.
         zin = _filter_channels_in_staging(
-            staging, well_zips, mode,
+            input_dir, well_zips, mode,
             keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
             log_fn=log_fn,
         )
-        zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
+        zin.on_pipeline_success = _on_success
         return zin
 
     return ZippedInput(
-        zip_dir=staging,
+        zip_dir=input_dir,
         mode=mode,
         well_zips=well_zips,
-        cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
+        cleanup=None,
+        on_pipeline_success=_on_success,
     )
 
 
@@ -537,6 +605,20 @@ def _stage_mixed_mode(
 
     all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
 
+    # Snapshot the leftover folders we just zipped; ``on_pipeline_success``
+    # removes them so the next run is plain ZIP mode rather than MIXED.
+    # Pre-v5.x.x policy was "leave folders for manual user verification";
+    # the user explicitly opted into automatic deletion on clean
+    # completion via the user-facing zipper-output question.
+    consumed_folders = tuple(folder_wells[label] for label in sorted(folder_wells))
+
+    def _on_success() -> None:
+        for folder in consumed_folders:
+            try:
+                shutil.rmtree(folder)
+            except OSError:
+                pass
+
     if fluor_tokens is not None:
         # v5.2.18 invariant: the channel filter must NOT mutate the
         # user's input dir. Copy ALL zips (existing + new) into a
@@ -555,6 +637,7 @@ def _stage_mixed_mode(
                 log_fn=log_fn,
             )
             zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
+            zin.on_pipeline_success = _on_success
             return zin
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
@@ -566,6 +649,7 @@ def _stage_mixed_mode(
         mode=LocalInputMode.MIXED,
         well_zips=all_zips,
         cleanup=None,
+        on_pipeline_success=_on_success,
     )
 
 

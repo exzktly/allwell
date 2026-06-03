@@ -1056,7 +1056,7 @@ class AnalyzeTab(QWidget):
         """
         try:
             log_q.put(("zipper_start", self._expected_well_count(opts)))
-            input_dir, output_dir = resolve_input_output(
+            input_dir, output_dir, on_success = resolve_input_output(
                 opts["raw"],
                 log_fn=lambda msg: log_q.put(("line", msg)),
                 progress_fn=lambda tok: log_q.put(("zipper_well", tok)),
@@ -1065,7 +1065,11 @@ class AnalyzeTab(QWidget):
                 proc_hook=proc_hook,
             )
             log_q.put(("zipper_done", None))
-            return input_dir, output_dir
+            # v5.x.x: forward the optional success callback as a
+            # 3-tuple. PipelineRunner unpacks it and runs it after
+            # a clean pipeline completion so loose TIFs at raw/ get
+            # cleaned up once raw/in/ has the zipped equivalents.
+            return input_dir, output_dir, on_success
         except (ValueError, RuntimeError) as exc:
             log_q.put(("error", f"Input error: {exc}\n"))
             return None

@@ -163,6 +163,48 @@ def resolve_input_output(
 
     in_sub = raw / "in"
     if in_sub.is_dir() and _has_well_content(in_sub):
+        # v5.x.x resume support: ``raw/in/`` already has well content,
+        # but a prior ``--move-source-tifs`` run may have crashed
+        # mid-way and left some TIFs at ``raw/`` (only some were
+        # moved). Detect that state and re-run the zipper to consume
+        # the leftovers — the zipper is naturally idempotent in the
+        # move case since each TIF has a unique filename and
+        # ``os.makedirs(..., exist_ok=True)`` is fine with existing
+        # well folders.
+        leftover_tifs = tif_files_in(raw)
+        if leftover_tifs:
+            if log_fn:
+                log_fn(
+                    f"[zipper] Resume: found {len(leftover_tifs)} leftover "
+                    f"TIF(s) at top level after partial run; consuming into "
+                    f"existing raw/in/ well folders.\n"
+                )
+            source_tifs = tuple(leftover_tifs)
+            run_zipper(
+                raw,
+                in_sub,
+                log_fn=log_fn,
+                progress_fn=progress_fn,
+                filename_schema=filename_schema,
+                filename_sep=filename_sep,
+                proc_hook=proc_hook,
+                move_source_tifs=move_source_tifs,
+            )
+            if move_source_tifs:
+                return in_sub, raw / "out", None
+
+            def _on_success_resume() -> None:
+                """Delete the leftover loose TIFs from raw/ once the
+                pipeline completes cleanly. Mirror the fresh-run
+                callback."""
+                for tif in source_tifs:
+                    try:
+                        tif.unlink()
+                    except OSError:
+                        pass
+
+            return in_sub, raw / "out", _on_success_resume
+
         return in_sub, raw / "out", None
 
     tifs = tif_files_in(raw)

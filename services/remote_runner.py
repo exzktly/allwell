@@ -318,12 +318,38 @@ def stage_local_zips(
             p for p in input_dir.iterdir()
             if p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
         ))
+        # v5.x.x resume support: a prior ``--move-source-tifs`` run
+        # may have crashed mid-way, leaving SOME TIFs in well
+        # subfolders and SOME still loose at the top level. Capture
+        # the leftovers — they go into the same snapshot as the
+        # fresh-FLAT case so the post-success hook deletes them too
+        # (or, for move-mode, the zipper itself will have consumed
+        # them by run end and the unlink is a no-op caught by the
+        # OSError handler).
+        source_loose_tifs = tuple(sorted(
+            p for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF")
+            for p in input_dir.glob(pat)
+        ))
+        if source_loose_tifs and log_fn:
+            log_fn(
+                f"[stage] resume: found {len(source_loose_tifs)} leftover "
+                f"loose TIF(s) at top level + {len(source_well_folders)} "
+                f"well folder(s); consuming leftovers into existing folders.\n"
+            )
 
     # Capture zips that existed BEFORE this stage runs — we must NOT
     # delete those on a partial-zipper failure (they could be user
     # data from a prior run).
     pre_existing_zips = {p for p in input_dir.glob("[A-H][0-9]*.zip")}
 
+    # Step 1: WellPlateZipper groups loose TIFs into per-well
+    # subfolders (the v5.x.x ``--move-source-tifs`` flag and copy
+    # default both produce folders, never zips — the zip-up step is
+    # separate and lives in ``_zip_well_folder`` below). For FOLDER
+    # mode this is mostly a no-op (no loose TIFs at top level on a
+    # fresh run); for the FOLDER-resume-after-partial-move case it
+    # consumes the leftover top-level TIFs into the existing well
+    # folders.
     try:
         run_zipper(
             input_dir,
@@ -346,34 +372,83 @@ def stage_local_zips(
                     pass
         raise
 
+    # Step 2: convert each well folder into ``{well}.zip``. This is
+    # the same atomic-tmp + rename pattern that ``_stage_mixed_mode``
+    # uses for its leftover-folder zip-up. Without this step the
+    # remote pipeline would have nothing to upload — pre-v5.x.x the
+    # FLAT / FOLDER path through ``_stage_input_zips`` was broken
+    # because the framework expected zips here but the zipper only
+    # produces folders.
+    folders_after_zipper = sorted(
+        p for p in input_dir.iterdir()
+        if p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
+    )
+    newly_zipped: list[Path] = []
+    try:
+        for folder in folders_after_zipper:
+            target = input_dir / f"{folder.name}.zip"
+            if target.exists() and target in pre_existing_zips:
+                # User-data zip from a prior run; leave it alone.
+                continue
+            n = _zip_well_folder(folder, target)
+            if n > 0:
+                newly_zipped.append(target)
+                if log_fn:
+                    log_fn(
+                        f"[stage] zipped {folder.name} → {target.name} "
+                        f"({n} TIF{'s' if n != 1 else ''}).\n"
+                    )
+    except Exception:
+        # On a zip-up failure clean up partial zip artifacts (sources
+        # stay intact for a retry).
+        for p in newly_zipped:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        raise
+
     well_zips = tuple(sorted(input_dir.glob("[A-H][0-9]*.zip")))
     if not well_zips:
         raise RuntimeError(
             "WellPlateZipper produced no per-well zips; check filename_schema and separator."
         )
 
+    # The post-success hook needs to delete EVERY well folder the
+    # zip-up step processed (both the snapshotted ones for FOLDER
+    # mode and the freshly-created ones for FLAT mode). Re-scan now
+    # rather than using the pre-zipper snapshot because FLAT-mode
+    # folders didn't exist when we took the snapshot.
+    folders_to_clean = tuple(folders_after_zipper)
+
     def _on_success() -> None:
-        """Delete the source loose TIFs / well folders this stage
-        consumed, so the input dir is now pure zip mode."""
+        """Delete the source artifacts this stage consumed so the
+        input dir is now pure zip mode:
+
+        * loose top-level TIFs (snapshotted before the zipper ran —
+          in copy mode they're the originals we need to remove; in
+          move mode they're already gone and the unlink is a no-op
+          caught by the OSError handler);
+        * every well folder we zipped up (whether it pre-existed
+          for FOLDER mode or the zipper just created it for FLAT
+          mode — in either case we just successfully extracted the
+          ``{well}.zip`` from it and the folder is redundant).
+        """
         for tif in source_loose_tifs:
             try:
                 tif.unlink()
             except OSError:
                 pass
-        for folder in source_well_folders:
+        for folder in folders_to_clean:
             try:
                 shutil.rmtree(folder)
             except OSError:
                 pass
 
-    # When ``move_source_tifs`` was True the zipper already removed
-    # the originals, so there's nothing left for the post-success hook
-    # to do. Set it to None to skip the (harmless but pointless)
-    # unlink-on-missing loop.
-    if move_source_tifs:
-        _on_success_effective: Callable[[], None] | None = None
-    else:
-        _on_success_effective = _on_success
+    # Even in ``move_source_tifs`` mode the post-success hook still
+    # has work to do (delete the well folders we just zipped up); only
+    # the loose-TIF unlinks become no-ops. Don't short-circuit.
+    _on_success_effective: Callable[[], None] | None = _on_success
 
     if fluor_tokens is not None:
         # Filter modifies zips in place. Safe here because the zips

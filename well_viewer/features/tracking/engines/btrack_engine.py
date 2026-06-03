@@ -62,7 +62,18 @@ def run(frames: List[FrameDetections], params: EngineParams) -> TrackResult:
         return result.finalize()
 
     with btrack.BayesianTracker() as tracker:
+        # btrack's BayesianTracker MUST be configured with a motion / hypothesis
+        # model before track(); left unconfigured it fails inside btrack and
+        # only logs to btrack's own logger, so the app surfaces "it failed" with
+        # no useful message. When the caller doesn't supply a config file, fall
+        # back to btrack's bundled example cell config so tracking actually runs.
         cfg = params.extra.get("config_file")
+        if not cfg:
+            try:
+                from btrack import datasets as _bt_datasets
+                cfg = _bt_datasets.cell_config()
+            except Exception:
+                cfg = None
         if cfg:
             tracker.configure(cfg)
         tracker.max_search_radius = float(params.max_distance)

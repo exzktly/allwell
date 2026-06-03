@@ -36,6 +36,8 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **5.5.7 — Cell tracking (§D).** Link cells across timepoints after processing: choose the **greedy**, **btrack** (Bayesian + lineage) or **trackastra** (transformer) engine, then explore results in the new **Tracking** tab (Setup & Run + Track Viewer) and **Track Plots** sub-tab, with motility metrics and `track_id` columns written back.
+
 - **5.5.6 — Label-free segmentation (§A).** Segment unlabelled / phase channels: Cellpose and a classical engine are selectable with per-method parameter panels, and channels can be designated as phase on ingestion.
 
 - **5.5.5 — Editable QC layer (§B).** Debris removal is now non-destructive — cells are *flagged, not deleted* — and editable after the run from the **Segmentation** tab: tune the size / solidity gate and the cells it removes highlight live on the image while every plot, statistic and the Review table re-flag, with no re-segmentation. The QC verdict is the single source of area/shape gating and composes with manual curation (a cell counts only when manually kept **and** it passes QC). A **Max region area** bound additionally rejects bright debris that StarDist shatters into many small "cells" — they share one over-large bright region that per-cell size can't see. Flat-field correction stays a run-time option.

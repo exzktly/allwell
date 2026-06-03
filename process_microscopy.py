@@ -2038,16 +2038,16 @@ def process_image_group(
         log.info("  stardist:    %.1f s  (%d nuclei detected)",
                  time.perf_counter() - _t, len(np.unique(labels)) - 1)
 
-    # QC debris removal: drop label regions outside the size/solidity bounds
-    # (debris, fragments, merged blobs) before measurement. Reuses the §C
-    # regionprops machinery.
+    # QC debris gating is NON-DESTRUCTIVE: every segmented cell is kept and
+    # quantified rather than zeroed out of the mask (which used to delete the
+    # cells' rows entirely). The size/solidity thresholds are recorded in
+    # pipeline_info.json (qc_options) and applied as a reversible per-cell flag
+    # in the Review QC view, where they can be edited without re-segmenting and
+    # compose with manual curation. ``shape_solidity`` is emitted unconditionally
+    # below so that gate is editable post-run. See well_viewer/features/qc/.
     if qc_remove_debris:
-        labels, _n_debris = filter_debris(
-            labels, min_area=qc_min_area, max_area=qc_max_area,
-            min_solidity=qc_min_solidity,
-        )
-        if _n_debris:
-            log.info("  debris:      removed %d region(s)", _n_debris)
+        log.info("  debris:      gating deferred to Review QC layer "
+                 "(non-destructive; thresholds recorded in pipeline_info)")
 
     # Save QC images.
     # Keep schema tokens in output stems so output names stay harmonized with
@@ -2159,7 +2159,13 @@ def process_image_group(
     # Per-cell morphology (selected shape features + always-on centroids), one
     # regionprops pass over the label image. Channel-independent → emitted with
     # a shape_ prefix, merged into each cell record by nucleus id.
-    shape_by_id = compute_shape_features(labels, shape_features)
+    # ``solidity`` is always included (even if unselected) so the post-run QC
+    # debris gate (well_viewer/features/qc) can be edited without re-segmenting;
+    # area is already emitted as the base ``area_px`` column.
+    _qc_shape_keys = list(shape_features or [])
+    if "solidity" not in _qc_shape_keys:
+        _qc_shape_keys.append("solidity")
+    shape_by_id = compute_shape_features(labels, _qc_shape_keys)
 
     for i, nid in enumerate(nuc_ids):
         rec: dict = {

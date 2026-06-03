@@ -1084,11 +1084,22 @@ def review_effective_included(app, label: str, row: dict) -> str:
     (which rewrite the canonical row['Included']).
     """
     fov, tp, nid = app._review_row_keys(row)
+    val = None
     if fov and tp and nid:
         ovr = app._review_included_overrides.get((label, fov, tp, nid))
         if ovr is not None:
-            return ovr
-    return str(row.get("Included", "1"))
+            val = ovr
+    if val is None:
+        val = str(row.get("Included", "1"))
+    # Compose the QC layer: a QC-failed cell (QC_Pass == 0) is excluded
+    # regardless of manual curation — effective = manual-keep AND passes-QC.
+    qc = row.get("QC_Pass", 1)
+    try:
+        if int(float(str(qc).strip() or "1")) == 0:
+            return "0"
+    except (TypeError, ValueError):
+        pass
+    return val
 
 
 

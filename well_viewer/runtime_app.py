@@ -927,6 +927,13 @@ class WellViewerApp(QWidget):
     def _get_rows(self, label: str) -> pd.DataFrame:
         if label not in self._app_state.dataset.cache:
             self._app_state.dataset.cache[label] = load_well_csv(self._app_state.dataset.well_paths[label])
+            # Project the QC verdict (QC_Pass) onto freshly-built frames so
+            # lazily-loaded wells respect the QC layer without a global recompute.
+            try:
+                from well_viewer.features.qc.controller import apply_qc_to_cache
+                apply_qc_to_cache(self, label)
+            except Exception:
+                pass
         return self._app_state.dataset.cache[label]
 
     def _invalidate_dataset_cache(self) -> None: self._app_state.dataset.cache.clear()

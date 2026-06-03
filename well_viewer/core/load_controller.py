@@ -143,6 +143,15 @@ def load_directory(app, d: Path, label=None) -> None:
         apply_review_overrides_to_cache(app)
     except Exception:
         pass
+    # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)
+    # and project the QC_Pass verdict onto any already-cached rows. Safe no-op
+    # when neither file exists.
+    try:
+        app._persistence.load("qc_params")
+        from well_viewer.features.qc.controller import apply_qc_to_cache
+        apply_qc_to_cache(app)
+    except Exception:
+        pass
     # Hydrate user-defined line-plot draw order (line_order.json).
     try:
         app._persistence.load("line_order")

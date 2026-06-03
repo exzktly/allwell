@@ -231,11 +231,24 @@ def detect_review_image_channels(df: pd.DataFrame, fluor_channels: List[str], se
 # ── DataFrame helpers ────────────────────────────────────────────────────────
 
 def df_included_mask(df: pd.DataFrame) -> pd.Series:
-    """Return a boolean Series flagging rows where ``Included == 1``."""
+    """Rows that count toward analysis: ``Included == 1`` composed with the QC
+    layer.
+
+    Manual curation / cell-gating own the ``Included`` column; the QC layer owns
+    a separate ``QC_Pass`` column (1 = passes debris gating). The effective
+    inclusion is the AND of the two — ``manual-keep AND passes-QC`` — so QC
+    re-gating never clobbers hand-curated edits. ``QC_Pass`` is optional: when
+    absent (no QC layer / older data) it is treated as all-pass.
+    """
     if "Included" not in df.columns:
-        return pd.Series(True, index=df.index)
-    incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
-    return incl.eq(1)
+        mask = pd.Series(True, index=df.index)
+    else:
+        incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
+        mask = incl.eq(1)
+    if "QC_Pass" in df.columns:
+        qc = pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1)
+        mask = mask & qc.eq(1)
+    return mask
 
 
 def resolve_value_series(

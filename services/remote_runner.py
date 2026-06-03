@@ -223,6 +223,7 @@ def stage_local_zips(
     nuclear_token: str | None = None,
     log_fn: Callable[[str], None] | None = None,
     proc_hook: Callable[[subprocess.Popen | None], None] | None = None,
+    move_source_tifs: bool = False,
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
@@ -332,6 +333,7 @@ def stage_local_zips(
             filename_schema=filename_schema,
             filename_sep=filename_sep,
             proc_hook=proc_hook,
+            move_source_tifs=move_source_tifs,
         )
     except Exception:
         # Roll back ONLY the zips we created in this aborted run.
@@ -364,6 +366,15 @@ def stage_local_zips(
             except OSError:
                 pass
 
+    # When ``move_source_tifs`` was True the zipper already removed
+    # the originals, so there's nothing left for the post-success hook
+    # to do. Set it to None to skip the (harmless but pointless)
+    # unlink-on-missing loop.
+    if move_source_tifs:
+        _on_success_effective: Callable[[], None] | None = None
+    else:
+        _on_success_effective = _on_success
+
     if fluor_tokens is not None:
         # Filter modifies zips in place. Safe here because the zips
         # we just wrote are scratch artifacts (the user's "real" data
@@ -376,7 +387,7 @@ def stage_local_zips(
             keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
             log_fn=log_fn,
         )
-        zin.on_pipeline_success = _on_success
+        zin.on_pipeline_success = _on_success_effective
         return zin
 
     return ZippedInput(
@@ -384,7 +395,7 @@ def stage_local_zips(
         mode=mode,
         well_zips=well_zips,
         cleanup=None,
-        on_pipeline_success=_on_success,
+        on_pipeline_success=_on_success_effective,
     )
 
 

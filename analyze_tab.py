@@ -437,6 +437,21 @@ class AnalyzeTab(QWidget):
         self._compress_input_cb.setChecked(True)
         sec.layout().addWidget(self._compress_input_cb)
 
+        # v5.x.x: opt-in MOVE semantics for the WellPlateZipper. When
+        # off (default) the zipper copies loose TIFs into per-well
+        # subfolders and leaves the originals at raw/, then PR #336's
+        # on_success hook deletes them after a clean run — disk usage
+        # peaks at ~2x. When on, ``--move-source-tifs`` is passed and
+        # peak usage stays close to the input footprint, at the cost
+        # of losing a clean-retry path on a mid-zipper crash.
+        self._move_source_tifs_cb = QCheckBox(
+            "Loose-TIF mode only: Move source TIFs into well folders "
+            "(saves ~2× peak disk; sources gone if zipper crashes mid-run)",
+            sec,
+        )
+        self._move_source_tifs_cb.setChecked(False)
+        sec.layout().addWidget(self._move_source_tifs_cb)
+
         self._compress_output_cb = QCheckBox(
             "Folder mode only: Compress output well folders to .zip", sec)
         self._compress_output_cb.setChecked(True)
@@ -1009,6 +1024,7 @@ class AnalyzeTab(QWidget):
             no_tophat_fluor=self._no_tophat_fluor_cb.isChecked(),
             compress_input_well_folders=self._compress_input_cb.isChecked(),
             compress_output_well_folders=self._compress_output_cb.isChecked(),
+            move_source_tifs=self._move_source_tifs_cb.isChecked(),
             force=self._force_cb.isChecked(),
             cpu_only=self._cpu_only_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),
@@ -1063,6 +1079,7 @@ class AnalyzeTab(QWidget):
                 filename_schema=opts["filename_schema"],
                 filename_sep=opts["filename_sep"],
                 proc_hook=proc_hook,
+                move_source_tifs=bool(opts.get("move_source_tifs", False)),
             )
             log_q.put(("zipper_done", None))
             # v5.x.x: forward the optional success callback as a

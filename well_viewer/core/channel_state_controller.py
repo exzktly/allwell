@@ -158,7 +158,7 @@ def recalculate_threshold(app) -> None:
 
     # Hydrate persisted gating params from pipeline_info.json.
     app._load_gating_from_pipeline_info()
-    if hasattr(app, "_cell_gating_area_edit"):
+    if hasattr(app, "_cell_gating_fluor_gate_edits"):
         from well_viewer.features.grouping.cell_gating_tab_view import (
             cell_gating_load_cell_areas,
             cell_gating_load_threshold_frac_on,
@@ -741,7 +741,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
             pass
     # Cell Gating shows one row per fluor channel + one per ratio. Pull
     # the ratio rows into the table whenever the ratio set changes.
-    if hasattr(app, "_cell_gating_area_edit"):
+    if hasattr(app, "_cell_gating_fluor_gate_edits"):
         try:
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
@@ -854,20 +854,18 @@ def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
 
 
 def get_cell_area_threshold(app) -> float:
-    """Get cell area threshold from the Cell Gating tab."""
-    edit = getattr(app, "_cell_gating_area_edit", None)
-    if edit is not None:
-        try:
-            return float(edit.text())
-        except ValueError:
-            return 0.0
+    """Retired — cell-area gating now lives in the QC layer
+    (``well_viewer/features/qc``), enforced via ``QC_Pass`` at the
+    ``df_included_mask`` chokepoint. Returns 0.0 so the legacy direct
+    area filter threaded through scatter / export / gating is a no-op; the
+    QC gate (edited in the Segmentation tab) is the single source of truth."""
     return 0.0
 
 
 
 def get_fluor_gate(app, channel: str) -> float:
     """Get FluorGating threshold for a channel."""
-    if hasattr(app, "_cell_gating_area_edit"):
+    if hasattr(app, "_cell_gating_fluor_gate_edits"):
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_fluor_gate
         return cell_gating_get_fluor_gate(app, channel)
     return 0.0

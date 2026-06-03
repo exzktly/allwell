@@ -253,12 +253,10 @@ def load_directory(app, d: Path, label=None) -> None:
 
 
 def _kick_off_gating_after_load(app) -> None:
-    if not hasattr(app, "_cell_gating_area_edit"):
+    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return
-    try:
-        cell_area = float(app._cell_gating_area_edit.text())
-    except (ValueError, AttributeError):
-        cell_area = 0.0
+    # Cell-area gating is retired (now QC-owned); only a non-default
+    # fluorescence gate needs the gating worker kicked off here.
     has_non_default_gate = False
     for edit in getattr(app, "_cell_gating_fluor_gate_edits", {}).values():
         try:
@@ -267,7 +265,7 @@ def _kick_off_gating_after_load(app) -> None:
                 break
         except ValueError:
             pass
-    if cell_area > 0.0 or has_non_default_gate:
+    if has_non_default_gate:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(app)
 

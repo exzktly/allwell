@@ -106,7 +106,7 @@ def on_tab_change(app, _e=None) -> None:
     elif tab == "Cell Gating":
         app._sidebar_main_frame.setVisible(True)
         app._refresh_sidebar_map()
-        if hasattr(app, "_cell_gating_area_edit"):
+        if hasattr(app, "_cell_gating_fluor_gate_edits"):
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
 

@@ -82,11 +82,23 @@ class QCParams:
     @classmethod
     def from_pipeline_info(cls, info: Optional[Dict[str, Any]]) -> "QCParams":
         """Seed from a dataset's ``pipeline_info.json`` ``qc_options`` block so
-        the QC view opens pre-populated with the thresholds used at run time."""
-        qc = (info or {}).get("qc_options", {}) if isinstance(info, dict) else {}
+        the QC view opens pre-populated with the thresholds used at run time.
+
+        Also migrates the retired legacy ``cell_gating.cell_area_threshold``
+        into the QC layer's ``min_area`` (enabling the gate) so datasets created
+        before the QC layer keep their cell-area filtering — now QC-owned.
+        """
+        info = info if isinstance(info, dict) else {}
+        qc = info.get("qc_options", {}) or {}
+        enabled = bool(qc.get("remove_debris", False))
+        min_area = _pos(qc.get("min_area"))
+        legacy = _pos((info.get("cell_gating", {}) or {}).get("cell_area_threshold"))
+        if min_area is None and legacy is not None:
+            min_area = legacy
+            enabled = True
         return cls(
-            enabled=bool(qc.get("remove_debris", False)),
-            min_area=_pos(qc.get("min_area")),
+            enabled=enabled,
+            min_area=min_area,
             max_area=_pos(qc.get("max_area")),
             min_solidity=_pos(qc.get("min_solidity")),
         )

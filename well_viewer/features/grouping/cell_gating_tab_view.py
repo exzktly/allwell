@@ -83,15 +83,17 @@ class GatingWorker(QThread):
 
     def _run_inner(self) -> None:
         debug = _debug_flags.cell_gating_debug_enabled()
-        cell_area_threshold = self._app._get_cell_area_threshold()
+        # Cell-area gating is retired here — it now lives in the QC layer
+        # (QC_Pass at the df_included_mask chokepoint). This worker gates on
+        # fluorescence only; QC composes with its Included result downstream.
         fluor_gates = self._app._get_all_fluor_gates()
         labels = list(self._app._app_state.dataset.well_paths)
         total = len(labels)
 
         if debug:
             logger.info(
-                "GatingWorker start: wells=%d cell_area_threshold=%.4f fluor_gates=%s",
-                total, cell_area_threshold, fluor_gates,
+                "GatingWorker start: wells=%d fluor_gates=%s",
+                total, fluor_gates,
             )
 
         included_total = 0
@@ -112,11 +114,6 @@ class GatingWorker(QThread):
                 well_included = 0
             else:
                 mask = pd.Series(True, index=df.index)
-                if "area_px" in df.columns:
-                    area = pd.to_numeric(df["area_px"], errors="coerce")
-                    mask &= area.notna() & (area > cell_area_threshold)
-                else:
-                    mask &= cell_area_threshold < 0
                 for channel, gate_threshold in fluor_gates.items():
                     col = f"{channel}_mean_intensity"
                     if col not in df.columns:
@@ -194,19 +191,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     cf_layout = QVBoxLayout(control_frame)
     cf_layout.setContentsMargins(6, 6, 6, 6)
 
-    # Cell area threshold
-    area_row = QWidget(control_frame)
-    ar = QHBoxLayout(area_row)
-    ar.setContentsMargins(0, 0, 0, 0)
-    ar.addWidget(QLabel("Cell Area Threshold (pixels):", area_row))
-    ctx.app._cell_gating_area_edit = QLineEdit("0.0", area_row)
-    ctx.app._cell_gating_area_edit.setFixedWidth(90)
-    ctx.app._cell_gating_area_edit.editingFinished.connect(
-        lambda: cell_gating_on_gating_change(ctx.app)
-    )
-    ar.addWidget(ctx.app._cell_gating_area_edit)
-    ar.addStretch(1)
-    cf_layout.addWidget(area_row)
+    # Cell-area gating retired — it now lives in the QC layer (Segmentation
+    # tab → QC debris gate), enforced via QC_Pass at the df_included_mask
+    # chokepoint. This tab gates on fluorescence only.
 
     title_row = QWidget(control_frame)
     tr = QHBoxLayout(title_row)
@@ -310,7 +297,7 @@ def build_cell_gating_subtab(app) -> None:
 
 def cell_gating_load_cell_areas(app) -> None:
     """Repopulate cell-area + per-channel fluorescence CDFs from selected wells."""
-    if not hasattr(app, "_cell_gating_area_edit"):
+    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return  # tab not built yet
     app._cell_gating_cell_areas = []
     app._cell_gating_fluor_data = {}
@@ -421,7 +408,6 @@ def cell_gating_get_thresh_frac_on(app, channel: str) -> float:
 
 def cell_gating_on_gating_change(app) -> None:
     try:
-        float(app._cell_gating_area_edit.text())
         for edit in app._cell_gating_fluor_gate_edits.values():
             float(edit.text())
     except ValueError:
@@ -834,11 +820,14 @@ def _cell_gating_plot_cdf(app) -> None:
         axes[0].grid(True, alpha=0.2, color=txt_mut)
         axes[0].tick_params(colors=txt_mut, labelsize=8)
 
+        # Mark the QC layer's min-area gate (cell-area gating is QC-owned now).
         try:
-            cell_area_threshold = float(app._cell_gating_area_edit.text())
-            axes[0].axvline(x=cell_area_threshold, color=warn,
-                            linestyle="--", linewidth=2, alpha=0.7)
-        except ValueError:
+            from well_viewer.features.qc.controller import get_qc_params
+            _qc_min = get_qc_params(app).min_area
+            if _qc_min is not None:
+                axes[0].axvline(x=float(_qc_min), color=warn,
+                                linestyle="--", linewidth=2, alpha=0.7)
+        except Exception:
             pass
 
     colors = [accent, "#FF9500", "#FF3B30", "#34C759"]

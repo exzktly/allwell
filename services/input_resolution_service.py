@@ -167,17 +167,36 @@ def resolve_input_output(
         # but a prior ``--move-source-tifs`` run may have crashed
         # mid-way and left some TIFs at ``raw/`` (only some were
         # moved). Detect that state and re-run the zipper to consume
-        # the leftovers — the zipper is naturally idempotent in the
-        # move case since each TIF has a unique filename and
-        # ``os.makedirs(..., exist_ok=True)`` is fine with existing
-        # well folders.
-        leftover_tifs = tif_files_in(raw)
+        # ONLY the truly-unconsumed ones — for copy-mode reruns where
+        # every loose TIF already has a same-named copy under
+        # ``raw/in/<well>/``, the zipper is a no-op and skipping it
+        # avoids re-copying the same files (which would show up as
+        # noisy "zipping" log lines against files already in place
+        # from a prior successful copy).
+        loose_at_top = tif_files_in(raw)
+        if loose_at_top:
+            existing_basenames: set[str] = set()
+            try:
+                for well_dir in in_sub.iterdir():
+                    if not well_dir.is_dir():
+                        continue
+                    for child in well_dir.iterdir():
+                        if child.is_file() and child.suffix.lower() in (".tif", ".tiff"):
+                            existing_basenames.add(child.name)
+            except OSError:
+                pass
+            leftover_tifs = [
+                p for p in loose_at_top if p.name not in existing_basenames
+            ]
+        else:
+            leftover_tifs = []
+
         if leftover_tifs:
             if log_fn:
                 log_fn(
-                    f"[zipper] Resume: found {len(leftover_tifs)} leftover "
-                    f"TIF(s) at top level after partial run; consuming into "
-                    f"existing raw/in/ well folders.\n"
+                    f"[zipper] Resume: found {len(leftover_tifs)} unconsumed "
+                    f"loose TIF(s) at top level after partial run; consuming "
+                    f"into existing raw/in/ well folders.\n"
                 )
             source_tifs = tuple(leftover_tifs)
             run_zipper(
@@ -205,6 +224,29 @@ def resolve_input_output(
 
             return in_sub, raw / "out", _on_success_resume
 
+        # All loose TIFs at top level (if any) are already represented
+        # under raw/in/. If the prior run was copy-mode they're
+        # redundant and the on_success cleanup will tidy them up;
+        # otherwise (move-mode prior run, or no loose TIFs at all) the
+        # state is already fully consumed and there's nothing to do.
+        if loose_at_top and log_fn:
+            log_fn(
+                f"[zipper] Resume: all {len(loose_at_top)} loose TIF(s) at "
+                f"top level already have a copy under raw/in/. Skipping "
+                f"zipper re-run; will clean up the loose copies on "
+                f"successful pipeline completion.\n"
+            )
+        if loose_at_top:
+            already_copied = tuple(loose_at_top)
+
+            def _on_success_post_copy() -> None:
+                for tif in already_copied:
+                    try:
+                        tif.unlink()
+                    except OSError:
+                        pass
+
+            return in_sub, raw / "out", _on_success_post_copy
         return in_sub, raw / "out", None
 
     tifs = tif_files_in(raw)

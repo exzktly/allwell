@@ -482,6 +482,13 @@ class AnalyzeTab(QWidget):
     def _build_qc_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Quality Control")
 
+        hint = QLabel(
+            "Optional pre-measurement clean-up: even out illumination "
+            "(flat-field) and drop debris/merged regions by size & shape.", sec)
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        sec.layout().addWidget(hint)
+
         r = self._row(sec, "Flat-field correction")
         self._flatfield_cb = QComboBox(r)
         self._flatfield_cb.addItems(["none", "empty_well", "gaussian", "basic"])
@@ -510,6 +517,19 @@ class AnalyzeTab(QWidget):
         rs = self._row(sec, "Min solidity (0-1)")
         self._qc_min_solidity_edit = self._entry(rs, "0", width=80)
         rs.layout().addStretch(1)
+
+        # The size / solidity bounds only apply when debris removal is on —
+        # gate them on the checkbox (the same pattern the Background-well field
+        # uses for the empty_well flat-field mode) so the cleaning-step options
+        # read as one coherent group rather than always-live orphan fields.
+        self._qc_debris_rows = (ra, rs)
+
+        def _sync_debris(_=None) -> None:
+            on = self._qc_remove_debris_cb.isChecked()
+            for row in self._qc_debris_rows:
+                row.setEnabled(on)
+        self._qc_remove_debris_cb.toggled.connect(_sync_debris)
+        _sync_debris()
 
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Output Options")

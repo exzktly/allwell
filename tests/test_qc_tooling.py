@@ -161,3 +161,39 @@ def test_build_pipeline_args_qc_mapping():
     assert a[a.index("--qc_min_area") + 1] == "20.0"
     assert "--qc_max_area" not in a       # 0 → no bound
     assert a[a.index("--qc_min_solidity") + 1] == "0.4"
+
+
+# ── Analyze QC section UI: presence + bound gating ───────────────────────────
+
+@pytest.mark.qt
+def test_analyze_qc_section_present_and_gated():
+    """The QC cleaning-step options are built and discoverable, and the debris
+    size/solidity bounds are gated on the 'Remove debris' toggle (mirroring the
+    Background-well field's gating on the empty_well flat-field mode)."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QLabel
+    QApplication.instance() or QApplication([])
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    # All QC widgets exist and the section title renders.
+    for attr in ("_flatfield_cb", "_background_well_edit", "_qc_remove_debris_cb",
+                 "_qc_min_area_edit", "_qc_max_area_edit", "_qc_min_solidity_edit"):
+        assert getattr(tab, attr, None) is not None
+    titles = {l.text() for l in tab.findChildren(QLabel)}
+    assert "Quality Control" in titles
+
+    # Debris bounds disabled until the checkbox is on, then re-disabled when off.
+    ra, rs = tab._qc_debris_rows
+    assert tab._qc_remove_debris_cb.isChecked() is False
+    assert ra.isEnabled() is False and rs.isEnabled() is False
+    tab._qc_remove_debris_cb.setChecked(True)
+    assert ra.isEnabled() is True and rs.isEnabled() is True
+    tab._qc_remove_debris_cb.setChecked(False)
+    assert ra.isEnabled() is False
+
+    # Background well still gates on the empty_well flat-field mode.
+    assert tab._background_well_edit.isEnabled() is False
+    tab._flatfield_cb.setCurrentText("empty_well")
+    assert tab._background_well_edit.isEnabled() is True

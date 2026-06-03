@@ -131,3 +131,53 @@ def test_btrack_guarded():
         pytest.skip("btrack installed")
     with pytest.raises(RuntimeError, match="btrack"):
         run_tracking("btrack", _frames([[(1, 0, 0)]]), EngineParams())
+
+
+def test_btrack_falls_back_to_default_config(monkeypatch):
+    """Regression: an unconfigured BayesianTracker fails inside btrack with no
+    useful message. With no config_file supplied, the engine must configure the
+    tracker from btrack's bundled cell_config so tracking actually runs."""
+    import sys
+    import types
+    from well_viewer.features.tracking.engines import btrack_engine as bt
+
+    calls: dict = {}
+
+    class _FakeTracker:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def configure(self, cfg): calls["configured_with"] = cfg
+        def append(self, objs): calls["appended"] = len(objs)
+        def track(self): calls["tracked"] = True
+        def optimize(self): calls["optimized"] = True
+        # settable attrs the engine assigns
+        max_search_radius = 0.0
+        update_method = None
+        volume = None
+        tracks = ()
+
+    class _PyTrackObject:
+        @staticmethod
+        def from_dict(d): return d
+
+    fake_btrack = types.ModuleType("btrack")
+    fake_btrack.BayesianTracker = _FakeTracker
+    fake_btrack.constants = types.SimpleNamespace(
+        BayesianUpdates=types.SimpleNamespace(APPROXIMATE="approx"))
+    btypes_mod = types.ModuleType("btrack.btypes")
+    btypes_mod.PyTrackObject = _PyTrackObject
+    datasets_mod = types.ModuleType("btrack.datasets")
+    datasets_mod.cell_config = lambda: "/bundled/cell_config.json"
+
+    monkeypatch.setitem(sys.modules, "btrack", fake_btrack)
+    monkeypatch.setitem(sys.modules, "btrack.btypes", btypes_mod)
+    monkeypatch.setitem(sys.modules, "btrack.datasets", datasets_mod)
+
+    bt.run(_frames([[(1, 0, 0)], [(1, 0, 1)]]), EngineParams())
+    assert calls.get("configured_with") == "/bundled/cell_config.json"
+    assert calls.get("tracked") is True
+
+    # An explicit config_file still wins over the bundled fallback.
+    calls.clear()
+    bt.run(_frames([[(1, 0, 0)]]), EngineParams(extra={"config_file": "/my/cfg.json"}))
+    assert calls.get("configured_with") == "/my/cfg.json"

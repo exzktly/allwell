@@ -1512,3 +1512,12 @@ the right next move is to open `well_viewer/runtime_app.py` and scroll
 through `_build_ui` (around line 934) — that's where every widget tree
 hanging off `WellViewerApp` gets stitched together, and every name you'll
 need to grep for is in plain sight.
+
+---
+
+## Version history
+
+The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
+Newest first:
+
+- **5.5.0 (PR1).** `shape_features_core` added as the shared feature catalogue; the PyInstaller spec `collect_all`s torch/cellpose/btrack/trackastra; viewer read paths gained backwards-compat defaults (see the bw-compat test harness).

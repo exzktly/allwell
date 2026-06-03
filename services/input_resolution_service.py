@@ -57,6 +57,7 @@ def run_zipper(
     filename_schema: str,
     filename_sep: str,
     proc_hook: Callable[[subprocess.Popen | None], None] | None = None,
+    move_source_tifs: bool = False,
 ) -> None:
     zipper = find_zipper_script()
     if zipper is None:
@@ -75,6 +76,8 @@ def run_zipper(
         "--filename_sep",
         filename_sep,
     ]
+    if move_source_tifs:
+        cmd.append("--move-source-tifs")
     if log_fn:
         log_fn(f"[zipper] $ {' '.join(cmd)}\n")
 
@@ -130,17 +133,22 @@ def resolve_input_output(
     filename_schema: str,
     filename_sep: str,
     proc_hook: Callable[[subprocess.Popen | None], None] | None = None,
+    move_source_tifs: bool = False,
 ) -> tuple[Path, Path, Callable[[], None] | None]:
     """Resolve the raw input folder into ``(input_dir, output_dir,
     on_success)``.
 
     ``on_success`` is ``None`` for inputs that needed no zipping
-    (already-zipped folders, an ``in/`` subfolder with well content).
-    When the zipper had to run against loose TIFs at ``raw/``, the
-    returned callback deletes those loose TIFs from ``raw/`` so a
-    successful pipeline run converts the dataset from
-    "loose TIFs at top level" to "zips in ``raw/in/``" (the next
-    run picks up the zips and skips the zipper entirely).
+    (already-zipped folders, an ``in/`` subfolder with well content),
+    AND for the loose-TIF case when ``move_source_tifs=True`` (the
+    zipper has already removed the sources, so there's nothing for
+    the post-success hook to delete).
+
+    For the default ``move_source_tifs=False`` loose-TIF case the
+    returned callback deletes ``raw/*.tif`` so a successful pipeline
+    run converts the dataset from "loose TIFs at top level" to
+    "zips in ``raw/in/``" (the next run picks up the zips and skips
+    the zipper entirely).
 
     The caller MUST invoke ``on_success`` only on a clean pipeline
     completion. On any failure (zipper error, pipeline non-zero
@@ -177,6 +185,7 @@ def resolve_input_output(
             filename_schema=filename_schema,
             filename_sep=filename_sep,
             proc_hook=proc_hook,
+            move_source_tifs=move_source_tifs,
         )
         if not in_sub.is_dir() or not _has_well_content(in_sub):
             raise ValueError(
@@ -187,6 +196,13 @@ def resolve_input_output(
                 "  • The well token is not a valid 96-well plate position (A01–H12).\n\n"
                 f"Schema used: {filename_schema}  |  Separator: '{filename_sep}'"
             )
+
+        if move_source_tifs:
+            # The zipper already moved the source TIFs; no post-success
+            # cleanup needed and nothing safe to undo on failure either
+            # (the source files are gone in their old location regardless
+            # of pipeline outcome).
+            return in_sub, raw / "out", None
 
         def _on_success() -> None:
             """Delete loose TIFs from raw/ once the pipeline completes

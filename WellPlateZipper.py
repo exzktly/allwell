@@ -60,6 +60,18 @@ def build_arg_parser():
         "--filename_sep", default=DEFAULT_SEP,
         help=f"Field separator character in filenames.  Default: \"{DEFAULT_SEP}\"",
     )
+    parser.add_argument(
+        "--move-source-tifs", action="store_true",
+        help=(
+            "Move each source TIF into its per-well folder instead of "
+            "copying. Default is to copy (safer: a crash mid-pipeline "
+            "leaves the originals untouched). Use --move-source-tifs "
+            "when disk space is tight — peak usage stays close to the "
+            "input footprint rather than ~2x during the pipeline run. "
+            "A crash mid-zipper leaves a half-converted layout: some "
+            "wells in per-well subfolders, the rest still loose."
+        ),
+    )
     return parser
 
 
@@ -150,14 +162,30 @@ def group_by_well(
     return out
 
 
-def folder_well(well: str, files: List[str], output_dir: str) -> None:
-    """Copy *files* into a per-well subfolder <output_dir>/<well>/."""
+def folder_well(
+    well: str, files: List[str], output_dir: str,
+    *, move: bool = False,
+) -> None:
+    """Place *files* into a per-well subfolder <output_dir>/<well>/.
+
+    ``move=False`` (default) — copy each file with ``shutil.copy2``,
+    leaving the source TIFs untouched. Safer: any crash mid-pipeline
+    keeps the originals available for a clean retry.
+
+    ``move=True`` — opt-in via ``--move-source-tifs``. Uses
+    ``shutil.move`` so peak disk usage stays close to the input
+    footprint rather than ~2x during the pipeline run. The trade-off
+    is that a crash mid-zipper leaves a half-converted input dir
+    (some wells migrated to subfolders, the rest still loose at
+    the top level).
+    """
     if not files:
         return
     well_dir = os.path.join(output_dir, well)
     os.makedirs(well_dir, exist_ok=True)
+    place = shutil.move if move else shutil.copy2
     for f in files:
-        shutil.copy2(f, os.path.join(well_dir, os.path.basename(f)))
+        place(f, os.path.join(well_dir, os.path.basename(f)))
     print(f"{well}: {len(files)} files")
 
 
@@ -189,7 +217,12 @@ def main():
     # Emit per-well progress in canonical A01…H12 order so the Analyze
     # tab's progress chip can keep tracking.
     for well in generate_wells():
-        folder_well(well, files_by_well.get(well, []), output_dir)
+        folder_well(
+            well,
+            files_by_well.get(well, []),
+            output_dir,
+            move=args.move_source_tifs,
+        )
 
 
 if __name__ == "__main__":

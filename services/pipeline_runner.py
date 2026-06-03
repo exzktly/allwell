@@ -394,6 +394,7 @@ class PipelineRunner:
                 fluor_tokens=opts["fluor_tokens"] if self._selective_channels else None,
                 nuclear_token=opts["nuclear_token"] if self._selective_channels else None,
                 log_fn=lambda m: self._enqueue(("line", m)),
+                move_source_tifs=bool(opts.get("move_source_tifs", False)),
             )
             self._enqueue((
                 "line",

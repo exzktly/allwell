@@ -803,19 +803,26 @@ regions, **reusing the same `regionprops` pass** as the shape features. The
 settings are recorded as a `qc_options` block in `pipeline_info.json`
 (`read_pipeline_info` defaults it to `{}` on legacy sidecars).
 
-**Segmentation engines + phase ingestion (label-free).** `--segmentation_method`
-selects the segmenter in `process_image_group`'s dispatch: the StarDist methods
-(`stardist_nuclei`, `stardist_seeded_watershed_cell`) need a fluorescent nuclear
-stain, while the **label-free** methods — `cellpose` (Cellpose `cyto3`, torch
-model lazy-loaded per worker into `_CELLPOSE_MODEL`; `_worker_init` skips the
-StarDist/TF load for these) and `classical_threshold` (Otsu + distance-transform
-watershed, no model) — segment a **phase / brightfield** channel instead. That
-channel is designated on ingestion via a per-row **Phase** checkbox
-(`analyze_tab._phase_token()`, mutually exclusive, not also smFISH) → the
-`--phase_token` arg; `main()` maps the phase token onto the nuclear slot so all
-existing per-FOV grouping is reused. The phase channel is a first-class role
-(`image_identity.Role.PHASE`, suffix `_phase`), and the token is recorded as
-`phase_token` in `pipeline_info.json` so Review knows the segmentation channel.
+**Segmentation routines + parameters.** `--segmentation_method` selects the
+segmenter in `process_image_group`'s dispatch; the Analyze "Channel Tokens"
+section shows a **per-method parameter panel** (a `NamedPageStack` swapped by
+`_refresh_segmentation_hints`) so only the chosen routine's controls appear. All
+routines segment the **Segmentation channel** (`--nuclear_token`, which may be any
+fluorescent or brightfield channel) unless noted:
+- `stardist_nuclei` / `stardist_seeded_watershed_cell` — StarDist (needs a
+  fluorescent stain); watershed adds a cytoplasm token + min-nucleus-area.
+- `cellpose` — **general** Cellpose, not phase-locked. Exposes model
+  (cyto3/cyto2/cyto/nuclei), diameter, `flow_threshold`, `cellprob_threshold`,
+  and an optional second **nucleus channel** (`channels=[seg, nuc]`). Models are
+  cached per type in `_CELLPOSE_MODELS`; `_worker_init` skips the StarDist/TF load.
+- `classical_threshold` — Otsu + distance-transform watershed (no model), general.
+- `cellpose_labelfree` — the **only** label-free method: a Cellpose `cyto3`
+  brightfield preset that segments the channel marked **Phase**. The Phase
+  channel is designated by a per-row checkbox (`analyze_tab._phase_token()`,
+  mutually exclusive, not also smFISH) → `--phase_token`; `main()` remaps the
+  phase token onto the nuclear slot (only for this method) so all per-FOV grouping
+  is reused. Phase is a first-class role (`image_identity.Role.PHASE`, suffix
+  `_phase`) recorded as `phase_token` in `pipeline_info.json`.
 
 ### 6.3 `all_well_launcher.py`
 

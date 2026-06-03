@@ -342,35 +342,68 @@ def stage_local_zips(
     # data from a prior run).
     pre_existing_zips = {p for p in input_dir.glob("[A-H][0-9]*.zip")}
 
+    # Step 0 (v5.x.x): decide whether the zipper actually needs to
+    # run. The framework gets here for FLAT mode (loose TIFs at top
+    # level), fresh FOLDER mode (well subfolders), and the resume
+    # cases (partial move, post-copy crash). The zipper only has work
+    # to do if there are loose TIFs at top level that DON'T already
+    # have a copy in their target well subfolder — i.e. truly
+    # unconsumed sources. Re-copying already-consumed TIFs is just
+    # wasted I/O (and on a copy-mode-after-crash retry, also produces
+    # confusing logs as the user watches the zipper "do work" against
+    # files that are already in their folders).
+    def _basenames_inside_well_folders() -> set[str]:
+        names: set[str] = set()
+        for p in input_dir.iterdir():
+            if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+                continue
+            for child in p.iterdir():
+                if child.is_file() and child.suffix.lower() in (".tif", ".tiff"):
+                    names.add(child.name)
+        return names
+
+    folder_basenames = _basenames_inside_well_folders()
+    unconsumed_loose_tifs = tuple(
+        p for p in source_loose_tifs if p.name not in folder_basenames
+    )
+    zipper_will_run = bool(unconsumed_loose_tifs) or (
+        mode is LocalInputMode.FLAT and not folder_basenames
+    )
+    if mode is LocalInputMode.FOLDER and not unconsumed_loose_tifs and log_fn:
+        log_fn(
+            "[stage] all loose TIF(s) already copied into well folders "
+            "from a prior run; skipping zipper re-run, going straight "
+            "to zip-up.\n"
+        )
+
     # Step 1: WellPlateZipper groups loose TIFs into per-well
     # subfolders (the v5.x.x ``--move-source-tifs`` flag and copy
     # default both produce folders, never zips — the zip-up step is
-    # separate and lives in ``_zip_well_folder`` below). For FOLDER
-    # mode this is mostly a no-op (no loose TIFs at top level on a
-    # fresh run); for the FOLDER-resume-after-partial-move case it
-    # consumes the leftover top-level TIFs into the existing well
-    # folders.
-    try:
-        run_zipper(
-            input_dir,
-            input_dir,
-            log_fn=log_fn,
-            progress_fn=None,
-            filename_schema=filename_schema,
-            filename_sep=filename_sep,
-            proc_hook=proc_hook,
-            move_source_tifs=move_source_tifs,
-        )
-    except Exception:
-        # Roll back ONLY the zips we created in this aborted run.
-        # Source TIFs / folders stay intact so the user can re-run.
-        for p in input_dir.glob("[A-H][0-9]*.zip"):
-            if p not in pre_existing_zips:
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
-        raise
+    # separate and lives in ``_zip_well_folder`` below). Skipped when
+    # the prior-run detection above shows every loose TIF already has
+    # a folder copy.
+    if zipper_will_run:
+        try:
+            run_zipper(
+                input_dir,
+                input_dir,
+                log_fn=log_fn,
+                progress_fn=None,
+                filename_schema=filename_schema,
+                filename_sep=filename_sep,
+                proc_hook=proc_hook,
+                move_source_tifs=move_source_tifs,
+            )
+        except Exception:
+            # Roll back ONLY the zips we created in this aborted run.
+            # Source TIFs / folders stay intact so the user can re-run.
+            for p in input_dir.glob("[A-H][0-9]*.zip"):
+                if p not in pre_existing_zips:
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+            raise
 
     # Step 2: convert each well folder into ``{well}.zip``. This is
     # the same atomic-tmp + rename pattern that ``_stage_mixed_mode``

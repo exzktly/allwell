@@ -101,6 +101,14 @@ def _count_well_content(folder: Path) -> int:
     return len(zips) or len(folders)
 
 
+def _safe_seg_float(text: str, default: float) -> float:
+    """Parse a segmentation-parameter field; *default* on empty/invalid."""
+    try:
+        return float(str(text).strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
@@ -298,21 +306,33 @@ class AnalyzeTab(QWidget):
         self._schema_preview_lbl.setWordWrap(True)
         sec.layout().addWidget(self._schema_preview_lbl)
 
+    # Segmentation routines: (CLI value, friendly label). The combo stores the
+    # value in userData so the label can read naturally without changing argv.
+    _SEG_METHODS = (
+        ("stardist_nuclei", "StarDist — nuclei"),
+        ("stardist_seeded_watershed_cell", "StarDist + watershed — cell"),
+        ("cellpose", "Cellpose (general)"),
+        ("cellpose_labelfree", "Label-free (Cellpose, brightfield)"),
+        ("classical_threshold", "Classical (Otsu + watershed)"),
+    )
+
+    def _seg_method(self) -> str:
+        """The canonical segmentation-method value behind the combo selection."""
+        return self._seg_method_cb.currentData() or "stardist_nuclei"
+
     def _build_channel_tokens_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Channel Tokens")
 
         seg_row = self._row(sec, "Segmentation")
         self._seg_method_cb = QComboBox(seg_row)
-        self._seg_method_cb.addItems([
-            "stardist_nuclei", "stardist_seeded_watershed_cell",
-            "cellpose", "classical_threshold",
-        ])
-        self._seg_method_cb.setFixedWidth(170)
+        for _value, _label in self._SEG_METHODS:
+            self._seg_method_cb.addItem(_label, userData=_value)
+        self._seg_method_cb.setFixedWidth(230)
         seg_row.layout().addWidget(self._seg_method_cb)
         seg_row.layout().addStretch(1)
         self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())
 
-        nuc_row = self._row(sec, "Nuclear (seg)")
+        nuc_row = self._row(sec, "Segmentation channel")
         self._nuclear_row_widget = nuc_row
         self._nuclear_token_edit = self._entry(nuc_row, "NIR")
         nuc_row.layout().addStretch(1)
@@ -341,39 +361,71 @@ class AnalyzeTab(QWidget):
         add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
         sec.layout().addWidget(add_btn)
 
-        # Watershed-only rows (hidden until method selected)
-        self._cyto_row_widget = QWidget(sec)
-        cr = QHBoxLayout(self._cyto_row_widget)
-        cr.setContentsMargins(0, 1, 0, 1)
-        clbl = QLabel("Cytoplasm token", self._cyto_row_widget)
-        clbl.setObjectName("Muted")
-        clbl.setFixedWidth(150)
-        cr.addWidget(clbl)
-        self._cytoplasm_edit = QLineEdit(self._cyto_row_widget)
-        self._cytoplasm_edit.setFixedWidth(80)
-        cr.addWidget(self._cytoplasm_edit)
-        cr.addStretch(1)
-        self._cytoplasm_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
-        sec.layout().addWidget(self._cyto_row_widget)
-        self._cyto_row_widget.setVisible(False)
+        # Per-method parameter panel — swapped by _refresh_segmentation_hints so
+        # only the selected routine's controls are shown.
+        from well_viewer.core.centre_view import NamedPageStack
+        self._seg_param_stack = NamedPageStack(sec)
+        sec.layout().addWidget(self._seg_param_stack)
 
-        self._area_row_widget = QWidget(sec)
-        ar = QHBoxLayout(self._area_row_widget)
-        ar.setContentsMargins(0, 1, 0, 1)
-        albl = QLabel("Min nucleus area", self._area_row_widget)
-        albl.setObjectName("Muted")
-        albl.setFixedWidth(150)
-        ar.addWidget(albl)
-        self._min_nucleus_area_edit = QLineEdit("50", self._area_row_widget)
-        self._min_nucleus_area_edit.setFixedWidth(60)
-        ar.addWidget(self._min_nucleus_area_edit)
-        px_lbl = QLabel("pixels (watershed)", self._area_row_widget)
-        px_lbl.setObjectName("Muted")
-        ar.addWidget(px_lbl)
-        ar.addStretch(1)
+        def _page() -> QWidget:
+            p = QWidget()
+            v = QVBoxLayout(p)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(2)
+            return p
+
+        # StarDist (nuclei): no extra parameters.
+        self._seg_param_stack.addPage("stardist_nuclei", _page())
+
+        # StarDist + watershed: cytoplasm token + min nucleus area.
+        ws = _page()
+        cyto_cell = self._row(ws, "Cytoplasm token")
+        self._cytoplasm_edit = self._entry(cyto_cell, "", width=80)
+        cyto_cell.layout().addStretch(1)
+        self._cytoplasm_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
+        area_cell = self._row(ws, "Min nucleus area")
+        self._min_nucleus_area_edit = self._entry(area_cell, "50", width=60)
+        _px = QLabel("pixels", area_cell)
+        _px.setObjectName("Muted")
+        area_cell.layout().addWidget(_px)
+        area_cell.layout().addStretch(1)
         self._min_nucleus_area_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
-        sec.layout().addWidget(self._area_row_widget)
-        self._area_row_widget.setVisible(False)
+        self._seg_param_stack.addPage("stardist_seeded_watershed_cell", ws)
+
+        # Cellpose (general): model, diameter, flow/cell-prob thresholds, optional
+        # second (nucleus) channel for cyto models. Segments the Segmentation
+        # channel above (fluorescent or brightfield).
+        cp = _page()
+        m_cell = self._row(cp, "Model")
+        self._cellpose_model_cb = QComboBox(cp)
+        self._cellpose_model_cb.addItems(["cyto3", "cyto2", "cyto", "nuclei"])
+        m_cell.layout().addWidget(self._cellpose_model_cb)
+        m_cell.layout().addStretch(1)
+        d_cell = self._row(cp, "Diameter (px, 0=auto)")
+        self._cellpose_diameter_edit = self._entry(d_cell, "0", width=70)
+        d_cell.layout().addStretch(1)
+        f_cell = self._row(cp, "Flow threshold")
+        self._cellpose_flow_thr_edit = self._entry(f_cell, "0.4", width=70)
+        f_cell.layout().addStretch(1)
+        c_cell = self._row(cp, "Cell-prob threshold")
+        self._cellpose_cellprob_thr_edit = self._entry(c_cell, "0.0", width=70)
+        c_cell.layout().addStretch(1)
+        n_cell = self._row(cp, "Nucleus channel (opt)")
+        self._cellpose_nuclei_channel_edit = self._entry(n_cell, "", width=80)
+        n_cell.layout().addStretch(1)
+        self._seg_param_stack.addPage("cellpose", cp)
+
+        # Label-free (Cellpose preset on the Phase channel) — no exposed params.
+        lf = _page()
+        lf_lbl = QLabel("Segments the channel marked 'Phase' above, using a Cellpose "
+                        "brightfield preset (cyto3, auto diameter).", lf)
+        lf_lbl.setObjectName("Muted")
+        lf_lbl.setWordWrap(True)
+        lf.layout().addWidget(lf_lbl)
+        self._seg_param_stack.addPage("cellpose_labelfree", lf)
+
+        # Classical (Otsu + watershed): no extra parameters.
+        self._seg_param_stack.addPage("classical_threshold", _page())
 
         self._segmentation_hint_lbl = QLabel("", sec)
         self._segmentation_hint_lbl.setObjectName("Muted")
@@ -886,7 +938,7 @@ class AnalyzeTab(QWidget):
     # ------------------------------------------------------------------
     def _segmentation_validation_errors(self) -> list[str]:
         errors: list[str] = []
-        method = self._seg_method_cb.currentText()
+        method = self._seg_method()
         if method == "stardist_seeded_watershed_cell":
             cyto = self._cytoplasm_edit.text().strip()
             nuc  = self._nuclear_token_edit.text().strip()
@@ -900,11 +952,11 @@ class AnalyzeTab(QWidget):
                     errors.append("Minimum nucleus area must be a positive integer.")
             except ValueError:
                 errors.append("Minimum nucleus area must be a positive integer.")
-        elif method in ("cellpose", "classical_threshold"):
+        elif method == "cellpose_labelfree":
             if not self._phase_token():
                 errors.append(
                     "Label-free segmentation requires exactly one channel marked "
-                    "'Phase' (the brightfield/phase image to segment).")
+                    "'Phase' (the brightfield image to segment).")
         return errors
 
     def _background_well_validation_error(self) -> Optional[str]:
@@ -938,27 +990,33 @@ class AnalyzeTab(QWidget):
     def _refresh_segmentation_hints(self) -> None:
         if not hasattr(self, "_segmentation_hint_lbl"):
             return
-        method = self._seg_method_cb.currentText()
-        watershed = method == "stardist_seeded_watershed_cell"
-        label_free = method in ("cellpose", "classical_threshold")
-        self._cyto_row_widget.setVisible(watershed)
-        self._area_row_widget.setVisible(watershed)
-        # Label-free methods segment the Phase channel, not a nuclear stain —
-        # the nuclear-token row is irrelevant there.
+        method = self._seg_method()
+        # Show only the selected routine's parameter page.
+        if hasattr(self, "_seg_param_stack"):
+            self._seg_param_stack.setCurrentByName(method)
+        # The Label-free preset segments the Phase channel — the explicit
+        # Segmentation-channel field doesn't apply there (it's taken at runtime).
+        phase_locked = method == "cellpose_labelfree"
         if hasattr(self, "_nuclear_row_widget"):
-            self._nuclear_row_widget.setVisible(not label_free)
-        if watershed:
-            errors = self._segmentation_validation_errors()
-            self._segmentation_hint_lbl.setText("  ".join(errors) if errors else (
-                "Watershed mode uses StarDist seeds + cytoplasm mask "
-                "and also quantifies the cytoplasm channel."))
-        elif label_free:
-            errors = self._segmentation_validation_errors()
-            self._segmentation_hint_lbl.setText("  ".join(errors) if errors else (
-                "Label-free mode segments the channel marked 'Phase' "
-                "(no nuclear stain required)."))
-        else:
-            self._segmentation_hint_lbl.setText("")
+            self._nuclear_row_widget.setVisible(not phase_locked)
+        errors = self._segmentation_validation_errors()
+        if errors:
+            self._segmentation_hint_lbl.setText("  ".join(errors))
+            return
+        hint = {
+            "stardist_seeded_watershed_cell":
+                "Watershed mode uses StarDist seeds + cytoplasm mask and also "
+                "quantifies the cytoplasm channel.",
+            "cellpose":
+                "Cellpose segments the 'Segmentation channel' above — works on a "
+                "fluorescent or brightfield channel.",
+            "cellpose_labelfree":
+                "Label-free preset: Cellpose (cyto3) on the channel marked 'Phase' "
+                "— no nuclear stain required.",
+            "classical_threshold":
+                "Otsu threshold + watershed on the 'Segmentation channel' above.",
+        }.get(method, "")
+        self._segmentation_hint_lbl.setText(hint)
 
     # ------------------------------------------------------------------
     # Schema helpers
@@ -1251,7 +1309,7 @@ class AnalyzeTab(QWidget):
             self._status_signal_pushed = False
 
     def _collect_run_options(self) -> dict:
-        method = self._seg_method_cb.currentText() or "stardist_nuclei"
+        method = self._seg_method()
         try:
             min_area = int(self._min_nucleus_area_edit.text().strip() or "50")
         except ValueError:
@@ -1291,6 +1349,11 @@ class AnalyzeTab(QWidget):
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=min_area,
+            cellpose_model=self._cellpose_model_cb.currentText(),
+            cellpose_diameter=_safe_seg_float(self._cellpose_diameter_edit.text(), 0.0),
+            cellpose_flow_threshold=_safe_seg_float(self._cellpose_flow_thr_edit.text(), 0.4),
+            cellpose_cellprob_threshold=_safe_seg_float(self._cellpose_cellprob_thr_edit.text(), 0.0),
+            cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
         )
 
     def _expected_well_count(self, opts: dict) -> int:

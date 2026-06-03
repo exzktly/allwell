@@ -129,6 +129,50 @@ def test_scatter_gate_exempts_shape_columns():
     assert gate_exempt("gfp_mean_intensity") is False
 
 
+# ── Analyze: compact shape-metric dropdown (replaces the wide chip grid) ──────
+
+def test_checkable_dropdown_data_contract(qapp):
+    """The CheckableDropdown is a drop-in for the multi-select chip group:
+    addItem / checkedData / setCheckedData / All / None, with a summary."""
+    from widgets.checkable_dropdown import CheckableDropdown
+
+    d = CheckableDropdown(noun="metrics selected", empty_text="No metrics selected")
+    for label, key in (("Area", "area"), ("Eccentricity", "eccentricity"),
+                       ("Solidity", "solidity")):
+        d.addItem(label, data=key)
+    assert d.count() == 3
+    assert d.checkedData() == [] and d._button.text().startswith("No metrics")
+
+    d.setCheckedData(["area", "solidity"])
+    assert d.checkedData() == ["area", "solidity"]          # catalog order preserved
+    assert d.checkedLabels() == ["Area", "Solidity"]
+    assert "2 of 3" in d._button.text()
+
+    d._set_all(True)
+    assert d.checkedData() == ["area", "eccentricity", "solidity"]
+    assert "All 3" in d._button.text()
+    d._set_all(False)
+    assert d.checkedData() == []
+
+
+def test_analyze_shape_selector_is_dropdown(qapp):
+    """Regression: the Analyze 'Shape Metrics' selector is the compact dropdown
+    (not a wide chip row), defaults round-trip into the run options, and a
+    changed selection flows through unchanged."""
+    from analyze_tab import AnalyzeTab
+    from widgets.checkable_dropdown import CheckableDropdown
+
+    tab = AnalyzeTab()
+    sel = tab._shape_chips
+    assert isinstance(sel, CheckableDropdown)
+    assert sel.count() == len(sfc.SELECTABLE_KEYS)
+    # Defaults match the tab's declared default set (order-insensitive).
+    assert set(sel.checkedData()) == set(tab._SHAPE_DEFAULTS)
+
+    sel.setCheckedData(["eccentricity", "solidity"])
+    assert tab._collect_run_options()["shape_features"] == ["eccentricity", "solidity"]
+
+
 # ── Full-app regressions: shape features survive sub-tab switch + reach scatter ─
 
 

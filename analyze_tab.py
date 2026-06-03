@@ -38,7 +38,7 @@ from services.remote_config import load_remotes
 from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
-from widgets.chip_group import ChipGroup
+from widgets.checkable_dropdown import CheckableDropdown
 import shape_features_core as _sfc
 
 # ---------------------------------------------------------------------------
@@ -446,10 +446,16 @@ class AnalyzeTab(QWidget):
         hint.setWordWrap(True)
         sec.layout().addWidget(hint)
 
-        self._shape_chips = ChipGroup(sec, exclusive=False)
+        # A compact checkbox dropdown rather than a wide chip grid — the
+        # selectable-feature list is long enough to overflow the narrow
+        # Analyze sidebar. ``checkedData()`` / ``setCheckedData()`` keep the
+        # same contract the chip group exposed, so _collect_run_options needs
+        # no change.
+        self._shape_chips = CheckableDropdown(sec, noun="metrics selected",
+                                              empty_text="No metrics selected")
         for key in _sfc.SELECTABLE_KEYS:
             feat = _sfc.BY_KEY[key]
-            self._shape_chips.addChip(feat.label, data=key)
+            self._shape_chips.addItem(feat.label, data=key)
         self._shape_chips.setCheckedData(list(self._SHAPE_DEFAULTS))
         sec.layout().addWidget(self._shape_chips)
 

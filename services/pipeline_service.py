@@ -62,18 +62,32 @@ def build_pipeline_args(
     cytoplasm_token = (opts.get("cytoplasm_token") or "").strip()
     if segmentation_method == "stardist_seeded_watershed_cell" and cytoplasm_token:
         args += ["--cytoplasm_token", cytoplasm_token]
-    # Label-free methods segment the designated phase channel.
-    if segmentation_method in ("cellpose", "classical_threshold"):
+    # The label-free preset segments the designated phase channel; main() applies
+    # the cyto3 brightfield preset, so the GUI sends only the phase token here.
+    if segmentation_method == "cellpose_labelfree":
         phase_token = (opts.get("phase_token") or "").strip()
         if phase_token:
             args += ["--phase_token", phase_token]
-        if segmentation_method == "cellpose":
+    # General Cellpose: expose model + diameter + thresholds + optional nucleus
+    # channel (works on a fluorescent or brightfield channel; no phase remap).
+    if segmentation_method == "cellpose":
+        args += ["--cellpose_model", str(opts.get("cellpose_model", "cyto3") or "cyto3")]
+        for flag, key, default in (
+            ("--cellpose_diameter", "cellpose_diameter", 0.0),
+            ("--cellpose_flow_threshold", "cellpose_flow_threshold", 0.4),
+            ("--cellpose_cellprob_threshold", "cellpose_cellprob_threshold", 0.0),
+        ):
             try:
-                diam = float(opts.get("cellpose_diameter", 0) or 0)
+                val = float(opts.get(key, default))
             except (TypeError, ValueError):
-                diam = 0.0
-            if diam > 0:
-                args += ["--cellpose_diameter", str(diam)]
+                val = default
+            # diameter is only meaningful when > 0; thresholds always emitted
+            if key == "cellpose_diameter" and val <= 0:
+                continue
+            args += [flag, str(val)]
+        nuc = (opts.get("cellpose_nuclei_channel") or "").strip()
+        if nuc:
+            args += ["--cellpose_nuclei_channel", nuc]
     try:
         args += ["--tophat_radius_nir", str(int(opts["tophat_radius_nir"]))]
     except (TypeError, ValueError, KeyError):

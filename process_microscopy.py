@@ -78,15 +78,18 @@ import imageio.v3 as iio
 # ---------------------------------------------------------------------------
 
 _STARDIST_MODEL: "StarDist2D | None" = None
-# Per-worker Cellpose model (label-free segmentation), lazy-loaded on first use.
-_CELLPOSE_MODEL = None
+# Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
+# run can choose a model without silently reusing another type's cache. Lazy.
+_CELLPOSE_MODELS: "dict[str, object]" = {}
 
 # Segmentation-method groups. StarDist methods need the TF model loaded in
-# _worker_init; label-free methods read the designated phase channel instead of
-# a fluorescent nuclear stain (cellpose lazy-loads its torch model; classical
-# needs no model).
+# _worker_init. Cellpose is a *general* segmenter (any channel); the
+# 'cellpose_labelfree' preset is the only label-free method (it remaps the
+# nuclear slot onto the phase channel in main()). classical_threshold is also a
+# general routine (Otsu + watershed on the chosen channel).
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
-_LABELFREE_METHODS = ("cellpose", "classical_threshold")
+_CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
+_LABELFREE_METHODS = ("cellpose_labelfree",)
 
 # Identifies the FOV currently being segmented, for diagnostic logging — set by
 # process_image_group at entry so the per-FOV ``seg-input`` line (and the last
@@ -1692,28 +1695,55 @@ def _segment_stardist_seeded_watershed_cell(
     return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
 
 
-def _segment_cellpose(image: np.ndarray, diameter: float = 0.0) -> np.ndarray:
-    """Label-free segmentation with the Cellpose ``cyto3`` model.
+def _cellpose_model(model_type: str = "cyto3"):
+    """Return the per-worker Cellpose model for *model_type*, loading it once.
 
-    Reads the designated phase / brightfield channel (not a nuclear stain). The
-    model is loaded once per worker into the guarded ``_CELLPOSE_MODEL`` global
-    on first use (mirrors the ``_STARDIST_MODEL`` cache). ``diameter=0`` lets
-    Cellpose auto-estimate the cell diameter. Import is guarded so the app /
-    pipeline run without cellpose installed; the error only surfaces when this
-    method is actually selected.
-    """
-    global _CELLPOSE_MODEL
-    if _CELLPOSE_MODEL is None:
+    Guarded import so the app / pipeline run without cellpose installed; the
+    error only surfaces when a Cellpose method is actually selected."""
+    key = str(model_type or "cyto3").strip() or "cyto3"
+    model = _CELLPOSE_MODELS.get(key)
+    if model is None:
         try:
             from cellpose import models as _cp_models
         except Exception as exc:  # pragma: no cover - depends on optional dep
             raise RuntimeError(
-                "segmentation_method=cellpose requires the 'cellpose' package. "
-                f"Install it (see requirements) — import failed: {exc}"
+                "Cellpose segmentation requires the 'cellpose' package. Install "
+                f"it (see requirements) — import failed: {exc}"
             ) from exc
-        _CELLPOSE_MODEL = _cp_models.CellposeModel(model_type="cyto3")
+        model = _cp_models.CellposeModel(model_type=key)
+        _CELLPOSE_MODELS[key] = model
+    return model
+
+
+def _segment_cellpose(
+    image: np.ndarray,
+    *,
+    model_type: str = "cyto3",
+    diameter: float = 0.0,
+    flow_threshold: float = 0.4,
+    cellprob_threshold: float = 0.0,
+    nucleus_image: "np.ndarray | None" = None,
+) -> np.ndarray:
+    """Segment *image* with Cellpose. Works on any channel (fluorescent or
+    brightfield) — the caller chooses the input. ``diameter=0`` auto-estimates.
+
+    When *nucleus_image* is given, the two channels are stacked and Cellpose runs
+    in cyto+nucleus mode (``channels=[1, 2]``); otherwise grayscale
+    (``channels=[0, 0]``). ``flow_threshold`` / ``cellprob_threshold`` tune the
+    mask recovery / probability cut.
+    """
+    model = _cellpose_model(model_type)
     diam = float(diameter) if diameter and diameter > 0 else None
-    result = _CELLPOSE_MODEL.eval(np.asarray(image), diameter=diam, channels=[0, 0])
+    seg = np.asarray(image)
+    if nucleus_image is not None:
+        stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
+        result = model.eval(stacked, diameter=diam, channels=[1, 2],
+                            flow_threshold=flow_threshold,
+                            cellprob_threshold=cellprob_threshold)
+    else:
+        result = model.eval(seg, diameter=diam, channels=[0, 0],
+                            flow_threshold=flow_threshold,
+                            cellprob_threshold=cellprob_threshold)
     masks = result[0]  # eval returns (masks, flows, styles[, diams])
     return np.asarray(masks, dtype=np.int32)
 
@@ -2039,6 +2069,10 @@ def process_image_group(
     qc_max_area: "float | None" = None,
     qc_min_solidity: "float | None" = None,
     cellpose_diameter: float = 0.0,
+    cellpose_model: str = "cyto3",
+    cellpose_flow_threshold: float = 0.4,
+    cellpose_cellprob_threshold: float = 0.0,
+    cellpose_nuclei_channel: str = "",
 ) -> list[dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
@@ -2168,13 +2202,25 @@ def process_image_group(
             time.perf_counter() - _t,
             len(np.unique(labels)) - 1,
         )
-    elif segmentation_method == "cellpose":
-        # Label-free: the phase/brightfield channel occupies the nuclear slot
-        # (main() maps --phase_token onto the nuclear token for label-free runs),
-        # so nir_corr is the phase image here.
-        labels = _segment_cellpose(nir_corr, diameter=cellpose_diameter)
-        log.info("  cellpose:    %.1f s  (%d cells detected)",
-                 time.perf_counter() - _t, len(np.unique(labels)) - 1)
+    elif segmentation_method in _CELLPOSE_METHODS:
+        # General Cellpose segments the chosen Segmentation channel (nir_corr).
+        # The 'cellpose_labelfree' preset is identical mechanics: main() already
+        # remapped the nuclear slot onto the phase channel, and forces cyto3, so
+        # nir_corr is the phase image and the params are the brightfield preset.
+        nucleus_image = None
+        nuc_tok = str(cellpose_nuclei_channel or "").strip().lower()
+        if nuc_tok:
+            lowered = [t.lower() for t in fluor_tokens]
+            if nuc_tok in lowered:
+                nucleus_image = fluor_raws[lowered.index(nuc_tok)]
+        labels = _segment_cellpose(
+            nir_corr, model_type=cellpose_model, diameter=cellpose_diameter,
+            flow_threshold=cellpose_flow_threshold,
+            cellprob_threshold=cellpose_cellprob_threshold,
+            nucleus_image=nucleus_image,
+        )
+        log.info("  cellpose:    %.1f s  (%d cells detected; model=%s)",
+                 time.perf_counter() - _t, len(np.unique(labels)) - 1, cellpose_model)
     elif segmentation_method == "classical_threshold":
         labels = _segment_classical(nir_corr)
         log.info("  classical:   %.1f s  (%d objects detected)",
@@ -4164,29 +4210,55 @@ def build_parser() -> argparse.ArgumentParser:
         "--segmentation_method",
         default=DEFAULT_SEGMENTATION_METHOD,
         choices=("stardist_nuclei", "stardist_seeded_watershed_cell",
-                 "cellpose", "classical_threshold"),
+                 "cellpose", "cellpose_labelfree", "classical_threshold"),
         help=(
-            "Segmentation method. 'stardist_nuclei' keeps existing behavior. "
-            "'stardist_seeded_watershed_cell' uses StarDist nuclear seeds and "
-            "2D watershed on a cytoplasm Otsu mask. 'cellpose' (Cellpose cyto3) "
-            "and 'classical_threshold' (Otsu + watershed) are label-free and "
-            "segment the --phase_token channel instead of a nuclear stain."
+            "Segmentation routine, run on the --nuclear_token channel (any "
+            "fluorescent or brightfield channel) unless noted. 'stardist_nuclei' "
+            "(default) and 'stardist_seeded_watershed_cell' (StarDist seeds + "
+            "cytoplasm watershed) need a fluorescent stain. 'cellpose' is general "
+            "Cellpose (tune --cellpose_model/diameter/flow/cellprob, optional "
+            "--cellpose_nuclei_channel). 'classical_threshold' is Otsu + "
+            "watershed. 'cellpose_labelfree' is a Cellpose cyto3 preset that "
+            "segments the --phase_token (brightfield) channel."
         ),
     )
     p.add_argument(
         "--phase_token",
         default="",
         help=(
-            "Channel token of the phase / brightfield image used as the "
-            "segmentation input for the label-free methods (cellpose / "
-            "classical_threshold). Ignored by the StarDist methods."
+            "Channel token of the phase / brightfield image segmented by the "
+            "'cellpose_labelfree' preset. Ignored by the other methods."
         ),
+    )
+    p.add_argument(
+        "--cellpose_model",
+        default="cyto3",
+        choices=("cyto3", "cyto2", "cyto", "nuclei"),
+        help="Cellpose model for --segmentation_method=cellpose.",
     )
     p.add_argument(
         "--cellpose_diameter",
         type=float,
         default=0.0,
         help="Cellpose cell diameter in px (0 = auto-estimate).",
+    )
+    p.add_argument(
+        "--cellpose_flow_threshold",
+        type=float,
+        default=0.4,
+        help="Cellpose flow_threshold (mask recovery tolerance).",
+    )
+    p.add_argument(
+        "--cellpose_cellprob_threshold",
+        type=float,
+        default=0.0,
+        help="Cellpose cellprob_threshold (cell probability cut).",
+    )
+    p.add_argument(
+        "--cellpose_nuclei_channel",
+        default="",
+        help="Optional fluor token used as Cellpose's nucleus channel "
+             "(channels=[seg, nucleus]) for cyto models; empty = grayscale.",
     )
     p.add_argument(
         "--cytoplasm_token",
@@ -4384,8 +4456,10 @@ def main() -> None:
                 f"{args.segmentation_method} (the phase/brightfield channel to segment)."
             )
         args.nuclear_token = phase_token
-        log.info("Label-free segmentation (%s): using phase channel %r as the "
-                 "segmentation input.", args.segmentation_method, phase_token)
+        # The label-free preset is Cellpose with a brightfield model.
+        args.cellpose_model = "cyto3"
+        log.info("Label-free segmentation (%s): Cellpose cyto3 on phase channel "
+                 "%r as the segmentation input.", args.segmentation_method, phase_token)
     log.info("Schema   : %s  (sep=%r)", args.filename_schema, sep)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -4546,6 +4620,10 @@ def main() -> None:
         qc_max_area=(args.qc_max_area or None),
         qc_min_solidity=(args.qc_min_solidity or None),
         cellpose_diameter=args.cellpose_diameter,
+        cellpose_model=args.cellpose_model,
+        cellpose_flow_threshold=args.cellpose_flow_threshold,
+        cellpose_cellprob_threshold=args.cellpose_cellprob_threshold,
+        cellpose_nuclei_channel=args.cellpose_nuclei_channel,
     )
 
     # If the selected input is an "in" directory, normalise any loose TIF/TIFF

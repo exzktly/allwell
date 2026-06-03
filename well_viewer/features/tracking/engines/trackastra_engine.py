@@ -102,5 +102,17 @@ def run(frames: List[FrameDetections], params: EngineParams) -> TrackResult:
     device = str(extra.get("device", "automatic"))
     model_name = str(extra.get("model", DEFAULT_MODEL))
     model = Trackastra.from_pretrained(model_name, device=device)
-    _graph, masks_tracked = model.track(imgs, masks, mode=mode)
+    tracked = model.track(imgs, masks, mode=mode)
+    # trackastra's ``track()`` return shape changed across releases: the pinned
+    # 0.3.x returns a single ``TrackGraph``, while newer builds return a
+    # ``(track_graph, masks_tracked)`` pair. Unpacking the single-graph return
+    # into two iterated the graph's *nodes* — the "too many values to unpack
+    # (expected 2)" crash the user hit. Accept both: use the relabeled masks
+    # directly when the pair form is returned, else derive them from the graph
+    # via ``graph_to_ctc`` (which returns ``(track_df, relabeled_masks)``).
+    if isinstance(tracked, tuple) and len(tracked) == 2:
+        _graph, masks_tracked = tracked
+    else:
+        from trackastra.tracking import graph_to_ctc
+        _track_df, masks_tracked = graph_to_ctc(tracked, masks, outdir=None)
     return result_from_tracked_masks(ordered, np.asarray(masks_tracked))

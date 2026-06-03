@@ -290,6 +290,15 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     sep.setFixedHeight(1)
     il.addWidget(sep)
 
+    # Quality-control debris gate — the Segmentation tab is the QC editing
+    # home: tuning the size/solidity bounds here re-flags cells live (they
+    # render excluded in the overlay below) and applies to the whole dataset.
+    try:
+        from well_viewer.features.qc.tab_view import build_qc_gate_controls
+        il.addWidget(build_qc_gate_controls(self, inner))
+    except Exception:
+        pass
+
     self._review_image_status = QLabel("", inner)
     self._review_image_status.setObjectName("Muted")
     il.addWidget(self._review_image_status)

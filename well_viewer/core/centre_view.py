@@ -712,10 +712,6 @@ def build_centre(app, parent: QWidget) -> None:
         from well_viewer.features.batch_export.tab_view import build_batch_export_tab
         build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
-    def _build_qc() -> None:
-        from well_viewer.features.qc.tab_view import build_qc_tab
-        build_qc_tab(app, tab_frames["QC"])
-
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         ("Analysis", [
             # "Plotting" is a single top-level tab that contains Line Graphs,
@@ -735,9 +731,6 @@ def build_centre(app, parent: QWidget) -> None:
             # segmentation surfaces share one rail entry.
             ("Image Table", _build_image_table),
             ("Segmentation", _build_cell_segmentation),
-            # Post-run quality control: edit the debris gate and re-flag cells
-            # live (non-destructive; composes with manual curation).
-            ("QC", _build_qc),
         ]),
         ("Data", [
             ("Review CSV", _build_review_csv),

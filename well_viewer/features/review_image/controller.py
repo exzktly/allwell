@@ -576,15 +576,26 @@ def review_build_include_map(
                 sub_keys = keys.loc[sub.index]
                 nids = sub_keys.map(lambda k: k[2]).map(_safe_int_or_none)
                 incl = sub["Included"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
+                # QC layer (QC_Pass) composes with manual/gating Included: a
+                # cell shows excluded when it fails QC *or* is manually/gated
+                # out (effective = manual-keep AND passes-QC). Absent column →
+                # all-pass (older data / QC off).
+                if "QC_Pass" in sub.columns:
+                    qc = sub["QC_Pass"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
+                else:
+                    qc = pd.Series(1, index=sub.index)
                 overrides = app._review_included_overrides
-                for nid, base_incl in zip(nids, incl):
+                for nid, base_incl, qc_pass in zip(nids, incl, qc):
                     if nid is None:
                         continue
                     ovr = overrides.get((well, fov, tp, str(nid)))
                     if ovr is not None:
-                        include_by_nid[nid] = (str(ovr).strip() != "0")
+                        inc = (str(ovr).strip() != "0")
                     elif nid in include_by_nid:
-                        include_by_nid[nid] = bool(base_incl)
+                        inc = bool(base_incl)
+                    else:
+                        continue
+                    include_by_nid[nid] = inc and bool(qc_pass)
     # Apply overrides for cells present in the mask but without a CSV row
     # (e.g. when no pipeline results are loaded yet).
     for (ovr_well, ovr_fov, ovr_tp, ovr_nid), val in app._review_included_overrides.items():

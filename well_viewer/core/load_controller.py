@@ -150,6 +150,8 @@ def load_directory(app, d: Path, label=None) -> None:
         app._persistence.load("qc_params")
         from well_viewer.features.qc.controller import apply_qc_to_cache
         apply_qc_to_cache(app)
+        from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
+        qc_gate_refresh_widgets(app)  # sync the Segmentation gate row if built
     except Exception:
         pass
     # Hydrate user-defined line-plot draw order (line_order.json).

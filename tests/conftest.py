@@ -285,3 +285,17 @@ def loaded_app(viewer_app, mini_dataset):
     ``_load_path`` drains pending centre builders as part of loading)."""
     viewer_app._load_path(mini_dataset)
     return viewer_app
+
+
+@pytest.fixture
+def mini_dataset_shape(tmp_path):
+    """Mini dataset that additionally carries per-cell shape-feature columns."""
+    from tests.fixtures.mini_dataset import build_mini_dataset
+    return build_mini_dataset(tmp_path / "mini_dataset_shape", with_shape=True)
+
+
+@pytest.fixture
+def loaded_app_shape(viewer_app, mini_dataset_shape):
+    """``WellViewerApp`` loaded with the shape-feature mini dataset."""
+    viewer_app._load_path(mini_dataset_shape)
+    return viewer_app

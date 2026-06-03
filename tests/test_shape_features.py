@@ -19,6 +19,8 @@ import shape_features_core as sfc
 from well_viewer.core.channel_state import ChannelState
 from well_viewer.core.ui_helpers import set_combo_values_sectioned
 
+pytestmark = pytest.mark.qt
+
 
 @pytest.fixture(scope="module")
 def qapp():
@@ -125,6 +127,75 @@ def test_scatter_gate_exempts_shape_columns():
     assert gate_exempt("shape_eccentricity") is True
     assert gate_exempt("w3cy5_smfish_count") is True
     assert gate_exempt("gfp_mean_intensity") is False
+
+
+# ── Full-app regressions: shape features survive sub-tab switch + reach scatter ─
+
+
+def _plot_combo_labels(app):
+    cb = app._plotting_channel_cb
+    return [cb.itemText(i) for i in range(cb.count())]
+
+
+def test_shape_section_survives_plot_subtab_switch(loaded_app_shape):
+    """Regression: switching plot sub-tabs used to rebuild the global channel
+    combo with fluor+ratio only, dropping the Shape Features section so shape
+    metrics vanished until the user "wiggled" the channel dropdown."""
+    app = loaded_app_shape
+    assert any("Eccentricity" in l for l in _plot_combo_labels(app))
+
+    nb = app._plotting_notebook
+    nb.setCurrentByName("Bar Plots")
+    nb.setCurrentByName("Line Graphs")
+
+    labels = _plot_combo_labels(app)
+    # The section header and at least one shape feature are still present —
+    # no channel "wiggle" required.
+    assert "— Shape Features —" in labels
+    assert any("Eccentricity" in l for l in labels)
+
+
+def test_scatter_menus_offer_shape_features(loaded_app_shape):
+    """Regression: the per-cell scatter channel dropdowns never listed shape
+    features. Both axes now offer them under their own section, and a shape
+    selection resolves to the ``shape_*`` column with the Property combo inert."""
+    app = loaded_app_shape
+    for cb_attr in ("_scatter_ch_x_cb", "_scatter_ch_y_cb"):
+        cb = getattr(app, cb_attr)
+        texts = [cb.itemText(i) for i in range(cb.count())]
+        assert "— Shape Features —" in texts
+        assert "Eccentricity" in texts
+
+    xcb = app._scatter_ch_x_cb
+    xcb.setCurrentIndex(xcb.findText("Eccentricity"))
+    app._refresh_scatter_metric_for_axis("x")
+    metric_x = app._scatter_axis_metric_key("x")
+    assert app._col_for_scatter_axis(xcb.currentText(), metric_x) == "shape_eccentricity"
+    # A shape feature carries no per-cell metric — the Property combo collapses.
+    assert app._scatter_metric_x_cb.isEnabled() is False
+
+
+def test_scatter_draw_with_shape_axis(loaded_app_shape):
+    """End-to-end: a shape feature on the X axis plots real per-cell points."""
+    from well_viewer.features.scatter.controller import (
+        update_scatter_menus, redraw_scatter_orchestrate,
+    )
+    from tests.fixtures.mini_dataset import WELLS
+
+    app = loaded_app_shape
+    app._set_selected_wells(set(WELLS))
+    update_scatter_menus(app)
+    app._scatter_ch_x_cb.setCurrentIndex(app._scatter_ch_x_cb.findText("Eccentricity"))
+    app._scatter_ch_y_cb.setCurrentIndex(app._scatter_ch_y_cb.findText("gfp"))
+    for tp in list(app._scatter_tp_selections):
+        app._scatter_tp_selections[tp] = True
+
+    redraw_scatter_orchestrate(app)
+    cache = app._scatter_interaction_cache
+    assert cache["col_x"] == "shape_eccentricity"
+    assert cache["col_y"] == "gfp_mean_intensity"
+    assert len(cache["points"]) > 0
+    assert app._ax_scatter.get_xlabel() == "Eccentricity"
 
 
 # ── End-to-end: label → key → active state → value resolution ────────────────

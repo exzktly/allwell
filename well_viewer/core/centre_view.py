@@ -445,19 +445,38 @@ def build_centre(app, parent: QWidget) -> None:
                            (app._app_state.channel.fluor_channels or [])]
             ratio_labels = list(getattr(app, "_ratio_dropdown_labels",
                                         lambda: [])() or [])
-            labels = (real_labels + ratio_labels) or ["—"]
+            # Shape features are channel-independent virtual channels shown
+            # under their own section — mirror ``_update_channel_selector`` so a
+            # lazily-built sub-tab switch doesn't clobber the Shape Features
+            # group out of the global combo. Rebuilding with the plain
+            # fluor+ratio list (as this did before) dropped the section every
+            # time the user changed plot sub-tabs, so shape metrics only
+            # reappeared after a channel "wiggle" forced ``_update_channel_selector``.
+            from shape_features_core import label_for as _shape_label_for
+            from well_viewer.core.ui_helpers import (
+                set_combo_values as _scv,
+                set_combo_values_sectioned as _scv_sectioned,
+            )
+            shape_cols = list(app._app_state.channel.shape_features or [])
+            shape_labels = [_shape_label_for(c) or c for c in shape_cols]
+            plot_sections = [("", real_labels + ratio_labels)]
+            if shape_labels:
+                plot_sections.append(("Shape Features", shape_labels))
+            inline_labels = real_labels + ratio_labels + shape_labels
             try:
                 active_label = app._active_channel_label()
             except Exception:
                 active_label = ""
-            blocked = global_cb.blockSignals(True)
-            try:
-                global_cb.clear()
-                global_cb.addItems(labels)
-                if active_label and active_label in labels:
-                    global_cb.setCurrentIndex(labels.index(active_label))
-            finally:
-                global_cb.blockSignals(blocked)
+            if inline_labels:
+                _scv_sectioned(global_cb, plot_sections)
+            else:
+                _scv(global_cb, ["—"])
+            if active_label and global_cb.findText(active_label) >= 0:
+                blocked = global_cb.blockSignals(True)
+                try:
+                    global_cb.setCurrentIndex(global_cb.findText(active_label))
+                finally:
+                    global_cb.blockSignals(blocked)
 
         # Configure-subplots / Edit-axes handlers live on ``app`` (kept here
         # as helpers for tab toolbars and the per-plot Export Style sidebar's

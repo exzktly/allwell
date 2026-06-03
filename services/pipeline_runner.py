@@ -290,7 +290,17 @@ class PipelineRunner:
                 return
             if resolved is None:
                 return
-            input_dir, output_dir = resolved
+            # v5.x.x: ``resolve_dirs`` now returns ``(input_dir,
+            # output_dir, on_success)`` where ``on_success`` is a
+            # callback that cleans up source artifacts (loose TIFs in
+            # ``raw/`` for the zipper-fired path) after a clean
+            # pipeline completion. Older 2-tuple callers keep working
+            # via the unpack fallback below.
+            on_success: Callable[[], None] | None = None
+            if len(resolved) == 3:
+                input_dir, output_dir, on_success = resolved  # type: ignore[misc]
+            else:
+                input_dir, output_dir = resolved  # type: ignore[misc]
             if any(input_dir.glob("*.zip")):
                 self._enqueue((
                     "line",
@@ -314,13 +324,21 @@ class PipelineRunner:
                 f"Target : {target}\n\n",
             ))
             if self._remote is not None and self._remote_runner is not None:
-                self._run_pipeline_remote(input_dir, output_dir, args, opts)
+                self._run_pipeline_remote(
+                    input_dir, output_dir, args, opts,
+                    on_success=on_success,
+                )
             else:
-                self._run_pipeline_subprocess(args)
+                self._run_pipeline_subprocess(args, on_success=on_success)
         finally:
             self._enqueue(("finished", None))
 
-    def _run_pipeline_subprocess(self, args: list[str]) -> None:
+    def _run_pipeline_subprocess(
+        self,
+        args: list[str],
+        *,
+        on_success: Callable[[], None] | None = None,
+    ) -> None:
         try:
             self._proc = spawn_pipeline(args)
             assert self._proc.stdout is not None
@@ -329,6 +347,18 @@ class PipelineRunner:
             self._proc.wait()
             rc = self._proc.returncode
             if rc == 0:
+                # v5.x.x: zipper-fired-this-run source cleanup. Only
+                # runs on a clean exit (rc == 0); any failure leaves
+                # the loose TIFs intact so the user can re-run.
+                if on_success is not None:
+                    try:
+                        on_success()
+                    except OSError as exc:
+                        self._enqueue((
+                            "line",
+                            f"[warn] post-success cleanup of source "
+                            f"files failed: {exc}\n",
+                        ))
                 self._enqueue(("done", "Pipeline completed successfully.\n"))
             else:
                 self._enqueue(("error", f"Pipeline exited with code {rc}.\n"))
@@ -341,6 +371,8 @@ class PipelineRunner:
         output_dir: Path,
         args: list[str],
         opts: dict,
+        *,
+        on_success: Callable[[], None] | None = None,
     ) -> None:
         """Stage inputs, launch the pipeline on the remote, stream output.
 
@@ -402,6 +434,40 @@ class PipelineRunner:
                 log_fn=lambda m: self._enqueue(("line", m)),
             )
             if rc == 0 and ok:
+                # v5.x.x: clean run-to-completion. Fire both success
+                # hooks:
+                # 1. ``zipped.on_pipeline_success`` — deletes the
+                #    source loose TIFs / well folders that
+                #    ``_stage_input_zips`` converted to zips inside
+                #    the runner's input_dir (i.e., raw/in/ when the
+                #    Analyze tab ran the zipper into raw/in/, OR the
+                #    user's selected dir when it was already a folder
+                #    of mixed-mode TIFs).
+                # 2. ``on_success`` — the outer resolve_input_output
+                #    callback, which deletes the loose TIFs at the
+                #    user's top-level ``raw/`` for the
+                #    "raw/ → raw/in/{well}.zip" flow.
+                # After this the user's input layout is pure-ZIP and
+                # the next run against the same folder skips both
+                # the zipper and the staging step.
+                if zipped is not None and zipped.on_pipeline_success is not None:
+                    try:
+                        zipped.on_pipeline_success()
+                    except OSError as exc:
+                        self._enqueue((
+                            "line",
+                            f"[warn] post-success cleanup of source files "
+                            f"failed: {exc}\n",
+                        ))
+                if on_success is not None:
+                    try:
+                        on_success()
+                    except OSError as exc:
+                        self._enqueue((
+                            "line",
+                            f"[warn] post-success cleanup of raw TIFs "
+                            f"failed: {exc}\n",
+                        ))
                 self._enqueue(("done", "Remote pipeline completed successfully.\n"))
             elif rc != 0:
                 self._enqueue(("error", f"Remote pipeline exited with code {rc}.\n"))

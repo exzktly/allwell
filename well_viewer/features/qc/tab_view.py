@@ -65,7 +65,14 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
     hl.addWidget(QLabel("min solidity", row))
     min_sol_edit = QLineEdit(_fmt(params.min_solidity), row)
     hl.addWidget(min_sol_edit)
-    for w in (min_area_edit, max_area_edit, min_sol_edit):
+    hl.addWidget(QLabel("max region", row))
+    max_region_edit = QLineEdit(_fmt(params.max_region_area), row)
+    max_region_edit.setToolTip(
+        "Reject cells sitting in an over-large bright region (px²) — catches "
+        "debris StarDist shattered into many small cells that per-cell size "
+        "can't, since each fragment is individually small.")
+    hl.addWidget(max_region_edit)
+    for w in (min_area_edit, max_area_edit, min_sol_edit, max_region_edit):
         w.setFixedWidth(70)
         w.setPlaceholderText("none")
 
@@ -77,7 +84,8 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
     # stash refs so persistence / external recomputes can refresh the row
     app._qc_gate_widgets = {
         "enable": enable_cb, "min_area": min_area_edit,
-        "max_area": max_area_edit, "min_solidity": min_sol_edit, "status": status,
+        "max_area": max_area_edit, "min_solidity": min_sol_edit,
+        "max_region_area": max_region_edit, "status": status,
     }
 
     def _fields_params() -> QCParams:
@@ -86,11 +94,12 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
             min_area=_num(min_area_edit.text()) or None,
             max_area=_num(max_area_edit.text()) or None,
             min_solidity=_num(min_sol_edit.text()) or None,
+            max_region_area=_num(max_region_edit.text()) or None,
         ).with_updates()
 
     def _sync_enabled() -> None:
         on = enable_cb.isChecked()
-        for w in (min_area_edit, max_area_edit, min_sol_edit):
+        for w in (min_area_edit, max_area_edit, min_sol_edit, max_region_edit):
             w.setEnabled(on)
 
     def _update_status() -> None:
@@ -112,7 +121,7 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
         _update_status()
 
     enable_cb.toggled.connect(lambda _=None: _apply())
-    for w in (min_area_edit, max_area_edit, min_sol_edit):
+    for w in (min_area_edit, max_area_edit, min_sol_edit, max_region_edit):
         w.editingFinished.connect(_apply)
 
     _sync_enabled()
@@ -131,3 +140,4 @@ def qc_gate_refresh_widgets(app) -> None:
     w["min_area"].setText(_fmt(p.min_area))
     w["max_area"].setText(_fmt(p.max_area))
     w["min_solidity"].setText(_fmt(p.min_solidity))
+    w["max_region_area"].setText(_fmt(p.max_region_area))

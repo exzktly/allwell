@@ -40,6 +40,30 @@ def test_min_and_max_area_gate():
     assert list(res) == [0, 1, 0]  # 5 too small, 500 too big
 
 
+def test_max_region_area_gate_rejects_shattered_debris():
+    # qc_region_area = area of the bright region each cell sits in; the debris
+    # fragments share a large region (144) while the real nucleus is small (25).
+    df = pd.DataFrame({"area_px": [25, 9, 9, 9, 9],
+                       "qc_region_area": [25, 144, 144, 144, 144]})
+    res = compute_qc_pass(df, QCParams(enabled=True, max_region_area=100))
+    assert list(res) == [1, 0, 0, 0, 0]  # nucleus kept; 4 debris fragments dropped
+
+
+def test_region_gate_missing_column_passes():
+    df = pd.DataFrame({"area_px": [25, 9, 9]})  # no qc_region_area
+    res = compute_qc_pass(df, QCParams(enabled=True, max_region_area=100))
+    assert list(res) == [1, 1, 1]
+
+
+def test_region_area_round_trips():
+    p = QCParams(enabled=True, max_region_area=500)
+    assert QCParams.from_dict(p.to_dict()).max_region_area == 500
+    assert QCParams.from_pipeline_info(
+        {"qc_options": {"remove_debris": True, "max_region_area": 500}}
+    ).max_region_area == 500
+    assert p.is_active
+
+
 def test_min_solidity_gate_and_missing_metric_passes():
     # solidity present for some semantics; NaN solidity must pass (can't measure)
     df = _df([100, 100, 100], solidity=[0.5, 0.95, float("nan")])

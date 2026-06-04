@@ -1422,6 +1422,74 @@ def filter_debris(
     return cleaned, len(bad_ids)
 
 
+def compute_region_areas(
+    image: np.ndarray,
+    labels: np.ndarray,
+    *,
+    close_radius: int = 2,
+) -> "dict[int, float]":
+    """Per-label area (px) of the connected bright *region* each nucleus sits in.
+
+    StarDist mis-segments a bright debris blob into many small star-convex
+    labels, so per-cell size can't reject it (each fragment is small). This
+    reconstructs the image-level region the fragments belong to: the Otsu-bright
+    foreground **unioned with the label mask**, morphologically closed so the
+    densely-packed fragments (or a solid bright blob) re-merge into one connected
+    component. A normal isolated nucleus sits in a small component (≈ its own
+    size); every fragment of a debris blob shares the same *large* component.
+
+    Returns ``{label_id: region_area_px}`` so a post-run "max region area" gate
+    rejects the whole blob at once. Pure numpy / skimage — unit-tested without
+    the app. Returns all-zero (no gating) when the image is unusable.
+    """
+    lab = np.asarray(labels)
+    ids = np.unique(lab)
+    ids = ids[ids != 0]
+    out: "dict[int, float]" = {int(n): 0.0 for n in ids}
+    if not out:
+        return out
+    img = np.asarray(image, dtype=np.float32)
+    if img.shape != lab.shape or img.size == 0:
+        return out
+
+    from skimage.measure import label as _cc_label
+    fg = (lab > 0)
+    finite = img[np.isfinite(img)]
+    if finite.size and float(finite.max()) > float(finite.min()):
+        try:
+            from skimage.filters import threshold_otsu
+            fg = fg | (img > float(threshold_otsu(finite)))
+        except Exception:
+            pass
+    if close_radius and close_radius > 0:
+        try:
+            from scipy.ndimage import binary_closing as _binary_closing
+            from skimage.morphology import disk
+            fg = _binary_closing(fg, structure=disk(int(close_radius)))
+        except Exception:
+            pass
+    # closing can erode label pixels near the image border; re-union the labels
+    # so every nucleus always anchors a component at least its own size.
+    fg = np.asarray(fg, dtype=bool) | (lab > 0)
+
+    comp = _cc_label(fg)
+    comp_area = np.bincount(comp.ravel())  # area (px) of each connected component
+    # Dominant component per nucleus label (its pixels lie in one component).
+    sel = lab > 0
+    ncomp = int(comp.max()) + 1
+    keyed = lab[sel].astype(np.int64) * ncomp + comp[sel].astype(np.int64)
+    ukey, ucount = np.unique(keyed, return_counts=True)
+    best_count: "dict[int, int]" = {}
+    for k, cnt in zip(ukey.tolist(), ucount.tolist()):
+        l, c = divmod(k, ncomp)
+        if c == 0:
+            continue
+        if cnt > best_count.get(l, 0):
+            best_count[l] = cnt
+            out[int(l)] = float(comp_area[c])
+    return out
+
+
 def build_flatfield_models(
     input_dir: Path,
     *,
@@ -2167,6 +2235,11 @@ def process_image_group(
         _qc_shape_keys.append("solidity")
     shape_by_id = compute_shape_features(labels, _qc_shape_keys)
 
+    # Per-cell bright-region area (always emitted) so the post-run QC gate can
+    # reject debris that StarDist shattered into many small cells — a size gate
+    # on this region area catches the blob that per-cell size misses.
+    region_by_id = compute_region_areas(nir_corr, labels)
+
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
             **meta,
@@ -2180,6 +2253,7 @@ def process_image_group(
             rec[f"{pfx}_min_intensity"]   = float(minv[i])
             rec[f"{pfx}_std_intensity"]   = float(stdv[i])
         rec.update(shape_by_id.get(int(nid), {}))
+        rec["qc_region_area"] = float(region_by_id.get(int(nid), 0.0))
         records.append(rec)
     log.info("  quantify:    %.1f s  (%d nuclei)", time.perf_counter() - _t, len(records))
 

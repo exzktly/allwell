@@ -27,6 +27,10 @@ from typing import Any, Dict, Optional
 # is emitted unconditionally by the pipeline so the gate is editable post-hoc.
 AREA_COLS = ("shape_area", "area_px")
 SOLIDITY_COL = "shape_solidity"
+# Area of the connected bright *region* a cell sits in (always emitted by the
+# pipeline). Rejecting on this catches debris StarDist shattered into many small
+# cells — the fragments share one large region the per-cell size gate can't see.
+REGION_AREA_COL = "qc_region_area"
 
 
 def _first_col(df, names):
@@ -59,6 +63,7 @@ class QCParams:
     min_area: Optional[float] = None
     max_area: Optional[float] = None
     min_solidity: Optional[float] = None
+    max_region_area: Optional[float] = None
 
     # ── (de)serialization ────────────────────────────────────────────────
     def to_dict(self) -> Dict[str, Any]:
@@ -67,6 +72,7 @@ class QCParams:
             "min_area": self.min_area,
             "max_area": self.max_area,
             "min_solidity": self.min_solidity,
+            "max_region_area": self.max_region_area,
         }
 
     @classmethod
@@ -77,6 +83,7 @@ class QCParams:
             min_area=_pos(d.get("min_area")),
             max_area=_pos(d.get("max_area")),
             min_solidity=_pos(d.get("min_solidity")),
+            max_region_area=_pos(d.get("max_region_area")),
         )
 
     @classmethod
@@ -101,11 +108,12 @@ class QCParams:
             min_area=min_area,
             max_area=_pos(qc.get("max_area")),
             min_solidity=_pos(qc.get("min_solidity")),
+            max_region_area=_pos(qc.get("max_region_area")),
         )
 
     def with_updates(self, **changes: Any) -> "QCParams":
         # normalize numeric bounds through _pos so 0/"" become None
-        for k in ("min_area", "max_area", "min_solidity"):
+        for k in ("min_area", "max_area", "min_solidity", "max_region_area"):
             if k in changes:
                 changes[k] = _pos(changes[k])
         if "enabled" in changes:
@@ -117,7 +125,8 @@ class QCParams:
         """True when the gate would actually exclude anything (enabled with at
         least one bound set)."""
         return self.enabled and any(
-            b is not None for b in (self.min_area, self.max_area, self.min_solidity)
+            b is not None for b in
+            (self.min_area, self.max_area, self.min_solidity, self.max_region_area)
         )
 
 
@@ -146,6 +155,9 @@ def compute_qc_pass(df, params: QCParams):
     if SOLIDITY_COL in df.columns and params.min_solidity is not None:
         sol = pd.to_numeric(df[SOLIDITY_COL], errors="coerce")
         fail |= (sol < params.min_solidity).fillna(False)
+    if REGION_AREA_COL in df.columns and params.max_region_area is not None:
+        region = pd.to_numeric(df[REGION_AREA_COL], errors="coerce")
+        fail |= (region > params.max_region_area).fillna(False)
 
     passed[fail] = 0
     return passed

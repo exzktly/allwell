@@ -457,6 +457,24 @@ class AnalyzeTab(QWidget):
         self._compress_output_cb.setChecked(True)
         sec.layout().addWidget(self._compress_output_cb)
 
+        # v5.4.6: remote batched mode. ``0`` (default) uploads every
+        # well-zip up front and runs the pipeline once across the
+        # whole plate — lowest total runtime. Any positive integer
+        # processes that many wells at a time: peak remote disk ≈
+        # batch_size wells of input + ~1 well of output (per-well
+        # Fetcher cleanup), at the cost of one StarDist reload per
+        # batch (~5–10 s overhead each). Pick based on the remote's
+        # free disk.
+        bs_row = self._row(sec, "Remote batch size (0=off)")
+        self._remote_batch_size_edit = self._entry(bs_row, "0", width=40)
+        bs_hint = QLabel(
+            "(remote-only · bounds peak disk to ~N wells of input)",
+            bs_row,
+        )
+        bs_hint.setObjectName("Muted")
+        bs_row.layout().addWidget(bs_hint)
+        bs_row.layout().addStretch(1)
+
         r = self._row(sec, "CSV prefix")
         self._csv_prefix_edit = self._entry(r, "measurements", width=160)
         r.layout().addStretch(1)
@@ -1041,6 +1059,7 @@ class AnalyzeTab(QWidget):
             compress_input_well_folders=self._compress_input_cb.isChecked(),
             compress_output_well_folders=self._compress_output_cb.isChecked(),
             move_source_tifs=self._move_source_tifs_cb.isChecked(),
+            remote_batch_size=self._remote_batch_size_edit.text(),
             force=self._force_cb.isChecked(),
             cpu_only=self._cpu_only_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),

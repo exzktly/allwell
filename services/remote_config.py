@@ -350,7 +350,14 @@ def to_rsync_path(p: Path | str) -> str:
     if s.startswith("\\\\") or s.startswith("//"):
         raise NotImplementedError(
             "UNC paths aren't supported by rsync on Windows. "
-            "Map the share to a drive letter first."
+            "Map the share to a drive letter first "
+            "(e.g. ``net use Z: \\\\server\\share``), then pick "
+            "the directory via that drive letter. Note: pre-v5.4.4 "
+            "of AllWell, Qt's file dialog could silently rewrite a "
+            "mapped-drive selection back to its underlying UNC path "
+            "— if you're on a pre-v5.4.5 build, upgrade or type the "
+            "drive-letter path directly into the input field instead "
+            "of using the Browse button."
         )
     # On a non-Windows test runner with _is_windows monkeypatched True,
     # Path(s).resolve() would try to construct WindowsPath which can't

@@ -1290,6 +1290,69 @@ class DatasetCache:
             )
         return key, sent_bytes, elapsed
 
+    def upload_subset(
+        self,
+        well_zips: list[Path],
+        remote_path: str,
+        *,
+        log_fn: Callable[[str], None] | None = None,
+        progress_fn: Callable[[float], None] | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> tuple[int, float, int]:
+        """Upload a chosen subset of zips to ``remote_path``.
+
+        Shares all the safety knobs of :meth:`ensure_uploaded` (the
+        ``--info`` gating, the bounded retry on transient codes, the
+        rsync transport policy from :func:`_rsync_ssh_transport`)
+        but skips the cache-key bookkeeping — used by batched mode
+        where ``remote_path`` is a single shared input dir that
+        sees a rolling window of well-zips while the per-well
+        Fetcher cleanup drains it.
+
+        Returns ``(bytes_transferred, elapsed_s, returncode)``.
+        """
+        if not well_zips:
+            return 0, 0.0, 0
+        sources = [to_rsync_path(p) for p in well_zips]
+        dest = f"{self.host.ssh_alias}:{remote_path}/"
+        cmd = [
+            resolve_rsync_binary(),
+            *_rsync_ssh_transport(self.host),
+            "-aH",
+            "--partial",
+        ]
+        if _rsync_supports_append_verify():
+            cmd.append("--append-verify")
+        if _rsync_supports_info_flag():
+            cmd.append("--info=name1,stats2,progress2")
+        if log_fn:
+            log_fn(
+                f"[remote] $ {' '.join(shlex.quote(c) for c in cmd)} … → {dest} "
+                f"({len(sources)} file(s))\n"
+            )
+        cmd += [*sources, dest]
+        t0 = time.monotonic()
+        sent_bytes = 0
+        rc = -1
+        for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
+            if stop_event is not None and stop_event.is_set():
+                break
+            if delay > 0:
+                if log_fn:
+                    log_fn(
+                        f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
+                        f"in {delay:.0f}s (last exit code {rc})\n"
+                    )
+                time.sleep(delay)
+            attempt_bytes, rc = _run_rsync_streaming(
+                cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+            )
+            sent_bytes += attempt_bytes
+            if rc == 0 or rc not in _RSYNC_RETRY_CODES:
+                break
+        elapsed = max(time.monotonic() - t0, 1e-6)
+        return sent_bytes, elapsed, rc
+
     def gc(
         self, max_bytes: int, *, log_fn: Callable[[str], None] | None = None
     ) -> None:
@@ -1879,6 +1942,241 @@ class _RemoteProcess:
         self._tee_thread.start()
 
 
+class _BatchedRemoteProcess:
+    """``_RemoteProcess``-compatible wrapper that runs the pipeline in
+    sequential batches of ``batch_size`` wells.
+
+    Each batch: upload that batch's zips into the shared remote input
+    dir, spawn the pipeline (sees just those zips because the Fetcher
+    cleaned out the prior batch), tee its stdout to the caller +
+    Fetcher, wait for it to exit. Combined returncode is the first
+    non-zero or 0 on all-success. A single ``Fetcher`` instance
+    persists across all batches with ``delete_after_download=True``
+    so peak remote disk = ``(M wells of input) + (~1 well of output)``.
+
+    Exposes the same Popen-compatible surface as ``_RemoteProcess``
+    (``stdout``, ``poll()``, ``wait()``, ``terminate()``, ``kill()``,
+    ``pid``, ``returncode``) so :meth:`pipeline_runner._run_pipeline_remote`
+    can consume either transparently.
+    """
+
+    def __init__(
+        self,
+        runner: "RemoteRunner",
+        zipped: ZippedInput,
+        local_output_dir: Path,
+        pipeline_argv: list[str],
+        batch_size: int,
+        *,
+        output_filter: OutputFilter,
+        log_fn: Callable[[str], None] | None = None,
+        progress_fn: Callable[[float], None] | None = None,
+        stop_event: threading.Event | None = None,
+    ):
+        self._runner = runner
+        self._zipped = zipped
+        self._local_output_dir = local_output_dir
+        self._pipeline_argv = pipeline_argv
+        self._batch_size = max(1, batch_size)
+        self._output_filter = output_filter
+        self._log = log_fn or (lambda _m: None)
+        self._progress = progress_fn
+        self._stop = stop_event or threading.Event()
+        self._returncode: Optional[int] = None
+        self._line_q: "queue.Queue[Optional[str]]" = queue.Queue()
+        self._lines = _QueueLineIterator(self._line_q)
+        self._current_proc: Optional[subprocess.Popen] = None
+
+        # Set up the shared run identifiers and remote dirs.
+        key = runner._cache.cache_key(zipped)  # noqa: SLF001
+        run_id = "run-" + _compute_run_id(key, pipeline_argv)
+        remote_input = runner._cache.remote_dataset_dir(key)  # noqa: SLF001
+        remote_output = (
+            f"{runner.host.remote_staging_dir}/runs/{run_id}/out"
+        )
+        remote_pidfile = (
+            f"{runner.host.remote_staging_dir}/runs/{run_id}/run.pid"
+        )
+        # mkdir BOTH input + output (input may be reused across re-runs
+        # but always needs to exist on a fresh remote).
+        runner._cache._ssh_run(  # noqa: SLF001
+            ["mkdir", "-p", remote_input, remote_output],
+            check=True,
+        )
+
+        runner._run = _RemoteRun(
+            run_id=run_id,
+            cache_key=key,
+            remote_input_dir=remote_input,
+            remote_output_dir=remote_output,
+            remote_pidfile=remote_pidfile,
+            local_output_dir=local_output_dir,
+            local_input_mode=zipped.mode,
+            output_filter=output_filter,
+        )
+
+        # One Fetcher persisting across batches. Pre-set the total well
+        # count: each batch's pipeline banner reports just THAT
+        # batch's count, which would corrupt the cross-batch progress
+        # math if the Fetcher trusted the per-batch banner.
+        self._fetcher = Fetcher(
+            runner.host, runner._run,
+            output_filter=output_filter,
+            log_fn=log_fn, progress_fn=progress_fn,
+            delete_after_download=True,
+        )
+        self._fetcher.run.well_count_total = len(zipped.well_zips)
+
+        self._worker = threading.Thread(
+            target=self._run_batches, daemon=True,
+        )
+        self._worker.start()
+
+    # Popen-compatible surface ─────────────────────────────────────────
+
+    @property
+    def pid(self) -> int:
+        return self._current_proc.pid if self._current_proc else -1
+
+    @property
+    def returncode(self) -> Optional[int]:
+        return self._returncode
+
+    @property
+    def stdout(self) -> "_QueueLineIterator":
+        return self._lines
+
+    def poll(self) -> Optional[int]:
+        if self._worker.is_alive():
+            return None
+        return self._returncode
+
+    def wait(self, timeout: Optional[float] = None) -> int:
+        self._worker.join(timeout=timeout)
+        return self._returncode if self._returncode is not None else 0
+
+    def terminate(self) -> None:
+        self._stop.set()
+        if self._current_proc is not None:
+            self._current_proc.terminate()
+        self._fetcher.cancel()
+
+    def kill(self) -> None:
+        self._stop.set()
+        if self._current_proc is not None:
+            self._current_proc.kill()
+        self._fetcher.cancel()
+
+    def send_signal(self, sig: int) -> None:
+        if self._current_proc is not None:
+            self._current_proc.send_signal(sig)
+
+    # Internals ────────────────────────────────────────────────────────
+
+    def _run_batches(self) -> None:
+        try:
+            all_zips = list(self._zipped.well_zips)
+            batches = [
+                all_zips[i:i + self._batch_size]
+                for i in range(0, len(all_zips), self._batch_size)
+            ]
+            n_batches = len(batches)
+            self._log(
+                f"[remote] batched mode: {len(all_zips)} well(s) in "
+                f"{n_batches} batch(es) of up to {self._batch_size} "
+                f"(peak remote disk ≈ {self._batch_size} well-input)\n"
+            )
+
+            for batch_idx, batch_zips in enumerate(batches):
+                if self._stop.is_set():
+                    self._log(
+                        f"[remote] stopped before batch "
+                        f"{batch_idx + 1}/{n_batches}\n"
+                    )
+                    self._returncode = 130
+                    return
+
+                self._log(
+                    f"[remote] batch {batch_idx + 1}/{n_batches}: "
+                    f"uploading {len(batch_zips)} well-zip(s)\n"
+                )
+                sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(  # noqa: SLF001
+                    batch_zips,
+                    self._runner._run.remote_input_dir,  # noqa: SLF001
+                    log_fn=self._log,
+                    progress_fn=self._progress,
+                    stop_event=self._stop,
+                )
+                if rc != 0:
+                    self._log(
+                        f"[remote] batch {batch_idx + 1} upload failed "
+                        f"(rsync rc={rc}); aborting remaining batches\n"
+                    )
+                    self._returncode = rc
+                    return
+                self._log(
+                    f"[remote] batch {batch_idx + 1}: upload complete "
+                    f"({sent_bytes / (1024**2):.1f} MB); launching pipeline\n"
+                )
+
+                # Build the remote command for this batch. Input dir
+                # is shared across batches; the pipeline scans it
+                # once at startup and only sees the zips currently
+                # present (i.e. just this batch's, because the
+                # Fetcher cleaned out the previous one).
+                remote_argv = self._runner._build_remote_argv(  # noqa: SLF001
+                    self._pipeline_argv,
+                    self._runner._run.remote_input_dir,  # noqa: SLF001
+                    self._runner._run.remote_output_dir,  # noqa: SLF001
+                    self._output_filter,
+                    self._zipped.mode,
+                )
+                remote_cmd = (
+                    f"echo $$ > {_remote_quote(self._runner._run.remote_pidfile)}; "  # noqa: SLF001
+                    f"{_CONDA_ACTIVATE_SNIPPET}; "
+                    f"exec {_remote_join(remote_argv)}"
+                )
+                ssh_argv = (
+                    self._runner.host.ssh_argv(allocate_tty=True)
+                    + [remote_cmd]
+                )
+                self._current_proc = subprocess.Popen(
+                    ssh_argv,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                    start_new_session=(os.name == "posix"),
+                )
+                assert self._current_proc.stdout is not None
+                for line in self._current_proc.stdout:
+                    if self._stop.is_set():
+                        self._current_proc.terminate()
+                        break
+                    self._fetcher.observe(line)
+                    self._line_q.put(line)
+                rc = self._current_proc.wait()
+                self._current_proc = None
+
+                if rc != 0:
+                    self._log(
+                        f"[remote] batch {batch_idx + 1} pipeline exited "
+                        f"{rc}; aborting remaining batches\n"
+                    )
+                    self._returncode = rc
+                    return
+
+                self._log(
+                    f"[remote] batch {batch_idx + 1}/{n_batches} complete\n"
+                )
+
+            self._returncode = 0
+        finally:
+            self._line_q.put(None)
+            self._fetcher.flush_and_join()
+
+
 class _QueueLineIterator:
     """Iterator that pulls lines off a queue; sentinel ``None`` ends
     iteration. Lets the Popen consumer treat us like a file."""
@@ -1915,12 +2213,14 @@ class Fetcher:
         output_filter: OutputFilter,
         log_fn: Callable[[str], None] | None = None,
         progress_fn: Callable[[float], None] | None = None,
+        delete_after_download: bool = False,
     ):
         self.host = host
         self.run = run
         self.output_filter = output_filter
         self._log = log_fn or (lambda _msg: None)
         self._progress = progress_fn
+        self._delete_after_download = delete_after_download
         self._stop = threading.Event()
         self._pending: queue.Queue[Optional[str]] = queue.Queue()
         self._worker = threading.Thread(target=self._loop, daemon=True)
@@ -2082,6 +2382,55 @@ class Fetcher:
         )
         if self._progress and self.run.well_count_total > 0:
             self._progress(len(self.run.fetched_wells) / self.run.well_count_total)
+
+        # v5.4.6 — per-well remote cleanup. With the data safely landed
+        # locally, both the remote input zip and the remote output zip
+        # (plus per-well CSVs) become redundant. Deleting them as each
+        # well is fetched bounds peak remote disk to roughly
+        # ``(uploaded-but-not-yet-processed inputs) + 1 well's output``
+        # — independent of how many wells the plate has. Crucial on
+        # constrained remotes where the full plate's outputs would
+        # otherwise overflow before the run completes. Failures are
+        # logged but non-fatal — an end-of-run ``rm -rf`` via
+        # ``verify_and_cleanup`` is the backstop.
+        if self._delete_after_download:
+            self._delete_well_files_on_remote(well)
+
+    def _delete_well_files_on_remote(self, well: str) -> None:
+        """rm the remote input + output zips + per-well CSVs for
+        ``well``. Fires after the local download is confirmed safe
+        (Fetcher.fetched_wells.add). Non-fatal: ssh-delete failure is
+        logged but doesn't abort the run — the end-of-run
+        ``verify_and_cleanup`` is the backstop. On a disk-constrained
+        remote this is the difference between the pipeline completing
+        and ENOSPC mid-run."""
+        cmd = (
+            f"rm -f "
+            f"{self.run.remote_input_dir}/{well}.zip "
+            f"{self.run.remote_output_dir}/{well}_out.zip "
+            f"{self.run.remote_output_dir}/*_{well}.csv"
+        )
+        try:
+            result = subprocess.run(
+                self.host.ssh_argv(allocate_tty=False) + ["bash", "-c", cmd],
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                stderr = (
+                    result.stderr.decode("utf-8", errors="replace")
+                    if isinstance(result.stderr, (bytes, bytearray))
+                    else (result.stderr or "")
+                )
+                self._log(
+                    f"[remote] warn: per-well cleanup of {well} on remote "
+                    f"returned {result.returncode}: {stderr.strip()}\n"
+                )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            self._log(
+                f"[remote] warn: per-well cleanup of {well} on remote "
+                f"failed: {exc}\n"
+            )
 
     def _materialize(self, well: str, well_zip: Path) -> None:
         """Place the well's outputs in ``local_output_dir`` so the result
@@ -2331,7 +2680,8 @@ class RemoteRunner:
         log_fn: Callable[[str], None] | None = None,
         progress_fn: Callable[[float], None] | None = None,
         stop_event: threading.Event | None = None,
-    ) -> _RemoteProcess:
+        batch_size: int = 0,
+    ):
         """Stage inputs, build the remote command, launch ssh.
 
         ``pipeline_argv`` is the result of
@@ -2339,21 +2689,55 @@ class RemoteRunner:
         same argv we'd pass locally. We rewrite the two path args and
         append the filter flags before launching remotely.
 
+        ``batch_size`` controls remote-disk peak usage:
+
+        * ``0`` (default) — upload every well-zip up front, run the
+          pipeline once against the whole plate. Lowest total runtime
+          (StarDist loads once, full parallelism inside the pipeline).
+          Peak remote disk = ``(all inputs) + (all outputs accumulated
+          before fetch)``.
+        * ``> 0`` — split into batches of this many wells. Each batch:
+          upload → spawn pipeline → wait → next batch. The Fetcher
+          deletes each well's input + output zip on the remote as
+          soon as the local download lands, so peak disk ≈
+          ``batch_size`` wells of input + ~1 well of output. Tradeoff:
+          StarDist reloads once per batch (~5–10 s overhead per
+          batch). Pick ``batch_size`` based on your remote's free
+          disk; the smaller it is, the more loads and the lower the
+          peak.
+
         Returns a Popen-compatible handle the GUI's stdout reader can
         consume unchanged.
         """
         log = log_fn or (lambda _m: None)
 
+        # Pipeline code sync runs for either path.
+        self.sync_required_files(log_fn=log)
+
+        if batch_size > 0:
+            log(
+                f"[remote] batched mode enabled: batch_size={batch_size}\n"
+            )
+            return _BatchedRemoteProcess(
+                self,
+                zipped,
+                local_output_dir,
+                pipeline_argv,
+                batch_size,
+                output_filter=output_filter,
+                log_fn=log_fn,
+                progress_fn=progress_fn,
+                stop_event=stop_event,
+            )
+
+        # Single-shot path (the v5.4.5 and earlier behavior, byte-
+        # identical apart from the moved sync_required_files() call).
         # Cache budget enforcement before each run.
         self._cache.gc(self.host.cache_budget_gb * (1024**3), log_fn=log)
 
-        # Ensure the pipeline code is up to date on the remote. Cheap —
-        # ~300 KB of source plus rsync's delta-skip when nothing changed.
-        # Guarantees the user is never running stale code after a local
-        # edit, and turns the first-ever invocation against a host where
-        # only the conda env was pre-installed (no bootstrap rsync) into
-        # a working run instead of an obscure "can't open file" error.
-        self.sync_required_files(log_fn=log)
+        # ``sync_required_files`` ran above (covers both single-shot
+        # and batched paths). Cheap — ~300 KB of source plus rsync's
+        # delta-skip when nothing changed.
 
         # Upload.
         key, sent, elapsed = self._cache.ensure_uploaded(

@@ -414,6 +414,10 @@ class PipelineRunner:
                 # of the existing well-progress signal in ProgressTracker.
                 self._enqueue(("remote_xfer", pct))
 
+            try:
+                batch_size = int(opts.get("remote_batch_size", 0) or 0)
+            except (ValueError, TypeError):
+                batch_size = 0
             self._proc = self._remote_runner.spawn(
                 zipped,
                 output_dir,
@@ -421,6 +425,7 @@ class PipelineRunner:
                 output_filter=output_filter,
                 log_fn=lambda m: self._enqueue(("line", m)),
                 progress_fn=_on_xfer_progress,
+                batch_size=max(0, batch_size),
             )
             assert self._proc.stdout is not None
             for line in self._proc.stdout:

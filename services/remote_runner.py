@@ -1988,35 +1988,26 @@ class _BatchedRemoteProcess:
         self._current_proc: Optional[subprocess.Popen] = None
 
         # Set up the shared run identifiers and remote dirs.
-        # v5.4.7: use a per-run input dir (``runs/<run_id>/in``)
-        # instead of the persistent cache dir (``datasets/<key>``).
-        # The cache dir is shared across runs with the same input
-        # set and can hold stale well-zips from a prior aborted run —
-        # the per-batch pipeline would then SEE those stale zips
-        # alongside the batch's freshly-uploaded ones, process some,
-        # and log "Zip mode: N to process, M skipped" with bogus
-        # numbers (the user saw "processed 5, skipped 5" on batch
-        # one of a fresh run). A run-private input dir is clean by
-        # construction, and the per-well Fetcher cleanup keeps it
-        # bounded to ~``batch_size`` zips at any time.
+        # Keep the single-shot path's layout: input goes into the
+        # persistent dataset cache (``datasets/<key>``) and output
+        # into ``runs/<run_id>/out``. The "stale zips" diagnosis
+        # of v5.4.7 was incorrect — the user cleared remote dirs
+        # manually before the run that showed "processed 5, skipped
+        # 5" — so we're not switching dirs blindly. The actual cause
+        # of that log line is still under investigation; if it turns
+        # out to be cache-dir pollution we can switch later, with
+        # evidence.
         key = runner._cache.cache_key(zipped)  # noqa: SLF001
         run_id = "run-" + _compute_run_id(key, pipeline_argv)
-        remote_input = (
-            f"{runner.host.remote_staging_dir}/runs/{run_id}/in"
-        )
+        remote_input = runner._cache.remote_dataset_dir(key)  # noqa: SLF001
         remote_output = (
             f"{runner.host.remote_staging_dir}/runs/{run_id}/out"
         )
         remote_pidfile = (
             f"{runner.host.remote_staging_dir}/runs/{run_id}/run.pid"
         )
-        # Clean any leftover zips from a prior batched run that
-        # crashed mid-batch — they'd otherwise be visible to this
-        # batch's pipeline scan. Then (re)create the input + output
-        # dirs.
-        runner._cache._ssh_script(  # noqa: SLF001
-            f"rm -f -- {remote_input}/*.zip 2>/dev/null || true\n"
-            f"mkdir -p {remote_input} {remote_output}\n",
+        runner._cache._ssh_run(  # noqa: SLF001
+            ["mkdir", "-p", remote_input, remote_output],
             check=True,
         )
 

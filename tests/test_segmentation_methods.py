@@ -66,6 +66,25 @@ def test_param_panel_swaps_per_method(qapp):
     assert tab._nuclear_row_widget.isHidden() is False
 
 
+def test_param_stack_collapses_to_current_page(qapp):
+    # Regression: the param stack must size to the *current* page, not the max
+    # over all pages — otherwise the empty StarDist page reserves the tall
+    # Cellpose page's height (the gap under channel tokens).
+    from PySide6.QtWidgets import QSizePolicy
+    from analyze_tab import AnalyzeTab
+    tab = AnalyzeTab()
+    st = tab._seg_param_stack
+    _set_method(tab, "cellpose")
+    tall = st.sizeHint().height()
+    _set_method(tab, "stardist_nuclei")
+    short = st.sizeHint().height()
+    assert short < tall                      # collapsed, no reserved gap
+    cur = st.currentIndex()
+    assert st.widget(cur).sizePolicy().verticalPolicy() == QSizePolicy.Preferred
+    assert all(st.widget(i).sizePolicy().verticalPolicy() == QSizePolicy.Ignored
+               for i in range(st.count()) if i != cur)
+
+
 # ── general Cellpose → CLI arg mapping ───────────────────────────────────────
 
 def _base(**over):

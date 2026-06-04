@@ -365,6 +365,14 @@ class AnalyzeTab(QWidget):
         # only the selected routine's controls are shown.
         from well_viewer.core.centre_view import NamedPageStack
         self._seg_param_stack = NamedPageStack(sec)
+        # A QStackedWidget's height is the max over *all* pages, so the short
+        # default (StarDist, no params) would still reserve the tall Cellpose
+        # page's height — a big empty gap under the channel-tokens section.
+        # Collapse it to the current page by giving the hidden pages a vertical
+        # size policy of Ignored, re-applied on every page switch.
+        self._seg_param_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._seg_param_stack.currentChanged.connect(
+            lambda _=None: self._collapse_seg_param_stack())
         sec.layout().addWidget(self._seg_param_stack)
 
         def _page() -> QWidget:
@@ -987,6 +995,27 @@ class AnalyzeTab(QWidget):
                     f"well — confirm the well exists in:\n{input_dir}")
         return None
 
+    def _collapse_seg_param_stack(self) -> None:
+        """Size the per-method parameter stack to its *current* page only.
+
+        A ``QStackedWidget`` reports the max sizeHint over all pages, so without
+        this the empty StarDist page reserves the tall Cellpose page's height
+        (the gap the user saw under channel tokens). Giving every non-current
+        page a vertically-Ignored policy drops it from the height calculation.
+        """
+        stack = getattr(self, "_seg_param_stack", None)
+        if stack is None:
+            return
+        cur = stack.currentIndex()
+        for i in range(stack.count()):
+            page = stack.widget(i)
+            pol = page.sizePolicy()
+            pol.setVerticalPolicy(
+                QSizePolicy.Preferred if i == cur else QSizePolicy.Ignored)
+            page.setSizePolicy(pol)
+        stack.adjustSize()
+        stack.updateGeometry()
+
     def _refresh_segmentation_hints(self) -> None:
         if not hasattr(self, "_segmentation_hint_lbl"):
             return
@@ -994,6 +1023,7 @@ class AnalyzeTab(QWidget):
         # Show only the selected routine's parameter page.
         if hasattr(self, "_seg_param_stack"):
             self._seg_param_stack.setCurrentByName(method)
+            self._collapse_seg_param_stack()
         # The Label-free preset segments the Phase channel — the explicit
         # Segmentation-channel field doesn't apply there (it's taken at runtime).
         phase_locked = method == "cellpose_labelfree"

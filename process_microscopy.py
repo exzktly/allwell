@@ -3261,6 +3261,17 @@ def build_parser() -> argparse.ArgumentParser:
                        "a GPU with other jobs."
                    ))
 
+    p.add_argument("--no_auto_threshold", action="store_true",
+                   help=(
+                       "Skip the post-pipeline auto-threshold estimation. "
+                       "Used by AllWell's batched remote-execution mode (v5.4.7+) "
+                       "to suppress the per-batch threshold pass, which would "
+                       "otherwise overwrite the previous batch's defaults using "
+                       "incomplete data. The runner re-runs the estimation once "
+                       "locally after all batches finish, against the full "
+                       "downloaded output dir."
+                   ))
+
     return p
 
 # ---------------------------------------------------------------------------
@@ -3538,6 +3549,14 @@ def main() -> None:
     # imread, which the rest of the pipeline already uses. Any failure is
     # logged and the pipeline continues — auto-threshold is informational
     # only and the user can always set thresholds manually in the GUI.
+    #
+    # v5.4.7: skipped when ``--no_auto_threshold`` is set (AllWell's
+    # batched remote runner passes this so the per-batch pass doesn't
+    # overwrite the prior batch's defaults with incomplete-plate data;
+    # the runner re-runs it once locally after all batches drain).
+    if args.no_auto_threshold:
+        log.info("Auto-threshold skipped (--no_auto_threshold).")
+        return
     try:
         thresholds = _estimate_thresholds_standalone(
             output_dir,

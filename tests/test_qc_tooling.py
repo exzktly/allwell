@@ -23,10 +23,15 @@ from process_microscopy import (
     BACKGROUND_METHODS,
     filter_debris,
     build_flatfield_models,
+    build_background_models,
+    sample_empty_well_images,
     _normalize_flatfield,
 )
 from services.pipeline_service import build_pipeline_args
 from pathlib import Path
+import io
+import zipfile
+import tifffile
 
 
 # ── flat-field estimation / application ──────────────────────────────────────
@@ -124,6 +129,40 @@ def test_build_flatfield_models(tmp_path):
     # none/gaussian never precompute
     assert build_flatfield_models(tmp_path, tokens=["GFP"], schema=schema,
                                   sep="_", mode="gaussian") == {}
+
+
+def _zip_well(zip_path: Path, well: str, tokens, n=3, level=60.0):
+    """Write a per-well input zip (the default input layout) of TIFFs."""
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for tok in tokens:
+            for f in range(n):
+                b = io.BytesIO()
+                tifffile.imwrite(b, np.full((32, 32), level, np.float32))
+                zf.writestr(f"{well}_s{f}_{tok}.tif", b.getvalue())
+
+
+def test_empty_well_models_read_zipped_wells(tmp_path):
+    # Regression: in the default zip-per-well mode the empty-well flat-field /
+    # background models were built only from loose-on-disk TIFFs, so the well
+    # stayed compressed, every model came back empty, and empty_well silently
+    # no-op'd (corrected == raw). The sampler must now read inside the zip.
+    schema = ["well", "field", "channel"]
+    _zip_well(tmp_path / "C11.zip", "C11", ["DAPI", "GFP"], level=60.0)
+    _zip_well(tmp_path / "B02.zip", "B02", ["DAPI", "GFP"], level=200.0)
+
+    stacks = sample_empty_well_images(tmp_path, tokens=["DAPI", "GFP"],
+                                      schema=schema, sep="_", background_well="C11")
+    assert set(stacks) == {"dapi", "gfp"}
+    # sampled from C11 (≈60), not B02 (≈200)
+    assert all(abs(float(a.mean()) - 60.0) < 1 for a in stacks["dapi"])
+
+    bgm = build_background_models(tmp_path, tokens=["DAPI", "GFP"], schema=schema,
+                                  sep="_", background_well="C11")
+    ffm = build_flatfield_models(tmp_path, tokens=["DAPI", "GFP"], schema=schema,
+                                 sep="_", mode="empty_well", background_well="C11")
+    assert set(bgm) == {"dapi", "gfp"} and set(ffm) == {"dapi", "gfp"}
+    # the additive field keeps the measured level → real subtraction, not a no-op
+    assert abs(float(bgm["dapi"].mean()) - 60.0) < 2
 
 
 # ── Analyze → CLI arg mapping ────────────────────────────────────────────────

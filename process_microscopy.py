@@ -1063,6 +1063,117 @@ def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
     return apply_flatfield(img, ff_field)
 
 
+def _load_image_source(source) -> "np.ndarray | None":
+    """Load a 2-D float32 image from either a ``Path`` on disk or a
+    ``(zip_path, member_name)`` tuple (a TIFF stored inside a per-well zip).
+    Returns None on any read error so sampling can skip it."""
+    import io as _io
+    try:
+        if isinstance(source, tuple):
+            zpath, member = source
+            with zipfile.ZipFile(zpath, "r") as zf:
+                arr = imread(_io.BytesIO(zf.read(member)))
+            while arr.ndim > 2:
+                arr = arr[0]
+            return arr.astype(np.float32)
+        return load_2d_gray(source)
+    except Exception:
+        return None
+
+
+def sample_empty_well_images(
+    input_dir: Path,
+    *,
+    tokens: "list[str]",
+    schema: "list[str] | None",
+    sep: str,
+    background_well: str,
+    max_samples: int = 30,
+) -> "dict[str, list[np.ndarray]]":
+    """Sample up to *max_samples* images per channel token from the empty /
+    background well, reading from **whichever input layout holds it**: a
+    per-well ``<WELL>.zip`` (the default mode), a per-well folder, or loose
+    TIFFs in *input_dir*. Returns ``{token_lower: [array, ...]}`` — the
+    per-channel stacks the empty-well estimators consume; empty when the well
+    can't be located or carries none of the requested channels.
+
+    This closes the gap where the empty-well flat-field / background models were
+    built only from TIFFs *loose on disk*: in the default zip-per-well mode the
+    background well stayed compressed, every model came back empty, and
+    ``--flatfield empty_well`` / ``--background empty_well`` silently became a
+    no-op (corrected values identical to raw).
+    """
+    fields = list(schema or [])
+    chan_idx = fields.index("channel") if "channel" in fields else -1
+    well_idx = fields.index("well") if "well" in fields else -1
+    bg = str(background_well or "").strip().lower()
+    if chan_idx < 0 or not bg:
+        return {}
+    want = {str(t).strip().lower() for t in (tokens or [])}
+
+    def _token_of(stem: str, *, require_well: bool) -> "str | None":
+        parts = stem.split(sep)
+        if chan_idx >= len(parts):
+            return None
+        if require_well:
+            if well_idx < 0 or well_idx >= len(parts) \
+                    or parts[well_idx].strip().lower() != bg:
+                return None
+        tok = parts[chan_idx].strip().lower()
+        if want and tok not in want:
+            return None
+        return tok
+
+    # source := Path on disk | (zip_path, member_name)
+    by_token: "dict[str, list]" = defaultdict(list)
+
+    # 1) per-well zip (default mode): <input_dir>/<WELL>.zip. The well is
+    #    established by the zip name, so members need not carry the well token.
+    zip_hit = False
+    for well, zpath in find_well_zips(input_dir):
+        if well.lower() != bg:
+            continue
+        zip_hit = True
+        try:
+            with zipfile.ZipFile(zpath, "r") as zf:
+                for member in zf.infolist():
+                    name = Path(member.filename).name
+                    if not name or name.startswith(".") \
+                            or Path(name).suffix.lower() not in (".tif", ".tiff"):
+                        continue
+                    tok = _token_of(Path(name).stem, require_well=False)
+                    if tok is not None:
+                        by_token[tok].append((zpath, member.filename))
+        except (OSError, zipfile.BadZipFile):
+            continue
+
+    # 2) per-well folder: <input_dir>/<WELL>/...  (well set by folder name).
+    if not zip_hit:
+        for well, folder in find_well_folders(input_dir):
+            if well.lower() != bg:
+                continue
+            for p in sorted(folder.rglob("*.tif*")):
+                tok = _token_of(p.stem, require_well=False)
+                if tok is not None:
+                    by_token[tok].append(p)
+
+    # 3) loose TIFFs anywhere under input_dir — the filename must carry the well.
+    if not by_token:
+        for p in sorted(input_dir.rglob("*.tif*")):
+            tok = _token_of(p.stem, require_well=True)
+            if tok is not None:
+                by_token[tok].append(p)
+
+    out: "dict[str, list[np.ndarray]]" = {}
+    for tok, sources in by_token.items():
+        step = max(1, len(sources) // max_samples)
+        imgs = [a for a in (_load_image_source(s)
+                            for s in sources[::step][:max_samples]) if a is not None]
+        if imgs:
+            out[tok] = imgs
+    return out
+
+
 def build_background_models(
     input_dir: Path,
     *,
@@ -1075,36 +1186,16 @@ def build_background_models(
     """Per-channel **additive** background fields from the empty/background well
     (for ``--background empty_well``). Mirrors :func:`build_flatfield_models`'s
     empty-well sampling but uses :func:`estimate_background_field` (keeps the
-    measured level for subtraction, not a mean-1 field for division). Returns
-    ``{token_lower: field}``; channels with no usable empty-well images omitted.
+    measured level for subtraction, not a mean-1 field for division). Reads the
+    well from whichever input layout holds it (zip / folder / loose) via
+    :func:`sample_empty_well_images`. Returns ``{token_lower: field}``; channels
+    with no usable empty-well images omitted.
     """
-    fields = list(schema or [])
-    chan_idx = fields.index("channel") if "channel" in fields else -1
-    well_idx = fields.index("well") if "well" in fields else -1
-    bg = str(background_well or "").strip().lower()
-    if chan_idx < 0 or well_idx < 0 or not bg:
-        return {}
-    want = {str(t).strip().lower() for t in (tokens or [])}
-    by_token: "dict[str, list[Path]]" = {}
-    for path in sorted(input_dir.rglob("*.tif*")):
-        parts = path.stem.split(sep)
-        if chan_idx >= len(parts) or well_idx >= len(parts):
-            continue
-        if parts[well_idx].strip().lower() != bg:
-            continue
-        tok = parts[chan_idx].strip().lower()
-        if want and tok not in want:
-            continue
-        by_token.setdefault(tok, []).append(path)
+    stacks = sample_empty_well_images(
+        input_dir, tokens=tokens, schema=schema, sep=sep,
+        background_well=background_well, max_samples=max_samples)
     models: "dict[str, np.ndarray]" = {}
-    for tok, paths in by_token.items():
-        step = max(1, len(paths) // max_samples)
-        imgs = []
-        for p in paths[::step][:max_samples]:
-            try:
-                imgs.append(load_2d_gray(p))
-            except Exception:
-                continue
+    for tok, imgs in stacks.items():
         field = estimate_background_field(imgs)
         if field is not None:
             models[tok] = field
@@ -1293,44 +1384,46 @@ def build_flatfield_models(
     Globs the input tree for TIFFs, groups them by channel token (parsed from
     the filename schema), evenly samples up to *max_samples* per channel, and
     estimates one BaSiC-style field per token via :func:`estimate_basic_flatfield`.
-    For ``empty_well`` only files belonging to *background_well* are used.
-    Returns ``{token_lower: flatfield}``; channels with no usable images are
-    omitted (so :func:`apply_flatfield` no-ops them). Operates on TIFFs present
-    on disk — zip-mode wells (still compressed) yield no models.
+    For ``empty_well`` only images from *background_well* are used, read from
+    whichever input layout holds it (zip / folder / loose) via
+    :func:`sample_empty_well_images`; ``basic`` samples the whole plate from
+    TIFFs present on disk. Returns ``{token_lower: flatfield}``; channels with no
+    usable images are omitted (so :func:`apply_flatfield` no-ops them).
     """
     if mode not in ("basic", "empty_well"):
         return {}
     fields = list(schema or [])
     chan_idx = fields.index("channel") if "channel" in fields else -1
-    well_idx = fields.index("well") if "well" in fields else -1
     if chan_idx < 0:
         return {}
     want = {str(t).strip().lower() for t in (tokens or [])}
-    bg = str(background_well or "").strip().lower()
-    if mode == "empty_well" and (well_idx < 0 or not bg):
-        return {}
-    by_token: "dict[str, list[Path]]" = {}
-    for path in sorted(input_dir.rglob("*.tif*")):
-        parts = path.stem.split(sep)
-        if chan_idx >= len(parts):
-            continue
-        tok = parts[chan_idx].strip().lower()
-        if want and tok not in want:
-            continue
-        if mode == "empty_well":
-            if well_idx >= len(parts) or parts[well_idx].strip().lower() != bg:
+
+    if mode == "empty_well":
+        if not str(background_well or "").strip():
+            return {}
+        by_token_imgs = sample_empty_well_images(
+            input_dir, tokens=tokens, schema=schema, sep=sep,
+            background_well=background_well, max_samples=max_samples)
+    else:  # basic — whole-plate sampling from loose/folder TIFFs on disk.
+        by_token: "dict[str, list[Path]]" = {}
+        for path in sorted(input_dir.rglob("*.tif*")):
+            parts = path.stem.split(sep)
+            if chan_idx >= len(parts):
                 continue
-        by_token.setdefault(tok, []).append(path)
+            tok = parts[chan_idx].strip().lower()
+            if want and tok not in want:
+                continue
+            by_token.setdefault(tok, []).append(path)
+        by_token_imgs = {}
+        for tok, paths in by_token.items():
+            step = max(1, len(paths) // max_samples)
+            imgs = [a for a in (_load_image_source(p)
+                                for p in paths[::step][:max_samples]) if a is not None]
+            if imgs:
+                by_token_imgs[tok] = imgs
+
     models: "dict[str, np.ndarray]" = {}
-    for tok, paths in by_token.items():
-        step = max(1, len(paths) // max_samples)
-        sample = paths[::step][:max_samples]
-        imgs = []
-        for p in sample:
-            try:
-                imgs.append(load_2d_gray(p))
-            except Exception:
-                continue
+    for tok, imgs in by_token_imgs.items():
         field = estimate_basic_flatfield(imgs)
         if field is not None:
             models[tok] = field

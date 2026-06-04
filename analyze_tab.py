@@ -1145,17 +1145,58 @@ class AnalyzeTab(QWidget):
         # arrives.
         vsb = self._log.verticalScrollBar()
         at_bottom = vsb.value() >= vsb.maximum() - 4  # 4-px tolerance
+
+        # v5.4.7: compensate for ``setMaximumBlockCount(10000)``-driven
+        # trimming. When a new line pushes the block count over the
+        # cap, Qt removes blocks from the TOP. From the scrollbar's
+        # view that shifts every following pixel up — a user scrolled
+        # to read an earlier line still LOOKS like they're at the
+        # same value() but the content under that pixel has moved.
+        # Without an explicit compensation the viewport drifts toward
+        # the bottom (toward newer lines) every time trimming fires,
+        # which felt extra-broken once the rsync progress2 stream
+        # made trimming common during a remote run. Solution:
+        # snapshot block count before insert, count lines added,
+        # derive how many blocks were trimmed, subtract that many
+        # line-heights from the saved scroll value.
+        old_value = vsb.value()
+        doc = self._log.document()
+        old_block_count = doc.blockCount()
+        lines_added = text.count("\n") if text else 0
+        # An ``insertText`` of "foo\nbar" appends 1 hard newline +
+        # bar (no trailing newline) → blockCount goes up by 1.
+        # "foo\nbar\n" → up by 1. "foo" (no newline) → up by 0.
+        # The text we receive always has a trailing "\n" (see
+        # callers), so ``\n``-count == new blocks added.
+
         # Use a *fresh* QTextCursor for the insert — setting the active
         # text cursor (the old code) is what forced the viewport to
         # follow the caret. The doc-bound cursor leaves the visible
         # cursor / selection alone.
-        cursor = QTextCursor(self._log.document())
+        cursor = QTextCursor(doc)
         cursor.movePosition(QTextCursor.End)
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(self._LOG_COLORS.get(tag, self._LOG_COLORS["INFO"])))
         cursor.insertText(text, fmt)
+
         if at_bottom:
             vsb.setValue(vsb.maximum())
+            return
+
+        # User was scrolled up. Did setMaximumBlockCount trim
+        # blocks from the top? If so, shift the saved scroll value
+        # up by the corresponding pixel height so the user stays
+        # anchored to the SAME content they were reading instead
+        # of drifting toward the new lines at the bottom.
+        new_block_count = doc.blockCount()
+        blocks_trimmed = max(0, old_block_count + lines_added - new_block_count)
+        if blocks_trimmed > 0:
+            line_height = max(1, self._log.fontMetrics().lineSpacing())
+            vsb.setValue(max(0, old_value - blocks_trimmed * line_height))
+        else:
+            # No trimming — explicitly restore the pre-insert value
+            # in case Qt did anything implicit.
+            vsb.setValue(old_value)
 
     def _clear_log(self) -> None:
         self._log.clear()

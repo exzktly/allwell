@@ -1988,6 +1988,15 @@ class _BatchedRemoteProcess:
         self._current_proc: Optional[subprocess.Popen] = None
 
         # Set up the shared run identifiers and remote dirs.
+        # Keep the single-shot path's layout: input goes into the
+        # persistent dataset cache (``datasets/<key>``) and output
+        # into ``runs/<run_id>/out``. The "stale zips" diagnosis
+        # of v5.4.7 was incorrect — the user cleared remote dirs
+        # manually before the run that showed "processed 5, skipped
+        # 5" — so we're not switching dirs blindly. The actual cause
+        # of that log line is still under investigation; if it turns
+        # out to be cache-dir pollution we can switch later, with
+        # evidence.
         key = runner._cache.cache_key(zipped)  # noqa: SLF001
         run_id = "run-" + _compute_run_id(key, pipeline_argv)
         remote_input = runner._cache.remote_dataset_dir(key)  # noqa: SLF001
@@ -1997,8 +2006,6 @@ class _BatchedRemoteProcess:
         remote_pidfile = (
             f"{runner.host.remote_staging_dir}/runs/{run_id}/run.pid"
         )
-        # mkdir BOTH input + output (input may be reused across re-runs
-        # but always needs to exist on a fresh remote).
         runner._cache._ssh_run(  # noqa: SLF001
             ["mkdir", "-p", remote_input, remote_output],
             check=True,
@@ -2087,6 +2094,20 @@ class _BatchedRemoteProcess:
                 f"(peak remote disk ≈ {self._batch_size} well-input)\n"
             )
 
+            # v5.4.7: inject a synthetic "Zip mode: <total> wells"
+            # banner BEFORE batch 1's stdout. The GUI's
+            # ``ProgressTracker`` locks on the first such banner via
+            # ``if not self.well_total:``; without this, each batch's
+            # own banner reports just THAT batch's count (e.g. 50)
+            # and well_done climbs past 100% as later batches add up
+            # against the wrong denominator. We always say "Zip mode"
+            # because the remote pipeline sees zips on disk regardless
+            # of the local input mode the user started from. The "—
+            # batched" suffix is informational only; the regex
+            # ``\s+well`` matches both "well" and "wells" so the
+            # parenthetical doesn't disturb the match.
+            self._line_q.put(f"Zip mode: {len(all_zips)} wells — batched\n")
+
             for batch_idx, batch_zips in enumerate(batches):
                 if self._stop.is_set():
                     self._log(
@@ -2100,11 +2121,31 @@ class _BatchedRemoteProcess:
                     f"[remote] batch {batch_idx + 1}/{n_batches}: "
                     f"uploading {len(batch_zips)} well-zip(s)\n"
                 )
+                # v5.4.7: scale per-batch upload progress so the
+                # status label advances smoothly across the WHOLE
+                # run instead of resetting from 0 → 1 once per
+                # batch. Each batch's rsync calls progress_fn with
+                # ``pct`` in [0, 1]; map to
+                # ``(batch_idx + pct) / n_batches`` so batch 1's
+                # uploads animate 0 → 1/n_batches, batch 2's
+                # 1/n_batches → 2/n_batches, etc.
+                _outer_progress = self._progress
+                if _outer_progress is not None:
+                    def _scaled_progress(
+                        pct: float,
+                        _idx: int = batch_idx,
+                        _n: int = n_batches,
+                        _outer=_outer_progress,
+                    ) -> None:
+                        _outer((_idx + pct) / _n)
+                    inner_progress: "Callable[[float], None] | None" = _scaled_progress
+                else:
+                    inner_progress = None
                 sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(  # noqa: SLF001
                     batch_zips,
                     self._runner._run.remote_input_dir,  # noqa: SLF001
                     log_fn=self._log,
-                    progress_fn=self._progress,
+                    progress_fn=inner_progress,
                     stop_event=self._stop,
                 )
                 if rc != 0:
@@ -2131,6 +2172,17 @@ class _BatchedRemoteProcess:
                     self._output_filter,
                     self._zipped.mode,
                 )
+                # v5.4.7: suppress the per-batch auto-threshold pass.
+                # Each batch sees only its own outputs (the Fetcher
+                # downloads + deletes them as soon as they land), so
+                # the in-pipeline auto-threshold would compute
+                # thresholds from a sliver of the plate and overwrite
+                # the previous batch's defaults each time. We run a
+                # single auto-threshold pass locally after every
+                # batch drains (see ``_run_local_auto_threshold``
+                # below).
+                if "--no_auto_threshold" not in remote_argv:
+                    remote_argv = list(remote_argv) + ["--no_auto_threshold"]
                 remote_cmd = (
                     f"echo $$ > {_remote_quote(self._runner._run.remote_pidfile)}; "  # noqa: SLF001
                     f"{_CONDA_ACTIVATE_SNIPPET}; "
@@ -2173,8 +2225,79 @@ class _BatchedRemoteProcess:
 
             self._returncode = 0
         finally:
-            self._line_q.put(None)
+            # Drain the Fetcher first so every well's CSV + zip lands
+            # locally BEFORE we attempt auto-threshold against
+            # local_output_dir.
             self._fetcher.flush_and_join()
+            # v5.4.7: single auto-threshold pass over the FULL
+            # downloaded output. The per-batch passes were suppressed
+            # via ``--no_auto_threshold`` so that a batch wouldn't
+            # write thresholds derived from a sliver of the plate.
+            # Fires only when the whole run succeeded — a mid-run
+            # abort leaves the previous run's pipeline_info.json (if
+            # any) untouched.
+            if self._returncode == 0:
+                self._run_local_auto_threshold()
+            self._line_q.put(None)
+
+    def _run_local_auto_threshold(self) -> None:
+        """Re-run the pipeline's auto-threshold pass locally against
+        the full ``local_output_dir`` after every batch has drained.
+        Failures are logged but non-fatal (matches the remote
+        pipeline's "informational only" stance on auto-threshold)."""
+        try:
+            # Late import: ``process_microscopy`` is a heavy module
+            # (pulls TensorFlow indirectly). Don't pay that cost on
+            # every import of remote_runner.
+            sys.path.insert(0, str(repo_root()))
+            from process_microscopy import (
+                _estimate_thresholds_standalone,
+                _apply_thresholds_to_pipeline_info,
+            )
+            # Parse the channel tokens out of the pipeline argv so we
+            # don't have to re-thread them through __init__.
+            fluor_tokens: list[str] = []
+            schema = ""
+            sep = "_"
+            it = iter(self._pipeline_argv)
+            for arg in it:
+                if arg == "--fluor_tokens":
+                    fluor_tokens = next(it, "").split()
+                elif arg == "--filename_schema":
+                    schema = next(it, "")
+                elif arg == "--filename_sep":
+                    sep = next(it, "_")
+            import logging
+            log_pylog = logging.getLogger("allwell.local_auto_threshold")
+            self._log(
+                "[remote] running auto-threshold pass locally over "
+                f"{self._local_output_dir} (full plate, all batches drained)\n"
+            )
+            thresholds = _estimate_thresholds_standalone(
+                self._local_output_dir,
+                fluor_channels=fluor_tokens,
+                filename_schema=schema,
+                filename_sep=sep,
+                log=log_pylog,
+            )
+            written = _apply_thresholds_to_pipeline_info(
+                self._local_output_dir, thresholds, log_pylog,
+            )
+            if written:
+                self._log(
+                    "[remote] local auto-threshold defaults written for "
+                    f"{len(written)} channel(s): "
+                    + ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items())
+                    + "\n"
+                )
+            else:
+                self._log(
+                    "[remote] local auto-threshold pass produced no new defaults.\n"
+                )
+        except Exception as exc:  # noqa: BLE001 — informational, never fatal
+            self._log(
+                f"[remote] warn: local auto-threshold pass failed: {exc}\n"
+            )
 
 
 class _QueueLineIterator:
@@ -2233,8 +2356,17 @@ class Fetcher:
         ``ProgressTracker`` already parses, plus the mode banner that
         announces the well total.
         """
+        # v5.4.7: lock the well total to whatever set it FIRST.
+        # In single-shot mode the pipeline emits exactly one banner
+        # and this is a no-op refinement. In batched mode the
+        # ``_BatchedRemoteProcess`` pre-sets ``well_count_total`` to
+        # the full plate count and injects a synthetic banner before
+        # batch 1; without this guard, each per-batch banner would
+        # overwrite the lock with that batch's count, and the
+        # Fetcher's per-well log lines would read e.g. "10/5: starting
+        # download" once batch 2 began.
         m = _RE_MODE_WELLS.search(stdout_line)
-        if m:
+        if m and not self.run.well_count_total:
             self.run.well_count_total = int(m.group(1))
         # v5.2.17: use .search not .match — the line carries a
         # ``YYYY-MM-DD HH:MM:SS  INFO`` prefix from the basicConfig
@@ -2403,16 +2535,28 @@ class Fetcher:
         logged but doesn't abort the run — the end-of-run
         ``verify_and_cleanup`` is the backstop. On a disk-constrained
         remote this is the difference between the pipeline completing
-        and ENOSPC mid-run."""
-        cmd = (
-            f"rm -f "
+        and ENOSPC mid-run.
+
+        v5.4.7: pipe the script via stdin to ``bash -s`` instead of
+        passing it as ``bash -c "..."`` arguments. ssh joins multi-
+        arg remote commands with spaces, so a ``["bash", "-c",
+        "rm -f a b c"]`` argv arrived at the remote bash as
+        ``bash -c rm -f a b c`` — bash then took ``rm`` as the
+        ``-c`` script and treated ``-f a b c`` as positional args
+        to that script. The script ``rm`` (no args) hit ``rm: missing
+        operand`` and the user saw the warning on every well. The
+        stdin pipe avoids the shell-quoting round-trip entirely.
+        """
+        script = (
+            f"rm -f -- "
             f"{self.run.remote_input_dir}/{well}.zip "
             f"{self.run.remote_output_dir}/{well}_out.zip "
-            f"{self.run.remote_output_dir}/*_{well}.csv"
+            f"{self.run.remote_output_dir}/*_{well}.csv\n"
         )
         try:
             result = subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + ["bash", "-c", cmd],
+                self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
+                input=script.encode("utf-8"),
                 capture_output=True,
                 timeout=30,
             )

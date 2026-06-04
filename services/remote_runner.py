@@ -1447,6 +1447,43 @@ def _looks_like_rsync_filename(line: str) -> bool:
     return bool(_RSYNC_FILENAME_RE.match(line))
 
 
+def _iter_rsync_lines(stdout) -> "Iterable[str]":
+    """Yield rsync stdout 'lines' split on BOTH ``\\n`` and ``\\r``.
+
+    Critical for surfacing ``--info=progress2`` updates in real time:
+    rsync terminates its in-place updating progress bar with ``\\r``,
+    not ``\\n``. The default ``for line in proc.stdout`` only splits
+    on ``\\n``, so during a multi-GB transfer of a single well zip
+    the progress updates accumulate in the pipe buffer for minutes
+    until rsync moves on to the next file (or finishes). On Windows
+    where non-TTY pipes are block-buffered at the OS level, this
+    becomes ten-plus-minute silences in the GUI log — users
+    reasonably assume the pipeline has hung.
+
+    Reads small chunks (raw bytes), splits on ``[\\r\\n]+``, decodes
+    each chunk on its own. Empty splits (consecutive terminators,
+    typical of ``\\r\\n`` from Windows-built tools) are filtered.
+    Returns a generator so the caller can interleave per-line work
+    with reading.
+    """
+    buf = b""
+    line_re = re.compile(rb"[\r\n]+")
+    while True:
+        chunk = stdout.read(64)
+        if not chunk:
+            if buf:
+                yield buf.decode("utf-8", errors="replace")
+            return
+        buf += chunk
+        parts = line_re.split(buf)
+        # Last element may be a partial line (no terminator yet);
+        # keep it for the next iteration.
+        for part in parts[:-1]:
+            if part:
+                yield part.decode("utf-8", errors="replace")
+        buf = parts[-1]
+
+
 def _run_rsync_streaming(
     cmd: list[str],
     *,
@@ -1461,13 +1498,22 @@ def _run_rsync_streaming(
 
     v5.1.1: return value gained the exit code so the caller can drive a
     bounded retry on transient network failures (rsync codes 10/12/30/35).
+
+    v5.4.5: binary stdout + manual ``[\\r\\n]+`` splitting via
+    ``_iter_rsync_lines`` so ``--info=progress2`` updates (which
+    terminate with ``\\r``) reach the log promptly. Without this, the
+    GUI shows up to ten minutes of silence between the
+    ``[remote] $ rsync …`` line and the first per-file ↑ marker
+    during the upload of a large well zip.
     """
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
+        # Binary mode + small ``read`` chunks so we can split on
+        # ``\r`` alongside ``\n``. ``text=True`` + ``for line in
+        # stdout`` only saw ``\n`` and missed every progress update.
+        bufsize=0,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
 
@@ -1483,36 +1529,50 @@ def _run_rsync_streaming(
     # (e.g. "A01.zip") and the required-files names (e.g.
     # "process_microscopy.py", "_Docs/requirements-remote.txt").
     file_count = 0
+    # Rate-limit the progress-bar surfacing — rsync can emit many
+    # progress updates per second, and the GUI doesn't need
+    # sub-second resolution. Emit at most every 2 seconds, plus the
+    # final 100% line.
+    last_progress_log = 0.0
+    PROGRESS_LOG_MIN_INTERVAL = 2.0
 
     try:
         assert proc.stdout is not None
-        for line in proc.stdout:
+        for line in _iter_rsync_lines(proc.stdout):
             if stop_event and stop_event.is_set():
                 proc.terminate()
                 break
-            line = line.rstrip("\n")
             if not line:
                 continue
             # Progress lines (--info=progress2) print to a TTY-ish format
-            # with carriage returns. When piped, rsync still emits them on
-            # newlines; we just extract the percentage if present.
+            # with carriage returns. We now read \r-delimited and can
+            # surface them as percentage updates.
             m = progress_re.search(line)
-            if m and progress_fn:
+            is_progress = m is not None
+            if is_progress and progress_fn:
                 try:
                     pct = float(m.group(2)) / 100.0
                     progress_fn(pct)
                 except ValueError:
                     pass
-            m = bytes_actual_re.match(line)
-            if m:
-                sent_bytes = int(m.group(1).replace(",", ""))
+            m_bytes = bytes_actual_re.match(line)
+            if m_bytes:
+                sent_bytes = int(m_bytes.group(1).replace(",", ""))
             elif sent_bytes == 0:
-                m = bytes_sent_re.match(line)
-                if m:
-                    sent_bytes = int(m.group(1).replace(",", ""))
+                m_bytes = bytes_sent_re.match(line)
+                if m_bytes:
+                    sent_bytes = int(m_bytes.group(1).replace(",", ""))
             if log_fn:
                 if line.startswith(("sent ", "Total ", "rsync:", "rsync error")):
                     log_fn(f"[remote] {line}\n")
+                elif is_progress:
+                    # Rate-limited so a fast link doesn't flood the GUI
+                    # with progress lines, but so the user does see
+                    # SOMETHING during a long upload of a single file.
+                    now = time.monotonic()
+                    if now - last_progress_log >= PROGRESS_LOG_MIN_INTERVAL:
+                        log_fn(f"[remote] ↑ {line}\n")
+                        last_progress_log = now
                 elif _looks_like_rsync_filename(line):
                     file_count += 1
                     log_fn(f"[remote] ↑ ({file_count}) {line}\n")

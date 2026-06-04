@@ -608,177 +608,6 @@ def collect_bar_items_for_group(
     return items
 
 
-def _pooled_wells_for_fov_mode(app) -> List[str]:
-    """Wells contributing to the FOV-pooled per-tp distribution.
-
-    When replicate sets are active, every well inside every visible rset is
-    pooled together (the user-set pool-replicates toggle is moot here — the
-    "Aggregate FOV" mode already collapses well identity). When no rsets are
-    active, the user's plate selection is pooled.
-    """
-    active_rsets = app._rep_sets_active()
-    out: List[str] = []
-    seen: set = set()
-    if active_rsets:
-        for rset in active_rsets:
-            for w in rset.wells:
-                if w in seen:
-                    continue
-                if w not in app._app_state.dataset.well_paths:
-                    continue
-                seen.add(w)
-                out.append(w)
-        return out
-    for label in app._app_state.selection.selected_wells:
-        if label in seen or label not in app._app_state.dataset.well_paths:
-            continue
-        seen.add(label)
-        out.append(label)
-    out.sort(key=app._parse_rc)
-    return out
-
-
-def collect_bar_items_fov_pooled(
-    app, target_ts: List[float], *,
-    threshold: Optional[float] = None,
-) -> Tuple[List[BarItem], str]:
-    """Build one ``BarItem`` per timepoint by pooling every well's cells.
-
-    Used when the *Aggregate FOV* toggle is on AND the user has selected
-    multiple timepoints (or even a single one). All cells from every well
-    contributing to the plot are pooled per timepoint and aggregated with
-    ``aggregate_with_threshold_df(..., per_fov_spread=True)`` so SD/SEM is
-    computed across per-FOV means (FOV ids prefixed by well to avoid
-    cross-well collisions).
-
-    Returns ``(items, band_lbl)`` — one ``BarItem`` per tp, in ascending tp
-    order; the items use ``group_key=""`` because they form a single
-    timepoint-axis sequence with no clustering.
-    """
-    import numpy as _np
-    import pandas as _pd
-    from well_viewer.data.data_loading import (
-        _aggregate_arrays as _agg_arrays,
-        df_included_mask as _incl_mask,
-        resolve_value_series as _resolve_vals,
-    )
-
-    use_sem = app._app_state.plot.use_sem
-    band_lbl = "SEM" if use_sem else "SD"
-    if not target_ts:
-        return [], band_lbl
-
-    if threshold is None:
-        if app._app_state.channel.active_metric == "smfish_count":
-            threshold = -1.0
-        else:
-            threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-
-    val_col = app._app_state.channel.active_val_col
-    cell_area_threshold = app._get_cell_area_threshold()
-    fluor_gates = app._get_all_fluor_gates() or {}
-    ratios = app._app_state.channel.ratio_index
-
-    wells = _pooled_wells_for_fov_mode(app)
-
-    # Build one (tp, val, fov) triple stream across all pooled wells. FOV ids
-    # are well-prefixed so the same numeric FOV in two wells stays distinct.
-    tp_chunks: List[_np.ndarray] = []
-    val_chunks: List[_np.ndarray] = []
-    fov_chunks: List[_np.ndarray] = []
-    for w in wells:
-        df = app._get_rows(w)
-        if df is None or len(df) == 0:
-            continue
-        mask = _incl_mask(df).to_numpy(copy=True)
-        if "area_px" in df.columns:
-            area = _pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
-            with _np.errstate(invalid="ignore"):
-                mask &= _np.isfinite(area) & (area > cell_area_threshold)
-        for channel, gate in fluor_gates.items():
-            col = f"{channel}_mean_intensity"
-            if col not in df.columns:
-                continue
-            v = _pd.to_numeric(df[col], errors="coerce").to_numpy()
-            mask &= _np.isfinite(v) & (v > gate)
-        if "timepoint_hours" in df.columns:
-            tp = _pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-        else:
-            tp = _np.full(len(df), _np.nan)
-        val = _resolve_vals(df, val_col, ratios).to_numpy()
-        if "fov" in df.columns:
-            fov_series = (df["fov"].fillna("1").astype(str).str.strip().replace("", "1"))
-        else:
-            fov_series = _pd.Series(["1"] * len(df), index=df.index)
-        fov_arr = fov_series.to_numpy()
-        final = mask & _np.isfinite(tp) & _np.isfinite(val)
-        if not final.any():
-            continue
-        # Prefix FOV by well so cross-well FOV ids stay disjoint.
-        fov_pref = _np.array([f"{w}|{f}" for f in fov_arr[final]], dtype=object)
-        tp_chunks.append(tp[final].astype(float))
-        val_chunks.append(val[final].astype(float))
-        fov_chunks.append(fov_pref)
-
-    items: List[BarItem] = []
-    if not tp_chunks:
-        for t in target_ts:
-            items.append(BarItem(
-                key=f"t{t:.4g}", display=f"t={t:.4g} h", color=app._rank_color_well("A01"),
-                mean=float("nan"), spread=0.0, has_mean=False,
-                frac=float("nan"), frac_spread=0.0, has_frac=False,
-                n_above=0.0, n_above_spread=0.0,
-                tp=float(t), group_key="",
-            ))
-        return items, band_lbl
-
-    tp_all = _np.concatenate(tp_chunks)
-    val_all = _np.concatenate(val_chunks)
-    fov_all = _np.concatenate(fov_chunks)
-
-    # Aggregate per tp; only return the tps the user actually selected.
-    from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
-    target_set = set()
-    for t in target_ts:
-        target_set.add(float(t))
-    # _aggregate_arrays groups by exact tp values present in the stream;
-    # round to the same tolerance we already use elsewhere (1e-6).
-    pts = _agg_arrays(tp_all, val_all, fov_all, threshold, use_sem, True)
-    pts_by_t = {float(p[0]): p for p in pts}
-
-    for i, t in enumerate(target_ts):
-        # Match within 1e-6 tolerance to handle float rounding from
-        # earlier numeric parsing — same tolerance as the per-well branch.
-        matched = None
-        for pt_t, pt in pts_by_t.items():
-            if abs(pt_t - float(t)) < 1e-6:
-                matched = pt
-                break
-        color = _WELL_COLORS[i % len(_WELL_COLORS)]
-        display = f"t={float(t):.4g}"
-        if matched is None:
-            items.append(BarItem(
-                key=f"t{float(t):.4g}", display=display, color=color,
-                mean=float("nan"), spread=0.0, has_mean=False,
-                frac=float("nan"), frac_spread=0.0, has_frac=False,
-                n_above=0.0, n_above_spread=0.0,
-                tp=float(t), group_key="",
-            ))
-            continue
-        m, s, f = matched[1], matched[2], matched[3]
-        frac_spread = float(matched[6]) if len(matched) >= 7 else 0.0
-        n_above_pf_mean = float(matched[7]) if len(matched) >= 8 else 0.0
-        n_above_pf_spread = float(matched[8]) if len(matched) >= 9 else 0.0
-        items.append(BarItem(
-            key=f"t{float(t):.4g}", display=display, color=color,
-            mean=float(m), spread=float(s), has_mean=not math.isnan(m),
-            frac=float(f), frac_spread=frac_spread, has_frac=not math.isnan(f),
-            n_above=n_above_pf_mean, n_above_spread=n_above_pf_spread,
-            tp=float(t), group_key="",
-        ))
-    return items, band_lbl
-
-
 def ordered_bar_keys(app) -> list:
     """Return ordered bar keys for current mode, respecting custom drag order."""
     active_rsets = app._rep_sets_active()
@@ -1221,6 +1050,7 @@ def toggle_swarm(app) -> None:
         app._bar_violin = False
         app._violin_btn.setChecked(False)
         app._violin_slider.setEnabled(False)
+    app._refresh_bar_layout_btn_state()
     redraw_bars(app)
 
 
@@ -1236,6 +1066,7 @@ def toggle_violin(app) -> None:
         # Mutually exclusive with beeswarm
         app._bar_swarm = False
         app._swarm_btn.setChecked(False)
+    app._refresh_bar_layout_btn_state()
     redraw_bars(app)
 
 
@@ -1286,6 +1117,14 @@ def toggle_bar_pool_replicates(app) -> None:
     """Flip whether replicate-set wells collapse to a single column."""
     from well_viewer.features.barplot.renderer import redraw_bars
     app._app_state.plot.toggle_bar_pool_replicates()
+    app._refresh_bar_layout_btn_state()
+    redraw_bars(app)
+
+
+def toggle_bar_pool_rset_cells(app) -> None:
+    """Flip whether violin/beeswarm pool an rset's wells into one column."""
+    from well_viewer.features.barplot.renderer import redraw_bars
+    app._app_state.plot.toggle_bar_pool_rset_cells()
     app._refresh_bar_layout_btn_state()
     redraw_bars(app)
 
@@ -1387,28 +1226,32 @@ def refresh_bar_layout_btn_state(app) -> None:
     """Sync the bar-tab layout toggle buttons with PlotState.
 
     Updates the *Group by ...* and *Pool Replicates* button labels / checked
-    states, and disables them when "Aggregate FOV" is on (no degrees of
-    freedom left in that mode). The pool-replicates button is hidden when
-    there are no active replicate sets.
+    states. The pool-replicates button is hidden when there are no active
+    replicate sets. The *Pool rset cells* button is hidden unless violin /
+    beeswarm is on AND ≥1 rset is active.
     """
     plot = app._app_state.plot
-    fov_active = bool(plot.use_fov_replicates)
     group_btn = getattr(app, "_bar_group_mode_btn", None)
     pool_btn = getattr(app, "_bar_pool_reps_btn", None)
+    pool_cells_btn = getattr(app, "_bar_pool_rset_cells_btn", None)
+    has_rsets = bool(app._rep_sets_active())
+    use_per_cell = bool(getattr(app, "_bar_violin", False) or getattr(app, "_bar_swarm", False))
     if group_btn is not None:
         if plot.bar_group_mode == "well":
             group_btn.setText("Group by Well")
         else:
             group_btn.setText("Group by Timepoint")
         group_btn.setChecked(plot.bar_group_mode == "timepoint")
-        group_btn.setEnabled(not fov_active)
+        group_btn.setEnabled(True)
     if pool_btn is not None:
-        has_rsets = bool(app._rep_sets_active())
-        pool_btn.setVisible(has_rsets and not fov_active)
-        pool_btn.setEnabled(not fov_active)
+        pool_btn.setVisible(has_rsets)
+        pool_btn.setEnabled(True)
         if plot.bar_pool_replicates:
             pool_btn.setText("Pool Replicates")
         else:
             pool_btn.setText("Show Wells Separately")
         pool_btn.setChecked(not plot.bar_pool_replicates)
+    if pool_cells_btn is not None:
+        pool_cells_btn.setVisible(use_per_cell and has_rsets)
+        pool_cells_btn.setChecked(bool(plot.bar_pool_rset_cells))
 

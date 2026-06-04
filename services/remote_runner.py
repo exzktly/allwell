@@ -83,7 +83,7 @@ _CSV_ONLY_GLOBS: tuple[str, ...] = ("*.csv", "pipeline_info.json")
 
 
 # Files this framework needs on the remote in order to run the pipeline.
-# Kept minimal on purpose: process_microscopy.py plus its two local-module
+# Kept minimal on purpose: process_microscopy.py plus its local-module
 # imports, plus the requirements list (so the bootstrap script knows what
 # pip-installs to do). Paths are relative to the repo root.
 #
@@ -95,6 +95,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "process_microscopy.py",
     "auto_threshold_core.py",
     "well_token.py",
+    # §C shape features: process_microscopy.compute_shape_features imports
+    # this on every run, so the remote needs it too (else ModuleNotFoundError).
+    "shape_features_core.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.

@@ -41,6 +41,7 @@ sibling_scripts = [
     (str(_parent / "all_well.py"),              "."),
     (str(_parent / "analyze_tab.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
+    (str(_parent / "shape_features_core.py"),   "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "theme.py"),                 "."),
 ]
@@ -79,6 +80,11 @@ datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 # ---------------------------------------------------------------------------
 
 hiddenimports = [
+    # First-party repo-root pipeline module imported lazily inside
+    # process_microscopy.compute_shape_features (function-level imports are
+    # missed by PyInstaller's static analysis, unlike the top-level
+    # auto_threshold_core / well_token).
+    "shape_features_core",
     # numpy internals
     "numpy.core._multiarray_umath",
     "numpy.core._multiarray_tests",

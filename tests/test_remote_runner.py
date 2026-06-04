@@ -1462,7 +1462,7 @@ def test_verify_reports_empty_csv(host, tmp_path):
 
 
 def test_required_files_list_is_what_we_promised():
-    """The contract from the design discussion: only these four files.
+    """The contract from the design discussion: only these files.
 
     v5.2.1 swapped ``_Docs/requirements.txt`` for
     ``_Docs/requirements-remote.txt`` so the remote install no longer
@@ -1473,6 +1473,7 @@ def test_required_files_list_is_what_we_promised():
         "process_microscopy.py",
         "auto_threshold_core.py",
         "well_token.py",
+        "shape_features_core.py",
         "_Docs/requirements-remote.txt",
     )
 

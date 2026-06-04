@@ -254,7 +254,6 @@ class AnalyzeTab(QWidget):
         self._build_channel_tokens_section(parent)
         self._build_folders_section(parent)
         self._refresh_schema_preview()
-        self._build_tophat_section(parent)
         self._build_shape_features_section(parent)
         self._build_qc_section(parent)
         self._build_output_options_section(parent)
@@ -422,24 +421,6 @@ class AnalyzeTab(QWidget):
 
         self._input_edit.textChanged.connect(lambda _: self._refresh_output())
 
-    def _build_tophat_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Top-Hat Background Subtraction")
-
-        nir_row = self._row(sec, "Nuclear radius")
-        self._tophat_radius_nir_edit = self._entry(nir_row, "100", width=60)
-        self._no_tophat_nir_cb = QCheckBox("Disable", nir_row)
-        nir_row.layout().addWidget(self._no_tophat_nir_cb)
-        nir_row.layout().addStretch(1)
-
-        fluor_row = self._row(sec, "Fluor radius")
-        self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
-        self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
-        fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
-        fluor_row.layout().addStretch(1)
-
-        hint = QLabel("Fluor radius applies to all fluorescent channels.", sec)
-        hint.setObjectName("Muted")
-        sec.layout().addWidget(hint)
 
     # Sensible default morphology features (centroids are always emitted by the
     # pipeline regardless of selection, so they are not offered as chips).
@@ -497,28 +478,55 @@ class AnalyzeTab(QWidget):
 
         rbg = self._row(sec, "Background subtraction")
         self._background_cb = QComboBox(rbg)
-        self._background_cb.addItems(["top_hat", "rolling_ball", "empty_well"])
+        self._background_cb.addItems(["none", "top_hat", "rolling_ball", "empty_well"])
+        self._background_cb.setCurrentText("top_hat")
         self._background_cb.setToolTip(
-            "How background is subtracted (per channel, where top-hat is enabled):\n"
+            "How background is subtracted (per channel, where enabled below):\n"
+            "• none — no background subtraction.\n"
             "• top_hat — fast square morphological; leaves halos/hotspots on "
             "uneven background.\n"
             "• rolling_ball — smooth isotropic baseline (recommended for "
             "structured background; slower).\n"
             "• empty_well — subtract a measured per-channel background from the "
-            "Background well.")
+            "Background well. (If flat-field is *also* empty_well, the two are "
+            "combined into one correct (raw−B)/(B/mean(B)) pass.)")
         rbg.layout().addWidget(self._background_cb)
         rbg.layout().addStretch(1)
+
+        # Radius / enable controls — folded in from the former standalone
+        # "Top-Hat Background Subtraction" section. Shown only for the
+        # radius-based methods (top_hat / rolling_ball); hidden for empty_well /
+        # none, which take no radius.
+        nir_row = self._row(sec, "Nuclear radius")
+        self._tophat_radius_nir_edit = self._entry(nir_row, "100", width=60)
+        self._no_tophat_nir_cb = QCheckBox("Disable", nir_row)
+        nir_row.layout().addWidget(self._no_tophat_nir_cb)
+        nir_row.layout().addStretch(1)
+        fluor_row = self._row(sec, "Fluor radius")
+        self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
+        self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
+        fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
+        fluor_row.layout().addStretch(1)
+        radius_hint = QLabel("Radius = background scale (px); Fluor radius "
+                             "applies to all fluorescent channels.", sec)
+        radius_hint.setObjectName("Muted")
+        radius_hint.setWordWrap(True)
+        sec.layout().addWidget(radius_hint)
+        self._bg_radius_rows = (nir_row, fluor_row, radius_hint)
 
         rbw = self._row(sec, "Background well")
         self._background_well_edit = self._entry(rbw, "", width=120)
         rbw.layout().addStretch(1)
 
         def _sync_bg(_=None) -> None:
-            # The background well feeds both empty_well flat-field and empty_well
-            # background subtraction.
+            bg_method = self._background_cb.currentText()
+            # Background well feeds empty_well flat-field and/or empty_well bg.
             self._background_well_edit.setEnabled(
                 self._flatfield_cb.currentText() == "empty_well"
-                or self._background_cb.currentText() == "empty_well")
+                or bg_method == "empty_well")
+            # Radius only applies to the morphological / rolling-ball methods.
+            for w in self._bg_radius_rows:
+                w.setVisible(bg_method in ("top_hat", "rolling_ball"))
         self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
         self._background_cb.currentIndexChanged.connect(_sync_bg)
         _sync_bg()

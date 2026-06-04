@@ -36,7 +36,7 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
-- **5.5.2 — Quality control (§B).** New **Quality Control** section in Analyze: optional flat-field correction, a **background-subtraction method** (`top_hat` / `rolling_ball` / `empty_well` — rolling-ball gives a smooth baseline without the square top-hat's halos; empty-well subtracts a measured per-channel background), and debris removal (min/max area + solidity gates), so noisy plates clean up before quantification.
+- **5.5.2 — Quality control (§B).** New **Quality Control** section in Analyze: optional flat-field correction, a **background-subtraction method** (`none` / `top_hat` / `rolling_ball` / `empty_well` — rolling-ball gives a smooth baseline without the square top-hat's halos; empty-well subtracts a measured per-channel background, and when flat-field is *also* empty-well the two combine into one correct `(raw − B)/(B/mean(B))` pass), and debris removal (min/max area + solidity gates), so noisy plates clean up before quantification.
 
 - **5.5.1 — Per-cell shape features (§C).** The pipeline can emit per-cell morphology columns (area, perimeter, solidity, eccentricity, …); pick them from the **Shape Metrics** dropdown in Analyze, and they appear in Review as a sectioned *Shape Features* virtual-channel group for plotting.
 

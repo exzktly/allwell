@@ -19,6 +19,7 @@ from process_microscopy import (
     estimate_basic_flatfield,
     estimate_background_field,
     subtract_background,
+    combined_empty_well_correct,
     BACKGROUND_METHODS,
     filter_debris,
     build_flatfield_models,
@@ -193,7 +194,32 @@ def test_build_pipeline_args_background_mapping():
                             _base_opts(background="empty_well", background_well="H12"))
     assert a[a.index("--background") + 1] == "empty_well"
     assert a[a.index("--background_well") + 1] == "H12"
-    assert "BACKGROUND_METHODS" and set(BACKGROUND_METHODS) == {"top_hat", "rolling_ball", "empty_well"}
+    # explicit "none" disables background subtraction entirely
+    a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts(background="none"))
+    assert a[a.index("--background") + 1] == "none"
+    assert set(BACKGROUND_METHODS) == {"none", "top_hat", "rolling_ball", "empty_well"}
+
+
+def test_subtract_background_none_is_noop():
+    img = (np.random.default_rng(3).random((24, 24)) * 100).astype(np.float32)
+    assert np.allclose(subtract_background(img, 8, "none"), img)
+
+
+def test_combined_empty_well_recovers_signal():
+    # raw = gain·signal + B, with the additive background B tracking the
+    # illumination gain (B = gain·k) — the assumption behind the combined model.
+    # Then (raw − B)/(B/mean(B)) should null the empty background and recover the
+    # signal, where naive divide-then-subtract would not.
+    H = W = 48
+    gain = np.tile(np.linspace(0.5, 1.5, W, dtype=np.float32), (H, 1))
+    empty = [(gain * 80.0).astype(np.float32) for _ in range(5)]
+    B = estimate_background_field(empty)            # ≈ gain·80 (un-normalized)
+    ff = estimate_basic_flatfield(empty)            # ≈ (gain·80)/mean  (mean 1)
+    signal = np.zeros((H, W), np.float32); signal[14:22, 14:22] = 300.0
+    raw = (gain * signal + gain * 80.0).astype(np.float32)
+    out = combined_empty_well_correct(raw, B, ff)
+    assert float(out[0:8, 0:8].mean()) < 25            # empty region → ~0
+    assert 200 < float(out[15:21, 15:21].mean()) < 400  # signal recovered (~300)
 
 
 def test_build_pipeline_args_qc_mapping():

@@ -986,7 +986,7 @@ def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:
 
 
 # Background-subtraction methods selectable via ``--background``.
-BACKGROUND_METHODS = ("top_hat", "rolling_ball", "empty_well")
+BACKGROUND_METHODS = ("none", "top_hat", "rolling_ball", "empty_well")
 
 
 def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarray | None":
@@ -1028,6 +1028,8 @@ def subtract_background(image, radius: int, method: str = "top_hat",
     non-negative.
     """
     img = np.asarray(image, dtype=np.float32)
+    if method == "none":
+        return img
     if method == "rolling_ball":
         from skimage.restoration import rolling_ball
         return np.clip(img - rolling_ball(img, radius=float(radius)), 0.0, None)
@@ -1038,6 +1040,27 @@ def subtract_background(image, radius: int, method: str = "top_hat",
                 return np.clip(img - bg, 0.0, None)
         return img
     return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
+
+
+def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
+    """Proper combined empty-well correction when the empty well drives *both*
+    flat-field and background: subtract the measured additive background ``B``
+    (``bg_field``, un-normalized), then divide by the mean-1 illumination field
+    ``ff_field`` (= ``B/mean(B)``) — i.e. ``(raw − B) / (B/mean(B))``.
+
+    This fixes the scale mismatch of doing them separately (flat-field divides,
+    then a raw-scale field is subtracted from the rescaled image). It assumes the
+    additive background **tracks the illumination** (true for media autofluor-
+    escence under uneven excitation): then for ``raw = gain·signal + B`` with
+    ``gain ∝ B`` it recovers ``signal``, and the empty well itself maps to ~0.
+    Each field no-ops when absent / shape-mismatched.
+    """
+    img = np.asarray(image, dtype=np.float32)
+    if bg_field is not None:
+        b = np.asarray(bg_field, dtype=np.float32)
+        if b.shape == img.shape:
+            img = np.clip(img - b, 0.0, None)
+    return apply_flatfield(img, ff_field)
 
 
 def build_background_models(
@@ -1771,43 +1794,58 @@ def process_image_group(
         fluor_raws.append(img)
         log.info("  load fluor:  %.1f s  %s", time.perf_counter() - _t, fp.name)
 
-    # QC flat-field correction (before top-hat so the background subtraction
-    # operates on evenly-illuminated images). gaussian = self-estimated per
-    # image; basic / empty_well = a per-channel field precomputed once in main()
-    # and passed via flatfield_models (keyed by lower-cased channel token).
-    if flatfield_mode and flatfield_mode != "none":
-        def _flatfield_for(token: str, img: np.ndarray):
-            if flatfield_mode == "gaussian":
-                return estimate_gaussian_flatfield(img)
-            return (flatfield_models or {}).get(str(token).lower())
+    # ── Flat-field (illumination) + background correction ────────────────────
+    # Normal order is flat-field (divide) → background (subtract). The one
+    # exception is the proper *combined* empty-well model: when both flat-field
+    # and background use the empty well, naive divide-then-subtract mixes scales
+    # (the additive field is at raw scale but applied after the rescale). The
+    # physically-correct correction is (raw − B)/(B/mean(B)) — subtract the
+    # measured additive background B first, then divide by the mean-1 illumination
+    # field — which assumes the background tracks the illumination (true for media
+    # autofluorescence under uneven excitation). In that case both are folded into
+    # one per-channel step below and the standalone flat-field is skipped.
+    combined_ew = (flatfield_mode == "empty_well" and background_method == "empty_well")
+
+    def _flatfield_for(token: str, img: np.ndarray):
+        if flatfield_mode == "gaussian":
+            return estimate_gaussian_flatfield(img)
+        return (flatfield_models or {}).get(str(token).lower())
+
+    def _bg_for(token: str):
+        return (background_models or {}).get(str(token).lower())
+
+    # Flat-field up front for every channel, unless folded into the combined step.
+    if flatfield_mode and flatfield_mode != "none" and not combined_ew:
         _t = time.perf_counter()
         nir_raw = apply_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
         fluor_raws = [apply_flatfield(f, _flatfield_for(tok, f))
                       for f, tok in zip(fluor_raws, fluor_tokens)]
         log.info("  flatfield:   %.1f s  (mode=%s)", time.perf_counter() - _t, flatfield_mode)
 
-    # Background subtraction — method = top_hat / rolling_ball / empty_well.
-    # Generalises the old plain top-hat: rolling_ball gives a smooth isotropic
-    # baseline (no square-SE halos / hotspots), empty_well subtracts a measured
-    # per-channel background field. The per-channel toggle still gates on/off
-    # and the radius sets the scale (ignored by empty_well).
-    def _bg_for(token: str):
-        return (background_models or {}).get(str(token).lower())
-    # Nuclear channel.
-    _t = time.perf_counter()
-    nir_corr = (subtract_background(nir_raw, tophat_radius_nir, background_method,
-                                    _bg_for(nuclear_token))
-                if tophat_nir else nir_raw)
-    log.info("  bg_nir:      %.1f s  (method=%s, radius %d, enabled=%s)",
-             time.perf_counter() - _t, background_method, tophat_radius_nir, tophat_nir)
+    # Background subtraction per channel (gated by the top-hat toggle). In
+    # combined empty-well mode this step IS the full correction
+    # (raw − B)/(B/mean(B)); otherwise it is subtract_background(method) where
+    # method ∈ none / top_hat / rolling_ball / empty_well.
+    def _correct(img: np.ndarray, token: str, radius: int, enabled: bool) -> np.ndarray:
+        if not enabled:
+            return img
+        if combined_ew:
+            return combined_empty_well_correct(
+                img, _bg_for(token), _flatfield_for(token, img))
+        return subtract_background(img, radius, background_method, _bg_for(token))
 
-    # Each fluorescent channel.
+    _t = time.perf_counter()
+    nir_corr = _correct(nir_raw, nuclear_token, tophat_radius_nir, tophat_nir)
+    log.info("  bg_nir:      %.1f s  (method=%s%s, radius %d, enabled=%s)",
+             time.perf_counter() - _t, background_method,
+             " +combined-empty_well" if combined_ew else "",
+             tophat_radius_nir, tophat_nir)
+
     fluor_tophat: list[np.ndarray] = []
     for i, (fraw, do_th, radius) in enumerate(
             zip(fluor_raws, tophat_fluor, tophat_radius_fluor)):
         _t = time.perf_counter()
-        fc = (subtract_background(fraw, radius, background_method, _bg_for(fluor_tokens[i]))
-              if do_th else fraw)
+        fc = _correct(fraw, fluor_tokens[i], radius, do_th)
         fluor_tophat.append(fc)
         log.info("  bg_%s:  %.1f s  (method=%s, radius %d, enabled=%s)",
                  fluor_tokens[i].lower(), time.perf_counter() - _t,
@@ -1868,6 +1906,12 @@ def process_image_group(
     # Save QC images.
     # Keep schema tokens in output stems so output names stay harmonized with
     # input naming conventions and schema-driven resolvers.
+    #
+    # NB: the ``_tophat`` suffix is **legacy naming** — these are the
+    # *background-corrected* images (nir_corr / fluor_tophat), i.e. the output of
+    # whatever --background method ran (top_hat / rolling_ball / empty_well /
+    # none, after any flat-field), not specifically a top-hat. The suffix is kept
+    # because the Review side reads ``_tophat`` files; only the label is stale.
     _t = time.perf_counter()
     if save_tophat_images:
         th_nir_path = build_processed_output_path(
@@ -1919,7 +1963,8 @@ def process_image_group(
                 ),
                 cytoplasm_binary_mask.astype(np.uint8),
             )
-        log.info("  tophat tifs written")
+        log.info("  bg-corrected tifs written  (method=%s, suffix=_tophat [legacy])",
+                 background_method)
     _safe_imwrite(
         build_processed_output_path(
             nuclear_path,

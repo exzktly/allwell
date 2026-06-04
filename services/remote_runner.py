@@ -1915,12 +1915,14 @@ class Fetcher:
         output_filter: OutputFilter,
         log_fn: Callable[[str], None] | None = None,
         progress_fn: Callable[[float], None] | None = None,
+        delete_after_download: bool = False,
     ):
         self.host = host
         self.run = run
         self.output_filter = output_filter
         self._log = log_fn or (lambda _msg: None)
         self._progress = progress_fn
+        self._delete_after_download = delete_after_download
         self._stop = threading.Event()
         self._pending: queue.Queue[Optional[str]] = queue.Queue()
         self._worker = threading.Thread(target=self._loop, daemon=True)
@@ -2082,6 +2084,55 @@ class Fetcher:
         )
         if self._progress and self.run.well_count_total > 0:
             self._progress(len(self.run.fetched_wells) / self.run.well_count_total)
+
+        # v5.4.6 — per-well remote cleanup. With the data safely landed
+        # locally, both the remote input zip and the remote output zip
+        # (plus per-well CSVs) become redundant. Deleting them as each
+        # well is fetched bounds peak remote disk to roughly
+        # ``(uploaded-but-not-yet-processed inputs) + 1 well's output``
+        # — independent of how many wells the plate has. Crucial on
+        # constrained remotes where the full plate's outputs would
+        # otherwise overflow before the run completes. Failures are
+        # logged but non-fatal — an end-of-run ``rm -rf`` via
+        # ``verify_and_cleanup`` is the backstop.
+        if self._delete_after_download:
+            self._delete_well_files_on_remote(well)
+
+    def _delete_well_files_on_remote(self, well: str) -> None:
+        """rm the remote input + output zips + per-well CSVs for
+        ``well``. Fires after the local download is confirmed safe
+        (Fetcher.fetched_wells.add). Non-fatal: ssh-delete failure is
+        logged but doesn't abort the run — the end-of-run
+        ``verify_and_cleanup`` is the backstop. On a disk-constrained
+        remote this is the difference between the pipeline completing
+        and ENOSPC mid-run."""
+        cmd = (
+            f"rm -f "
+            f"{self.run.remote_input_dir}/{well}.zip "
+            f"{self.run.remote_output_dir}/{well}_out.zip "
+            f"{self.run.remote_output_dir}/*_{well}.csv"
+        )
+        try:
+            result = subprocess.run(
+                self.host.ssh_argv(allocate_tty=False) + ["bash", "-c", cmd],
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                stderr = (
+                    result.stderr.decode("utf-8", errors="replace")
+                    if isinstance(result.stderr, (bytes, bytearray))
+                    else (result.stderr or "")
+                )
+                self._log(
+                    f"[remote] warn: per-well cleanup of {well} on remote "
+                    f"returned {result.returncode}: {stderr.strip()}\n"
+                )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            self._log(
+                f"[remote] warn: per-well cleanup of {well} on remote "
+                f"failed: {exc}\n"
+            )
 
     def _materialize(self, well: str, well_zip: Path) -> None:
         """Place the well's outputs in ``local_output_dir`` so the result

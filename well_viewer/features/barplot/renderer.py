@@ -45,6 +45,22 @@ NO_SELECTION_MSG = (
 )
 
 
+def _pooled_rows(app, lbl: str, pool_groups: Optional[Dict[str, List[str]]]):
+    """Return cells for ``lbl``. When ``pool_groups[lbl]`` exists, concat
+    the per-well DataFrames of every well in the group; otherwise just
+    return ``app._get_rows(lbl)`` unchanged."""
+    if pool_groups is not None and lbl in pool_groups:
+        frames = []
+        for w in pool_groups[lbl]:
+            sub = app._get_rows(w)
+            if sub is not None and not sub.empty:
+                frames.append(sub)
+        if not frames:
+            return None
+        return pd.concat(frames, ignore_index=True)
+    return app._get_rows(lbl)
+
+
 def _format_tp_title(target_ts: List[float], tp_str: str) -> str:
     """Build the axis-title timepoint suffix for one or many tps."""
     if not target_ts:
@@ -69,6 +85,7 @@ def draw_violin(
     group_keys: Optional[List[str]] = None,
     cell_scale: Optional[Dict[str, float]] = None,
     bw: Optional[float] = None,
+    pool_groups: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """KDE-smoothed distribution per well/group.
 
@@ -112,7 +129,7 @@ def draw_violin(
 
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
-        df = app._get_rows(lbl)
+        df = _pooled_rows(app, lbl, pool_groups)
         vals = np.empty(0, dtype=float)
         n_total = n_above = 0
         if df is not None and not df.empty and "timepoint_hours" in df.columns:
@@ -238,6 +255,7 @@ def draw_beeswarm(
     xs: Optional[List[float]] = None,
     group_keys: Optional[List[str]] = None,
     cell_scale: Optional[Dict[str, float]] = None,
+    pool_groups: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """One column per (well, timepoint), each cell a jittered point.
 
@@ -261,7 +279,7 @@ def draw_beeswarm(
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
         xi = xs[i] if i < len(xs) else i
-        df = app._get_rows(lbl)
+        df = _pooled_rows(app, lbl, pool_groups)
         cell_vals = np.empty(0, dtype=float)
         frac_val: Optional[float] = None
         if df is not None and not df.empty:
@@ -659,6 +677,7 @@ def draw_per_cell_bar_mode(
     plot = app._app_state.plot
     group_mode = getattr(plot, "bar_group_mode", "well")
     pool_reps = bool(getattr(plot, "bar_pool_replicates", True))
+    pool_rset_cells = bool(getattr(plot, "bar_pool_rset_cells", False)) and bool(active_rsets)
 
     # Build a base (well, color, well_label, cluster_label) sequence for
     # one timepoint. When rsets are active and pool_replicates is False,
@@ -670,7 +689,28 @@ def draw_per_cell_bar_mode(
     base_colors: List[str] = []
     base_short: List[str] = []      # short well/rset label used per-bar
     base_full: List[str] = []       # disambiguating label used in cluster headers
-    if active_rsets and pool_reps:
+    pool_groups: Optional[Dict[str, List[str]]] = None
+    if pool_rset_cells:
+        # One column per rset; cells pooled across the rset's wells. The
+        # rset *name* becomes the "well" key passed downstream — draw_violin /
+        # draw_beeswarm route the row-fetch through ``pool_groups``, and
+        # ``build_cell_scaling`` accepts rset names because ``member_*``
+        # resolvers branch on ``_label_to_replicate_set``.
+        rset_by_name = {r.name: r for r in active_rsets}
+        pool_groups = {}
+        for key in ordered_keys:
+            rset = rset_by_name.get(key)
+            if rset is None:
+                continue
+            valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+            if not valid:
+                continue
+            base_wells.append(rset.name)
+            base_colors.append(app._rank_color_rset(rset))
+            base_short.append(rset.name)
+            base_full.append(rset.name)
+            pool_groups[rset.name] = valid
+    elif active_rsets and pool_reps:
         rset_by_name = {r.name: r for r in active_rsets}
         for key in ordered_keys:
             rset = rset_by_name.get(key)
@@ -766,6 +806,7 @@ def draw_per_cell_bar_mode(
             plot_tps, tp_str, threshold,
             xs=xs, group_keys=group_keys,
             cell_scale=cell_scale,
+            pool_groups=pool_groups,
         )
     else:
         draw_beeswarm(
@@ -774,6 +815,7 @@ def draw_per_cell_bar_mode(
             plot_tps, tp_str, threshold,
             xs=xs, group_keys=group_keys,
             cell_scale=cell_scale,
+            pool_groups=pool_groups,
         )
     _apply_bar_ylims(app, ax_mean, ax_frac, ax_n=ax_n)
     # Even in violin/beeswarm mode the user wants to see the events
@@ -782,6 +824,7 @@ def draw_per_cell_bar_mode(
         draw_per_well_n_bars(
             app, ax_n, plot_wells, plot_colors, plot_labels,
             plot_tps, threshold, xs=xs, group_keys=group_keys,
+            pool_groups=pool_groups,
         )
     app._bar_canvas.draw_idle()
     return True
@@ -798,6 +841,7 @@ def draw_per_well_n_bars(
     *,
     xs: Optional[List[float]] = None,
     group_keys: Optional[List[str]] = None,
+    pool_groups: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """Render the events-above-threshold panel for per-cell view modes.
 
@@ -807,6 +851,7 @@ def draw_per_well_n_bars(
     total above-threshold count with no error bar.
     """
     from matplotlib.ticker import MaxNLocator
+    from well_viewer.domain.stats_compute import aggregate_group
     cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     per_fov_spread = app._use_fov_spread_active()
@@ -822,13 +867,22 @@ def draw_per_well_n_bars(
     for i, lbl in enumerate(wells):
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
         xi = xs[i] if i < len(xs) else i
-        pts = aggregate_well(app,
-            lbl, threshold=threshold, use_sem=use_sem,
-            val_col=app._app_state.channel.active_val_col,
-            cell_area_threshold=cell_area_threshold,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
+        if pool_groups is not None and lbl in pool_groups:
+            pts = aggregate_group(app,
+                pool_groups[lbl], threshold=threshold, use_sem=use_sem,
+                val_col=app._app_state.channel.active_val_col,
+                cell_area_threshold=cell_area_threshold,
+                fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread,
+            )
+        else:
+            pts = aggregate_well(app,
+                lbl, threshold=threshold, use_sem=use_sem,
+                val_col=app._app_state.channel.active_val_col,
+                cell_area_threshold=cell_area_threshold,
+                fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread,
+            )
         matched = [pt for pt in pts if abs(pt[0] - col_tp) < 1e-6]
         color = colors[i % len(colors)] if colors else app._rank_color_well(lbl)
         if matched:

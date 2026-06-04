@@ -1050,6 +1050,7 @@ def toggle_swarm(app) -> None:
         app._bar_violin = False
         app._violin_btn.setChecked(False)
         app._violin_slider.setEnabled(False)
+    app._refresh_bar_layout_btn_state()
     redraw_bars(app)
 
 
@@ -1065,6 +1066,7 @@ def toggle_violin(app) -> None:
         # Mutually exclusive with beeswarm
         app._bar_swarm = False
         app._swarm_btn.setChecked(False)
+    app._refresh_bar_layout_btn_state()
     redraw_bars(app)
 
 
@@ -1115,6 +1117,14 @@ def toggle_bar_pool_replicates(app) -> None:
     """Flip whether replicate-set wells collapse to a single column."""
     from well_viewer.features.barplot.renderer import redraw_bars
     app._app_state.plot.toggle_bar_pool_replicates()
+    app._refresh_bar_layout_btn_state()
+    redraw_bars(app)
+
+
+def toggle_bar_pool_rset_cells(app) -> None:
+    """Flip whether violin/beeswarm pool an rset's wells into one column."""
+    from well_viewer.features.barplot.renderer import redraw_bars
+    app._app_state.plot.toggle_bar_pool_rset_cells()
     app._refresh_bar_layout_btn_state()
     redraw_bars(app)
 
@@ -1217,11 +1227,15 @@ def refresh_bar_layout_btn_state(app) -> None:
 
     Updates the *Group by ...* and *Pool Replicates* button labels / checked
     states. The pool-replicates button is hidden when there are no active
-    replicate sets.
+    replicate sets. The *Pool rset cells* button is hidden unless violin /
+    beeswarm is on AND ≥1 rset is active.
     """
     plot = app._app_state.plot
     group_btn = getattr(app, "_bar_group_mode_btn", None)
     pool_btn = getattr(app, "_bar_pool_reps_btn", None)
+    pool_cells_btn = getattr(app, "_bar_pool_rset_cells_btn", None)
+    has_rsets = bool(app._rep_sets_active())
+    use_per_cell = bool(getattr(app, "_bar_violin", False) or getattr(app, "_bar_swarm", False))
     if group_btn is not None:
         if plot.bar_group_mode == "well":
             group_btn.setText("Group by Well")
@@ -1230,7 +1244,6 @@ def refresh_bar_layout_btn_state(app) -> None:
         group_btn.setChecked(plot.bar_group_mode == "timepoint")
         group_btn.setEnabled(True)
     if pool_btn is not None:
-        has_rsets = bool(app._rep_sets_active())
         pool_btn.setVisible(has_rsets)
         pool_btn.setEnabled(True)
         if plot.bar_pool_replicates:
@@ -1238,4 +1251,7 @@ def refresh_bar_layout_btn_state(app) -> None:
         else:
             pool_btn.setText("Show Wells Separately")
         pool_btn.setChecked(not plot.bar_pool_replicates)
+    if pool_cells_btn is not None:
+        pool_cells_btn.setVisible(use_per_cell and has_rsets)
+        pool_cells_btn.setChecked(bool(plot.bar_pool_rset_cells))
 

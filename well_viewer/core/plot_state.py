@@ -47,6 +47,11 @@ class PlotState:
     # one column per well (still coloured by the rset's rank colour).
     bar_group_mode: str = "well"
     bar_pool_replicates: bool = True
+    # Violin / beeswarm only. When True (and ≥1 replicate set is active),
+    # each rset's wells are pooled into one per-cell column instead of one
+    # column per well. Independent of ``use_fov_replicates`` (which controls
+    # the SD/SEM source on the bar / n_above panels).
+    bar_pool_rset_cells: bool = False
 
     fc_vs_control_on: bool = False
     fc_control_label: str = ""
@@ -99,3 +104,8 @@ class PlotState:
         """Flip whether replicate-set wells pool to a single column."""
         self.bar_pool_replicates = not self.bar_pool_replicates
         return self.bar_pool_replicates
+
+    def toggle_bar_pool_rset_cells(self) -> bool:
+        """Flip the per-cell-view rset-pooling mode; returns the new state."""
+        self.bar_pool_rset_cells = not self.bar_pool_rset_cells
+        return self.bar_pool_rset_cells

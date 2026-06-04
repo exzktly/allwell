@@ -16,6 +16,7 @@ from well_viewer.features.barplot.controller import (
     open_bar_timepoint_selector,
     toggle_bar_group_mode,
     toggle_bar_pool_replicates,
+    toggle_bar_pool_rset_cells,
 )
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
@@ -159,6 +160,15 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     )
     ctx.app._bar_pool_reps_btn.setVisible(False)
     sl.addWidget(ctx.app._bar_pool_reps_btn)
+
+    ctx.app._bar_pool_rset_cells_btn = QPushButton("Pool rset cells", shape_ctrl)
+    ctx.app._bar_pool_rset_cells_btn.setProperty("variant", "toggle")
+    ctx.app._bar_pool_rset_cells_btn.setCheckable(True)
+    ctx.app._bar_pool_rset_cells_btn.clicked.connect(
+        lambda _=False: toggle_bar_pool_rset_cells(ctx.app)
+    )
+    ctx.app._bar_pool_rset_cells_btn.setVisible(False)
+    sl.addWidget(ctx.app._bar_pool_rset_cells_btn)
 
     ctx.app._swarm_btn = QPushButton("Beeswarm", shape_ctrl)
     ctx.app._swarm_btn.setProperty("variant", "toggle")

@@ -22,7 +22,6 @@ from well_viewer.features.barplot.controller import (
     apply_bar_ylims as _apply_bar_ylims,
     cluster_x_for_group_keys,
     collect_bar_items as _collect_bar_items,
-    collect_bar_items_fov_pooled as _collect_bar_items_fov_pooled,
     ordered_bar_keys as _ordered_bar_keys,
     render_bar_items as _render_bar_items,
 )
@@ -457,199 +456,6 @@ def draw_grouped_bar_mode(
     app._bar_canvas.draw_idle()
 
 
-def draw_fov_pooled_mode(
-    app,
-    *,
-    ax_mean,
-    ax_frac,
-    ax_n,
-    target_ts: List[float],
-    tp_str: str,
-    threshold: float,
-    band_lbl: str,
-) -> None:
-    """Aggregate-FOV mode: pool every well's cells per tp into one column.
-
-    When the user has the Aggregate FOV toggle on the bar tab folds every
-    selected well (and every well inside every active replicate set, since
-    well identity is moot here) into a single pooled distribution per
-    timepoint. SD/SEM is computed across the pooled per-FOV means (FOV ids
-    are well-prefixed so cross-well FOVs stay disjoint).
-
-    For violin/beeswarm modes the cell array per tp is pooled in the same
-    way and drawn as a single column per tp.
-    """
-    from well_viewer.data.metric_labels import (
-        METRIC_KEY_TO_LABEL as _MLB,
-        threshold_qualifier, fraction_title,
-        events_per_fov_title,
-    )
-    from well_viewer.domain import fold_change as _fc
-    _ch = app._app_state.channel.active_channel.upper()
-    _metric_key = app._app_state.channel.active_metric
-    _metric_label = _MLB.get(_metric_key, "Mean Intensity")
-    _thr_q = threshold_qualifier(_metric_key)
-    _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
-    _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl)
-    _tp_suffix = _format_tp_title(target_ts, tp_str)
-
-    use_violin = bool(getattr(app, "_bar_violin", False))
-    use_swarm = bool(getattr(app, "_bar_swarm", False))
-
-    if use_violin or use_swarm:
-        # Per-cell distribution view: build one "pseudo-well" per tp by
-        # passing target_ts as the per-column tp list and synthetic well
-        # names that ``_get_rows`` will recognise. Simpler: render directly
-        # here without going through draw_violin/beeswarm — we already have
-        # the pooled cell arrays from the FOV-pooled helper.
-        from well_viewer.features.barplot.controller import _pooled_wells_for_fov_mode
-        from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
-        wells = _pooled_wells_for_fov_mode(app)
-        ratios = app._app_state.channel.ratio_index
-        # Pool per-cell values per tp across all wells.
-        per_tp_vals: List[np.ndarray] = []
-        per_tp_frac: List[float] = []
-        for t in target_ts:
-            chunks: List[np.ndarray] = []
-            n_total_total = 0
-            n_above_total = 0
-            for w in wells:
-                df = app._get_rows(w)
-                if df is None or len(df) == 0 or "timepoint_hours" not in df.columns:
-                    continue
-                mask = df_included_mask(df).to_numpy(copy=True)
-                tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-                with np.errstate(invalid="ignore"):
-                    mask &= np.isfinite(tp) & (np.abs(tp - float(t)) <= 1e-6)
-                v = resolve_value_series(df, app._app_state.channel.active_val_col, ratios).to_numpy()
-                mask &= np.isfinite(v)
-                v_sel = v[mask]
-                n_total_total += int(v_sel.size)
-                above = v_sel[v_sel > threshold]
-                n_above_total += int(above.size)
-                if above.size:
-                    chunks.append(above.astype(float))
-            cells = np.concatenate(chunks) if chunks else np.empty(0, dtype=float)
-            per_tp_vals.append(cells)
-            per_tp_frac.append(n_above_total / n_total_total if n_total_total else float("nan"))
-
-        n = len(target_ts)
-        xs = list(range(n))
-        labels = [f"t={t:.4g}" for t in target_ts]
-        if use_violin:
-            try:
-                from scipy.stats import gaussian_kde
-            except ImportError:
-                ax_mean.text(0.5, 0.5, "scipy required for violin plot",
-                             transform=ax_mean.transAxes, ha="center", va="center",
-                             color=tokens_for(ax_mean)[2], fontsize=9)
-                return
-            slider = getattr(app, "_violin_slider", None)
-            bw = max(0.05, float(slider.value()) / 100.0 if slider is not None else 1.0)
-            bar_w = min(0.4, 3.0 / max(n, 1))
-            for i, arr in enumerate(per_tp_vals):
-                color = _WELL_COLORS[i % len(_WELL_COLORS)]
-                if arr.size < 3:
-                    if arr.size:
-                        ax_mean.scatter([i], [arr[0]], c=color, s=20, zorder=4)
-                    continue
-                kde = gaussian_kde(arr, bw_method=bw)
-                y_min, y_max = float(arr.min()), float(arr.max())
-                y_pad = (y_max - y_min) * 0.05
-                ys = np.linspace(y_min - y_pad, y_max + y_pad, 200)
-                density = kde(ys)
-                max_d = density.max()
-                if max_d > 0:
-                    density = density / max_d * bar_w
-                ax_mean.fill_betweenx(ys, i - density, i + density,
-                                      color=color, alpha=0.55, zorder=2)
-                ax_mean.plot(i - density, ys, color=color, lw=0.6, alpha=0.7, zorder=3)
-                ax_mean.plot(i + density, ys, color=color, lw=0.6, alpha=0.7, zorder=3)
-                median = float(np.median(arr))
-                ax_mean.hlines(median, i - bar_w * 0.6, i + bar_w * 0.6,
-                               colors="white", lw=2.0, zorder=5)
-                ax_mean.hlines(median, i - bar_w * 0.6, i + bar_w * 0.6,
-                               colors=color, lw=1.2, zorder=6)
-        else:
-            bar_w = min(0.35, 3.0 / max(n, 1))
-            for i, arr in enumerate(per_tp_vals):
-                color = _WELL_COLORS[i % len(_WELL_COLORS)]
-                if arr.size:
-                    jx, jy = _beeswarm_jitter(arr.tolist(), x_center=float(i), max_spread=bar_w)
-                    sc = ax_mean.scatter(jx, jy, c=color, s=6, alpha=0.55,
-                                         zorder=3, linewidths=0)
-                    sc._aw_marker_collection = True  # v5.2.31: see draw_beeswarm
-                    m = float(arr.mean())
-                    ax_mean.plot([i - bar_w * 0.6, i + bar_w * 0.6], [m, m],
-                                 color=color, lw=1.5, zorder=4)
-                else:
-                    ax_mean.scatter([i], [0], c=CLR_PLACEHOLDER, s=16,
-                                    marker="x", zorder=3, linewidths=1)
-
-        # Fraction panel: dot per tp.
-        for i, fv in enumerate(per_tp_frac):
-            color = _WELL_COLORS[i % len(_WELL_COLORS)]
-            if not math.isnan(fv):
-                ax_frac.scatter([i], [fv], c=color, s=30, zorder=3, linewidths=0)
-            else:
-                ax_frac.scatter([i], [0], c=CLR_PLACEHOLDER, s=16,
-                                marker="x", zorder=3, linewidths=1)
-        ax_frac.axhline(0.5, color=BORDER, lw=0.8, ls="--", alpha=0.5, zorder=1)
-        for ax in (ax_mean, ax_frac):
-            ax.set_xticks(xs)
-            ax.set_xticklabels(labels, rotation=45 if n > 8 else 0,
-                               ha="right" if n > 8 else "center", fontsize=7)
-            ax.set_xlim(-0.6, n - 0.4)
-            setattr(ax, "_categorical_xaxis", True)
-        ax_frac.set_ylim(-0.05, 1.05)
-        ax_mean.set_title(
-            f"{_ch} {_metric_label} (FOV-pooled, {'violin' if use_violin else 'beeswarm'}){_fc_suffix}  —  {_tp_suffix}",
-            color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
-        ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
-        ax_frac.set_title(
-            f"{fraction_title(_metric_key)}  —  {_tp_suffix}",
-            color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
-        ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
-    else:
-        # Bar/spread view: one bar per tp using the pooled per-FOV stats.
-        items, _ = _collect_bar_items_fov_pooled(app, target_ts, threshold=threshold)
-        _render_bar_items(
-            ax_mean=ax_mean,
-            ax_frac=ax_frac,
-            ax_n=ax_n,
-            use_groups=False,
-            items=items,
-            threshold=threshold,
-            warn_color=WARN,
-            border_color=BORDER,
-            placeholder_color=CLR_PLACEHOLDER,
-            disabled_well_color=CLR_MUTED_DISABLED,
-            err_bar_color=CLR_ERR_BAR,
-        )
-        ax_mean.set_title(
-            f"{_ch} {_metric_label}{_thr_q} ± {band_lbl} (FOV-pooled){_fc_suffix}  —  {_tp_suffix}",
-            color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6,
-        )
-        ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
-        ax_frac.set_title(
-            f"{fraction_title(_metric_key)} (FOV-pooled)  —  {_tp_suffix}",
-            color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6,
-        )
-        ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
-
-    if ax_n is not None and not (use_violin or use_swarm):
-        ax_n.set_title(
-            f"{events_per_fov_title(_metric_key, band_lbl)} (FOV-pooled)  —  {_tp_suffix}",
-            color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold", pad=6,
-        )
-        ax_n.set_ylabel(
-            "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV",
-            fontsize=8, labelpad=5,
-        )
-    _apply_bar_ylims(app, ax_mean, ax_frac, ax_n=ax_n)
-    app._bar_canvas.draw_idle()
-
-
 def redraw_bars(app) -> None:
     """Top-level bar plot redraw (drives the Bar Plots tab)."""
     if not hasattr(app, "_ax_bar_mean"):
@@ -725,44 +531,31 @@ def redraw_bars(app) -> None:
     tp_strs = [s for _, s in tp_list]
     tp_str_combined = ", ".join(tp_strs)
 
-    fov_active = app._use_fov_spread_active()
-    if fov_active:
-        draw_fov_pooled_mode(
-            app,
-            ax_mean=ax_mean,
-            ax_frac=ax_frac,
-            ax_n=ax_n,
-            target_ts=target_ts,
-            tp_str=tp_str_combined,
-            threshold=threshold,
-            band_lbl=band_lbl,
-        )
-    else:
-        if draw_per_cell_bar_mode(
-            app,
-            ax_mean=ax_mean,
-            ax_frac=ax_frac,
-            ax_n=ax_n,
-            active_rsets=active_rsets,
-            target_ts=target_ts,
-            tp_str=tp_str_combined,
-            threshold=threshold,
-        ):
-            from well_viewer.features.export.style import apply_export_style_to_current
-            apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))
-            return
-        draw_grouped_bar_mode(
-            app,
-            ax_mean=ax_mean,
-            ax_frac=ax_frac,
-            ax_n=ax_n,
-            active_rsets=active_rsets,
-            target_ts=target_ts,
-            tp_str=tp_str_combined,
-            threshold=threshold,
-            band_lbl=band_lbl,
-            use_sem=use_sem,
-        )
+    if draw_per_cell_bar_mode(
+        app,
+        ax_mean=ax_mean,
+        ax_frac=ax_frac,
+        ax_n=ax_n,
+        active_rsets=active_rsets,
+        target_ts=target_ts,
+        tp_str=tp_str_combined,
+        threshold=threshold,
+    ):
+        from well_viewer.features.export.style import apply_export_style_to_current
+        apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))
+        return
+    draw_grouped_bar_mode(
+        app,
+        ax_mean=ax_mean,
+        ax_frac=ax_frac,
+        ax_n=ax_n,
+        active_rsets=active_rsets,
+        target_ts=target_ts,
+        tp_str=tp_str_combined,
+        threshold=threshold,
+        band_lbl=band_lbl,
+        use_sem=use_sem,
+    )
     from well_viewer.features.export.style import apply_export_style_to_current
 
     apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))

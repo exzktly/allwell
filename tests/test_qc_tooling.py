@@ -14,8 +14,12 @@ pytest.importorskip("skimage")
 
 from process_microscopy import (
     apply_flatfield,
+    apply_tophat,
     estimate_gaussian_flatfield,
     estimate_basic_flatfield,
+    estimate_background_field,
+    subtract_background,
+    BACKGROUND_METHODS,
     filter_debris,
     build_flatfield_models,
     _normalize_flatfield,
@@ -134,6 +138,62 @@ def _base_opts(**over):
                 qc_min_area=0.0, qc_max_area=0.0, qc_min_solidity=0.0)
     opts.update(over)
     return opts
+
+
+# ── background-subtraction methods ───────────────────────────────────────────
+
+def test_subtract_background_top_hat_is_backcompat():
+    img = (np.random.default_rng(1).random((48, 48)) * 100).astype(np.float32)
+    # default method must be byte-for-byte the legacy top-hat
+    assert np.allclose(subtract_background(img, 8, "top_hat"), apply_tophat(img, 8))
+    assert np.allclose(subtract_background(img, 8), apply_tophat(img, 8))
+
+
+def test_subtract_background_rolling_ball_smooths_gradient():
+    # a smooth illumination gradient + flat signal: rolling-ball should remove
+    # the gradient, leaving a near-flat (low-variance) background-subtracted image
+    y = np.linspace(0, 300, 64, dtype=np.float32)
+    img = np.tile(y, (64, 1))                     # pure left→right gradient
+    rb = subtract_background(img, 20, "rolling_ball")
+    assert rb.min() >= 0.0 and rb.shape == img.shape
+    assert float(rb.std()) < float(img.std())     # gradient flattened
+
+
+def test_subtract_background_empty_well_subtracts_field():
+    img = np.full((32, 32), 80.0, np.float32)
+    field = np.full((32, 32), 50.0, np.float32)
+    assert np.allclose(subtract_background(img, 5, "empty_well", bg_field=field), 30.0)
+    # no field → no-op (channel absent from the empty well)
+    assert np.allclose(subtract_background(img, 5, "empty_well", bg_field=None), img)
+    # shape mismatch → no-op
+    assert np.allclose(subtract_background(img, 5, "empty_well",
+                                          bg_field=np.zeros((4, 4), np.float32)), img)
+
+
+def test_estimate_background_field_keeps_measured_level():
+    # unlike the flat-field estimator (mean 1), the background field keeps the
+    # measured level so it can be subtracted
+    f = estimate_background_field([np.full((16, 16), 12.0, np.float32)] * 4)
+    assert f is not None and abs(float(f.mean()) - 12.0) < 0.5
+    assert estimate_background_field([]) is None
+
+
+def test_build_pipeline_args_background_mapping():
+    P = Path("/x/process_microscopy.py")
+    # default top_hat → no --background flag
+    a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts())
+    assert "--background" not in a
+    # rolling_ball → flag, no background well
+    a = build_pipeline_args(P, Path("/in"), Path("/out"),
+                            _base_opts(background="rolling_ball"))
+    assert a[a.index("--background") + 1] == "rolling_ball"
+    assert "--background_well" not in a
+    # empty_well background carries the background well even with flatfield=none
+    a = build_pipeline_args(P, Path("/in"), Path("/out"),
+                            _base_opts(background="empty_well", background_well="H12"))
+    assert a[a.index("--background") + 1] == "empty_well"
+    assert a[a.index("--background_well") + 1] == "H12"
+    assert "BACKGROUND_METHODS" and set(BACKGROUND_METHODS) == {"top_hat", "rolling_ball", "empty_well"}
 
 
 def test_build_pipeline_args_qc_mapping():

@@ -495,14 +495,32 @@ class AnalyzeTab(QWidget):
         r.layout().addWidget(self._flatfield_cb)
         r.layout().addStretch(1)
 
+        rbg = self._row(sec, "Background subtraction")
+        self._background_cb = QComboBox(rbg)
+        self._background_cb.addItems(["top_hat", "rolling_ball", "empty_well"])
+        self._background_cb.setToolTip(
+            "How background is subtracted (per channel, where top-hat is enabled):\n"
+            "• top_hat — fast square morphological; leaves halos/hotspots on "
+            "uneven background.\n"
+            "• rolling_ball — smooth isotropic baseline (recommended for "
+            "structured background; slower).\n"
+            "• empty_well — subtract a measured per-channel background from the "
+            "Background well.")
+        rbg.layout().addWidget(self._background_cb)
+        rbg.layout().addStretch(1)
+
         rbw = self._row(sec, "Background well")
         self._background_well_edit = self._entry(rbw, "", width=120)
         rbw.layout().addStretch(1)
 
         def _sync_bg(_=None) -> None:
+            # The background well feeds both empty_well flat-field and empty_well
+            # background subtraction.
             self._background_well_edit.setEnabled(
-                self._flatfield_cb.currentText() == "empty_well")
+                self._flatfield_cb.currentText() == "empty_well"
+                or self._background_cb.currentText() == "empty_well")
         self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
+        self._background_cb.currentIndexChanged.connect(_sync_bg)
         _sync_bg()
 
         self._qc_remove_debris_cb = QCheckBox(
@@ -1171,6 +1189,7 @@ class AnalyzeTab(QWidget):
             smfish_tokens=self._smfish_tokens_list(),
             shape_features=list(self._shape_chips.checkedData()),
             flatfield=self._flatfield_cb.currentText(),
+            background=self._background_cb.currentText(),
             background_well=self._background_well_edit.text().strip(),
             qc_remove_debris=self._qc_remove_debris_cb.isChecked(),
             qc_min_area=_safe_qc_float(self._qc_min_area_edit.text()),

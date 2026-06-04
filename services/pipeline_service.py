@@ -92,13 +92,17 @@ def build_pipeline_args(
     if shape_features:
         args += ["--shape_features"] + list(shape_features)
 
-    # Quality control: flat-field correction + debris removal.
+    # Quality control: flat-field correction + background method + debris removal.
     flatfield = str(opts.get("flatfield", "none") or "none")
+    bg_well = str(opts.get("background_well", "") or "").strip()
     if flatfield and flatfield != "none":
         args += ["--flatfield", flatfield]
-        bg = str(opts.get("background_well", "") or "").strip()
-        if flatfield == "empty_well" and bg:
-            args += ["--background_well", bg]
+    background = str(opts.get("background", "top_hat") or "top_hat")
+    if background and background != "top_hat":
+        args += ["--background", background]
+    # The background well feeds both empty_well flat-field and empty_well bg.
+    if bg_well and (flatfield == "empty_well" or background == "empty_well"):
+        args += ["--background_well", bg_well]
     if opts.get("qc_remove_debris"):
         args.append("--qc_remove_debris")
         for flag, key in (("--qc_min_area", "qc_min_area"),

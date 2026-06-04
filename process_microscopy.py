@@ -985,6 +985,109 @@ def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:
     return img - background                    # always ≥ 0 (opening is anti-extensive)
 
 
+# Background-subtraction methods selectable via ``--background``.
+BACKGROUND_METHODS = ("top_hat", "rolling_ball", "empty_well")
+
+
+def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarray | None":
+    """Additive background field from a stack of (empty-well) single-channel
+    images: the per-pixel **median** (robust to stray signal that moves between
+    fields), Gaussian-smoothed. Unlike :func:`estimate_basic_flatfield` this
+    keeps the measured *level* (no mean-1 normalization) so it can be
+    **subtracted**. Returns None when the stack is empty / shapes differ."""
+    from scipy.ndimage import gaussian_filter
+    if sigma is None:
+        sigma = _FLATFIELD_SIGMA  # defined later in the flat-field section
+    arrs = [np.asarray(a, dtype=np.float32) for a in stack]
+    arrs = [a for a in arrs if a.ndim == 2]
+    if not arrs:
+        return None
+    shp = arrs[0].shape
+    arrs = [a for a in arrs if a.shape == shp]
+    if not arrs:
+        return None
+    median = np.median(np.stack(arrs, axis=0), axis=0)
+    return gaussian_filter(median, sigma=float(sigma)).astype(np.float32)
+
+
+def subtract_background(image, radius: int, method: str = "top_hat",
+                        bg_field: "np.ndarray | None" = None) -> np.ndarray:
+    """White background subtraction, dispatched by *method*.
+
+    - ``top_hat`` — ``img - grey_opening(square)``: fast (separable 1-D passes)
+      but the flat square footprint leaves anisotropic, *terraced* residuals,
+      i.e. halos / hotspots next to bright objects. Current default.
+    - ``rolling_ball`` — ``img - skimage.restoration.rolling_ball(radius)``: a
+      smooth, isotropic baseline; the recommended choice for uneven / structured
+      background (slower than top-hat).
+    - ``empty_well`` — ``img - bg_field``: subtract a *measured* per-channel
+      background (smoothed empty-well median, :func:`estimate_background_field`);
+      no-op when no field is available for the channel.
+
+    Result is clipped at 0 (white-top-hat convention) so downstream sums stay
+    non-negative.
+    """
+    img = np.asarray(image, dtype=np.float32)
+    if method == "rolling_ball":
+        from skimage.restoration import rolling_ball
+        return np.clip(img - rolling_ball(img, radius=float(radius)), 0.0, None)
+    if method == "empty_well":
+        if bg_field is not None:
+            bg = np.asarray(bg_field, dtype=np.float32)
+            if bg.shape == img.shape:
+                return np.clip(img - bg, 0.0, None)
+        return img
+    return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
+
+
+def build_background_models(
+    input_dir: Path,
+    *,
+    tokens: "list[str]",
+    schema: "list[str] | None",
+    sep: str,
+    background_well: str = "",
+    max_samples: int = 30,
+) -> "dict[str, np.ndarray]":
+    """Per-channel **additive** background fields from the empty/background well
+    (for ``--background empty_well``). Mirrors :func:`build_flatfield_models`'s
+    empty-well sampling but uses :func:`estimate_background_field` (keeps the
+    measured level for subtraction, not a mean-1 field for division). Returns
+    ``{token_lower: field}``; channels with no usable empty-well images omitted.
+    """
+    fields = list(schema or [])
+    chan_idx = fields.index("channel") if "channel" in fields else -1
+    well_idx = fields.index("well") if "well" in fields else -1
+    bg = str(background_well or "").strip().lower()
+    if chan_idx < 0 or well_idx < 0 or not bg:
+        return {}
+    want = {str(t).strip().lower() for t in (tokens or [])}
+    by_token: "dict[str, list[Path]]" = {}
+    for path in sorted(input_dir.rglob("*.tif*")):
+        parts = path.stem.split(sep)
+        if chan_idx >= len(parts) or well_idx >= len(parts):
+            continue
+        if parts[well_idx].strip().lower() != bg:
+            continue
+        tok = parts[chan_idx].strip().lower()
+        if want and tok not in want:
+            continue
+        by_token.setdefault(tok, []).append(path)
+    models: "dict[str, np.ndarray]" = {}
+    for tok, paths in by_token.items():
+        step = max(1, len(paths) // max_samples)
+        imgs = []
+        for p in paths[::step][:max_samples]:
+            try:
+                imgs.append(load_2d_gray(p))
+            except Exception:
+                continue
+        field = estimate_background_field(imgs)
+        if field is not None:
+            models[tok] = field
+    return models
+
+
 SMFISH_LOG_KERNEL = np.array([
     [-4, -1, 0, -1, -4],
     [-1, 2, 3, 2, -1],
@@ -1626,6 +1729,8 @@ def process_image_group(
     shape_features: "list[str] | None" = None,
     flatfield_mode: str = "none",
     flatfield_models: "dict | None" = None,
+    background_method: str = "top_hat",
+    background_models: "dict | None" = None,
     qc_remove_debris: bool = False,
     qc_min_area: "float | None" = None,
     qc_max_area: "float | None" = None,
@@ -1681,21 +1786,32 @@ def process_image_group(
                       for f, tok in zip(fluor_raws, fluor_tokens)]
         log.info("  flatfield:   %.1f s  (mode=%s)", time.perf_counter() - _t, flatfield_mode)
 
-    # Top-hat on nuclear channel.
+    # Background subtraction — method = top_hat / rolling_ball / empty_well.
+    # Generalises the old plain top-hat: rolling_ball gives a smooth isotropic
+    # baseline (no square-SE halos / hotspots), empty_well subtracts a measured
+    # per-channel background field. The per-channel toggle still gates on/off
+    # and the radius sets the scale (ignored by empty_well).
+    def _bg_for(token: str):
+        return (background_models or {}).get(str(token).lower())
+    # Nuclear channel.
     _t = time.perf_counter()
-    nir_corr = apply_tophat(nir_raw, tophat_radius_nir) if tophat_nir else nir_raw
-    log.info("  tophat_nir:  %.1f s  (radius %d, enabled=%s)",
-             time.perf_counter() - _t, tophat_radius_nir, tophat_nir)
+    nir_corr = (subtract_background(nir_raw, tophat_radius_nir, background_method,
+                                    _bg_for(nuclear_token))
+                if tophat_nir else nir_raw)
+    log.info("  bg_nir:      %.1f s  (method=%s, radius %d, enabled=%s)",
+             time.perf_counter() - _t, background_method, tophat_radius_nir, tophat_nir)
 
-    # Top-hat on each fluorescent channel.
+    # Each fluorescent channel.
     fluor_tophat: list[np.ndarray] = []
     for i, (fraw, do_th, radius) in enumerate(
             zip(fluor_raws, tophat_fluor, tophat_radius_fluor)):
         _t = time.perf_counter()
-        fc = apply_tophat(fraw, radius) if do_th else fraw
+        fc = (subtract_background(fraw, radius, background_method, _bg_for(fluor_tokens[i]))
+              if do_th else fraw)
         fluor_tophat.append(fc)
-        log.info("  tophat_%s:  %.1f s  (radius %d, enabled=%s)",
-                 fluor_tokens[i].lower(), time.perf_counter() - _t, radius, do_th)
+        log.info("  bg_%s:  %.1f s  (method=%s, radius %d, enabled=%s)",
+                 fluor_tokens[i].lower(), time.perf_counter() - _t,
+                 background_method, radius, do_th)
 
     smfish_set = set(smfish_tokens or [])
     fluor_corr = list(fluor_tophat)
@@ -3748,8 +3864,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "one field per channel from a sample of the dataset (pure-numpy "
                         "BaSiC); 'empty_well' uses --background_well as the reference.")
     p.add_argument("--background_well", default="",
-                   help="Well label of an empty/background well used as the flat-field "
-                        "reference when --flatfield=empty_well.")
+                   help="Well label of an empty/background well used as the reference "
+                        "for --flatfield=empty_well and/or --background=empty_well.")
+    p.add_argument("--background", choices=BACKGROUND_METHODS, default="top_hat",
+                   help="Background-subtraction method (applied per channel where "
+                        "top-hat is enabled). 'top_hat' = fast square morphological "
+                        "(default, but leaves halos on uneven background); "
+                        "'rolling_ball' = smooth isotropic baseline (recommended for "
+                        "structured background, slower); 'empty_well' = subtract a "
+                        "measured per-channel background from --background_well.")
     p.add_argument("--qc_remove_debris", action="store_true",
                    help="Remove segmented regions whose size/solidity fall outside the "
                         "QC bounds below (debris, fragments, merged blobs).")
@@ -3888,6 +4011,7 @@ def main() -> None:
             shape_features=list(args.shape_features or []),
             qc_options={
                 "flatfield": args.flatfield,
+                "background": args.background,
                 "background_well": args.background_well or "",
                 "remove_debris": bool(args.qc_remove_debris),
                 "min_area": float(args.qc_min_area or 0.0),
@@ -4017,6 +4141,8 @@ def main() -> None:
         shape_features=list(args.shape_features or []),
         flatfield_mode=args.flatfield,
         flatfield_models={},
+        background_method=args.background,
+        background_models={},
         qc_remove_debris=args.qc_remove_debris,
         qc_min_area=(args.qc_min_area or None),
         qc_max_area=(args.qc_max_area or None),
@@ -4043,6 +4169,19 @@ def main() -> None:
         )
         log.info("Flat-field (%s): built field(s) for channel(s): %s",
                  args.flatfield, sorted(shared_kwargs["flatfield_models"]) or "(none found)")
+
+    # Precompute per-channel additive background fields once (--background
+    # empty_well). top_hat / rolling_ball estimate per image in the worker.
+    if args.background == "empty_well":
+        shared_kwargs["background_models"] = build_background_models(
+            input_dir,
+            tokens=[args.nuclear_token] + list(fluor_tokens_for_quant),
+            schema=schema,
+            sep=sep,
+            background_well=args.background_well,
+        )
+        log.info("Background (empty_well): built field(s) for channel(s): %s",
+                 sorted(shared_kwargs["background_models"]) or "(none found)")
 
     # ── Decide mode: zip, folder, or flat ───────────────────────────────────
     well_zips    = find_well_zips(input_dir)

@@ -2032,7 +2032,10 @@ class _BatchedRemoteProcess:
             log_fn=log_fn, progress_fn=progress_fn,
             delete_after_download=True,
         )
-        self._fetcher.run.well_count_total = len(zipped.well_zips)
+        # ``well_count_total`` is set in ``_run_batches`` AFTER the
+        # local-completion filter runs (a pre-filter set would lock
+        # in the raw count and the GUI's progress denominator would
+        # be wrong when some wells were already-done locally).
 
         self._worker = threading.Thread(
             target=self._run_batches, daemon=True,
@@ -2083,6 +2086,65 @@ class _BatchedRemoteProcess:
     def _run_batches(self) -> None:
         try:
             all_zips = list(self._zipped.well_zips)
+
+            # v5.4.7: local-completion filter. The remote pipeline's
+            # own skip check (``output_exists_for_well``) looks at the
+            # REMOTE output dir — but per-well Fetcher cleanup deletes
+            # outputs there as soon as they land locally, so a batched
+            # re-run never sees a cache hit on the remote side. Instead
+            # check the LOCAL ``output_dir`` up front: any well with
+            # both ``{well}_out.zip`` AND ``{csv_prefix}_{well}.csv``
+            # already present (non-empty) is treated as complete and
+            # excluded from the run. ``--force`` in the pipeline argv
+            # short-circuits the filter (matches the single-shot path
+            # and ``process_microscopy.py``'s own ``force`` semantics).
+            force = "--force" in self._pipeline_argv
+            csv_prefix = "measurements"
+            it = iter(self._pipeline_argv)
+            for arg in it:
+                if arg == "--csv_prefix":
+                    csv_prefix = next(it, csv_prefix)
+                    break
+            if not force:
+                skipped: list[Path] = []
+                kept: list[Path] = []
+                for p in all_zips:
+                    well = p.stem.upper()
+                    out_zip = self._local_output_dir / f"{well}_out.zip"
+                    csv_path = self._local_output_dir / f"{csv_prefix}_{well}.csv"
+                    if (
+                        out_zip.exists() and out_zip.stat().st_size > 0
+                        and csv_path.exists() and csv_path.stat().st_size > 0
+                    ):
+                        skipped.append(p)
+                    else:
+                        kept.append(p)
+                if skipped:
+                    self._log(
+                        f"[remote] batched mode: {len(skipped)} well(s) "
+                        f"already complete locally — skipping upload + "
+                        f"compute. (force=False; pass --force to "
+                        f"reprocess.)\n"
+                    )
+                    if len(skipped) <= 8:
+                        self._log(
+                            "[remote] skipped wells: "
+                            + ", ".join(p.stem for p in skipped)
+                            + "\n"
+                        )
+                    all_zips = kept
+
+            if not all_zips:
+                self._log(
+                    "[remote] batched mode: every well already complete "
+                    "locally — nothing to do.\n"
+                )
+                self._fetcher.run.well_count_total = 0
+                self._returncode = 0
+                return
+
+            self._fetcher.run.well_count_total = len(all_zips)
+
             batches = [
                 all_zips[i:i + self._batch_size]
                 for i in range(0, len(all_zips), self._batch_size)
@@ -2094,9 +2156,9 @@ class _BatchedRemoteProcess:
                 f"(peak remote disk ≈ {self._batch_size} well-input)\n"
             )
 
-            # v5.4.7: inject a synthetic "Zip mode: <total> wells"
-            # banner BEFORE batch 1's stdout. The GUI's
-            # ``ProgressTracker`` locks on the first such banner via
+            # Inject a synthetic "Zip mode: <total> wells" banner
+            # BEFORE batch 1's stdout. The GUI's ``ProgressTracker``
+            # locks on the first such banner via
             # ``if not self.well_total:``; without this, each batch's
             # own banner reports just THAT batch's count (e.g. 50)
             # and well_done climbs past 100% as later batches add up

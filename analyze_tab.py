@@ -889,7 +889,23 @@ class AnalyzeTab(QWidget):
     # Folder resolution
     # ------------------------------------------------------------------
     def _browse_input(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Select input folder")
+        # ``DontResolveSymlinks`` keeps a Windows mapped drive (e.g.
+        # ``Z:\plate`` for a ``net use Z: \\server\share`` mount)
+        # rendered as its drive letter in the returned string instead
+        # of being canonicalized to the underlying UNC path. The
+        # remote-execution path (rsync over Cygwin ssh) rejects UNC
+        # paths via ``to_rsync_path`` — users who carefully mapped
+        # their network share and picked it via the drive letter
+        # would otherwise hit "UNC paths aren't supported by rsync on
+        # Windows" because Qt resolved the mapping out from under
+        # them. ``ShowDirsOnly`` is implied by ``getExistingDirectory``
+        # but spelled explicitly here so the option set is obvious.
+        d = QFileDialog.getExistingDirectory(
+            self,
+            "Select input folder",
+            "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
+        )
         if d:
             self._input_edit.setText(d)
             self._input_edit.setEnabled(True)

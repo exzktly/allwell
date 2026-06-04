@@ -2092,12 +2092,31 @@ class _BatchedRemoteProcess:
             # REMOTE output dir — but per-well Fetcher cleanup deletes
             # outputs there as soon as they land locally, so a batched
             # re-run never sees a cache hit on the remote side. Instead
-            # check the LOCAL ``output_dir`` up front: any well with
-            # both ``{well}_out.zip`` AND ``{csv_prefix}_{well}.csv``
-            # already present (non-empty) is treated as complete and
-            # excluded from the run. ``--force`` in the pipeline argv
-            # short-circuits the filter (matches the single-shot path
-            # and ``process_microscopy.py``'s own ``force`` semantics).
+            # check the LOCAL ``output_dir`` up front.
+            #
+            # v5.4.8: relaxed from "both ``{well}_out.zip`` AND the CSV"
+            # to "CSV only". The zip's local presence depends on the
+            # output mode the Fetcher used to materialize it:
+            #
+            # * ZIP / FLAT mode → ``shutil.copyfile`` lands the zip
+            #   verbatim at ``local_output_dir/{well}_out.zip``.
+            # * FOLDER mode → ``zipfile.extractall`` extracts the zip
+            #   contents (loose QC files) and the zip itself is
+            #   discarded.
+            # * CSV_ONLY mode → the zip is dropped on the floor
+            #   entirely.
+            #
+            # So the zip exists locally in only ONE of three Fetcher
+            # paths — requiring it broke the filter for the other two
+            # and the user saw "wells were re-processed even though
+            # output already existed". The per-well CSV is written by
+            # the pipeline regardless of mode and pulled by the
+            # Fetcher unconditionally, so it's the canonical
+            # "this well is done" signal.
+            #
+            # ``--force`` in the pipeline argv short-circuits the
+            # filter (matches the single-shot path and
+            # ``process_microscopy.py``'s own ``force`` semantics).
             force = "--force" in self._pipeline_argv
             csv_prefix = "measurements"
             it = iter(self._pipeline_argv)
@@ -2110,21 +2129,17 @@ class _BatchedRemoteProcess:
                 kept: list[Path] = []
                 for p in all_zips:
                     well = p.stem.upper()
-                    out_zip = self._local_output_dir / f"{well}_out.zip"
                     csv_path = self._local_output_dir / f"{csv_prefix}_{well}.csv"
-                    if (
-                        out_zip.exists() and out_zip.stat().st_size > 0
-                        and csv_path.exists() and csv_path.stat().st_size > 0
-                    ):
+                    if csv_path.exists() and csv_path.stat().st_size > 0:
                         skipped.append(p)
                     else:
                         kept.append(p)
                 if skipped:
                     self._log(
                         f"[remote] batched mode: {len(skipped)} well(s) "
-                        f"already complete locally — skipping upload + "
-                        f"compute. (force=False; pass --force to "
-                        f"reprocess.)\n"
+                        f"already complete locally (per-well CSV present "
+                        f"under {self._local_output_dir.name}/) — skipping "
+                        f"upload + compute. Pass --force to reprocess.\n"
                     )
                     if len(skipped) <= 8:
                         self._log(

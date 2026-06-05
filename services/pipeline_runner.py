@@ -55,9 +55,14 @@ _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well
 _RE_WELL_START = re.compile(r"Well (\S+) — starting")
 _RE_WELL_DONE_ID = re.compile(r"Well (\S+) — done\.")
 _RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
-# Remote per-well lifecycle: input zip uploaded, output zip materialised locally.
+# Remote per-well lifecycle: input zip uploaded, then the output is fetched as
+# TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
+# is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
+# even when the CSV pull failed (it's retried later), so it must NOT be the
+# download trigger on its own.
 _RE_REMOTE_UP_WELL = re.compile(r"\[remote\] ↑.*?([A-Ha-h]\d{1,2})\.zip")
-_RE_REMOTE_MAT = re.compile(r"\[remote\] ✓ (\S+?): materialised")
+_RE_FETCH_ZIP = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): [\d.]+ MB zip")
+_RE_FETCH_CSV = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): \d+ CSV file")
 # Auto-threshold pass completes each well: "completed well 3/12 (A01_out.zip)".
 _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h]\d{1,2})")
 
@@ -74,12 +79,23 @@ class ProgressTracker:
         self.well_total = 0
         self.well_done = 0
         self._finalize_emitted = False
+        self._fetch_parts: dict[str, set] = {}   # well -> {"zip","csv"} seen
 
     def reset(self) -> None:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
         self._finalize_emitted = False
+        self._fetch_parts = {}
+
+    def _mark_fetch_part(self, well: str, part: str) -> bool:
+        """Record that *part* ("zip"/"csv") of *well*'s output has landed.
+        Returns True only on the transition where BOTH parts are now present
+        (i.e. the well has just become fully downloaded)."""
+        seen = self._fetch_parts.setdefault(well, set())
+        was_complete = {"zip", "csv"} <= seen
+        seen.add(part)
+        return not was_complete and {"zip", "csv"} <= seen
 
     def parse(self, line: str) -> list[Tuple[str, object]]:
         """Return queue events for a single stdout line.
@@ -110,9 +126,15 @@ class ProgressTracker:
                 events.append(("well_stage", (mu.group(1), "upload")))
         elif "[remote] ↓" in line:
             events.append(("stage", "download"))
-        mm = _RE_REMOTE_MAT.search(line)
-        if mm:
-            events.append(("well_stage", (mm.group(1), "download")))
+        # A well is "downloaded" only once BOTH its output zip and its CSV(s)
+        # have transferred — not on the first part, and not on ``✓ materialised``
+        # (which fires even when the CSV pull failed and is deferred to a retry).
+        mz = _RE_FETCH_ZIP.search(line)
+        if mz and self._mark_fetch_part(mz.group(1), "zip"):
+            events.append(("well_stage", (mz.group(1), "download")))
+        mc = _RE_FETCH_CSV.search(line)
+        if mc and self._mark_fetch_part(mc.group(1), "csv"):
+            events.append(("well_stage", (mc.group(1), "download")))
         # Per-well compute lifecycle (fires regardless of the well_total banner).
         ms = _RE_WELL_START.search(line)
         if ms:

@@ -39,6 +39,7 @@ from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
 from widgets.checkable_dropdown import CheckableDropdown
+from widgets.run_dashboard import RunDashboard
 from widgets.wrap_checkbox import WrapCheckBox
 import shape_features_core as _sfc
 
@@ -1176,6 +1177,13 @@ class AnalyzeTab(QWidget):
         r1 = QFrame(parent); r1.setFrameShape(QFrame.HLine); r1.setObjectName("HRule")
         rl.addWidget(r1)
 
+        # Visual run dashboard (stage stepper + live plate map + headline/ETA),
+        # fed from the same progress events as the bar below.
+        self._dashboard = RunDashboard(parent)
+        rl.addWidget(self._dashboard)
+        rdiv = QFrame(parent); rdiv.setFrameShape(QFrame.HLine); rdiv.setObjectName("HRule")
+        rl.addWidget(rdiv)
+
         prog_widget = QWidget(parent)
         prog_widget
         pl = QHBoxLayout(prog_widget)
@@ -1336,6 +1344,7 @@ class AnalyzeTab(QWidget):
         self._well_total = 0
         self._well_done  = 0
         self._progress_tracker.reset()
+        self._dashboard.reset(remote=self._remote_cb.currentData() is not None)
         self._progress.setValue(0)
         self._prog_lbl.setText("Preparing…")
         self._eta_deadline = None
@@ -1614,6 +1623,7 @@ class AnalyzeTab(QWidget):
             self._progress.setRange(0, total)
             self._progress.setValue(0)
             self._prog_lbl.setText(f"Pipeline: 0 / {total} wells")
+            self._dashboard.set_headline(f"Processing 0 / {total} wells")
         elif kind == "well_done":
             done, total = payload  # type: ignore[misc]
             self._well_done = int(done)
@@ -1623,11 +1633,22 @@ class AnalyzeTab(QWidget):
                 f"Pipeline: {self._well_done} / {total} wells  ({pct}%)"
             )
             self._update_eta(self._well_done, total)
+            self._dashboard.set_headline(
+                f"Processing {self._well_done} / {total} wells  ({pct}%)")
+            self._dashboard.set_eta(self._eta_lbl.text())
             # The auto-threshold pass runs *after* the last well — show
             # an explicit finalizing state so the user doesn't see the
             # progress bar pinned at 100% with nothing happening.
             if total > 0 and self._well_done >= total:
                 self._status_lbl.setText("Finalizing…")
+        elif kind == "stage":
+            self._dashboard.set_stage(str(payload))
+        elif kind == "well_active":
+            self._dashboard.well_active(str(payload))
+        elif kind == "well_done_id":
+            self._dashboard.well_done(str(payload))
+        elif kind == "well_error":
+            self._dashboard.well_error(str(payload))
 
     def _poll_log(self) -> None:
         try:
@@ -1648,6 +1669,8 @@ class AnalyzeTab(QWidget):
                     self._progress.setRange(0, n)
                     self._progress.setValue(0)
                     self._prog_lbl.setText(f"Grouping: 0 / {n} wells")
+                    self._dashboard.set_stage("group")
+                    self._dashboard.set_headline(f"Grouping 0 / {n} wells")
                 elif kind == "zipper_well":
                     n_total = self._progress.maximum() or 96
                     self._zipper_done = getattr(self, "_zipper_done", 0) + 1
@@ -1655,6 +1678,9 @@ class AnalyzeTab(QWidget):
                     pct = int(self._zipper_done / n_total * 100)
                     self._prog_lbl.setText(f"Grouping: {self._zipper_done} / {n_total} wells  ({pct}%)")
                     self._update_eta(self._zipper_done, n_total)
+                    self._dashboard.set_headline(
+                        f"Grouping {self._zipper_done} / {n_total} wells  ({pct}%)")
+                    self._dashboard.set_eta(self._eta_lbl.text())
                 elif kind == "zipper_done":
                     self._progress.setRange(0, 100)
                     self._progress.setValue(0)
@@ -1683,10 +1709,15 @@ class AnalyzeTab(QWidget):
                     except (TypeError, ValueError):
                         pct = 0.0
                     self._status_lbl.setText(f"Transferring… {int(pct * 100)}%")
+                    self._dashboard.set_status(f"Transferring… {int(pct * 100)}%")
                 elif kind == "done":
                     self._progress.setValue(self._progress.maximum() or 100)
                     n = self._well_done or getattr(self, "_zipper_done", 0)
                     self._prog_lbl.setText(f"Complete — {n} well(s) processed")
+                    self._dashboard.set_stage("done")
+                    self._dashboard.set_headline(f"Complete — {n} well(s) processed")
+                    self._dashboard.set_status("")
+                    self._dashboard.set_eta("")
                     self._log_line(payload, "DONE")
                     self._log_line(
                         "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

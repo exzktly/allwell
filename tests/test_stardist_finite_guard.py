@@ -1,11 +1,13 @@
-"""StarDist input must be finite before predict_instances.
+"""StarDist input must be finite AND in [0, 1] before predict_instances.
 
 StarDist's polygon NMS (ClipperLib) hard-aborts the process with an uncatchable
 C++ exception ("ClipperLib::clipperException: Coordinate outside allowed range")
-when the network sees NaN/Inf — and because ``normalize`` uses ``np.percentile``
-(not the nan-aware form), one NaN pixel poisons the entire field. The guard in
-``_segment_stardist_nuclei`` must scrub non-finite values so a real run can't
-hit the abort. Uses a fake model, so no TensorFlow / StarDist needed.
+when the network sees out-of-distribution input — either NaN/Inf (one NaN
+poisons the percentile normalization) or huge *finite* outliers (empty-well
+flat-field divides by a near-zero field and amplifies a region ~100x; the
+default normalize(clip=False) leaves those at the top). ``_segment_stardist_nuclei``
+must scrub non-finite values AND clamp to [0, 1] so a real run can't hit the
+abort. Uses a fake model, so no TensorFlow / StarDist needed.
 """
 
 from __future__ import annotations
@@ -29,7 +31,10 @@ def fake_csbdeep(monkeypatch):
         x = np.asarray(x, dtype=np.float32)
         lo = np.percentile(x, pmin)
         hi = np.percentile(x, pmax)
-        return ((x - lo) / (hi - lo + eps)).astype(dtype)
+        out = (x - lo) / (hi - lo + eps)
+        if clip:                       # csbdeep 0.8.0 hard-clips to [0, 1]
+            out = np.clip(out, 0.0, 1.0)
+        return out.astype(dtype)
 
     utils = types.ModuleType("csbdeep.utils")
     utils.normalize = normalize
@@ -48,6 +53,8 @@ class _FiniteOnlyModel:
 
     def predict_instances(self, img):
         assert np.all(np.isfinite(img)), "predict_instances got non-finite input"
+        assert img.min() >= -1e-6 and img.max() <= 1.0 + 1e-6, \
+            f"predict_instances got out-of-[0,1] input: [{img.min()}, {img.max()}]"
         self.seen = img
         labels = np.zeros(img.shape, dtype=np.int32)
         labels[2:5, 2:5] = 1
@@ -95,3 +102,17 @@ def test_finite_structured_input_reaches_model(fake_model):
     img = np.random.default_rng(1).random((10, 10)).astype(np.float32)
     pm._segment_stardist_nuclei(img)
     assert fake_model.seen is not None and np.all(np.isfinite(fake_model.seen))
+
+
+def test_ood_amplified_spike_is_clamped(fake_model):
+    # The empty-well failure mode: a dim region amplified to a huge FINITE value.
+    # Without clip=True + the explicit clamp this reaches StarDist and overflows
+    # ClipperLib; the guard must hand the model only values in [0, 1].
+    rng = np.random.default_rng(2)
+    img = (rng.random((24, 24)).astype(np.float32) * 0.5 + 0.25)   # structured
+    img[5, 5] = 1e6           # amplified outlier
+    img[6, 6] = 5e5
+    labels = pm._segment_stardist_nuclei(img)      # must NOT raise/abort
+    assert labels.dtype == np.int32
+    assert fake_model.seen is not None
+    assert fake_model.seen.min() >= -1e-6 and fake_model.seen.max() <= 1.0 + 1e-6

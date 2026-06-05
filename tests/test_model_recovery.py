@@ -12,6 +12,8 @@ need neither TensorFlow nor StarDist.
 from __future__ import annotations
 
 import os
+import threading
+import time
 from pathlib import Path
 
 import process_microscopy as pm
@@ -77,3 +79,72 @@ def test_purge_targets_only_model_cache(tmp_path, monkeypatch):
     assert str(model_dir) in removed
     assert not model_dir.exists()
     assert other.exists()
+
+
+# ── download serialisation (the concurrent-download race that corrupts cache) ──
+
+def test_concurrent_loads_download_once(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERAS_HOME", str(tmp_path))
+    warm = tmp_path / "models" / "warm.flag"
+
+    class FakeSD:
+        download_count = 0
+        _dl_lock = threading.Lock()
+
+        @classmethod
+        def from_pretrained(cls, name):
+            if not warm.exists():                     # cold cache → "download"
+                with cls._dl_lock:
+                    cls.download_count += 1
+                time.sleep(0.05)                      # widen the race window
+                warm.parent.mkdir(parents=True, exist_ok=True)
+                warm.write_text("ok")
+            return f"MODEL[{name}]"
+
+    results: list = []
+    threads = [threading.Thread(
+        target=lambda: results.append(pm._load_stardist_pretrained(FakeSD)))
+        for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # The lock serialises the cold download → exactly one, despite 8 callers.
+    assert FakeSD.download_count == 1
+    assert results == ["MODEL[2D_versatile_fluo]"] * 8
+
+
+def test_lock_stale_is_reclaimed(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERAS_HOME", str(tmp_path))
+    lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    lockdir.mkdir(parents=True)
+    old = time.time() - pm._STARDIST_LOCK_STALE - 10      # older than stale window
+    os.utime(lockdir, (old, old))
+
+    class FakeSD:
+        @classmethod
+        def from_pretrained(cls, name):
+            return f"MODEL[{name}]"
+
+    # A stale lock must be reclaimed, not block — the load returns promptly.
+    out = pm._load_stardist_pretrained(FakeSD)
+    assert out == "MODEL[2D_versatile_fluo]"
+    assert not lockdir.exists()                          # reclaimed + released
+
+
+def test_lock_timeout_degrades_to_unlocked(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERAS_HOME", str(tmp_path))
+    monkeypatch.setattr(pm, "_STARDIST_LOCK_TIMEOUT", 0.2)
+    monkeypatch.setattr(pm, "_STARDIST_LOCK_STALE", 1e9)   # never treat as stale
+    lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    lockdir.mkdir(parents=True)                            # held by a (fake) live holder
+
+    class FakeSD:
+        @classmethod
+        def from_pretrained(cls, name):
+            return f"MODEL[{name}]"
+
+    # Held lock + timeout → proceed WITHOUT it rather than hang/raise.
+    out = pm._load_stardist_pretrained(FakeSD)
+    assert out == "MODEL[2D_versatile_fluo]"
+    assert lockdir.exists()                               # we didn't hold/remove it

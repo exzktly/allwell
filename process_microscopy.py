@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import contextlib
 import json
 import logging
 import os
@@ -82,6 +83,13 @@ _STARDIST_MODEL: "StarDist2D | None" = None
 # process_image_group at entry so the per-FOV ``seg-input`` line (and the last
 # line before a ClipperLib abort) names the culprit image. Per-worker process.
 _SEG_FOV_LABEL: str = ""
+
+# StarDist sees percentile-normalized input anchored to [0, 1]; clamp to this so
+# no out-of-distribution value (e.g. a dim region amplified by empty-well
+# flat-field division) can drive the regressed polygon vertices out of
+# ClipperLib's integer range — the uncatchable "coordinate outside allowed
+# range" abort.
+_STARDIST_INPUT_CLIP = (0.0, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -1016,19 +1024,23 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
     # uncatchable C++ exception —
     #   terminate called after throwing an instance of
     #   'ClipperLib::clipperException'  ("Coordinate outside allowed range")
-    # — if the network is fed non-finite input. A single NaN/Inf pixel is enough:
-    # ``normalize`` uses ``np.percentile`` (not the nan-aware variant), so one
-    # NaN turns the percentiles NaN and the *entire* normalized image non-finite,
-    # the regressed polygon distances become NaN/Inf, and the int cast overflows
-    # ClipperLib's range. TIFFs that encode masked/saturated pixels as NaN/Inf,
-    # or aggressive flat-field / background correction, can introduce these — so
-    # scrub non-finite values before normalize and again after (belt and braces).
+    # — if the network is fed non-finite OR out-of-distribution input. Two ways
+    # in: (1) a single NaN/Inf pixel — ``normalize`` uses ``np.percentile`` (not
+    # the nan-aware variant), so one NaN turns the percentiles NaN and the whole
+    # image non-finite; (2) huge *finite* values — empty-well flat-field divides
+    # by a near-zero field and amplifies a dim region by ~100x, and the default
+    # ``normalize(clip=False)`` does NOT clip the top end, so those outliers reach
+    # the network and the regressed distances blow up. So: scrub non-finite, then
+    # normalize WITH ``clip=True`` and an explicit clamp so the input is strictly
+    # in [0, 1] — the distribution StarDist was trained on — making the abort
+    # impossible regardless of the upstream correction.
     arr = np.asarray(nir_corr, dtype=np.float32)
     if not np.all(np.isfinite(arr)):
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-    nir_norm = normalize(arr, 1, 99.8)
+    nir_norm = normalize(arr, 1, 99.8, clip=True)
     if not np.all(np.isfinite(nir_norm)):
         nir_norm = np.nan_to_num(nir_norm, nan=0.0, posinf=0.0, neginf=0.0)
+    np.clip(nir_norm, _STARDIST_INPUT_CLIP[0], _STARDIST_INPUT_CLIP[1], out=nir_norm)
 
     # ── ClipperLib diagnostics ───────────────────────────────────────────────
     # The abort ("coordinate outside allowed range") happens *inside*
@@ -1954,6 +1966,71 @@ def _purge_stardist_cache() -> "list[str]":
     return removed
 
 
+# Cross-process download serialisation (see _stardist_download_lock).
+_STARDIST_LOCK_TIMEOUT = 300.0   # s; the first cold download can take 30s+
+_STARDIST_LOCK_STALE   = 600.0   # s; reclaim a lock whose holder died mid-download
+_STARDIST_LOCK_POLL    = 0.5     # s between acquisition attempts
+
+
+def _stardist_cache_models_dir() -> Path:
+    """Primary keras model-cache dir — ``$KERAS_HOME`` else ``~/.keras``, then
+    ``/models`` — where ``from_pretrained`` downloads the weights. Created if
+    missing. Mirrors the root logic in :func:`_purge_stardist_cache`."""
+    root = os.environ.get("KERAS_HOME") or os.path.join(os.path.expanduser("~"), ".keras")
+    models = Path(root) / "models"
+    models.mkdir(parents=True, exist_ok=True)
+    return models
+
+
+@contextlib.contextmanager
+def _stardist_download_lock(timeout: "float | None" = None):
+    """Cross-process advisory lock serialising the StarDist model download/purge.
+
+    All spawn-pool workers run ``_worker_init`` → ``from_pretrained`` at once; on
+    a cold cache they download the same file concurrently and truncate each
+    other (the recurring "cache corrupt" failure), and an unguarded purge can
+    delete another worker's in-flight download. Atomic ``os.mkdir`` of a lock
+    directory is the primitive: exactly one process wins and downloads; the rest
+    block, then load a *warm* cache. Degrades safely — on timeout, an unusable
+    cache dir, or any lock error, it proceeds WITHOUT the lock rather than fail
+    the run, and reclaims a stale lock left by a dead holder.
+    """
+    if timeout is None:                 # resolve at call time so tests can patch it
+        timeout = _STARDIST_LOCK_TIMEOUT
+    try:
+        lockdir = _stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    except OSError:
+        yield                       # cache dir unusable — run unsynchronised
+        return
+    deadline = time.monotonic() + timeout
+    held = False
+    while True:
+        try:
+            os.mkdir(lockdir)
+            held = True
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lockdir.stat().st_mtime
+            except OSError:
+                age = 0.0
+            if age > _STARDIST_LOCK_STALE:
+                shutil.rmtree(lockdir, ignore_errors=True)   # reclaim dead holder
+                continue
+            if time.monotonic() >= deadline:
+                log.warning("StarDist download lock busy >%.0fs — proceeding "
+                            "without it (cache may be contended).", timeout)
+                break
+            time.sleep(_STARDIST_LOCK_POLL)
+        except OSError:
+            break                   # can't create the lock (perms/fs) — unsynchronised
+    try:
+        yield
+    finally:
+        if held:
+            shutil.rmtree(lockdir, ignore_errors=True)
+
+
 def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
     """Load a StarDist pretrained model, recovering once from a corrupt cache.
 
@@ -1961,18 +2038,23 @@ def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
     (see :data:`_CORRUPT_MODEL_MARKERS`) — the classic symptom of a previous
     run that died mid-download — purge the cache and re-download exactly once.
     Any other error (and a second failure) propagates unchanged.
+
+    The whole body runs under :func:`_stardist_download_lock` so concurrent
+    workers serialise: only one downloads (the rest hit a warm cache), and the
+    purge+retry can't delete another worker's in-flight download.
     """
-    try:
-        return StarDist2D.from_pretrained(name)
-    except Exception as exc:                                 # noqa: BLE001
-        if not any(m in str(exc).lower() for m in _CORRUPT_MODEL_MARKERS):
-            raise
-        removed = _purge_stardist_cache()
-        log.warning(
-            "StarDist model cache was corrupt (%s: %s) — purged %s and "
-            "re-downloading once.",
-            exc.__class__.__name__, exc, removed or "(nothing found to remove)")
-        return StarDist2D.from_pretrained(name)
+    with _stardist_download_lock():
+        try:
+            return StarDist2D.from_pretrained(name)
+        except Exception as exc:                                 # noqa: BLE001
+            if not any(m in str(exc).lower() for m in _CORRUPT_MODEL_MARKERS):
+                raise
+            removed = _purge_stardist_cache()
+            log.warning(
+                "StarDist model cache was corrupt (%s: %s) — purged %s and "
+                "re-downloading once.",
+                exc.__class__.__name__, exc, removed or "(nothing found to remove)")
+            return StarDist2D.from_pretrained(name)
 
 
 def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:

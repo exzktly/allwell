@@ -254,11 +254,14 @@ def _base_opts(**over):
 
 # ── background-subtraction methods ───────────────────────────────────────────
 
-def test_subtract_background_top_hat_is_backcompat():
+def test_subtract_background_method_dispatch_and_default():
+    from process_microscopy import _isotropic_disk_tophat
     img = (np.random.default_rng(1).random((48, 48)) * 100).astype(np.float32)
-    # default method must be byte-for-byte the legacy top-hat
+    # explicit top_hat is still byte-for-byte the legacy square top-hat
     assert np.allclose(subtract_background(img, 8, "top_hat"), apply_tophat(img, 8))
-    assert np.allclose(subtract_background(img, 8), apply_tophat(img, 8))
+    # the DEFAULT is now the isotropic sliding_disk, NOT the square top_hat
+    assert np.allclose(subtract_background(img, 8), _isotropic_disk_tophat(img, 8))
+    assert not np.allclose(subtract_background(img, 8), apply_tophat(img, 8))
 
 
 def test_subtract_background_sliding_disk_smooths_gradient():
@@ -347,9 +350,14 @@ def test_estimate_background_field_keeps_measured_level():
 
 def test_build_pipeline_args_background_mapping():
     P = Path("/x/process_microscopy.py")
-    # default top_hat → no --background flag
+    # the method is now ALWAYS passed explicitly (no silent CLI-default fallback);
+    # the unspecified default is the isotropic sliding_disk.
     a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts())
-    assert "--background" not in a
+    assert a[a.index("--background") + 1] == "sliding_disk"
+    # top_hat is still selectable and passed through verbatim
+    a = build_pipeline_args(P, Path("/in"), Path("/out"),
+                            _base_opts(background="top_hat"))
+    assert a[a.index("--background") + 1] == "top_hat"
     # sliding_disk → flag, no background well
     a = build_pipeline_args(P, Path("/in"), Path("/out"),
                             _base_opts(background="sliding_disk"))
@@ -464,6 +472,22 @@ def test_analyze_qc_section_present_and_gated():
         assert not (radius_labels & shown), f"labels stranded for {method}"
     tab._background_cb.setCurrentText("sliding_disk")
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
+
+
+def test_analyze_default_background_is_sliding_disk_end_to_end(qapp):
+    """Regression: the dropdown defaults to the isotropic sliding_disk (not the
+    square top_hat) and that selection survives all the way to the CLI args — so
+    a default run can't silently use the square method ("selected sliding-disk,
+    ran top_hat")."""
+    from analyze_tab import AnalyzeTab
+    from services.pipeline_service import build_pipeline_args
+    tab = AnalyzeTab()
+    assert tab._background_cb.currentText() == "sliding_disk"
+    opts = tab._collect_run_options()
+    assert opts.get("background") == "sliding_disk"
+    a = build_pipeline_args(Path("/x/process_microscopy.py"),
+                            Path("/in"), Path("/out"), opts)
+    assert a[a.index("--background") + 1] == "sliding_disk"
 
 
 # ── background-well presence (empty_well requires a real, existing well) ──────

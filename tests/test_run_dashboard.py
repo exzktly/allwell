@@ -57,6 +57,8 @@ def test_dashboard_stepper_and_wells(qapp):
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard()
     d.reset(remote=False)
+    # read-only status map: the All 96 / Invert / Clear selection row is hidden
+    assert not d._plate._actions_host.isVisibleTo(d._plate)
     keys = [k for k, _ in d._stages]
     assert keys == ["group", "process", "finalize", "done"]
     for k in keys:

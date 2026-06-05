@@ -1145,6 +1145,50 @@ def test_fetcher_observes_well_done_marker(host, tmp_path):
     assert run.expected_wells == {"A01", "B02"}
 
 
+def _make_run(tmp_path):
+    from services.remote_runner import _RemoteRun
+    return _RemoteRun(
+        run_id="x", cache_key="k", remote_input_dir="/r/in",
+        remote_output_dir="/r/out", remote_pidfile="/r/pid",
+        local_output_dir=tmp_path, local_input_mode=LocalInputMode.ZIP,
+    )
+
+
+def test_flush_and_join_does_not_drain_when_cancelled(host, tmp_path):
+    """Stop pressed → cancel() → flush_and_join must NOT drain the queue: no
+    'draining fetcher' wait, no download summary — just reap the worker and
+    report the cancellation, so Stop is immediate."""
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=logs.append)
+        # two wells queued as if mid-run, then the user hits Stop
+        fetcher.observe("Zip mode: 2 well-zip files detected\n")
+        fetcher.observe("A01 — done.\n")
+        fetcher.observe("B02 — done.\n")
+        fetcher.cancel()
+        fetcher.flush_and_join(timeout=5)
+    joined = "".join(logs)
+    assert "cancelled" in joined
+    assert "draining fetcher" not in joined
+    assert "wells downloaded" not in joined
+    assert not fetcher._worker.is_alive()
+
+
+def test_flush_and_join_drains_when_not_cancelled(host, tmp_path):
+    """Normal completion still drains and emits the download summary."""
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=logs.append)
+        fetcher.flush_and_join(timeout=5)
+    joined = "".join(logs)
+    assert "cancelled" not in joined
+    assert "fetcher:" in joined          # end-of-stream summary emitted
+
+
 def test_fetcher_observes_well_done_with_logging_prefix(host, tmp_path):
     """v5.2.17 regression: process_microscopy.py emits
     ``log.info("Well %s — done.", well_label)`` with a basicConfig

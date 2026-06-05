@@ -2467,7 +2467,19 @@ class Fetcher:
 
         Called by the Popen wrapper's ``wait()`` so the run isn't
         reported complete until every well's output has landed.
+
+        If the fetcher was **cancelled** (Stop pressed → :meth:`cancel`), do
+        *not* drain: the user asked to abort, not to wait for the wells still
+        queued for download. Just reap the worker — it returns promptly on the
+        stop event — and exit, so Stop is immediate instead of blocking on the
+        remaining queue.
         """
+        if self._stop.is_set():
+            self._pending.put(None)          # unblock the worker's queue.get()
+            self._worker.join(timeout=timeout)
+            self._log("[remote] ↓ fetcher cancelled — "
+                      "remaining downloads skipped\n")
+            return
         pending_count = self._pending.qsize()
         if pending_count:
             self._log(

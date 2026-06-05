@@ -50,6 +50,11 @@ def classify_log_line(line: str) -> str:
 
 _RE_TF_WORKERS = re.compile(r"TF threads/worker\s*:\s*\d+\s+\(workers:\s*(\d+)\s+x")
 _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well")
+# Per-well lifecycle markers emitted by the worker (process_microscopy):
+#   "Well A01 — starting (pid …)"  /  "Well A01 — done."  /  "FAILED well A01: …"
+_RE_WELL_START = re.compile(r"Well (\S+) — starting")
+_RE_WELL_DONE_ID = re.compile(r"Well (\S+) — done\.")
+_RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
 
 
 class ProgressTracker:
@@ -63,11 +68,13 @@ class ProgressTracker:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self._finalize_emitted = False
 
     def reset(self) -> None:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self._finalize_emitted = False
 
     def parse(self, line: str) -> list[Tuple[str, object]]:
         """Return queue events for a single stdout line.
@@ -88,11 +95,31 @@ class ProgressTracker:
         m = _RE_TF_WORKERS.search(line)
         if m:
             events.append(("workers", int(m.group(1))))
+        # Remote transfer phase (the runner logs "[remote] ↑" while uploading
+        # inputs, "[remote] ↓" while fetching outputs) drives the stepper.
+        if "[remote] ↑" in line:
+            events.append(("stage", "upload"))
+        elif "[remote] ↓" in line:
+            events.append(("stage", "download"))
+        # Per-well lifecycle → live plate map. These fire regardless of whether
+        # the well_total banner has been seen yet.
+        ms = _RE_WELL_START.search(line)
+        if ms:
+            events.append(("stage", "process"))
+            events.append(("well_active", ms.group(1)))
+        mf = _RE_WELL_FAIL.search(line)
+        if mf:
+            events.append(("well_error", mf.group(1)))
+        # Auto-threshold pass runs after the last well → the "Finalize" stage.
+        if not self._finalize_emitted and line.lstrip().startswith("Auto-threshold:"):
+            self._finalize_emitted = True
+            events.append(("stage", "finalize"))
         if not self.well_total:
             m = _RE_MODE_WELLS.search(line)
             if m:
                 self.well_total = int(m.group(1))
                 events.append(("well_total", self.well_total))
+                events.append(("stage", "process"))
                 return events
         if self.well_total:
             # Count a well as "done" when the pipeline emits its
@@ -112,6 +139,9 @@ class ProgressTracker:
             if "— done." in line:
                 self.well_done += 1
                 events.append(("well_done", (self.well_done, self.well_total)))
+                md = _RE_WELL_DONE_ID.search(line)
+                if md:
+                    events.append(("well_done_id", md.group(1)))
         return events
 
 

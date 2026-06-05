@@ -560,13 +560,15 @@ Every "save state into the dataset folder" path lives under
 | `persistence.json::heatmap_layouts` | `heatmap_layouts.py` | Saved heatmap layouts + cmap/scale state. |
 | `persistence.json::line_order` | `line_order.py` | Line plot replicate-set / well draw order. |
 | `persistence.json::view_state` | `view_state.py` | Active tab, selected wells, channel/metric, fold-change scopes, per-tab combos, export-style prefs. Saved on dataset switch + app close. |
+| `persistence.json::qc_params` | `qc_params.py` | QC debris-gating thresholds edited in the QC sidebar; seeded from `pipeline_info.json` `qc_options` when unset. |
 | `cell_overrides.json` | `cell_overrides.py` | Per-cell `Included` overrides set on the Segmentation tab (kept separate — large + write-heavy). |
 | `bar_groups.json` | `bar_groups.py` | User-picked file for bar-plot group state (no auto-save). |
 
 `persistence.json` is a single consolidated viewer-state document managed by
 `_doc.py`. On first load it migrates any legacy `ratios.json`,
 `heatmap_layouts.json`, or `line_order.json` sidecars into the unified file
-and deletes them.
+and deletes them. `qc_params` migrates its own legacy `qc_params.json` (which
+wraps its data, so it can't use the generic migrator) inside `qc_params.py`.
 
 Persistence modules expose `load_from_data_dir(app)` / `save_to_data_dir(app)`
 function pairs. They are registered, by name, with the **`PersistenceRegistry`**

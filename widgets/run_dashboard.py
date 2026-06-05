@@ -102,6 +102,9 @@ class RunDashboard(QWidget):
         self._plate.setSelectionMode("passive")
         self._plate.setDragSelectEnabled(False)
         self._plate.setRowColumnSelectable(False)
+        # Read-only status map — hide the All 96 / Invert / Clear selection row;
+        # the wells are coloured by run progress, not picked by the user.
+        self._plate.setActionsVisible(False)
         self._plate.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._plate.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._plate.setMaximumHeight(210)

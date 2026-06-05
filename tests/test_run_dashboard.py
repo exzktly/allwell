@@ -27,11 +27,28 @@ def test_tracker_emits_full_per_well_lifecycle():
     assert ("A01", "upload") in _stages_for(t, "[remote] ↑ (1) A01.zip")
     assert ("A01", "active") in _stages_for(t, "Well A01 — starting (pid 9)")
     assert ("A01", "process") in _stages_for(t, "Well A01 — done.")
-    assert ("A01", "download") in _stages_for(
+    # "download" requires BOTH the output zip AND the CSV(s) to have landed —
+    # the zip alone (or ✓ materialised, which fires even on a CSV miss) is not
+    # enough.
+    assert ("A01", "download") not in _stages_for(t, "[remote] ↓ A01: 5.2 MB zip in 12s (3 Mbps)")
+    assert ("A01", "download") not in _stages_for(
         t, "[remote] ✓ A01: materialised to /out (1/3 wells fetched)")
+    assert ("A01", "download") in _stages_for(t, "[remote] ↓ A01: 1 CSV file(s) in 1s")
     assert ("A01", "threshold") in _stages_for(
         t, "Auto-threshold: completed well 1/3 (A01_out.zip)")
     assert ("A03", "error") in _stages_for(t, "FAILED well A03: boom")
+
+
+def test_tracker_download_requires_both_zip_and_csv():
+    # a well whose CSV pull failed (WARN, then materialised anyway) must NOT be
+    # shown as downloaded — only the zip landed.
+    t = ProgressTracker()
+    t.parse("Zip mode: 2 well(s) to process, 1 worker(s).")
+    assert ("B02", "download") not in _stages_for(t, "[remote] ↓ B02: 4.0 MB zip in 9s (3 Mbps)")
+    assert ("B02", "download") not in _stages_for(
+        t, "[remote] ↓ B02: WARN no CSV files found at /out/*_B02.csv")
+    assert ("B02", "download") not in _stages_for(
+        t, "[remote] ✓ B02: materialised to /out (2/2 wells fetched)")
 
 
 def test_tracker_coarse_stage_and_finalize_once():

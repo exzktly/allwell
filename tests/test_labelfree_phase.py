@@ -106,6 +106,11 @@ def test_analyze_phase_checkbox(qapp):
         tab._fluor_add_row("BF")
     (e0, _s0, p0, _b0) = tab._fluor_rows[0]
     (e1, s1, p1, _b1) = tab._fluor_rows[1]
+    # Layout regression: the smFISH/Phase checkboxes are pinned to their natural
+    # width so a narrow sidebar can't shrink them into overlapping text.
+    for (_e, _sm, _ph, _b) in tab._fluor_rows:
+        assert _sm.minimumWidth() > 0 and _ph.minimumWidth() > 0
+        assert _sm.minimumWidth() >= _sm.sizeHint().width() - 1
     e0.setText("BF")
     e1.setText("GFP")
 

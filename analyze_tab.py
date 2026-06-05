@@ -341,10 +341,12 @@ class AnalyzeTab(QWidget):
 
         fl_title = QLabel("Fluorescent channels", sec)
         fl_title.setContentsMargins(0, 6, 0, 2)
+        fl_title.setWordWrap(True)
         sec.layout().addWidget(fl_title)
         fl_hint = QLabel("Mark smFISH channels, or one channel as Phase for "
                          "label-free segmentation, with the checkboxes on each row.", sec)
         fl_hint.setObjectName("Muted")
+        fl_hint.setWordWrap(True)
         sec.layout().addWidget(fl_hint)
 
         self._fluor_frame = QWidget(sec)
@@ -445,6 +447,7 @@ class AnalyzeTab(QWidget):
         sec = self._section(parent, "Folders")
 
         in_lbl = QLabel("Input folder", sec)
+        in_lbl.setWordWrap(True)
         sec.layout().addWidget(in_lbl)
 
         in_pick = QWidget(sec)
@@ -470,10 +473,12 @@ class AnalyzeTab(QWidget):
 
         self._folder_lock_lbl = QLabel("Define the filename schema above first.", sec)
         self._folder_lock_lbl.setObjectName("Muted")
+        self._folder_lock_lbl.setWordWrap(True)
         sec.layout().addWidget(self._folder_lock_lbl)
 
         out_lbl = QLabel("Output folder (auto)", sec)
         out_lbl.setContentsMargins(0, 6, 0, 0)
+        out_lbl.setWordWrap(True)
         sec.layout().addWidget(out_lbl)
         self._output_lbl = QLabel("—", sec)
         self._output_lbl.setObjectName("Muted")
@@ -871,7 +876,7 @@ class AnalyzeTab(QWidget):
         row = QWidget(self._fluor_frame)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(4)
+        rl.setSpacing(8)
 
         edit = QLineEdit(default_token, row)
         edit.setFixedWidth(80)
@@ -883,10 +888,16 @@ class AnalyzeTab(QWidget):
         remove_btn.setProperty("variant", "secondary")
         rl.addWidget(remove_btn)
 
+        # Pin each checkbox to its natural width so a narrow sidebar can't shrink
+        # it below the indicator+text and make "Phase" overlap "smFISH".
         smfish_cb = QCheckBox("smFISH", row)
+        smfish_cb.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        smfish_cb.setMinimumWidth(smfish_cb.sizeHint().width())
         rl.addWidget(smfish_cb)
 
         phase_cb = QCheckBox("Phase", row)
+        phase_cb.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        phase_cb.setMinimumWidth(phase_cb.sizeHint().width())
         rl.addWidget(phase_cb)
         rl.addStretch(1)
 

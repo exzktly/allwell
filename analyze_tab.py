@@ -870,6 +870,34 @@ class AnalyzeTab(QWidget):
                 errors.append("Minimum nucleus area must be a positive integer.")
         return errors
 
+    def _background_well_validation_error(self) -> Optional[str]:
+        """When empty_well drives flat-field and/or background, the background
+        well must be specified and must exist in the input. Returns an error
+        message to block the run, or None when the request is valid (or empty_well
+        isn't selected)."""
+        uses = []
+        if self._flatfield_cb.currentText() == "empty_well":
+            uses.append("flat-field correction")
+        if self._background_cb.currentText() == "empty_well":
+            uses.append("background subtraction")
+        if not uses:
+            return None
+        which = " and ".join(uses)
+        well = self._background_well_edit.text().strip()
+        if not well:
+            return (f"Empty-well {which} requires a Background well.\n\n"
+                    "Enter the empty/background well (e.g. H12) so its measured "
+                    "background can be sampled.")
+        input_dir = Path(self._input_edit.text().strip())
+        sep = self._filename_sep_edit.text() or DEFAULT_SEP
+        schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
+        from services.input_resolution_service import well_present_in_input
+        if not well_present_in_input(input_dir, well, schema=schema, sep=sep):
+            return (f"Background well '{well}' was not found in the input folder.\n\n"
+                    f"Empty-well {which} reads its reference images from that "
+                    f"well — confirm the well exists in:\n{input_dir}")
+        return None
+
     def _refresh_segmentation_hints(self) -> None:
         if not hasattr(self, "_segmentation_hint_lbl"):
             return
@@ -1141,6 +1169,14 @@ class AnalyzeTab(QWidget):
         seg_errors = self._segmentation_validation_errors()
         if seg_errors:
             QMessageBox.critical(self, "Segmentation Error", "\n".join(seg_errors))
+            return None
+        # Empty-well flat-field / background reads its reference images from a
+        # named background well — require it to be specified AND to exist in the
+        # input before starting, rather than letting the run no-op (empty model)
+        # or fail mid-pipeline.
+        bw_err = self._background_well_validation_error()
+        if bw_err:
+            QMessageBox.critical(self, "Background Well Error", bw_err)
             return None
         pipeline = find_pipeline_script()
         if pipeline is None:

@@ -48,6 +48,49 @@ def _has_well_content(folder: Path) -> bool:
         return False
 
 
+def well_present_in_input(input_dir: Path, well: str, *,
+                          schema: "list[str] | None" = None,
+                          sep: str = "_") -> bool:
+    """True iff *well* (any 96-well form, e.g. ``'c11'`` / ``'C11'``) is present
+    in *input_dir* in any layout the pipeline reads: a per-well ``<WELL>.zip``,
+    a per-well folder, or loose TIFFs whose schema ``well`` field matches.
+
+    Mirrors the empty-well sampling in :func:`process_microscopy.sample_empty_well_images`
+    (non-recursive zip / folder lookup, recursive loose-TIFF parse) so the
+    Analyze pre-run check agrees with what the pipeline will actually find. Used
+    to block a run when ``--flatfield empty_well`` / ``--background empty_well``
+    name a background well that doesn't exist.
+    """
+    from well_token import canonical_well_label
+    target = canonical_well_label(well or "")
+    if target is None:
+        return False
+    try:
+        # 1) per-well zip:  <input_dir>/<WELL>.zip
+        for p in input_dir.glob("*.zip"):
+            if canonical_well_label(p.stem) == target:
+                return True
+        # 2) per-well folder:  <input_dir>/<WELL>/
+        for p in input_dir.iterdir():
+            if p.is_dir() and canonical_well_label(p.name) == target:
+                return True
+    except OSError:
+        return False
+    # 3) loose TIFFs — parse the 'well' field from the filename schema.
+    fields = [str(f).strip().lower() for f in (schema or [])]
+    if "well" not in fields:
+        return False
+    well_idx = fields.index("well")
+    try:
+        for p in input_dir.rglob("*.tif*"):
+            parts = p.stem.split(sep)
+            if well_idx < len(parts) and canonical_well_label(parts[well_idx]) == target:
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def run_zipper(
     tif_folder: Path,
     out_folder: Path,

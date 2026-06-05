@@ -358,3 +358,70 @@ def test_analyze_qc_section_present_and_gated():
         assert not (radius_labels & shown), f"labels stranded for {method}"
     tab._background_cb.setCurrentText("rolling_ball")
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
+
+
+# ── background-well presence (empty_well requires a real, existing well) ──────
+
+def test_well_present_in_input_layouts(tmp_path):
+    from services.input_resolution_service import well_present_in_input
+    # zip layout (default): <input>/<WELL>.zip
+    (tmp_path / "zipmode").mkdir()
+    zd = tmp_path / "zipmode"
+    with zipfile.ZipFile(zd / "C11.zip", "w") as z:
+        z.writestr("C11_s0_DAPI.tif", b"x")
+    assert well_present_in_input(zd, "c11")          # case/zero-pad insensitive
+    assert well_present_in_input(zd, "C11")
+    assert not well_present_in_input(zd, "H12")
+    # folder layout
+    fd = tmp_path / "foldermode"; (fd / "B02").mkdir(parents=True)
+    assert well_present_in_input(fd, "b2")           # unpadded canonicalises
+    assert not well_present_in_input(fd, "B03")
+    # loose-TIFF layout (parsed via the schema 'well' field)
+    ld = tmp_path / "loose"; ld.mkdir()
+    _write_tif(ld / "A01_s0_DAPI.tif", np.zeros((4, 4), np.float32))
+    schema = ["well", "field", "channel"]
+    assert well_present_in_input(ld, "A01", schema=schema, sep="_")
+    assert not well_present_in_input(ld, "A02", schema=schema, sep="_")
+    # invalid token never matches
+    assert not well_present_in_input(zd, "")
+    assert not well_present_in_input(zd, "ZZ9")
+
+
+def test_background_well_validation_blocks_run(tmp_path):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    from analyze_tab import AnalyzeTab
+
+    with zipfile.ZipFile(tmp_path / "H12.zip", "w") as z:
+        z.writestr("H12_s0_DAPI.tif", b"x")
+    tab = AnalyzeTab()
+    tab._input_edit.setText(str(tmp_path))
+
+    # neither uses empty_well → no error
+    tab._flatfield_cb.setCurrentText("none")
+    tab._background_cb.setCurrentText("top_hat")
+    assert tab._background_well_validation_error() is None
+
+    # empty_well background, blank well → required
+    tab._background_cb.setCurrentText("empty_well")
+    tab._background_well_edit.setText("")
+    err = tab._background_well_validation_error()
+    assert err and "requires a Background well" in err
+
+    # specified but absent → not found
+    tab._background_well_edit.setText("A01")
+    err = tab._background_well_validation_error()
+    assert err and "was not found" in err
+
+    # specified + present → valid
+    tab._background_well_edit.setText("h12")
+    assert tab._background_well_validation_error() is None
+
+    # empty_well flat-field path triggers it too (message names flat-field)
+    tab._background_cb.setCurrentText("top_hat")
+    tab._flatfield_cb.setCurrentText("empty_well")
+    tab._background_well_edit.setText("")
+    err = tab._background_well_validation_error()
+    assert err and "flat-field correction" in err

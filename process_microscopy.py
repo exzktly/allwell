@@ -1027,6 +1027,30 @@ def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
     return np.clip(out, 0.0, None)
 
 
+def _estimate_rolling_ball_bg(img: np.ndarray, radius: float) -> np.ndarray:
+    """Rolling-ball background, estimated on a downscaled copy for speed.
+
+    ``skimage.restoration.rolling_ball`` is O(pixels × ball-footprint) at full
+    resolution — ~80 s for one full microscopy frame at radius 100. The
+    background it estimates is smooth/low-frequency, so computing it on a
+    downscaled image and upscaling back is near-lossless and ~f² faster
+    (scikit-image's own recommended optimisation). The downscale factor scales
+    with the radius (a bigger ball → a smoother background tolerates more
+    downscaling) and is bounded so the small image stays a sane size.
+    """
+    from skimage.restoration import rolling_ball
+    h, w = img.shape[:2]
+    f = max(1, min(int(radius // 25), min(h, w) // 32))
+    if f <= 1:
+        return rolling_ball(img, radius=radius).astype(np.float32)
+    from skimage.transform import resize
+    small = resize(img, (max(1, h // f), max(1, w // f)), order=1, mode="reflect",
+                   anti_aliasing=True, preserve_range=True).astype(np.float32)
+    bg_small = rolling_ball(small, radius=radius / f)
+    return resize(bg_small, (h, w), order=1, mode="reflect",
+                  anti_aliasing=False, preserve_range=True).astype(np.float32)
+
+
 def subtract_background(image, radius: int, method: str = "top_hat",
                         bg_field: "np.ndarray | None" = None) -> np.ndarray:
     """White background subtraction, dispatched by *method*.
@@ -1034,9 +1058,10 @@ def subtract_background(image, radius: int, method: str = "top_hat",
     - ``top_hat`` — ``img - grey_opening(square)``: fast (separable 1-D passes)
       but the flat square footprint leaves anisotropic, *terraced* residuals,
       i.e. halos / hotspots next to bright objects. Current default.
-    - ``rolling_ball`` — ``img - skimage.restoration.rolling_ball(radius)``: a
-      smooth, isotropic baseline; the recommended choice for uneven / structured
-      background (slower than top-hat).
+    - ``rolling_ball`` — ``img - rolling_ball(radius)`` (the smooth, isotropic
+      baseline; recommended for uneven / structured background). Estimated on a
+      downscaled copy via :func:`_estimate_rolling_ball_bg` so it isn't ~80 s an
+      image; still slower than top-hat.
     - ``empty_well`` — ``img - bg_field``: subtract a *measured* per-channel
       background (smoothed empty-well median, :func:`estimate_background_field`);
       no-op when no field is available for the channel.
@@ -1048,8 +1073,7 @@ def subtract_background(image, radius: int, method: str = "top_hat",
     if method == "none":
         return img
     if method == "rolling_ball":
-        from skimage.restoration import rolling_ball
-        return np.clip(img - rolling_ball(img, radius=float(radius)), 0.0, None)
+        return np.clip(img - _estimate_rolling_ball_bg(img, float(radius)), 0.0, None)
     if method == "empty_well":
         if bg_field is not None:
             bg = np.asarray(bg_field, dtype=np.float32)

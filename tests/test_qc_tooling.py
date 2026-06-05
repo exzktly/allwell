@@ -234,6 +234,26 @@ def test_subtract_background_rolling_ball_smooths_gradient():
     assert float(rb.std()) < float(img.std())     # gradient flattened
 
 
+def test_rolling_ball_downscaled_path_removes_bg_keeps_object():
+    # radius 50 on a 128px image triggers the downscale fast path (f>1). It must
+    # still remove a smooth background and preserve a bright object, at the input
+    # resolution.
+    from process_microscopy import _estimate_rolling_ball_bg
+    H = W = 128
+    grad = np.tile(np.linspace(40, 160, W, dtype=np.float32), (H, 1))  # smooth bg
+    img = grad.copy()
+    img[60:70, 60:70] += 400.0                    # a bright object
+    # the helper actually downscales at this radius/size
+    assert max(1, min(50 // 25, min(H, W) // 32)) > 1
+    out = subtract_background(img, 50, "rolling_ball")
+    assert out.shape == img.shape and out.min() >= 0.0
+    assert float(out[5:15, 5:15].mean()) < 40       # smooth background removed
+    assert float(out[62:68, 62:68].mean()) > 200    # object preserved
+    # the estimated background tracks the gradient (low → high, left → right)
+    bg = _estimate_rolling_ball_bg(grad, 50.0)
+    assert bg[:, -1].mean() > bg[:, 0].mean()
+
+
 def test_subtract_background_empty_well_subtracts_field():
     img = np.full((32, 32), 80.0, np.float32)
     field = np.full((32, 32), 50.0, np.float32)

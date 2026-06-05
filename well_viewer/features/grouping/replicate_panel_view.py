@@ -315,7 +315,17 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     app._cell_gating_subtab_frame = cell_gating_tab
     app._cell_gating_subtab_built = False
 
-    # Sub-tab 4: Notes — freeform per-project text, persisted via
+    # Sub-tab 4: Pipeline Info — the run's recorded parameters (read-only),
+    # including which background method actually ran.
+    from well_viewer.features.grouping.pipeline_info_view import (
+        build_pipeline_info_subtab,
+    )
+    pinfo_tab = _QWidget(sub_tabs)
+    _QVBoxLayout(pinfo_tab).setContentsMargins(0, 0, 0, 0)
+    build_pipeline_info_subtab(app, pinfo_tab)
+    sub_tabs.addTab(pinfo_tab, "Pipeline Info")
+
+    # Sub-tab 5: Notes — freeform per-project text, persisted via
     # sample_definitions.json's "notes" field.
     notes_tab = _QWidget(sub_tabs)
     nl = _QVBoxLayout(notes_tab)
@@ -331,6 +341,8 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
         name = sub_tabs.tabText(idx)
         if name == "Cell Gating":
             build_cell_gating_subtab(app)
+        if name == "Pipeline Info" and hasattr(app, "_pipeline_info_refresh"):
+            app._pipeline_info_refresh()      # re-read in case the dataset changed
         # Entering the Groups sub-tab deselects any previously-active
         # group so a click on the sidebar plate has no consequence
         # until the user explicitly picks one. The active-group banner

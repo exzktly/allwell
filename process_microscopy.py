@@ -1063,7 +1063,7 @@ def _isotropic_disk_tophat(img: np.ndarray, radius: int) -> np.ndarray:
     return np.clip(white_tophat(img, footprint).astype(np.float32), 0.0, None)
 
 
-def subtract_background(image, radius: int, method: str = "top_hat",
+def subtract_background(image, radius: int, method: str = "sliding_disk",
                         bg_field: "np.ndarray | None" = None) -> np.ndarray:
     """White background subtraction, dispatched by *method*.
 
@@ -1677,7 +1677,10 @@ def _segment_stardist_seeded_watershed_cell(
         nuclear_points[y, x] = marker_id
         marker_id += 1
 
-    cytoplasm_tophat = apply_tophat(cytoplasm_raw, tophat_radius_fluor)
+    # Isotropic disk top-hat (not the square apply_tophat): a square footprint
+    # here stamps square bias onto the cytoplasm mask → square-edged watershed
+    # cells, regardless of the chosen --background method.
+    cytoplasm_tophat = _isotropic_disk_tophat(cytoplasm_raw, tophat_radius_fluor)
     try:
         thresh = threshold_otsu(cytoplasm_tophat)
     except ValueError:
@@ -2062,7 +2065,7 @@ def process_image_group(
     shape_features: "list[str] | None" = None,
     flatfield_mode: str = "none",
     flatfield_models: "dict | None" = None,
-    background_method: str = "top_hat",
+    background_method: str = "sliding_disk",
     background_models: "dict | None" = None,
     qc_remove_debris: bool = False,
     qc_min_area: "float | None" = None,
@@ -4320,11 +4323,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--background_well", default="",
                    help="Well label of an empty/background well used as the reference "
                         "for --flatfield=empty_well and/or --background=empty_well.")
-    p.add_argument("--background", choices=BACKGROUND_METHODS, default="top_hat",
+    p.add_argument("--background", choices=BACKGROUND_METHODS, default="sliding_disk",
                    help="Background-subtraction method (applied per channel where "
                         "top-hat is enabled). 'top_hat' = fast square morphological "
-                        "(default, but leaves halos on uneven background); "
-                        "'sliding_disk' = smooth isotropic disk baseline (recommended "
+                        "(leaves square halos on uneven background); "
+                        "'sliding_disk' = smooth isotropic disk baseline (default; recommended "
                         "for structured/uneven background, no square halos); "
                         "'empty_well' = subtract a "
                         "measured per-channel background from --background_well.")

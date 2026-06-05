@@ -123,8 +123,10 @@ def build_pipeline_args(
     bg_well = str(opts.get("background_well", "") or "").strip()
     if flatfield and flatfield != "none":
         args += ["--flatfield", flatfield]
-    background = str(opts.get("background", "top_hat") or "top_hat")
-    if background and background != "top_hat":
+    # Always pass the selected method explicitly so the run can never silently
+    # fall back to the CLI default — the GUI dropdown is the source of truth.
+    background = str(opts.get("background", "sliding_disk") or "sliding_disk")
+    if background:
         args += ["--background", background]
     # The background well feeds both empty_well flat-field and empty_well bg.
     if bg_well and (flatfield == "empty_well" or background == "empty_well"):

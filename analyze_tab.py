@@ -550,14 +550,17 @@ class AnalyzeTab(QWidget):
         rbg = self._row(sec, "Background subtraction")
         self._background_cb = QComboBox(rbg)
         self._background_cb.addItems(["none", "top_hat", "sliding_disk", "empty_well"])
-        self._background_cb.setCurrentText("top_hat")
+        # Default to the isotropic sliding_disk: top_hat's square footprint leaves
+        # telltale square halos, and since the dropdown doesn't persist, a top_hat
+        # default meant runs silently used the square method unless re-selected.
+        self._background_cb.setCurrentText("sliding_disk")
         self._background_cb.setToolTip(
             "How background is subtracted (per channel, where enabled below):\n"
             "• none — no background subtraction.\n"
-            "• top_hat — fast square morphological; leaves halos/hotspots on "
-            "uneven background.\n"
-            "• sliding_disk — smooth isotropic disk baseline (recommended for "
-            "structured/uneven background; no square halos).\n"
+            "• top_hat — fast square morphological; leaves square halos/hotspots "
+            "on uneven background.\n"
+            "• sliding_disk — smooth isotropic disk baseline (default; recommended "
+            "for structured/uneven background; no square halos).\n"
             "• empty_well — subtract a measured per-channel background from the "
             "Background well. (If flat-field is *also* empty_well, the two are "
             "combined into one correct (raw−B)/(B/mean(B)) pass.)")

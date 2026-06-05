@@ -50,6 +50,21 @@ def classify_log_line(line: str) -> str:
 
 _RE_TF_WORKERS = re.compile(r"TF threads/worker\s*:\s*\d+\s+\(workers:\s*(\d+)\s+x")
 _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well")
+# Per-well lifecycle markers emitted by the worker (process_microscopy):
+#   "Well A01 — starting (pid …)"  /  "Well A01 — done."  /  "FAILED well A01: …"
+_RE_WELL_START = re.compile(r"Well (\S+) — starting")
+_RE_WELL_DONE_ID = re.compile(r"Well (\S+) — done\.")
+_RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
+# Remote per-well lifecycle: input zip uploaded, then the output is fetched as
+# TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
+# is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
+# even when the CSV pull failed (it's retried later), so it must NOT be the
+# download trigger on its own.
+_RE_REMOTE_UP_WELL = re.compile(r"\[remote\] ↑.*?([A-Ha-h]\d{1,2})\.zip")
+_RE_FETCH_ZIP = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): [\d.]+ MB zip")
+_RE_FETCH_CSV = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): \d+ CSV file")
+# Auto-threshold pass completes each well: "completed well 3/12 (A01_out.zip)".
+_RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h]\d{1,2})")
 
 
 class ProgressTracker:
@@ -63,11 +78,24 @@ class ProgressTracker:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self._finalize_emitted = False
+        self._fetch_parts: dict[str, set] = {}   # well -> {"zip","csv"} seen
 
     def reset(self) -> None:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self._finalize_emitted = False
+        self._fetch_parts = {}
+
+    def _mark_fetch_part(self, well: str, part: str) -> bool:
+        """Record that *part* ("zip"/"csv") of *well*'s output has landed.
+        Returns True only on the transition where BOTH parts are now present
+        (i.e. the well has just become fully downloaded)."""
+        seen = self._fetch_parts.setdefault(well, set())
+        was_complete = {"zip", "csv"} <= seen
+        seen.add(part)
+        return not was_complete and {"zip", "csv"} <= seen
 
     def parse(self, line: str) -> list[Tuple[str, object]]:
         """Return queue events for a single stdout line.
@@ -88,11 +116,46 @@ class ProgressTracker:
         m = _RE_TF_WORKERS.search(line)
         if m:
             events.append(("workers", int(m.group(1))))
+        # Remote transfer phases (the runner logs "[remote] ↑" while uploading
+        # inputs, "[remote] ↓" while fetching outputs) drive the active stage.
+        # Per-well: the input zip's upload and the output zip's local landing.
+        if "[remote] ↑" in line:
+            events.append(("stage", "upload"))
+            mu = _RE_REMOTE_UP_WELL.search(line)
+            if mu:
+                events.append(("well_stage", (mu.group(1), "upload")))
+        elif "[remote] ↓" in line:
+            events.append(("stage", "download"))
+        # A well is "downloaded" only once BOTH its output zip and its CSV(s)
+        # have transferred — not on the first part, and not on ``✓ materialised``
+        # (which fires even when the CSV pull failed and is deferred to a retry).
+        mz = _RE_FETCH_ZIP.search(line)
+        if mz and self._mark_fetch_part(mz.group(1), "zip"):
+            events.append(("well_stage", (mz.group(1), "download")))
+        mc = _RE_FETCH_CSV.search(line)
+        if mc and self._mark_fetch_part(mc.group(1), "csv"):
+            events.append(("well_stage", (mc.group(1), "download")))
+        # Per-well compute lifecycle (fires regardless of the well_total banner).
+        ms = _RE_WELL_START.search(line)
+        if ms:
+            events.append(("stage", "process"))
+            events.append(("well_stage", (ms.group(1), "active")))
+        mf = _RE_WELL_FAIL.search(line)
+        if mf:
+            events.append(("well_stage", (mf.group(1), "error")))
+        mt = _RE_THRESH_WELL.search(line)
+        if mt:
+            events.append(("well_stage", (mt.group(1), "threshold")))
+        # Auto-threshold pass runs after the last well → the "Threshold" stage.
+        if not self._finalize_emitted and line.lstrip().startswith("Auto-threshold:"):
+            self._finalize_emitted = True
+            events.append(("stage", "finalize"))
         if not self.well_total:
             m = _RE_MODE_WELLS.search(line)
             if m:
                 self.well_total = int(m.group(1))
                 events.append(("well_total", self.well_total))
+                events.append(("stage", "process"))
                 return events
         if self.well_total:
             # Count a well as "done" when the pipeline emits its
@@ -112,6 +175,9 @@ class ProgressTracker:
             if "— done." in line:
                 self.well_done += 1
                 events.append(("well_done", (self.well_done, self.well_total)))
+                md = _RE_WELL_DONE_ID.search(line)
+                if md:
+                    events.append(("well_stage", (md.group(1), "process")))
         return events
 
 

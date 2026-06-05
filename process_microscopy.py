@@ -1823,6 +1823,92 @@ def _ensure_pkg_resources_shim() -> None:
     _sys.modules["pkg_resources"] = shim
 
 
+# Substrings in an exception message that indicate a corrupt / truncated cached
+# model file (HDF5 weights or its download archive) rather than a transient
+# network / SSL problem — so we know it is safe to purge the cache and re-fetch.
+_CORRUPT_MODEL_MARKERS = (
+    "truncated file",
+    "unable to synchronously open file",
+    "file signature not found",
+    "bad object header",
+    "not a valid hdf5",
+    "unable to open file",
+    "bad magic number",         # truncated zip archive
+    "file is not a zip file",
+)
+
+
+def _purge_stardist_cache() -> "list[str]":
+    """Remove cached StarDist pretrained-model files so the next
+    ``from_pretrained`` re-downloads them.
+
+    ``StarDist2D.from_pretrained`` caches the model under the keras cache
+    (``$KERAS_HOME`` or ``~/.keras/models/…``) as ``weights_best.h5`` +
+    ``config.json``. A run interrupted mid-download (e.g. the worker was killed,
+    or an earlier failure aborted the pool) can leave a **truncated**
+    ``weights_best.h5``; the next run reuses it and h5py dies with
+    ``OSError: Unable to synchronously open file (truncated file: eof = …)``.
+
+    Deletes any model folder containing a StarDist weights file (and stray
+    ``*.h5`` / partial download archives) under each keras cache root. Returns
+    the paths removed, for logging.
+    """
+    roots: "list[Path]" = []
+    kh = os.environ.get("KERAS_HOME")
+    if kh:
+        roots.append(Path(kh))
+    roots.append(Path(os.path.expanduser("~")) / ".keras")
+    removed: "list[str]" = []
+    seen: "set[str]" = set()
+    for models in (r / "models" for r in roots):
+        if not models.is_dir():
+            continue
+        targets: "set[Path]" = set()
+        for p in models.rglob("*"):
+            if not p.is_file():
+                continue
+            low = p.name.lower()
+            if low == "weights_best.h5" or low.endswith("weights_best.h5"):
+                targets.add(p.parent)                       # whole model folder
+            elif low.endswith((".h5", ".zip", ".part", ".download", ".tmp")):
+                targets.add(p)                              # stray / partial file
+        for t in targets:
+            key = str(t)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if t.is_dir():
+                    shutil.rmtree(t, ignore_errors=True)
+                else:
+                    t.unlink()
+                removed.append(key)
+            except OSError:
+                pass
+    return removed
+
+
+def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
+    """Load a StarDist pretrained model, recovering once from a corrupt cache.
+
+    If the first load fails because the cached weights / archive is truncated
+    (see :data:`_CORRUPT_MODEL_MARKERS`) — the classic symptom of a previous
+    run that died mid-download — purge the cache and re-download exactly once.
+    Any other error (and a second failure) propagates unchanged.
+    """
+    try:
+        return StarDist2D.from_pretrained(name)
+    except Exception as exc:                                 # noqa: BLE001
+        if not any(m in str(exc).lower() for m in _CORRUPT_MODEL_MARKERS):
+            raise
+        removed = _purge_stardist_cache()
+        log.warning(
+            "StarDist model cache was corrupt (%s: %s) — purged %s and "
+            "re-downloading once.",
+            exc.__class__.__name__, exc, removed or "(nothing found to remove)")
+        return StarDist2D.from_pretrained(name)
+
+
 def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:
     """
     Called once in each worker process before any image pairs are processed.
@@ -1947,12 +2033,14 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:
     # clusters) this raises an SSL error.  The override below disables
     # certificate verification for this one call only; the original context
     # factory is restored immediately in the finally block so no other network
-    # code in the worker is affected.
+    # code in the worker is affected. _load_stardist_pretrained additionally
+    # recovers from a truncated cache left by an interrupted earlier run (it
+    # purges the corrupt weights and re-downloads once).
     import ssl as _ssl
     _orig_ssl_ctx = _ssl._create_default_https_context
     _ssl._create_default_https_context = _ssl._create_unverified_context
     try:
-        _STARDIST_MODEL = _StarDist2D.from_pretrained("2D_versatile_fluo")
+        _STARDIST_MODEL = _load_stardist_pretrained(_StarDist2D, "2D_versatile_fluo")
     finally:
         _ssl._create_default_https_context = _orig_ssl_ctx
     log.info("Worker %d model loaded in %.1f s.", os.getpid(), time.perf_counter() - _t0)

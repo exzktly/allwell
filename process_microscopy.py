@@ -1282,6 +1282,7 @@ def compute_shape_features(
 
 FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
 _FLATFIELD_SIGMA = 50.0  # Gaussian smoothing scale (px) for illumination estimation
+_FLATFIELD_FLOOR = 0.1   # min value of a mean-1 field → caps img/ff amplification at 10x
 
 
 def _normalize_flatfield(field: np.ndarray) -> "np.ndarray | None":
@@ -1293,7 +1294,14 @@ def _normalize_flatfield(field: np.ndarray) -> "np.ndarray | None":
         return None
     out = field / m
     out[~np.isfinite(out)] = 1.0
-    out[out <= 0.0] = 1.0
+    # Bound the amplification of img/ff in apply_flatfield. A dim empty-well
+    # region drives ff toward 0; without a floor, img/ff explodes (e.g. ff=0.005
+    # → 200x) and feeds StarDist out-of-distribution values that abort ClipperLib.
+    # Flooring the mean-1 field at _FLATFIELD_FLOOR caps amplification at
+    # 1/_FLATFIELD_FLOOR (=10x) and subsumes the old `out <= 0` guard. Real
+    # vignetting is < ~3x (field stays > ~0.33), so legitimate correction is
+    # untouched; only pathological empty-well division is clipped.
+    np.maximum(out, _FLATFIELD_FLOOR, out=out)
     return out.astype(np.float32)
 
 

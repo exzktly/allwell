@@ -26,6 +26,7 @@ from process_microscopy import (
     build_background_models,
     sample_empty_well_images,
     _normalize_flatfield,
+    _FLATFIELD_FLOOR,
 )
 from services.pipeline_service import build_pipeline_args
 from pathlib import Path
@@ -40,6 +41,40 @@ def test_normalize_flatfield():
     ff = _normalize_flatfield(np.full((8, 8), 7.0, np.float32))
     assert abs(float(ff.mean()) - 1.0) < 1e-5
     assert _normalize_flatfield(np.zeros((4, 4))) is None
+
+
+def test_normalize_flatfield_floors_tiny_values():
+    # A dim empty-well region → tiny mean-1 value → huge img/ff amplification →
+    # OOD StarDist input → ClipperLib abort. The floor caps amplification.
+    field = np.full((16, 16), 1000.0, np.float32)
+    field[0, 0] = 1.0          # ~0.001 of the mean → would be ~1000x amplification
+    field[1, 1] = 5.0
+    ff = _normalize_flatfield(field)
+    assert ff.min() >= _FLATFIELD_FLOOR - 1e-6          # floored
+    assert 1.0 / ff.min() <= 1.0 / _FLATFIELD_FLOOR + 1e-3  # amplification ≤ 1/floor
+    assert np.all(np.isfinite(ff))
+
+
+def test_normalize_flatfield_preserves_gentle_vignette():
+    # Real vignetting (<3x falloff) keeps the field well above the floor — no
+    # pixel should be clamped, so legitimate correction is untouched.
+    grad = np.tile(np.linspace(0.4, 1.6, 32).astype(np.float32), (32, 1))
+    ff = _normalize_flatfield(grad)
+    assert ff.min() > _FLATFIELD_FLOOR + 0.1           # nothing hit the floor
+    assert abs(float(ff.mean()) - 1.0) < 0.05
+
+
+def test_apply_flatfield_bounded_amplification():
+    # img/ff can amplify at most 1/_FLATFIELD_FLOOR after the floor.
+    field = np.full((16, 16), 1000.0, np.float32)
+    field[0, 0] = 0.5          # near-black empty-well pixel
+    ff = _normalize_flatfield(field)
+    img = np.full((16, 16), 200.0, np.float32)
+    out = apply_flatfield(img, ff)
+    assert out.max() <= img.max() / _FLATFIELD_FLOOR + 1.0   # no ~400000x blow-up
+    # the combined empty-well model routes through apply_flatfield → same bound
+    out2 = combined_empty_well_correct(img, None, ff)
+    assert out2.max() <= img.max() / _FLATFIELD_FLOOR + 1.0
 
 
 def test_gaussian_flatfield_flattens_gradient():

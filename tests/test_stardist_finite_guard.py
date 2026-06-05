@@ -1,0 +1,85 @@
+"""StarDist input must be finite before predict_instances.
+
+StarDist's polygon NMS (ClipperLib) hard-aborts the process with an uncatchable
+C++ exception ("ClipperLib::clipperException: Coordinate outside allowed range")
+when the network sees NaN/Inf — and because ``normalize`` uses ``np.percentile``
+(not the nan-aware form), one NaN pixel poisons the entire field. The guard in
+``_segment_stardist_nuclei`` must scrub non-finite values so a real run can't
+hit the abort. Uses a fake model, so no TensorFlow / StarDist needed.
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+
+import numpy as np
+import pytest
+
+import process_microscopy as pm
+
+
+@pytest.fixture(autouse=True)
+def fake_csbdeep(monkeypatch):
+    """Provide csbdeep.utils.normalize (absent in the sandbox) faithfully: it
+    uses np.percentile — the *non* nan-aware form — so a single NaN poisons the
+    whole field, exactly the behaviour that makes the guard necessary."""
+    def normalize(x, pmin=3, pmax=99.8, axis=None, clip=False, eps=1e-20,
+                  dtype=np.float32):
+        x = np.asarray(x, dtype=np.float32)
+        lo = np.percentile(x, pmin)
+        hi = np.percentile(x, pmax)
+        return ((x - lo) / (hi - lo + eps)).astype(dtype)
+
+    utils = types.ModuleType("csbdeep.utils")
+    utils.normalize = normalize
+    mod = types.ModuleType("csbdeep")
+    mod.utils = utils
+    monkeypatch.setitem(sys.modules, "csbdeep", mod)
+    monkeypatch.setitem(sys.modules, "csbdeep.utils", utils)
+
+
+class _FiniteOnlyModel:
+    """Stand-in StarDist model that *requires* finite input (mirrors the real
+    extension, which would otherwise abort the process)."""
+
+    def __init__(self):
+        self.seen = None
+
+    def predict_instances(self, img):
+        assert np.all(np.isfinite(img)), "predict_instances got non-finite input"
+        self.seen = img
+        labels = np.zeros(img.shape, dtype=np.int32)
+        labels[2:5, 2:5] = 1
+        return labels, {}
+
+
+@pytest.fixture
+def fake_model(monkeypatch):
+    m = _FiniteOnlyModel()
+    monkeypatch.setattr(pm, "_STARDIST_MODEL", m)
+    return m
+
+
+def test_nan_input_is_scrubbed(fake_model):
+    img = np.random.default_rng(0).random((16, 16)).astype(np.float32) * 100
+    img[7, 7] = np.nan          # one NaN would poison percentile normalization
+    img[1, 1] = np.inf
+    img[2, 2] = -np.inf
+    labels = pm._segment_stardist_nuclei(img)       # must NOT raise/abort
+    assert labels.dtype == np.int32
+    assert np.all(np.isfinite(fake_model.seen))
+    assert labels.max() == 1
+
+
+def test_all_nan_input_is_scrubbed(fake_model):
+    img = np.full((12, 12), np.nan, dtype=np.float32)
+    labels = pm._segment_stardist_nuclei(img)       # worst case: entirely NaN
+    assert np.all(np.isfinite(fake_model.seen))
+    assert labels.shape == img.shape
+
+
+def test_finite_input_unchanged_path(fake_model):
+    img = np.random.default_rng(1).random((10, 10)).astype(np.float32)
+    pm._segment_stardist_nuclei(img)
+    assert np.all(np.isfinite(fake_model.seen))

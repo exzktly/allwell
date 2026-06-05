@@ -1006,7 +1006,24 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
             "StarDist model is not initialised. "
             "Ensure _worker_init ran before process_image_group."
         )
-    nir_norm = normalize(nir_corr, 1, 99.8)
+    # StarDist's polygon non-maximum-suppression uses ClipperLib, which casts
+    # polygon coordinates to integers and aborts the whole *process* with an
+    # uncatchable C++ exception —
+    #   terminate called after throwing an instance of
+    #   'ClipperLib::clipperException'  ("Coordinate outside allowed range")
+    # — if the network is fed non-finite input. A single NaN/Inf pixel is enough:
+    # ``normalize`` uses ``np.percentile`` (not the nan-aware variant), so one
+    # NaN turns the percentiles NaN and the *entire* normalized image non-finite,
+    # the regressed polygon distances become NaN/Inf, and the int cast overflows
+    # ClipperLib's range. TIFFs that encode masked/saturated pixels as NaN/Inf,
+    # or aggressive flat-field / background correction, can introduce these — so
+    # scrub non-finite values before normalize and again after (belt and braces).
+    arr = np.asarray(nir_corr, dtype=np.float32)
+    if not np.all(np.isfinite(arr)):
+        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    nir_norm = normalize(arr, 1, 99.8)
+    if not np.all(np.isfinite(nir_norm)):
+        nir_norm = np.nan_to_num(nir_norm, nan=0.0, posinf=0.0, neginf=0.0)
     labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
     return labels.astype(np.int32)
 

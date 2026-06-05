@@ -232,26 +232,13 @@ def test_subtract_background_rolling_ball_smooths_gradient():
     rb = subtract_background(img, 20, "rolling_ball")
     assert rb.min() >= 0.0 and rb.shape == img.shape
     assert float(rb.std()) < float(img.std())     # gradient flattened
-
-
-def test_rolling_ball_downscaled_path_removes_bg_keeps_object():
-    # radius 50 on a 128px image triggers the downscale fast path (f>1). It must
-    # still remove a smooth background and preserve a bright object, at the input
-    # resolution.
-    from process_microscopy import _estimate_rolling_ball_bg
-    H = W = 128
-    grad = np.tile(np.linspace(40, 160, W, dtype=np.float32), (H, 1))  # smooth bg
-    img = grad.copy()
-    img[60:70, 60:70] += 400.0                    # a bright object
-    # the helper actually downscales at this radius/size
-    assert max(1, min(50 // 25, min(H, W) // 32)) > 1
-    out = subtract_background(img, 50, "rolling_ball")
-    assert out.shape == img.shape and out.min() >= 0.0
-    assert float(out[5:15, 5:15].mean()) < 40       # smooth background removed
-    assert float(out[62:68, 62:68].mean()) > 200    # object preserved
-    # the estimated background tracks the gradient (low → high, left → right)
-    bg = _estimate_rolling_ball_bg(grad, 50.0)
-    assert bg[:, -1].mean() > bg[:, 0].mean()
+    # full-res rolling-ball (no downscale helper): preserves a bright object
+    # without leaving bright-disk artifacts around it (the reverted regression).
+    obj = np.tile(np.linspace(40, 160, 96, dtype=np.float32), (96, 1)).copy()
+    obj[44:52, 44:52] += 400.0
+    out = subtract_background(obj, 30, "rolling_ball")
+    assert float(out[4:12, 4:12].mean()) < 40       # smooth background removed
+    assert float(out[45:51, 45:51].mean()) > 200    # object preserved
 
 
 def test_subtract_background_empty_well_subtracts_field():

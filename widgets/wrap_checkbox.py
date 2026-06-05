@@ -32,9 +32,13 @@ class WrapCheckBox(QWidget):
         lay.addWidget(self._cb, 0, Qt.AlignTop)
         self._lbl = QLabel(text, self)
         self._lbl.setWordWrap(True)
-        # Let the label shrink below its text width (so the composite's minimum
-        # width stays small) while still wrapping to the width it is given.
-        self._lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        # A word-wrapped label already reports a small minimum width (its widest
+        # word), so the composite never pins a narrow sidebar — but use Preferred,
+        # NOT Ignored: Ignored discards the label's preferred width, so in a
+        # horizontal row without an explicit stretch the label collapsed to 0 px
+        # (no text) and the wrapped height ballooned. Preferred keeps a sane
+        # preferred width while still wrapping to whatever width it's given.
+        self._lbl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         lay.addWidget(self._lbl, 1)
         self._cb.toggled.connect(self.toggled)
 

@@ -778,8 +778,9 @@ class AnalyzeTab(QWidget):
             "for confirming what auto-delete will do on a shared remote "
             "before committing to it."
         )
-        dr_rl.addWidget(self._dry_run_cleanup_cb)
-        dr_rl.addStretch(1)
+        # Fill the row (stretch=1, no trailing spacer) so the wrapping label gets
+        # the full width — matching the other WrapCheckBoxes in this form.
+        dr_rl.addWidget(self._dry_run_cleanup_cb, 1)
         parent.layout().addWidget(dry_run_row)
 
         # Disable the cleanup checkbox until the user picks a remote.

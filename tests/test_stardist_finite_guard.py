@@ -72,14 +72,26 @@ def test_nan_input_is_scrubbed(fake_model):
     assert labels.max() == 1
 
 
-def test_all_nan_input_is_scrubbed(fake_model):
+def test_all_nan_input_skips_prediction(fake_model):
+    # All-NaN scrubs to all-zero → near-constant → the degenerate-field guard
+    # returns empty labels WITHOUT calling StarDist (avoids the ClipperLib abort).
     img = np.full((12, 12), np.nan, dtype=np.float32)
-    labels = pm._segment_stardist_nuclei(img)       # worst case: entirely NaN
-    assert np.all(np.isfinite(fake_model.seen))
+    labels = pm._segment_stardist_nuclei(img)
     assert labels.shape == img.shape
+    assert labels.max() == 0
+    assert fake_model.seen is None          # prediction skipped
 
 
-def test_finite_input_unchanged_path(fake_model):
+def test_constant_field_skips_prediction(fake_model):
+    # A near-constant field (e.g. an empty-well over-subtracted nuclear channel)
+    # has no nuclei and is the classic ClipperLib trigger — skip it.
+    img = np.full((20, 20), 123.0, dtype=np.float32)
+    labels = pm._segment_stardist_nuclei(img)
+    assert labels.max() == 0
+    assert fake_model.seen is None
+
+
+def test_finite_structured_input_reaches_model(fake_model):
     img = np.random.default_rng(1).random((10, 10)).astype(np.float32)
     pm._segment_stardist_nuclei(img)
-    assert np.all(np.isfinite(fake_model.seen))
+    assert fake_model.seen is not None and np.all(np.isfinite(fake_model.seen))

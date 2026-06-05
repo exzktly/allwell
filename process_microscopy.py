@@ -78,6 +78,11 @@ import imageio.v3 as iio
 
 _STARDIST_MODEL: "StarDist2D | None" = None
 
+# Identifies the FOV currently being segmented, for diagnostic logging — set by
+# process_image_group at entry so the per-FOV ``seg-input`` line (and the last
+# line before a ClipperLib abort) names the culprit image. Per-worker process.
+_SEG_FOV_LABEL: str = ""
+
 
 # ---------------------------------------------------------------------------
 # Robust file I/O helpers
@@ -1024,6 +1029,48 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
     nir_norm = normalize(arr, 1, 99.8)
     if not np.all(np.isfinite(nir_norm)):
         nir_norm = np.nan_to_num(nir_norm, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # ── ClipperLib diagnostics ───────────────────────────────────────────────
+    # The abort ("coordinate outside allowed range") happens *inside*
+    # predict_instances, in StarDist's polygon NMS, when the regressed vertices
+    # land at out-of-range integer coordinates — the classic cause being a
+    # pathological / near-constant input (e.g. an empty-well over-subtracted
+    # nuclear field). It's an uncatchable C++ abort, so we can't try/except it;
+    # instead log the input characteristics for *every* FOV. The last
+    # ``seg-input`` line before the process dies names the culprit and its stats.
+    fov = _SEG_FOV_LABEL or "?"
+    lo, hi = float(nir_norm.min()), float(nir_norm.max())
+    log.info("  seg-input %s: shape=%s min=%.4g max=%.4g mean=%.4g dyn_range=%.4g "
+             "finite=%.0f%% nonzero=%.0f%%",
+             fov, tuple(nir_norm.shape), lo, hi, float(nir_norm.mean()), hi - lo,
+             float(np.isfinite(nir_norm).mean()) * 100.0,
+             float(np.count_nonzero(nir_norm)) / nir_norm.size * 100.0)
+
+    # A near-constant field has no nuclei and is the classic ClipperLib trigger —
+    # skip prediction (0 nuclei) rather than risk the uncatchable abort.
+    if hi - lo < 1e-6:
+        log.warning("  seg-input %s: near-constant field (dyn_range≈0) — skipping "
+                    "StarDist (0 nuclei) to avoid a ClipperLib abort", fov)
+        return np.zeros(nir_norm.shape, dtype=np.int32)
+
+    # Opt-in deep trace (ALLWELL_SEG_DEBUG=1): run the raw network once to log the
+    # predicted probability / radial-distance magnitudes. Huge or non-finite
+    # distances are the *direct* source of the out-of-range polygon coordinates;
+    # this pins the failure to prediction vs input. Fully guarded — never alters
+    # the production path, and falls back silently if the split API differs.
+    if os.environ.get("ALLWELL_SEG_DEBUG"):
+        try:
+            pred = _STARDIST_MODEL.predict(nir_norm)
+            prob, dist = pred[0], pred[1]
+            log.info("  seg-debug %s: prob[min=%.3g max=%.3g] dist[min=%.3g "
+                     "max=%.3g] dist_nonfinite=%d prob_shape=%s dist_shape=%s",
+                     fov, float(np.nanmin(prob)), float(np.nanmax(prob)),
+                     float(np.nanmin(dist)), float(np.nanmax(dist)),
+                     int((~np.isfinite(dist)).sum()),
+                     tuple(np.shape(prob)), tuple(np.shape(dist)))
+        except Exception as exc:                                # noqa: BLE001
+            log.warning("  seg-debug %s: predict() trace failed: %s", fov, exc)
+
     labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
     return labels.astype(np.int32)
 
@@ -1368,6 +1415,8 @@ def process_image_group(
     """
     log.info("Processing %s  (%d fluor channel(s): %s)",
              nuclear_path.name, len(fluor_paths), ", ".join(fluor_tokens))
+    global _SEG_FOV_LABEL
+    _SEG_FOV_LABEL = nuclear_path.name
 
     _t = time.perf_counter()
     nir_raw = load_2d_gray(nuclear_path)

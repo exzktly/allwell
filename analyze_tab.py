@@ -39,6 +39,7 @@ from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
 from widgets.checkable_dropdown import CheckableDropdown
+from widgets.wrap_checkbox import WrapCheckBox
 import shape_features_core as _sfc
 
 
@@ -606,7 +607,7 @@ class AnalyzeTab(QWidget):
         self._background_cb.currentIndexChanged.connect(_sync_bg)
         _sync_bg()
 
-        self._qc_remove_debris_cb = QCheckBox(
+        self._qc_remove_debris_cb = WrapCheckBox(
             "Remove debris (drop regions outside the size / solidity bounds)", sec)
         sec.layout().addWidget(self._qc_remove_debris_cb)
 
@@ -635,7 +636,7 @@ class AnalyzeTab(QWidget):
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Output Options")
 
-        self._compress_input_cb = QCheckBox(
+        self._compress_input_cb = WrapCheckBox(
             "Folder mode only: Compress input well folders to .zip", sec)
         self._compress_input_cb.setChecked(True)
         sec.layout().addWidget(self._compress_input_cb)
@@ -647,7 +648,7 @@ class AnalyzeTab(QWidget):
         # peaks at ~2x. When on, ``--move-source-tifs`` is passed and
         # peak usage stays close to the input footprint, at the cost
         # of losing a clean-retry path on a mid-zipper crash.
-        self._move_source_tifs_cb = QCheckBox(
+        self._move_source_tifs_cb = WrapCheckBox(
             "Loose-TIF mode only: Move source TIFs into well folders "
             "(saves ~2× peak disk; sources gone if zipper crashes mid-run)",
             sec,
@@ -655,7 +656,7 @@ class AnalyzeTab(QWidget):
         self._move_source_tifs_cb.setChecked(False)
         sec.layout().addWidget(self._move_source_tifs_cb)
 
-        self._compress_output_cb = QCheckBox(
+        self._compress_output_cb = WrapCheckBox(
             "Folder mode only: Compress output well folders to .zip", sec)
         self._compress_output_cb.setChecked(True)
         sec.layout().addWidget(self._compress_output_cb)
@@ -675,8 +676,8 @@ class AnalyzeTab(QWidget):
             bs_row,
         )
         bs_hint.setObjectName("Muted")
-        bs_row.layout().addWidget(bs_hint)
-        bs_row.layout().addStretch(1)
+        bs_hint.setWordWrap(True)
+        bs_row.layout().addWidget(bs_hint, 1)
 
         r = self._row(sec, "CSV prefix")
         self._csv_prefix_edit = self._entry(r, "measurements", width=160)
@@ -763,7 +764,7 @@ class AnalyzeTab(QWidget):
         dr_rl = QHBoxLayout(dry_run_row)
         dr_rl.setContentsMargins(12, 0, 12, 0)
         dr_rl.setSpacing(8)
-        self._dry_run_cleanup_cb = QCheckBox(
+        self._dry_run_cleanup_cb = WrapCheckBox(
             "Dry-run cleanup (show what would be deleted, don't delete)",
             dry_run_row,
         )

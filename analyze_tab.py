@@ -1623,6 +1623,7 @@ class AnalyzeTab(QWidget):
             self._progress.setRange(0, total)
             self._progress.setValue(0)
             self._prog_lbl.setText(f"Pipeline: 0 / {total} wells")
+            self._dashboard.set_total(total)
             self._dashboard.set_headline(f"Processing 0 / {total} wells")
         elif kind == "well_done":
             done, total = payload  # type: ignore[misc]
@@ -1642,13 +1643,10 @@ class AnalyzeTab(QWidget):
             if total > 0 and self._well_done >= total:
                 self._status_lbl.setText("Finalizing…")
         elif kind == "stage":
-            self._dashboard.set_stage(str(payload))
-        elif kind == "well_active":
-            self._dashboard.well_active(str(payload))
-        elif kind == "well_done_id":
-            self._dashboard.well_done(str(payload))
-        elif kind == "well_error":
-            self._dashboard.well_error(str(payload))
+            self._dashboard.set_active_stage(str(payload))
+        elif kind == "well_stage":
+            well, stage = payload  # type: ignore[misc]
+            self._dashboard.set_well_stage(str(well), str(stage))
 
     def _poll_log(self) -> None:
         try:
@@ -1669,7 +1667,8 @@ class AnalyzeTab(QWidget):
                     self._progress.setRange(0, n)
                     self._progress.setValue(0)
                     self._prog_lbl.setText(f"Grouping: 0 / {n} wells")
-                    self._dashboard.set_stage("group")
+                    self._dashboard.set_total(n)
+                    self._dashboard.set_active_stage("group")
                     self._dashboard.set_headline(f"Grouping 0 / {n} wells")
                 elif kind == "zipper_well":
                     n_total = self._progress.maximum() or 96
@@ -1678,6 +1677,9 @@ class AnalyzeTab(QWidget):
                     pct = int(self._zipper_done / n_total * 100)
                     self._prog_lbl.setText(f"Grouping: {self._zipper_done} / {n_total} wells  ({pct}%)")
                     self._update_eta(self._zipper_done, n_total)
+                    self._dashboard.set_active_stage("group")
+                    if payload:
+                        self._dashboard.set_well_stage(str(payload), "group")
                     self._dashboard.set_headline(
                         f"Grouping {self._zipper_done} / {n_total} wells  ({pct}%)")
                     self._dashboard.set_eta(self._eta_lbl.text())
@@ -1714,7 +1716,6 @@ class AnalyzeTab(QWidget):
                     self._progress.setValue(self._progress.maximum() or 100)
                     n = self._well_done or getattr(self, "_zipper_done", 0)
                     self._prog_lbl.setText(f"Complete — {n} well(s) processed")
-                    self._dashboard.set_stage("done")
                     self._dashboard.set_headline(f"Complete — {n} well(s) processed")
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")

@@ -55,6 +55,11 @@ _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well
 _RE_WELL_START = re.compile(r"Well (\S+) — starting")
 _RE_WELL_DONE_ID = re.compile(r"Well (\S+) — done\.")
 _RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
+# Remote per-well lifecycle: input zip uploaded, output zip materialised locally.
+_RE_REMOTE_UP_WELL = re.compile(r"\[remote\] ↑.*?([A-Ha-h]\d{1,2})\.zip")
+_RE_REMOTE_MAT = re.compile(r"\[remote\] ✓ (\S+?): materialised")
+# Auto-threshold pass completes each well: "completed well 3/12 (A01_out.zip)".
+_RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h]\d{1,2})")
 
 
 class ProgressTracker:
@@ -95,22 +100,31 @@ class ProgressTracker:
         m = _RE_TF_WORKERS.search(line)
         if m:
             events.append(("workers", int(m.group(1))))
-        # Remote transfer phase (the runner logs "[remote] ↑" while uploading
-        # inputs, "[remote] ↓" while fetching outputs) drives the stepper.
+        # Remote transfer phases (the runner logs "[remote] ↑" while uploading
+        # inputs, "[remote] ↓" while fetching outputs) drive the active stage.
+        # Per-well: the input zip's upload and the output zip's local landing.
         if "[remote] ↑" in line:
             events.append(("stage", "upload"))
+            mu = _RE_REMOTE_UP_WELL.search(line)
+            if mu:
+                events.append(("well_stage", (mu.group(1), "upload")))
         elif "[remote] ↓" in line:
             events.append(("stage", "download"))
-        # Per-well lifecycle → live plate map. These fire regardless of whether
-        # the well_total banner has been seen yet.
+        mm = _RE_REMOTE_MAT.search(line)
+        if mm:
+            events.append(("well_stage", (mm.group(1), "download")))
+        # Per-well compute lifecycle (fires regardless of the well_total banner).
         ms = _RE_WELL_START.search(line)
         if ms:
             events.append(("stage", "process"))
-            events.append(("well_active", ms.group(1)))
+            events.append(("well_stage", (ms.group(1), "active")))
         mf = _RE_WELL_FAIL.search(line)
         if mf:
-            events.append(("well_error", mf.group(1)))
-        # Auto-threshold pass runs after the last well → the "Finalize" stage.
+            events.append(("well_stage", (mf.group(1), "error")))
+        mt = _RE_THRESH_WELL.search(line)
+        if mt:
+            events.append(("well_stage", (mt.group(1), "threshold")))
+        # Auto-threshold pass runs after the last well → the "Threshold" stage.
         if not self._finalize_emitted and line.lstrip().startswith("Auto-threshold:"):
             self._finalize_emitted = True
             events.append(("stage", "finalize"))
@@ -141,7 +155,7 @@ class ProgressTracker:
                 events.append(("well_done", (self.well_done, self.well_total)))
                 md = _RE_WELL_DONE_ID.search(line)
                 if md:
-                    events.append(("well_done_id", md.group(1)))
+                    events.append(("well_stage", (md.group(1), "process")))
         return events
 
 

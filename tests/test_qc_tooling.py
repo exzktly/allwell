@@ -225,20 +225,47 @@ def test_subtract_background_top_hat_is_backcompat():
 
 
 def test_subtract_background_rolling_ball_smooths_gradient():
-    # a smooth illumination gradient + flat signal: rolling-ball should remove
-    # the gradient, leaving a near-flat (low-variance) background-subtracted image
+    # rolling_ball is now an isotropic disk white-top-hat at full resolution.
+    # A smooth illumination gradient + flat signal: it should remove the gradient,
+    # leaving a near-flat (low-variance) background-subtracted image.
     y = np.linspace(0, 300, 64, dtype=np.float32)
     img = np.tile(y, (64, 1))                     # pure left→right gradient
     rb = subtract_background(img, 20, "rolling_ball")
     assert rb.min() >= 0.0 and rb.shape == img.shape
     assert float(rb.std()) < float(img.std())     # gradient flattened
-    # full-res rolling-ball (no downscale helper): preserves a bright object
-    # without leaving bright-disk artifacts around it (the reverted regression).
+    # Preserves a small bright object on a smooth background.
     obj = np.tile(np.linspace(40, 160, 96, dtype=np.float32), (96, 1)).copy()
     obj[44:52, 44:52] += 400.0
     out = subtract_background(obj, 30, "rolling_ball")
     assert float(out[4:12, 4:12].mean()) < 40       # smooth background removed
     assert float(out[45:51, 45:51].mean()) > 200    # object preserved
+
+
+def test_rolling_ball_isotropic_no_bright_disk_on_confluent_patch():
+    """The bug we fixed: a raised ball-scale patch (a confluent region) must be
+    flattened, not left as a bright disk. The downscale trick shifted the
+    rolling-ball climb threshold and left such patches ~10x too bright; the
+    full-res disk opening flattens a patch wider than ~2·radius like the ball."""
+    N = 256
+    yy, xx = np.ogrid[:N, :N]
+    r = np.hypot(yy - N / 2, xx - N / 2)
+    # raised soft-edged disk Ø≈140 px on a flat background; radius 40 → 2·r=80 < 140
+    img = (np.full((N, N), 100.0, np.float32)
+           + 300.0 * 0.5 * (1 - np.tanh((r - 70) / 4))).astype(np.float32)
+    out = subtract_background(img, 40, "rolling_ball")
+    centre = out[N // 2 - 8:N // 2 + 8, N // 2 - 8:N // 2 + 8].mean()
+    assert float(centre) < 30.0          # patch flattened, NOT a bright disk
+
+    # Isotropy: the response around a point object is rotationally even, unlike
+    # the square top_hat. Compare a horizontal vs diagonal arm of a star pattern.
+    star = np.zeros((N, N), np.float32)
+    star[N // 2, :] = 500.0
+    for i in range(N):
+        star[i, i] = 500.0
+    rb = subtract_background(star, 12, "rolling_ball")
+    horiz = float(rb[N // 2, 20:40].mean())
+    diag = float(np.mean([rb[i, i] for i in range(20, 40)]))
+    assert abs(horiz - diag) < 0.30 * max(horiz, diag) + 5  # near-isotropic
 
 
 def test_subtract_background_empty_well_subtracts_field():

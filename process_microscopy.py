@@ -1027,6 +1027,30 @@ def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
     return np.clip(out, 0.0, None)
 
 
+def _isotropic_disk_tophat(img: np.ndarray, radius: int) -> np.ndarray:
+    """Grayscale white top-hat with a flat *disk* footprint — the isotropic,
+    full-resolution stand-in for the classic rolling ball.
+
+    The rolling ball flattens regions wider than ~2·radius and preserves narrower
+    ones; that threshold is set by the ball's *fixed spatial radius*, not its
+    curved cap, so opening by a flat disk of the same radius reproduces it. Unlike
+    ``top_hat``'s square footprint the disk is isotropic (no terraced square
+    halos), and unlike the reverted downscale trick it runs at full resolution —
+    there is no coarse grid to shift the flatten/preserve threshold and stamp
+    bright ~150 px disks into confluent regions. The disk is built with skimage's
+    ``decomposition="sequence"`` (a stack of small line erosions) so the opening
+    is ~O(N) rather than O(N·radius²), which keeps it fast at full resolution.
+    """
+    from skimage.morphology import disk, white_tophat
+    r = max(1, int(round(float(radius))))
+    try:
+        footprint = disk(r, decomposition="sequence")
+    except TypeError:                       # pragma: no cover - older skimage
+        footprint = disk(r)
+    # white_tophat = img - opening(img); opening is anti-extensive so it's ≥ 0.
+    return np.clip(white_tophat(img, footprint).astype(np.float32), 0.0, None)
+
+
 def subtract_background(image, radius: int, method: str = "top_hat",
                         bg_field: "np.ndarray | None" = None) -> np.ndarray:
     """White background subtraction, dispatched by *method*.
@@ -1034,13 +1058,17 @@ def subtract_background(image, radius: int, method: str = "top_hat",
     - ``top_hat`` — ``img - grey_opening(square)``: fast (separable 1-D passes)
       but the flat square footprint leaves anisotropic, *terraced* residuals,
       i.e. halos / hotspots next to bright objects. Current default.
-    - ``rolling_ball`` — ``img - skimage.restoration.rolling_ball(radius)``: a
-      smooth, isotropic baseline for uneven / structured background, at FULL
-      resolution. It is slow (~80 s for a full frame at radius 100) — a previous
-      downscale optimisation was reverted because mean/anti-aliased downsampling
-      smears bright objects into the low-res background and leaves bright ~150 px
-      disk artifacts after subtraction (which corrupt quantification). For speed
-      use ``top_hat`` (fast, separable) or ``empty_well`` (measured field).
+    - ``rolling_ball`` — isotropic disk white-top-hat (``img - opening(disk)``),
+      computed at FULL resolution via :func:`_isotropic_disk_tophat`. This is the
+      smooth, isotropic baseline for uneven / structured background. The classic
+      rolling ball's behaviour (flatten regions wider than ~2·radius, preserve
+      narrower ones) is governed by the ball's fixed spatial radius, not its
+      curved cap, so opening by a flat disk of the same radius reproduces it —
+      while being isotropic (no square terracing like ``top_hat``) and fast.
+      Replaces ``skimage.restoration.rolling_ball``: the exact ball is ~80 s a
+      frame, and the earlier downscale optimisation was reverted because a coarse
+      grid shifts the flatten/preserve threshold and stamps bright ~150 px disks
+      into confluent regions (which corrupt quantification).
     - ``empty_well`` — ``img - bg_field``: subtract a *measured* per-channel
       background (smoothed empty-well median, :func:`estimate_background_field`);
       no-op when no field is available for the channel.
@@ -1052,8 +1080,7 @@ def subtract_background(image, radius: int, method: str = "top_hat",
     if method == "none":
         return img
     if method == "rolling_ball":
-        from skimage.restoration import rolling_ball
-        return np.clip(img - rolling_ball(img, radius=float(radius)), 0.0, None)
+        return _isotropic_disk_tophat(img, int(radius))
     if method == "empty_well":
         if bg_field is not None:
             bg = np.asarray(bg_field, dtype=np.float32)

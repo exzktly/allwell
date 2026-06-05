@@ -1145,6 +1145,73 @@ def test_fetcher_observes_well_done_marker(host, tmp_path):
     assert run.expected_wells == {"A01", "B02"}
 
 
+def _make_run(tmp_path):
+    from services.remote_runner import _RemoteRun
+    return _RemoteRun(
+        run_id="x", cache_key="k", remote_input_dir="/r/in",
+        remote_output_dir="/r/out", remote_pidfile="/r/pid",
+        local_output_dir=tmp_path, local_input_mode=LocalInputMode.ZIP,
+    )
+
+
+def test_transfer_heartbeat_reports_progress(host, tmp_path):
+    """A silent per-well fetch must not look hung: the heartbeat emits periodic
+    'still transferring… (Ns, M MB so far)' lines with the growing byte count."""
+    import time as _time
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=logs.append)
+    dest = tmp_path / "allwell-x-A01_out.zip"
+    # simulate rsync streaming into a hidden temp file in the dest dir
+    (tmp_path / f".{dest.name}.abc123").write_bytes(b"\0" * (3 * 1024 * 1024))
+    with fetcher._transfer_heartbeat("A01", dest, interval=0.05):
+        _time.sleep(0.16)                       # allow a couple of beats
+    joined = "".join(logs)
+    assert "still transferring" in joined
+    assert "A01" in joined and "MB so far" in joined
+    # no heartbeat lines leak after the context exits
+    n = joined.count("still transferring")
+    _time.sleep(0.12)
+    assert "".join(logs).count("still transferring") == n
+
+
+def test_flush_and_join_does_not_drain_when_cancelled(host, tmp_path):
+    """Stop pressed → cancel() → flush_and_join must NOT drain the queue: no
+    'draining fetcher' wait, no download summary — just reap the worker and
+    report the cancellation, so Stop is immediate."""
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=logs.append)
+        # two wells queued as if mid-run, then the user hits Stop
+        fetcher.observe("Zip mode: 2 well-zip files detected\n")
+        fetcher.observe("A01 — done.\n")
+        fetcher.observe("B02 — done.\n")
+        fetcher.cancel()
+        fetcher.flush_and_join(timeout=5)
+    joined = "".join(logs)
+    assert "cancelled" in joined
+    assert "draining fetcher" not in joined
+    assert "wells downloaded" not in joined
+    assert not fetcher._worker.is_alive()
+
+
+def test_flush_and_join_drains_when_not_cancelled(host, tmp_path):
+    """Normal completion still drains and emits the download summary."""
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=logs.append)
+        fetcher.flush_and_join(timeout=5)
+    joined = "".join(logs)
+    assert "cancelled" not in joined
+    assert "fetcher:" in joined          # end-of-stream summary emitted
+
+
 def test_fetcher_observes_well_done_with_logging_prefix(host, tmp_path):
     """v5.2.17 regression: process_microscopy.py emits
     ``log.info("Well %s — done.", well_label)`` with a basicConfig
@@ -1462,7 +1529,7 @@ def test_verify_reports_empty_csv(host, tmp_path):
 
 
 def test_required_files_list_is_what_we_promised():
-    """The contract from the design discussion: only these four files.
+    """The contract from the design discussion: only these files.
 
     v5.2.1 swapped ``_Docs/requirements.txt`` for
     ``_Docs/requirements-remote.txt`` so the remote install no longer
@@ -1473,6 +1540,7 @@ def test_required_files_list_is_what_we_promised():
         "process_microscopy.py",
         "auto_threshold_core.py",
         "well_token.py",
+        "shape_features_core.py",
         "_Docs/requirements-remote.txt",
     )
 

@@ -40,6 +40,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import contextlib
 from functools import lru_cache
 import tempfile
 import threading
@@ -83,7 +84,7 @@ _CSV_ONLY_GLOBS: tuple[str, ...] = ("*.csv", "pipeline_info.json")
 
 
 # Files this framework needs on the remote in order to run the pipeline.
-# Kept minimal on purpose: process_microscopy.py plus its two local-module
+# Kept minimal on purpose: process_microscopy.py plus its local-module
 # imports, plus the requirements list (so the bootstrap script knows what
 # pip-installs to do). Paths are relative to the repo root.
 #
@@ -95,6 +96,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "process_microscopy.py",
     "auto_threshold_core.py",
     "well_token.py",
+    # §C shape features: process_microscopy.compute_shape_features imports
+    # this on every run, so the remote needs it too (else ModuleNotFoundError).
+    "shape_features_core.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.
@@ -1597,7 +1601,7 @@ def _run_rsync_streaming(
     # sub-second resolution. Emit at most every 2 seconds, plus the
     # final 100% line.
     last_progress_log = 0.0
-    PROGRESS_LOG_MIN_INTERVAL = 2.0
+    PROGRESS_LOG_MIN_INTERVAL = 1.0
 
     try:
         assert proc.stdout is not None
@@ -2464,7 +2468,19 @@ class Fetcher:
 
         Called by the Popen wrapper's ``wait()`` so the run isn't
         reported complete until every well's output has landed.
+
+        If the fetcher was **cancelled** (Stop pressed → :meth:`cancel`), do
+        *not* drain: the user asked to abort, not to wait for the wells still
+        queued for download. Just reap the worker — it returns promptly on the
+        stop event — and exit, so Stop is immediate instead of blocking on the
+        remaining queue.
         """
+        if self._stop.is_set():
+            self._pending.put(None)          # unblock the worker's queue.get()
+            self._worker.join(timeout=timeout)
+            self._log("[remote] ↓ fetcher cancelled — "
+                      "remaining downloads skipped\n")
+            return
         pending_count = self._pending.qsize()
         if pending_count:
             self._log(
@@ -2508,6 +2524,50 @@ class Fetcher:
                 return
             self._fetch_one(item)
 
+    @contextlib.contextmanager
+    def _transfer_heartbeat(self, label: str, dest_path: Path, interval: float = 8.0):
+        """Emit a periodic "still transferring…" line showing bytes-so-far while a
+        per-well rsync runs, so a long download is visibly *moving* rather than
+        looking hung. The per-well fetch rsync is silent (capture_output), so
+        without this the user has no way to tell a slow transfer from a stuck one.
+        Bytes-so-far = the growing rsync temp/partial file(s) in the dest dir."""
+        stop = threading.Event()
+        t0 = time.monotonic()
+
+        def _bytes_so_far() -> int:
+            total = 0
+            try:
+                # rsync streams into a hidden temp ``.{name}.XXXXXX`` (or the
+                # partial file) in the dest dir, renaming to dest on completion.
+                for p in dest_path.parent.glob(f".{dest_path.name}.*"):
+                    try:
+                        total += p.stat().st_size
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+            try:
+                total += dest_path.stat().st_size
+            except OSError:
+                pass
+            return total
+
+        def _beat() -> None:
+            while not stop.wait(interval):
+                mb = _bytes_so_far() / (1024 * 1024)
+                self._log(
+                    f"[remote] ↓ {label}: still transferring… "
+                    f"({_fmt_secs(time.monotonic() - t0)}, {mb:.1f} MB so far)\n"
+                )
+
+        th = threading.Thread(target=_beat, daemon=True)
+        th.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            th.join(timeout=1.0)
+
     def _fetch_one(self, well: str) -> None:
         """Pull a single well's output. The remote pipeline produces
         ``{output_dir}/{well}_out.zip`` and a sibling
@@ -2537,10 +2597,12 @@ class Fetcher:
         # even under CSV-only mode: we'll discard it after extracting the
         # files we want.
         t0 = time.monotonic()
-        if not self._rsync(
-            [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
-             "-a", zip_src, to_rsync_path(tmp_zip)]
-        ):
+        with self._transfer_heartbeat(well, tmp_zip):
+            ok = self._rsync(
+                [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
+                 "-a", "--partial", zip_src, to_rsync_path(tmp_zip)]
+            )
+        if not ok:
             self._log(
                 f"[remote] ↓ {well}: WARN could not pull {well}_out.zip from "
                 f"{self.run.remote_output_dir}; will retry at end of run.\n"

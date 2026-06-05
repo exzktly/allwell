@@ -77,6 +77,7 @@ allwell/
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── auto_threshold_core.py       ← Otsu helpers shared by pipeline + GUI (stdlib + numpy only)
 ├── well_token.py                ← canonical 96-well token parser (stdlib only)
+├── shape_features_core.py       ← Qt-free per-cell shape-feature catalog shared by pipeline + GUI
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
@@ -89,11 +90,26 @@ allwell/
 └── design/                      ← HTML mockups + screenshots — visual reference only
 ```
 
-The two top-level helpers `auto_threshold_core.py` and `well_token.py` are
-*deliberately at repo root* (not under `well_viewer/`): the pipeline contract
-forbids `well_viewer` / `widgets` / Qt imports, so anything both the pipeline
-and the GUI need to agree on has to live in a Qt-free module the pipeline can
-import. See §6.2 for the contract.
+The repo-root helpers `auto_threshold_core.py`, `well_token.py`, and
+`shape_features_core.py` are *deliberately at repo root* (not under
+`well_viewer/`): the pipeline contract forbids `well_viewer` / `widgets` / Qt
+imports, so anything both the pipeline and the GUI need to agree on has to live
+in a Qt-free module the pipeline can import. `shape_features_core.py` (added with
+the shape-features work) is the single source of truth for the per-cell
+`shape_*` morphology columns — the pipeline emits them, the GUI detects/labels
+them. See §6.2 for the contract.
+
+**Feature-stack dependencies (segmentation / QC / shape / tracking).** This work
+adds a pinned ML stack to `_Docs/requirements-remote.txt` — Torch 2.0.1
+(cellpose + trackastra) and btrack — deliberately held to the **Torch 2.0.1
+line** because TensorFlow 2.13 caps `typing-extensions<4.6` while newer Torch
+needs `>=4.8`; the whole stack (incl. lightning/kornia) is pinned to coexist.
+laptrack was dropped (no version satisfies `numpy≤1.24.3` *and* `pandas≥2.0`);
+the BaSiC flat-field is a pure-numpy reimplementation (no jax). `read_pipeline_info`
+gains `.get`-defaulted keys (`shape_features` / `qc_options` / `phase_token` /
+`schema_version`) so pre-feature sidecars load unchanged. Full rationale +
+empirical resolution: `_Docs/Markdowns/TODO_segmentation_qc_shape_tracking.md`
+Part 1.
 
 The Review side (`well_viewer/`) is organised per-feature: one package per
 visible tab / functional area, with cross-cutting infrastructure split out
@@ -1496,3 +1512,12 @@ the right next move is to open `well_viewer/runtime_app.py` and scroll
 through `_build_ui` (around line 934) — that's where every widget tree
 hanging off `WellViewerApp` gets stitched together, and every name you'll
 need to grep for is in plain sight.
+
+---
+
+## Version history
+
+The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
+Newest first:
+
+- **5.5.0 (PR1).** `shape_features_core` added as the shared feature catalogue; the PyInstaller spec `collect_all`s torch/cellpose/btrack/trackastra; viewer read paths gained backwards-compat defaults (see the bw-compat test harness).

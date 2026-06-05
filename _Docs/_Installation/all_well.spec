@@ -41,6 +41,7 @@ sibling_scripts = [
     (str(_parent / "all_well.py"),              "."),
     (str(_parent / "analyze_tab.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
+    (str(_parent / "shape_features_core.py"),   "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "theme.py"),                 "."),
 ]
@@ -79,6 +80,11 @@ datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 # ---------------------------------------------------------------------------
 
 hiddenimports = [
+    # First-party repo-root pipeline module imported lazily inside
+    # process_microscopy.compute_shape_features (function-level imports are
+    # missed by PyInstaller's static analysis, unlike the top-level
+    # auto_threshold_core / well_token).
+    "shape_features_core",
     # numpy internals
     "numpy.core._multiarray_umath",
     "numpy.core._multiarray_tests",
@@ -428,11 +434,30 @@ _icd_datas, _icd_binaries, _icd_hidden = collect_all("imagecodecs")
 datas         += _icd_datas
 hiddenimports += _icd_hidden
 
+# Label-free segmentation (cellpose) + cell tracking (btrack / trackastra).
+# torch / torchvision carry large compiled extensions; cellpose, btrack,
+# trackastra, kornia and lightning each have submodules and (trackastra) bundled
+# data (pretrained-model configs). collect_all grabs the Python shims, the
+# .so/.dylib binaries, and data files so the frozen app can segment and track
+# without a Python toolchain present. The macOS/Windows build wheels are
+# CPU/MPS (no CUDA), so the torch payload stays manageable.
+# NOTE: not yet exercised by a frozen build — verify on the dev env via
+# build_all_well.sh / build_executable.ps1 (prune unused torch backends if the
+# bundle grows too large). cellpose/trackastra download model weights at
+# runtime; those are not bundled.
+_ml_binaries = []
+for _pkg in ("torch", "torchvision", "cellpose", "btrack", "trackastra",
+             "kornia", "lightning", "pytorch_lightning", "torchmetrics"):
+    _ml_d, _ml_b, _ml_h = collect_all(_pkg)
+    datas         += _ml_d
+    _ml_binaries  += _ml_b
+    hiddenimports += _ml_h
+
 # Collect data files
 datas += collect_data_files("numba")
 datas += collect_data_files("skimage")
 
-_extra_binaries = _csn_binaries + _req_binaries + _icd_binaries
+_extra_binaries = _csn_binaries + _req_binaries + _icd_binaries + _ml_binaries
 
 a = Analysis(
     [str(_parent / "all_well_launcher.py")],
@@ -520,7 +545,7 @@ app = BUNDLE(   # noqa: F821
     name="AllWell.app",
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
-    version="5.4.8",
+    version="5.5.0",
     info_plist={
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription":

@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import contextlib
 import json
 import logging
 import os
@@ -77,6 +78,18 @@ import imageio.v3 as iio
 # ---------------------------------------------------------------------------
 
 _STARDIST_MODEL: "StarDist2D | None" = None
+
+# Identifies the FOV currently being segmented, for diagnostic logging — set by
+# process_image_group at entry so the per-FOV ``seg-input`` line (and the last
+# line before a ClipperLib abort) names the culprit image. Per-worker process.
+_SEG_FOV_LABEL: str = ""
+
+# StarDist sees percentile-normalized input anchored to [0, 1]; clamp to this so
+# no out-of-distribution value (e.g. a dim region amplified by empty-well
+# flat-field division) can drive the regressed polygon vertices out of
+# ClipperLib's integer range — the uncatchable "coordinate outside allowed
+# range" abort.
+_STARDIST_INPUT_CLIP = (0.0, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -1006,7 +1019,70 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
             "StarDist model is not initialised. "
             "Ensure _worker_init ran before process_image_group."
         )
-    nir_norm = normalize(nir_corr, 1, 99.8)
+    # StarDist's polygon non-maximum-suppression uses ClipperLib, which casts
+    # polygon coordinates to integers and aborts the whole *process* with an
+    # uncatchable C++ exception —
+    #   terminate called after throwing an instance of
+    #   'ClipperLib::clipperException'  ("Coordinate outside allowed range")
+    # — if the network is fed non-finite OR out-of-distribution input. Two ways
+    # in: (1) a single NaN/Inf pixel — ``normalize`` uses ``np.percentile`` (not
+    # the nan-aware variant), so one NaN turns the percentiles NaN and the whole
+    # image non-finite; (2) huge *finite* values — empty-well flat-field divides
+    # by a near-zero field and amplifies a dim region by ~100x, and the default
+    # ``normalize(clip=False)`` does NOT clip the top end, so those outliers reach
+    # the network and the regressed distances blow up. So: scrub non-finite, then
+    # normalize WITH ``clip=True`` and an explicit clamp so the input is strictly
+    # in [0, 1] — the distribution StarDist was trained on — making the abort
+    # impossible regardless of the upstream correction.
+    arr = np.asarray(nir_corr, dtype=np.float32)
+    if not np.all(np.isfinite(arr)):
+        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    nir_norm = normalize(arr, 1, 99.8, clip=True)
+    if not np.all(np.isfinite(nir_norm)):
+        nir_norm = np.nan_to_num(nir_norm, nan=0.0, posinf=0.0, neginf=0.0)
+    np.clip(nir_norm, _STARDIST_INPUT_CLIP[0], _STARDIST_INPUT_CLIP[1], out=nir_norm)
+
+    # ── ClipperLib diagnostics ───────────────────────────────────────────────
+    # The abort ("coordinate outside allowed range") happens *inside*
+    # predict_instances, in StarDist's polygon NMS, when the regressed vertices
+    # land at out-of-range integer coordinates — the classic cause being a
+    # pathological / near-constant input (e.g. an empty-well over-subtracted
+    # nuclear field). It's an uncatchable C++ abort, so we can't try/except it;
+    # instead log the input characteristics for *every* FOV. The last
+    # ``seg-input`` line before the process dies names the culprit and its stats.
+    fov = _SEG_FOV_LABEL or "?"
+    lo, hi = float(nir_norm.min()), float(nir_norm.max())
+    log.info("  seg-input %s: shape=%s min=%.4g max=%.4g mean=%.4g dyn_range=%.4g "
+             "finite=%.0f%% nonzero=%.0f%%",
+             fov, tuple(nir_norm.shape), lo, hi, float(nir_norm.mean()), hi - lo,
+             float(np.isfinite(nir_norm).mean()) * 100.0,
+             float(np.count_nonzero(nir_norm)) / nir_norm.size * 100.0)
+
+    # A near-constant field has no nuclei and is the classic ClipperLib trigger —
+    # skip prediction (0 nuclei) rather than risk the uncatchable abort.
+    if hi - lo < 1e-6:
+        log.warning("  seg-input %s: near-constant field (dyn_range≈0) — skipping "
+                    "StarDist (0 nuclei) to avoid a ClipperLib abort", fov)
+        return np.zeros(nir_norm.shape, dtype=np.int32)
+
+    # Opt-in deep trace (ALLWELL_SEG_DEBUG=1): run the raw network once to log the
+    # predicted probability / radial-distance magnitudes. Huge or non-finite
+    # distances are the *direct* source of the out-of-range polygon coordinates;
+    # this pins the failure to prediction vs input. Fully guarded — never alters
+    # the production path, and falls back silently if the split API differs.
+    if os.environ.get("ALLWELL_SEG_DEBUG"):
+        try:
+            pred = _STARDIST_MODEL.predict(nir_norm)
+            prob, dist = pred[0], pred[1]
+            log.info("  seg-debug %s: prob[min=%.3g max=%.3g] dist[min=%.3g "
+                     "max=%.3g] dist_nonfinite=%d prob_shape=%s dist_shape=%s",
+                     fov, float(np.nanmin(prob)), float(np.nanmax(prob)),
+                     float(np.nanmin(dist)), float(np.nanmax(dist)),
+                     int((~np.isfinite(dist)).sum()),
+                     tuple(np.shape(prob)), tuple(np.shape(dist)))
+        except Exception as exc:                                # noqa: BLE001
+            log.warning("  seg-debug %s: predict() trace failed: %s", fov, exc)
+
     labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
     return labels.astype(np.int32)
 
@@ -1351,6 +1427,8 @@ def process_image_group(
     """
     log.info("Processing %s  (%d fluor channel(s): %s)",
              nuclear_path.name, len(fluor_paths), ", ".join(fluor_tokens))
+    global _SEG_FOV_LABEL
+    _SEG_FOV_LABEL = nuclear_path.name
 
     _t = time.perf_counter()
     nir_raw = load_2d_gray(nuclear_path)
@@ -1823,6 +1901,206 @@ def _ensure_pkg_resources_shim() -> None:
     _sys.modules["pkg_resources"] = shim
 
 
+# Substrings in an exception message that indicate a corrupt / truncated cached
+# model file (HDF5 weights or its download archive) rather than a transient
+# network / SSL problem — so we know it is safe to purge the cache and re-fetch.
+_CORRUPT_MODEL_MARKERS = (
+    "truncated file",
+    "unable to synchronously open file",
+    "file signature not found",
+    "bad object header",
+    "not a valid hdf5",
+    "unable to open file",
+    "bad magic number",         # truncated zip archive
+    "file is not a zip file",
+)
+
+
+def _purge_stardist_cache() -> "list[str]":
+    """Remove cached StarDist pretrained-model files so the next
+    ``from_pretrained`` re-downloads them.
+
+    ``StarDist2D.from_pretrained`` caches the model under the keras cache
+    (``$KERAS_HOME`` or ``~/.keras/models/…``) as ``weights_best.h5`` +
+    ``config.json``. A run interrupted mid-download (e.g. the worker was killed,
+    or an earlier failure aborted the pool) can leave a **truncated**
+    ``weights_best.h5``; the next run reuses it and h5py dies with
+    ``OSError: Unable to synchronously open file (truncated file: eof = …)``.
+
+    Deletes any model folder containing a StarDist weights file (and stray
+    ``*.h5`` / partial download archives) under each keras cache root. Returns
+    the paths removed, for logging.
+    """
+    roots: "list[Path]" = []
+    kh = os.environ.get("KERAS_HOME")
+    if kh:
+        roots.append(Path(kh))
+    roots.append(Path(os.path.expanduser("~")) / ".keras")
+    removed: "list[str]" = []
+    seen: "set[str]" = set()
+    for models in (r / "models" for r in roots):
+        if not models.is_dir():
+            continue
+        targets: "set[Path]" = set()
+        for p in models.rglob("*"):
+            if not p.is_file():
+                continue
+            low = p.name.lower()
+            if low == "weights_best.h5" or low.endswith("weights_best.h5"):
+                targets.add(p.parent)                       # whole model folder
+            elif low.endswith((".h5", ".zip", ".part", ".download", ".tmp")):
+                targets.add(p)                              # stray / partial file
+        for t in targets:
+            key = str(t)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if t.is_dir():
+                    shutil.rmtree(t, ignore_errors=True)
+                else:
+                    t.unlink()
+                removed.append(key)
+            except OSError:
+                pass
+    return removed
+
+
+# Cross-process download serialisation (see _stardist_download_lock).
+_STARDIST_LOCK_TIMEOUT = 120.0   # s; max wait on a *live* download before going unlocked
+_STARDIST_LOCK_STALE   = 180.0   # s; reclaim a no-live-PID lock older than this
+_STARDIST_LOCK_POLL    = 0.25    # s between acquisition attempts
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort liveness check for a local PID (the download workers all share
+    the host). Unknown/unsupported (e.g. Windows ``os.kill(pid, 0)``) → assume
+    alive, so we never reclaim a lock we can't prove is dead."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False                       # definitively gone
+    except PermissionError:
+        return True                        # exists, owned by another user
+    except OSError:
+        return True                        # can't tell → assume alive (safe)
+    return True
+
+
+def _stardist_lock_is_dead(lockdir: Path) -> bool:
+    """A leaked lock is reclaimable when its recorded holder PID(s) are no longer
+    running (instant — the crashed/killed-worker case), or — no PID recorded, a
+    reused PID, or a hung holder — it is older than the stale window."""
+    pids: "list[int]" = []
+    try:
+        for p in lockdir.iterdir():
+            if p.name.startswith("pid.") and p.name[4:].isdigit():
+                pids.append(int(p.name[4:]))
+    except OSError:
+        return False
+    if pids and not any(_pid_alive(pid) for pid in pids):
+        return True                        # all recorded holders dead → reclaim now
+    try:
+        return (time.time() - lockdir.stat().st_mtime) > _STARDIST_LOCK_STALE
+    except OSError:
+        return False
+
+
+def _stardist_cache_models_dir() -> Path:
+    """Primary keras model-cache dir — ``$KERAS_HOME`` else ``~/.keras``, then
+    ``/models`` — where ``from_pretrained`` downloads the weights. Created if
+    missing. Mirrors the root logic in :func:`_purge_stardist_cache`."""
+    root = os.environ.get("KERAS_HOME") or os.path.join(os.path.expanduser("~"), ".keras")
+    models = Path(root) / "models"
+    models.mkdir(parents=True, exist_ok=True)
+    return models
+
+
+@contextlib.contextmanager
+def _stardist_download_lock(timeout: "float | None" = None):
+    """Cross-process advisory lock serialising the StarDist model download/purge.
+
+    All spawn-pool workers run ``_worker_init`` → ``from_pretrained`` at once; on
+    a cold cache they download the same file concurrently and truncate each
+    other (the recurring "cache corrupt" failure), and an unguarded purge can
+    delete another worker's in-flight download. Atomic ``os.mkdir`` of a lock
+    directory is the primitive: exactly one process wins and downloads; the rest
+    block, then load a *warm* cache. Degrades safely — on timeout, an unusable
+    cache dir, or any lock error, it proceeds WITHOUT the lock rather than fail
+    the run, and reclaims a stale lock left by a dead holder.
+    """
+    if timeout is None:                 # resolve at call time so tests can patch it
+        timeout = _STARDIST_LOCK_TIMEOUT
+    try:
+        lockdir = _stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    except OSError:
+        yield                       # cache dir unusable — run unsynchronised
+        return
+    deadline = time.monotonic() + timeout
+    held = False
+    while True:
+        try:
+            os.mkdir(lockdir)
+            held = True
+            # Record our PID so other workers can reclaim instantly if we die.
+            try:
+                (lockdir / f"pid.{os.getpid()}").touch()
+            except OSError:
+                pass
+            break
+        except FileExistsError:
+            # Reclaim immediately if the holder is dead (PID gone) — the leaked-
+            # lock-after-crash case — so a rerun never stalls for minutes; a
+            # genuinely live download is waited on up to the (short) timeout.
+            if _stardist_lock_is_dead(lockdir):
+                shutil.rmtree(lockdir, ignore_errors=True)
+                if lockdir.exists():            # couldn't remove → don't spin
+                    log.warning("StarDist download lock could not be reclaimed — "
+                                "proceeding without it.")
+                    break
+                continue
+            if time.monotonic() >= deadline:
+                log.warning("StarDist download lock held by a live process "
+                            ">%.0fs — proceeding without it.", timeout)
+                break
+            time.sleep(_STARDIST_LOCK_POLL)
+        except OSError:
+            break                   # can't create the lock (perms/fs) — unsynchronised
+    try:
+        yield
+    finally:
+        if held:
+            shutil.rmtree(lockdir, ignore_errors=True)
+
+
+def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
+    """Load a StarDist pretrained model, recovering once from a corrupt cache.
+
+    If the first load fails because the cached weights / archive is truncated
+    (see :data:`_CORRUPT_MODEL_MARKERS`) — the classic symptom of a previous
+    run that died mid-download — purge the cache and re-download exactly once.
+    Any other error (and a second failure) propagates unchanged.
+
+    The whole body runs under :func:`_stardist_download_lock` so concurrent
+    workers serialise: only one downloads (the rest hit a warm cache), and the
+    purge+retry can't delete another worker's in-flight download.
+    """
+    with _stardist_download_lock():
+        try:
+            return StarDist2D.from_pretrained(name)
+        except Exception as exc:                                 # noqa: BLE001
+            if not any(m in str(exc).lower() for m in _CORRUPT_MODEL_MARKERS):
+                raise
+            removed = _purge_stardist_cache()
+            log.warning(
+                "StarDist model cache was corrupt (%s: %s) — purged %s and "
+                "re-downloading once.",
+                exc.__class__.__name__, exc, removed or "(nothing found to remove)")
+            return StarDist2D.from_pretrained(name)
+
+
 def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:
     """
     Called once in each worker process before any image pairs are processed.
@@ -1947,12 +2225,14 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:
     # clusters) this raises an SSL error.  The override below disables
     # certificate verification for this one call only; the original context
     # factory is restored immediately in the finally block so no other network
-    # code in the worker is affected.
+    # code in the worker is affected. _load_stardist_pretrained additionally
+    # recovers from a truncated cache left by an interrupted earlier run (it
+    # purges the corrupt weights and re-downloads once).
     import ssl as _ssl
     _orig_ssl_ctx = _ssl._create_default_https_context
     _ssl._create_default_https_context = _ssl._create_unverified_context
     try:
-        _STARDIST_MODEL = _StarDist2D.from_pretrained("2D_versatile_fluo")
+        _STARDIST_MODEL = _load_stardist_pretrained(_StarDist2D, "2D_versatile_fluo")
     finally:
         _ssl._create_default_https_context = _orig_ssl_ctx
     log.info("Worker %d model loaded in %.1f s.", os.getpid(), time.perf_counter() - _t0)

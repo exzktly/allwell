@@ -94,6 +94,21 @@ def read_pipeline_info(
             for fov in data.get("available_fovs", []) or []
             if str(fov).strip()
         ],
+        # ── Feature-additive keys (backwards-compatible) ──────────────────────
+        # These are written by the pipeline only once the corresponding feature
+        # ships (label-free seg / QC tooling / shape features). Datasets analyzed
+        # before those features have none of them, so each reads through a
+        # ``.get`` default — the viewer must behave identically on a legacy
+        # sidecar. See _Docs/Markdowns/TODO_segmentation_qc_shape_tracking.md §2.
+        "schema_version": _safe_int("schema_version", 1),
+        "segmentation_method": str(data.get("segmentation_method", "") or "").strip().lower(),
+        "phase_token": str(data.get("phase_token", "") or "").strip().lower(),
+        "shape_features": [
+            str(s).strip().lower()
+            for s in data.get("shape_features", []) or []
+            if str(s).strip()
+        ],
+        "qc_options": dict(data.get("qc_options", {}) or {}),
     }
 
     if fov_idx >= 0 and tp_idx >= 0 and fov_idx == tp_idx:

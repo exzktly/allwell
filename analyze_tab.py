@@ -41,6 +41,14 @@ from ui.theme import (
 from widgets.checkable_dropdown import CheckableDropdown
 import shape_features_core as _sfc
 
+
+def _safe_qc_float(text: str) -> float:
+    """Parse a QC bound from a text field; 0.0 (= no bound) on empty/invalid."""
+    try:
+        return float(str(text).strip() or "0")
+    except (TypeError, ValueError):
+        return 0.0
+
 # ---------------------------------------------------------------------------
 # Schema vocabulary — kept in sync with process_microscopy.py
 # ---------------------------------------------------------------------------
@@ -246,8 +254,8 @@ class AnalyzeTab(QWidget):
         self._build_channel_tokens_section(parent)
         self._build_folders_section(parent)
         self._refresh_schema_preview()
-        self._build_tophat_section(parent)
         self._build_shape_features_section(parent)
+        self._build_qc_section(parent)
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
         self._build_run_controls(parent)
@@ -413,24 +421,6 @@ class AnalyzeTab(QWidget):
 
         self._input_edit.textChanged.connect(lambda _: self._refresh_output())
 
-    def _build_tophat_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Top-Hat Background Subtraction")
-
-        nir_row = self._row(sec, "Nuclear radius")
-        self._tophat_radius_nir_edit = self._entry(nir_row, "100", width=60)
-        self._no_tophat_nir_cb = QCheckBox("Disable", nir_row)
-        nir_row.layout().addWidget(self._no_tophat_nir_cb)
-        nir_row.layout().addStretch(1)
-
-        fluor_row = self._row(sec, "Fluor radius")
-        self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
-        self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
-        fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
-        fluor_row.layout().addStretch(1)
-
-        hint = QLabel("Fluor radius applies to all fluorescent channels.", sec)
-        hint.setObjectName("Muted")
-        sec.layout().addWidget(hint)
 
     # Sensible default morphology features (centroids are always emitted by the
     # pipeline regardless of selection, so they are not offered as chips).
@@ -469,6 +459,108 @@ class AnalyzeTab(QWidget):
         crl.addWidget(self._shape_chips)
         crl.addStretch(1)
         sec.layout().addWidget(chip_row)
+
+    def _build_qc_section(self, parent: QWidget) -> None:
+        sec = self._section(parent, "Quality Control")
+
+        hint = QLabel(
+            "Optional pre-measurement clean-up: even out illumination "
+            "(flat-field) and drop debris/merged regions by size & shape.", sec)
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        sec.layout().addWidget(hint)
+
+        r = self._row(sec, "Flat-field correction")
+        self._flatfield_cb = QComboBox(r)
+        self._flatfield_cb.addItems(["none", "empty_well", "gaussian", "basic"])
+        r.layout().addWidget(self._flatfield_cb)
+        r.layout().addStretch(1)
+
+        rbg = self._row(sec, "Background subtraction")
+        self._background_cb = QComboBox(rbg)
+        self._background_cb.addItems(["none", "top_hat", "sliding_disk", "empty_well"])
+        self._background_cb.setCurrentText("top_hat")
+        self._background_cb.setToolTip(
+            "How background is subtracted (per channel, where enabled below):\n"
+            "• none — no background subtraction.\n"
+            "• top_hat — fast square morphological; leaves halos/hotspots on "
+            "uneven background.\n"
+            "• sliding_disk — smooth isotropic disk baseline (recommended for "
+            "structured/uneven background; no square halos).\n"
+            "• empty_well — subtract a measured per-channel background from the "
+            "Background well. (If flat-field is *also* empty_well, the two are "
+            "combined into one correct (raw−B)/(B/mean(B)) pass.)")
+        rbg.layout().addWidget(self._background_cb)
+        rbg.layout().addStretch(1)
+
+        # Radius / enable controls — folded in from the former standalone
+        # "Top-Hat Background Subtraction" section. Shown only for the
+        # radius-based methods (top_hat / sliding_disk); hidden for empty_well /
+        # none, which take no radius.
+        nir_row = self._row(sec, "Nuclear radius")
+        self._tophat_radius_nir_edit = self._entry(nir_row, "100", width=60)
+        self._no_tophat_nir_cb = QCheckBox("Disable", nir_row)
+        nir_row.layout().addWidget(self._no_tophat_nir_cb)
+        nir_row.layout().addStretch(1)
+        fluor_row = self._row(sec, "Fluor radius")
+        self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
+        self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
+        fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
+        fluor_row.layout().addStretch(1)
+        radius_hint = QLabel("Radius = background scale (px); Fluor radius "
+                             "applies to all fluorescent channels.", sec)
+        radius_hint.setObjectName("Muted")
+        radius_hint.setWordWrap(True)
+        sec.layout().addWidget(radius_hint)
+        # _row() returns the right-hand cell, not the full row — the "Nuclear
+        # radius" / "Fluor radius" label lives in the cell's parent. Toggle
+        # visibility on the *parent* rows so the labels hide with their entries
+        # (hiding only the cell left the labels stranded).
+        self._bg_radius_rows = (nir_row.parentWidget(), fluor_row.parentWidget(),
+                                radius_hint)
+
+        rbw = self._row(sec, "Background well")
+        self._background_well_edit = self._entry(rbw, "", width=120)
+        rbw.layout().addStretch(1)
+
+        def _sync_bg(_=None) -> None:
+            bg_method = self._background_cb.currentText()
+            # Background well feeds empty_well flat-field and/or empty_well bg.
+            self._background_well_edit.setEnabled(
+                self._flatfield_cb.currentText() == "empty_well"
+                or bg_method == "empty_well")
+            # Radius only applies to the morphological / sliding-disk methods.
+            for w in self._bg_radius_rows:
+                w.setVisible(bg_method in ("top_hat", "sliding_disk"))
+        self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
+        self._background_cb.currentIndexChanged.connect(_sync_bg)
+        _sync_bg()
+
+        self._qc_remove_debris_cb = QCheckBox(
+            "Remove debris (drop regions outside the size / solidity bounds)", sec)
+        sec.layout().addWidget(self._qc_remove_debris_cb)
+
+        ra = self._row(sec, "Min / Max area (px)")
+        self._qc_min_area_edit = self._entry(ra, "0", width=80)
+        self._qc_max_area_edit = self._entry(ra, "0", width=80)
+        ra.layout().addStretch(1)
+
+        rs = self._row(sec, "Min solidity (0-1)")
+        self._qc_min_solidity_edit = self._entry(rs, "0", width=80)
+        rs.layout().addStretch(1)
+
+        # The size / solidity bounds only apply when debris removal is on —
+        # gate them on the checkbox (the same pattern the Background-well field
+        # uses for the empty_well flat-field mode) so the cleaning-step options
+        # read as one coherent group rather than always-live orphan fields.
+        self._qc_debris_rows = (ra, rs)
+
+        def _sync_debris(_=None) -> None:
+            on = self._qc_remove_debris_cb.isChecked()
+            for row in self._qc_debris_rows:
+                row.setEnabled(on)
+        self._qc_remove_debris_cb.toggled.connect(_sync_debris)
+        _sync_debris()
 
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Output Options")
@@ -778,6 +870,34 @@ class AnalyzeTab(QWidget):
                 errors.append("Minimum nucleus area must be a positive integer.")
         return errors
 
+    def _background_well_validation_error(self) -> Optional[str]:
+        """When empty_well drives flat-field and/or background, the background
+        well must be specified and must exist in the input. Returns an error
+        message to block the run, or None when the request is valid (or empty_well
+        isn't selected)."""
+        uses = []
+        if self._flatfield_cb.currentText() == "empty_well":
+            uses.append("flat-field correction")
+        if self._background_cb.currentText() == "empty_well":
+            uses.append("background subtraction")
+        if not uses:
+            return None
+        which = " and ".join(uses)
+        well = self._background_well_edit.text().strip()
+        if not well:
+            return (f"Empty-well {which} requires a Background well.\n\n"
+                    "Enter the empty/background well (e.g. H12) so its measured "
+                    "background can be sampled.")
+        input_dir = Path(self._input_edit.text().strip())
+        sep = self._filename_sep_edit.text() or DEFAULT_SEP
+        schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
+        from services.input_resolution_service import well_present_in_input
+        if not well_present_in_input(input_dir, well, schema=schema, sep=sep):
+            return (f"Background well '{well}' was not found in the input folder.\n\n"
+                    f"Empty-well {which} reads its reference images from that "
+                    f"well — confirm the well exists in:\n{input_dir}")
+        return None
+
     def _refresh_segmentation_hints(self) -> None:
         if not hasattr(self, "_segmentation_hint_lbl"):
             return
@@ -1050,6 +1170,14 @@ class AnalyzeTab(QWidget):
         if seg_errors:
             QMessageBox.critical(self, "Segmentation Error", "\n".join(seg_errors))
             return None
+        # Empty-well flat-field / background reads its reference images from a
+        # named background well — require it to be specified AND to exist in the
+        # input before starting, rather than letting the run no-op (empty model)
+        # or fail mid-pipeline.
+        bw_err = self._background_well_validation_error()
+        if bw_err:
+            QMessageBox.critical(self, "Background Well Error", bw_err)
+            return None
         pipeline = find_pipeline_script()
         if pipeline is None:
             QMessageBox.critical(self, "Configuration Error",
@@ -1109,6 +1237,13 @@ class AnalyzeTab(QWidget):
             filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
             smfish_tokens=self._smfish_tokens_list(),
             shape_features=list(self._shape_chips.checkedData()),
+            flatfield=self._flatfield_cb.currentText(),
+            background=self._background_cb.currentText(),
+            background_well=self._background_well_edit.text().strip(),
+            qc_remove_debris=self._qc_remove_debris_cb.isChecked(),
+            qc_min_area=_safe_qc_float(self._qc_min_area_edit.text()),
+            qc_max_area=_safe_qc_float(self._qc_max_area_edit.text()),
+            qc_min_solidity=_safe_qc_float(self._qc_min_solidity_edit.text()),
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=min_area,

@@ -343,3 +343,18 @@ def test_analyze_qc_section_present_and_gated():
     assert tab._background_well_edit.isEnabled() is False
     tab._flatfield_cb.setCurrentText("empty_well")
     assert tab._background_well_edit.isEnabled() is True
+
+    # Radius rows show only for the radius-based methods, and the whole row —
+    # the "Nuclear radius"/"Fluor radius" *labels* included — hides for the
+    # others (regression: hiding only the entry cell stranded the labels).
+    radius_labels = {"Nuclear radius", "Fluor radius"}
+    tab._background_cb.setCurrentText("top_hat")
+    assert all(not r.isHidden() for r in tab._bg_radius_rows)
+    for method in ("none", "empty_well"):
+        tab._background_cb.setCurrentText(method)
+        assert all(r.isHidden() for r in tab._bg_radius_rows), method
+        shown = {l.text() for r in tab._bg_radius_rows
+                 for l in r.findChildren(QLabel) if not r.isHidden()}
+        assert not (radius_labels & shown), f"labels stranded for {method}"
+    tab._background_cb.setCurrentText("rolling_ball")
+    assert all(not r.isHidden() for r in tab._bg_radius_rows)

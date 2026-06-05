@@ -512,7 +512,12 @@ class AnalyzeTab(QWidget):
         radius_hint.setObjectName("Muted")
         radius_hint.setWordWrap(True)
         sec.layout().addWidget(radius_hint)
-        self._bg_radius_rows = (nir_row, fluor_row, radius_hint)
+        # _row() returns the right-hand cell, not the full row — the "Nuclear
+        # radius" / "Fluor radius" label lives in the cell's parent. Toggle
+        # visibility on the *parent* rows so the labels hide with their entries
+        # (hiding only the cell left the labels stranded).
+        self._bg_radius_rows = (nir_row.parentWidget(), fluor_row.parentWidget(),
+                                radius_hint)
 
         rbw = self._row(sec, "Background well")
         self._background_well_edit = self._entry(rbw, "", width=120)

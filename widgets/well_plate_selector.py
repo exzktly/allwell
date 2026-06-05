@@ -50,7 +50,7 @@ from PySide6.QtCore import (  # noqa: E402
     Property, QEvent, QMimeData, QPoint, QRectF, QSize, Qt, Signal,
 )
 from PySide6.QtGui import (  # noqa: E402
-    QBrush, QColor, QDrag, QLinearGradient, QPainter, QPen, QRadialGradient,
+    QBrush, QColor, QDrag, QFont, QLinearGradient, QPainter, QPen, QRadialGradient,
 )
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QHBoxLayout, QPushButton, QSizePolicy, QToolTip,
@@ -132,6 +132,7 @@ class _PlateGrid(QWidget):
         self._rc_selectable = True
         self._single_select = False
         self._tooltip_provider = None          # Callable[[str], str] | None
+        self._markers: dict[tuple[int, int], str] = {}  # per-well glyph overlay
         # Drag-source / drop-sink config (heatmap-layout DnD).
         self._drag_mime: str | None = None     # when set, a press starts a QDrag
         self._accept_mime: str | None = None   # when set, the grid accepts drops
@@ -348,6 +349,23 @@ class _PlateGrid(QWidget):
 
     def set_tooltip_provider(self, provider) -> None:
         self._tooltip_provider = provider
+
+    def set_well_marker(self, well_id, glyph) -> None:
+        """Overlay a short glyph (e.g. a status icon) centred on a well, or
+        clear it with ``glyph=None``."""
+        parsed = _parse_well_id(well_id)
+        if parsed is None:
+            return
+        if glyph:
+            self._markers[parsed] = str(glyph)
+        else:
+            self._markers.pop(parsed, None)
+        self.update()
+
+    def clear_well_markers(self) -> None:
+        if self._markers:
+            self._markers.clear()
+            self.update()
 
     def set_drag_mime(self, mime: str | None) -> None:
         """When *mime* is set, pressing a well and dragging past the platform
@@ -866,6 +884,15 @@ class _PlateGrid(QWidget):
                 else:
                     tint = group_color if group_color is not None else QColor(c.accent)
                     self._paint_depressed(p, wr, hovered, tint=tint)
+                glyph = self._markers.get(key)
+                if glyph:
+                    f = QFont(self.font())
+                    f.setPixelSize(max(7, int(wr.height() * 0.62)))
+                    p.setFont(f)
+                    # contrast against the well fill (coloured wells are bright)
+                    p.setPen(QColor(c.ink_dark if group_color is not None else c.text_primary))
+                    p.drawText(wr, int(Qt.AlignCenter), glyph)
+                    p.setFont(self.font())
 
         # Rubber-band rectangle while a "rect" drag-select is in progress.
         if (self._drag_mode == "rect" and self._rect_start is not None
@@ -976,6 +1003,13 @@ class WellPlateSelector(QWidget):
 
     def setWellState(self, well_id, state: str) -> None:
         self._grid.set_well_state(well_id, state)
+
+    def setWellMarker(self, well_id, glyph) -> None:
+        """Overlay a glyph (e.g. a status icon) on a well; ``None`` clears it."""
+        self._grid.set_well_marker(well_id, glyph)
+
+    def clearWellMarkers(self) -> None:
+        self._grid.clear_well_markers()
 
     # ── interaction config ───────────────────────────────────────────────
     def setSelectionMode(self, mode: str) -> None:

@@ -210,6 +210,27 @@ def test_subtract_background_empty_well_subtracts_field():
                                           bg_field=np.zeros((4, 4), np.float32)), img)
 
 
+def test_empty_well_subtraction_is_nonneg_and_finite():
+    # negatives floored to 0 (image dimmer than the reference field)
+    img = np.full((16, 16), 30.0, np.float32)
+    field = np.full((16, 16), 50.0, np.float32)
+    out = subtract_background(img, 5, "empty_well", bg_field=field)
+    assert out.min() >= 0.0 and np.all(out == 0.0)
+    # a NON-FINITE reference pixel must not survive — np.clip alone would keep
+    # the NaN/Inf and crash StarDist's ClipperLib NMS / poison quantification.
+    bad = np.full((16, 16), 50.0, np.float32)
+    bad[0, 0] = np.nan
+    bad[1, 1] = np.inf
+    bad[2, 2] = -np.inf
+    out = subtract_background(np.full((16, 16), 80.0, np.float32), 5,
+                             "empty_well", bg_field=bad)
+    assert np.all(np.isfinite(out)) and out.min() >= 0.0
+    # combined model is guarded the same way
+    ff = np.ones((16, 16), np.float32)
+    out2 = combined_empty_well_correct(np.full((16, 16), 80.0, np.float32), bad, ff)
+    assert np.all(np.isfinite(out2)) and out2.min() >= 0.0
+
+
 def test_estimate_background_field_keeps_measured_level():
     # unlike the flat-field estimator (mean 1), the background field keeps the
     # measured level so it can be subtracted

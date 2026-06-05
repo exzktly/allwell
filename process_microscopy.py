@@ -1010,6 +1010,23 @@ def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarra
     return gaussian_filter(median, sigma=float(sigma)).astype(np.float32)
 
 
+def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
+    """Force a background-subtracted image non-negative **and** finite.
+
+    ``np.clip(x, 0, None)`` floors negatives but does **not** remove ``NaN`` /
+    ``±Inf`` (``np.clip(nan, 0, None) is nan``). A measured empty-well field can
+    carry a non-finite pixel (e.g. a NaN in the reference TIFFs survives the
+    median + Gaussian smoothing), and ``img - bg`` then keeps it. Left in, those
+    non-finite pixels crash StarDist's ClipperLib polygon NMS (an uncatchable
+    C++ ``terminate``) and poison intensity sums. So zero out non-finite pixels
+    first, then clip negatives to 0 (white-top-hat convention).
+    """
+    out = np.asarray(diff, dtype=np.float32)
+    if not np.all(np.isfinite(out)):
+        out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    return np.clip(out, 0.0, None)
+
+
 def subtract_background(image, radius: int, method: str = "top_hat",
                         bg_field: "np.ndarray | None" = None) -> np.ndarray:
     """White background subtraction, dispatched by *method*.
@@ -1037,7 +1054,7 @@ def subtract_background(image, radius: int, method: str = "top_hat",
         if bg_field is not None:
             bg = np.asarray(bg_field, dtype=np.float32)
             if bg.shape == img.shape:
-                return np.clip(img - bg, 0.0, None)
+                return _floor_after_subtract(img - bg)
         return img
     return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
 
@@ -1059,7 +1076,7 @@ def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
     if bg_field is not None:
         b = np.asarray(bg_field, dtype=np.float32)
         if b.shape == img.shape:
-            img = np.clip(img - b, 0.0, None)
+            img = _floor_after_subtract(img - b)
     return apply_flatfield(img, ff_field)
 
 

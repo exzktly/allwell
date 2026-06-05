@@ -1,15 +1,16 @@
 """Consolidated viewer-state document (``<data_dir>/persistence.json``).
 
 Holds one section per viewer-owned persistence domain so the data directory
-carries a single file instead of three small sidecars. Currently houses
-``ratios``, ``heatmap_layouts``, and ``line_order``. ``cell_overrides`` stays
-in its own file (size + write-frequency); ``pipeline_info.json`` is owned by
-the batch pipeline and is left alone.
+carries a single file instead of a pile of small sidecars. Houses ``ratios``,
+``heatmap_layouts``, ``line_order``, ``view_state`` (added by ``view_state.py``
+for live UI selections), and ``qc_params``. ``cell_overrides`` stays in its own
+file (size + write-frequency); ``pipeline_info.json`` is owned by the batch
+pipeline and is left alone.
 
-A ``view_state`` section is added by ``view_state.py`` for live UI selections.
-
-Migration: on first read, any legacy sidecars present in the data directory
-are absorbed into a fresh ``persistence.json`` and then deleted.
+Migration: on first read, any raw-format legacy sidecars (see ``LEGACY_SIDECARS``)
+present in the data directory are absorbed into a fresh ``persistence.json`` and
+then deleted. ``qc_params`` migrates its own legacy ``qc_params.json`` (which
+wraps its data) separately, in ``qc_params.py``.
 """
 
 from __future__ import annotations

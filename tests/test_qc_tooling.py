@@ -224,27 +224,27 @@ def test_subtract_background_top_hat_is_backcompat():
     assert np.allclose(subtract_background(img, 8), apply_tophat(img, 8))
 
 
-def test_subtract_background_rolling_ball_smooths_gradient():
-    # rolling_ball is now an isotropic disk white-top-hat at full resolution.
+def test_subtract_background_sliding_disk_smooths_gradient():
+    # sliding_disk is now an isotropic disk white-top-hat at full resolution.
     # A smooth illumination gradient + flat signal: it should remove the gradient,
     # leaving a near-flat (low-variance) background-subtracted image.
     y = np.linspace(0, 300, 64, dtype=np.float32)
     img = np.tile(y, (64, 1))                     # pure left→right gradient
-    rb = subtract_background(img, 20, "rolling_ball")
+    rb = subtract_background(img, 20, "sliding_disk")
     assert rb.min() >= 0.0 and rb.shape == img.shape
     assert float(rb.std()) < float(img.std())     # gradient flattened
     # Preserves a small bright object on a smooth background.
     obj = np.tile(np.linspace(40, 160, 96, dtype=np.float32), (96, 1)).copy()
     obj[44:52, 44:52] += 400.0
-    out = subtract_background(obj, 30, "rolling_ball")
+    out = subtract_background(obj, 30, "sliding_disk")
     assert float(out[4:12, 4:12].mean()) < 40       # smooth background removed
     assert float(out[45:51, 45:51].mean()) > 200    # object preserved
 
 
-def test_rolling_ball_isotropic_no_bright_disk_on_confluent_patch():
+def test_sliding_disk_isotropic_no_bright_disk_on_confluent_patch():
     """The bug we fixed: a raised ball-scale patch (a confluent region) must be
     flattened, not left as a bright disk. The downscale trick shifted the
-    rolling-ball climb threshold and left such patches ~10x too bright; the
+    sliding-disk climb threshold and left such patches ~10x too bright; the
     full-res disk opening flattens a patch wider than ~2·radius like the ball."""
     N = 256
     yy, xx = np.ogrid[:N, :N]
@@ -252,7 +252,7 @@ def test_rolling_ball_isotropic_no_bright_disk_on_confluent_patch():
     # raised soft-edged disk Ø≈140 px on a flat background; radius 40 → 2·r=80 < 140
     img = (np.full((N, N), 100.0, np.float32)
            + 300.0 * 0.5 * (1 - np.tanh((r - 70) / 4))).astype(np.float32)
-    out = subtract_background(img, 40, "rolling_ball")
+    out = subtract_background(img, 40, "sliding_disk")
     centre = out[N // 2 - 8:N // 2 + 8, N // 2 - 8:N // 2 + 8].mean()
     assert float(centre) < 30.0          # patch flattened, NOT a bright disk
 
@@ -262,7 +262,7 @@ def test_rolling_ball_isotropic_no_bright_disk_on_confluent_patch():
     star[N // 2, :] = 500.0
     for i in range(N):
         star[i, i] = 500.0
-    rb = subtract_background(star, 12, "rolling_ball")
+    rb = subtract_background(star, 12, "sliding_disk")
     horiz = float(rb[N // 2, 20:40].mean())
     diag = float(np.mean([rb[i, i] for i in range(20, 40)]))
     assert abs(horiz - diag) < 0.30 * max(horiz, diag) + 5  # near-isotropic
@@ -313,10 +313,10 @@ def test_build_pipeline_args_background_mapping():
     # default top_hat → no --background flag
     a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts())
     assert "--background" not in a
-    # rolling_ball → flag, no background well
+    # sliding_disk → flag, no background well
     a = build_pipeline_args(P, Path("/in"), Path("/out"),
-                            _base_opts(background="rolling_ball"))
-    assert a[a.index("--background") + 1] == "rolling_ball"
+                            _base_opts(background="sliding_disk"))
+    assert a[a.index("--background") + 1] == "sliding_disk"
     assert "--background_well" not in a
     # empty_well background carries the background well even with flatfield=none
     a = build_pipeline_args(P, Path("/in"), Path("/out"),
@@ -326,7 +326,7 @@ def test_build_pipeline_args_background_mapping():
     # explicit "none" disables background subtraction entirely
     a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts(background="none"))
     assert a[a.index("--background") + 1] == "none"
-    assert set(BACKGROUND_METHODS) == {"none", "top_hat", "rolling_ball", "empty_well"}
+    assert set(BACKGROUND_METHODS) == {"none", "top_hat", "sliding_disk", "empty_well"}
 
 
 def test_subtract_background_none_is_noop():
@@ -425,7 +425,7 @@ def test_analyze_qc_section_present_and_gated():
         shown = {l.text() for r in tab._bg_radius_rows
                  for l in r.findChildren(QLabel) if not r.isHidden()}
         assert not (radius_labels & shown), f"labels stranded for {method}"
-    tab._background_cb.setCurrentText("rolling_ball")
+    tab._background_cb.setCurrentText("sliding_disk")
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
 
 

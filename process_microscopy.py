@@ -986,7 +986,7 @@ def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:
 
 
 # Background-subtraction methods selectable via ``--background``.
-BACKGROUND_METHODS = ("none", "top_hat", "rolling_ball", "empty_well")
+BACKGROUND_METHODS = ("none", "top_hat", "sliding_disk", "empty_well")
 
 
 def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarray | None":
@@ -1028,18 +1028,18 @@ def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
 
 
 def _isotropic_disk_tophat(img: np.ndarray, radius: int) -> np.ndarray:
-    """Grayscale white top-hat with a flat *disk* footprint — the isotropic,
-    full-resolution stand-in for the classic rolling ball.
+    """Sliding-disk background: grayscale white top-hat with a flat *disk*
+    footprint of the given radius, computed at full resolution.
 
-    The rolling ball flattens regions wider than ~2·radius and preserves narrower
-    ones; that threshold is set by the ball's *fixed spatial radius*, not its
-    curved cap, so opening by a flat disk of the same radius reproduces it. Unlike
+    A disk of radius R slid under the intensity surface flattens regions wider
+    than ~2·R (treated as background) and preserves narrower ones (kept as
+    signal); the flatten/preserve threshold is set by the disk radius. Unlike
     ``top_hat``'s square footprint the disk is isotropic (no terraced square
-    halos), and unlike the reverted downscale trick it runs at full resolution —
-    there is no coarse grid to shift the flatten/preserve threshold and stamp
-    bright ~150 px disks into confluent regions. The disk is built with skimage's
-    ``decomposition="sequence"`` (a stack of small line erosions) so the opening
-    is ~O(N) rather than O(N·radius²), which keeps it fast at full resolution.
+    halos), and running at full resolution means there is no coarse grid to shift
+    the threshold and stamp bright ~150 px disks into confluent regions (the
+    failure of the reverted downscale approximation). The disk is built with
+    skimage's ``decomposition="sequence"`` (a stack of small line erosions) so the
+    opening is ~O(N) rather than O(N·radius²), keeping it fast at full resolution.
     """
     from skimage.morphology import disk, white_tophat
     r = max(1, int(round(float(radius))))
@@ -1058,17 +1058,14 @@ def subtract_background(image, radius: int, method: str = "top_hat",
     - ``top_hat`` — ``img - grey_opening(square)``: fast (separable 1-D passes)
       but the flat square footprint leaves anisotropic, *terraced* residuals,
       i.e. halos / hotspots next to bright objects. Current default.
-    - ``rolling_ball`` — isotropic disk white-top-hat (``img - opening(disk)``),
-      computed at FULL resolution via :func:`_isotropic_disk_tophat`. This is the
-      smooth, isotropic baseline for uneven / structured background. The classic
-      rolling ball's behaviour (flatten regions wider than ~2·radius, preserve
-      narrower ones) is governed by the ball's fixed spatial radius, not its
-      curved cap, so opening by a flat disk of the same radius reproduces it —
-      while being isotropic (no square terracing like ``top_hat``) and fast.
-      Replaces ``skimage.restoration.rolling_ball``: the exact ball is ~80 s a
-      frame, and the earlier downscale optimisation was reverted because a coarse
-      grid shifts the flatten/preserve threshold and stamps bright ~150 px disks
-      into confluent regions (which corrupt quantification).
+    - ``sliding_disk`` — isotropic disk white-top-hat (``img - opening(disk)``),
+      computed at FULL resolution via :func:`_isotropic_disk_tophat`. The smooth,
+      isotropic baseline for uneven / structured background: a disk of the given
+      radius flattens regions wider than ~2·radius and preserves narrower ones,
+      isotropically (no square terracing like ``top_hat``) and fast (~1.8 s a
+      1024² frame). An earlier downscale optimisation was reverted because a
+      coarse grid shifts that flatten/preserve threshold and stamps bright ~150 px
+      disks into confluent regions (which corrupt quantification).
     - ``empty_well`` — ``img - bg_field``: subtract a *measured* per-channel
       background (smoothed empty-well median, :func:`estimate_background_field`);
       no-op when no field is available for the channel.
@@ -1079,7 +1076,7 @@ def subtract_background(image, radius: int, method: str = "top_hat",
     img = np.asarray(image, dtype=np.float32)
     if method == "none":
         return img
-    if method == "rolling_ball":
+    if method == "sliding_disk":
         return _isotropic_disk_tophat(img, int(radius))
     if method == "empty_well":
         if bg_field is not None:
@@ -1974,7 +1971,7 @@ def process_image_group(
     # Background subtraction per channel (gated by the top-hat toggle). In
     # combined empty-well mode this step IS the full correction
     # (raw − B)/(B/mean(B)); otherwise it is subtract_background(method) where
-    # method ∈ none / top_hat / rolling_ball / empty_well.
+    # method ∈ none / top_hat / sliding_disk / empty_well.
     def _correct(img: np.ndarray, token: str, radius: int, enabled: bool) -> np.ndarray:
         if not enabled:
             return img
@@ -2058,7 +2055,7 @@ def process_image_group(
     #
     # NB: the ``_tophat`` suffix is **legacy naming** — these are the
     # *background-corrected* images (nir_corr / fluor_tophat), i.e. the output of
-    # whatever --background method ran (top_hat / rolling_ball / empty_well /
+    # whatever --background method ran (top_hat / sliding_disk / empty_well /
     # none, after any flat-field), not specifically a top-hat. The suffix is kept
     # because the Review side reads ``_tophat`` files; only the label is stale.
     _t = time.perf_counter()
@@ -4064,8 +4061,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Background-subtraction method (applied per channel where "
                         "top-hat is enabled). 'top_hat' = fast square morphological "
                         "(default, but leaves halos on uneven background); "
-                        "'rolling_ball' = smooth isotropic baseline (recommended for "
-                        "structured background, slower); 'empty_well' = subtract a "
+                        "'sliding_disk' = smooth isotropic disk baseline (recommended "
+                        "for structured/uneven background, no square halos); "
+                        "'empty_well' = subtract a "
                         "measured per-channel background from --background_well.")
     p.add_argument("--qc_remove_debris", action="store_true",
                    help="Remove segmented regions whose size/solidity fall outside the "
@@ -4365,7 +4363,7 @@ def main() -> None:
                  args.flatfield, sorted(shared_kwargs["flatfield_models"]) or "(none found)")
 
     # Precompute per-channel additive background fields once (--background
-    # empty_well). top_hat / rolling_ball estimate per image in the worker.
+    # empty_well). top_hat / sliding_disk estimate per image in the worker.
     if args.background == "empty_well":
         shared_kwargs["background_models"] = build_background_models(
             input_dir,

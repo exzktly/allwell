@@ -68,7 +68,7 @@ class PersistenceRegistry:
 def build_persistence_registry(app) -> PersistenceRegistry:
     """Create the registry and register every data-dir persistence domain."""
     from well_viewer.persistence import (
-        cell_overrides, heatmap_layouts, line_order, ratios,
+        cell_overrides, heatmap_layouts, line_order, qc_params, ratios,
         sample_definitions, view_state,
     )
 
@@ -89,4 +89,7 @@ def build_persistence_registry(app) -> PersistenceRegistry:
                       save=view_state.save_to_data_dir,
                       load=view_state.load_from_data_dir)
     registry.register("notes", save=sample_definitions.save_notes)
+    registry.register("qc_params",
+                      save=qc_params.save_to_data_dir,
+                      load=qc_params.load_from_data_dir)
     return registry

@@ -22,7 +22,6 @@ def save_to_pipeline_info(app) -> None:
         save_gating_to_pipeline_info,
     )
     from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     # Persist every key that has a Cell Gating row, including ratio entries
     # (keyed by ``ratio:<name>``). Iterating only ``app._app_state.channel.fluor_channels``
@@ -32,7 +31,7 @@ def save_to_pipeline_info(app) -> None:
         for key in (app._cell_gating_thresh_frac_edits or {}).keys()
     }
     block = build_gating_block(
-        cell_area_threshold, fluor_gates, thresh_frac_on,
+        fluor_gates, thresh_frac_on,
     )
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
 
@@ -51,23 +50,18 @@ def load_from_pipeline_info(app) -> bool:
     if not block:
         return False
 
-    if not hasattr(app, "_cell_gating_area_edit"):
+    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         build = getattr(app, "_centre_build_pending", None)
         if callable(build):
             build("Sample Definitions")
         from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(app)
-    if not hasattr(app, "_cell_gating_area_edit"):
+    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return False
 
     applied = False
-    cell_area = block.get("cell_area_threshold")
-    if cell_area is not None:
-        try:
-            app._cell_gating_area_edit.setText(str(float(cell_area)))
-            applied = True
-        except (ValueError, TypeError, AttributeError):
-            pass
+    # ``cell_area_threshold`` is retired from this block — the QC layer now owns
+    # cell-area gating and migrates any legacy value (see QCParams.from_pipeline_info).
 
     fluor_gates = block.get("fluor_gates") or {}
     if isinstance(fluor_gates, dict):

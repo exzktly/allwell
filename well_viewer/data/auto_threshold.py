@@ -346,7 +346,6 @@ def apply_auto_thresholds_to_pipeline_info(
     existing = read_gating_params(out_dir) or {}
     existing_fluor = dict(existing.get("fluor_gates") or {})
     existing_tfo = dict(existing.get("thresh_frac_on") or {})
-    existing_area = float(existing.get("cell_area_threshold") or 0.0)
 
     written: Dict[str, float] = {}
     for ch, thr in computed.items():
@@ -358,6 +357,6 @@ def apply_auto_thresholds_to_pipeline_info(
     if not written:
         return {}
 
-    block = build_gating_block(existing_area, existing_fluor, existing_tfo)
+    block = build_gating_block(existing_fluor, existing_tfo)
     save_gating_to_pipeline_info(out_dir, block)
     return written

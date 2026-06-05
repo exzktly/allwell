@@ -281,13 +281,13 @@ def clear_all(app) -> None:
 
     app._set_ratio_metrics([])
 
-    if hasattr(app, "_cell_gating_area_edit"):
+    if hasattr(app, "_cell_gating_fluor_gate_edits"):
         try:
             from well_viewer.features.grouping.cell_gating_tab_view import (
                 cell_gating_on_gating_change,
                 cell_gating_on_threshold_frac_on_change,
             )
-            app._cell_gating_area_edit.setText("0.0")
+            # cell-area gating retired (now QC-owned); reset only fluor + frac.
             for edit in app._cell_gating_fluor_gate_edits.values():
                 edit.setText("0.0")
             for edit in app._cell_gating_thresh_frac_edits.values():

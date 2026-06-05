@@ -288,7 +288,6 @@ def export_plot_data(app) -> None:
     threshold = app._get_thresh_frac_on(ch)
     use_sem = bool(app._app_state.plot.use_sem)
     band_lbl = "SEM" if use_sem else "SD"
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     well_labels = _well_labels_map(app)
     include_repset_col = bool(well_to_repset)
@@ -300,7 +299,6 @@ def export_plot_data(app) -> None:
             _fc.control_pts_for_line(
                 app, fc_ctrl_lbl, threshold=threshold,
                 val_col=app._app_state.channel.active_val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
         )
@@ -311,7 +309,6 @@ def export_plot_data(app) -> None:
         pts = aggregate_well(app, 
             label, threshold=threshold, use_sem=use_sem,
             val_col=app._app_state.channel.active_val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
         norm_pts = (
@@ -476,7 +473,6 @@ def export_raw_data_csv(app) -> None:
     import pandas as pd
     from well_viewer.data.data_loading import df_included_mask
 
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gate_threshold = app._get_fluor_gate(app._app_state.channel.active_channel)
     well_labels = _well_labels_map(app)
     # Gating semantics stay on mean fluorescence intensity even when the
@@ -494,7 +490,7 @@ def export_raw_data_csv(app) -> None:
         mask = df_included_mask(df).to_numpy(copy=True)
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) & (area > cell_area_threshold)
+            mask &= np.isfinite(area) 
         fluor = pd.to_numeric(df[gate_col], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
             mask &= np.isfinite(fluor) & (fluor > fluor_gate_threshold)
@@ -672,14 +668,12 @@ def export_scatter_data(app) -> None:
         col_x = app._col_for_scatter_entry(ch_x_entry)
         col_y = app._col_for_scatter_entry(ch_y_entry)
 
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gate_x = app._get_fluor_gate(ch_x_base)
     fluor_gate_y = app._get_fluor_gate(ch_y_base)
 
     scatter_data = _scatter_collect_data(
         app, col_x, col_y, timepoints_h,
         well_colors=[],
-        cell_area_threshold=cell_area_threshold,
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )
@@ -873,7 +867,6 @@ def export_distribution_data(app) -> None:
     import math as _math
 
     val_col = app._app_state.channel.active_val_col
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     ratios = app._app_state.channel.ratio_index
 
@@ -894,7 +887,6 @@ def export_distribution_data(app) -> None:
     for name, _color, df in iter_plot_groups(app):
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             ratios=ratios,
             tp_filter=tp_filter,

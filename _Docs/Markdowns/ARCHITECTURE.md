@@ -803,6 +803,27 @@ regions, **reusing the same `regionprops` pass** as the shape features. The
 settings are recorded as a `qc_options` block in `pipeline_info.json`
 (`read_pipeline_info` defaults it to `{}` on legacy sidecars).
 
+**Segmentation routines + parameters.** `--segmentation_method` selects the
+segmenter in `process_image_group`'s dispatch; the Analyze "Channel Tokens"
+section shows a **per-method parameter panel** (a `NamedPageStack` swapped by
+`_refresh_segmentation_hints`) so only the chosen routine's controls appear. All
+routines segment the **Segmentation channel** (`--nuclear_token`, which may be any
+fluorescent or brightfield channel) unless noted:
+- `stardist_nuclei` / `stardist_seeded_watershed_cell` — StarDist (needs a
+  fluorescent stain); watershed adds a cytoplasm token + min-nucleus-area.
+- `cellpose` — **general** Cellpose, not phase-locked. Exposes model
+  (cyto3/cyto2/cyto/nuclei), diameter, `flow_threshold`, `cellprob_threshold`,
+  and an optional second **nucleus channel** (`channels=[seg, nuc]`). Models are
+  cached per type in `_CELLPOSE_MODELS`; `_worker_init` skips the StarDist/TF load.
+- `classical_threshold` — Otsu + distance-transform watershed (no model), general.
+- `cellpose_labelfree` — the **only** label-free method: a Cellpose `cyto3`
+  brightfield preset that segments the channel marked **Phase**. The Phase
+  channel is designated by a per-row checkbox (`analyze_tab._phase_token()`,
+  mutually exclusive, not also smFISH) → `--phase_token`; `main()` remaps the
+  phase token onto the nuclear slot (only for this method) so all per-FOV grouping
+  is reused. Phase is a first-class role (`image_identity.Role.PHASE`, suffix
+  `_phase`) recorded as `phase_token` in `pipeline_info.json`.
+
 ### 6.3 `all_well_launcher.py`
 
 PyInstaller entry point. Two responsibilities:
@@ -1543,6 +1564,10 @@ need to grep for is in plain sight.
 
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
+
+- **5.5.6 (PR4).** Label-free segmentation engines (Cellpose + classical) added to the pipeline with a general/label-free split and a per-method parameter panel; `Role.PHASE` classification on ingestion plumbs phase channels through.
+
+- **5.5.5 (QC editor).** Non-destructive, composable QC layer under `well_viewer/features/qc/`: the pipeline keeps every segmented cell and always emits `shape_solidity`; the debris verdict (`compute_qc_pass`) is recomputed live from thresholds and projected as a `QC_Pass` column, composed with the manual `Included` flag at the single chokepoint `df_included_mask` (effective = manual-keep AND passes-QC). It's edited from the **Segmentation** tab — the gate row drives `set_qc_params`, `review_build_include_map` composes `QC_Pass` so the overlay highlights flagged cells live, and thresholds persist to `qc_params.json` (seeded from `pipeline_info`). The QC gate is the single source of cell-area / shape filtering (the legacy `cell_area_threshold` is retired in favour of it). To catch bright debris StarDist shatters into many small labels (which per-cell size misses), the pipeline also emits a per-cell `qc_region_area` — the area of the Otsu-bright connected region a cell sits in (`compute_region_areas`: bright foreground ∪ labels, morphologically closed, connected-components), so all fragments of a blob share one large region; a **Max region area** bound (`compute_qc_pass`) rejects them together.
 
 - **5.5.2 (PR3).** QC stage in `process_microscopy` (flat-field + debris removal driven by `qc_options`); Analyze exposes it via the Quality Control section with debris-bound controls gated on the *Remove debris* toggle. Background subtraction is a selectable method (`subtract_background`: `none` no-op, `top_hat` square morphological [default], `rolling_ball` smooth/isotropic via skimage, `empty_well` additive `build_background_models`/`estimate_background_field`) applied per channel before quantification, recorded in `qc_options.background`. When the empty well drives **both** flat-field and background, `combined_empty_well_correct` folds them into the physically-correct `(raw − B)/(B/mean(B))` single pass (assuming the additive background tracks the illumination), instead of the scale-mismatched divide-then-subtract.
 

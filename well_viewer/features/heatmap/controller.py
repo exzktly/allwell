@@ -139,7 +139,6 @@ def _pool_filtered_mean(
     wells,
     *,
     val_col: str,
-    cell_area_threshold: float,
     fluor_gates: Dict[str, float],
     ratios,
     target_t: float,
@@ -158,7 +157,6 @@ def _pool_filtered_mean(
             continue
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             ratios=ratios,
             tp_filter=target_t,
@@ -178,7 +176,6 @@ def _cell_value(
     metric: str,
     val_col: str,
     threshold: float,
-    cell_area_threshold: float,
     fluor_gates: Dict[str, float],
     ratios: Optional[Dict] = None,
 ) -> float:
@@ -193,7 +190,6 @@ def _cell_value(
         pts = aggregate_group(app, 
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
         matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
@@ -203,7 +199,6 @@ def _cell_value(
         pts = aggregate_group(app, 
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
         matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
@@ -222,7 +217,6 @@ def _cell_value(
         return _pool_filtered_mean(
             app, valid_wells,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             ratios=ratios,
             target_t=target_t,
@@ -236,7 +230,6 @@ def _cell_value(
         return _pool_filtered_mean(
             app, valid_wells,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             ratios=ratios,
             target_t=target_t,
@@ -246,7 +239,6 @@ def _cell_value(
     pts = aggregate_group(app, 
         valid_wells, threshold=threshold, use_sem=False,
         val_col=val_col,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
     )
     matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
@@ -290,7 +282,6 @@ def _compute_global_range(
     metric: str,
     val_col: str,
     threshold: float,
-    cell_area_threshold: float,
     fluor_gates: Dict[str, float],
     ratios,
 ) -> Tuple[Optional[float], Optional[float]]:
@@ -326,7 +317,6 @@ def _compute_global_range(
         metric,
         val_col,
         float(threshold),
-        float(cell_area_threshold),
         tuple(sorted((fluor_gates or {}).items())),
         ratios_fingerprint,
         tuple(tps),
@@ -346,7 +336,7 @@ def _compute_global_range(
             try:
                 v = _cell_value(
                     app, wells, tp, metric, val_col,
-                    threshold, cell_area_threshold, fluor_gates, ratios,
+                    threshold, fluor_gates, ratios,
                 )
             except Exception:
                 v = float("nan")
@@ -388,7 +378,6 @@ def redraw_heatmap(app) -> None:
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     ratios = app._app_state.channel.ratio_index
     cmap_name = _selected_cmap(app)
@@ -403,7 +392,7 @@ def redraw_heatmap(app) -> None:
         try:
             arr[r, c] = _cell_value(
                 app, wells, tp, metric, val_col,
-                threshold, cell_area_threshold, fluor_gates, ratios,
+                threshold, fluor_gates, ratios,
             )
         except Exception:
             arr[r, c] = float("nan")
@@ -418,7 +407,7 @@ def redraw_heatmap(app) -> None:
     # only recomputes when an input changes.
     g_vmin, g_vmax = _compute_global_range(
         app, layout, metric, val_col,
-        threshold, cell_area_threshold, fluor_gates, ratios,
+        threshold, fluor_gates, ratios,
     )
     app._heatmap_global_vmin = g_vmin
     app._heatmap_global_vmax = g_vmax

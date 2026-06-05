@@ -37,7 +37,6 @@ def collect_line_series_for_group(
     threshold: float,
     use_sem: bool,
     val_col: str,
-    cell_area_threshold: float,
     fluor_gates,
     fc_state: Tuple[bool, str, bool] = (False, "", False),
     include_cdf: bool = False,
@@ -63,7 +62,6 @@ def collect_line_series_for_group(
             _fc.control_pts_for_line(
                 app, fc_ctrl_lbl, threshold=threshold,
                 val_col=val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
         )
@@ -88,7 +86,6 @@ def collect_line_series_for_group(
         pts = aggregate_group(app, 
             valid_wells, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
         if fc_active and pts:
@@ -110,7 +107,6 @@ def collect_line_series_for_group(
         pts = aggregate_well(app, 
             w, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
         if fc_active and pts:

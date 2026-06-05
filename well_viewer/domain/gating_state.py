@@ -9,7 +9,6 @@ at its default), and writes the file back.
 Schema written under the ``cell_gating`` key:
 
     {
-        "cell_area_threshold": 100.0,
         "fluor_gates":     {"gfp": 50.0, "mcherry": 0.0},
         "thresh_frac_on":  {"gfp": 60.0, "mcherry": 50.0},
     }
@@ -40,7 +39,6 @@ def pipeline_info_available(out_dir: Path) -> bool:
     """``True`` when *out_dir* has a writable pipeline_info.json sidecar."""
     return _resolve_pipeline_info_path(out_dir).exists()
 
-DEFAULT_CELL_AREA_THRESHOLD = 0.0
 DEFAULT_FLUOR_GATE = 0.0
 DEFAULT_THRESH_FRAC_ON = 50.0
 
@@ -66,7 +64,6 @@ def _is_default(value: float, default: float) -> bool:
 
 
 def build_gating_block(
-    cell_area_threshold: float,
     fluor_gates: Dict[str, float],
     thresh_frac_on: Dict[str, float],
 ) -> Dict[str, Any]:
@@ -76,9 +73,6 @@ def build_gating_block(
     use that to decide whether to remove the block from the sidecar.
     """
     block: Dict[str, Any] = {}
-    if not _is_default(cell_area_threshold, DEFAULT_CELL_AREA_THRESHOLD):
-        block["cell_area_threshold"] = float(cell_area_threshold)
-
     fg_out: Dict[str, float] = {}
     for ch, val in (fluor_gates or {}).items():
         if not _is_default(val, DEFAULT_FLUOR_GATE):

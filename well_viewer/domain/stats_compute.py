@@ -27,7 +27,6 @@ def well_aggregate_stats(
     *,
     threshold: float,
     val_col: str,
-    cell_area_threshold: float,
     fluor_gates: Dict[str, float],
     use_sem: bool,
     per_fov_spread: bool = False,
@@ -61,7 +60,6 @@ def well_aggregate_stats(
             app,
             lbl, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
         )
@@ -129,10 +127,9 @@ def compute_rep_stats(
     """
     if not True:
         app._app_state.stats.cache = {}
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
-                  app._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
+                  app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())))
     if cache_key in app._app_state.stats.cache:
         return app._app_state.stats.cache[cache_key]
 
@@ -141,7 +138,6 @@ def compute_rep_stats(
         rset.wells, target_t,
         threshold=threshold,
         val_col=app._app_state.channel.active_val_col,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
         use_sem=use_sem,
     )
@@ -168,10 +164,9 @@ def compute_rep_per_fov_stats(
     """
     if not True:
         app._app_state.stats.cache = {}
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
-                 use_sem, app._app_state.channel.active_val_col, cell_area_threshold,
+                 use_sem, app._app_state.channel.active_val_col,
                  tuple(sorted(fluor_gates.items())))
     if cache_key in app._app_state.stats.cache:
         return app._app_state.stats.cache[cache_key]
@@ -202,7 +197,6 @@ def compute_rep_per_fov_stats(
         threshold=threshold,
         use_sem=use_sem,
         val_col=app._app_state.channel.active_val_col,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates,
         per_fov_spread=True,
         ratios=app._app_state.channel.ratio_index,
@@ -235,10 +229,9 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
     if not True:
         app._app_state.stats.cache = {}
     threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
-                 app._app_state.channel.active_val_col, cell_area_threshold,
+                 app._app_state.channel.active_val_col,
                  tuple(sorted(fluor_gates.items())))
     if cache_key in app._app_state.stats.cache:
         return app._app_state.stats.cache[cache_key]
@@ -251,7 +244,6 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
             app,
             lbl, threshold=threshold, use_sem=False,
             val_col=app._app_state.channel.active_val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
         )
         matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
@@ -278,10 +270,9 @@ def compute_group_stats(
     """
     if not True:
         app._app_state.stats.cache = {}
-    cell_area_threshold = app._get_cell_area_threshold()
     fluor_gates = app._get_all_fluor_gates()
     cache_key = (grp.name, tuple(grp.wells), target_t, threshold, use_sem,
-                  app._app_state.channel.active_val_col, cell_area_threshold, tuple(sorted(fluor_gates.items())))
+                  app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())))
     if cache_key in app._app_state.stats.cache:
         return app._app_state.stats.cache[cache_key]
 
@@ -298,7 +289,6 @@ def compute_group_stats(
                 app,
                 lbl, threshold=threshold, use_sem=False,
                 val_col=app._app_state.channel.active_val_col,
-                cell_area_threshold=cell_area_threshold,
                 fluor_gates=fluor_gates,
             )
             matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
@@ -338,7 +328,6 @@ def aggregate_well(
     threshold: float,
     use_sem: bool,
     val_col: str,
-    cell_area_threshold: float,
     fluor_gates: Optional[Dict[str, float]] = None,
     per_fov_spread: bool = False,
     tp_col: str = "timepoint_hours",
@@ -357,7 +346,6 @@ def aggregate_well(
             threshold=threshold,
             use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
             tp_col=tp_col,
@@ -368,7 +356,6 @@ def aggregate_well(
         use_sem=use_sem,
         tp_col=tp_col,
         val_col=val_col,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
         ratios=app._app_state.channel.ratio_index,
@@ -381,7 +368,6 @@ def aggregate_group(
     threshold: float,
     use_sem: bool,
     val_col: str,
-    cell_area_threshold: float,
     fluor_gates: Optional[Dict[str, float]] = None,
     per_fov_spread: bool = False,
     tp_col: str = "timepoint_hours",
@@ -394,7 +380,6 @@ def aggregate_group(
             threshold=threshold,
             use_sem=use_sem,
             val_col=val_col,
-            cell_area_threshold=cell_area_threshold,
             fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
             tp_col=tp_col,
@@ -406,7 +391,7 @@ def aggregate_group(
         return aggregate_well(
             app,
             valid[0], threshold=threshold, use_sem=use_sem,
-            val_col=val_col, cell_area_threshold=cell_area_threshold,
+            val_col=val_col,
             fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
             tp_col=tp_col,
         )
@@ -430,7 +415,6 @@ def aggregate_group(
         use_sem=use_sem,
         tp_col=tp_col,
         val_col=val_col,
-        cell_area_threshold=cell_area_threshold,
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
         ratios=app._app_state.channel.ratio_index,

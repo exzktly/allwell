@@ -1343,7 +1343,6 @@ class BatchExportPanel(QWidget):
                 _val_col = self._export_val_col_for("_line_channel_cb")
                 _ch = _ch_selected
                 _metric = self._selected_export_metric_key("_line_channel_cb")
-                _cell_area_threshold = self._app._get_cell_area_threshold()
                 _fluor_gates = self._app._get_all_fluor_gates()
                 _well_labels = _well_labels_map(self._app)
                 panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
@@ -1355,7 +1354,6 @@ class BatchExportPanel(QWidget):
                     self._app, grp,
                     threshold=threshold, use_sem=use_sem,
                     val_col=_val_col,
-                    cell_area_threshold=_cell_area_threshold,
                     fluor_gates=_fluor_gates,
                     fc_state=(False, "", False),
                 )
@@ -1364,7 +1362,6 @@ class BatchExportPanel(QWidget):
                         self._app, grp,
                         threshold=threshold, use_sem=use_sem,
                         val_col=_val_col,
-                        cell_area_threshold=_cell_area_threshold,
                         fluor_gates=_fluor_gates,
                         fc_state=panel_fc_state,
                     )
@@ -1433,7 +1430,6 @@ class BatchExportPanel(QWidget):
                         _fc.control_pts_for_line(
                             self._app, fc_ctrl_lbl, threshold=threshold,
                             val_col=_val_col,
-                            cell_area_threshold=_cell_area_threshold,
                             fluor_gates=_fluor_gates,
                         )
                     )
@@ -1514,7 +1510,6 @@ class BatchExportPanel(QWidget):
         all_fluor_vals: List[float] = []
 
         _val_col = self._export_val_col_for("_line_channel_cb")
-        _cell_area_threshold = self._app._get_cell_area_threshold()
         _fluor_gates = self._app._get_all_fluor_gates()
         from well_viewer.features.batch_export._line_series_runner import (
             collect_line_series_for_group,
@@ -1528,7 +1523,6 @@ class BatchExportPanel(QWidget):
             self._app, grp,
             threshold=threshold, use_sem=use_sem,
             val_col=_val_col,
-            cell_area_threshold=_cell_area_threshold,
             fluor_gates=_fluor_gates,
             fc_state=fc_state_for_fig,
             include_cdf=True,

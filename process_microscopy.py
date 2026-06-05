@@ -78,6 +78,18 @@ import imageio.v3 as iio
 # ---------------------------------------------------------------------------
 
 _STARDIST_MODEL: "StarDist2D | None" = None
+# Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
+# run can choose a model without silently reusing another type's cache. Lazy.
+_CELLPOSE_MODELS: "dict[str, object]" = {}
+
+# Segmentation-method groups. StarDist methods need the TF model loaded in
+# _worker_init. Cellpose is a *general* segmenter (any channel); the
+# 'cellpose_labelfree' preset is the only label-free method (it remaps the
+# nuclear slot onto the phase channel in main()). classical_threshold is also a
+# general routine (Otsu + watershed on the chosen channel).
+_STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
+_CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
+_LABELFREE_METHODS = ("cellpose_labelfree",)
 
 # Identifies the FOV currently being segmented, for diagnostic logging — set by
 # process_image_group at entry so the per-FOV ``seg-input`` line (and the last
@@ -1422,6 +1434,74 @@ def filter_debris(
     return cleaned, len(bad_ids)
 
 
+def compute_region_areas(
+    image: np.ndarray,
+    labels: np.ndarray,
+    *,
+    close_radius: int = 2,
+) -> "dict[int, float]":
+    """Per-label area (px) of the connected bright *region* each nucleus sits in.
+
+    StarDist mis-segments a bright debris blob into many small star-convex
+    labels, so per-cell size can't reject it (each fragment is small). This
+    reconstructs the image-level region the fragments belong to: the Otsu-bright
+    foreground **unioned with the label mask**, morphologically closed so the
+    densely-packed fragments (or a solid bright blob) re-merge into one connected
+    component. A normal isolated nucleus sits in a small component (≈ its own
+    size); every fragment of a debris blob shares the same *large* component.
+
+    Returns ``{label_id: region_area_px}`` so a post-run "max region area" gate
+    rejects the whole blob at once. Pure numpy / skimage — unit-tested without
+    the app. Returns all-zero (no gating) when the image is unusable.
+    """
+    lab = np.asarray(labels)
+    ids = np.unique(lab)
+    ids = ids[ids != 0]
+    out: "dict[int, float]" = {int(n): 0.0 for n in ids}
+    if not out:
+        return out
+    img = np.asarray(image, dtype=np.float32)
+    if img.shape != lab.shape or img.size == 0:
+        return out
+
+    from skimage.measure import label as _cc_label
+    fg = (lab > 0)
+    finite = img[np.isfinite(img)]
+    if finite.size and float(finite.max()) > float(finite.min()):
+        try:
+            from skimage.filters import threshold_otsu
+            fg = fg | (img > float(threshold_otsu(finite)))
+        except Exception:
+            pass
+    if close_radius and close_radius > 0:
+        try:
+            from scipy.ndimage import binary_closing as _binary_closing
+            from skimage.morphology import disk
+            fg = _binary_closing(fg, structure=disk(int(close_radius)))
+        except Exception:
+            pass
+    # closing can erode label pixels near the image border; re-union the labels
+    # so every nucleus always anchors a component at least its own size.
+    fg = np.asarray(fg, dtype=bool) | (lab > 0)
+
+    comp = _cc_label(fg)
+    comp_area = np.bincount(comp.ravel())  # area (px) of each connected component
+    # Dominant component per nucleus label (its pixels lie in one component).
+    sel = lab > 0
+    ncomp = int(comp.max()) + 1
+    keyed = lab[sel].astype(np.int64) * ncomp + comp[sel].astype(np.int64)
+    ukey, ucount = np.unique(keyed, return_counts=True)
+    best_count: "dict[int, int]" = {}
+    for k, cnt in zip(ukey.tolist(), ucount.tolist()):
+        l, c = divmod(k, ncomp)
+        if c == 0:
+            continue
+        if cnt > best_count.get(l, 0):
+            best_count[l] = cnt
+            out[int(l)] = float(comp_area[c])
+    return out
+
+
 def build_flatfield_models(
     input_dir: Path,
     *,
@@ -1613,6 +1693,90 @@ def _segment_stardist_seeded_watershed_cell(
             mask=cytoplasm_binary_mask,
         ).astype(np.int32)
     return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
+
+
+def _cellpose_model(model_type: str = "cyto3"):
+    """Return the per-worker Cellpose model for *model_type*, loading it once.
+
+    Guarded import so the app / pipeline run without cellpose installed; the
+    error only surfaces when a Cellpose method is actually selected."""
+    key = str(model_type or "cyto3").strip() or "cyto3"
+    model = _CELLPOSE_MODELS.get(key)
+    if model is None:
+        try:
+            from cellpose import models as _cp_models
+        except Exception as exc:  # pragma: no cover - depends on optional dep
+            raise RuntimeError(
+                "Cellpose segmentation requires the 'cellpose' package. Install "
+                f"it (see requirements) — import failed: {exc}"
+            ) from exc
+        model = _cp_models.CellposeModel(model_type=key)
+        _CELLPOSE_MODELS[key] = model
+    return model
+
+
+def _segment_cellpose(
+    image: np.ndarray,
+    *,
+    model_type: str = "cyto3",
+    diameter: float = 0.0,
+    flow_threshold: float = 0.4,
+    cellprob_threshold: float = 0.0,
+    nucleus_image: "np.ndarray | None" = None,
+) -> np.ndarray:
+    """Segment *image* with Cellpose. Works on any channel (fluorescent or
+    brightfield) — the caller chooses the input. ``diameter=0`` auto-estimates.
+
+    When *nucleus_image* is given, the two channels are stacked and Cellpose runs
+    in cyto+nucleus mode (``channels=[1, 2]``); otherwise grayscale
+    (``channels=[0, 0]``). ``flow_threshold`` / ``cellprob_threshold`` tune the
+    mask recovery / probability cut.
+    """
+    model = _cellpose_model(model_type)
+    diam = float(diameter) if diameter and diameter > 0 else None
+    seg = np.asarray(image)
+    if nucleus_image is not None:
+        stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
+        result = model.eval(stacked, diameter=diam, channels=[1, 2],
+                            flow_threshold=flow_threshold,
+                            cellprob_threshold=cellprob_threshold)
+    else:
+        result = model.eval(seg, diameter=diam, channels=[0, 0],
+                            flow_threshold=flow_threshold,
+                            cellprob_threshold=cellprob_threshold)
+    masks = result[0]  # eval returns (masks, flows, styles[, diams])
+    return np.asarray(masks, dtype=np.int32)
+
+
+def _segment_classical(image: np.ndarray) -> np.ndarray:
+    """Label-free segmentation by Otsu threshold + distance-transform watershed.
+
+    Splits touching objects without any deep-learning model: Otsu (via
+    ``threshold_otsu``) gives the foreground mask; the EDT peaks seed a
+    watershed (both already imported for the seeded-watershed mode). Reads the
+    designated phase channel. No new dependency.
+    """
+    from skimage.feature import peak_local_max
+    from skimage.measure import label as _label
+    img = np.asarray(image, dtype=np.float32)
+    try:
+        thresh = threshold_otsu(img)
+    except ValueError:
+        thresh = float(np.mean(img))
+    mask = img > thresh
+    if not np.any(mask):
+        return np.zeros(img.shape, dtype=np.int32)
+    distance = ndi.distance_transform_edt(mask)
+    # Seed one marker per local distance maximum (≈ one per object).
+    coords = peak_local_max(distance, min_distance=5, labels=mask)
+    markers = np.zeros(distance.shape, dtype=np.int32)
+    for i, (y, x) in enumerate(coords, start=1):
+        markers[y, x] = i
+    if markers.max() == 0:
+        # No peaks (e.g. a single blob) — fall back to connected components.
+        return _label(mask).astype(np.int32)
+    labels = watershed(-distance, markers=markers, mask=mask)
+    return np.asarray(labels, dtype=np.int32)
 
 
 # ---------------------------------------------------------------------------
@@ -1904,6 +2068,11 @@ def process_image_group(
     qc_min_area: "float | None" = None,
     qc_max_area: "float | None" = None,
     qc_min_solidity: "float | None" = None,
+    cellpose_diameter: float = 0.0,
+    cellpose_model: str = "cyto3",
+    cellpose_flow_threshold: float = 0.4,
+    cellpose_cellprob_threshold: float = 0.0,
+    cellpose_nuclei_channel: str = "",
 ) -> list[dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
@@ -2033,21 +2202,44 @@ def process_image_group(
             time.perf_counter() - _t,
             len(np.unique(labels)) - 1,
         )
+    elif segmentation_method in _CELLPOSE_METHODS:
+        # General Cellpose segments the chosen Segmentation channel (nir_corr).
+        # The 'cellpose_labelfree' preset is identical mechanics: main() already
+        # remapped the nuclear slot onto the phase channel, and forces cyto3, so
+        # nir_corr is the phase image and the params are the brightfield preset.
+        nucleus_image = None
+        nuc_tok = str(cellpose_nuclei_channel or "").strip().lower()
+        if nuc_tok:
+            lowered = [t.lower() for t in fluor_tokens]
+            if nuc_tok in lowered:
+                nucleus_image = fluor_raws[lowered.index(nuc_tok)]
+        labels = _segment_cellpose(
+            nir_corr, model_type=cellpose_model, diameter=cellpose_diameter,
+            flow_threshold=cellpose_flow_threshold,
+            cellprob_threshold=cellpose_cellprob_threshold,
+            nucleus_image=nucleus_image,
+        )
+        log.info("  cellpose:    %.1f s  (%d cells detected; model=%s)",
+                 time.perf_counter() - _t, len(np.unique(labels)) - 1, cellpose_model)
+    elif segmentation_method == "classical_threshold":
+        labels = _segment_classical(nir_corr)
+        log.info("  classical:   %.1f s  (%d objects detected)",
+                 time.perf_counter() - _t, len(np.unique(labels)) - 1)
     else:
         labels = _segment_stardist_nuclei(nir_corr)
         log.info("  stardist:    %.1f s  (%d nuclei detected)",
                  time.perf_counter() - _t, len(np.unique(labels)) - 1)
 
-    # QC debris removal: drop label regions outside the size/solidity bounds
-    # (debris, fragments, merged blobs) before measurement. Reuses the §C
-    # regionprops machinery.
+    # QC debris gating is NON-DESTRUCTIVE: every segmented cell is kept and
+    # quantified rather than zeroed out of the mask (which used to delete the
+    # cells' rows entirely). The size/solidity thresholds are recorded in
+    # pipeline_info.json (qc_options) and applied as a reversible per-cell flag
+    # in the Review QC view, where they can be edited without re-segmenting and
+    # compose with manual curation. ``shape_solidity`` is emitted unconditionally
+    # below so that gate is editable post-run. See well_viewer/features/qc/.
     if qc_remove_debris:
-        labels, _n_debris = filter_debris(
-            labels, min_area=qc_min_area, max_area=qc_max_area,
-            min_solidity=qc_min_solidity,
-        )
-        if _n_debris:
-            log.info("  debris:      removed %d region(s)", _n_debris)
+        log.info("  debris:      gating deferred to Review QC layer "
+                 "(non-destructive; thresholds recorded in pipeline_info)")
 
     # Save QC images.
     # Keep schema tokens in output stems so output names stay harmonized with
@@ -2159,7 +2351,18 @@ def process_image_group(
     # Per-cell morphology (selected shape features + always-on centroids), one
     # regionprops pass over the label image. Channel-independent → emitted with
     # a shape_ prefix, merged into each cell record by nucleus id.
-    shape_by_id = compute_shape_features(labels, shape_features)
+    # ``solidity`` is always included (even if unselected) so the post-run QC
+    # debris gate (well_viewer/features/qc) can be edited without re-segmenting;
+    # area is already emitted as the base ``area_px`` column.
+    _qc_shape_keys = list(shape_features or [])
+    if "solidity" not in _qc_shape_keys:
+        _qc_shape_keys.append("solidity")
+    shape_by_id = compute_shape_features(labels, _qc_shape_keys)
+
+    # Per-cell bright-region area (always emitted) so the post-run QC gate can
+    # reject debris that StarDist shattered into many small cells — a size gate
+    # on this region area catches the blob that per-cell size misses.
+    region_by_id = compute_region_areas(nir_corr, labels)
 
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
@@ -2174,6 +2377,7 @@ def process_image_group(
             rec[f"{pfx}_min_intensity"]   = float(minv[i])
             rec[f"{pfx}_std_intensity"]   = float(stdv[i])
         rec.update(shape_by_id.get(int(nid), {}))
+        rec["qc_region_area"] = float(region_by_id.get(int(nid), 0.0))
         records.append(rec)
     log.info("  quantify:    %.1f s  (%d nuclei)", time.perf_counter() - _t, len(records))
 
@@ -2659,7 +2863,8 @@ def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
             return StarDist2D.from_pretrained(name)
 
 
-def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:
+def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
+                 segmentation_method: str = DEFAULT_SEGMENTATION_METHOD) -> None:
     """
     Called once in each worker process before any image pairs are processed.
 
@@ -2758,6 +2963,15 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0) -> None:
         device_note = "CPU-only (non-macOS default)"
     thr_note = (f"{threads_per_worker} TF thread(s)" if threads_per_worker > 0
                 else "TF default threads")
+
+    # Label-free methods (cellpose / classical_threshold) don't use the StarDist
+    # TF model — skip the (heavy, network-touching) load entirely. Cellpose
+    # lazy-loads its torch model on first use; classical needs none.
+    if segmentation_method not in _STARDIST_METHODS:
+        log.info("Worker %d ready (%s; label-free '%s' — StarDist not loaded).",
+                 os.getpid(), device_note, segmentation_method)
+        return
+
     log.info("Worker %d loading StarDist (%s, %s).", os.getpid(), device_note, thr_note)
 
     # Import StarDist and its TF dependency HERE, after env vars are set.
@@ -3323,7 +3537,8 @@ def run_pipeline_on_wells(
         max_workers=workers,
         mp_context=ctx,
         initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker),
+        initargs=(force_cpu, threads_per_worker,
+                  shared_kwargs.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
     ) as executor:
         future_to_well = {
             executor.submit(task_fn, well_label, pairs, shared_kwargs): well_label
@@ -3568,7 +3783,8 @@ def process_well_zips(
         max_workers=workers,
         mp_context=ctx,
         initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker),
+        initargs=(force_cpu, threads_per_worker,
+                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
     ) as executor:
         future_to_well = {
             executor.submit(
@@ -3688,7 +3904,8 @@ def process_well_folders(
         max_workers=workers,
         mp_context=ctx,
         initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker),
+        initargs=(force_cpu, threads_per_worker,
+                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
     ) as executor:
         future_to_well = {
             executor.submit(
@@ -3891,6 +4108,7 @@ def write_pipeline_info(
     min_nucleus_area_px: int,
     shape_features: "list[str] | None" = None,
     qc_options: "dict | None" = None,
+    phase_token: str = "",
     execution_options: "dict | None" = None,
 ) -> Path:
     """Serialize the run metadata sidecar to ``<output_dir>/pipeline_info.json``."""
@@ -3916,6 +4134,7 @@ def write_pipeline_info(
         "smfish_tokens": list(smfish_tokens or []),
         "shape_features": [str(s).strip().lower() for s in (shape_features or []) if str(s).strip()],
         "qc_options": dict(qc_options or {}),
+        "phase_token": str(phase_token or "").strip().lower(),
         "segmentation_method": segmentation_method,
         "cytoplasm_token": cytoplasm_token,
         "min_nucleus_area_px": int(min_nucleus_area_px),
@@ -3990,12 +4209,56 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--segmentation_method",
         default=DEFAULT_SEGMENTATION_METHOD,
-        choices=("stardist_nuclei", "stardist_seeded_watershed_cell"),
+        choices=("stardist_nuclei", "stardist_seeded_watershed_cell",
+                 "cellpose", "cellpose_labelfree", "classical_threshold"),
         help=(
-            "Segmentation method. 'stardist_nuclei' keeps existing behavior. "
-            "'stardist_seeded_watershed_cell' uses StarDist nuclear seeds and "
-            "2D watershed on a cytoplasm Otsu mask."
+            "Segmentation routine, run on the --nuclear_token channel (any "
+            "fluorescent or brightfield channel) unless noted. 'stardist_nuclei' "
+            "(default) and 'stardist_seeded_watershed_cell' (StarDist seeds + "
+            "cytoplasm watershed) need a fluorescent stain. 'cellpose' is general "
+            "Cellpose (tune --cellpose_model/diameter/flow/cellprob, optional "
+            "--cellpose_nuclei_channel). 'classical_threshold' is Otsu + "
+            "watershed. 'cellpose_labelfree' is a Cellpose cyto3 preset that "
+            "segments the --phase_token (brightfield) channel."
         ),
+    )
+    p.add_argument(
+        "--phase_token",
+        default="",
+        help=(
+            "Channel token of the phase / brightfield image segmented by the "
+            "'cellpose_labelfree' preset. Ignored by the other methods."
+        ),
+    )
+    p.add_argument(
+        "--cellpose_model",
+        default="cyto3",
+        choices=("cyto3", "cyto2", "cyto", "nuclei"),
+        help="Cellpose model for --segmentation_method=cellpose.",
+    )
+    p.add_argument(
+        "--cellpose_diameter",
+        type=float,
+        default=0.0,
+        help="Cellpose cell diameter in px (0 = auto-estimate).",
+    )
+    p.add_argument(
+        "--cellpose_flow_threshold",
+        type=float,
+        default=0.4,
+        help="Cellpose flow_threshold (mask recovery tolerance).",
+    )
+    p.add_argument(
+        "--cellpose_cellprob_threshold",
+        type=float,
+        default=0.0,
+        help="Cellpose cellprob_threshold (cell probability cut).",
+    )
+    p.add_argument(
+        "--cellpose_nuclei_channel",
+        default="",
+        help="Optional fluor token used as Cellpose's nucleus channel "
+             "(channels=[seg, nucleus]) for cyto models; empty = grayscale.",
     )
     p.add_argument(
         "--cytoplasm_token",
@@ -4181,6 +4444,22 @@ def main() -> None:
             )
         if args.cytoplasm_token == args.nuclear_token:
             parser.error("--cytoplasm_token must be different from --nuclear_token.")
+    # Label-free methods segment the designated phase channel rather than a
+    # fluorescent nuclear stain. The phase image takes the nuclear slot for the
+    # grouping/segmentation machinery — remap the nuclear token onto it so all
+    # existing per-FOV grouping is reused unchanged.
+    phase_token = str(args.phase_token or "").strip()
+    if args.segmentation_method in _LABELFREE_METHODS:
+        if not phase_token:
+            parser.error(
+                f"--phase_token is required when --segmentation_method="
+                f"{args.segmentation_method} (the phase/brightfield channel to segment)."
+            )
+        args.nuclear_token = phase_token
+        # The label-free preset is Cellpose with a brightfield model.
+        args.cellpose_model = "cyto3"
+        log.info("Label-free segmentation (%s): Cellpose cyto3 on phase channel "
+                 "%r as the segmentation input.", args.segmentation_method, phase_token)
     log.info("Schema   : %s  (sep=%r)", args.filename_schema, sep)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -4210,6 +4489,7 @@ def main() -> None:
                 "max_area": float(args.qc_max_area or 0.0),
                 "min_solidity": float(args.qc_min_solidity or 0.0),
             },
+            phase_token=args.phase_token or "",
             execution_options=vars(args),
         )
         log.info("Wrote sidecar : %s", info_path)
@@ -4339,6 +4619,11 @@ def main() -> None:
         qc_min_area=(args.qc_min_area or None),
         qc_max_area=(args.qc_max_area or None),
         qc_min_solidity=(args.qc_min_solidity or None),
+        cellpose_diameter=args.cellpose_diameter,
+        cellpose_model=args.cellpose_model,
+        cellpose_flow_threshold=args.cellpose_flow_threshold,
+        cellpose_cellprob_threshold=args.cellpose_cellprob_threshold,
+        cellpose_nuclei_channel=args.cellpose_nuclei_channel,
     )
 
     # If the selected input is an "in" directory, normalise any loose TIF/TIFF

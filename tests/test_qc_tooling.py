@@ -22,6 +22,7 @@ from process_microscopy import (
     combined_empty_well_correct,
     BACKGROUND_METHODS,
     filter_debris,
+    compute_region_areas,
     build_flatfield_models,
     build_background_models,
     sample_empty_well_images,
@@ -33,6 +34,42 @@ from pathlib import Path
 import io
 import zipfile
 import tifffile
+
+
+# ── bright-region area (debris StarDist shatters into many small cells) ──────
+
+def test_compute_region_areas_merges_shattered_debris():
+    """An isolated nucleus sits in a small bright region; a bright debris blob
+    that StarDist split into 4 small labels has all 4 share one large region."""
+    img = np.zeros((40, 40), dtype=np.float32)
+    lab = np.zeros((40, 40), dtype=np.int32)
+    # isolated nucleus (label 1) on its own small bright spot
+    img[2:7, 2:7] = 1000.0
+    lab[2:7, 2:7] = 1
+    # one bright 12x12 debris blob, shattered into 4 small labels (2..5)
+    img[25:37, 25:37] = 1000.0
+    lab[26:29, 26:29] = 2
+    lab[26:29, 33:36] = 3
+    lab[33:36, 26:29] = 4
+    lab[33:36, 33:36] = 5
+
+    region = compute_region_areas(img, lab)
+    # the four debris fragments share one large region, much bigger than the
+    # isolated nucleus's
+    big = {region[2], region[3], region[4], region[5]}
+    assert len(big) == 1                       # all four equal (same blob)
+    assert region[2] >= 140                     # ~12x12 = 144
+    assert region[1] <= 40                       # ~5x5 = 25 (+closing halo)
+    assert region[2] > 3 * region[1]            # blob dwarfs a single nucleus
+
+
+def test_compute_region_areas_empty_and_flat():
+    assert compute_region_areas(np.zeros((10, 10), np.float32),
+                                np.zeros((10, 10), np.int32)) == {}
+    # flat image (no Otsu split) → labels still anchor their own components
+    lab = np.zeros((10, 10), np.int32); lab[1:4, 1:4] = 1
+    out = compute_region_areas(np.ones((10, 10), np.float32), lab)
+    assert out[1] >= 9
 
 
 # ── flat-field estimation / application ──────────────────────────────────────

@@ -157,10 +157,12 @@ def test_normalize_well_canonicalises_96_well(value, expected):
 
 
 def test_role_catalog_covers_all_legacy_kinds():
-    """Every kind the legacy code branched on is in the catalog."""
+    """Every kind the legacy code branched on is in the catalog (newer roles
+    such as ``phase`` may extend it)."""
     legacy = {"fluor", "tophat", "mask", "overlay", "smfish"}
     catalog = {spec.role.value for spec in ROLE_CATALOG.values()}
-    assert legacy == catalog
+    assert legacy <= catalog
+    assert "phase" in catalog
 
 
 @pytest.mark.parametrize("role,expected", [

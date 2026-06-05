@@ -57,6 +57,7 @@ class Role(str, Enum):
     MASK = "mask"
     OVERLAY = "overlay"
     SMFISH = "smfish"
+    PHASE = "phase"
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,15 @@ ROLE_CATALOG: Mapping[Role, RoleSpec] = {
         accept_exts=(),
         is_channel_scoped=True, precedence=30,
     ),
+    # Phase / brightfield channel designated as the label-free segmentation
+    # input (cellpose / classical). Channel-scoped like smFISH; any processed
+    # phase output carries a "_phase" suffix.
+    Role.PHASE: RoleSpec(
+        role=Role.PHASE, suffix="_phase",
+        output_exts=(".tif", ".tiff"),
+        accept_exts=(),
+        is_channel_scoped=True, precedence=35,
+    ),
 }
 
 
@@ -120,6 +130,7 @@ def role_for_kind(kind: str) -> Optional[Role]:
         "mask": Role.MASK,
         "overlay": Role.OVERLAY,
         "smfish": Role.SMFISH,
+        "phase": Role.PHASE,
     }
     return aliases.get(str(kind).strip().lower())
 

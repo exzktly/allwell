@@ -231,11 +231,24 @@ def detect_review_image_channels(df: pd.DataFrame, fluor_channels: List[str], se
 # ── DataFrame helpers ────────────────────────────────────────────────────────
 
 def df_included_mask(df: pd.DataFrame) -> pd.Series:
-    """Return a boolean Series flagging rows where ``Included == 1``."""
+    """Rows that count toward analysis: ``Included == 1`` composed with the QC
+    layer.
+
+    Manual curation / cell-gating own the ``Included`` column; the QC layer owns
+    a separate ``QC_Pass`` column (1 = passes debris gating). The effective
+    inclusion is the AND of the two — ``manual-keep AND passes-QC`` — so QC
+    re-gating never clobbers hand-curated edits. ``QC_Pass`` is optional: when
+    absent (no QC layer / older data) it is treated as all-pass.
+    """
     if "Included" not in df.columns:
-        return pd.Series(True, index=df.index)
-    incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
-    return incl.eq(1)
+        mask = pd.Series(True, index=df.index)
+    else:
+        incl = pd.to_numeric(df["Included"], errors="coerce").fillna(0)
+        mask = incl.eq(1)
+    if "QC_Pass" in df.columns:
+        qc = pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1)
+        mask = mask & qc.eq(1)
+    return mask
 
 
 def resolve_value_series(
@@ -345,7 +358,6 @@ def aggregate_with_threshold_df(
     use_sem: bool = False,
     tp_col: str = "timepoint_hours",
     val_col: str = "gfp_mean_intensity",
-    cell_area_threshold: float = 0.0,
     fluor_gates: Optional[Dict[str, float]] = None,
     per_fov_spread: bool = False,
     ratios: Optional[Dict[str, RatioMetric]] = None,
@@ -381,8 +393,8 @@ def aggregate_with_threshold_df(
             # rather than letting `~(NaN <= x)` keep them. Without this,
             # aggregation kept NaN-area cells but raw filtering dropped
             # them — same dataset, different counts.
-            mask &= np.isfinite(area) & (area > cell_area_threshold)
-    elif 0.0 <= cell_area_threshold:
+            mask &= np.isfinite(area) 
+    else:
         return []
 
     for channel, gate in fluor_gates.items():
@@ -543,7 +555,6 @@ def _all_fluor_values(df: pd.DataFrame, val_col: str = "gfp_mean_intensity") -> 
 def _all_fluor_values_filtered(
     df: pd.DataFrame,
     val_col: str = "gfp_mean_intensity",
-    cell_area_threshold: float = 0.0,
     fluor_gates: Optional[Dict[str, float]] = None,
     ratios: Optional[Dict[str, RatioMetric]] = None,
     tp_filter: Optional[float] = None,
@@ -560,8 +571,8 @@ def _all_fluor_values_filtered(
     if "area_px" in df.columns:
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) & (area > cell_area_threshold)
-    elif cell_area_threshold >= 0.0:
+            mask &= np.isfinite(area) 
+    else:
         return np.empty(0, dtype=float)
 
     for channel, gate in fluor_gates.items():

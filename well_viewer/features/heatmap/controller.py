@@ -384,7 +384,7 @@ def redraw_heatmap(app) -> None:
     # smFISH counts: use a negative floor so cells with zero detected
     # spots contribute to the mean — at threshold=0 an all-zero
     # population gives NaN and the heatmap cell stays empty.
-    if app._app_state.channel.active_metric == "smfish_count":
+    if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)

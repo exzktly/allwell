@@ -391,7 +391,7 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h) -> None:
     edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
     grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
 
-    if app._app_state.channel.active_metric == "smfish_count":
+    if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
         threshold = float("nan")
     else:
         try:

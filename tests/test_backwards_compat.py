@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import shape_features_core as sfc
 from well_viewer.domain.viewer_state import read_pipeline_info
 
@@ -99,3 +101,29 @@ def test_shape_features_core_catalog():
     # Shape metrics carry no cell-gating threshold; intensity metrics do.
     assert sfc.has_threshold("shape_area") is False
     assert sfc.has_threshold("gfp_mean_intensity") is True
+
+
+# ── Review-side detection (backwards-compatible) ─────────────────────────────
+
+def test_detect_shape_features_legacy_vs_new():
+    pd = pytest.importorskip("pandas")
+    from well_viewer.data.data_loading import detect_shape_features
+
+    # Legacy CSV (intensity only) → no shape columns → no dropdown section.
+    legacy = pd.DataFrame({
+        "well": ["A01"], "fov": ["F001"], "timepoint": ["24h"],
+        "nucleus_id": [1], "area_px": [150], "gfp_mean_intensity": [80.0],
+    })
+    assert detect_shape_features(legacy) == []
+
+    # New CSV with shape columns → returned in catalog order.
+    new = legacy.copy()
+    new["shape_solidity"] = 0.97
+    new["shape_eccentricity"] = 0.4
+    new["shape_centroid_row"] = 19.5
+    new["shape_centroid_col"] = 19.5
+    out = detect_shape_features(new)
+    assert out == [c for c in sfc.ALL_COLUMNS if c in set(new.columns)]
+    # eccentricity precedes solidity in the catalog; centroids come last.
+    assert out.index("shape_eccentricity") < out.index("shape_solidity")
+    assert "shape_centroid_row" in out and "shape_centroid_col" in out

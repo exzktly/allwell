@@ -4,12 +4,13 @@ Living status tracker for the four tentpole features. Design spec:
 [`FEATURE_PLAN_segmentation_qc_shape_tracking.md`](FEATURE_PLAN_segmentation_qc_shape_tracking.md)
 (§A label-free seg · §B QC · §C shape features · §D tracking).
 
-**Current status:** ✅ PR1 (foundation) code-complete — deps empirically resolved + installed +
-import-coexistence verified (laptrack dropped; btrack+trackastra in-core); `requirements-remote.txt`,
-PyInstaller spec, `shape_features_core.py`, `read_pipeline_info` bw-compat defaults, and the
-`tests/test_backwards_compat.py` harness all landed. Remaining for PR1 = **dev-env-only**
-verification (py3.10 install, Metal GPU, StarDist determinism, `pytest`, held tifffile/imagecodecs
-pins). **Next: PR2 — shape features.**
+**Current status:** ✅ PR1 (foundation) code-complete (dev-env verification pending).
+✅ PR2 (shape features) **complete & verified headless** — pipeline emit + sidecar + Analyze
+chip selector + `detect_shape_features` + the full Review dropdown wiring (sectioned combo,
+metric collapse, virtual-channel routing, all-cells aggregation, scatter-gate bypass).
+A headless PySide6 (offscreen) env now runs the suite; `test_shape_features.py` +
+`test_backwards_compat.py` + full suite green (8 unrelated pre-existing remote/rsync failures).
+**Next: PR3 (QC tooling) or PR5a (tracking core) — both base on PR2.**
 
 ## Confirmed decisions
 - **Dependencies:** all new packages in **core** requirements, pinned to one mutually
@@ -151,25 +152,33 @@ main
 - **Verification:** dependency gate passes; `pytest tests/` green; app launches; StarDist
   determinism unchanged.
 
-### ☐ PR2 — Shape features (§C)
+### ✅ PR2 — Shape features (§C)
 - **Branch:** `claude/feat-shape-features`  **Base:** `claude/feat-foundation-deps-core`
   **Depends on:** PR1 (`shape_features_core`).
 - **Tasks:**
-  - ☐ `compute_shape_features(labels, selected)` via `regionprops_table`; merge `shape_*`
-    columns (incl. always-on centroids) into per-cell records (`process_microscopy.py:1516-1541`).
-  - ☐ `--shape_features` arg (`build_parser`) + thread through `process_image_group`.
-  - ☐ Record `shape_features` in the fresh `pipeline_info` `info` dict.
-  - ☐ Analyze "Shape Metrics" `ChipGroup` section + `_collect_run_options` + `build_pipeline_args`.
-  - ☐ `detect_shape_features(df)`; `ui_helpers.set_combo_values_sectioned`; "Shape Features"
-    dropdown section + metric collapse; `threshold=-1.0` aggregation; scatter-gate bypass for
-    `shape_*` axes.
-- **Commits:** `feat(pipeline): emit selectable shape-feature columns` ·
-  `feat(analyze): shape-metrics chip selector` ·
+  - ✅ `compute_shape_features(labels, selected)` via `regionprops_table`; merge `shape_*`
+    columns (incl. always-on centroids) into per-cell records. Validated on synthetic labels.
+  - ✅ `--shape_features` arg (`build_parser`) + thread through `process_image_group` + `shared_kwargs`.
+  - ✅ Record `shape_features` in the fresh `pipeline_info` `info` dict + stamp `schema_version=2`.
+  - ✅ Analyze "Shape Metrics" `ChipGroup` section + `_collect_run_options` +
+    `build_pipeline_args` (`--shape_features` mapping verified).
+  - ✅ `detect_shape_features(df)` (catalog-ordered; `[]` on legacy CSVs) + bw-compat test extended.
+  - ✅ **Review dropdown wiring** — `ui_helpers.set_combo_values_sectioned` (disabled,
+    non-selectable headers on the combo's own model); "Shape Features" section in
+    `update_channel_selector` + label→col map; `set_active_shape_feature` routing +
+    `is_shape_active`; `populate_metric_combo` collapse; `active_channel_label` branch;
+    `recalculate_threshold` populates `shape_features`; `threshold=-1.0` (all-cells)
+    aggregation in line/bar/heatmap/distribution; scatter `fluor_gate` bypass for `shape_*`.
+    **Verified headless** (PySide6 offscreen).
+- **Commits (landed):** `feat(pipeline): emit selectable shape-feature columns` ·
+  `feat(review/data): detect shape-feature columns` · `feat(analyze): shape-metrics chip selector` ·
   `feat(review): shape features as sectioned virtual channels`
-- **BW-compat gate:** old CSVs (no `shape_*`) ⇒ no dropdown section, plots unchanged; extend the
-  regression test.
-- **Verification:** run pipeline with `--shape_features`; confirm columns + sidecar key; open
-  legacy dataset (no section); `pytest tests/`.
+- **BW-compat gate:** ✅ old CSVs (no `shape_*`) ⇒ `detect_shape_features` returns `[]` (no
+  dropdown section); `read_pipeline_info` defaults hold; regression test green.
+- **Verification:** ✅ `tests/test_shape_features.py` (5) + `test_backwards_compat.py` (5) +
+  full suite green in a headless PySide6 env (8 unrelated pre-existing remote/rsync failures,
+  confirmed failing on base). Set up: `apt install libegl1 …`; `QT_QPA_PLATFORM=offscreen`.
+  Visual polish (section styling) is the only thing left for a real-display dev-env pass.
 
 ### ☐ PR3 — QC tooling (§B)
 - **Branch:** `claude/feat-qc-tooling`  **Base:** `claude/feat-shape-features`

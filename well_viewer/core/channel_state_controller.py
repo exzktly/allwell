@@ -28,12 +28,14 @@ from well_viewer.data.data_loading import (
     detect_fluor_channels,
     detect_nuclear_channel_token,
     detect_review_image_channels,
+    detect_shape_features,
     detect_smfish_channels,
     merge_fluor_channels,
     normalize_channel_tokens,
 )
 from well_viewer.domain.ratio_models import build_ratio_index, is_ratio_key, ratio_name_from_key
-from well_viewer.core.ui_helpers import set_combo_values
+from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
+from shape_features_core import is_shape_column, label_for as shape_label_for
 from functools import partial
 
 _logger = logging.getLogger("well_viewer")
@@ -80,6 +82,9 @@ def recalculate_threshold(app) -> None:
     app._app_state.channel.review_image_channels = detect_review_image_channels(
         sample_df, app._app_state.channel.fluor_channels, seg_tok,
     )
+    # Populate the available shape-feature columns before the dropdown is built
+    # so they appear in the "Shape Features" section.
+    app._app_state.channel.shape_features = detect_shape_features(sample_df)
     update_channel_selector(app)
 
     # Update smFISH channels, then let ChannelState re-assert its invariants:
@@ -191,6 +196,15 @@ def set_active_channel(app, channel: str) -> None:
             frame = getattr(app, frame_attr, None)
             if frame is not None:
                 frame.setVisible(False)
+    elif is_shape_column(channel):
+        # Shape features are a single per-cell value (like ratios) — the column
+        # name is the value column, and the per-cell metric selector doesn't apply.
+        if not channel_state.set_active_shape_feature(channel):
+            return
+        for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
+            frame = getattr(app, frame_attr, None)
+            if frame is not None:
+                frame.setVisible(False)
     else:
         # set_active_channel resets a stale ratio / smFISH metric so the new
         # channel composes a real column, and re-derives the value column.
@@ -282,12 +296,18 @@ def update_channel_selector(app) -> None:
     """
     real_labels = [ch.upper() for ch in app._app_state.channel.fluor_channels]
     ratio_labels = app._ratio_dropdown_labels()
-    labels = (real_labels + ratio_labels) or ["—"]
-    # Map the uppercase dropdown label back to the underlying channel key
-    # used by set_active_channel.
+    # Shape features are channel-independent virtual channels shown under their
+    # own dropdown section; their key is the shape_* column itself.
+    shape_cols = list(app._app_state.channel.shape_features or [])
+    shape_labels = [shape_label_for(c) or c for c in shape_cols]
+    labels = (real_labels + ratio_labels + shape_labels) or ["—"]
+    # Map the dropdown label back to the underlying channel key used by
+    # set_active_channel (real token, ratio:<name> key, or shape_* column).
     app._label_to_channel_key = {ch.upper(): ch for ch in app._app_state.channel.fluor_channels}
     for r in app._app_state.channel.ratio_metrics:
         app._label_to_channel_key[app._ratio_label_for(r)] = r.key()
+    for col, lbl in zip(shape_cols, shape_labels):
+        app._label_to_channel_key[lbl] = col
     # Montage/preview includes the segmentation channel token.
     seg_tok = getattr(app, "_seg_channel_token", "")
     montage_chans = list(app._app_state.channel.fluor_channels)
@@ -295,10 +315,19 @@ def update_channel_selector(app) -> None:
         montage_chans.append(seg_tok)
     montage_labels = [ch.upper() for ch in montage_chans] or ["—"]
     review_labels = [ch.upper() for ch in (app._app_state.channel.review_image_channels or app._app_state.channel.fluor_channels)] or ["—"]
+    # Plot tabs: real + ratio channels inline, shape features under their own
+    # section header. Image tabs (preview/review) never get shape features.
+    plot_sections = [("", real_labels + ratio_labels)]
+    if shape_labels:
+        plot_sections.append(("Shape Features", shape_labels))
+    have_any = bool(real_labels or ratio_labels or shape_labels)
     for attr in ("_chan_cb_line", "_chan_cb_bar", "_chan_cb_distribution",
                  "_chan_cb_heatmap", "_plotting_channel_cb"):
         if hasattr(app, attr):
-            set_combo_values(getattr(app, attr), labels)
+            if have_any:
+                set_combo_values_sectioned(getattr(app, attr), plot_sections)
+            else:
+                set_combo_values(getattr(app, attr), ["—"])
     if hasattr(app, "_chan_cb_preview"):
         set_combo_values(app._chan_cb_preview, montage_labels)
     if hasattr(app, "_review_image_chan_cb"):
@@ -499,10 +528,10 @@ def set_active_metric(app, metric: str) -> None:
     if metric == app._app_state.channel.active_metric:
         return
     app._app_state.channel.active_metric = metric
-    if not is_ratio_key(app._app_state.channel.active_val_col):
+    if not is_ratio_key(app._app_state.channel.active_val_col) and not is_shape_column(app._app_state.channel.active_val_col):
         app._app_state.channel.active_val_col = f"{app._app_state.channel.active_channel}_{app._app_state.channel.active_metric}"
     active_val_col = app._app_state.channel.active_val_col
-    if not is_ratio_key(active_val_col):
+    if not is_ratio_key(active_val_col) and not is_shape_column(active_val_col):
         cache = getattr(app._app_state.dataset, "cache", {}) or {}
         first_df = next(iter(cache.values()), None)
         if (
@@ -562,17 +591,21 @@ def populate_metric_combo(
     from well_viewer.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
     )
-    ratio_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
-    is_ratio = bool(ratio_key and is_ratio_key(ratio_key))
+    mapped_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    is_ratio = bool(mapped_key and is_ratio_key(mapped_key))
+    is_shape = bool(mapped_key and is_shape_column(mapped_key))
 
     prev = str(cb.currentText() or "")
     blocked = cb.blockSignals(True)
     try:
         cb.clear()
-        if is_ratio:
+        if is_ratio or is_shape:
+            # A single computed value per cell — no intensity-metric flavours.
             cb.addItem(CALCULATED_VAL_LABEL)
             cb.setCurrentIndex(0)
-            cb.setEnabled(True)
+            # Shape features have no metric choice at all; disable the combo so
+            # it reads as inert rather than a one-item dropdown.
+            cb.setEnabled(not is_shape)
             return
         items = list(METRIC_ORDER)
         if include_fraction:
@@ -843,12 +876,15 @@ def get_fluor_gate(app, channel: str) -> float:
 
 def active_channel_label(app) -> str:
     """Return the dropdown label corresponding to the active channel."""
-    if is_ratio_key(app._app_state.channel.active_val_col):
-        ratio_name = ratio_name_from_key(app._app_state.channel.active_val_col)
+    active_val_col = app._app_state.channel.active_val_col
+    if is_ratio_key(active_val_col):
+        ratio_name = ratio_name_from_key(active_val_col)
         for r in app._app_state.channel.ratio_metrics:
             if r.name == ratio_name:
                 return app._ratio_label_for(r)
         return ratio_name.upper()
+    if is_shape_column(active_val_col):
+        return shape_label_for(active_val_col) or active_val_col
     return app._app_state.channel.active_channel.upper()
 
 

@@ -73,6 +73,11 @@ _FEATURES: tuple[ShapeFeature, ...] = (
     ShapeFeature("centroid_col",      "shape_centroid_col",      "Centroid (col)",    "centroid",          "coord"),
 )
 
+#: Public, ordered view of the catalog (use instead of the private ``_FEATURES``).
+FEATURES: tuple[ShapeFeature, ...] = _FEATURES
+#: All emitted shape columns, in catalog order (incl. always-on centroids).
+ALL_COLUMNS: tuple[str, ...] = tuple(f.column for f in _FEATURES)
+
 BY_KEY: dict[str, ShapeFeature] = {f.key: f for f in _FEATURES}
 BY_COLUMN: dict[str, ShapeFeature] = {f.column: f for f in _FEATURES}
 

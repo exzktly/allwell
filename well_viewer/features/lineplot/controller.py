@@ -333,7 +333,7 @@ def redraw_line_plots(
     # spots still contribute to the mean (see barplot/controller.py for
     # the full rationale — at threshold=0 an all-zero population yields
     # NaN means and the plot stays empty).
-    if app._app_state.channel.active_metric == "smfish_count":
+    if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)

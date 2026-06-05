@@ -36,6 +36,8 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **5.5.1 — Per-cell shape features (§C).** The pipeline can emit per-cell morphology columns (area, perimeter, solidity, eccentricity, …); pick them from the **Shape Metrics** dropdown in Analyze, and they appear in Review as a sectioned *Shape Features* virtual-channel group for plotting.
+
 - **5.5.0 — Feature-stack foundation (PR1).** Locks the empirically-verified dependency set and bundles the optional engines (PyTorch, Cellpose, btrack, trackastra) in the PyInstaller build, adds the `shape_features_core` module, and makes dataset reads backwards-compatible with pre-5.5 CSVs.
 
 ---

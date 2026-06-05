@@ -999,6 +999,51 @@ def apply_smfish_log(image: np.ndarray) -> np.ndarray:
     return convolve(image.astype(np.float32), SMFISH_LOG_KERNEL)
 
 
+def compute_shape_features(
+    labels: np.ndarray,
+    selected_keys: "list[str] | None",
+) -> "dict[int, dict[str, float]]":
+    """Per-cell morphology features keyed by label id.
+
+    Computes the user-selected shape features (``selected_keys``) **plus** the
+    always-on centroids (needed by cell tracking) in a single
+    ``skimage.measure.regionprops_table`` pass over the label image — the same
+    pass QC debris-removal will reuse. Returns ``{label_id: {shape_col: value}}``
+    using the ``shape_`` column names from :mod:`shape_features_core` (the
+    Qt-free catalog shared with the viewer). Returns ``{}`` when there are no
+    labels. Channel-independent: no intensity image is needed.
+    """
+    import shape_features_core as sfc
+    from skimage.measure import regionprops_table
+
+    props = sfc.regionprops_properties(selected_keys)  # base regionprop names (incl. centroid)
+    if not props or labels is None or not np.any(labels):
+        return {}
+    table = regionprops_table(labels, properties=("label",) + tuple(props))
+    label_ids = table["label"]
+    emit_keys = list(sfc.normalize_selection(selected_keys)) + list(sfc.ALWAYS_ON_KEYS)
+
+    out: "dict[int, dict[str, float]]" = {}
+    for i, lab in enumerate(label_ids):
+        rec: "dict[str, float]" = {}
+        for key in emit_keys:
+            feat = sfc.BY_KEY.get(key)
+            if feat is None:
+                continue
+            if key == "circularity":
+                area = float(table["area"][i])
+                per = float(table["perimeter"][i])
+                rec[feat.column] = float(4.0 * np.pi * area / (per * per)) if per > 0 else 0.0
+            elif key == "centroid_row":
+                rec[feat.column] = float(table["centroid-0"][i])
+            elif key == "centroid_col":
+                rec[feat.column] = float(table["centroid-1"][i])
+            else:
+                rec[feat.column] = float(table[feat.regionprop][i])
+        out[int(lab)] = rec
+    return out
+
+
 def save_overlay(nir_raw: np.ndarray, labels: np.ndarray, out_path: Path) -> None:
     """Save an 8-bit RGB PNG with nucleus boundaries drawn in red."""
     mn, mx = nir_raw.min(), nir_raw.max()
@@ -1411,6 +1456,7 @@ def process_image_group(
     segmentation_method: str = DEFAULT_SEGMENTATION_METHOD,
     cytoplasm_token: str = "",
     min_nucleus_area_px: int = 50,
+    shape_features: "list[str] | None" = None,
 ) -> list[dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
@@ -1604,6 +1650,11 @@ def process_image_group(
             tok.lower(),
         ))
 
+    # Per-cell morphology (selected shape features + always-on centroids), one
+    # regionprops pass over the label image. Channel-independent → emitted with
+    # a shape_ prefix, merged into each cell record by nucleus id.
+    shape_by_id = compute_shape_features(labels, shape_features)
+
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
             **meta,
@@ -1616,6 +1667,7 @@ def process_image_group(
             rec[f"{pfx}_max_intensity"]   = float(maxv[i])
             rec[f"{pfx}_min_intensity"]   = float(minv[i])
             rec[f"{pfx}_std_intensity"]   = float(stdv[i])
+        rec.update(shape_by_id.get(int(nid), {}))
         records.append(rec)
     log.info("  quantify:    %.1f s  (%d nuclei)", time.perf_counter() - _t, len(records))
 
@@ -3182,6 +3234,10 @@ def process_well_folders(
 # ---------------------------------------------------------------------------
 
 PIPELINE_INFO_FILENAME = "pipeline_info.json"
+# Sidecar schema version. v1 = pre-feature (label-free seg / QC / shape features);
+# v2 = may carry shape_features / qc_options / phase_token. Readers default a
+# missing value to 1 (see well_viewer/domain/viewer_state.read_pipeline_info).
+PIPELINE_INFO_SCHEMA_VERSION = 2
 
 
 def _pipeline_info_jsonable(value):
@@ -3327,6 +3383,7 @@ def write_pipeline_info(
     segmentation_method: str,
     cytoplasm_token: str,
     min_nucleus_area_px: int,
+    shape_features: "list[str] | None" = None,
     execution_options: "dict | None" = None,
 ) -> Path:
     """Serialize the run metadata sidecar to ``<output_dir>/pipeline_info.json``."""
@@ -3334,6 +3391,7 @@ def write_pipeline_info(
         cytoplasm_token = ""
     fields = [f.strip() for f in filename_schema.split(":")]
     info = {
+        "schema_version": PIPELINE_INFO_SCHEMA_VERSION,
         "schema": filename_schema,
         "separator": filename_sep,
         "schema_fields": fields,
@@ -3349,6 +3407,7 @@ def write_pipeline_info(
             cytoplasm_token=cytoplasm_token,
         ),
         "smfish_tokens": list(smfish_tokens or []),
+        "shape_features": [str(s).strip().lower() for s in (shape_features or []) if str(s).strip()],
         "segmentation_method": segmentation_method,
         "cytoplasm_token": cytoplasm_token,
         "min_nucleus_area_px": int(min_nucleus_area_px),
@@ -3476,6 +3535,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--smfish_tokens", nargs="*", default=[],
                    help="Fluorescent channel tokens containing smFISH data. "
                         "A LoG spot-enhancement kernel is applied after tophat.")
+    p.add_argument("--shape_features", nargs="*", default=[],
+                   help="Per-cell shape features to emit as shape_<feature> columns "
+                        "(e.g. eccentricity solidity perimeter major_axis_length). "
+                        "Cell centroids (shape_centroid_row/col) are always emitted.")
 
     p.add_argument("--no_save_tophat",   action="store_true",
                    help="Do not save top-hat/smFISH intermediate TIFFs")
@@ -3602,6 +3665,7 @@ def main() -> None:
             segmentation_method=args.segmentation_method,
             cytoplasm_token=args.cytoplasm_token or "",
             min_nucleus_area_px=args.min_nucleus_area_px,
+            shape_features=list(args.shape_features or []),
             execution_options=vars(args),
         )
         log.info("Wrote sidecar : %s", info_path)
@@ -3722,6 +3786,7 @@ def main() -> None:
         segmentation_method=args.segmentation_method,
         cytoplasm_token=args.cytoplasm_token,
         min_nucleus_area_px=args.min_nucleus_area_px,
+        shape_features=list(args.shape_features or []),
     )
 
     # If the selected input is an "in" directory, normalise any loose TIF/TIFF

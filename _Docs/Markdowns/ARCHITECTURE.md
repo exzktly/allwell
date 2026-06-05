@@ -779,6 +779,19 @@ Output dir
 └── (transient tmp_<well>/ directories deleted on success)
 ```
 
+**Per-cell shape features.** `compute_shape_features(labels, selected)` runs one
+`skimage.regionprops_table` pass per FOV and merges `shape_<feature>` columns
+(area/eccentricity/solidity/perimeter/…, plus the **always-on**
+`shape_centroid_row/col` that cell tracking links across timepoints) into each
+cell record; the selection comes from `--shape_features` and is recorded in
+`pipeline_info.json`. The feature catalog lives in the Qt-free repo-root
+`shape_features_core.py` so the pipeline (emit) and the GUI (detect/label) can't
+drift. On the Review side `data_loading.detect_shape_features` finds the columns
+and the channel dropdown surfaces them as **sectioned virtual channels** (a
+"Shape Features" group via `ui_helpers.set_combo_values_sectioned`), with the
+metric combo collapsed and all-cells (`threshold=-1`) aggregation — they are
+channel-independent, so they bypass the per-channel intensity gate.
+
 ### 6.3 `all_well_launcher.py`
 
 PyInstaller entry point. Two responsibilities:
@@ -1519,5 +1532,7 @@ need to grep for is in plain sight.
 
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
+
+- **5.5.1 (PR2).** Shape features flow pipeline→CSV→Review as sectioned virtual channels. Analyze's selector is now a compact `widgets/checkable_dropdown.CheckableDropdown` (replacing the wide chip grid); the Review channel combo builds sectioned entries via `set_combo_values_sectioned`, fixing shape metrics dropping out on plot sub-tab switches.
 
 - **5.5.0 (PR1).** `shape_features_core` added as the shared feature catalogue; the PyInstaller spec `collect_all`s torch/cellpose/btrack/trackastra; viewer read paths gained backwards-compat defaults (see the bw-compat test harness).

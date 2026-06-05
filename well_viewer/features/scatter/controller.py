@@ -15,6 +15,7 @@ from well_viewer.domain.stats_compute import well_aggregate_stats
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.channel_state_controller import populate_metric_combo
 from well_viewer.domain.ratio_models import is_ratio_key
+from shape_features_core import is_shape_column
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -83,11 +84,14 @@ def collect_scatter_data(
         target_tps = [float(t) for t in (timepoints_h or [])]
     target_arr = np.asarray(target_tps, dtype=float)
 
-    # smFISH counts are integer spot tallies, not fluorescence intensities,
-    # so the per-channel fluor-gate (an intensity floor like 50–1500) would
-    # gate out every count cell. Bypass the gate on count axes.
-    is_count_x = isinstance(col_x, str) and col_x.endswith("_smfish_count")
-    is_count_y = isinstance(col_y, str) and col_y.endswith("_smfish_count")
+    # smFISH counts are integer spot tallies and shape features are morphology
+    # values — neither is a fluorescence intensity, so the per-channel
+    # fluor-gate (an intensity floor like 50–1500) would gate out every such
+    # cell. Bypass the gate on count / shape axes.
+    def _gate_exempt(col) -> bool:
+        return isinstance(col, str) and (col.endswith("_smfish_count") or is_shape_column(col))
+    is_count_x = _gate_exempt(col_x)
+    is_count_y = _gate_exempt(col_y)
 
     def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, list]]:
         df = app._get_rows(well_label)
@@ -368,6 +372,9 @@ def redraw_scatter(
     # Format axes — derive readable label from column name
     def _col_label(col: str) -> str:
         from well_viewer.data.metric_labels import split_metric_col
+        if is_shape_column(col):
+            from shape_features_core import label_for as _shape_label_for
+            return _shape_label_for(col) or col
         parts = split_metric_col(col)
         if parts is None:
             return col
@@ -999,14 +1006,31 @@ def update_scatter_menus(app) -> None:
     ratio_labels = app._ratio_dropdown_labels()
     scatter_ch_options = list(channels) + ratio_labels
 
-    _set_combo_values(app._scatter_ch_x_cb, scatter_ch_options)
-    _set_combo_values(app._scatter_ch_y_cb, scatter_ch_options)
+    # The per-cell scatter additionally offers the shape-feature virtual
+    # channels: each point is a cell, so per-cell morphology (eccentricity,
+    # area, …) is a natural axis. They are channel-independent and shown under
+    # their own section, mirroring the line/bar channel dropdown. The aggregate
+    # scatter keeps fluor+ratio only — its stat-string aggregation has no
+    # shape-feature path. ``_label_to_channel_key`` (built by
+    # ``_update_channel_selector``) maps each label back to its ``shape_*``
+    # column so ``_col_for_scatter_axis`` resolves it like a ratio.
+    from shape_features_core import label_for as _shape_label_for
+    from well_viewer.core.ui_helpers import set_combo_values_sectioned as _set_combo_values_sectioned
+    shape_cols = list(app._app_state.channel.shape_features or [])
+    shape_labels = [_shape_label_for(c) or c for c in shape_cols]
+    cells_ch_options = scatter_ch_options + shape_labels
+    cells_sections = [("", list(scatter_ch_options))]
+    if shape_labels:
+        cells_sections.append(("Shape Features", shape_labels))
 
-    if scatter_ch_options:
-        if app._scatter_ch_x_var.currentText() not in scatter_ch_options:
-            app._scatter_ch_x_var.setCurrentText(scatter_ch_options[0])
-        if app._scatter_ch_y_var.currentText() not in scatter_ch_options:
-            app._scatter_ch_y_var.setCurrentText(scatter_ch_options[0 if len(scatter_ch_options) == 1 else 1])
+    _set_combo_values_sectioned(app._scatter_ch_x_cb, cells_sections)
+    _set_combo_values_sectioned(app._scatter_ch_y_cb, cells_sections)
+
+    if cells_ch_options:
+        if app._scatter_ch_x_var.currentText() not in cells_ch_options:
+            app._scatter_ch_x_var.setCurrentText(cells_ch_options[0])
+        if app._scatter_ch_y_var.currentText() not in cells_ch_options:
+            app._scatter_ch_y_var.setCurrentText(cells_ch_options[0 if len(cells_ch_options) == 1 else 1])
 
     # Refresh per-axis metric combo enable state to match the
     # currently-selected channels.
@@ -1113,9 +1137,11 @@ def col_for_scatter_entry(app, entry: str) -> str:
     "gfp (spots)" -> "gfp_smfish_count"
     "GFP/MCHERRY" (a ratio dropdown label) -> "ratio:GFP/MCHERRY"
     """
-    ratio_key = (getattr(app, "_label_to_channel_key", None) or {}).get(entry)
-    if ratio_key and is_ratio_key(ratio_key):
-        return ratio_key
+    mapped_key = (getattr(app, "_label_to_channel_key", None) or {}).get(entry)
+    if mapped_key and is_ratio_key(mapped_key):
+        return mapped_key
+    if mapped_key and is_shape_column(mapped_key):
+        return mapped_key
     if entry.endswith(" (spots)"):
         ch = entry[:-8]  # Remove " (spots)"
         return f"{ch}_smfish_count"
@@ -1138,9 +1164,13 @@ def col_for_scatter_axis(app, channel_entry: str, metric_key: str) -> str:
     — that's a synthetic key that downstream aggregation code treats as a
     Fraction-On aggregation against the channel's mean-intensity column.
     """
-    ratio_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
-    if ratio_key and is_ratio_key(ratio_key):
-        return ratio_key
+    mapped_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    if mapped_key and is_ratio_key(mapped_key):
+        return mapped_key
+    # Shape features are a single per-cell value (the ``shape_*`` column itself);
+    # they carry no metric suffix, like ratios.
+    if mapped_key and is_shape_column(mapped_key):
+        return mapped_key
     if metric_key in ("fraction_above_threshold", "smfish_count"):
         # Fraction-on uses MFI as the underlying value column; smFISH
         # uses the dedicated count column.

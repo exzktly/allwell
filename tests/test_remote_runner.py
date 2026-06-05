@@ -1154,6 +1154,29 @@ def _make_run(tmp_path):
     )
 
 
+def test_transfer_heartbeat_reports_progress(host, tmp_path):
+    """A silent per-well fetch must not look hung: the heartbeat emits periodic
+    'still transferring… (Ns, M MB so far)' lines with the growing byte count."""
+    import time as _time
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=logs.append)
+    dest = tmp_path / "allwell-x-A01_out.zip"
+    # simulate rsync streaming into a hidden temp file in the dest dir
+    (tmp_path / f".{dest.name}.abc123").write_bytes(b"\0" * (3 * 1024 * 1024))
+    with fetcher._transfer_heartbeat("A01", dest, interval=0.05):
+        _time.sleep(0.16)                       # allow a couple of beats
+    joined = "".join(logs)
+    assert "still transferring" in joined
+    assert "A01" in joined and "MB so far" in joined
+    # no heartbeat lines leak after the context exits
+    n = joined.count("still transferring")
+    _time.sleep(0.12)
+    assert "".join(logs).count("still transferring") == n
+
+
 def test_flush_and_join_does_not_drain_when_cancelled(host, tmp_path):
     """Stop pressed → cancel() → flush_and_join must NOT drain the queue: no
     'draining fetcher' wait, no download summary — just reap the worker and

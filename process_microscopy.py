@@ -1967,9 +1967,45 @@ def _purge_stardist_cache() -> "list[str]":
 
 
 # Cross-process download serialisation (see _stardist_download_lock).
-_STARDIST_LOCK_TIMEOUT = 300.0   # s; the first cold download can take 30s+
-_STARDIST_LOCK_STALE   = 600.0   # s; reclaim a lock whose holder died mid-download
-_STARDIST_LOCK_POLL    = 0.5     # s between acquisition attempts
+_STARDIST_LOCK_TIMEOUT = 120.0   # s; max wait on a *live* download before going unlocked
+_STARDIST_LOCK_STALE   = 180.0   # s; reclaim a no-live-PID lock older than this
+_STARDIST_LOCK_POLL    = 0.25    # s between acquisition attempts
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort liveness check for a local PID (the download workers all share
+    the host). Unknown/unsupported (e.g. Windows ``os.kill(pid, 0)``) → assume
+    alive, so we never reclaim a lock we can't prove is dead."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False                       # definitively gone
+    except PermissionError:
+        return True                        # exists, owned by another user
+    except OSError:
+        return True                        # can't tell → assume alive (safe)
+    return True
+
+
+def _stardist_lock_is_dead(lockdir: Path) -> bool:
+    """A leaked lock is reclaimable when its recorded holder PID(s) are no longer
+    running (instant — the crashed/killed-worker case), or — no PID recorded, a
+    reused PID, or a hung holder — it is older than the stale window."""
+    pids: "list[int]" = []
+    try:
+        for p in lockdir.iterdir():
+            if p.name.startswith("pid.") and p.name[4:].isdigit():
+                pids.append(int(p.name[4:]))
+    except OSError:
+        return False
+    if pids and not any(_pid_alive(pid) for pid in pids):
+        return True                        # all recorded holders dead → reclaim now
+    try:
+        return (time.time() - lockdir.stat().st_mtime) > _STARDIST_LOCK_STALE
+    except OSError:
+        return False
 
 
 def _stardist_cache_models_dir() -> Path:
@@ -2008,18 +2044,26 @@ def _stardist_download_lock(timeout: "float | None" = None):
         try:
             os.mkdir(lockdir)
             held = True
+            # Record our PID so other workers can reclaim instantly if we die.
+            try:
+                (lockdir / f"pid.{os.getpid()}").touch()
+            except OSError:
+                pass
             break
         except FileExistsError:
-            try:
-                age = time.time() - lockdir.stat().st_mtime
-            except OSError:
-                age = 0.0
-            if age > _STARDIST_LOCK_STALE:
-                shutil.rmtree(lockdir, ignore_errors=True)   # reclaim dead holder
+            # Reclaim immediately if the holder is dead (PID gone) — the leaked-
+            # lock-after-crash case — so a rerun never stalls for minutes; a
+            # genuinely live download is waited on up to the (short) timeout.
+            if _stardist_lock_is_dead(lockdir):
+                shutil.rmtree(lockdir, ignore_errors=True)
+                if lockdir.exists():            # couldn't remove → don't spin
+                    log.warning("StarDist download lock could not be reclaimed — "
+                                "proceeding without it.")
+                    break
                 continue
             if time.monotonic() >= deadline:
-                log.warning("StarDist download lock busy >%.0fs — proceeding "
-                            "without it (cache may be contended).", timeout)
+                log.warning("StarDist download lock held by a live process "
+                            ">%.0fs — proceeding without it.", timeout)
                 break
             time.sleep(_STARDIST_LOCK_POLL)
         except OSError:

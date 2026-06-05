@@ -132,6 +132,30 @@ def test_lock_stale_is_reclaimed(tmp_path, monkeypatch):
     assert not lockdir.exists()                          # reclaimed + released
 
 
+def test_lock_dead_holder_reclaimed_instantly(tmp_path, monkeypatch):
+    # The hang we hit: a previous run was killed while a worker held the lock,
+    # leaking the lockdir. The rerun must reclaim it AT ONCE (the holder PID is
+    # dead), not stall for the timeout — even with mtime-staleness disabled.
+    monkeypatch.setenv("KERAS_HOME", str(tmp_path))
+    monkeypatch.setattr(pm, "_STARDIST_LOCK_STALE", 1e9)    # disable mtime fallback
+    monkeypatch.setattr(pm, "_STARDIST_LOCK_TIMEOUT", 30.0)  # would be slow if it waited
+    monkeypatch.setattr(pm, "_pid_alive", lambda pid: False)  # recorded holder is dead
+    lockdir = pm._stardist_cache_models_dir() / ".allwell_stardist_download.lock"
+    lockdir.mkdir(parents=True)
+    (lockdir / "pid.999999").touch()
+
+    class FakeSD:
+        @classmethod
+        def from_pretrained(cls, name):
+            return f"MODEL[{name}]"
+
+    t0 = time.monotonic()
+    out = pm._load_stardist_pretrained(FakeSD)
+    assert out == "MODEL[2D_versatile_fluo]"
+    assert time.monotonic() - t0 < 1.0                     # instant, not after timeout
+    assert not lockdir.exists()                            # reclaimed + released
+
+
 def test_lock_timeout_degrades_to_unlocked(tmp_path, monkeypatch):
     monkeypatch.setenv("KERAS_HOME", str(tmp_path))
     monkeypatch.setattr(pm, "_STARDIST_LOCK_TIMEOUT", 0.2)

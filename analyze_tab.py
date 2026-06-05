@@ -457,7 +457,18 @@ class AnalyzeTab(QWidget):
             feat = _sfc.BY_KEY[key]
             self._shape_chips.addItem(feat.label, data=key)
         self._shape_chips.setCheckedData(list(self._SHAPE_DEFAULTS))
-        sec.layout().addWidget(self._shape_chips)
+        # Constrain width to match the other controls (e.g. the segmentation
+        # combo's 230 px). Added directly to the section's QVBoxLayout the dropdown
+        # button's Preferred policy stretched it to the full ~414 px sidebar, which
+        # looked oversized; cap it and left-align with a trailing stretch.
+        self._shape_chips.setMaximumWidth(230)
+        chip_row = QWidget(sec)
+        crl = QHBoxLayout(chip_row)
+        crl.setContentsMargins(0, 0, 0, 0)
+        crl.setSpacing(4)
+        crl.addWidget(self._shape_chips)
+        crl.addStretch(1)
+        sec.layout().addWidget(chip_row)
 
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Output Options")

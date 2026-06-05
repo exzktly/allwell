@@ -171,6 +171,8 @@ def test_analyze_shape_selector_is_dropdown(qapp):
 
     sel.setCheckedData(["eccentricity", "solidity"])
     assert tab._collect_run_options()["shape_features"] == ["eccentricity", "solidity"]
+    # width is capped (was stretching to the full sidebar, looking oversized)
+    assert sel.maximumWidth() <= 230
 
 
 # ── Full-app regressions: shape features survive sub-tab switch + reach scatter ─

@@ -1177,6 +1177,48 @@ def test_transfer_heartbeat_reports_progress(host, tmp_path):
     assert "".join(logs).count("still transferring") == n
 
 
+def test_zip_is_complete(tmp_path):
+    import zipfile
+    from services.remote_runner import _zip_is_complete
+    good = tmp_path / "good.zip"
+    with zipfile.ZipFile(good, "w") as z:
+        z.writestr("a.tif", b"data")
+    assert _zip_is_complete(good)                       # valid, fully written
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"PK\x03\x04 truncated, no central directory")
+    assert not _zip_is_complete(bad)                    # partial download
+    assert not _zip_is_complete(tmp_path / "missing.zip")
+
+
+def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
+    """The stuck-final-fetch bug: rsync can exit non-zero (timeout / reset on
+    close) *after* the zip is fully across. The well must still materialise —
+    not get discarded and re-fetched forever — so the run can finish."""
+    import tempfile, zipfile
+    from pathlib import Path
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        f = Fetcher(host, run, output_filter=OutputFilter.FULL, log_fn=logs.append)
+    well = "A01"
+    tmp_zip = Path(tempfile.gettempdir()) / f"allwell-{run.run_id}-{well}_out.zip"
+    with zipfile.ZipFile(tmp_zip, "w") as z:            # a COMPLETE zip on disk
+        z.writestr("A01_overlay.tif", b"data")
+    try:
+        with patch.object(Fetcher, "_rsync", return_value=False), \
+             patch.object(Fetcher, "_rsync_glob", return_value=1), \
+             patch.object(Fetcher, "_materialize", lambda self, w, z: None), \
+             patch.object(Fetcher, "_delete_well_files_on_remote", lambda self, w: None):
+            f._fetch_one(well)
+        assert well in run.fetched_wells                # accepted, not discarded
+        assert any("complete on disk" in m for m in logs)
+    finally:
+        try:
+            tmp_zip.unlink()
+        except OSError:
+            pass
+
+
 def test_flush_and_join_does_not_drain_when_cancelled(host, tmp_path):
     """Stop pressed → cancel() → flush_and_join must NOT drain the queue: no
     'draining fetcher' wait, no download summary — just reap the worker and

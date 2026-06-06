@@ -1324,9 +1324,13 @@ process_microscopy.main()
         │     ├── write per-well CSV + image outputs
         │     └── compress to <well>_out.zip
         ├── write pipeline_info.json
-        └── _estimate_thresholds_standalone(output_dir, …)
-              └── _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
-                    ↳ pipeline_info.json["cell_gating"]["thresh_frac_on"]
+        ├── _estimate_thresholds_standalone(output_dir, …)
+        │     └── _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
+        │           ↳ pipeline_info.json["cell_gating"]["thresh_frac_on"]
+        └── if --track: whole-well tracking post-pass
+              ├── tracking.orchestrator.track_well() per well (per-FOV linking)
+              ├── write track_id / track_parent_id / tree_id back into each CSV
+              └── write <well>_out.zip-fingerprinted tracks.json
         │
         ▼
 Process exits. Analyze tab offers the dataset to Review.
@@ -1625,9 +1629,11 @@ need to grep for is in plain sight.
 
 ## Version history
 
-The 6.0 series adds the live run-status dashboard and hardens the run path
-(remote fetch, crash-safety, dead-code removal) on top of the 5.5 analysis
-line. Newest first:
+The 6.x series adds the cell-tracking subsystem (6.1) and the live run-status
+dashboard + run-path hardening (6.0) on top of the 5.5 analysis line. Newest
+first:
+
+- **6.1.0 — Cell tracking (§D).** The whole tracking cascade landed in one drop: a Qt-free, pipeline-importable core under `well_viewer/features/tracking/` (the `run(frames, params) -> TrackResult` engine contract with **greedy** [scipy LAP, default], **btrack**, and **trackastra** [transformer] adapters, all import-guarded; `model.py` DataFrame⇄frames + additive `track_id`/`track_parent_id`/`tree_id` columns; `orchestrator.track_well()` per-FOV linking; `persistence/tracking.py` writing `<well>_out.zip`-fingerprinted `tracks.json`). It runs as a whole-well post-pass — headless via `process_microscopy --track`, or from the GUI via `worker.track_wells_async` (daemon thread + `_WorkerBridge`, the smFISH contract). A new Review **"Tracking"** rail tab hosts Setup & Run, Track Viewer, Lineage, **Editor** (`TrackEditor` relabel/merge/split/delete/assign-division with undo + rule-based **Pruning**), **Analytics** (per-`(fov,track)` motility + CTC/lineage export), and **Track Plots** (per-track time-series by well). Combines and supersedes the original stacked PRs #331–#335. See the *Cell tracking subsystem* section in §5.7 for the full structure / data model / dataflow.
 
 - **6.0.x — Review-CSV crash + Movie Montage removal + rsync tests (PR #356).** Fixed an OOM/SIGKILL when clicking a segmentation cell or the Review-CSV sidebar link: the non-editable FOV combo now carries `review_norm_fov`-normalised values (so cell-click `setCurrentText` hits the exact-match path instead of stranding the filter on a zero-row pair), and `refresh_review_csv_rows` hard-caps the materialised table at 5000 rows so it can never allocate millions of `QTableWidgetItem`s. Removed the dormant Movie Montage subsystem (~1490 lines: `preview/montage.py`, `preview/callbacks.py`, the dead tab builder, the `_montage_crop_tool` delegates, and `export.save_montage_figure`) now that the tab is folded into Image Table; the one live helper (`_show_image_pixel_tooltip`) moved into `review_image/controller.py`. Un-staled the three rsync-retry tests against the cancellable chunked backoff (the schedule is unchanged — they now assert it by reconstructing per-retry totals from the ≤0.25s sleep chunks).
 
@@ -1642,8 +1648,6 @@ line. Newest first:
 - **6.0.x — `qc_params` into `persistence.json` (PR #351).** QC debris-gate thresholds moved from a standalone `qc_params.json` sidecar into the consolidated `persistence.json::qc_params` section (per the persistence architecture); `qc_params.py` migrates its own legacy sidecar since it wraps its data and can't use the generic migrator.
 
 - **6.0.0 — Run dashboard + sliding-disk default.** The visual run dashboard (`widgets/run_dashboard.py`) landed as the primary run view above the collapsible log (PR #350). Background subtraction's isotropic disk method was finalised and renamed `rolling_ball → sliding_disk` (now the default, no back-compat alias), with a **Pipeline Info** tab added as the on-disk receipt (PR #347). Version pill → `v6.0.0`.
-
-- **5.5.7 (PR5).** Tracking feature under `well_viewer/features/tracking/` (engine adapters, orchestrator, worker, edit, analytics, persistence); engine adapters are import-guarded. Fixes: the trackastra adapter handles 0.3.x's single-`TrackGraph` `track()` return via `graph_to_ctc` (newer builds return a pair); the btrack adapter falls back to the bundled `cell_config` when no config is supplied.
 
 - **5.5.6 (PR4).** Label-free segmentation engines (Cellpose + classical) added to the pipeline with a general/label-free split and a per-method parameter panel; `Role.PHASE` classification on ingestion plumbs phase channels through.
 

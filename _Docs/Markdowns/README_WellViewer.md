@@ -36,7 +36,7 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
-- **5.5.7 — Cell tracking (§D).** Link cells across timepoints after processing: choose the **greedy**, **btrack** (Bayesian + lineage) or **trackastra** (transformer) engine, then explore results in the new **Tracking** tab (Setup & Run + Track Viewer) and **Track Plots** sub-tab, with motility metrics and `track_id` columns written back.
+- **6.1.0 — Cell tracking (§D).** Link cells across timepoints after processing: choose the **greedy**, **btrack** (Bayesian + lineage) or **trackastra** (transformer) engine, then explore results in the new **Tracking** tab (Setup & Run + Track Viewer) and **Track Plots** sub-tab, with motility metrics and `track_id` columns written back.
 
 - **5.5.6 — Label-free segmentation (§A).** Segment unlabelled / phase channels: Cellpose and a classical engine are selectable with per-method parameter panels, and channels can be designated as phase on ingestion.
 

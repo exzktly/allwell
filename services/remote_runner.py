@@ -189,6 +189,19 @@ def _fmt_secs(s: float) -> str:
     return f"{int(s // 60)}m{int(s % 60):02d}s"
 
 
+def _zip_is_complete(path: "Path") -> bool:
+    """True iff *path* is a fully-transferred, valid zip.
+
+    ``zipfile.is_zipfile`` looks for the end-of-central-directory record, which
+    only exists once the whole archive has landed — a truncated / partial
+    download fails the check. Lets the Fetcher distinguish "rsync errored but the
+    file is actually here" from "the file is incomplete"."""
+    try:
+        return path.exists() and zipfile.is_zipfile(path)
+    except OSError:
+        return False
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # LocalZipper
 # ────────────────────────────────────────────────────────────────────────────
@@ -2599,15 +2612,28 @@ class Fetcher:
         t0 = time.monotonic()
         with self._transfer_heartbeat(well, tmp_zip):
             ok = self._rsync(
+                # ``--timeout`` is rsync's own I/O-idle timeout: if the link
+                # stalls (or rsync hangs after the data is across, waiting on a
+                # half-closed connection) rsync aborts in 2 min instead of the
+                # whole transfer blocking until the 5-min subprocess deadline —
+                # which used to leave the final fetch sitting there for minutes.
                 [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
-                 "-a", "--partial", zip_src, to_rsync_path(tmp_zip)]
+                 "-a", "--partial", "--timeout=120", zip_src, to_rsync_path(tmp_zip)]
             )
-        if not ok:
+        # rsync can report a non-zero exit (timeout / connection reset on close)
+        # *after* the zip is fully across. Don't throw away a complete file and
+        # re-fetch it forever — if the .zip is intact on disk, proceed.
+        if not ok and not _zip_is_complete(tmp_zip):
             self._log(
                 f"[remote] ↓ {well}: WARN could not pull {well}_out.zip from "
                 f"{self.run.remote_output_dir}; will retry at end of run.\n"
             )
             return
+        if not ok:
+            self._log(
+                f"[remote] ↓ {well}: rsync returned an error but the .zip is "
+                f"complete on disk — proceeding.\n"
+            )
 
         zip_elapsed = time.monotonic() - t0
         zip_size = tmp_zip.stat().st_size if tmp_zip.exists() else 0

@@ -904,11 +904,23 @@ def refresh_review_csv(app) -> None:
         app._review_csv_msg_lbl.setText("No CSV rows loaded for selected well(s).")
         return
 
-    fovs = sorted({
-        str(r.get("fov", r.get("FOV", ""))).strip()
-        for r in rows
-        if str(r.get("fov", r.get("FOV", ""))).strip()
-    })
+    # Normalize the FOV combo values the SAME way the cell-click navigation and
+    # the row filter do (review_norm_fov / _review_row_keys). The combo is
+    # non-editable, so if its items were the raw CSV strings ("1.0", "01") while
+    # a click calls setCurrentText("1"), the select silently no-ops, the filter
+    # lands on the wrong (or an empty) FOV, and refresh_review_csv_rows falls
+    # back to materialising *every* loaded row — the OOM that SIGKILLs the app.
+    def _fov_sort_key(s: str):
+        try:
+            return (0, float(s))
+        except (TypeError, ValueError):
+            return (1, s)
+    fovs = sorted(
+        {review_norm_fov(r.get("fov", r.get("FOV", "")))
+         for r in rows
+         if review_norm_fov(r.get("fov", r.get("FOV", "")))},
+        key=_fov_sort_key,
+    )
     tps: list[str] = []
     seen_tps: set[str] = set()
     for row in rows:
@@ -987,6 +999,18 @@ def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
             f"Review CSV fallback active: no exact match for FOV={fov_sel}, TP={tp_sel}; showing {len(filtered)} row(s).{ctx_txt}"
         )
 
+    # Hard cap on materialised rows. A QTableWidget builds one heavyweight
+    # QTableWidgetItem per cell, so an unbounded build (e.g. the all-rows
+    # fallback above, or a multi-well selection spanning every FOV/timepoint)
+    # can allocate millions of items and get the process OOM-killed. The table
+    # is an inspection aid for a single FOV/timepoint (a few hundred cells), so
+    # truncating past the cap costs nothing real while removing the crash.
+    _MAX_TABLE_ROWS = 5000
+    n_total = len(filtered)
+    truncated = n_total > _MAX_TABLE_ROWS
+    if truncated:
+        filtered = filtered[:_MAX_TABLE_ROWS]
+
     cols = list(filtered[0].keys())
     table.setColumnCount(len(cols))
     table.setHorizontalHeaderLabels(cols)
@@ -1011,7 +1035,13 @@ def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
             else:
                 value = row.get(c, "")
             table.setItem(r, ci, QTableWidgetItem(str(value)))
-    app._review_csv_msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
+    if truncated:
+        app._review_csv_msg_lbl.setText(
+            f"Showing first {len(filtered):,} of {n_total:,} row(s) "
+            "— narrow the FOV / timepoint to see the rest."
+        )
+    else:
+        app._review_csv_msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
 
 
 

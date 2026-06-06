@@ -59,47 +59,92 @@ def test_non_transient_exit_code_does_not_retry(monkeypatch):
     fake_sleep.assert_not_called()
 
 
+# The backoff is slept in small ``<=0.25s`` chunks (v5.2.28) so a long wait
+# stays responsive to the Stop button — ``time.sleep`` therefore fires many
+# times per retry rather than once. Reconstruct the per-retry totals from the
+# chunk stream (the sleeps between consecutive subprocess.run calls) so the
+# tests assert the *schedule*, not the chunking granularity.
+_RUN = "run"
+
+
+def _record_timeline(monkeypatch, result):
+    """Patch subprocess.run + time.sleep to append to a shared timeline list.
+
+    ``subprocess.run`` records a ``_RUN`` marker and returns ``result``;
+    ``time.sleep`` records the slept duration. The interleaving lets a test
+    reconstruct the per-retry backoff from the sleep chunks between runs.
+    """
+    timeline: list = []
+
+    def _run(*_a, **_k):
+        timeline.append(_RUN)
+        return result
+
+    monkeypatch.setattr("services.remote_runner.subprocess.run", _run)
+    monkeypatch.setattr(
+        "services.remote_runner.time.sleep", lambda s: timeline.append(float(s)),
+    )
+    return timeline
+
+
+def _grouped_delays(timeline: list) -> tuple[float, ...]:
+    """Sum the sleep chunks that fall between consecutive run calls."""
+    groups: list[float] = []
+    cur = 0.0
+    seen_run = False
+    for ev in timeline:
+        if ev == _RUN:
+            if seen_run:
+                groups.append(round(cur, 6))
+            cur = 0.0
+            seen_run = True
+        else:
+            cur += ev
+    return tuple(groups)
+
+
 @pytest.mark.parametrize("code", sorted(_RSYNC_RETRY_CODES))
 def test_transient_exit_code_triggers_retries(code, monkeypatch):
     """Every retry-eligible code keeps trying up to the budget."""
     fake_run = MagicMock(return_value=_fail(code))
-    fake_sleep = MagicMock()
+    sleeps: list[float] = []
     monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
-    monkeypatch.setattr("services.remote_runner.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "services.remote_runner.time.sleep", lambda s: sleeps.append(float(s)),
+    )
 
     result = _rsync_with_retry(["rsync", "-a", "x", "y"])
     assert result.returncode == code
     # 1 initial + 3 retries = 4 attempts.
     assert fake_run.call_count == 1 + len(_RSYNC_RETRY_DELAYS)
-    # Slept exactly once between each retry pair.
-    assert fake_sleep.call_count == len(_RSYNC_RETRY_DELAYS)
+    # Total backoff equals the schedule, delivered in cancellable <=0.25s chunks.
+    assert sleeps and all(s <= 0.25 + 1e-9 for s in sleeps)
+    assert round(sum(sleeps), 6) == round(sum(_RSYNC_RETRY_DELAYS), 6)
 
 
 def test_retry_then_succeed(monkeypatch):
     """A transient blip followed by recovery should succeed after one
     or two retries without exhausting the budget."""
     fake_run = MagicMock(side_effect=[_fail(10), _fail(10), _ok()])
-    fake_sleep = MagicMock()
+    sleeps: list[float] = []
     monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
-    monkeypatch.setattr("services.remote_runner.time.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "services.remote_runner.time.sleep", lambda s: sleeps.append(float(s)),
+    )
 
     result = _rsync_with_retry(["rsync", "-a", "x", "y"])
     assert result.returncode == 0
     assert fake_run.call_count == 3
-    assert fake_sleep.call_count == 2
+    # Two backoffs before the two retries: the first two scheduled delays.
+    assert round(sum(sleeps), 6) == round(sum(_RSYNC_RETRY_DELAYS[:2]), 6)
 
 
 def test_backoff_schedule_is_exponential(monkeypatch):
-    """Sleeps before retries 1/2/3 must match _RSYNC_RETRY_DELAYS."""
-    fake_run = MagicMock(return_value=_fail(10))
-    sleeps: list[float] = []
-    monkeypatch.setattr("services.remote_runner.subprocess.run", fake_run)
-    monkeypatch.setattr(
-        "services.remote_runner.time.sleep", lambda s: sleeps.append(s),
-    )
+    """Backoffs before retries 1/2/3 must sum, per-retry, to _RSYNC_RETRY_DELAYS."""
+    timeline = _record_timeline(monkeypatch, _fail(10))
 
     _rsync_with_retry(["rsync", "-a", "x", "y"])
-    assert tuple(sleeps) == _RSYNC_RETRY_DELAYS
+    assert _grouped_delays(timeline) == _RSYNC_RETRY_DELAYS
 
 
 def test_oserror_in_subprocess_keeps_retrying(monkeypatch):

@@ -1,207 +1,26 @@
-"""Movie montage / review-image view builders (Qt port)."""
+"""Review-image (Segmentation tab) view builder (Qt port).
+
+The Movie Montage tab this module used to also build was folded into the
+Image Table tab; its orphaned ``build_right_panel`` builder (and the montage
+top-hat-subtraction controls it hosted) has been removed.
+"""
 
 from __future__ import annotations
-from well_viewer.features.preview.montage import refresh_preview_montage
 
-from typing import List, Optional
-
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QToolTip, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import btn_card, btn_secondary
-from well_viewer.features.preview.callbacks import montage_tophat_toggled
 from well_viewer.features.review_image.controller import on_review_image_channel_selected
-from well_viewer.features.preview.montage import montage_zoom_step
-from well_viewer.features.preview.montage import on_montage_shift_wheel
 from well_viewer.features.review_image.renderer import refresh_review_image
 from functools import partial
-from well_viewer.features.export.service import save_montage_figure
-from well_viewer.features.preview.montage import montage_redraw_at_zoom
-from well_viewer.features.preview.montage import montage_zoom_fit
 from well_viewer.features.review_image.controller import on_review_image_move
 from well_viewer.features.review_image.controller import on_review_image_press
 from well_viewer.features.review_image.controller import on_review_image_release
 from well_viewer.features.review_image.controller import pick_review_image_color
-
-
-def build_right_panel(self, parent: QWidget) -> None:
-    """Movie Montage tab: header + scrollable thumbnail grid + LUT / zoom row."""
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        parent.setLayout(layout)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(0)
-
-    inner = QWidget(parent)
-    il = QVBoxLayout(inner)
-    il.setContentsMargins(0, 0, 0, 0)
-    il.setSpacing(0)
-    layout.addWidget(inner, 1)
-
-    ctrl = QWidget(inner)
-    cl = QHBoxLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
-    self._preview_well_lbl = QLabel("No well selected", ctrl)
-    cl.addWidget(self._preview_well_lbl)
-
-    cl.addWidget(QLabel("Channel:", ctrl))
-    self._chan_cb_preview = QComboBox(ctrl)
-    self._chan_cb_preview.addItems(["GFP"])
-    self._chan_cb_preview.currentIndexChanged.connect(
-        lambda _i: self._on_preview_channel_selected(None)
-    )
-    cl.addWidget(self._chan_cb_preview)
-    self._montage_chan_var = self._chan_cb_preview
-
-    cl.addWidget(QLabel("FOV:", ctrl))
-    self._fov_menu = QComboBox(ctrl)
-    self._fov_menu.addItems(["—"])
-    self._fov_menu.currentIndexChanged.connect(
-        lambda _i: refresh_preview_montage(self)
-    )
-    cl.addWidget(self._fov_menu)
-    self._preview_fov_var = self._fov_menu
-    self._preview_fov_cb = self._fov_menu  # alias used by preview / export callers
-    cl.addStretch(1)
-    cl.addWidget(btn_secondary(ctrl, "Save Montage…", partial(save_montage_figure, self)))
-    il.addWidget(ctrl)
-
-    sep = QFrame(inner)
-    sep.setObjectName("Separator")
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
-    il.addWidget(sep)
-
-    self._montage_status = QLabel("", inner)
-    self._montage_status.setObjectName("Muted")
-    il.addWidget(self._montage_status)
-
-    self._montage_canvas = QScrollArea(inner)
-    self._montage_canvas.setWidgetResizable(True)
-    self._montage_canvas.setFrameShape(QFrame.NoFrame)
-    self._montage_inner = QWidget()
-    # Layout is created on demand by _refresh_preview_montage (QGridLayout).
-    self._montage_canvas.setWidget(self._montage_inner)
-    il.addWidget(self._montage_canvas, 1)
-    self._montage_win = None
-
-    # LUT + zoom row
-    lut_row = QWidget(inner)
-    lr = QHBoxLayout(lut_row)
-    lr.setContentsMargins(8, 4, 8, 4)
-    self._mon_lut_chan_lbl = QLabel(
-        f"{self._app_state.channel.active_image_channel.upper()} LUT min:", lut_row,
-    )
-    lr.addWidget(self._mon_lut_chan_lbl)
-
-    self._mon_lmin_entry = QLineEdit("auto", lut_row)
-    self._mon_lmin_entry.setFixedWidth(80)
-    self._mon_lmin_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
-    lr.addWidget(self._mon_lmin_entry)
-    self._mon_lmin_edit = self._mon_lmin_entry  # alias used by montage / export callers
-
-    lr.addWidget(QLabel("max:", lut_row))
-    self._mon_lmax_entry = QLineEdit("auto", lut_row)
-    self._mon_lmax_entry.setFixedWidth(80)
-    self._mon_lmax_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
-    lr.addWidget(self._mon_lmax_entry)
-    self._mon_lmax_edit = self._mon_lmax_entry  # alias used by montage / export callers
-
-    lr.addWidget(btn_secondary(lut_row, "Auto LUT", self._montage_auto_lut))
-
-    # Overlay LUT — tune brightness/contrast of the segmentation overlay.
-    ov_sep = QFrame(lut_row)
-    ov_sep.setFrameShape(QFrame.VLine)
-    ov_sep.setFixedWidth(1)
-    lr.addWidget(ov_sep)
-
-    lr.addWidget(QLabel("Overlay LUT min:", lut_row))
-    self._mon_ov_lmin_entry = QLineEdit("auto", lut_row)
-    self._mon_ov_lmin_entry.setFixedWidth(80)
-    self._mon_ov_lmin_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
-    lr.addWidget(self._mon_ov_lmin_entry)
-    self._mon_ov_lmin_edit = self._mon_ov_lmin_entry
-
-    lr.addWidget(QLabel("max:", lut_row))
-    self._mon_ov_lmax_entry = QLineEdit("auto", lut_row)
-    self._mon_ov_lmax_entry.setFixedWidth(80)
-    self._mon_ov_lmax_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
-    lr.addWidget(self._mon_ov_lmax_entry)
-    self._mon_ov_lmax_edit = self._mon_ov_lmax_entry
-
-    lr.addWidget(QLabel("Zoom:", lut_row))
-    lr.addWidget(btn_card(lut_row, "−", lambda: montage_zoom_step(self, -1)))
-    self._montage_zoom_lbl = QLabel("100%", lut_row)
-    self._montage_zoom_lbl.setFixedWidth(50)
-    lr.addWidget(self._montage_zoom_lbl)
-    lr.addWidget(btn_card(lut_row, "+", lambda: montage_zoom_step(self, +1)))
-    lr.addWidget(btn_secondary(lut_row, "Fit", partial(montage_zoom_fit, self)))
-
-    # Region-of-interest crop controls (built by the shared CropTool).
-    # The Crop toggle puts the next click-drag on a fluorescence thumbnail
-    # into rubber-band mode; once released, the resulting square zooms
-    # every timepoint of the film strip into that region.
-    crop_sep = QFrame(lut_row)
-    crop_sep.setFrameShape(QFrame.VLine)
-    crop_sep.setFixedWidth(1)
-    lr.addWidget(crop_sep)
-
-    self._montage_crop_btn = self._montage_crop_tool.make_button(lut_row)
-    lr.addWidget(self._montage_crop_btn)
-    lr.addWidget(self._montage_crop_tool.make_reset_button(lut_row))
-    self._montage_crop_status_lbl = self._montage_crop_tool.make_status_label(lut_row)
-    lr.addWidget(self._montage_crop_status_lbl)
-
-    lr.addStretch(1)
-    il.addWidget(lut_row)
-
-    # Top-hat controls
-    th_row = QWidget(inner)
-    tr = QHBoxLayout(th_row)
-    tr.setContentsMargins(8, 2, 8, 2)
-    self._th_checkbox = QCheckBox("Top-hat background subtraction", th_row)
-    self._th_checkbox.toggled.connect(
-        lambda _b: montage_tophat_toggled(self)
-    )
-    tr.addWidget(self._th_checkbox)
-    self._mon_tophat_cb = self._th_checkbox  # alias used by montage / export callers
-
-    tr.addWidget(QLabel("   radius:", th_row))
-    self._th_radius_entry = QLineEdit("50", th_row)
-    self._th_radius_entry.setFixedWidth(60)
-    self._th_radius_entry.editingFinished.connect(partial(montage_redraw_at_zoom, self))
-    tr.addWidget(self._th_radius_entry)
-    self._mon_tophat_radius_edit = self._th_radius_entry  # alias used by montage / export callers
-    tr.addWidget(QLabel("px", th_row))
-    self._th_preload_badge = QLabel("", th_row)
-    tr.addWidget(self._th_preload_badge)
-    tr.addStretch(1)
-    il.addWidget(th_row)
-
-    self._montage_fluor_arrays: List[object] = []
-    self._montage_overlay_arrays: List[object] = []
-    self._montage_fluor_refs: List[object] = []
-    self._montage_overlay_refs: List[object] = []
-    self._montage_resize_job: Optional[str] = None
-    self._montage_zoom: float = 1.0
-    self._montage_base_sz: int = 120
-
-    # Wheel zoom on the montage
-    def _wheel(event):
-        delta = event.angleDelta().y()
-        if event.modifiers() & Qt.ShiftModifier:
-            if hasattr(self, "_on_montage_shift_wheel"):
-                on_montage_shift_wheel(self, event)
-        elif delta > 0:
-            montage_zoom_step(self, +1)
-        elif delta < 0:
-            montage_zoom_step(self, -1)
-
-    self._montage_canvas.wheelEvent = _wheel
 
 
 def build_review_image_panel(self, parent: QWidget) -> None:

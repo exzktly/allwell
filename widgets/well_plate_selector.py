@@ -133,6 +133,7 @@ class _PlateGrid(QWidget):
         self._single_select = False
         self._tooltip_provider = None          # Callable[[str], str] | None
         self._markers: dict[tuple[int, int], str] = {}  # per-well glyph overlay
+        self._colored_wells_lit = False        # paint colour-override wells raised/lit
         # Drag-source / drop-sink config (heatmap-layout DnD).
         self._drag_mime: str | None = None     # when set, a press starts a QDrag
         self._accept_mime: str | None = None   # when set, the grid accepts drops
@@ -365,6 +366,12 @@ class _PlateGrid(QWidget):
     def clear_well_markers(self) -> None:
         if self._markers:
             self._markers.clear()
+            self.update()
+
+    def set_colored_wells_lit(self, on: bool) -> None:
+        on = bool(on)
+        if on != self._colored_wells_lit:
+            self._colored_wells_lit = on
             self.update()
 
     def set_drag_mime(self, mime: str | None) -> None:
@@ -876,7 +883,8 @@ class _PlateGrid(QWidget):
                 #     muted tint (group colour if set, else the app's
                 #     accent) so the well always reads as a faint hue
                 #     rather than a dark recess.
-                if in_selection:
+                lit = in_selection or (self._colored_wells_lit and group_color is not None)
+                if lit:
                     base = group_color if group_color is not None else QColor(
                         traces[self._selected[key] % len(traces)]
                     )
@@ -1010,6 +1018,12 @@ class WellPlateSelector(QWidget):
 
     def clearWellMarkers(self) -> None:
         self._grid.clear_well_markers()
+
+    def setColoredWellsLit(self, on: bool) -> None:
+        """Paint wells that have an explicit colour override in the raised/lit
+        style (instead of the dim recessed tint) — for status maps where the
+        colour is the signal, not a faint membership hint."""
+        self._grid.set_colored_wells_lit(on)
 
     # ── interaction config ───────────────────────────────────────────────
     def setSelectionMode(self, mode: str) -> None:

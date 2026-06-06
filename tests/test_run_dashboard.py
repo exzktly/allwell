@@ -64,7 +64,7 @@ def test_tracker_coarse_stage_and_finalize_once():
 
 # ── RunDashboard widget ──────────────────────────────────────────────────────
 
-def test_dashboard_furthest_counts_and_tooltip(qapp):
+def test_dashboard_per_stage_counts_and_tooltip(qapp):
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard()
     d.reset(remote=True, total=4)
@@ -72,12 +72,11 @@ def test_dashboard_furthest_counts_and_tooltip(qapp):
                         ("A01", "process"), ("A01", "download"),
                         ("A01", "threshold"), ("A03", "error")]:
         d.set_well_stage(well, stage)
-    assert d._furthest == {"A01": "threshold", "A02": "upload", "A03": "error"}
-    # furthest-based counts: reaching a later stage implies the earlier ones
-    assert d._count_at_least(2) == 2          # uploaded (A01, A02)
-    assert d._count_at_least(4) == 1          # processed (A01)
-    assert d._count_at_least(6) == 1          # thresholded (A01)
-    assert "complete" in d._well_tooltip("A01")
+    # stages tracked independently — each counts only the wells that hit it
+    assert d._count("upload") == 2            # A01, A02
+    assert d._count("process") == 1           # A01
+    assert d._count("download") == 1          # A01
+    assert "fetched" in d._well_tooltip("A01")
     assert "failed" in d._well_tooltip("A03")
     assert "pending" in d._well_tooltip("H12")
     # active well carries a glyph marker; cleared once it advances
@@ -88,14 +87,30 @@ def test_dashboard_furthest_counts_and_tooltip(qapp):
     assert not d2._plate._grid._markers                  # cleared on advance
 
 
-def test_dashboard_never_regresses(qapp):
+def test_remote_threshold_does_not_count_as_download(qapp):
+    # the bug: on a remote run the server thresholds before the client downloads;
+    # "threshold" must NOT make Download read N/N before anything is fetched.
     from widgets.run_dashboard import RunDashboard
+    d = RunDashboard(); d.reset(remote=True, total=3)
+    for w in ("A01", "A02", "A03"):
+        d.set_well_stage(w, "process")
+        d.set_well_stage(w, "threshold")      # server finished all wells
+    assert d._count("threshold") == 3
+    assert d._count("download") == 0          # nothing fetched yet
+    from ui.theme import ACCENT, CLR_SUCCESS
+    assert d._well_color("A01") == ACCENT      # blue: computed, awaiting fetch
+    d.set_well_stage("A01", "download")
+    assert d._count("download") == 1
+    assert d._well_color("A01") == CLR_SUCCESS  # green only once data is local
+
+
+def test_dashboard_error_wins(qapp):
+    from widgets.run_dashboard import RunDashboard
+    from ui.theme import CLR_DANGER
     d = RunDashboard(); d.reset(remote=True, total=1)
-    d.set_well_stage("A01", "threshold")
-    d.set_well_stage("A01", "process")        # stale/out-of-order — ignored
-    assert d._furthest["A01"] == "threshold"
-    d.set_well_stage("A01", "error")          # error always wins
-    assert d._furthest["A01"] == "error"
+    d.set_well_stage("A01", "process")
+    d.set_well_stage("A01", "error")
+    assert d._well_color("A01") == CLR_DANGER and "failed" in d._well_tooltip("A01")
 
 
 def test_dashboard_rail_local_vs_remote(qapp):
@@ -104,7 +119,8 @@ def test_dashboard_rail_local_vs_remote(qapp):
     d.reset(remote=False, total=8)
     assert list(d._rail) == ["group", "process", "threshold"]
     d.reset(remote=True, total=8)
-    assert list(d._rail) == ["group", "upload", "process", "download", "threshold"]
+    # remote order: server thresholds before the client downloads
+    assert list(d._rail) == ["group", "upload", "process", "threshold", "download"]
     # active-stage highlight maps finalize -> threshold
     d.set_active_stage("finalize")
     assert d._active_stage == "threshold"

@@ -73,7 +73,22 @@ def build_pipeline_info_subtab(app, parent: QWidget) -> None:
     tree.setColumnCount(2)
     tree.setHeaderLabels(["Parameter", "Value"])
     tree.setRootIsDecorated(True)
+    # The alternating row colour banded every other row white, leaving the value
+    # text invisible (the rows used the palette's default light alternate while
+    # the text stayed light). Drop it and pin themed colours explicitly so every
+    # row is the dark panel background with high-contrast text, regardless of any
+    # ambient palette.
+    import theme as _theme
+    _c = _theme.Colors
     tree.setAlternatingRowColors(True)
+    tree.setStyleSheet(
+        f"QTreeWidget#PipelineInfoTree {{ background:{_c.panel}; "
+        f"alternate-background-color:{_c.surface}; color:{_c.text_primary}; }}"
+        f"QTreeWidget#PipelineInfoTree::item {{ color:{_c.text_primary}; "
+        f"padding:3px 6px; }}"
+        f"QTreeWidget#PipelineInfoTree::item:selected {{ "
+        f"background:{_c.accent}; color:{_c.ink_dark}; }}"
+    )
     tree.header().setStretchLastSection(True)
     layout.addWidget(tree, 1)
 

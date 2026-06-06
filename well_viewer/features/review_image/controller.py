@@ -428,6 +428,64 @@ def on_review_image_move(app, event) -> None:
         on_review_image_hover(app, event)
 
 
+def _show_image_pixel_tooltip(app, event, channel_label: str, label) -> None:
+    """Show an x/y/value tooltip for a QLabel carrying ``_raw_arr`` / ``_sz_w`` /
+    ``_sz_h`` (and optionally ``_crop`` / ``_mask_arr``).
+
+    Previously lived in the now-removed Movie Montage module; it is kept here as
+    the review-image hover is its only live caller.
+    """
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QToolTip
+
+    lbl = label
+    arr = getattr(lbl, "_raw_arr", None)
+    if arr is None or not app._NP_AVAILABLE:
+        QToolTip.hideText()
+        return
+    sz_w = getattr(lbl, "_sz_w", lbl.width() if lbl else 1)
+    sz_h = getattr(lbl, "_sz_h", lbl.height() if lbl else 1)
+    arr = app._np.asarray(arr, dtype=app._np.float32)
+    full_h, full_w = arr.shape[:2]
+    crop = getattr(lbl, "_crop", None)
+    if crop is not None:
+        # Pixmap displays only the cropped region; scale and offset must be
+        # computed against the cropped dimensions, then offset back into
+        # full-image coords for the reported (x, y).
+        cy0, cx0, cy1, cx1 = crop
+        view_w = max(1, int(cx1) - int(cx0))
+        view_h = max(1, int(cy1) - int(cy0))
+        offset_y, offset_x = int(cy0), int(cx0)
+    else:
+        view_w, view_h = full_w, full_h
+        offset_y = offset_x = 0
+    scale = min(sz_w / max(view_w, 1), sz_h / max(view_h, 1))
+    nw, nh = max(1, int(view_w * scale)), max(1, int(view_h * scale))
+    lw = lbl.width() if lbl else sz_w
+    lh = lbl.height() if lbl else sz_h
+    ex = int(event.position().x())
+    ey = int(event.position().y())
+    rel_x = (ex - (lw - nw) // 2) / max(scale, 1e-9)
+    rel_y = (ey - (lh - nh) // 2) / max(scale, 1e-9)
+    if not (0 <= rel_x < view_w and 0 <= rel_y < view_h):
+        QToolTip.hideText()
+        return
+    img_x = offset_x + rel_x
+    img_y = offset_y + rel_y
+    val = float(arr[int(img_y), int(img_x)])
+    extra = ""
+    mask_arr = getattr(lbl, "_mask_arr", None)
+    if mask_arr is not None:
+        try:
+            nid = int(app._np.asarray(mask_arr)[int(img_y), int(img_x)])
+            if nid > 0:
+                extra = f"  cell:{nid}"
+        except Exception:
+            pass
+    global_pos = lbl.mapToGlobal(QPoint(ex, ey))
+    QToolTip.showText(global_pos, f"x={int(img_x)}  y={int(img_y)}  {channel_label}:{val:.1f}{extra}")
+
+
 def on_review_image_hover(app, event) -> None:
     if not hasattr(app, "_review_image_label"):
         return
@@ -438,7 +496,6 @@ def on_review_image_hover(app, event) -> None:
     else:
         app._review_image_label._sz_w = int(app._review_image_label.width())
         app._review_image_label._sz_h = int(app._review_image_label.height())
-    from well_viewer.features.preview.montage import _show_image_pixel_tooltip
     _show_image_pixel_tooltip(
         app,
         event,

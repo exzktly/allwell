@@ -6,7 +6,6 @@ decoding, boundary computation, or pixmap composition. Each function takes
 """
 
 from __future__ import annotations
-from well_viewer.features.preview.montage import refresh_preview_montage
 
 import logging
 from typing import Dict, Optional
@@ -52,7 +51,7 @@ def _update_preview_impl(app, well_label: Optional[str]) -> None:
     # Local imports keep this module standalone-importable without paying
     # the cost of dragging in runtime_app at module load time.
     from well_viewer.data.image_discovery import find_well_images_and_masks
-    from well_viewer.core.ui_helpers import clear_layout as _clear_layout, set_combo_values as _set_combo_values
+    from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 
     channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
     if well_label is None:
@@ -60,19 +59,12 @@ def _update_preview_impl(app, well_label: Optional[str]) -> None:
             app._preview_well_lbl.setText("No well selected")
         if hasattr(app, "_review_image_well_lbl"):
             app._review_image_well_lbl.setText("No well selected")
-        if hasattr(app, "_fov_menu"):
-            _set_combo_values(app._fov_menu, ["—"])
-            app._preview_fov_var.setCurrentText("—")
         if hasattr(app, "_review_image_fov_menu"):
             _set_combo_values(app._review_image_fov_menu, ["—"])
         if hasattr(app, "_review_image_tp_menu"):
             _set_combo_values(app._review_image_tp_menu, ["—"])
             app._review_image_tp_var.setCurrentText("—")
         app._app_state.preview.fluor = app._app_state.preview.overlay = app._app_state.preview.mask = {}
-        if hasattr(app, "_montage_inner"):
-            _clear_layout(app._montage_inner.layout())
-            app._app_state.preview.montage_photos.clear()
-            app._montage_status.setText("Select a well in the left panel.")
         if hasattr(app, "_review_image_status"):
             app._review_image_status.setText("Select a well in the left panel.")
         if channel_switch_debug:
@@ -115,9 +107,6 @@ def _update_preview_impl(app, well_label: Optional[str]) -> None:
             len(fluor), len(tophat_fluor), len(overlay), len(mask),
         )
 
-    if hasattr(app, "_th_checkbox"):
-        app._update_tophat_controls(preloaded=False)
-
     def _norm_fov(value: object) -> str:
         raw = str(value or "").strip()
         if not raw:
@@ -151,36 +140,15 @@ def _update_preview_impl(app, well_label: Optional[str]) -> None:
         )
 
     if not (fluor or overlay or mask or tophat_fluor):
-        if hasattr(app, "_fov_menu"):
-            _set_combo_values(app._fov_menu, ["—"])
-            app._preview_fov_var.setCurrentText("—")
         tok = _extract_well_token(well_label) or well_label
         dirs = f"in={app._app_state.dataset.in_dir}  out={app._app_state.dataset.data_dir}"
         msg = f"No images found for {tok}. Searched: {dirs}"
         _logger.warning(msg)
-        if hasattr(app, "_montage_status"):
-            app._montage_status.setText(f"No images found for {tok} — check Log for details.")
         return
 
-    if hasattr(app, "_fov_menu"):
-        _set_combo_values(app._fov_menu, all_fovs)
-        cur = app._preview_fov_var.currentText()
-        if all_fovs:
-            app._preview_fov_var.setCurrentText(cur if cur in all_fovs else all_fovs[0])
-        else:
-            app._preview_fov_var.setCurrentText("—")
     if hasattr(app, "_review_image_fov_menu"):
         _set_combo_values(app._review_image_fov_menu, all_fovs or ["—"])
 
-    if hasattr(app, "_preview_fov_var"):
-        cur = app._preview_fov_var.currentText()
-        if all_fovs and cur not in all_fovs:
-            app._preview_fov_var.setCurrentText(all_fovs[0])
-
-    try:
-        refresh_preview_montage(app)
-    except AttributeError:
-        pass
     if channel_switch_debug:
         _logger.debug("[RI-CHSW step 4->6] triggering refresh_review_image after preview reload")
     refresh_review_image(app)

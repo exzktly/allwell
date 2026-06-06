@@ -96,8 +96,6 @@ _plot_save_bar_figure_orchestrator = _lazy("well_viewer.core.plot_orchestrator",
 _plot_save_line_figure_orchestrator = _lazy("well_viewer.core.plot_orchestrator", "save_line_figure")
 _plot_save_matplotlib_fig_orchestrator = _lazy("well_viewer.core.plot_orchestrator", "save_matplotlib_fig")
 
-_montage_auto_lut_controller = _lazy("well_viewer.features.preview.montage", "montage_auto_lut")
-_montage_tophat_done_controller = _lazy("well_viewer.features.preview.montage", "montage_tophat_done")
 
 _on_review_image_click_controller = _lazy("well_viewer.features.review_image.controller", "on_review_image_click")
 _select_review_csv_row_for_cell_controller = _lazy("well_viewer.features.review_image.controller", "select_review_csv_row_for_cell")
@@ -187,8 +185,6 @@ from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from well_viewer.features.stats.controller import stats_refresh_map
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from functools import partial
-from well_viewer.features.preview.montage import montage_redraw_at_zoom
-from well_viewer.features.preview.montage import refresh_preview_montage
 from well_viewer.core.selection_controller import labels_apply_affix
 from well_viewer.features.barplot.controller import toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display
 from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
@@ -197,7 +193,6 @@ from well_viewer.features.export.style import open_export_style_panel
 from well_viewer.features.grouping.controller import rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded
 from well_viewer.features.lineplot.controller import toggle_sem
 from well_viewer.core.load_controller import load_path_shim
-from well_viewer.features.preview.montage import update_tophat_controls
 from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
 from well_viewer.features.preview.controller import refresh_preview_picker_shim, sync_preview_well_for_image_tabs
 from well_viewer.features.review_image.controller import review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv, refresh_review_csv_rows, review_effective_included, review_load_rows
@@ -336,16 +331,6 @@ class WellViewerApp(QWidget):
         self._review_image_color_swatches: Dict[str, object] = {}
         self._review_image_binary_btn = None
         self._review_image_outline_btn = None
-        # Movie Montage square-region crop. State lives in a CropTool
-        # instance; legacy attribute names are preserved as read-only
-        # delegates further down so existing readers (export_service,
-        # the montage redraw, etc.) keep working.
-        from well_viewer.data.crop_tool import CropTool as _CropTool
-        self._montage_crop_tool = _CropTool(
-            on_change=lambda: montage_redraw_at_zoom(self),
-        )
-        self._montage_crop_btn = None
-        self._montage_crop_status_lbl = None
 
         from well_viewer.core.app_shell_view import build_ui
         build_ui(self)
@@ -693,54 +678,6 @@ class WellViewerApp(QWidget):
 
 
 
-    def _update_tophat_controls(self, preloaded: Optional[bool] = None) -> None:
-        return update_tophat_controls(self, preloaded)
-
-
-
-    # _montage_make_thumb and _montage_make_overlay_thumb replaced by
-    # module-level make_fluor_thumb() / make_overlay_thumb()
-
-    # ── Movie Montage square-region crop (delegates to CropTool) ─────────────
-
-    @property
-    def _montage_crop(self):
-        return self._montage_crop_tool.crop
-
-    @property
-    def _montage_crop_mode(self) -> bool:
-        return self._montage_crop_tool.mode
-
-    @property
-    def _montage_crop_drag(self):
-        # Legacy read-only flag: existing dispatchers only test for None-ness.
-        return True if self._montage_crop_tool.is_dragging else None
-
-    def _montage_label_to_image_xy(self, label, lx: int, ly: int):
-        return self._montage_crop_tool.label_to_image_xy(label, lx, ly)
-
-    def _on_montage_crop_press(self, label, event) -> None:
-        self._montage_crop_tool.begin_drag(label, event)
-
-    def _on_montage_crop_drag(self, event) -> None:
-        self._montage_crop_tool.update_drag(event)
-
-    def _on_montage_crop_release(self, event) -> None:
-        self._montage_crop_tool.end_drag(event)
-
-    def _toggle_montage_crop_mode(self) -> None:
-        self._montage_crop_tool.toggle_mode()
-
-    def _refresh_montage_crop_indicator(self) -> None:
-        self._montage_crop_tool._refresh_indicator()
-
-
-    def _montage_tophat_done(self, filtered_arrays: list, partial: bool = False) -> None:
-        _montage_tophat_done_controller(self, filtered_arrays, partial=partial)
-
-    def _montage_auto_lut(self, redraw: bool = True, force: bool = True) -> None:
-        _montage_auto_lut_controller(self, redraw=redraw, force=force)
-
 
 
 
@@ -936,7 +873,6 @@ class WellViewerApp(QWidget):
     # ── Preview panel ─────────────────────────────────────────────────────────
 
 
-    def _on_preview_sel_change(self, _e=None) -> None: refresh_preview_montage(self)
 
     def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self, value)
 

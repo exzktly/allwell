@@ -1648,6 +1648,9 @@ class AnalyzeTab(QWidget):
         elif kind == "well_stage":
             well, stage = payload  # type: ignore[misc]
             self._dashboard.set_well_stage(str(well), str(stage))
+        elif kind == "well_fov":
+            well, done, total = payload  # type: ignore[misc]
+            self._dashboard.set_well_fov(str(well), int(done), int(total))
 
     def _poll_log(self) -> None:
         try:

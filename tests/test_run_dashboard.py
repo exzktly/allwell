@@ -132,3 +132,24 @@ def test_dashboard_collapse_toggle(qapp):
     d._toggle.setChecked(False); d._on_toggle()
     assert not d._body.isVisible()
     d._toggle.setChecked(True); d._on_toggle()
+
+
+def test_tracker_emits_per_well_fov_progress():
+    t = ProgressTracker()
+    assert ("A01", 0, 12) in [p for k, p in t.parse("Well A01 — 12 FOV-group(s)")
+                              if k == "well_fov"]
+    assert ("A01", 3, 12) in [p for k, p in t.parse("Well A01 — FOV 3/12 done")
+                              if k == "well_fov"]
+
+
+def test_dashboard_fov_sub_progress(qapp):
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard(); d.reset(remote=True, total=2)
+    d.set_well_stage("A01", "active"); d.set_well_stage("B02", "active")
+    d.set_well_fov("A01", 0, 12); d.set_well_fov("B02", 0, 8)
+    d.set_well_fov("A01", 7, 12)
+    txt = d._fov_lbl.text()
+    assert "A01 · FOV 7/12" in txt and "B02 · FOV 0/8" in txt
+    # a well that finishes processing drops out of the "currently computing" line
+    d.set_well_stage("A01", "process")
+    assert "A01" not in d._fov_lbl.text() and "B02" in d._fov_lbl.text()

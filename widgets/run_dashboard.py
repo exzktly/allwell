@@ -74,6 +74,7 @@ class RunDashboard(QWidget):
         self._done: dict[str, set] = {}          # stage -> set of wells completed
         self._active: set = set()                # wells currently processing
         self._errored: set = set()
+        self._fov: dict[str, tuple] = {}         # well -> (done, total) FOV-groups
         self._active_stage = ""
         self._rail: dict[str, tuple] = {}        # stage -> (dot,name,bar,count)
 
@@ -102,6 +103,11 @@ class RunDashboard(QWidget):
         self._headline = QLabel("Idle", self)
         self._headline.setStyleSheet(f"color:{TXT_PRI};")
         root.addWidget(self._headline)
+
+        # per-well FOV·timepoint sub-progress for the well(s) currently computing
+        self._fov_lbl = QLabel("", self)
+        self._fov_lbl.setObjectName("Muted")
+        root.addWidget(self._fov_lbl)
 
         # body: rail | plate | legend
         self._body = QWidget(self)
@@ -150,7 +156,9 @@ class RunDashboard(QWidget):
         self._done = {}
         self._active = set()
         self._errored = set()
+        self._fov = {}
         self._active_stage = ""
+        self._fov_lbl.setText("")
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
         self._plate.setEnabledWells(None)
@@ -182,6 +190,21 @@ class RunDashboard(QWidget):
             w, "✕" if w in self._errored
             else ("⚙" if w in self._active else None))
         self._refresh_rail()
+        self._refresh_fov()                  # active set changed
+
+    def set_well_fov(self, well_id: str, done: int, total: int) -> None:
+        """Per-well FOV·timepoint sub-progress (one group = one FOV × timepoint)
+        for the well(s) currently computing."""
+        w = _canon(well_id)
+        if not w:
+            return
+        self._fov[w] = (int(done), int(total))
+        self._refresh_fov()
+
+    def _refresh_fov(self) -> None:
+        parts = [f"{w} · FOV {self._fov[w][0]}/{self._fov[w][1]}"
+                 for w in sorted(self._active) if w in self._fov]
+        self._fov_lbl.setText("    ".join(parts))
 
     def set_active_stage(self, name: str) -> None:
         """Highlight the rail row for the coarse phase the run is in."""

@@ -3175,6 +3175,12 @@ def _process_groups_in_worker(
 
     all_records: list[dict] = []
     failed:      list[str]  = []
+    # Per-well FOV-group progress, tagged with the well so the GUI can attribute
+    # it correctly even when several wells process in parallel. One "image group"
+    # = one FOV × timepoint.
+    _fov_total = len(groups)
+    _fov_done = 0
+    log.info("Well %s — %d FOV-group(s)", well_label, _fov_total)
 
     def _run_group(nuclear_path: Path, fluor_paths: "list[Path]") -> "list[dict]":
         _t0 = time.perf_counter()
@@ -3218,6 +3224,8 @@ def _process_groups_in_worker(
             except Exception as exc:           # noqa: BLE001
                 log.error("FAILED %s: %s", nuclear_path.name, exc, exc_info=True)
                 failed.append(nuclear_path.name)
+            _fov_done += 1
+            log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
     else:
         with ThreadPoolExecutor(max_workers=fov_threads) as tex:
             future_map = {
@@ -3231,6 +3239,8 @@ def _process_groups_in_worker(
                 except Exception as exc:       # noqa: BLE001
                     log.error("FAILED %s: %s", nuclear_path.name, exc, exc_info=True)
                     failed.append(nuclear_path.name)
+                _fov_done += 1
+                log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
 
     return all_records, failed
 

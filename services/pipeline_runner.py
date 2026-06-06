@@ -65,6 +65,12 @@ _RE_FETCH_ZIP = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): [\d.]+ MB zip")
 _RE_FETCH_CSV = re.compile(r"\[remote\] ↓ ([A-Ha-h]\d{1,2}): \d+ CSV file")
 # Auto-threshold pass completes each well: "completed well 3/12 (A01_out.zip)".
 _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h]\d{1,2})")
+# Per-well FOV-group progress (one group = one FOV × timepoint), well-tagged so
+# it's attributable even when wells process in parallel:
+#   "Well A01 — 12 FOV-group(s)"  (the total, at well start)
+#   "Well A01 — FOV 3/12 done"    (each group as it completes)
+_RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+) — (\d+) FOV-group")
+_RE_WELL_FOV_DONE = re.compile(r"Well (\S+) — FOV (\d+)/(\d+) done")
 
 
 class ProgressTracker:
@@ -146,6 +152,14 @@ class ProgressTracker:
         mt = _RE_THRESH_WELL.search(line)
         if mt:
             events.append(("well_stage", (mt.group(1), "threshold")))
+        # Per-well FOV-group sub-progress (within the Process stage).
+        mft = _RE_WELL_FOV_TOTAL.search(line)
+        if mft:
+            events.append(("well_fov", (mft.group(1), 0, int(mft.group(2)))))
+        mfd = _RE_WELL_FOV_DONE.search(line)
+        if mfd:
+            events.append(("well_fov",
+                           (mfd.group(1), int(mfd.group(2)), int(mfd.group(3)))))
         # Auto-threshold pass runs after the last well → the "Threshold" stage.
         if not self._finalize_emitted and line.lstrip().startswith("Auto-threshold:"):
             self._finalize_emitted = True
@@ -467,6 +481,14 @@ class PipelineRunner:
                 f"[remote] {len(zipped.well_zips)} well-zip(s) staged "
                 f"({zipped.mode.value} mode).\n",
             ))
+            # The remote grouping runs inside stage_local_zips (not the local
+            # zipper subprocess), so it never emitted the per-well group events
+            # the dashboard's Group stage listens for — Group sat at 0 on remote
+            # runs. Surface them now that staging is complete.
+            self._enqueue(("zipper_start", len(zipped.well_zips)))
+            for wz in zipped.well_zips:
+                self._enqueue(("zipper_well", wz.stem))
+            self._enqueue(("zipper_done", None))
 
             est = self._remote_runner.estimate(zipped)
             self._enqueue(("line", f"[remote] {est.format()}\n"))

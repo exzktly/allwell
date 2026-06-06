@@ -145,8 +145,7 @@ well_viewer/
 │   ├── distribution/ controller.py, tab_view.py
 │   ├── stats/        controller.py, state.py, view.py
 │   ├── review_image/ controller.py, renderer.py, state.py, csv_tab_view.py
-│   ├── preview/      controller.py, callbacks.py, montage.py,
-│   │                 preview_view.py, panel_view.py
+│   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py
 │   ├── image_table/  controller.py, tab_view.py, panel_view.py,
 │   │                 grid_view.py, picker_view.py
@@ -177,7 +176,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 | `_models.py` | Plain dataclasses (no behaviour). | `domain/batch_models.py`, `domain/ratio_models.py` |
 | `_compute.py` | Pure-math layer shared across plot controllers. | `domain/stats_compute.py` |
 | `service.py` | Non-Qt service entry point. | `features/export/service.py` |
-| `callbacks.py` | Matplotlib click / interaction handlers for a feature. | `features/scatter/callbacks.py`, `features/preview/callbacks.py` |
+| `callbacks.py` | Matplotlib click / interaction handlers for a feature. | `features/scatter/callbacks.py` |
 | `worker.py` | Background `QThread` worker. | `features/smfish/worker.py` |
 | `_panel.py` | Per-plot-type panel (only inside `features/batch_export/`). | `features/batch_export/bar_panel.py`, `scatter_panel.py` |
 | `_` prefix | Private helper module (not part of the package's public surface). | `persistence/_doc.py`, `_io.py`, `features/batch_export/_common.py`, `_line_series_runner.py` |
@@ -185,7 +184,6 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 **Known exceptions** (legacy or single-purpose modules that don't fit the grid; do not propagate these naming choices to new files):
 
 - `features/grouping/view.py` and `features/stats/view.py` use bare `view.py` instead of `tab_view.py` — both predate the convention.
-- `features/preview/montage.py` is a feature-internal helper that doesn't fit a suffix.
 - `features/heatmap/models.py` is the only `models.py` in `features/` (the convention under `domain/` is `_models.py`).
 - `data/` modules use bare names (`data_loading.py`, `auto_threshold.py`, `crop_tool.py`, `image_discovery.py`, `image_resolver.py`, `metric_labels.py`, `zipfile_cache.py`) — each is one self-contained utility, no internal suffix scheme.
 - `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `gating_state`) and bare (`fold_change.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
@@ -494,10 +492,10 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/distribution/controller.py` | Distribution tab: histogram / KDE / violin. |
 | `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. |
 | `features/image_table/controller.py` | Image Table grid: per-cell config, distribute, export. |
-| `features/preview/{controller,callbacks,montage}.py` | Preview-panel helpers; `montage.py` is the legacy Movie Montage popout, folded into Image Table — kept for image-LUT helpers. |
+| `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The legacy Movie Montage popout — its tab builder (`build_right_panel`), `montage.py` renderer, and `callbacks.py` — was folded into Image Table and then removed entirely (v6.0.x); its one live helper, the image pixel-value hover tooltip, now lives in `review_image/controller.py` next to its only caller. |
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` (read side) and `role_output_filename` (write side, called from `process_microscopy.build_processed_output_path`) both consume it. The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
-| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. |
+| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
 
@@ -646,7 +644,7 @@ owning its own invariants (behaviour lives *in* the type, not just data):
 | `DatasetState` | data dir, well paths, row cache, canonical timepoint / FOV lists, `pipeline_info` | `core/dataset_state.py` |
 | `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization | `core/plot_state.py` |
 | `StatsState` | Statistics-tab comparison groups + result cache | `features/stats/state.py` |
-| `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview/montage image maps | `features/review_image/state.py` |
+| `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview image maps (`fluor` / `overlay` / `mask`) shared by the Segmentation review-image and Image Table | `features/review_image/state.py` |
 
 `AppState` (`core/app_state.py`) is a plain aggregate of all of the above —
 *not* a mega-dataclass with behaviour. `WellViewerApp` builds one as
@@ -844,7 +842,8 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | Module | What |
 |--------|------|
 | `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. |
-| `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. |
+| `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). |
+| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." |
 | `input_resolution_service.py` | Validates the input folder shape (zip set vs flat). |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
@@ -871,7 +870,8 @@ Notable members worth knowing about by name:
 | Widget | What it is |
 |--------|-----------|
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
-| `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, drag mime types for the heatmap layout. |
+| `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, drag mime types for the heatmap layout. A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. |
+| `RunDashboard` | The live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by its furthest-reached stage and overlays a gear glyph on the actively-computing well with its `FOV done/total` sub-progress. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |
 | `NamedPageStack` (in `views/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name. The replacement for the legacy `QTabWidget` + custom tab bar. |
 | `RailNav` | The left-rail section navigator. |
 | `SegmentedControl`, `ChipGroup`, `Stepper`, `StyledSlider`, `ToggleSwitch` | Form controls; each exposes `bindingAdapter()` returning `(getter, setter, change_signal)` for the Export Style sidebar's binding loop. |
@@ -1255,7 +1255,8 @@ services.pipeline_service.find_pipeline_script()
 services.pipeline_service.build_pipeline_args(…)
 services.pipeline_service.spawn_pipeline(args) → subprocess.Popen
         │
-        ▼ stdout stream → Analyze tab log view
+        ▼ stdout stream → ProgressTracker.parse() → RunDashboard events
+                         → Analyze tab log view (collapsible, underneath)
 process_microscopy.main()
         ├── per-well loop (ProcessPoolExecutor)
         │     ├── extract zip → tmp dir
@@ -1296,7 +1297,7 @@ auto-clears after `DANGER_HOLD_SECS`.
 
 `well_viewer/core/debug_flags.py` exposes module-level booleans
 (`REVIEW_TAB_DEBUG`, `REVIEW_BAR_DEBUG`, `REVIEW_SCATTER_DEBUG`,
-`ANALYZE_TAB_DEBUG`, `MOVIE_MONTAGE_DEBUG`, `REVIEW_IMAGE_CHSW_DEBUG`).
+`ANALYZE_TAB_DEBUG`, `REVIEW_IMAGE_CHSW_DEBUG`).
 `all_well.main()` wires the top-of-file constants in `all_well.py` into
 these flags so toggling them is a one-line edit. Each flag gates `logger.debug`
 calls inside its domain; off by default.
@@ -1564,8 +1565,23 @@ need to grep for is in plain sight.
 
 ## Version history
 
-The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
-Newest first:
+The 6.0 series adds the live run-status dashboard and hardens the run path
+(remote fetch, crash-safety, dead-code removal) on top of the 5.5 analysis
+line. Newest first:
+
+- **6.0.x — Review-CSV crash + Movie Montage removal + rsync tests (PR #356).** Fixed an OOM/SIGKILL when clicking a segmentation cell or the Review-CSV sidebar link: the non-editable FOV combo now carries `review_norm_fov`-normalised values (so cell-click `setCurrentText` hits the exact-match path instead of stranding the filter on a zero-row pair), and `refresh_review_csv_rows` hard-caps the materialised table at 5000 rows so it can never allocate millions of `QTableWidgetItem`s. Removed the dormant Movie Montage subsystem (~1490 lines: `preview/montage.py`, `preview/callbacks.py`, the dead tab builder, the `_montage_crop_tool` delegates, and `export.save_montage_figure`) now that the tab is folded into Image Table; the one live helper (`_show_image_pixel_tooltip`) moved into `review_image/controller.py`. Un-staled the three rsync-retry tests against the cancellable chunked backoff (the schedule is unchanged — they now assert it by reconstructing per-retry totals from the ≤0.25s sleep chunks).
+
+- **6.0.x — Pipeline Info tab contrast (PR #355).** The Pipeline Info tab (the run's `qc_options` receipt, so you can confirm e.g. which background method actually ran) rendered white-on-white; gave its tree an explicit themed stylesheet.
+
+- **6.0.x — Dashboard FOV sub-progress + Group-on-remote (PR #354).** `ProgressTracker` learned `("well_fov", (well, done, total))` events (emitted by `process_microscopy`'s per-well FOV loop) so the dashboard shows `FOV done/total` on the active well; remote runs now also drive the `group` stage rung.
+
+- **6.0.x — Stuck final fetch (PR #353).** `remote_runner._zip_is_complete` (`zipfile.is_zipfile`) lets the `Fetcher` recognise a rsync that timed out but already materialised a complete zip, instead of waiting forever — the last download no longer "just sits there."
+
+- **6.0.x — Dashboard stage-counting + lit wells (PR #352).** Each pipeline stage is tracked as an independent well-set, so a server-side `threshold` can't make `Download` read N/N before anything is fetched; remote wells render blue (computed-on-server) until their data lands green (downloaded). `WellPlateSelector` gained `setColoredWellsLit` / `setWellMarker` for the dashboard's plate map.
+
+- **6.0.x — `qc_params` into `persistence.json` (PR #351).** QC debris-gate thresholds moved from a standalone `qc_params.json` sidecar into the consolidated `persistence.json::qc_params` section (per the persistence architecture); `qc_params.py` migrates its own legacy sidecar since it wraps its data and can't use the generic migrator.
+
+- **6.0.0 — Run dashboard + sliding-disk default.** The visual run dashboard (`widgets/run_dashboard.py`) landed as the primary run view above the collapsible log (PR #350). Background subtraction's isotropic disk method was finalised and renamed `rolling_ball → sliding_disk` (now the default, no back-compat alias), with a **Pipeline Info** tab added as the on-disk receipt (PR #347). Version pill → `v6.0.0`.
 
 - **5.5.6 (PR4).** Label-free segmentation engines (Cellpose + classical) added to the pipeline with a general/label-free split and a per-method parameter panel; `Role.PHASE` classification on ingestion plumbs phase channels through.
 

@@ -696,25 +696,55 @@ def review_build_threshold_map(
         return above_by_nid
 
     mask = df_included_mask(sub).to_numpy(copy=True)
+    n_incl_qc = int(mask.sum())
     if "area_px" in sub.columns:
         area = pd.to_numeric(sub["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) 
+            mask &= np.isfinite(area)
+    n_after_area = int(mask.sum())
+    missing_fluor_col = None
     for chan, gate in fluor_gates.items():
         col = f"{chan}_mean_intensity"
         if col not in sub.columns:
+            missing_fluor_col = col
             mask[:] = False
             break
         v = pd.to_numeric(sub[col], errors="coerce").to_numpy()
         mask &= np.isfinite(v) & (v > gate)
+    n_after_fluor = int(mask.sum())
     val = resolve_value_series(sub, val_col, ratios).to_numpy()
     mask &= np.isfinite(val) & (val > threshold)
+    n_above = int(mask.sum())
 
     sub_keys = keys.loc[sub.index]
     for k, ok in zip(sub_keys, mask):
         nid = _safe_int_or_none(k[2])
         if nid is not None and nid in above_by_nid:
             above_by_nid[nid] = bool(ok)
+
+    # Diagnostic: the gating math is unit-tested correct, so when the binary
+    # mask highlights the "wrong" cells the cause is in the inputs — the
+    # resolved value column, the threshold, the QC verdict, or a missing gate
+    # column. One concise line per build surfaces all of them so the cause is
+    # visible in the log without a debugger.
+    try:
+        finite_vals = val[_np.isfinite(val)]
+        vmin = float(finite_vals.min()) if finite_vals.size else float("nan")
+        vmax = float(finite_vals.max()) if finite_vals.size else float("nan")
+        _logger.info(
+            "[binary-mask] well=%s fov=%s tp=%s | val_col=%r thresh=%.4g | "
+            "mask_cells=%d matched_rows=%d incl+qc=%d after_area=%d "
+            "after_fluor=%d above=%d | val_range=[%.4g,%.4g] qc_col=%s "
+            "fluor_gates=%s%s",
+            well, fov, tp, val_col, threshold,
+            len(above_by_nid), len(sub), n_incl_qc, n_after_area,
+            n_after_fluor, n_above, vmin, vmax,
+            ("QC_Pass" in sub.columns),
+            {k: round(float(g), 4) for k, g in fluor_gates.items()},
+            f" MISSING_FLUOR_COL={missing_fluor_col}" if missing_fluor_col else "",
+        )
+    except Exception:  # diagnostics must never break rendering
+        _logger.debug("[binary-mask] diagnostic log failed", exc_info=True)
     return above_by_nid
 
 

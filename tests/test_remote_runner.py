@@ -2676,3 +2676,31 @@ def test_retry_zip_repull_has_no_walltimeout_and_is_stop_aware(host, tmp_path, m
     assert "A01_out.zip" in pulled[0]["argv"]
     assert pulled[0]["timeout"] is None
     assert pulled[0]["stop_event"] is runner._cancelled
+
+
+def test_flush_and_join_waits_for_worker_not_a_fixed_cap(host, tmp_path):
+    """flush_and_join must block until the download worker actually finishes —
+    NOT return after a fixed interval while it's still in flight. Returning
+    early let verify_and_cleanup delete the remote mid-fetch ("completed run →
+    deleted cache → then finished fetcher")."""
+    import time
+    import threading as _t
+    run = _make_run(tmp_path)
+    run.well_count_total = 1
+    started = _t.Event()
+
+    def _slow_loop(self):
+        started.set()
+        time.sleep(0.5)                      # outlives the tiny join interval
+        self.run.fetched_wells.add("A01")
+
+    with patch.object(Fetcher, "_loop", _slow_loop):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=lambda _m: None)
+    assert started.wait(2.0)
+    t0 = time.monotonic()
+    fetcher.flush_and_join(timeout=0.1)       # tiny cap — must still wait it out
+    elapsed = time.monotonic() - t0
+    assert not fetcher._worker.is_alive()     # did not return while worker alive
+    assert "A01" in run.fetched_wells         # worker's work completed first
+    assert elapsed >= 0.4                     # blocked past the 0.1s interval

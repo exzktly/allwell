@@ -2593,3 +2593,25 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     # No rm calls — the default doesn't delete anything.
     assert rm_calls == [], \
         f"v5.2.11 default must not delete; observed rm calls: {rm_calls}"
+
+
+def test_cancel_stops_in_flight_fetcher(host):
+    """Stop during the final per-well rsync must interrupt the download.
+
+    RemoteRunner.cancel now sets the cancel flag AND cancels the Fetcher —
+    whose in-flight rsync (and bounded-retry loop) polls that stop event —
+    instead of only ssh-killing the remote. Without this, clicking Stop while
+    the final fetch was blocking / retry-looping did nothing.
+    """
+    runner = RemoteRunner(host)
+    cancelled = {"n": 0}
+
+    class _FakeFetcher:
+        def cancel(self):
+            cancelled["n"] += 1
+
+    runner._fetcher = _FakeFetcher()
+    # _run is None → cancel() returns before any ssh call, after the fetcher hook.
+    runner.cancel(None)
+    assert runner._cancelled.is_set()
+    assert cancelled["n"] == 1

@@ -1299,11 +1299,22 @@ class DatasetCache:
             mbps = (sent_bytes * 8) / elapsed / 1_000_000
             update_bandwidth(self.host.name, mbps)
 
+        mb = sent_bytes / (1024**2)
+        cache_hit = mb < 1
+        # On a full cache hit rsync moves nothing and emits no per-file
+        # "↑ <well>.zip" name lines, so the dashboard's Upload rail never
+        # advanced (the user just saw it stuck at 0/N when the inputs were
+        # already on the remote). Verification above confirmed every expected
+        # zip is present — emit a per-well marker so the Upload step reads
+        # complete. The dashboard de-dupes via sets, so this is harmless on a
+        # fresh upload that also streamed live ↑ lines.
+        if log_fn and cache_hit:
+            for wz in zipped.well_zips:
+                log_fn(f"[remote] ↑ {wz.stem}.zip already on remote\n")
         if log_fn:
-            mb = sent_bytes / (1024**2)
             log_fn(
                 f"[remote] upload: {mb:.1f} MB in {_fmt_secs(elapsed)}"
-                f"{' (cache hit)' if mb < 1 else ''}\n"
+                f"{' (cache hit)' if cache_hit else ''}\n"
             )
         return key, sent_bytes, elapsed
 
@@ -1690,7 +1701,7 @@ def _rsync_with_retry(
     cmd: list[str],
     *,
     log_fn: Callable[[str], None] | None = None,
-    timeout: int = 300,
+    timeout: int | None = 300,
     capture_output: bool = True,
     cwd: str | None = None,
     stop_event: threading.Event | None = None,
@@ -1785,7 +1796,7 @@ def _rsync_with_retry(
 def _rsync_run_cancellable(
     cmd: list[str],
     *,
-    timeout: int,
+    timeout: int | None,
     capture_output: bool,
     cwd: str | None,
     stop_event: threading.Event | None,
@@ -1795,7 +1806,13 @@ def _rsync_run_cancellable(
 
     When ``stop_event`` is None this is equivalent to ``subprocess.run``
     — the only path that runs without cancellation is the bootstrap
-    ``sync_required_files`` call, which is small and short-lived."""
+    ``sync_required_files`` call, which is small and short-lived.
+
+    ``timeout=None`` disables the wall-clock deadline entirely: the caller
+    is relying on rsync's own ``--timeout`` (I/O-idle) + ssh ``ConnectTimeout``
+    to bound stalls, so a large but steadily-progressing transfer is never
+    killed mid-flight (the bug that made the final per-well fetch retry-loop
+    and fail on big zips / slow links)."""
     if stop_event is None:
         return subprocess.run(
             cmd, capture_output=capture_output, text=True,
@@ -1806,7 +1823,7 @@ def _rsync_run_cancellable(
     proc = subprocess.Popen(
         cmd, stdout=stdout_pipe, stderr=stderr_pipe, text=True, cwd=cwd,
     )
-    deadline = time.monotonic() + timeout
+    deadline = None if timeout is None else time.monotonic() + timeout
     rc: int | None = None
     try:
         while True:
@@ -1822,7 +1839,7 @@ def _rsync_run_cancellable(
                     return subprocess.CompletedProcess(
                         cmd, returncode=130, stdout="", stderr="cancelled",
                     )
-                if time.monotonic() > deadline:
+                if deadline is not None and time.monotonic() > deadline:
                     proc.kill()
                     raise subprocess.TimeoutExpired(cmd, timeout)
                 continue
@@ -2783,7 +2800,18 @@ class Fetcher:
         # in-flight rsync had to run to completion before the
         # Fetcher noticed the stop_event between queue items —
         # which on a slow link looked like Stop did nothing.
-        result = _rsync_with_retry(argv, log_fn=self._log, stop_event=self._stop)
+        #
+        # timeout=None: the per-well fetch argv carries rsync ``--timeout=120``
+        # (I/O-idle) and the ssh transport sets ``ConnectTimeout=15``, so stalls
+        # and dead connections are already bounded. The old fixed 5-min
+        # subprocess wall-clock killed *healthy, still-progressing* transfers of
+        # large final zips mid-flight, and --partial resume couldn't always
+        # finish within the next window → endless retry/timeout/fail and a
+        # forced rerun. Drop the wall-clock and let rsync's own idle timeout be
+        # the stall guard.
+        result = _rsync_with_retry(
+            argv, log_fn=self._log, stop_event=self._stop, timeout=None,
+        )
         return result.returncode == 0
 
     def _rsync_glob(self, src_glob: str, dest_dir: Path) -> int:

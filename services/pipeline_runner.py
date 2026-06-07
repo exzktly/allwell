@@ -71,6 +71,11 @@ _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h
 #   "Well A01 — FOV 3/12 done"    (each group as it completes)
 _RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+) — (\d+) FOV-group")
 _RE_WELL_FOV_DONE = re.compile(r"Well (\S+) — FOV (\d+)/(\d+) done")
+# Finalize-phase status lines. After the last well the run is still busy
+# (auto-threshold scans every well's zip; a remote run then drains downloads
+# and cleans up) — surface what it's doing so "Finalizing…" doesn't look hung.
+_RE_TF_SCAN = re.compile(r"Auto-threshold: scanning (\d+) well")
+_RE_TF_PROG = re.compile(r"Auto-threshold: completed well (\d+)/(\d+)")
 
 
 class ProgressTracker:
@@ -152,6 +157,17 @@ class ProgressTracker:
         mt = _RE_THRESH_WELL.search(line)
         if mt:
             events.append(("well_stage", (mt.group(1), "threshold")))
+        # Finalize-phase status — replace the generic "Finalizing…" with what
+        # the run is actually doing so it doesn't read as a hang.
+        if _RE_TF_SCAN.search(line):
+            events.append(("status", "Auto-thresholding…"))
+        mtp = _RE_TF_PROG.search(line)
+        if mtp:
+            events.append(("status", f"Auto-thresholding {mtp.group(1)}/{mtp.group(2)}…"))
+        if "draining fetcher" in line or "] ↓ fetcher:" in line:
+            events.append(("status", "Finalizing downloads…"))
+        elif "[remote] verify:" in line or "[remote] removed " in line:
+            events.append(("status", "Cleaning up remote…"))
         # Per-well FOV-group sub-progress (within the Process stage).
         mft = _RE_WELL_FOV_TOTAL.search(line)
         if mft:

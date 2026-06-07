@@ -152,6 +152,34 @@ def build_pipeline_info_subtab(app, parent: QWidget) -> None:
             ("Timepoints", len(info.get("available_timepoints", []) or [])),
             ("FOVs", len(info.get("available_fovs", []) or [])),
         ], expand=False)
+
+        # Catch-all: the curated sections above are a readable digest of the
+        # common fields, but they hard-code which keys to show — so anything
+        # else the pipeline wrote (cellpose/track options, smfish_thresholds,
+        # cell_gating, sample_definitions, timestamps, nested qc_options keys…)
+        # was simply never displayed. Render the COMPLETE pipeline_info.json
+        # here so the tab is a full receipt with nothing hidden.
+        def _add_node(parent: QTreeWidgetItem, key: object, value: object) -> None:
+            if isinstance(value, dict):
+                node = QTreeWidgetItem(parent, [str(key), f"{{{len(value)}}}"])
+                for k, v in value.items():
+                    _add_node(node, k, v)
+            elif isinstance(value, (list, tuple)) and value and any(
+                isinstance(x, (dict, list, tuple)) for x in value
+            ):
+                node = QTreeWidgetItem(parent, [str(key), f"[{len(value)}]"])
+                for i, item in enumerate(value):
+                    _add_node(node, f"[{i}]", item)
+            else:
+                QTreeWidgetItem(parent, [str(key), _fmt(value)])
+
+        raw_node = QTreeWidgetItem(
+            tree, ["All parameters (raw pipeline_info.json)", f"{{{len(info)}}}"])
+        rf = raw_node.font(0); rf.setBold(True); raw_node.setFont(0, rf)
+        for k in sorted(info, key=str):
+            _add_node(raw_node, k, info[k])
+        raw_node.setExpanded(False)
+
         tree.resizeColumnToContents(0)
 
     reload_ib.clicked.connect(lambda _=False: _refresh())

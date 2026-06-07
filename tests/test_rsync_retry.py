@@ -189,3 +189,32 @@ def test_log_fn_receives_retry_notices(monkeypatch):
     # One log line per retry (3 retries → 3 lines).
     retry_lines = [l for l in logs if "retry" in l.lower()]
     assert len(retry_lines) == len(_RSYNC_RETRY_DELAYS)
+
+
+# ── wall-clock deadline: a progressing transfer must not be killed ───────────
+
+def test_cancellable_run_timeout_none_never_walltimeouts():
+    """timeout=None disables the wall-clock deadline so a long-but-progressing
+    transfer (the big final per-well zip) is never killed mid-flight — the
+    fetch relies on rsync's own --timeout for stalls instead."""
+    import sys
+    import threading
+    from services.remote_runner import _rsync_run_cancellable
+    ev = threading.Event()  # never set
+    r = _rsync_run_cancellable(
+        [sys.executable, "-c", "import time; time.sleep(0.5)"],
+        timeout=None, capture_output=True, cwd=None, stop_event=ev,
+    )
+    assert r.returncode == 0
+
+
+def test_cancellable_run_walltimeout_still_fires_when_set():
+    import sys
+    import threading
+    from services.remote_runner import _rsync_run_cancellable
+    ev = threading.Event()
+    with pytest.raises(subprocess.TimeoutExpired):
+        _rsync_run_cancellable(
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            timeout=1, capture_output=True, cwd=None, stop_event=ev,
+        )

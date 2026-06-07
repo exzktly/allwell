@@ -2882,6 +2882,12 @@ class RemoteRunner:
         self.host = host
         self._run: Optional[_RemoteRun] = None
         self._cache: DatasetCache = DatasetCache(host)
+        # The Fetcher created in spawn(), kept so cancel() can interrupt an
+        # in-flight per-well download, and a stop flag the end-of-run retry
+        # backstop polls. Without these, Stop did nothing while the final
+        # per-well rsync was in flight / retry-looping.
+        self._fetcher: Optional["Fetcher"] = None
+        self._cancelled: threading.Event = threading.Event()
 
     @property
     def run(self) -> Optional[_RemoteRun]:
@@ -3212,6 +3218,9 @@ class RemoteRunner:
             log_fn=log,
             progress_fn=progress_fn,
         )
+        # Keep a handle so cancel() can stop an in-flight per-well download.
+        self._fetcher = fetcher
+        self._cancelled.clear()
         return _RemoteProcess(popen, self._run, fetcher)
 
     # ── Verify + cleanup ────────────────────────────────────────────────
@@ -3387,6 +3396,9 @@ class RemoteRunner:
         log(f"[remote] end-of-run retry: re-pulling {len(wells)} well(s)…\n")
         host = self.host
         for well in sorted(wells):
+            if self._cancelled.is_set():
+                log("[remote] end-of-run retry cancelled by Stop.\n")
+                return
             # Pull the per-well CSV (top-level on remote out dir).
             csv_glob_src = (
                 f"{host.ssh_alias}:{run.remote_output_dir}/*_{well}.csv"
@@ -3544,7 +3556,20 @@ class RemoteRunner:
         """Best-effort remote kill. The local pgid kill (handled by
         PipelineRunner) is the primary mechanism; this is the belt-and-
         braces second channel via a fresh ssh that ``kill``s the PID we
-        wrote on startup."""
+        wrote on startup.
+
+        Also interrupts the local download side: the per-well Fetcher runs
+        rsync on a background thread in THIS process (separate from the ssh
+        process group), and the end-of-run retry backstop polls ``_cancelled``.
+        Without these, clicking Stop while the final per-well rsync was in
+        flight / retry-looping did nothing — the GUI only ever tore down the
+        ssh process, never the download that was actually blocking."""
+        self._cancelled.set()
+        if self._fetcher is not None:
+            try:
+                self._fetcher.cancel()
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
         if self._run is None:
             return
         run = self._run

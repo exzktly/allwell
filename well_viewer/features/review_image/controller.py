@@ -24,6 +24,24 @@ from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 _logger = logging.getLogger(__name__)
 
 
+def _guard_event(fn):
+    """Wrap a Qt mouse-event handler so an exception can't escape into the C++
+    event dispatch — under PySide6 that aborts the whole app (the "clicking a
+    cell in the Segmentation tab crashes" report). Log the traceback instead so
+    the click is a no-op and the cause is captured."""
+    import functools
+
+    @functools.wraps(fn)
+    def _wrapped(app, event, *args, **kwargs):
+        try:
+            return fn(app, event, *args, **kwargs)
+        except Exception:  # noqa: BLE001 — never let a click kill the app
+            _logger.exception("review-image %s failed", getattr(fn, "__name__", fn))
+            return None
+
+    return _wrapped
+
+
 
 def _select_tab_by_text(notebook, text: str) -> None:
     """Select a centre-stack page by its name (NamedPageStack v2 API)."""
@@ -56,6 +74,7 @@ def _table_row_dict(table, row_idx: int, col_names: list[str] | None = None) -> 
     }
 
 
+@_guard_event
 def on_review_image_click(app, event, logger) -> None:
     mask_arr = getattr(app._review_image_label, "_mask_arr", None)
     if mask_arr is None:
@@ -319,6 +338,7 @@ def on_review_image_wheel(app, event) -> None:
         app._review_image_zoom_step(direction)
 
 
+@_guard_event
 def on_review_image_press(app, event) -> None:
     # In include-edit mode, LMB drag draws a rubber-band rectangle for
     # bulk delete instead of panning. We record the anchor in label-local
@@ -379,6 +399,7 @@ def on_review_image_drag(app, event) -> None:
     app._render_review_image_display(pan_only=True)
 
 
+@_guard_event
 def on_review_image_release(app, event) -> None:
     # Rubber-band finalize path. A drag shorter than this many label-local
     # pixels in either axis falls through to the existing single-cell
@@ -419,6 +440,7 @@ def on_review_image_release(app, event) -> None:
         app._on_review_image_click(event)
 
 
+@_guard_event
 def on_review_image_move(app, event) -> None:
     """Unified mouseMove handler: drag when LMB held, otherwise hover."""
     from PySide6.QtCore import Qt
@@ -696,25 +718,55 @@ def review_build_threshold_map(
         return above_by_nid
 
     mask = df_included_mask(sub).to_numpy(copy=True)
+    n_incl_qc = int(mask.sum())
     if "area_px" in sub.columns:
         area = pd.to_numeric(sub["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) 
+            mask &= np.isfinite(area)
+    n_after_area = int(mask.sum())
+    missing_fluor_col = None
     for chan, gate in fluor_gates.items():
         col = f"{chan}_mean_intensity"
         if col not in sub.columns:
+            missing_fluor_col = col
             mask[:] = False
             break
         v = pd.to_numeric(sub[col], errors="coerce").to_numpy()
         mask &= np.isfinite(v) & (v > gate)
+    n_after_fluor = int(mask.sum())
     val = resolve_value_series(sub, val_col, ratios).to_numpy()
     mask &= np.isfinite(val) & (val > threshold)
+    n_above = int(mask.sum())
 
     sub_keys = keys.loc[sub.index]
     for k, ok in zip(sub_keys, mask):
         nid = _safe_int_or_none(k[2])
         if nid is not None and nid in above_by_nid:
             above_by_nid[nid] = bool(ok)
+
+    # Diagnostic: the gating math is unit-tested correct, so when the binary
+    # mask highlights the "wrong" cells the cause is in the inputs — the
+    # resolved value column, the threshold, the QC verdict, or a missing gate
+    # column. One concise line per build surfaces all of them so the cause is
+    # visible in the log without a debugger.
+    try:
+        finite_vals = val[_np.isfinite(val)]
+        vmin = float(finite_vals.min()) if finite_vals.size else float("nan")
+        vmax = float(finite_vals.max()) if finite_vals.size else float("nan")
+        _logger.info(
+            "[binary-mask] well=%s fov=%s tp=%s | val_col=%r thresh=%.4g | "
+            "mask_cells=%d matched_rows=%d incl+qc=%d after_area=%d "
+            "after_fluor=%d above=%d | val_range=[%.4g,%.4g] qc_col=%s "
+            "fluor_gates=%s%s",
+            well, fov, tp, val_col, threshold,
+            len(above_by_nid), len(sub), n_incl_qc, n_after_area,
+            n_after_fluor, n_above, vmin, vmax,
+            ("QC_Pass" in sub.columns),
+            {k: round(float(g), 4) for k, g in fluor_gates.items()},
+            f" MISSING_FLUOR_COL={missing_fluor_col}" if missing_fluor_col else "",
+        )
+    except Exception:  # diagnostics must never break rendering
+        _logger.debug("[binary-mask] diagnostic log failed", exc_info=True)
     return above_by_nid
 
 

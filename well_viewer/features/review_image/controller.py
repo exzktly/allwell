@@ -24,6 +24,24 @@ from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 _logger = logging.getLogger(__name__)
 
 
+def _guard_event(fn):
+    """Wrap a Qt mouse-event handler so an exception can't escape into the C++
+    event dispatch — under PySide6 that aborts the whole app (the "clicking a
+    cell in the Segmentation tab crashes" report). Log the traceback instead so
+    the click is a no-op and the cause is captured."""
+    import functools
+
+    @functools.wraps(fn)
+    def _wrapped(app, event, *args, **kwargs):
+        try:
+            return fn(app, event, *args, **kwargs)
+        except Exception:  # noqa: BLE001 — never let a click kill the app
+            _logger.exception("review-image %s failed", getattr(fn, "__name__", fn))
+            return None
+
+    return _wrapped
+
+
 
 def _select_tab_by_text(notebook, text: str) -> None:
     """Select a centre-stack page by its name (NamedPageStack v2 API)."""
@@ -56,6 +74,7 @@ def _table_row_dict(table, row_idx: int, col_names: list[str] | None = None) -> 
     }
 
 
+@_guard_event
 def on_review_image_click(app, event, logger) -> None:
     mask_arr = getattr(app._review_image_label, "_mask_arr", None)
     if mask_arr is None:
@@ -319,6 +338,7 @@ def on_review_image_wheel(app, event) -> None:
         app._review_image_zoom_step(direction)
 
 
+@_guard_event
 def on_review_image_press(app, event) -> None:
     # In include-edit mode, LMB drag draws a rubber-band rectangle for
     # bulk delete instead of panning. We record the anchor in label-local
@@ -379,6 +399,7 @@ def on_review_image_drag(app, event) -> None:
     app._render_review_image_display(pan_only=True)
 
 
+@_guard_event
 def on_review_image_release(app, event) -> None:
     # Rubber-band finalize path. A drag shorter than this many label-local
     # pixels in either axis falls through to the existing single-cell
@@ -419,6 +440,7 @@ def on_review_image_release(app, event) -> None:
         app._on_review_image_click(event)
 
 
+@_guard_event
 def on_review_image_move(app, event) -> None:
     """Unified mouseMove handler: drag when LMB held, otherwise hover."""
     from PySide6.QtCore import Qt

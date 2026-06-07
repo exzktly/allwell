@@ -2518,7 +2518,25 @@ class Fetcher:
                 f"still queued for download\n"
             )
         self._pending.put(None)
-        self._worker.join(timeout=timeout)
+        # Wait for the worker to ACTUALLY finish draining — NOT a fixed 60s cap.
+        # The old short timeout let join() return while downloads were still in
+        # flight, so wait() returned and verify_and_cleanup deleted the remote
+        # mid-fetch: "completed run → deleted cache → then finished fetcher".
+        # Each per-well fetch is independently bounded (rsync --timeout + retry
+        # cap), so the worker is guaranteed to terminate; block until it does,
+        # logging a heartbeat each interval so a long-but-legitimate drain isn't
+        # mistaken for a hang (and Stop still breaks out — cancel() sets _stop,
+        # the in-flight rsync aborts, the worker exits and this join returns).
+        while self._worker.is_alive():
+            self._worker.join(timeout=timeout)
+            if self._worker.is_alive():
+                done = len(self.run.fetched_wells)
+                tot = self.run.well_count_total
+                self._log(
+                    f"[remote] ↓ still downloading… ({done}/{tot} wells)\n"
+                    if tot else
+                    f"[remote] ↓ still downloading… ({done} well(s))\n"
+                )
         # v5.2.18: surface the end-of-stream summary so the user
         # sees a clear "all downloads complete" marker rather than
         # the run silently going quiet.

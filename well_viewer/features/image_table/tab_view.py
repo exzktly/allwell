@@ -36,6 +36,8 @@ from well_viewer.features.image_table.controller import image_table_distribute_w
 from well_viewer.features.image_table.controller import image_table_export
 from well_viewer.features.image_table.controller import image_table_generate
 from well_viewer.features.image_table.controller import image_table_load_heatmap_layout
+from well_viewer.features.image_table.controller import image_table_build_layout
+from well_viewer.features.image_table.controller import image_table_apply_preset
 
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:
@@ -68,6 +70,12 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         ctx.app._image_table_show_boundaries = False
     if not hasattr(ctx.app, "_image_table_show_binary"):
         ctx.app._image_table_show_binary = False
+    if not hasattr(ctx.app, "_image_table_active_channels"):
+        ctx.app._image_table_active_channels = set()
+    if not hasattr(ctx.app, "_image_table_row_axis"):
+        ctx.app._image_table_row_axis = "channel"
+    if not hasattr(ctx.app, "_image_table_col_axis"):
+        ctx.app._image_table_col_axis = "timepoint"
     # Shared square-region crop helper. on_change re-runs Generate so the
     # rendered grid follows mode toggles and crop changes automatically.
     if not hasattr(ctx.app, "_image_table_crop_tool"):
@@ -145,6 +153,52 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ctx.app._image_table_global_fov_cb = fov_cb
     gl.addStretch(1)
     il.addWidget(glob)
+
+    # ── Smart layout builder: rows = ▾  cols = ▾  + Build + presets ─────────
+    # Declare what varies down rows and across cols; Build auto-sizes the grid
+    # to the current selection (plate wells / ticked channels / timepoints /
+    # FOVs) and fills every cell, holding the off-axis dims at the Global value.
+    builder = QWidget(inner)
+    builder.setObjectName("TabCtrl")
+    bl = QHBoxLayout(builder)
+    bl.setContentsMargins(8, 6, 8, 6)
+    bl.setSpacing(6)
+    _AXES = [("Channels", "channel"), ("Wells", "well"),
+             ("Timepoints", "timepoint"), ("FOVs", "fov")]
+
+    def _axis_combo(default_key: str) -> QComboBox:
+        cb = QComboBox(builder)
+        for label, key in _AXES:
+            cb.addItem(label, key)
+        idx = cb.findData(default_key)
+        cb.setCurrentIndex(idx if idx >= 0 else 0)
+        return cb
+
+    bl.addWidget(QLabel("Layout — Rows:", builder))
+    row_axis_cb = _axis_combo(ctx.app._image_table_row_axis)
+    bl.addWidget(row_axis_cb)
+    ctx.app._image_table_row_axis_cb = row_axis_cb
+
+    bl.addWidget(QLabel("Cols:", builder))
+    col_axis_cb = _axis_combo(ctx.app._image_table_col_axis)
+    bl.addWidget(col_axis_cb)
+    ctx.app._image_table_col_axis_cb = col_axis_cb
+
+    bl.addWidget(btn_primary(
+        builder, "Build table", partial(image_table_build_layout, ctx.app),
+    ))
+    bl.addWidget(QLabel("Presets:", builder))
+    for label, (ra, ca) in (
+        ("Channels × Time", ("channel", "timepoint")),
+        ("Channels × Wells", ("channel", "well")),
+        ("Wells × Time", ("well", "timepoint")),
+        ("Wells × Channels", ("well", "channel")),
+    ):
+        bl.addWidget(btn_secondary(
+            builder, label, partial(image_table_apply_preset, ctx.app, ra, ca),
+        ))
+    bl.addStretch(1)
+    il.addWidget(builder)
 
     # ── Layout actions (operate on the selector grid above) ────────────────
     layout_actions = QWidget(inner)

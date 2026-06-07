@@ -326,6 +326,9 @@ def image_table_repopulate_dropdowns(app) -> None:
     if set(chan_opts) != existing:
         image_table_rebuild_lut_row(app)
 
+    # Keep the sidebar channel multi-select in sync with the dataset's channels.
+    image_table_refresh_channel_picker(app)
+
 
 # ── Selector-grid build / rebuild ────────────────────────────────────────────
 
@@ -690,6 +693,223 @@ def image_table_distribute_timepoints(app) -> None:
         f"Image Table: distributed {min(len(tps), len(cells[0]) if cells else 0)} "
         f"timepoint(s) across {len(cells)} row(s) ({assignments} cells filled)."
     )
+
+
+# ── Smart layout builder ──────────────────────────────────────────────────────
+#
+# Declare what varies down the ROWS and across the COLUMNS (Channels / Wells /
+# Timepoints / FOVs); one Build auto-sizes the grid to the selection and fills
+# every cell, holding the off-axis dimensions fixed. This replaces the manual
+# "set rows/cols, then assign every dropdown" workflow for the common views
+# (channels × timepoints, channels × wells, wells × timepoints, …).
+
+_AXIS_LABEL = {"channel": "Channels", "well": "Wells",
+               "timepoint": "Timepoints", "fov": "FOVs"}
+_AXIS_MAX = 12  # grid is capped at 12×12; longer axes are truncated
+
+
+def _axis_values(app, axis: str) -> List[str]:
+    """Ordered value list an axis expands into, drawn from the live selections."""
+    if axis == "channel":
+        opts = _channel_options(app)
+        sel = getattr(app, "_image_table_active_channels", None) or set()
+        return [c for c in opts if c in sel] if sel else list(opts)
+    if axis == "well":
+        sel = sorted(getattr(app, "_image_table_active_wells", set()) or set(),
+                     key=app._parse_rc)
+        return sel if sel else _well_options(app)
+    if axis == "timepoint":
+        return _timepoint_options(app)
+    if axis == "fov":
+        return _fov_options(app)
+    return []
+
+
+def _fixed_off_axis(app, on_axis: set) -> Dict[str, str]:
+    """Pick a single held value for each dimension NOT on a row/col axis.
+
+    Prefers the matching Global Options dropdown (so the user can change it and
+    re-Build), else the first selected/available value."""
+    def _global(attr: str) -> str:
+        cb = getattr(app, attr, None)
+        return cb.currentText().strip() if cb is not None else ""
+
+    def _first(seq) -> str:
+        return seq[0] if seq else ""
+
+    fixed = {"well": "", "channel": "", "timepoint": "", "fov": ""}
+    if "well" not in on_axis:
+        sel = sorted(getattr(app, "_image_table_active_wells", set()) or set(),
+                     key=app._parse_rc)
+        fixed["well"] = sel[0] if sel else _first(_well_options(app))
+    if "channel" not in on_axis:
+        fixed["channel"] = _global("_image_table_global_chan_cb") or _first(_axis_values(app, "channel"))
+    if "timepoint" not in on_axis:
+        fixed["timepoint"] = _global("_image_table_global_tp_cb") or _first(_timepoint_options(app))
+    if "fov" not in on_axis:
+        fixed["fov"] = _global("_image_table_global_fov_cb") or _first(_fov_options(app))
+    return fixed
+
+
+def _current_axis(app, which: str) -> str:
+    cb = getattr(app, f"_image_table_{which}_axis_cb", None)
+    if cb is not None:
+        data = cb.currentData()
+        if data:
+            return str(data)
+    # state fallback / default
+    return getattr(app, f"_image_table_{which}_axis",
+                   "channel" if which == "row" else "timepoint")
+
+
+def _apply_row_channel_styling(app, channels: List[str]) -> None:
+    """When rows are channels, mirror each channel onto its row-0 channel combo
+    and give each row a distinct colormap so the channels read apart."""
+    row_chan = getattr(app, "_image_table_row_chan_cbs", None) or []
+    row_lut = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    palette = [n for n in LUT_COLOR_NAMES if n != "Greys"] or LUT_COLOR_NAMES
+    for r, chan in enumerate(channels):
+        if r < len(row_chan) and row_chan[r] is not None:
+            cb = row_chan[r]
+            cb.blockSignals(True)
+            if cb.findText(chan) >= 0:
+                cb.setCurrentText(chan)
+            cb.blockSignals(False)
+        if palette and r < len(row_lut) and row_lut[r] is not None and hasattr(row_lut[r], "setLut"):
+            sel = row_lut[r]
+            sel.blockSignals(True)
+            try:
+                sel.setLut(palette[r % len(palette)])
+            except Exception:  # noqa: BLE001 — colormap styling is best-effort
+                pass
+            sel.blockSignals(False)
+
+
+def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c) -> Dict[str, str]:
+    """Per-cell (well, channel, timepoint, fov) for the smart layout: off-axis
+    dims held at *fixed*, the row axis driven by *r*, the col axis by *c*."""
+    vals = dict(fixed)
+    vals[row_axis] = row_vals[r]
+    vals[col_axis] = col_vals[c]
+    return vals
+
+
+def image_table_build_layout(app) -> None:
+    """Auto-size the grid to the chosen row/col axes and fill every cell."""
+    row_axis = _current_axis(app, "row")
+    col_axis = _current_axis(app, "col")
+    if row_axis == col_axis:
+        app._set_status("Image Table: choose two different axes for rows and columns.")
+        return
+
+    row_vals = _axis_values(app, row_axis)
+    col_vals = _axis_values(app, col_axis)
+    if not row_vals:
+        app._set_status(f"Image Table: nothing on the {_AXIS_LABEL[row_axis]} axis "
+                        f"(select some in the sidebar).")
+        return
+    if not col_vals:
+        app._set_status(f"Image Table: nothing on the {_AXIS_LABEL[col_axis]} axis "
+                        f"(select some in the sidebar).")
+        return
+
+    row_vals = row_vals[:_AXIS_MAX]
+    col_vals = col_vals[:_AXIS_MAX]
+    rows, cols = len(row_vals), len(col_vals)
+
+    # Size the grid (sync the spinners) and rebuild the empty selector cells.
+    app._image_table_rows = rows
+    app._image_table_cols = cols
+    for attr, val in (("_image_table_rows_spin", rows), ("_image_table_cols_spin", cols)):
+        spin = getattr(app, attr, None)
+        if spin is not None:
+            spin.blockSignals(True)
+            spin.setValue(val)
+            spin.blockSignals(False)
+    image_table_rebuild_grid(app)
+
+    fixed = _fixed_off_axis(app, {row_axis, col_axis})
+    key_of = {"well": "well_cb", "channel": "chan_cb",
+              "timepoint": "tp_cb", "fov": "fov_cb"}
+
+    def _set(cb, text):
+        if cb is None or not text:
+            return
+        cb.blockSignals(True)
+        try:
+            if cb.findText(text) >= 0:
+                cb.setCurrentText(text)
+        finally:
+            cb.blockSignals(False)
+
+    cells = getattr(app, "_image_table_cells", None) or []
+    for r, row in enumerate(cells):
+        for c, cell in enumerate(row):
+            vals = _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c)
+            for dim, ckey in key_of.items():
+                _set(cell.get(ckey), vals[dim])
+
+    if row_axis == "channel":
+        _apply_row_channel_styling(app, row_vals)
+
+    image_table_rebuild_lut_row(app)
+    image_table_generate(app)
+    app._set_status(
+        f"Image Table: built {rows}×{cols} — rows = {_AXIS_LABEL[row_axis]}, "
+        f"cols = {_AXIS_LABEL[col_axis]}."
+    )
+
+
+def image_table_apply_preset(app, row_axis: str, col_axis: str) -> None:
+    """Set the row/col axis dropdowns to a common pairing, then Build."""
+    for which, axis in (("row", row_axis), ("col", col_axis)):
+        cb = getattr(app, f"_image_table_{which}_axis_cb", None)
+        if cb is not None:
+            idx = cb.findData(axis)
+            cb.blockSignals(True)
+            cb.setCurrentIndex(idx if idx >= 0 else 0)
+            cb.blockSignals(False)
+        setattr(app, f"_image_table_{which}_axis", axis)
+    image_table_build_layout(app)
+
+
+# ── Channel multi-select (sidebar) ────────────────────────────────────────────
+
+
+def image_table_refresh_channel_picker(app) -> None:
+    """Repopulate the sidebar channel checkboxes from the dataset's channels,
+    preserving valid prior selections."""
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtWidgets import QListWidgetItem
+
+    lst = getattr(app, "_image_table_channel_list", None)
+    if lst is None:
+        return
+    opts = _channel_options(app)
+    active = getattr(app, "_image_table_active_channels", None)
+    if active is None:
+        active = set()
+    app._image_table_active_channels = {c for c in active if c in opts}
+    lst.blockSignals(True)
+    lst.clear()
+    for ch in opts:
+        it = QListWidgetItem(ch)
+        it.setFlags(it.flags() | _Qt.ItemIsUserCheckable)
+        it.setCheckState(_Qt.Checked if ch in app._image_table_active_channels
+                         else _Qt.Unchecked)
+        lst.addItem(it)
+    lst.blockSignals(False)
+
+
+def image_table_on_channel_toggled(app) -> None:
+    """Read the sidebar channel checkboxes into ``_image_table_active_channels``."""
+    from PySide6.QtCore import Qt as _Qt
+    lst = getattr(app, "_image_table_channel_list", None)
+    if lst is None:
+        return
+    sel = {lst.item(i).text() for i in range(lst.count())
+           if lst.item(i).checkState() == _Qt.Checked}
+    app._image_table_active_channels = sel
 
 
 def image_table_toggle_tophat(app) -> None:

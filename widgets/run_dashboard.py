@@ -104,12 +104,7 @@ class RunDashboard(QWidget):
         self._headline.setStyleSheet(f"color:{TXT_PRI};")
         root.addWidget(self._headline)
 
-        # per-well FOV·timepoint sub-progress for the well(s) currently computing
-        self._fov_lbl = QLabel("", self)
-        self._fov_lbl.setObjectName("Muted")
-        root.addWidget(self._fov_lbl)
-
-        # body: rail | plate | legend
+        # body: rail | plate (+ per-well FOV rails beneath it) | legend
         self._body = QWidget(self)
         body = QHBoxLayout(self._body)
         body.setContentsMargins(0, 4, 0, 0); body.setSpacing(14)
@@ -123,7 +118,13 @@ class RunDashboard(QWidget):
         d1 = QFrame(self._body); d1.setFrameShape(QFrame.VLine); d1.setObjectName("VRule")
         body.addWidget(d1)
 
-        self._plate = WellPlateSelector(self._body)
+        # Centre column: the plate map, with the per-well FOV·timepoint
+        # progress rails stacked directly beneath it.
+        self._center_host = QWidget(self._body)
+        center = QVBoxLayout(self._center_host)
+        center.setContentsMargins(0, 0, 0, 0); center.setSpacing(6)
+
+        self._plate = WellPlateSelector(self._center_host)
         self._plate.setSelectionMode("passive")
         self._plate.setDragSelectEnabled(False)
         self._plate.setRowColumnSelectable(False)
@@ -135,7 +136,16 @@ class RunDashboard(QWidget):
         self._plate.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._plate.setMaximumHeight(210)
         self._plate.setWellTooltipProvider(self._well_tooltip)
-        body.addWidget(self._plate, 1)
+        center.addWidget(self._plate)
+
+        # Per-well FOV·timepoint sub-progress: one labelled rail per well
+        # currently computing, rebuilt by _refresh_fov.
+        self._fov_host = QWidget(self._center_host)
+        self._fov_lay = QVBoxLayout(self._fov_host)
+        self._fov_lay.setContentsMargins(0, 0, 0, 0); self._fov_lay.setSpacing(3)
+        center.addWidget(self._fov_host)
+        center.addStretch(1)
+        body.addWidget(self._center_host, 1)
 
         d2 = QFrame(self._body); d2.setFrameShape(QFrame.VLine); d2.setObjectName("VRule")
         body.addWidget(d2)
@@ -158,7 +168,7 @@ class RunDashboard(QWidget):
         self._errored = set()
         self._fov = {}
         self._active_stage = ""
-        self._fov_lbl.setText("")
+        self._clear_fov_rows()
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
         self._plate.setEnabledWells(None)
@@ -201,10 +211,36 @@ class RunDashboard(QWidget):
         self._fov[w] = (int(done), int(total))
         self._refresh_fov()
 
+    def _clear_fov_rows(self) -> None:
+        while self._fov_lay.count():
+            it = self._fov_lay.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
     def _refresh_fov(self) -> None:
-        parts = [f"{w} · FOV {self._fov[w][0]}/{self._fov[w][1]}"
-                 for w in sorted(self._active) if w in self._fov]
-        self._fov_lbl.setText("    ".join(parts))
+        """One labelled progress rail per currently-computing well, beneath the
+        plate — replaces the old single 'A01 · FOV 7/12' text line."""
+        self._clear_fov_rows()
+        for w in sorted(self._active):
+            if w not in self._fov:
+                continue
+            done, total = self._fov[w]
+            row = QWidget(self._fov_host)
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(6)
+            lbl = QLabel(f"{w} · FOV", row); lbl.setObjectName("Muted")
+            lbl.setFixedWidth(78)
+            bar = QProgressBar(row)
+            bar.setRange(0, max(1, int(total)))
+            bar.setValue(max(0, min(int(done), int(total))))
+            bar.setFormat(f"{done}/{total}")
+            bar.setTextVisible(True)
+            bar.setFixedHeight(12)
+            rl.addWidget(lbl)
+            rl.addWidget(bar, 1)
+            self._fov_lay.addWidget(row)
 
     def set_active_stage(self, name: str) -> None:
         """Highlight the rail row for the coarse phase the run is in."""

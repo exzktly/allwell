@@ -1299,11 +1299,22 @@ class DatasetCache:
             mbps = (sent_bytes * 8) / elapsed / 1_000_000
             update_bandwidth(self.host.name, mbps)
 
+        mb = sent_bytes / (1024**2)
+        cache_hit = mb < 1
+        # On a full cache hit rsync moves nothing and emits no per-file
+        # "↑ <well>.zip" name lines, so the dashboard's Upload rail never
+        # advanced (the user just saw it stuck at 0/N when the inputs were
+        # already on the remote). Verification above confirmed every expected
+        # zip is present — emit a per-well marker so the Upload step reads
+        # complete. The dashboard de-dupes via sets, so this is harmless on a
+        # fresh upload that also streamed live ↑ lines.
+        if log_fn and cache_hit:
+            for wz in zipped.well_zips:
+                log_fn(f"[remote] ↑ {wz.stem}.zip already on remote\n")
         if log_fn:
-            mb = sent_bytes / (1024**2)
             log_fn(
                 f"[remote] upload: {mb:.1f} MB in {_fmt_secs(elapsed)}"
-                f"{' (cache hit)' if mb < 1 else ''}\n"
+                f"{' (cache hit)' if cache_hit else ''}\n"
             )
         return key, sent_bytes, elapsed
 

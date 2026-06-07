@@ -142,14 +142,51 @@ def test_tracker_emits_per_well_fov_progress():
                               if k == "well_fov"]
 
 
+def test_tracker_cached_upload_marks_well_uploaded():
+    # A full cache hit logs "↑ <well>.zip already on remote" (no live transfer
+    # lines) — it must still advance the Upload rail.
+    t = ProgressTracker()
+    ups = [p for k, p in t.parse("[remote] ↑ A01.zip already on remote") if k == "well_stage"]
+    assert ("A01", "upload") in ups
+
+
+def test_tracker_emits_finalize_status():
+    t = ProgressTracker()
+    assert ("status", "Auto-thresholding…") in t.parse(
+        "Auto-threshold: scanning 3 well(s) for channels: GFP")
+    assert ("status", "Auto-thresholding 2/3…") in t.parse(
+        "Auto-threshold: completed well 2/3 (A02_out.zip)")
+    assert ("status", "Finalizing downloads…") in t.parse(
+        "[remote] ↓ fetcher: 5/7 wells downloaded so far")
+    assert ("status", "Cleaning up remote…") in t.parse(
+        "[remote] removed run dir abc123.")
+
+
+def _fov_rails(d):
+    """{well: (value, maximum)} from the per-well FOV progress rails beneath
+    the plate (replaces the old single _fov_lbl text line)."""
+    from PySide6.QtWidgets import QLabel, QProgressBar
+    out = {}
+    for i in range(d._fov_lay.count()):
+        row = d._fov_lay.itemAt(i).widget()
+        if row is None:
+            continue
+        lbl = row.findChild(QLabel)
+        bar = row.findChild(QProgressBar)
+        out[lbl.text().split(" ")[0]] = (bar.value(), bar.maximum())
+    return out
+
+
 def test_dashboard_fov_sub_progress(qapp):
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard(); d.reset(remote=True, total=2)
     d.set_well_stage("A01", "active"); d.set_well_stage("B02", "active")
     d.set_well_fov("A01", 0, 12); d.set_well_fov("B02", 0, 8)
     d.set_well_fov("A01", 7, 12)
-    txt = d._fov_lbl.text()
-    assert "A01 · FOV 7/12" in txt and "B02 · FOV 0/8" in txt
-    # a well that finishes processing drops out of the "currently computing" line
+    # each computing well gets its own labelled rail (value/maximum), under the plate
+    rails = _fov_rails(d)
+    assert rails.get("A01") == (7, 12) and rails.get("B02") == (0, 8)
+    # a well that finishes processing drops out of the FOV rails
     d.set_well_stage("A01", "process")
-    assert "A01" not in d._fov_lbl.text() and "B02" in d._fov_lbl.text()
+    rails = _fov_rails(d)
+    assert "A01" not in rails and "B02" in rails

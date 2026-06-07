@@ -894,17 +894,21 @@ class AnalyzeTab(QWidget):
         remove_btn.setProperty("variant", "secondary")
         rl.addWidget(remove_btn)
 
-        # Pin each checkbox to its natural width so a narrow sidebar can't shrink
-        # it below the indicator+text and make "Phase" overlap "smFISH".
-        smfish_cb = QCheckBox("smFISH", row)
-        smfish_cb.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        smfish_cb.setMinimumWidth(smfish_cb.sizeHint().width())
-        rl.addWidget(smfish_cb)
+        # Pin each checkbox to a width derived from font metrics + a fixed
+        # indicator/spacing allowance, NOT sizeHint(): sizeHint() underreports
+        # the label width before the global stylesheet is polished, so the
+        # layout reserved too little and the "Phase" indicator painted on top
+        # of the "smFISH" label. Minimum policy floors the width at this value.
+        def _pin_checkbox(text: str) -> QCheckBox:
+            cb = QCheckBox(text, row)
+            # indicator (14px + 1px border ×2 = 16) + QSS spacing + padding.
+            cb.setMinimumWidth(cb.fontMetrics().horizontalAdvance(text) + 34)
+            cb.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+            rl.addWidget(cb)
+            return cb
 
-        phase_cb = QCheckBox("Phase", row)
-        phase_cb.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        phase_cb.setMinimumWidth(phase_cb.sizeHint().width())
-        rl.addWidget(phase_cb)
+        smfish_cb = _pin_checkbox("smFISH")
+        phase_cb = _pin_checkbox("Phase")
         rl.addStretch(1)
 
         self._fluor_rows.append((edit, smfish_cb, phase_cb, remove_btn))
@@ -1651,6 +1655,11 @@ class AnalyzeTab(QWidget):
         elif kind == "well_fov":
             well, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total))
+        elif kind == "status":
+            # Descriptive finalize-phase status (auto-threshold / remote drain
+            # / cleanup) so the post-well work doesn't read as a hang.
+            self._status_lbl.setText(str(payload))
+            self._dashboard.set_status(str(payload))
 
     def _poll_log(self) -> None:
         try:

@@ -2615,3 +2615,64 @@ def test_cancel_stops_in_flight_fetcher(host):
     runner.cancel(None)
     assert runner._cancelled.is_set()
     assert cancelled["n"] == 1
+
+
+# ── end-of-run retry backstop: must not wall-clock-hang or over-pull ──────────
+
+def _retry_runner(host, tmp_path, monkeypatch):
+    """A RemoteRunner with a _run and the rsync helpers stubbed; returns
+    (runner, pulled) where pulled records each re-pull's argv + kwargs."""
+    import services.remote_runner as rr
+    run = _make_run(tmp_path)
+    run.expected_wells = {"A01"}
+    runner = rr.RemoteRunner(host)
+    runner._run = run
+    pulled: list[dict] = []
+
+    def _fake_rsync(argv, *, log_fn=None, timeout=300, stop_event=None, **kw):
+        pulled.append({"argv": " ".join(map(str, argv)),
+                       "timeout": timeout, "stop_event": stop_event})
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(rr, "_rsync_with_retry", _fake_rsync)
+    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda h: [])
+    monkeypatch.setattr(rr, "to_rsync_path", lambda p: str(p))
+    return runner, pulled, rr
+
+
+def test_retry_skips_artifacts_already_present(host, tmp_path, monkeypatch):
+    """If the CSV and the out-zip are already local, the backstop re-pulls
+    nothing — no needless transfer (and no chance to hang)."""
+    runner, pulled, _ = _retry_runner(host, tmp_path, monkeypatch)
+    (tmp_path / "data_A01.csv").write_text("x")
+    (tmp_path / "A01_out.zip").write_text("zip")
+    runner._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
+    assert pulled == []
+
+
+def test_retry_csv_miss_does_not_drag_the_zip(host, tmp_path, monkeypatch):
+    """A missing CSV must NOT trigger re-pull of the (present) multi-hundred-MB
+    out-zip — the old unconditional zip pull is what fed the wall-clock loop."""
+    runner, pulled, rr = _retry_runner(host, tmp_path, monkeypatch)
+    (tmp_path / "A01_out.zip").write_text("zip")  # zip present; CSV absent
+    monkeypatch.setattr(
+        rr.subprocess, "run",
+        lambda *a, **k: MagicMock(stdout=b"/r/out/data_A01.csv\n", returncode=0))
+    runner._retry_missing_wells(["missing CSV for A01"], log=lambda _m: None)
+    assert any("data_A01.csv" in p["argv"] for p in pulled)
+    assert not any("A01_out.zip" in p["argv"] for p in pulled)
+
+
+def test_retry_zip_repull_has_no_walltimeout_and_is_stop_aware(host, tmp_path, monkeypatch):
+    """The genuinely-missing out-zip re-pull runs with timeout=None (no
+    wall-clock kill of a progressing transfer) and the cancel event wired in
+    (so Stop interrupts it) — the fix for the '7/7 fetched, then rsync retry'
+    hang."""
+    runner, pulled, _ = _retry_runner(host, tmp_path, monkeypatch)
+    (tmp_path / "data_A01.csv").write_text("x")  # CSV present; zip absent
+    runner._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
+    assert len(pulled) == 1
+    assert "A01_out.zip" in pulled[0]["argv"]
+    assert pulled[0]["timeout"] is None
+    assert pulled[0]["stop_event"] is runner._cancelled

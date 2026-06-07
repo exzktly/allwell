@@ -190,3 +190,20 @@ def test_dashboard_fov_sub_progress(qapp):
     d.set_well_stage("A01", "process")
     rails = _fov_rails(d)
     assert "A01" not in rails and "B02" in rails
+
+
+def test_dashboard_fov_rails_are_height_capped_and_scrollable(qapp):
+    """Many concurrent wells must NOT grow the dashboard and crush the log:
+    the FOV rails live in a height-capped scroll area that's hidden when idle."""
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard(); d.reset(remote=False, total=8)
+    # idle → the rail area reserves no space
+    assert d._fov_scroll.isHidden()
+    assert d._fov_scroll.maximumHeight() <= 120  # bounded, not unbounded
+    # fill more rails than fit in the cap
+    for i, w in enumerate(["A01", "B02", "C03", "D04", "E05", "F06", "G07", "H08"]):
+        d.set_well_stage(w, "active"); d.set_well_fov(w, i, 12)
+    assert d._fov_lay.count() == 8
+    assert not d._fov_scroll.isHidden()                       # shown while active
+    # content taller than the cap → it scrolls instead of expanding the dashboard
+    assert d._fov_host.sizeHint().height() > d._fov_scroll.maximumHeight()

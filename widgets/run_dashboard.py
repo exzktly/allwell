@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QSizePolicy, QToolButton,
-    QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QProgressBar, QScrollArea, QSizePolicy,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from ui.theme import ACCENT, CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN
@@ -139,11 +139,23 @@ class RunDashboard(QWidget):
         center.addWidget(self._plate)
 
         # Per-well FOV·timepoint sub-progress: one labelled rail per well
-        # currently computing, rebuilt by _refresh_fov.
-        self._fov_host = QWidget(self._center_host)
+        # currently computing, rebuilt by _refresh_fov. Wrapped in a height-
+        # capped scroll area so that when many wells compute at once the rails
+        # scroll instead of growing the dashboard and crushing the log below.
+        self._fov_host = QWidget()
         self._fov_lay = QVBoxLayout(self._fov_host)
         self._fov_lay.setContentsMargins(0, 0, 0, 0); self._fov_lay.setSpacing(3)
-        center.addWidget(self._fov_host)
+        self._fov_scroll = QScrollArea(self._center_host)
+        self._fov_scroll.setWidget(self._fov_host)
+        self._fov_scroll.setWidgetResizable(True)
+        self._fov_scroll.setFrameShape(QFrame.NoFrame)
+        self._fov_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._fov_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # ~6 rails (≈15px each) before scrolling; keeps the log visible.
+        self._fov_scroll.setMaximumHeight(96)
+        self._fov_scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        self._fov_host.setStyleSheet("background: transparent;")
+        center.addWidget(self._fov_scroll)
         center.addStretch(1)
         body.addWidget(self._center_host, 1)
 
@@ -169,6 +181,7 @@ class RunDashboard(QWidget):
         self._fov = {}
         self._active_stage = ""
         self._clear_fov_rows()
+        self._fov_scroll.setVisible(False)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
         self._plate.setEnabledWells(None)
@@ -223,6 +236,7 @@ class RunDashboard(QWidget):
         """One labelled progress rail per currently-computing well, beneath the
         plate — replaces the old single 'A01 · FOV 7/12' text line."""
         self._clear_fov_rows()
+        n_rows = 0
         for w in sorted(self._active):
             if w not in self._fov:
                 continue
@@ -241,6 +255,9 @@ class RunDashboard(QWidget):
             rl.addWidget(lbl)
             rl.addWidget(bar, 1)
             self._fov_lay.addWidget(row)
+            n_rows += 1
+        # Collapse the scroll area entirely when idle so it reserves no space.
+        self._fov_scroll.setVisible(n_rows > 0)
 
     def set_active_stage(self, name: str) -> None:
         """Highlight the rail row for the coarse phase the run is in."""

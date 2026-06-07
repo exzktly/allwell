@@ -961,9 +961,53 @@ def render_bar_items(
         setattr(ax, "_categorical_xaxis", True)
     if has_clusters:
         _annotate_cluster_headers(items, xs, ax_mean)
+
+    # ── Auto-fit y-limits: best-fit all bars ────────────────────────────────
+    # Keep the honest 0 baseline but trim the TOP to the tallest bar + its
+    # error bar (plus ~8% headroom so the error-bar caps aren't clipped), so
+    # the bars fill the panel instead of floating under matplotlib's default
+    # margin. Applied to every panel; the Fraction panel is additionally
+    # capped at 1.05 (it's a fraction). User-entered limits — applied by
+    # apply_bar_ylims, which runs AFTER this — still override.
+    _HEADROOM = 1.08
+
+    def _tops_lows(get_val, get_spread):
+        tops: List[float] = []
+        lows: List[float] = []
+        for it in items:
+            v = get_val(it)
+            if v is None or not math.isfinite(v):
+                continue
+            s = get_spread(it) or 0.0
+            if not math.isfinite(s) or s < 0:
+                s = 0.0
+            tops.append(v + s)
+            lows.append(v - s)
+        return tops, lows
+
+    def _autofit(ax, tops, lows, *, cap=None, floor_hi=None):
+        if not tops:
+            return
+        hi = max(tops) * _HEADROOM
+        if floor_hi is not None:
+            hi = max(hi, floor_hi)
+        if cap is not None:
+            hi = min(hi, cap)
+        lo = min([0.0] + lows)   # honest 0 baseline; dip below only for genuine negatives
+        if hi > lo:
+            ax.set_ylim(lo, hi)
+
+    _autofit(ax_mean, *_tops_lows(
+        lambda it: it.mean if it.has_mean else float("nan"),
+        lambda it: it.spread))
+    _autofit(ax_frac, *_tops_lows(
+        lambda it: it.frac if it.has_frac else float("nan"),
+        lambda it: it.frac_spread), cap=1.05)
+
     if ax_n is not None:
-        cur_lo, cur_hi = ax_n.get_ylim()
-        ax_n.set_ylim(0, max(cur_hi, 1))
+        _autofit(ax_n, *_tops_lows(
+            lambda it: float(it.n_above) if it.has_mean else float("nan"),
+            lambda it: it.n_above_spread), floor_hi=1.0)
         # Default to integer ticks because N is a count of events; in
         # Aggregate-FOVs mode the bar shows a per-FOV mean which can be
         # fractional, so let matplotlib pick auto ticks then.

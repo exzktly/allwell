@@ -3381,10 +3381,14 @@ class RemoteRunner:
         run = self._run
         if run is None:
             return
-        # Extract well IDs from the manifest messages. Format from
-        # _verify_local_manifest: "missing CSV for A01" / "empty CSV
-        # for A01". Match a two-letter+two-digit token.
-        well_re = re.compile(r"\b([A-H]\d{2})\b")
+        # Extract well IDs from the manifest messages. _verify_local_manifest
+        # emits several forms: "missing CSV for A01", "empty CSV for A01",
+        # "missing A01_out.zip locally", "missing A01/ output folder locally".
+        # A trailing \b fails on the zip form ("A01_out" — '_' is a word char,
+        # so no boundary after A01), which silently dropped zip/folder-only
+        # misses from the retry. Anchor on a leading boundary and forbid only a
+        # trailing digit, so all four forms parse without over-matching A012…
+        well_re = re.compile(r"\b([A-H]\d{2})(?![0-9])")
         wells: set[str] = set()
         for m in missing_messages:
             match = well_re.search(m)
@@ -3395,48 +3399,66 @@ class RemoteRunner:
 
         log(f"[remote] end-of-run retry: re-pulling {len(wells)} well(s)…\n")
         host = self.host
+        # The Fetcher's per-well rsync got the v6.0.1 wall-clock fix; this
+        # backstop path didn't, and was the remaining source of the
+        # "7/7 fetched, then endless rsync retry" hang: it re-pulled with the
+        # default 5-min subprocess wall-clock (which kills a large, still-
+        # progressing {well}_out.zip mid-transfer → --partial resume → killed
+        # again → loop) and with no stop event (so Stop couldn't break it).
+        # rsync --timeout=120 (I/O-idle) + ssh ConnectTimeout bound real stalls,
+        # so timeout=None is safe; stop_event makes Stop interrupt an in-flight
+        # re-pull.
+        want_zip = (
+            run.output_filter is OutputFilter.FULL
+            and run.local_input_mode in (
+                LocalInputMode.ZIP, LocalInputMode.FLAT, LocalInputMode.MIXED)
+        )
+
+        def _pull(remote_src: str) -> None:
+            _rsync_with_retry(
+                [resolve_rsync_binary(), *_rsync_ssh_transport(host),
+                 "-a", "--partial", "--timeout=120",
+                 f"{host.ssh_alias}:{remote_src}",
+                 to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
+                log_fn=log, timeout=None, stop_event=self._cancelled,
+            )
+
         for well in sorted(wells):
             if self._cancelled.is_set():
                 log("[remote] end-of-run retry cancelled by Stop.\n")
                 return
-            # Pull the per-well CSV (top-level on remote out dir).
-            csv_glob_src = (
-                f"{host.ssh_alias}:{run.remote_output_dir}/*_{well}.csv"
-            )
-            try:
-                listing = subprocess.run(
-                    host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-                    # v5.x.x: bytes input — see _ssh_script for the
-                    # Windows CRLF rationale.
-                    input=f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true".encode("utf-8"),
-                    capture_output=True, timeout=30,
-                )
-            except (subprocess.TimeoutExpired, OSError) as exc:
-                log(f"[remote] retry: listing {well} failed: {exc}\n")
-                continue
-            files = [
-                ln for ln in (
-                    listing.stdout.decode("utf-8", errors="replace")
-                    if listing.stdout else ""
-                ).splitlines() if ln.strip()
-            ]
-            for f in files:
-                _rsync_with_retry(
-                    [resolve_rsync_binary(), *_rsync_ssh_transport(host),
-                     "-a", f"{host.ssh_alias}:{f}",
-                     to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
-                    log_fn=log,
-                )
-            # Also re-pull the {well}_out.zip in case the user has a
-            # full output filter — it's harmless under csv-only mode
-            # since the temp zip gets discarded.
-            _rsync_with_retry(
-                [resolve_rsync_binary(), *_rsync_ssh_transport(host),
-                 "-a",
-                 f"{host.ssh_alias}:{run.remote_output_dir}/{well}_out.zip",
-                 to_rsync_path(run.local_output_dir).rstrip("/") + "/"],
-                log_fn=log,
-            )
+            # Re-pull the per-well CSV(s) only if they're actually missing or
+            # empty locally — a present CSV needs no refetch.
+            local_csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
+            csv_ok = bool(local_csvs) and all(p.stat().st_size > 0 for p in local_csvs)
+            if not csv_ok:
+                try:
+                    listing = subprocess.run(
+                        host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
+                        # v5.x.x: bytes input — see _ssh_script for the
+                        # Windows CRLF rationale.
+                        input=f"ls -1 {run.remote_output_dir}/*_{well}.csv 2>/dev/null || true".encode("utf-8"),
+                        capture_output=True, timeout=30,
+                    )
+                except (subprocess.TimeoutExpired, OSError) as exc:
+                    log(f"[remote] retry: listing {well} failed: {exc}\n")
+                    continue
+                files = [
+                    ln for ln in (
+                        listing.stdout.decode("utf-8", errors="replace")
+                        if listing.stdout else ""
+                    ).splitlines() if ln.strip()
+                ]
+                for f in files:
+                    _pull(f)
+            # Re-pull {well}_out.zip ONLY when the user's output mode wants it
+            # AND it isn't already present locally. Pulling a multi-hundred-MB
+            # zip just because a CSV was missing is what dragged this backstop
+            # into the wall-clock retry loop in the first place.
+            if want_zip:
+                out_zip = run.local_output_dir / f"{well}_out.zip"
+                if not out_zip.exists() or out_zip.stat().st_size == 0:
+                    _pull(f"{run.remote_output_dir}/{well}_out.zip")
 
     def _verify_local_manifest(
         self, *, log: Callable[[str], None]

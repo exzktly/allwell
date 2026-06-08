@@ -1375,81 +1375,19 @@ def compute_shape_features(
 # ── Quality control: flat-field correction + debris removal ──────────────────
 
 FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
-_FLATFIELD_SIGMA = 50.0  # Gaussian smoothing scale (px) for illumination estimation
-_FLATFIELD_FLOOR = 0.1   # min value of a mean-1 field → caps img/ff amplification at 10x
-
-
-def _normalize_flatfield(field: np.ndarray) -> "np.ndarray | None":
-    """Normalize an illumination field to mean 1.0 so dividing by it preserves
-    overall image scale. Returns None if the field is degenerate."""
-    field = np.asarray(field, dtype=np.float32)
-    m = float(np.mean(field)) if field.size else 0.0
-    if not np.isfinite(m) or m <= 0.0:
-        return None
-    out = field / m
-    out[~np.isfinite(out)] = 1.0
-    # Bound the amplification of img/ff in apply_flatfield. A dim empty-well
-    # region drives ff toward 0; without a floor, img/ff explodes (e.g. ff=0.005
-    # → 200x) and feeds StarDist out-of-distribution values that abort ClipperLib.
-    # Flooring the mean-1 field at _FLATFIELD_FLOOR caps amplification at
-    # 1/_FLATFIELD_FLOOR (=10x) and subsumes the old `out <= 0` guard. Real
-    # vignetting is < ~3x (field stays > ~0.33), so legitimate correction is
-    # untouched; only pathological empty-well division is clipped.
-    np.maximum(out, _FLATFIELD_FLOOR, out=out)
-    return out.astype(np.float32)
-
-
-def estimate_gaussian_flatfield(image: np.ndarray, sigma: float = _FLATFIELD_SIGMA) -> "np.ndarray | None":
-    """Estimate a smooth illumination field by heavily Gaussian-blurring *image*.
-
-    Dividing the image by the returned mean-1 field flattens slow illumination
-    gradients (vignetting / uneven excitation) while preserving cell-scale
-    structure. Self-referential: computed per image, no reference well needed.
-    """
-    from scipy.ndimage import gaussian_filter
-    blurred = gaussian_filter(np.asarray(image, dtype=np.float32), sigma=float(sigma))
-    return _normalize_flatfield(blurred)
-
-
-def estimate_basic_flatfield(stack, sigma: float = _FLATFIELD_SIGMA) -> "np.ndarray | None":
-    """Pure-numpy BaSiC-style flat-field from a stack of single-channel images.
-
-    Estimates the multiplicative illumination profile shared across the stack:
-    the per-pixel median (robust to cells/debris that move between fields),
-    smoothed and normalized to mean 1. This approximates BaSiC's flat-field
-    without its L1/low-rank optimisation — and without ``jax``/``basicpy``.
-    Returns None when the stack is empty or shapes are inconsistent.
-    """
-    from scipy.ndimage import gaussian_filter
-    arrs = [np.asarray(a, dtype=np.float32) for a in stack]
-    arrs = [a for a in arrs if a.ndim == 2]
-    if not arrs:
-        return None
-    shp = arrs[0].shape
-    arrs = [a for a in arrs if a.shape == shp]
-    if not arrs:
-        return None
-    median = np.median(np.stack(arrs, axis=0), axis=0)
-    return _normalize_flatfield(gaussian_filter(median, sigma=float(sigma)))
-
-
-def apply_flatfield(image: np.ndarray, flatfield: "np.ndarray | None") -> np.ndarray:
-    """Divide *image* by a mean-1 *flatfield* (no-op when None or shape-mismatched).
-
-    Returns float32; the mean-1 normalization keeps intensity magnitudes
-    comparable to the uncorrected image so downstream gating thresholds still
-    make sense.
-    """
-    if flatfield is None:
-        return image
-    img = np.asarray(image, dtype=np.float32)
-    ff = np.asarray(flatfield, dtype=np.float32)
-    if ff.shape != img.shape:
-        return image
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out = img / ff
-    out[~np.isfinite(out)] = 0.0
-    return out
+# Flat-field (illumination) estimators live in the Qt-free repo-root
+# ``flatfield_core`` module so the pipeline and the GUI share one implementation
+# (the GUI recomputes them for the Segmentation tab's flat-field validation
+# view). Imported under the original names so the rest of this module is
+# unchanged.
+from flatfield_core import (  # noqa: E402
+    _FLATFIELD_FLOOR,
+    _FLATFIELD_SIGMA,
+    _normalize_flatfield,
+    apply_flatfield,
+    estimate_basic_flatfield,
+    estimate_gaussian_flatfield,
+)
 
 
 def filter_debris(

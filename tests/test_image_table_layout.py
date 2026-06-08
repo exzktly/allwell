@@ -74,6 +74,39 @@ def test_layout_cell_values_maps_axes_and_holds_fixed():
     assert v0["channel"] == "GFP" and v0["timepoint"] == "0"
 
 
+def test_set_zoom_absolute_and_relative_clamp():
+    app = _fake_app(wells=["A01"], channels=["gfp"])
+    app._image_table_zoom = 1.0
+    # absolute
+    C.image_table_set_zoom(app, 2.0)
+    assert app._image_table_zoom == 2.0
+    # relative multiply
+    C.image_table_set_zoom(app, 1.25, relative=True)
+    assert abs(app._image_table_zoom - 2.5) < 1e-9
+    # clamps to the max (4.0)
+    C.image_table_set_zoom(app, 100.0)
+    assert app._image_table_zoom == C._ZOOM_MAX
+    # clamps to the min
+    C.image_table_set_zoom(app, 0.0001)
+    assert app._image_table_zoom == C._ZOOM_MIN
+
+
+def test_channel_selection_helpers():
+    app = _fake_app(wells=["A01"], channels=["gfp", "rfp"])
+    opts = C._channel_options(app)
+    app._image_table_active_channels = set()
+    # toggling a channel on/off mutates the active set
+    C.image_table_toggle_channel(app, opts[0], True)
+    assert app._image_table_active_channels == {opts[0]}
+    C.image_table_toggle_channel(app, opts[0], False)
+    assert app._image_table_active_channels == set()
+    # select-all / clear
+    C.image_table_set_all_channels(app, True)
+    assert app._image_table_active_channels == set(opts)
+    C.image_table_set_all_channels(app, False)
+    assert app._image_table_active_channels == set()
+
+
 def test_layout_cell_values_wells_x_channels():
     fixed = {"well": "", "channel": "", "timepoint": "0", "fov": "1"}
     rows = ["A01", "A02"]   # rows = wells

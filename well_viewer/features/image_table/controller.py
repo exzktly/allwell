@@ -464,6 +464,35 @@ def _row_export_cmap(app, r: int):
     return name
 
 
+def _export_binary_mask(app, cache, well, chan, tp, fov, binary_mode, crop_tool):
+    """Compute the white-cells array for a binary-mode export cell (cropped).
+
+    Mirrors the live ``_render_mask_binary`` / ``_render_threshold_binary``
+    selection so the export matches the on-screen thumbnails.
+    """
+    import numpy as _np
+
+    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+    if mask_arr is None:
+        return None
+    if binary_mode == "threshold":
+        above_by_nid: Dict[int, bool] = {}
+        try:
+            from well_viewer.features.review_image.controller import review_build_threshold_map
+            above_by_nid = review_build_threshold_map(app, mask_arr, well, fov, tp) or {}
+        except Exception:  # noqa: BLE001
+            above_by_nid = {}
+        m = _np.asarray(mask_arr)
+        passing = [nid for nid, ok in above_by_nid.items() if ok]
+        bm = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)
+    else:  # "mask"
+        bm = _np.asarray(mask_arr) > 0
+    bm = bm.astype(_np.uint8)
+    if crop_tool is not None:
+        bm = crop_tool.apply_to_array(bm)
+    return bm
+
+
 def _compose_image_table_rgb(
     arr,
     mask_arr,
@@ -472,7 +501,7 @@ def _compose_image_table_rgb(
     hi,
     cmap_name,
     is_overlay: bool,
-    show_binary: bool,
+    binary_mask=None,
     show_boundaries: bool,
 ):
     """Render the cell's display state to a uint8 RGB array.
@@ -480,9 +509,10 @@ def _compose_image_table_rgb(
     Single source of truth for the image-table cell pixel content,
     consumed by both the live thumbnail path (which wraps the RGB
     into a QPixmap) and the export figure path (which ``imshow``s it
-    directly). Honours the row's mpl colormap, the global
-    ``show_binary`` / ``show_boundaries`` toggles, and the per-cell
-    LUT range.
+    directly). Honours the row's mpl colormap, the per-cell LUT range,
+    ``show_boundaries``, and ``binary_mask`` — a precomputed array of the
+    cells to paint white (the full segmentation mask for "Binary (mask)"
+    or the above-threshold cells for "Binary (threshold)"), or None.
 
     Returns ``None`` when the input array can't be coerced — the
     caller falls back to whatever placeholder it shows for missing
@@ -511,10 +541,10 @@ def _compose_image_table_rgb(
                    / (rmax - rmin) * 255.0).astype(_np.uint8)
         return rgb
 
-    # 2. Binary-mask toggle wins over the fluorescence: paint a
-    # black-and-white silhouette of the segmentation mask.
-    if show_binary and mask_arr is not None:
-        cm = _np.asarray(mask_arr)
+    # 2. Binary toggle wins over the fluorescence: paint a black-and-white
+    # silhouette of the supplied cells (full mask, or above-threshold cells).
+    if binary_mask is not None:
+        cm = _np.asarray(binary_mask)
         binary = (cm > 0).astype(_np.uint8) * 255
         return _np.stack([binary, binary, binary], axis=-1)
 
@@ -853,10 +883,9 @@ def image_table_build_layout(app) -> None:
         _apply_row_channel_styling(app, row_vals)
 
     image_table_rebuild_lut_row(app)
-    image_table_generate(app)
     app._set_status(
-        f"Image Table: built {rows}×{cols} — rows = {_AXIS_LABEL[row_axis]}, "
-        f"cols = {_AXIS_LABEL[col_axis]}."
+        f"Image Table: built {rows}×{cols} selector grid — rows = {_AXIS_LABEL[row_axis]}, "
+        f"cols = {_AXIS_LABEL[col_axis]}. Press Generate to render."
     )
 
 
@@ -876,40 +905,65 @@ def image_table_apply_preset(app, row_axis: str, col_axis: str) -> None:
 # ── Channel multi-select (sidebar) ────────────────────────────────────────────
 
 
-def image_table_refresh_channel_picker(app) -> None:
-    """Repopulate the sidebar channel checkboxes from the dataset's channels,
-    preserving valid prior selections."""
-    from PySide6.QtCore import Qt as _Qt
-    from PySide6.QtWidgets import QListWidgetItem
-
-    lst = getattr(app, "_image_table_channel_list", None)
-    if lst is None:
+def _update_channel_btn_text(app) -> None:
+    """Reflect the active-channel set on the layout-row dropdown button."""
+    btn = getattr(app, "_image_table_channel_btn", None)
+    if btn is None:
         return
     opts = _channel_options(app)
-    active = getattr(app, "_image_table_active_channels", None)
-    if active is None:
-        active = set()
-    app._image_table_active_channels = {c for c in active if c in opts}
-    lst.blockSignals(True)
-    lst.clear()
-    for ch in opts:
-        it = QListWidgetItem(ch)
-        it.setFlags(it.flags() | _Qt.ItemIsUserCheckable)
-        it.setCheckState(_Qt.Checked if ch in app._image_table_active_channels
-                         else _Qt.Unchecked)
-        lst.addItem(it)
-    lst.blockSignals(False)
+    sel = getattr(app, "_image_table_active_channels", None) or set()
+    ordered = [c for c in opts if c in sel]
+    if not ordered or len(ordered) == len(opts):
+        btn.setText("Channels: all")
+    elif len(ordered) <= 2:
+        btn.setText("Channels: " + ", ".join(ordered))
+    else:
+        btn.setText(f"Channels: {len(ordered)} selected")
 
 
-def image_table_on_channel_toggled(app) -> None:
-    """Read the sidebar channel checkboxes into ``_image_table_active_channels``."""
-    from PySide6.QtCore import Qt as _Qt
-    lst = getattr(app, "_image_table_channel_list", None)
-    if lst is None:
+def image_table_refresh_channel_picker(app) -> None:
+    """Rebuild the layout-row channel dropdown menu from the dataset's
+    channels, preserving valid prior selections."""
+    from PySide6.QtGui import QAction
+
+    menu = getattr(app, "_image_table_channel_menu", None)
+    if menu is None:
         return
-    sel = {lst.item(i).text() for i in range(lst.count())
-           if lst.item(i).checkState() == _Qt.Checked}
+    opts = _channel_options(app)
+    active = getattr(app, "_image_table_active_channels", None) or set()
+    app._image_table_active_channels = {c for c in active if c in opts}
+
+    menu.clear()
+    act_all = menu.addAction("Select all")
+    act_all.triggered.connect(lambda _=False: image_table_set_all_channels(app, True))
+    act_none = menu.addAction("Clear")
+    act_none.triggered.connect(lambda _=False: image_table_set_all_channels(app, False))
+    menu.addSeparator()
+    for ch in opts:
+        act = QAction(ch, menu)
+        act.setCheckable(True)
+        # Set state BEFORE wiring so building the menu doesn't fire toggled.
+        act.setChecked(ch in app._image_table_active_channels)
+        act.toggled.connect(lambda checked, c=ch: image_table_toggle_channel(app, c, checked))
+        menu.addAction(act)
+    _update_channel_btn_text(app)
+
+
+def image_table_toggle_channel(app, channel: str, checked: bool) -> None:
+    """Add/remove a single channel from the active set (menu item toggled)."""
+    sel = set(getattr(app, "_image_table_active_channels", None) or set())
+    if checked:
+        sel.add(channel)
+    else:
+        sel.discard(channel)
     app._image_table_active_channels = sel
+    _update_channel_btn_text(app)
+
+
+def image_table_set_all_channels(app, on: bool) -> None:
+    """Select-all / clear from the dropdown header actions."""
+    app._image_table_active_channels = set(_channel_options(app)) if on else set()
+    image_table_refresh_channel_picker(app)  # rebuild to refresh checkmarks
 
 
 def image_table_toggle_tophat(app) -> None:
@@ -1365,16 +1419,56 @@ def image_table_toggle_boundaries(app) -> None:
     image_table_generate(app)
 
 
-def image_table_toggle_binary(app) -> None:
-    """Flip the binary-mask display flag and re-render."""
-    btn = getattr(app, "_image_table_binary_btn", None)
-    if btn is not None:
-        app._image_table_show_binary = bool(btn.isChecked())
-    else:
-        app._image_table_show_binary = not bool(
-            getattr(app, "_image_table_show_binary", False)
-        )
-    app._image_table_image_cache = {}
+_ZOOM_MIN = 0.33
+_ZOOM_MAX = 4.0
+
+
+def image_table_set_zoom(app, factor: float, *, relative: bool = False) -> None:
+    """Set (or step) the rendered-table zoom factor and re-render.
+
+    ``relative=True`` multiplies the current zoom by *factor* (zoom in/out
+    buttons); otherwise *factor* is the absolute level (1.0 = 240 px cells).
+    """
+    cur = float(getattr(app, "_image_table_zoom", 1.0) or 1.0)
+    new = cur * factor if relative else factor
+    new = max(_ZOOM_MIN, min(_ZOOM_MAX, new))
+    app._image_table_zoom = new
+    lbl = getattr(app, "_image_table_zoom_lbl", None)
+    if lbl is not None:
+        lbl.setText(f"{new * 100:.0f}%")
+    # Only re-render if a table has already been generated; otherwise just
+    # store the level for the next Generate.
+    if getattr(app, "_image_table_last_render", None):
+        image_table_generate(app)
+
+
+def image_table_set_binary_mode(app, mode: str) -> None:
+    """Set the binary display mode and re-render.
+
+    ``mode`` is one of:
+      * ``""``         — off (normal fluorescence / overlay).
+      * ``"mask"``     — every segmented cell drawn white on black.
+      * ``"threshold"``— only cells above the active ON threshold drawn white
+        (reuses the Review Image gating logic via
+        ``review_build_threshold_map``).
+
+    The two binary buttons are mutually exclusive: turning one on turns the
+    other off. Clicking the active mode's button again turns binary off.
+    """
+    current = getattr(app, "_image_table_binary_mode", "") or ""
+    new_mode = "" if current == mode else mode
+    app._image_table_binary_mode = new_mode
+
+    # Keep the two toggle buttons in sync with the resolved mode.
+    for m, attr in (("mask", "_image_table_binary_mask_btn"),
+                    ("threshold", "_image_table_binary_thresh_btn")):
+        b = getattr(app, attr, None)
+        if b is not None and hasattr(b, "setChecked"):
+            blocked = b.blockSignals(True)
+            try:
+                b.setChecked(new_mode == m)
+            finally:
+                b.blockSignals(blocked)
     image_table_generate(app)
 
 
@@ -1529,6 +1623,105 @@ def _install_cell_events(
     label._image_table_event_filter = filt  # type: ignore[attr-defined]
 
 
+# ── Binary render helpers (mask vs. above-threshold) ─────────────────────────
+
+
+def _render_mask_binary(app, cache, well, tp, fov, crop_tool, sz):
+    """White-on-black image of every segmented cell (full mask)."""
+    from well_viewer.core.ui_helpers import make_overlay_thumb
+    import numpy as _np
+
+    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+    if mask_arr is None:
+        return None
+    cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
+    binary = (_np.asarray(cm) > 0).astype(_np.uint8) * 255
+    rgb = _np.stack([binary, binary, binary], axis=-1)
+    return make_overlay_thumb(rgb, sz, sz, None, None)
+
+
+def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
+    """White-on-black image of only the cells above the active ON threshold.
+
+    Reuses the Review Image gating logic (``review_build_threshold_map``) so
+    the "above threshold" definition matches the bar plot / review tab exactly
+    (cell-area gating + every fluor gate + value-column > ON threshold). That
+    helper also emits the ``[binary-mask]`` diagnostic line.
+    """
+    from well_viewer.core.ui_helpers import make_overlay_thumb
+    import numpy as _np
+
+    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+    if mask_arr is None:
+        return None
+    above_by_nid: Dict[int, bool] = {}
+    try:
+        from well_viewer.features.review_image.controller import review_build_threshold_map
+        above_by_nid = review_build_threshold_map(app, mask_arr, well, fov, tp) or {}
+    except Exception:  # noqa: BLE001 — fall back to an all-off mask on any error
+        above_by_nid = {}
+    m = _np.asarray(mask_arr)
+    passing = [nid for nid, ok in above_by_nid.items() if ok]
+    binary = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)
+    b = binary.astype(_np.uint8) * 255
+    cm = crop_tool.apply_to_array(b) if crop_tool else b
+    rgb = _np.stack([cm, cm, cm], axis=-1)
+    return make_overlay_thumb(rgb, sz, sz, None, None)
+
+
+def _refresh_lut_fields_from_render(app, rendered) -> None:
+    """Pool the actual min/max per channel from the just-rendered arrays and
+    write the numbers into the LUT boxes, except rows the user has overridden.
+
+    A channel's entry carries an ``auto`` flag (True until the user edits its
+    min/max); only auto rows get refreshed, so manual overrides stick.
+    """
+    luts = getattr(app, "_image_table_lut", None) or {}
+    cells = getattr(app, "_image_table_cells", None) or []
+    if not luts or not cells:
+        return
+    try:
+        import numpy as _np
+    except Exception:
+        return
+
+    pooled: Dict[str, Tuple[float, float]] = {}
+    for r, row in enumerate(cells):
+        for c, cell in enumerate(row):
+            arr = rendered.get((r, c))
+            if arr is None or getattr(arr, "ndim", 2) >= 3:
+                continue  # skip empty cells and pre-rendered RGB overlays
+            chan = cell["chan_cb"].currentText().strip().upper()
+            if not chan:
+                continue
+            a = _np.asarray(arr, dtype=_np.float32)
+            mn, mx = float(a.min()), float(a.max())
+            if chan in pooled:
+                p0, p1 = pooled[chan]
+                pooled[chan] = (min(p0, mn), max(p1, mx))
+            else:
+                pooled[chan] = (mn, mx)
+
+    for chan, entry in luts.items():
+        if not entry.get("auto", True):
+            continue  # user-edited — leave alone
+        rng = pooled.get(chan.upper())
+        if rng is None:
+            continue
+        lo, hi = rng
+        if hi <= lo:
+            hi = lo + 1.0
+        for key, val in (("min", lo), ("max", hi)):
+            le = entry.get(key)
+            if le is None:
+                continue
+            blocked = le.blockSignals(True)
+            try:
+                le.setText(f"{val:.4g}")
+            finally:
+                le.blockSignals(blocked)
+
+
 # ── Generate (render image table below the selector) ─────────────────────────
 
 
@@ -1554,7 +1747,10 @@ def image_table_generate(app) -> None:
     crop_tool = getattr(app, "_image_table_crop_tool", None)
     use_tophat = bool(getattr(app, "_image_table_use_tophat", False))
     show_boundaries = bool(getattr(app, "_image_table_show_boundaries", False))
-    show_binary = bool(getattr(app, "_image_table_show_binary", False))
+    binary_mode = getattr(app, "_image_table_binary_mode", "") or ""
+    # Per-cell thumbnail size, scaled by the zoom factor (240 px = 1.0×).
+    zoom = float(getattr(app, "_image_table_zoom", 1.0) or 1.0)
+    sz = max(80, int(round(240 * zoom)))
 
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
@@ -1592,7 +1788,7 @@ def image_table_generate(app) -> None:
             img_label.setAlignment(Qt.AlignCenter)
             # Pin to the rendered pixmap size so the surrounding QLabel doesn't
             # expand and leave large gaps around the image.
-            img_label.setFixedSize(240, 240)
+            img_label.setFixedSize(sz, sz)
             if arr is not None:
                 # Apply the shared crop (no-op when not set) and render.
                 cropped = crop_tool.apply_to_array(arr) if crop_tool else arr
@@ -1601,32 +1797,31 @@ def image_table_generate(app) -> None:
                     # Pre-rendered RGB overlay: tint and per-channel LUT
                     # don't apply, so feed it straight to the overlay
                     # thumbnailer (which still respects lo/hi when set).
-                    pix = make_overlay_thumb(cropped, 240, 240, lo, hi)
-                elif show_binary:
-                    # Replace image with binary segmentation mask.
-                    mask_arr = _load_mask_array(app, cache, well, tp, fov)
-                    if mask_arr is not None:
-                        import numpy as _np
-                        cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
-                        binary = (_np.asarray(cm) > 0).astype(_np.uint8) * 255
-                        rgb = _np.stack([binary, binary, binary], axis=-1)
-                        pix = make_overlay_thumb(rgb, 240, 240, None, None)
-                    else:
-                        pix = make_fluor_thumb(cropped, 240, 240, lo, hi, cmap=_row_cmap_name(app, r))
+                    pix = make_overlay_thumb(cropped, sz, sz, lo, hi)
+                elif binary_mode == "mask":
+                    # Every segmented cell white on black.
+                    pix = _render_mask_binary(app, cache, well, tp, fov, crop_tool, sz)
+                    if pix is None:
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r))
+                elif binary_mode == "threshold":
+                    # Only cells above the active ON threshold white on black.
+                    pix = _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz)
+                    if pix is None:
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r))
                 elif show_boundaries:
                     # Overlay white cell-boundary outlines on the fluorescence image.
                     mask_arr = _load_mask_array(app, cache, well, tp, fov)
                     if mask_arr is not None:
                         cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
                         pix = _render_with_boundary_overlay(
-                            cropped, 240, 240, lo, hi,
+                            cropped, sz, sz, lo, hi,
                             _row_cmap_name(app, r), cm,
                         )
                     else:
-                        pix = make_fluor_thumb(cropped, 240, 240, lo, hi, cmap=_row_cmap_name(app, r))
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r))
                 else:
                     pix = make_fluor_thumb(
-                        cropped, 240, 240, lo, hi,
+                        cropped, sz, sz, lo, hi,
                         cmap=_row_cmap_name(app, r),
                     )
                 # CropTool needs the FULL source array + the active crop on
@@ -1647,6 +1842,9 @@ def image_table_generate(app) -> None:
 
     app._image_table_last_render = rendered
     app._image_table_image_cache = cache
+    # Fill the per-channel LUT min/max boxes with the actual pooled numbers so
+    # the user sees real values instead of "auto" (skips manually-edited rows).
+    _refresh_lut_fields_from_render(app, rendered)
     n = sum(1 for v in rendered.values() if v is not None)
     app._set_status(f"Image Table: generated {n} of {len(rendered)} cell(s).")
     if n == 0 and rendered:
@@ -1731,8 +1929,17 @@ def image_table_auto_lut(app, channel: str) -> None:
     entry = luts.get(chan_upper)
     if entry is None:
         return
-    entry["min"].setText(f"{pooled_min:.3g}")
-    entry["max"].setText(f"{pooled_max:.3g}")
+    # "Fit" re-enables auto-tracking so the boxes follow the data again.
+    entry["auto"] = True
+    for key, val in (("min", pooled_min), ("max", pooled_max)):
+        le = entry.get(key)
+        if le is None:
+            continue
+        blocked = le.blockSignals(True)
+        try:
+            le.setText(f"{val:.4g}")
+        finally:
+            le.blockSignals(blocked)
     image_table_generate(app)
 
 
@@ -1871,7 +2078,7 @@ def _build_export_figure(app):
     use_tophat = bool(getattr(app, "_image_table_use_tophat", False))
     # Mirror the live thumbnail's overlay toggles so the export matches
     # what the user sees on screen.
-    show_binary = bool(getattr(app, "_image_table_show_binary", False))
+    binary_mode = getattr(app, "_image_table_binary_mode", "") or ""
     show_boundaries = bool(getattr(app, "_image_table_show_boundaries", False))
 
     bg_face = "none" if transparent_bg else "white"
@@ -1941,16 +2148,21 @@ def _build_export_figure(app):
                 # of truth — anything that changes the live look auto-
                 # propagates to the export.
                 mask_arr = None
-                if (show_binary or show_boundaries) and not _is_nuc_seg(chan):
+                if show_boundaries and not _is_nuc_seg(chan):
                     mask_arr = _load_mask_array(app, cache, well, tp, fov)
                     if mask_arr is not None and crop_tool is not None:
                         mask_arr = crop_tool.apply_to_array(mask_arr)
+                binary_mask = None
+                if binary_mode in ("mask", "threshold") and not _is_nuc_seg(chan):
+                    binary_mask = _export_binary_mask(
+                        app, cache, well, chan, tp, fov, binary_mode, crop_tool,
+                    )
                 rgb = _compose_image_table_rgb(
                     arr, mask_arr,
                     lo=lo, hi=hi,
                     cmap_name=_row_cmap_name(app, r),
                     is_overlay=_is_nuc_seg(chan),
-                    show_binary=show_binary,
+                    binary_mask=binary_mask,
                     show_boundaries=show_boundaries,
                 )
                 if rgb is not None:

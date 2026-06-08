@@ -405,6 +405,7 @@ def labels_apply_affix(app, *, where: str) -> None:
 
     app._invalidate_stats_cache()
     label_grid_refresh(app)
+    _schedule_sample_def_autosave(app)
     app._set_status(
         f"Added {where} '{text}' to {len(selected)} well label{plural}."
     )
@@ -735,7 +736,20 @@ def rebuild_all(app) -> None:
     if hasattr(app, "_notebook"):
         if app._current_centre_tab() == "Line Graphs":
             app._show_line_sidebar()
+    # Sample definitions auto-persist (debounced), like notes / ratios /
+    # view-state — the explicit Save button is now just "save now".
+    _schedule_sample_def_autosave(app)
 
+
+def _schedule_sample_def_autosave(app) -> None:
+    """Queue a debounced write of the sample-definitions block.
+
+    Safe to call from any edit path: the registry coalesces a burst into one
+    write and ``autosave_to_pipeline_info`` no-ops silently without a data dir.
+    """
+    p = getattr(app, "_persistence", None)
+    if p is not None:
+        p.schedule_save("sample_definitions")
 
 
 def sel_add(app, name=None, wells=None, replicates=None, source="user",
@@ -764,6 +778,7 @@ def sel_set_hidden(app, sid, hidden, *, light=False) -> None:
     s["hidden"] = bool(hidden)
     if light:
         app._refresh_sidebar_map()
+        _schedule_sample_def_autosave(app)
     else:
         app._rebuild_all()
 
@@ -922,6 +937,7 @@ def labels_clear_all(app) -> None:
         app._app_state.dataset.well_labels.clear()
         label_grid_refresh(app)
         app._invalidate_stats_cache()
+        _schedule_sample_def_autosave(app)
 
 
 

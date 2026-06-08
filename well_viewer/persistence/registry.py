@@ -89,6 +89,8 @@ def build_persistence_registry(app) -> PersistenceRegistry:
                       save=view_state.save_to_data_dir,
                       load=view_state.load_from_data_dir)
     registry.register("notes", save=sample_definitions.save_notes)
+    registry.register("sample_definitions",
+                      save=sample_definitions.autosave_to_pipeline_info)
     registry.register("qc_params",
                       save=qc_params.save_to_data_dir,
                       load=qc_params.load_from_data_dir)

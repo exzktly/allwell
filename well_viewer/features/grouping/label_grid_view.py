@@ -235,6 +235,9 @@ class LabelGrid(QWidget):
             app._app_state.dataset.well_labels.pop(tok, None)
         if hasattr(app, "_invalidate_stats_cache"):
             app._invalidate_stats_cache()
+        p = getattr(app, "_persistence", None)
+        if p is not None:
+            p.schedule_save("sample_definitions")
 
     def _toggle_cell(self, tok: str) -> None:
         if self._enabled is not None and tok not in self._enabled:

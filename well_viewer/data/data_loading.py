@@ -369,9 +369,10 @@ def aggregate_with_threshold_df(
 ) -> List[AggPoint]:
     """Group rows by timepoint; compute stats for cells above threshold.
 
-    Applies consistent gating (Included flag, cell-area threshold, per-channel
-    fluorescence gates) across all rows up front, then computes statistics on
-    the filtered cell population.
+    Applies consistent gating across all rows up front — the inclusion chokepoint
+    ``df_included_mask`` (``Included==1 AND QC_Pass==1 AND Crop_Pass==1``) plus
+    the cell-area threshold and per-channel fluorescence gates — then computes
+    statistics on the filtered cell population.
 
     When ``per_fov_spread`` is True, the spread on the mean is the SD/SEM
     across per-FOV mean intensities at each timepoint, the ``frac_spread`` is
@@ -385,11 +386,11 @@ def aggregate_with_threshold_df(
 
     n = len(df)
 
-    if "Included" in df.columns:
-        incl = pd.to_numeric(df["Included"], errors="coerce").to_numpy()
-        mask = incl == 1
-    else:
-        mask = np.ones(n, dtype=bool)
+    # Inclusion must go through the single chokepoint so the bar/line aggregation
+    # honors the same gating as every other plot/stat: effective inclusion is
+    # ``Included==1 AND QC_Pass==1 AND Crop_Pass==1``. Filtering ``Included``
+    # alone here silently bypassed the QC and crop layers.
+    mask = df_included_mask(df).to_numpy(copy=True)
 
     if "area_px" in df.columns:
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()

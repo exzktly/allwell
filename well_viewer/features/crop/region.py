@@ -75,3 +75,33 @@ def compute_crop_pass(df, region: Optional[CropRegion]):
     # NaN centroid → unplaceable → keep (fail-open), matching compute_qc_pass.
     inside = inside | row.isna() | col.isna()
     return inside.astype(int)
+
+
+def crop_effect_for_df(df, region):
+    """Summarise a crop's effect on one frame.
+
+    Returns ``(removed, otherwise_included, has_centroids)``:
+    - ``otherwise_included`` — cells that would count toward analysis ignoring
+      the crop (``Included==1`` AND ``QC_Pass==1`` when those columns exist).
+    - ``removed`` — of those, how many the crop now drops (centroid outside the
+      box). This is the crop's marginal effect on every plot/stat.
+    - ``has_centroids`` — whether the frame carries the ``shape_centroid_*``
+      columns the crop needs; when False the crop fails open and ``removed`` is 0.
+    """
+    import pandas as pd
+
+    if df is None or len(df) == 0:
+        return 0, 0, False
+    has_centroids = (
+        CENTROID_ROW_COL in df.columns and CENTROID_COL_COL in df.columns
+    )
+    incl = pd.Series(True, index=df.index)
+    if "Included" in df.columns:
+        incl &= pd.to_numeric(df["Included"], errors="coerce").fillna(0).eq(1)
+    if "QC_Pass" in df.columns:
+        incl &= pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1).eq(1)
+    otherwise_included = int(incl.sum())
+    crop = compute_crop_pass(df, region).eq(1)
+    removed = int((incl & ~crop).sum())
+    return removed, otherwise_included, has_centroids
+

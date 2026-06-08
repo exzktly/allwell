@@ -998,7 +998,7 @@ def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:
 
 
 # Background-subtraction methods selectable via ``--background``.
-BACKGROUND_METHODS = ("none", "top_hat", "sliding_disk", "empty_well")
+BACKGROUND_METHODS = ("none", "top_hat", "sliding_disk", "fov_median", "empty_well")
 
 
 def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarray | None":
@@ -1127,6 +1127,12 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
       1024² frame). An earlier downscale optimisation was reverted because a
       coarse grid shifts that flatten/preserve threshold and stamps bright ~150 px
       disks into confluent regions (which corrupt quantification).
+    - ``fov_median`` — ``img - median(img)``: subtract a single scalar, the
+      median intensity of the whole field of view. Because most pixels in a field
+      are background, the median is a robust estimate of the flat background level
+      (insensitive to bright cells/debris). Removes a uniform offset only — it
+      does NOT flatten spatial gradients (use a morphological method or
+      ``empty_well`` for that). No radius and no reference well needed.
     - ``empty_well`` — ``img - bg_field``: subtract a *measured* per-channel
       background (smoothed empty-well median, :func:`estimate_background_field`);
       no-op when no field is available for the channel.
@@ -1139,6 +1145,10 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
         return img
     if method == "sliding_disk":
         return _isotropic_disk_tophat(img, int(radius))
+    if method == "fov_median":
+        finite = img[np.isfinite(img)]
+        level = float(np.median(finite)) if finite.size else 0.0
+        return _floor_after_subtract(img - level)
     if method == "empty_well":
         if bg_field is not None:
             bg = np.asarray(bg_field, dtype=np.float32)
@@ -4420,6 +4430,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "(leaves square halos on uneven background); "
                         "'sliding_disk' = smooth isotropic disk baseline (default; recommended "
                         "for structured/uneven background, no square halos); "
+                        "'fov_median' = subtract a single scalar, the median "
+                        "intensity of the whole field of view (uniform offset, "
+                        "no spatial flattening; no radius/reference needed); "
                         "'empty_well' = subtract a "
                         "measured per-channel background from --background_well.")
     p.add_argument("--qc_remove_debris", action="store_true",

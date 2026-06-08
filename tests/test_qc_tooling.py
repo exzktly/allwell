@@ -271,6 +271,25 @@ def test_subtract_background_method_dispatch_and_default():
     assert not np.allclose(subtract_background(img, 8), apply_tophat(img, 8))
 
 
+def test_subtract_background_fov_median_subtracts_scalar_offset():
+    # A flat background of 50 under a few bright cells: fov_median subtracts the
+    # FOV median (≈50, robust to the bright cells), flooring background to ~0 and
+    # leaving the cells reduced by exactly that scalar offset. No radius is used.
+    img = np.full((64, 64), 50.0, np.float32)
+    img[10:14, 10:14] = 900.0          # sparse bright cells don't move the median
+    img[40:44, 40:44] = 700.0
+    out = subtract_background(img, 0, "fov_median")
+    assert out.shape == img.shape and out.min() >= 0.0
+    assert float(np.median(out)) < 1.0                 # background floored to ~0
+    assert abs(float(out[11, 11]) - (900.0 - 50.0)) < 1e-3   # uniform offset only
+    assert abs(float(out[41, 41]) - (700.0 - 50.0)) < 1e-3
+    # radius is irrelevant for fov_median (scalar offset, no morphology)
+    assert np.array_equal(out, subtract_background(img, 999, "fov_median"))
+    # non-finite pixels are zeroed, not propagated (StarDist-safety)
+    nan_img = img.copy(); nan_img[0, 0] = np.nan
+    assert np.all(np.isfinite(subtract_background(nan_img, 0, "fov_median")))
+
+
 def test_subtract_background_sliding_disk_smooths_gradient():
     # sliding_disk is now an isotropic disk white-top-hat at full resolution.
     # A smooth illumination gradient + flat signal: it should remove the gradient,
@@ -375,10 +394,16 @@ def test_build_pipeline_args_background_mapping():
                             _base_opts(background="empty_well", background_well="H12"))
     assert a[a.index("--background") + 1] == "empty_well"
     assert a[a.index("--background_well") + 1] == "H12"
+    # fov_median → flag, no background well (a scalar offset; no reference well)
+    a = build_pipeline_args(P, Path("/in"), Path("/out"),
+                            _base_opts(background="fov_median"))
+    assert a[a.index("--background") + 1] == "fov_median"
+    assert "--background_well" not in a
     # explicit "none" disables background subtraction entirely
     a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts(background="none"))
     assert a[a.index("--background") + 1] == "none"
-    assert set(BACKGROUND_METHODS) == {"none", "top_hat", "sliding_disk", "empty_well"}
+    assert set(BACKGROUND_METHODS) == {
+        "none", "top_hat", "sliding_disk", "fov_median", "empty_well"}
 
 
 def test_subtract_background_none_is_noop():
@@ -477,7 +502,7 @@ def test_analyze_qc_section_present_and_gated():
     radius_labels = {"Nuclear radius", "Fluor radius"}
     tab._background_cb.setCurrentText("top_hat")
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
-    for method in ("none", "empty_well"):
+    for method in ("none", "fov_median", "empty_well"):
         tab._background_cb.setCurrentText(method)
         assert all(r.isHidden() for r in tab._bg_radius_rows), method
         shown = {l.text() for r in tab._bg_radius_rows

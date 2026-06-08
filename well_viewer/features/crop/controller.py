@@ -88,11 +88,56 @@ def set_crop_region(app, region: Optional[CropRegion]) -> None:
     app._app_state.dataset.crop_region = region
     recompute_crop_all(app)
     _save_redraw_refresh(app)
+
+    # Report the crop's actual effect so a silent no-op is never mistaken for a
+    # working crop. The decisive case: a dataset without per-cell centroid
+    # columns can't be cropped (compute_crop_pass fails open), so warn loudly.
+    removed, total_incl, has_centroids, n_wells = _crop_effect_counts(app)
     r0, c0, r1, c1 = region
+    where = f"{c1 - c0}×{r1 - r0}px @ ({c0},{r0})"
+    if n_wells and not has_centroids:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(
+            app, "Crop can't filter cells",
+            "This dataset has no per-cell centroid columns "
+            "(shape_centroid_row / shape_centroid_col), which the crop needs to "
+            "decide which cells fall inside the box.\n\n"
+            "The crop outline is shown, but no cells are excluded and the plots "
+            "are unchanged. Re-run the pipeline with shape features enabled to "
+            "use the crop.",
+        )
+        app._set_status(
+            f"Crop region set ({where}) — but this dataset has no centroid "
+            "columns, so no cells were excluded."
+        )
+        return
     app._set_status(
-        f"Crop region set: keeping cells with centroid inside "
-        f"{c1 - c0}×{r1 - r0}px @ ({c0},{r0}). Applies to all FOVs/wells."
+        f"Crop region set ({where}): excluded {removed:,} of {total_incl:,} "
+        f"otherwise-included cell(s) across {n_wells} loaded well(s)."
     )
+
+
+def _crop_effect_counts(app):
+    """Aggregate the crop's effect across the currently-cached wells.
+
+    Returns ``(removed, otherwise_included, has_centroids, n_wells)`` — the same
+    semantics as :func:`region.crop_effect_for_df`, summed over loaded wells
+    (``has_centroids`` is True when *any* loaded well carries the columns).
+    """
+    from .region import crop_effect_for_df
+
+    region = get_crop_region(app)
+    removed = total_incl = n_wells = 0
+    has_centroids = False
+    for df in app._app_state.dataset.cache.values():
+        if df is None or len(df) == 0:
+            continue
+        n_wells += 1
+        r, incl, hc = crop_effect_for_df(df, region)
+        removed += r
+        total_incl += incl
+        has_centroids = has_centroids or hc
+    return removed, total_incl, has_centroids, n_wells
 
 
 def clear_crop_region(app) -> None:

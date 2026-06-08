@@ -78,6 +78,7 @@ allwell/
 ├── auto_threshold_core.py       ← Otsu helpers shared by pipeline + GUI (stdlib + numpy only)
 ├── well_token.py                ← canonical 96-well token parser (stdlib only)
 ├── shape_features_core.py       ← Qt-free per-cell shape-feature catalog shared by pipeline + GUI
+├── flatfield_core.py            ← Qt-free flat-field illumination estimators shared by pipeline + GUI
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
@@ -90,14 +91,18 @@ allwell/
 └── design/                      ← HTML mockups + screenshots — visual reference only
 ```
 
-The repo-root helpers `auto_threshold_core.py`, `well_token.py`, and
-`shape_features_core.py` are *deliberately at repo root* (not under
-`well_viewer/`): the pipeline contract forbids `well_viewer` / `widgets` / Qt
-imports, so anything both the pipeline and the GUI need to agree on has to live
-in a Qt-free module the pipeline can import. `shape_features_core.py` (added with
-the shape-features work) is the single source of truth for the per-cell
-`shape_*` morphology columns — the pipeline emits them, the GUI detects/labels
-them. See §6.2 for the contract.
+The repo-root helpers `auto_threshold_core.py`, `well_token.py`,
+`shape_features_core.py`, and `flatfield_core.py` are *deliberately at repo
+root* (not under `well_viewer/`): the pipeline contract forbids `well_viewer` /
+`widgets` / Qt imports, so anything both the pipeline and the GUI need to agree
+on has to live in a Qt-free module the pipeline can import. `shape_features_core.py`
+(added with the shape-features work) is the single source of truth for the
+per-cell `shape_*` morphology columns — the pipeline emits them, the GUI
+detects/labels them. `flatfield_core.py` holds the flat-field illumination
+estimators (`estimate_gaussian_flatfield` / `estimate_basic_flatfield` /
+`apply_flatfield`, mean-1 normalized): the pipeline applies them at run time, and
+the Segmentation tab's "Flat-field" validation view recomputes them on demand.
+See §6.2 for the contract.
 
 **Feature-stack dependencies (segmentation / QC / shape / tracking).** This work
 adds a pinned ML stack to `_Docs/requirements-remote.txt` — Torch 2.0.1
@@ -499,7 +504,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The legacy Movie Montage popout — its tab builder (`build_right_panel`), `montage.py` renderer, and `callbacks.py` — was folded into Image Table and then removed entirely (v6.0.x); its one live helper, the image pixel-value hover tooltip, now lives in `review_image/controller.py` next to its only caller. |
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` (read side) and `role_output_filename` (write side, called from `process_microscopy.build_processed_output_path`) both consume it. The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
-| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
+| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `flatfield_core` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
 

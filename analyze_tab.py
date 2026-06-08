@@ -536,8 +536,12 @@ class AnalyzeTab(QWidget):
         sec = self._section(parent, "Quality Control")
 
         hint = QLabel(
-            "Optional pre-measurement clean-up: even out illumination "
-            "(flat-field) and drop debris/merged regions by size & shape.", sec)
+            "Optional pre-measurement clean-up, applied per channel at "
+            "quantification time. Two independent correction stages — flat-field "
+            "(divide out uneven illumination) then background subtraction "
+            "(remove a baseline) — plus a size/shape debris filter. The pixel "
+            "corrections change the measured values, so they can only be changed "
+            "by re-running; debris removal is editable later in Segmentation.", sec)
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         sec.layout().addWidget(hint)
@@ -545,6 +549,22 @@ class AnalyzeTab(QWidget):
         r = self._row(sec, "Flat-field correction")
         self._flatfield_cb = QComboBox(r)
         self._flatfield_cb.addItems(["none", "empty_well", "gaussian", "basic"])
+        self._flatfield_cb.setToolTip(
+            "Illumination (flat-field) correction — divides each channel by a "
+            "mean-1 illumination field F (corrected = image / F) to even out "
+            "vignetting / uneven excitation, applied before background "
+            "subtraction. The field is floored so amplification of dim regions "
+            "is capped at 10x.\n"
+            "• none — no illumination correction.\n"
+            "• empty_well — F is the smoothed per-pixel median of the Background "
+            "well (that well's intensity is the illumination profile). Needs a "
+            "Background well.\n"
+            "• gaussian — per-image, self-referential: F is the heavily "
+            "Gaussian-blurred image itself. No reference well needed.\n"
+            "• basic — pure-numpy BaSiC: F is the smoothed per-pixel median of a "
+            "whole-plate sample of the channel (one field per channel).\n"
+            "(If both flat-field and background are empty_well, the two combine "
+            "into one (raw-B)/(B/mean(B)) pass.)")
         r.layout().addWidget(self._flatfield_cb)
         r.layout().addStretch(1)
 
@@ -596,6 +616,13 @@ class AnalyzeTab(QWidget):
 
         rbw = self._row(sec, "Background well")
         self._background_well_edit = self._entry(rbw, "", width=120)
+        self._background_well_edit.setToolTip(
+            "Well label of an empty/background well (e.g. H12) used as the "
+            "reference for any empty_well mode above. Its smoothed per-pixel "
+            "median supplies the illumination field (flat-field) and/or the "
+            "measured additive background. Read from whichever input layout "
+            "holds the well (per-well zip, per-well folder, or loose TIFs); "
+            "enabled only when flat-field or background is empty_well.")
         rbw.layout().addStretch(1)
 
         def _sync_bg(_=None) -> None:

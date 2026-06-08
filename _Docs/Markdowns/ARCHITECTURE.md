@@ -78,6 +78,7 @@ allwell/
 ├── auto_threshold_core.py       ← Otsu helpers shared by pipeline + GUI (stdlib + numpy only)
 ├── well_token.py                ← canonical 96-well token parser (stdlib only)
 ├── shape_features_core.py       ← Qt-free per-cell shape-feature catalog shared by pipeline + GUI
+├── flatfield_core.py            ← Qt-free flat-field illumination estimators shared by pipeline + GUI
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
@@ -90,14 +91,18 @@ allwell/
 └── design/                      ← HTML mockups + screenshots — visual reference only
 ```
 
-The repo-root helpers `auto_threshold_core.py`, `well_token.py`, and
-`shape_features_core.py` are *deliberately at repo root* (not under
-`well_viewer/`): the pipeline contract forbids `well_viewer` / `widgets` / Qt
-imports, so anything both the pipeline and the GUI need to agree on has to live
-in a Qt-free module the pipeline can import. `shape_features_core.py` (added with
-the shape-features work) is the single source of truth for the per-cell
-`shape_*` morphology columns — the pipeline emits them, the GUI detects/labels
-them. See §6.2 for the contract.
+The repo-root helpers `auto_threshold_core.py`, `well_token.py`,
+`shape_features_core.py`, and `flatfield_core.py` are *deliberately at repo
+root* (not under `well_viewer/`): the pipeline contract forbids `well_viewer` /
+`widgets` / Qt imports, so anything both the pipeline and the GUI need to agree
+on has to live in a Qt-free module the pipeline can import. `shape_features_core.py`
+(added with the shape-features work) is the single source of truth for the
+per-cell `shape_*` morphology columns — the pipeline emits them, the GUI
+detects/labels them. `flatfield_core.py` holds the flat-field illumination
+estimators (`estimate_gaussian_flatfield` / `estimate_basic_flatfield` /
+`apply_flatfield`, mean-1 normalized): the pipeline applies them at run time, and
+the Segmentation tab's "Flat-field" validation view recomputes them on demand.
+See §6.2 for the contract.
 
 **Feature-stack dependencies (segmentation / QC / shape / tracking).** This work
 adds a pinned ML stack to `_Docs/requirements-remote.txt` — Torch 2.0.1
@@ -144,7 +149,8 @@ well_viewer/
 │   ├── heatmap/      controller.py, models.py, sidebar_view.py, tab_view.py
 │   ├── distribution/ controller.py, tab_view.py
 │   ├── stats/        controller.py, state.py, view.py
-│   ├── review_image/ controller.py, renderer.py, state.py, csv_tab_view.py
+│   ├── review_image/ controller.py, renderer.py, state.py, csv_tab_view.py,
+│   │                 box_select.py
 │   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py
 │   ├── image_table/  controller.py, tab_view.py, panel_view.py,
@@ -499,7 +505,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The legacy Movie Montage popout — its tab builder (`build_right_panel`), `montage.py` renderer, and `callbacks.py` — was folded into Image Table and then removed entirely (v6.0.x); its one live helper, the image pixel-value hover tooltip, now lives in `review_image/controller.py` next to its only caller. |
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` (read side) and `role_output_filename` (write side, called from `process_microscopy.build_processed_output_path`) both consume it. The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
-| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
+| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `flatfield_core` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
 
@@ -537,7 +543,7 @@ The relevant modules:
 
 | Module | Job |
 |--------|-----|
-| `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. Measurement columns are normalised to lower-case at read time so per-channel lookups are case-insensitive; for `smfish_count` metrics the bar / line / heatmap / scatter-aggregate paths pass `threshold=-1.0` (not `0`) so zero-spot cells contribute to the mean and the population count. `resolve_value_series` emits a deduped WARN naming the missing column when both the direct and case-folded lookups miss, surfacing schema-mismatch bugs that would otherwise show up as silently-empty plots. |
+| `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. `df_included_mask` is the single inclusion chokepoint — effective inclusion is `Included==1 AND QC_Pass==1 AND Crop_Pass==1` (the optional `QC_Pass` / `Crop_Pass` layers default to pass when absent), and every consumer (overlay, plots, stats, aggregation, export) composes it so QC debris-gating and the Segmentation crop apply uniformly. Measurement columns are normalised to lower-case at read time so per-channel lookups are case-insensitive; for `smfish_count` metrics the bar / line / heatmap / scatter-aggregate paths pass `threshold=-1.0` (not `0`) so zero-spot cells contribute to the mean and the population count. `resolve_value_series` emits a deduped WARN naming the missing column when both the direct and case-folded lookups miss, surfacing schema-mismatch bugs that would otherwise show up as silently-empty plots. |
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
 | `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
@@ -557,7 +563,8 @@ Every "save state into the dataset folder" path lives under
 |--------------|--------|---------------|
 | `pipeline_info.json::cell_gating` | `cell_gating.py` | Cell-area + per-channel `fluor_gates` + `thresh_frac_on`. |
 | `pipeline_info.json::smfish_thresholds` | `smfish.py` | Per-channel smFISH spot-detection threshold (`{channel: float}`). Saved only on a successful Apply Global Threshold so the value the spinbox shows matches the spot counts baked into the per-well CSVs. Restored on dataset open and on channel-combo switch. |
-| `pipeline_info.json::sample_definitions` | `sample_definitions.py` (top level) | Saved selections (`_selections`). |
+| `pipeline_info.json::sample_definitions` | `sample_definitions.py` (top level) | Saved selections + replicate sets / groups + well labels + notes. **Auto-saves** on edit via the registry (`autosave_to_pipeline_info`, a silent variant — no dialogs/toast, no-op without a data dir) in addition to the explicit Save button; well-label cells and the Notes box commit on `editingFinished` / focus-out (not per keystroke), discrete rep-set/group edits via `rebuild_all`. |
+| `persistence.json::crop_region` | `crop_region.py` | Dataset-wide crop rectangle drawn on the Segmentation tab (`DatasetState.crop_region`, source-mask pixel tuple). Feeds the `Crop_Pass` inclusion layer; an absent / cleared crop removes the section. |
 | `persistence.json::ratios` | `ratios.py` | User-defined ratio channels. |
 | `persistence.json::heatmap_layouts` | `heatmap_layouts.py` | Saved heatmap layouts + cmap/scale state. |
 | `persistence.json::line_order` | `line_order.py` | Line plot replicate-set / well draw order. |
@@ -594,9 +601,13 @@ catches per-well `PermissionError` so one locked well's CSV (e.g. user has
 it open in Excel) doesn't kill the rest of the run — the locked well is
 skipped with a WARN naming the file + likely cause. The registry owns the **one** debounced-save path — `schedule_save`
 with a shared pending-set — so signal storms (ratio-panel field edits, heatmap
-layout drag-and-drop, cell-override toggles) coalesce into one disk write per
-500 ms burst; this replaced five identical per-domain `schedule_save`/`_flush`
-pairs and their `_<name>_save_pending` flags. `cell_overrides.json` v2 stamps
+layout drag-and-drop, cell-override toggles, sample-definition edits, crop
+drags) coalesce into one disk write per 500 ms burst; this replaced five
+identical per-domain `schedule_save`/`_flush` pairs and their
+`_<name>_save_pending` flags. Auto-saving domains: `ratios`,
+`heatmap_layouts`, `cell_overrides`, `line_order`, `view_state`, `qc_params`,
+`notes`, `sample_definitions`, and `crop_region` (`bar_groups.json` is the lone
+explicit user-picked file with no autosave). `cell_overrides.json` v2 stamps
 each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.

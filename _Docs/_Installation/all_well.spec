@@ -42,6 +42,7 @@ sibling_scripts = [
     (str(_parent / "analyze_tab.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
     (str(_parent / "shape_features_core.py"),   "."),
+    (str(_parent / "flatfield_core.py"),        "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "theme.py"),                 "."),
 ]
@@ -85,6 +86,9 @@ hiddenimports = [
     # missed by PyInstaller's static analysis, unlike the top-level
     # auto_threshold_core / well_token).
     "shape_features_core",
+    # Qt-free flat-field estimators shared by pipeline + viewer (imported lazily
+    # inside the review-image controller, so static analysis can miss it).
+    "flatfield_core",
     # numpy internals
     "numpy.core._multiarray_umath",
     "numpy.core._multiarray_tests",
@@ -545,7 +549,7 @@ app = BUNDLE(   # noqa: F821
     name="AllWell.app",
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
-    version="6.1.4",
+    version="6.1.6",
     info_plist={
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription":

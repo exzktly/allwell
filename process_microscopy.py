@@ -1022,6 +1022,55 @@ def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarra
     return gaussian_filter(median, sigma=float(sigma)).astype(np.float32)
 
 
+def _match_background_scale(img: np.ndarray, bg: np.ndarray) -> np.ndarray:
+    """Fit the measured background field to *img*'s actual background.
+
+    The empty-well field ``B`` is captured at the reference well's exposure /
+    illumination. If the target image differs in exposure, gain, illumination
+    level, or carries a constant dark offset, subtracting the raw ``B`` leaves a
+    residual that follows ``B``'s spatial shape — e.g. a corner-bright field
+    leaves bright corners behind. So instead of subtracting ``B`` verbatim, fit
+    the image's background as ``a·B + c`` (a least-squares regression of image
+    intensity on the field over the background-dominated — dimmest ~60% —
+    pixels, which excludes bright cells), and return that fitted field. The
+    multiplicative term ``a`` absorbs the exposure/illumination mismatch and the
+    constant ``c`` absorbs a uniform pedestal, so subtracting the result flattens
+    the background regardless of where ``B`` is bright — with no assumption about
+    its shape.
+
+    ``a`` is clamped to ``[0.05, 20]`` so a near-constant / pathological field
+    can't blow up the fit; on a degenerate field the original is returned.
+    """
+    i = np.asarray(img, dtype=np.float32)
+    b = np.asarray(bg, dtype=np.float32)
+    finite = np.isfinite(i) & np.isfinite(b)
+    if int(finite.sum()) < 16:
+        return b
+    iv = i[finite]
+    bv = b[finite]
+    # Background-dominated subset: the dimmest ~60% of pixels. Bright cells sit
+    # in the top tail and would otherwise pull the regression up.
+    thr = float(np.percentile(iv, 60.0))
+    mask = iv <= thr
+    if int(mask.sum()) < 16:
+        mask = np.ones_like(iv, dtype=bool)
+    x = bv[mask]
+    y = iv[mask]
+    xm = float(x.mean())
+    ym = float(y.mean())
+    denom = float(((x - xm) ** 2).sum())
+    if not np.isfinite(denom) or denom <= 0.0:
+        return b
+    a = float(((x - xm) * (y - ym)).sum() / denom)
+    if not np.isfinite(a):
+        return b
+    a = float(min(20.0, max(0.05, a)))
+    c = ym - a * xm
+    fitted = (a * b + c).astype(np.float32)
+    fitted[~np.isfinite(fitted)] = 0.0
+    return fitted
+
+
 def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
     """Force a background-subtracted image non-negative **and** finite.
 
@@ -1094,6 +1143,10 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
         if bg_field is not None:
             bg = np.asarray(bg_field, dtype=np.float32)
             if bg.shape == img.shape:
+                # Match the field to this image's background level first, so an
+                # exposure/illumination mismatch can't leave a residual in the
+                # field's shape (e.g. bright corners).
+                bg = _match_background_scale(img, bg)
                 return _floor_after_subtract(img - bg)
         return img
     return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
@@ -1116,6 +1169,7 @@ def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
     if bg_field is not None:
         b = np.asarray(bg_field, dtype=np.float32)
         if b.shape == img.shape:
+            b = _match_background_scale(img, b)
             img = _floor_after_subtract(img - b)
     return apply_flatfield(img, ff_field)
 
@@ -1321,81 +1375,19 @@ def compute_shape_features(
 # ── Quality control: flat-field correction + debris removal ──────────────────
 
 FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
-_FLATFIELD_SIGMA = 50.0  # Gaussian smoothing scale (px) for illumination estimation
-_FLATFIELD_FLOOR = 0.1   # min value of a mean-1 field → caps img/ff amplification at 10x
-
-
-def _normalize_flatfield(field: np.ndarray) -> "np.ndarray | None":
-    """Normalize an illumination field to mean 1.0 so dividing by it preserves
-    overall image scale. Returns None if the field is degenerate."""
-    field = np.asarray(field, dtype=np.float32)
-    m = float(np.mean(field)) if field.size else 0.0
-    if not np.isfinite(m) or m <= 0.0:
-        return None
-    out = field / m
-    out[~np.isfinite(out)] = 1.0
-    # Bound the amplification of img/ff in apply_flatfield. A dim empty-well
-    # region drives ff toward 0; without a floor, img/ff explodes (e.g. ff=0.005
-    # → 200x) and feeds StarDist out-of-distribution values that abort ClipperLib.
-    # Flooring the mean-1 field at _FLATFIELD_FLOOR caps amplification at
-    # 1/_FLATFIELD_FLOOR (=10x) and subsumes the old `out <= 0` guard. Real
-    # vignetting is < ~3x (field stays > ~0.33), so legitimate correction is
-    # untouched; only pathological empty-well division is clipped.
-    np.maximum(out, _FLATFIELD_FLOOR, out=out)
-    return out.astype(np.float32)
-
-
-def estimate_gaussian_flatfield(image: np.ndarray, sigma: float = _FLATFIELD_SIGMA) -> "np.ndarray | None":
-    """Estimate a smooth illumination field by heavily Gaussian-blurring *image*.
-
-    Dividing the image by the returned mean-1 field flattens slow illumination
-    gradients (vignetting / uneven excitation) while preserving cell-scale
-    structure. Self-referential: computed per image, no reference well needed.
-    """
-    from scipy.ndimage import gaussian_filter
-    blurred = gaussian_filter(np.asarray(image, dtype=np.float32), sigma=float(sigma))
-    return _normalize_flatfield(blurred)
-
-
-def estimate_basic_flatfield(stack, sigma: float = _FLATFIELD_SIGMA) -> "np.ndarray | None":
-    """Pure-numpy BaSiC-style flat-field from a stack of single-channel images.
-
-    Estimates the multiplicative illumination profile shared across the stack:
-    the per-pixel median (robust to cells/debris that move between fields),
-    smoothed and normalized to mean 1. This approximates BaSiC's flat-field
-    without its L1/low-rank optimisation — and without ``jax``/``basicpy``.
-    Returns None when the stack is empty or shapes are inconsistent.
-    """
-    from scipy.ndimage import gaussian_filter
-    arrs = [np.asarray(a, dtype=np.float32) for a in stack]
-    arrs = [a for a in arrs if a.ndim == 2]
-    if not arrs:
-        return None
-    shp = arrs[0].shape
-    arrs = [a for a in arrs if a.shape == shp]
-    if not arrs:
-        return None
-    median = np.median(np.stack(arrs, axis=0), axis=0)
-    return _normalize_flatfield(gaussian_filter(median, sigma=float(sigma)))
-
-
-def apply_flatfield(image: np.ndarray, flatfield: "np.ndarray | None") -> np.ndarray:
-    """Divide *image* by a mean-1 *flatfield* (no-op when None or shape-mismatched).
-
-    Returns float32; the mean-1 normalization keeps intensity magnitudes
-    comparable to the uncorrected image so downstream gating thresholds still
-    make sense.
-    """
-    if flatfield is None:
-        return image
-    img = np.asarray(image, dtype=np.float32)
-    ff = np.asarray(flatfield, dtype=np.float32)
-    if ff.shape != img.shape:
-        return image
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out = img / ff
-    out[~np.isfinite(out)] = 0.0
-    return out
+# Flat-field (illumination) estimators live in the Qt-free repo-root
+# ``flatfield_core`` module so the pipeline and the GUI share one implementation
+# (the GUI recomputes them for the Segmentation tab's flat-field validation
+# view). Imported under the original names so the rest of this module is
+# unchanged.
+from flatfield_core import (  # noqa: E402
+    _FLATFIELD_FLOOR,
+    _FLATFIELD_SIGMA,
+    _normalize_flatfield,
+    apply_flatfield,
+    estimate_basic_flatfield,
+    estimate_gaussian_flatfield,
+)
 
 
 def filter_debris(

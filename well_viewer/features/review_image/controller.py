@@ -532,14 +532,14 @@ def review_row_keys_series(app, df: pd.DataFrame) -> Optional[pd.Series]:
 def review_resolve_image_refs(app, *, fov_raw: str, tp_raw: str):
     """Resolve (fluor_ref, mask_ref).
 
-    Honors ``_review_image_show_raw``: when True, prefer the unprocessed
-    fluorescence channel and fall back to the top-hat-filtered output if
-    the raw frame is unavailable; when False (default), prefer top-hat
-    and fall back to raw — the original behaviour. Falling back rather
-    than failing keeps Review Image usable on datasets that only ship
-    one of the two image kinds for a given FOV/timepoint.
+    Honors ``image_source``: ``"corrected"`` (default) prefers the top-hat
+    output and falls back to raw; ``"raw"`` and ``"flatfield"`` both resolve the
+    raw frame (raw is the flat-field input — the renderer applies the flat-field
+    to it) and fall back to top-hat. Falling back rather than failing keeps
+    Review Image usable on datasets that only ship one of the two image kinds
+    for a given FOV/timepoint.
     """
-    raw_first = bool(app._app_state.review_image.show_raw)
+    raw_first = app._app_state.review_image.image_source in ("raw", "flatfield")
     tophat_map = getattr(app, "_preview_tophat_fluor", {})
     raw_map = app._app_state.preview.fluor
     if raw_first:
@@ -560,6 +560,88 @@ def review_resolve_image_refs(app, *, fov_raw: str, tp_raw: str):
         norm_timepoint=app._norm_timepoint,
     )
     return fluor_ref, mask_ref
+
+
+# ── Flat-field validation view (recompute the selected flat-field) ────────────
+
+# Keep the on-the-fly preview field cheap: the illumination envelope is smooth,
+# so a handful of frames is plenty for the basic/empty-well median estimate.
+_FLATFIELD_PREVIEW_MAX_SAMPLES = 8
+
+
+def _flatfield_qc(app, key: str, default: str = "") -> str:
+    info = app._app_state.dataset.pipeline_info or {}
+    qc = info.get("qc_options") or {}
+    return str(qc.get(key, default) or default).strip()
+
+
+def _load_arrays_from_refs(refs, *, limit: int):
+    """Decode up to *limit* arrays from a ``(fov,tp)->ImgRef`` map."""
+    from well_viewer.data.image_discovery import open_imgref_as_array
+    out = []
+    for ref in list((refs or {}).values())[:limit]:
+        arr = open_imgref_as_array(ref, greyscale=True)
+        if arr is not None:
+            out.append(_np.asarray(arr, dtype=_np.float32))
+    return out
+
+
+def flatfield_field_for(app, channel: str, fluor_arr):
+    """Return the mean-1 flat-field field for the current view, or None (identity).
+
+    Recomputes the flat-field METHOD the pipeline used (read from
+    ``pipeline_info['qc_options']['flatfield']``) so the Segmentation tab can
+    show the flat-field stage in isolation, before any background subtraction.
+    Cached per ``(channel, mode)`` in ``ReviewImageState.flatfield_field_cache``.
+
+    Fidelity: exact for ``none`` / ``gaussian`` / ``empty_well`` (same estimator
+    and inputs the pipeline used); ``basic`` is approximated from the *current
+    well's* FOVs (the pipeline samples the whole plate). The estimate is capped
+    at a few frames and cached so the UI thread isn't blocked on repeat views.
+    """
+    import flatfield_core as _ffc
+
+    mode = _flatfield_qc(app, "flatfield", "none").lower()
+    if mode in ("", "none"):
+        return None
+    if mode == "gaussian":
+        # Self-referential (one image) — cheap, recomputed per frame.
+        return _ffc.estimate_gaussian_flatfield(fluor_arr)
+
+    chan = str(channel or "").lower()
+    cache = app._app_state.review_image.flatfield_field_cache
+    key = (chan, mode)
+    if key in cache:
+        return cache[key]
+
+    field = None
+    try:
+        if mode == "basic":
+            if hasattr(app, "_set_status"):
+                app._set_status("Computing flat-field (basic) for preview…")
+            arrs = _load_arrays_from_refs(
+                app._app_state.preview.fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
+            field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
+        elif mode == "empty_well":
+            bg_well = _flatfield_qc(app, "background_well", "")
+            if bg_well:
+                if hasattr(app, "_set_status"):
+                    app._set_status("Computing flat-field (empty well) for preview…")
+                from well_viewer.data.image_discovery import find_well_images_and_masks
+                ds = app._app_state.dataset
+                fluor, _ov, _mk, _th = find_well_images_and_masks(
+                    ds.data_dir, bg_well, fluor_token=channel,
+                    in_dir=ds.in_dir, _fov_tp_extractor=ds.fov_tp_extractor,
+                    _pipeline_info=ds.pipeline_info,
+                )
+                arrs = _load_arrays_from_refs(fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
+                field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
+    except Exception:  # noqa: BLE001 — a failed preview field falls back to raw
+        _logger.exception("flat-field preview recompute failed (mode=%s)", mode)
+        field = None
+
+    cache[key] = field
+    return field
 
 
 

@@ -61,7 +61,16 @@ class ReviewImageState:
     override_version: int = 0
 
     # render options
-    show_raw: bool = False
+    # Which image stage the canvas shows: "corrected" (final = flat-field +
+    # background, the saved top-hat image — default), "raw" (unprocessed
+    # fluorescence), or "flatfield" (raw with only the selected flat-field
+    # applied, recomputed on the fly — a validation view of the flat-field step
+    # in isolation, before any background/top-hat subtraction).
+    image_source: str = "corrected"
+    # Per-(channel, flatfield-mode) cache of the recomputed mean-1 flat-field
+    # field for the "flatfield" view, so the (possibly multi-image) estimate is
+    # computed once per channel. Cleared on dataset load / rescan.
+    flatfield_field_cache: dict = field(default_factory=dict)
     binary_mask: bool = False
     show_outline: bool = True
     boundary_color: tuple[int, int, int] = (255, 64, 64)
@@ -80,6 +89,7 @@ class ReviewImageState:
         self.frame_cache = None
         self.include_cache.clear()
         self.threshold_map_cache.clear()
+        self.flatfield_field_cache.clear()
 
 
 @dataclass

@@ -248,9 +248,13 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
         app._review_image_status.setText("Could not render review image (numpy unavailable).")
         return
 
+    # The "flatfield" stage and "raw" stage resolve the SAME raw file ref, so
+    # the source mode must be part of the cache key or they would collide.
+    image_source = app._app_state.review_image.image_source
     cache_key = (
         getattr(fluor_ref, "full_path_str", id(fluor_ref)),
         getattr(mask_ref, "full_path_str", id(mask_ref)),
+        image_source,
     )
     cached = app._app_state.review_image.frame_cache
     if cached is not None and cached.get("key") == cache_key:
@@ -264,6 +268,15 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
             app._review_image_status.setText("Could not render review image (image decode failed).")
             return
         fluor_arr = _np.asarray(fluor_raw, dtype=_np.float32)
+        # Flat-field validation view: apply ONLY the selected flat-field to the
+        # raw frame (recomputed on the fly), before any background/top-hat. A
+        # no-op when the mode resolves to no field (e.g. flatfield="none").
+        if image_source == "flatfield":
+            import flatfield_core as _ffc
+            from well_viewer.features.review_image.controller import flatfield_field_for
+            field = flatfield_field_for(
+                app, str(app._app_state.channel.active_image_channel or ""), fluor_arr)
+            fluor_arr = _np.asarray(_ffc.apply_flatfield(fluor_arr, field), dtype=_np.float32)
         center_int = _np.rint(_np.asarray(mask_raw)).astype(_np.int32, copy=False)
         padded = _np.pad(center_int, 1, mode="constant", constant_values=0)
         center = padded[1:-1, 1:-1]
@@ -582,23 +595,15 @@ def review_image_resolve_lut(app, arr) -> Tuple[float, float]:
 
 
 def refresh_review_image_source_btn(app) -> None:
-    """Sync the raw/top-hat toggle button's caption + variant with state."""
-    btn = getattr(app, "_review_image_raw_btn", None)
-    if btn is None:
+    """Sync the Raw / Flat-field / Corrected segmented control with state."""
+    seg = getattr(app, "_review_image_source_seg", None)
+    if seg is None:
         return
-    on = bool(app._app_state.review_image.show_raw)
-    btn.setChecked(on)
-    btn.setText("Raw" if on else "Top-hat")
-    btn.setProperty("variant", "toggle")
-    btn.style().unpolish(btn)
-    btn.style().polish(btn)
-    btn.setToolTip(
-        "Showing the unprocessed fluorescence frame.\n"
-        "Click to switch back to the top-hat-filtered image."
-        if on else
-        "Showing the top-hat-filtered fluorescence frame (default).\n"
-        "Click to switch to the unprocessed raw image."
-    )
+    blocked = seg.blockSignals(True)
+    try:
+        seg.setCurrentByData(app._app_state.review_image.image_source)
+    finally:
+        seg.blockSignals(blocked)
 
 
 
@@ -679,15 +684,22 @@ def review_image_refresh_color_swatch(app, which: str) -> None:
 
 
 
-def toggle_review_image_source(app) -> None:
-    """Flip raw vs top-hat preference for the Review Image fluorescence channel."""
-    app._app_state.review_image.show_raw = not bool(app._app_state.review_image.show_raw)
-    # The LUT range for raw vs top-hat differs significantly, so drop the
-    # cached LUT for the active channel so the new image gets a fresh
-    # auto-fit instead of a stale clip.
+def set_review_image_source(app, mode: str) -> None:
+    """Set which image stage the Review Image canvas shows.
+
+    ``mode`` is one of ``"raw"`` (unprocessed fluorescence), ``"flatfield"``
+    (raw with only the selected flat-field applied — recomputed on the fly to
+    validate the flat-field step before any background subtraction), or
+    ``"corrected"`` (the saved final = flat-field + background/top-hat image,
+    the default).
+    """
+    if mode not in ("raw", "flatfield", "corrected"):
+        return
+    app._app_state.review_image.image_source = mode
+    # LUT ranges differ between stages, so drop the active channel's cached LUT
+    # so the new stage gets a fresh auto-fit instead of a stale clip.
     chan = str(app._app_state.channel.active_image_channel or "").lower()
-    if chan in app._app_state.review_image.lut_by_channel:
-        del app._app_state.review_image.lut_by_channel[chan]
+    app._app_state.review_image.lut_by_channel.pop(chan, None)
     app._refresh_review_image_source_btn()
     app._app_state.review_image.preserve_view_on_refresh = True
     refresh_review_image(app)

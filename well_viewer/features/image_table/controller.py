@@ -400,7 +400,6 @@ def image_table_rebuild_grid(app) -> None:
             )
 
     image_table_rebuild_lut_row(app)
-    image_table_refresh_addrow_controls(app)
 
 
 def _row_cmap_name(app, r: int) -> Optional[str]:
@@ -1012,68 +1011,24 @@ def _write_cell(cell, vals: Dict[str, str]) -> None:
             cb.blockSignals(False)
 
 
-def image_table_refresh_addrow_controls(app) -> None:
-    """Repopulate the Add-row source-row list and value list from the grid."""
-    src_cb = getattr(app, "_image_table_addrow_src_cb", None)
-    if src_cb is not None:
-        n = len(getattr(app, "_image_table_cells", None) or [])
-        prev = src_cb.currentData()
-        src_cb.blockSignals(True)
-        src_cb.clear()
-        for i in range(n):
-            src_cb.addItem(f"Row {i + 1}", i)
-        if prev is not None:
-            idx = src_cb.findData(prev)
-            src_cb.setCurrentIndex(idx if idx >= 0 else max(0, src_cb.count() - 1))
-        src_cb.blockSignals(False)
-    image_table_on_addrow_dim_changed(app)
+def image_table_add_varied_row(app, *, src_idx: int, dim: str, mode: str, value: str) -> None:
+    """Append a new row cloned from row *src_idx*, varying one dimension.
 
-
-def image_table_on_addrow_dim_changed(app) -> None:
-    """Refill the Add-row value list for the chosen dimension; the value list
-    is only relevant in Uniform mode (Step advances each cell by one)."""
-    dim_cb = getattr(app, "_image_table_addrow_dim_cb", None)
-    val_cb = getattr(app, "_image_table_addrow_val_cb", None)
-    mode_cb = getattr(app, "_image_table_addrow_mode_cb", None)
-    if dim_cb is None or val_cb is None:
-        return
-    dim = dim_cb.currentData() or "channel"
-    prev = val_cb.currentText().strip()
-    val_cb.blockSignals(True)
-    val_cb.clear()
-    opts = _all_dim_options(app, dim)
-    val_cb.addItems(opts)
-    if prev in opts:
-        val_cb.setCurrentText(prev)
-    val_cb.blockSignals(False)
-    if mode_cb is not None:
-        val_cb.setEnabled((mode_cb.currentData() or "uniform") == "uniform")
-
-
-def image_table_add_varied_row(app) -> None:
-    """Append a new row cloned from an existing one, varying one dimension.
-
-    Uniform mode sets the chosen dimension to a single value across the whole
-    new row; Step mode advances each cell's value for that dimension by one
-    (clamped to the last available value). Other dimensions are copied as-is.
-    Builds the selector row only — press Generate to render.
+    Uniform mode sets *dim* to *value* across the whole new row; Step mode
+    advances each cell's value for *dim* by one (clamped to the last available
+    value). Other dimensions are copied as-is. Builds the selector row only —
+    press Generate to render. Driven by :func:`image_table_open_add_row_dialog`.
     """
     cells = getattr(app, "_image_table_cells", None) or []
     if not cells:
         app._set_status("Image Table: build a table first, then add a row.")
         return
-
-    src_cb = getattr(app, "_image_table_addrow_src_cb", None)
-    dim_cb = getattr(app, "_image_table_addrow_dim_cb", None)
-    val_cb = getattr(app, "_image_table_addrow_val_cb", None)
-    mode_cb = getattr(app, "_image_table_addrow_mode_cb", None)
-    src_idx = src_cb.currentData() if src_cb is not None else None
-    dim = (dim_cb.currentData() if dim_cb is not None else "channel") or "channel"
-    mode = (mode_cb.currentData() if mode_cb is not None else "uniform") or "uniform"
-    value = val_cb.currentText().strip() if val_cb is not None else ""
+    dim = dim or "channel"
+    mode = mode or "uniform"
+    value = (value or "").strip()
 
     snap = _snapshot_cells(app)
-    if src_idx is None or not (0 <= src_idx < len(snap)):
+    if not (0 <= src_idx < len(snap)):
         src_idx = len(snap) - 1
     src_row = snap[src_idx]
     opts = _all_dim_options(app, dim)
@@ -1119,11 +1074,86 @@ def image_table_add_varied_row(app) -> None:
         _apply_row_channel_styling_for_row(app, new_rows - 1, value)
 
     image_table_rebuild_lut_row(app)
-    image_table_refresh_addrow_controls(app)
     verb = f"set {dim} = {value}" if mode == "uniform" else f"stepped {dim}"
     app._set_status(
         f"Image Table: added row {new_rows} cloned from row {src_idx + 1} "
         f"({verb}). Press Generate to render."
+    )
+
+
+def image_table_open_add_row_dialog(app) -> None:
+    """Modal dialog to clone an existing row, varying one dimension.
+
+    Replaces the inline Add-row combo strip — collects source row / dimension /
+    mode / value here (value list is per-dimension, enabled only in Uniform
+    mode) and calls :func:`image_table_add_varied_row`.
+    """
+    from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout
+
+    cells = getattr(app, "_image_table_cells", None) or []
+    if not cells:
+        app._set_status("Image Table: build a table first, then add a row.")
+        return
+
+    dlg = QDialog(app)
+    dlg.setWindowTitle("Image Table — Add row")
+    form = QFormLayout(dlg)
+
+    src_cb = QComboBox(dlg)
+    for i in range(len(cells)):
+        src_cb.addItem(f"Row {i + 1}", i)
+    src_cb.setCurrentIndex(src_cb.count() - 1)
+    src_cb.setToolTip("Existing row to clone.")
+    form.addRow("Clone row:", src_cb)
+
+    dim_cb = QComboBox(dlg)
+    for label, key in (("Channel", "channel"), ("Timepoint", "timepoint"),
+                       ("FOV", "fov"), ("Well", "well")):
+        dim_cb.addItem(label, key)
+    form.addRow("Vary:", dim_cb)
+
+    mode_cb = QComboBox(dlg)
+    mode_cb.addItem("Uniform → one value", "uniform")
+    mode_cb.addItem("Step +1 per cell", "step")
+    mode_cb.setToolTip(
+        "Uniform: set the chosen dimension to one value across the new row.\n"
+        "Step +1: advance each cell's value for that dimension by one."
+    )
+    form.addRow("Mode:", mode_cb)
+
+    val_cb = QComboBox(dlg)
+    val_cb.setToolTip("New value (Uniform mode only).")
+    form.addRow("Value:", val_cb)
+
+    def _refresh_values() -> None:
+        dim = dim_cb.currentData() or "channel"
+        prev = val_cb.currentText().strip()
+        val_cb.blockSignals(True)
+        val_cb.clear()
+        opts = _all_dim_options(app, dim)
+        val_cb.addItems(opts)
+        if prev in opts:
+            val_cb.setCurrentText(prev)
+        val_cb.blockSignals(False)
+        val_cb.setEnabled((mode_cb.currentData() or "uniform") == "uniform")
+
+    dim_cb.currentIndexChanged.connect(lambda _i: _refresh_values())
+    mode_cb.currentIndexChanged.connect(lambda _i: _refresh_values())
+    _refresh_values()
+
+    btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
+    btns.accepted.connect(dlg.accept)
+    btns.rejected.connect(dlg.reject)
+    form.addRow(btns)
+
+    if dlg.exec() != QDialog.Accepted:
+        return
+    image_table_add_varied_row(
+        app,
+        src_idx=int(src_cb.currentData() or 0),
+        dim=str(dim_cb.currentData() or "channel"),
+        mode=str(mode_cb.currentData() or "uniform"),
+        value=val_cb.currentText().strip(),
     )
 
 
@@ -1152,15 +1182,12 @@ def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
 def image_table_toggle_tophat(app) -> None:
     """Flip the raw/tophat source flag and re-render.
 
-    Bound to a checkable toggle button in the Image Table action row. When
-    ON, ``_load_array`` reads from the pre-filtered tophat dict; when OFF,
-    it reads raw fluor as before.
+    Bound to the Display ▾ menu's checkable Tophat action. When ON,
+    ``_load_array`` reads from the pre-filtered tophat dict; when OFF, it reads
+    raw fluor as before.
     """
-    btn = getattr(app, "_image_table_tophat_btn", None)
-    if btn is not None:
-        app._image_table_use_tophat = bool(btn.isChecked())
-    else:
-        app._image_table_use_tophat = not bool(getattr(app, "_image_table_use_tophat", False))
+    app._image_table_use_tophat = not bool(getattr(app, "_image_table_use_tophat", False))
+    image_table_refresh_display_menu(app)
     # Tossing the cache so the next Generate fetches the right dict.
     app._image_table_image_cache = {}
     image_table_generate(app)
@@ -1590,16 +1617,36 @@ def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_ar
 
 
 def image_table_toggle_boundaries(app) -> None:
-    """Flip the boundary-overlay flag and re-render."""
-    btn = getattr(app, "_image_table_boundaries_btn", None)
-    if btn is not None:
-        app._image_table_show_boundaries = bool(btn.isChecked())
-    else:
-        app._image_table_show_boundaries = not bool(
-            getattr(app, "_image_table_show_boundaries", False)
-        )
+    """Flip the boundary-overlay flag and re-render (Display ▾ menu action)."""
+    app._image_table_show_boundaries = not bool(
+        getattr(app, "_image_table_show_boundaries", False)
+    )
+    image_table_refresh_display_menu(app)
     app._image_table_image_cache = {}
     image_table_generate(app)
+
+
+def image_table_refresh_display_menu(app) -> None:
+    """Sync the Display ▾ menu's QAction checked states from app state.
+
+    Driven from the toggle/binary handlers and from view_state restore so the
+    menu always mirrors ``_image_table_use_tophat`` / ``_show_boundaries`` /
+    ``_image_table_binary_mode`` (signals blocked to avoid re-entrancy)."""
+    def _set(attr, checked) -> None:
+        act = getattr(app, attr, None)
+        if act is not None and hasattr(act, "setChecked"):
+            blocked = act.blockSignals(True)
+            try:
+                act.setChecked(bool(checked))
+            finally:
+                act.blockSignals(blocked)
+
+    _set("_image_table_tophat_act", getattr(app, "_image_table_use_tophat", False))
+    _set("_image_table_boundaries_act", getattr(app, "_image_table_show_boundaries", False))
+    mode = getattr(app, "_image_table_binary_mode", "") or ""
+    _set("_image_table_binary_act_none", mode == "")
+    _set("_image_table_binary_act_mask", mode == "mask")
+    _set("_image_table_binary_act_thresh", mode == "threshold")
 
 
 _ZOOM_MIN = 0.33
@@ -1635,23 +1682,13 @@ def image_table_set_binary_mode(app, mode: str) -> None:
         (reuses the Review Image gating logic via
         ``review_build_threshold_map``).
 
-    The two binary buttons are mutually exclusive: turning one on turns the
-    other off. Clicking the active mode's button again turns binary off.
+    Driven by the Display ▾ menu's exclusive Binary radio group (None / Mask /
+    ≥ Threshold), so the mode is set absolutely rather than toggled.
     """
-    current = getattr(app, "_image_table_binary_mode", "") or ""
-    new_mode = "" if current == mode else mode
-    app._image_table_binary_mode = new_mode
-
-    # Keep the two toggle buttons in sync with the resolved mode.
-    for m, attr in (("mask", "_image_table_binary_mask_btn"),
-                    ("threshold", "_image_table_binary_thresh_btn")):
-        b = getattr(app, attr, None)
-        if b is not None and hasattr(b, "setChecked"):
-            blocked = b.blockSignals(True)
-            try:
-                b.setChecked(new_mode == m)
-            finally:
-                b.blockSignals(blocked)
+    if mode not in ("", "mask", "threshold"):
+        return
+    app._image_table_binary_mode = mode
+    image_table_refresh_display_menu(app)
     image_table_generate(app)
 
 

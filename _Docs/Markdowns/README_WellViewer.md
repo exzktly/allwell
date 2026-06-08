@@ -352,7 +352,87 @@ You can also explicitly override the output folder.
   `--no_tophat_*` flags disable per-channel.
 - **Min nucleus area** in pixels (rejects garbage detections).
 
-### 5. Compute options
+### 5. Quality control — field flatness & background correction
+
+The **Quality Control** section bundles optional, pre-measurement clean-up that
+runs **per channel at quantification time** (so it changes the pixel values that
+get measured and can only be changed by re-running the pipeline). There are two
+independent correction stages plus a debris filter:
+
+1. **Flat-field (illumination) correction** — *multiplicative*. Models the slow
+   illumination profile (vignetting / uneven excitation) as a smooth field `F`,
+   normalizes it to **mean 1.0**, and computes `corrected = image / F`. Because
+   the field is mean-1, overall intensity magnitudes stay comparable to the raw
+   image (so gating thresholds still make sense). The mean-1 field is **floored
+   at 0.1**, which caps the amplification of any dim region at 10× — this stops a
+   near-black patch from exploding to out-of-distribution values that would crash
+   segmentation. Real vignetting is < ~3× so legitimate correction is untouched.
+
+2. **Background subtraction** — *additive*. Removes a baseline offset, then clips
+   the result at 0 so downstream intensity sums stay non-negative.
+
+The normal order is **flat-field (divide) → background (subtract)**, with one
+special combined case described below.
+
+#### Flat-field correction modes
+
+| Mode | What it does |
+|------|--------------|
+| **`none`** | No illumination correction. |
+| **`gaussian`** | Self-referential, per-image: heavily Gaussian-blurs each image (σ ≈ 50 px) to estimate its own illumination field, then divides. No reference well needed; flattens slow gradients while preserving cell-scale structure. |
+| **`basic`** | Pure-numpy BaSiC-style. Samples up to ~30 images **per channel across the whole plate**, takes the **per-pixel median** (robust to cells/debris that move between fields), Gaussian-smooths it, normalizes to mean 1, and divides. One field per channel. Approximates BaSiC without its L1/low-rank optimisation (no `jax`/`basicpy`). |
+| **`empty_well`** | Same median-based estimator, but sampled **only from a designated empty/background well** (the *Background well* field) — that well's measured intensity *is* the illumination profile. Requires a Background well. |
+
+#### Background-subtraction methods
+
+| Method | Operation | Notes |
+|--------|-----------|-------|
+| **`none`** | Image unchanged. | — |
+| **`top_hat`** | `img − grey_opening(img, square)`, square footprint of side `2·radius+1`. | Fast (separable 1-D passes) but the square footprint leaves anisotropic, *terraced* residuals — square halos/hotspots next to bright objects. Legacy method. |
+| **`sliding_disk`** | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | **Default & recommended.** A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
+| **`empty_well`** | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). No-op if no field is available for the channel. Requires a Background well. |
+
+The **Nuclear radius** / **Fluor radius** entries set the background length scale
+(in px) for the morphological methods only (`top_hat` / `sliding_disk`); these
+controls are hidden for `none` / `empty_well`, which take no radius. Each channel
+has a **Disable** checkbox to skip background subtraction for that channel.
+
+#### Combined empty-well correction (the special case)
+
+When **both** flat-field and background are set to `empty_well`, the pipeline does
+**not** run them separately. Doing so would mix scales — the additive background
+`B` is at raw scale but a separate flat-field would already have rescaled the
+image. Instead a single physically-correct pass is applied:
+
+```
+corrected = (raw − B) / (B / mean(B))
+```
+
+i.e. subtract the measured additive background `B` first, then divide by the
+mean-1 illumination field (which is just `B / mean(B)`). This assumes the additive
+background **tracks the illumination** — true for media autofluorescence under
+uneven excitation — and then recovers the underlying signal while mapping the
+empty well itself to ~0.
+
+#### Background well
+
+Any `empty_well` choice (flat-field and/or background) reads its reference images
+from the well named here (e.g. `H12`). The well is located in whichever input
+layout holds it — a per-well ZIP, a per-well folder, or loose TIFs. The run is
+blocked if an `empty_well` mode is selected but the Background well is blank or
+not present in the input folder.
+
+#### Debris removal
+
+The **Remove debris** toggle drops segmented regions whose size / shape fall
+outside the bounds below — **min / max area** (px) and **min solidity** (0–1).
+Unlike the pixel corrections above, this gate is *non-destructive and editable
+after the run*: cells are flagged rather than deleted, and the Segmentation tab
+recomputes the verdict live as you tune the thresholds, with no re-segmentation
+(see [§B Editable QC layer](#whats-new)). A cell counts only when it is manually
+kept **and** it passes QC.
+
+### 6. Compute options
 
 - **TF threads.** TensorFlow intra-op parallelism (CPU only; ignored on
   Metal). Defaults to 4.
@@ -363,7 +443,7 @@ You can also explicitly override the output folder.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist.
 
-### 6. Run / Stop / Log
+### 7. Run / Stop / Log
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
 - **Stop** signals the entire pipeline process group (sub-workers

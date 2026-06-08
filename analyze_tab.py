@@ -615,14 +615,19 @@ class AnalyzeTab(QWidget):
                                 radius_hint)
 
         rbw = self._row(sec, "Background well")
-        self._background_well_edit = self._entry(rbw, "", width=120)
+        self._background_well_edit = self._entry(rbw, "", width=160)
+        self._background_well_edit.setPlaceholderText("H12 or H12, G12")
         self._background_well_edit.setToolTip(
-            "Well label of an empty/background well (e.g. H12) used as the "
-            "reference for any empty_well mode above. Its smoothed per-pixel "
-            "median supplies the illumination field (flat-field) and/or the "
-            "measured additive background. Read from whichever input layout "
-            "holds the well (per-well zip, per-well folder, or loose TIFs); "
-            "enabled only when flat-field or background is empty_well.")
+            "Well label(s) of empty/background well(s) used as the reference for "
+            "any empty_well mode above. Enter one (e.g. H12) or several "
+            "comma-separated (e.g. H12, G12) — multiple wells are pooled for a "
+            "cleaner estimate. Their smoothed per-pixel median supplies the "
+            "illumination field (flat-field) and/or the measured additive "
+            "background, computed PER TIMEPOINT (background drifts over time); a "
+            "timepoint the blank wells lack falls back to the all-timepoint "
+            "pooled median. Read from whichever input layout holds the well "
+            "(per-well zip, per-well folder, or loose TIFs); enabled only when "
+            "flat-field or background is empty_well.")
         rbw.layout().addStretch(1)
 
         def _sync_bg(_=None) -> None:
@@ -1028,19 +1033,30 @@ class AnalyzeTab(QWidget):
         if not uses:
             return None
         which = " and ".join(uses)
-        well = self._background_well_edit.text().strip()
-        if not well:
+        # One or several comma-separated wells (e.g. "H12, G12"), pooled.
+        raw = self._background_well_edit.text().strip()
+        seen, wells = set(), []
+        for tok in raw.replace(";", ",").split(","):
+            w = tok.strip()
+            if w and w.lower() not in seen:
+                seen.add(w.lower())
+                wells.append(w)
+        if not wells:
             return (f"Empty-well {which} requires a Background well.\n\n"
-                    "Enter the empty/background well (e.g. H12) so its measured "
+                    "Enter one empty/background well (e.g. H12) — or several "
+                    "comma-separated (e.g. H12, G12) — so its measured "
                     "background can be sampled.")
         input_dir = Path(self._input_edit.text().strip())
         sep = self._filename_sep_edit.text() or DEFAULT_SEP
         schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
         from services.input_resolution_service import well_present_in_input
-        if not well_present_in_input(input_dir, well, schema=schema, sep=sep):
-            return (f"Background well '{well}' was not found in the input folder.\n\n"
-                    f"Empty-well {which} reads its reference images from that "
-                    f"well — confirm the well exists in:\n{input_dir}")
+        missing = [w for w in wells
+                   if not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
+        if missing:
+            label = ", ".join(f"'{w}'" for w in missing)
+            return (f"Background well {label} was not found in the input folder.\n\n"
+                    f"Empty-well {which} reads its reference images from the named "
+                    f"well(s) — confirm they exist in:\n{input_dir}")
         return None
 
     def _collapse_seg_param_stack(self) -> None:

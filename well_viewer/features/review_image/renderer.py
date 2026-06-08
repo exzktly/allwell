@@ -275,7 +275,8 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
             import flatfield_core as _ffc
             from well_viewer.features.review_image.controller import flatfield_field_for
             field = flatfield_field_for(
-                app, str(app._app_state.channel.active_image_channel or ""), fluor_arr)
+                app, str(app._app_state.channel.active_image_channel or ""), fluor_arr,
+                tp=tp)
             fluor_arr = _np.asarray(_ffc.apply_flatfield(fluor_arr, field), dtype=_np.float32)
         center_int = _np.rint(_np.asarray(mask_raw)).astype(_np.int32, copy=False)
         padded = _np.pad(center_int, 1, mode="constant", constant_values=0)

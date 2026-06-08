@@ -28,6 +28,9 @@ from process_microscopy import (
     sample_empty_well_images,
     _normalize_flatfield,
     _FLATFIELD_FLOOR,
+    _POOLED_TP,
+    _empty_well_field,
+    _split_background_wells,
 )
 from services.pipeline_service import build_pipeline_args
 from pathlib import Path
@@ -184,16 +187,18 @@ def test_build_flatfield_models(tmp_path):
             img = rng.uniform(90, 110, (H, W)).astype(np.float32) * shade
             _write_tif(tmp_path / f"exp_GFP_{well}_{fov}_24h.tif", img)
 
-    # basic: builds a field for gfp across all wells
+    # basic: builds a field for gfp across all wells (time-collapsed → pooled key)
     models = build_flatfield_models(tmp_path, tokens=["GFP"], schema=schema,
                                     sep="_", mode="basic")
     assert set(models) == {"gfp"}
-    assert models["gfp"][:, -1].mean() > models["gfp"][:, 0].mean()
+    gfp = models["gfp"][_POOLED_TP]
+    assert gfp[:, -1].mean() > gfp[:, 0].mean()
 
-    # empty_well: only A02 is the reference
+    # empty_well: only A02 is the reference (nested {tp_key: field, pooled: field})
     models_bg = build_flatfield_models(tmp_path, tokens=["GFP"], schema=schema,
-                                       sep="_", mode="empty_well", background_well="A02")
+                                       sep="_", mode="empty_well", background_wells="A02")
     assert set(models_bg) == {"gfp"}
+    assert _empty_well_field(models_bg, "gfp", "24") is not None
 
     # empty_well with no background_well → nothing
     assert build_flatfield_models(tmp_path, tokens=["GFP"], schema=schema,
@@ -223,18 +228,20 @@ def test_empty_well_models_read_zipped_wells(tmp_path):
     _zip_well(tmp_path / "B02.zip", "B02", ["DAPI", "GFP"], level=200.0)
 
     stacks = sample_empty_well_images(tmp_path, tokens=["DAPI", "GFP"],
-                                      schema=schema, sep="_", background_well="C11")
+                                      schema=schema, sep="_", background_wells="C11")
     assert set(stacks) == {"dapi", "gfp"}
+    # this schema has no timepoint field → all frames pool under one key.
+    assert _POOLED_TP in stacks["dapi"]
     # sampled from C11 (≈60), not B02 (≈200)
-    assert all(abs(float(a.mean()) - 60.0) < 1 for a in stacks["dapi"])
+    assert all(abs(float(a.mean()) - 60.0) < 1 for a in stacks["dapi"][_POOLED_TP])
 
     bgm = build_background_models(tmp_path, tokens=["DAPI", "GFP"], schema=schema,
-                                  sep="_", background_well="C11")
+                                  sep="_", background_wells="C11")
     ffm = build_flatfield_models(tmp_path, tokens=["DAPI", "GFP"], schema=schema,
-                                 sep="_", mode="empty_well", background_well="C11")
+                                 sep="_", mode="empty_well", background_wells="C11")
     assert set(bgm) == {"dapi", "gfp"} and set(ffm) == {"dapi", "gfp"}
     # the additive field keeps the measured level → real subtraction, not a no-op
-    assert abs(float(bgm["dapi"].mean()) - 60.0) < 2
+    assert abs(float(_empty_well_field(bgm, "dapi", "").mean()) - 60.0) < 2
 
 
 # ── Analyze → CLI arg mapping ────────────────────────────────────────────────
@@ -412,6 +419,12 @@ def test_build_pipeline_args_qc_mapping():
                             _base_opts(flatfield="empty_well", background_well="H12"))
     assert a[a.index("--flatfield") + 1] == "empty_well"
     assert a[a.index("--background_well") + 1] == "H12"
+
+    # multiple (comma-separated) background wells pass through as one arg; the
+    # pipeline splits them via _split_background_wells.
+    a = build_pipeline_args(P, Path("/in"), Path("/out"),
+                            _base_opts(flatfield="empty_well", background_well="H12, G12"))
+    assert _split_background_wells(a[a.index("--background_well") + 1]) == ["H12", "G12"]
 
     # debris with bounds (zero bounds omitted)
     a = build_pipeline_args(P, Path("/in"), Path("/out"),

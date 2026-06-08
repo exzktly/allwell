@@ -417,10 +417,24 @@ empty well itself to ~0.
 #### Background well
 
 Any `empty_well` choice (flat-field and/or background) reads its reference images
-from the well named here (e.g. `H12`). The well is located in whichever input
-layout holds it — a per-well ZIP, a per-well folder, or loose TIFs. The run is
-blocked if an `empty_well` mode is selected but the Background well is blank or
-not present in the input folder.
+from the well(s) named here. Enter **one** well (e.g. `H12`) or **several
+comma-separated** (e.g. `H12, G12`) — multiple blank wells are **pooled** (their
+frames combined before the per-pixel median) for a cleaner, less noisy estimate.
+Each well is located in whichever input layout holds it — a per-well ZIP, a
+per-well folder, or loose TIFs. The run is blocked if an `empty_well` mode is
+selected but the Background well field is blank or none of the named wells are
+present in the input folder.
+
+**Per-timepoint correction.** Background drifts over the course of a timecourse,
+so the field is built **separately for each timepoint**: the empty-well frames at
+a given timepoint correct the sample frames at that same timepoint. Timepoint
+identity is normalized the same way everywhere — `T01`, `1`, `1.0`, and `1h` all
+collapse to one key — so empty-well and sample frames match regardless of label
+style. If the blank wells have **no frame at some timepoint**, that timepoint
+falls back to the **global pooled median** (the field built from all of the blank
+wells' frames across every timepoint), which is the historical whole-timecourse
+behavior. Single-well, single-timepoint datasets therefore behave exactly as
+before.
 
 #### Debris removal
 

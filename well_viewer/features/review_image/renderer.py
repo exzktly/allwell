@@ -347,9 +347,18 @@ def draw_review_image(
         lo, hi = app._review_image_resolve_lut(arr)
     if hasattr(app, "_review_lut_chan_lbl"):
         app._review_lut_chan_lbl.setText(f"{app._app_state.channel.active_image_channel.upper()} LUT min:")
-    if hasattr(app, "_review_lut_min_edit") and hasattr(app, "_review_lut_max_edit"):
-        app._review_lut_min_edit.setText(f"{lo:.0f}")
-        app._review_lut_max_edit.setText(f"{hi:.0f}")
+    # Keep the min/max boxes in sync with the LUT actually applied, so the
+    # user always sees the real numbers (not a stale "auto") and edits start
+    # from the current range. (These are ``_review_lmin_entry`` /
+    # ``_review_lmax_entry`` — the previous ``_review_lut_min_edit`` names
+    # never matched a real widget, so the boxes never updated.)
+    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
+        for _entry, _val in ((app._review_lmin_entry, lo), (app._review_lmax_entry, hi)):
+            _blocked = _entry.blockSignals(True)
+            try:
+                _entry.setText(f"{_val:.0f}")
+            finally:
+                _entry.blockSignals(_blocked)
     base = ((_np.clip(arr, lo, hi) - lo) / (hi - lo) * 255).astype(_np.uint8)
     h, w = base.shape
 
@@ -516,14 +525,23 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
 def review_image_resolve_lut(app, arr) -> Tuple[float, float]:
     chan = str(app._app_state.channel.active_image_channel or "").lower()
     if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
-        try:
-            lo = float(app._review_lmin_entry.text().strip())
-            hi = float(app._review_lmax_entry.text().strip())
-            if hi > lo:
-                app._app_state.review_image.lut_by_channel[chan] = (lo, hi)
-                return lo, hi
-        except Exception:
-            pass
+        # Parse each box independently so editing just one (leaving the other
+        # at "auto"/blank) still takes effect — the missing side falls back to
+        # the data min/max rather than discarding the typed value entirely.
+        def _num(text, fallback):
+            text = (text or "").strip().lower()
+            if not text or text == "auto":
+                return fallback
+            try:
+                return float(text)
+            except ValueError:
+                return fallback
+
+        lo = _num(app._review_lmin_entry.text(), float(arr.min()))
+        hi = _num(app._review_lmax_entry.text(), float(arr.max()))
+        if hi > lo:
+            app._app_state.review_image.lut_by_channel[chan] = (lo, hi)
+            return lo, hi
     saved = app._app_state.review_image.lut_by_channel.get(chan)
     if saved is not None and saved[1] > saved[0]:
         return saved

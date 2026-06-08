@@ -403,7 +403,18 @@ def test_build_pipeline_args_background_mapping():
     a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts(background="none"))
     assert a[a.index("--background") + 1] == "none"
     assert set(BACKGROUND_METHODS) == {
-        "none", "top_hat", "sliding_disk", "fov_median", "empty_well"}
+        "none", "top_hat", "sliding_disk", "fov_median", "empty_well",
+        "robust_mesh", "fft_bandpass"}
+    # The two object-size-agnostic methods reuse the radius (large-structure /
+    # tile scale); fft_bandpass also forwards the small-structure cutoffs.
+    for m in ("robust_mesh", "fft_bandpass"):
+        a = build_pipeline_args(P, Path("/in"), Path("/out"), _base_opts(background=m))
+        assert a[a.index("--background") + 1] == m
+    a = build_pipeline_args(P, Path("/in"), Path("/out"),
+                            _base_opts(background="fft_bandpass",
+                                       fft_small_nir="3", fft_small_fluor="5"))
+    assert a[a.index("--fft_small_nir") + 1] == "3"
+    assert a[a.index("--fft_small_fluor") + 1] == "5"
 
 
 def test_subtract_background_none_is_noop():

@@ -571,7 +571,8 @@ class AnalyzeTab(QWidget):
         rbg = self._row(sec, "Background subtraction")
         self._background_cb = QComboBox(rbg)
         self._background_cb.addItems(
-            ["none", "top_hat", "sliding_disk", "fov_median", "empty_well"])
+            ["none", "top_hat", "sliding_disk", "fov_median", "empty_well",
+             "robust_mesh", "fft_bandpass"])
         # Default to the isotropic sliding_disk: top_hat's square footprint leaves
         # telltale square halos, and since the dropdown doesn't persist, a top_hat
         # default meant runs silently used the square method unless re-selected.
@@ -588,7 +589,15 @@ class AnalyzeTab(QWidget):
             "does NOT flatten spatial gradients). No radius/reference needed.\n"
             "• empty_well — subtract a measured per-channel background from the "
             "Background well. (If flat-field is *also* empty_well, the two are "
-            "combined into one correct (raw−B)/(B/mean(B)) pass.)")
+            "combined into one correct (raw−B)/(B/mean(B)) pass.)\n"
+            "• robust_mesh — sigma-clipped local background on a coarse grid "
+            "(SExtractor/Background2D style), bicubically interpolated. Robust to "
+            "bright/confluent objects on uneven background where morphological "
+            "methods fail; uses the radius below as the background scale.\n"
+            "• fft_bandpass — 2-D FFT Butterworth high-pass: removes the "
+            "low-frequency background (illumination, gradients, large blobs) "
+            "regardless of object size. Radius below = large-structure cutoff; "
+            "small-structure (px) = optional high-frequency denoise (0 = off).")
         rbg.layout().addWidget(self._background_cb)
         rbg.layout().addStretch(1)
 
@@ -607,7 +616,10 @@ class AnalyzeTab(QWidget):
         fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
         fluor_row.layout().addStretch(1)
         radius_hint = QLabel("Radius = background scale (px); Fluor radius "
-                             "applies to all fluorescent channels.", sec)
+                             "applies to all fluorescent channels. For "
+                             "fft_bandpass it is the large-structure (low-"
+                             "frequency) cutoff; for robust_mesh it is the tile "
+                             "size.", sec)
         radius_hint.setObjectName("Muted")
         radius_hint.setWordWrap(True)
         sec.layout().addWidget(radius_hint)
@@ -617,6 +629,24 @@ class AnalyzeTab(QWidget):
         # (hiding only the cell left the labels stranded).
         self._bg_radius_rows = (nir_row.parentWidget(), fluor_row.parentWidget(),
                                 radius_hint)
+
+        # fft_bandpass-only small-structure (high-frequency) cutoffs — the
+        # optional low-pass that denoises for a true band-pass. 0 = high-pass
+        # only (preserves signal; the default, faithful for quantification).
+        fft_nir_row = self._row(sec, "Nuclear small px")
+        self._fft_small_nir_edit = self._entry(fft_nir_row, "0", width=60)
+        fft_nir_row.layout().addStretch(1)
+        fft_fluor_row = self._row(sec, "Fluor small px")
+        self._fft_small_fluor_edit = self._entry(fft_fluor_row, "0", width=60)
+        fft_fluor_row.layout().addStretch(1)
+        fft_hint = QLabel("Small-structure cutoff (px): 0 = high-pass only "
+                          "(no denoise); >1 attenuates features smaller than "
+                          "this for a true band-pass.", sec)
+        fft_hint.setObjectName("Muted")
+        fft_hint.setWordWrap(True)
+        sec.layout().addWidget(fft_hint)
+        self._fft_small_rows = (fft_nir_row.parentWidget(),
+                                fft_fluor_row.parentWidget(), fft_hint)
 
         rbw = self._row(sec, "Background well")
         self._background_well_edit = self._entry(rbw, "", width=160)
@@ -640,9 +670,15 @@ class AnalyzeTab(QWidget):
             self._background_well_edit.setEnabled(
                 self._flatfield_cb.currentText() == "empty_well"
                 or bg_method == "empty_well")
-            # Radius only applies to the morphological / sliding-disk methods.
+            # Radius is the background scale for the morphological / sliding-disk
+            # methods, the tile size for robust_mesh, and the large-structure
+            # cutoff for fft_bandpass — shown for all of them.
             for w in self._bg_radius_rows:
-                w.setVisible(bg_method in ("top_hat", "sliding_disk"))
+                w.setVisible(bg_method in ("top_hat", "sliding_disk",
+                                           "robust_mesh", "fft_bandpass"))
+            # The small-structure (high-frequency) cutoff is fft_bandpass-only.
+            for w in self._fft_small_rows:
+                w.setVisible(bg_method == "fft_bandpass")
         self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
         self._background_cb.currentIndexChanged.connect(_sync_bg)
         _sync_bg()
@@ -1408,6 +1444,8 @@ class AnalyzeTab(QWidget):
             csv_prefix=self._csv_prefix_edit.text().strip() or "measurements",
             tophat_radius_nir=self._tophat_radius_nir_edit.text(),
             tophat_radius_fluor=self._tophat_radius_fluor_edit.text(),
+            fft_small_nir=self._fft_small_nir_edit.text(),
+            fft_small_fluor=self._fft_small_fluor_edit.text(),
             no_tophat_nir=self._no_tophat_nir_cb.isChecked(),
             no_tophat_fluor=self._no_tophat_fluor_cb.isChecked(),
             compress_input_well_folders=self._compress_input_cb.isChecked(),

@@ -16,7 +16,8 @@ def test_review_image_defaults():
     assert ris.zoom == 1.0
     assert ris.pan_x == 0.0 and ris.pan_y == 0.0
     assert ris.show_outline is True
-    assert ris.show_raw is False
+    assert ris.image_source == "corrected"
+    assert ris.flatfield_field_cache == {}
     assert ris.binary_mask is False
     assert ris.boundary_color == (255, 64, 64)
     assert ris.selected_color == (255, 230, 64)

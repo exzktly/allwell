@@ -110,19 +110,30 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     cl.addWidget(btn_danger(
         ctrl, "Reset", lambda: reset_crop_and_overrides(self)))
 
-    # Raw vs top-hat fluorescence source toggle. Defaults to top-hat.
-    self._review_image_raw_btn = QPushButton("Top-hat", ctrl)
-    self._review_image_raw_btn.setProperty("variant", "toggle")
-    self._review_image_raw_btn.setCheckable(True)
-    self._review_image_raw_btn.setChecked(bool(self._app_state.review_image.show_raw))
-    self._review_image_raw_btn.setToolTip(
-        "Showing the top-hat-filtered fluorescence frame (default).\n"
-        "Click to switch to the unprocessed raw image."
+    # Image-stage selector: Raw / Flat-field (recomputed) / Corrected (final).
+    # Lets the user validate each correction stage in isolation. Defaults to
+    # Corrected (the saved final image). Signal wired AFTER initial setup so
+    # building the control doesn't fire the handler.
+    from widgets.segmented_control import SegmentedControl as _SegmentedControl
+    self._review_image_source_seg = _SegmentedControl(ctrl)
+    for _lbl, _data in (("Raw", "raw"), ("Flat-field", "flatfield"),
+                        ("Corrected", "corrected")):
+        self._review_image_source_seg.addSegment(_lbl, data=_data)
+    self._review_image_source_seg.setCurrentByData(
+        self._app_state.review_image.image_source)
+    self._review_image_source_seg.setToolTip(
+        "Image stage shown:\n"
+        "• Raw — unprocessed fluorescence.\n"
+        "• Flat-field — raw with only the selected flat-field applied "
+        "(recomputed live), before any background/top-hat. 'basic' flat-field "
+        "is approximated from the current well.\n"
+        "• Corrected — the saved final image (flat-field + background)."
     )
-    self._review_image_raw_btn.clicked.connect(
-        lambda _=False: self._toggle_review_image_source()
+    self._review_image_source_seg.currentChanged.connect(
+        lambda _i: self._set_review_image_source(
+            self._review_image_source_seg.currentData())
     )
-    cl.addWidget(self._review_image_raw_btn)
+    cl.addWidget(self._review_image_source_seg)
 
     cl.addWidget(btn_secondary(ctrl, "Fit", self._review_image_zoom_fit))
     cl.addWidget(btn_card(ctrl, "−", lambda: self._review_image_zoom_step(-1)))

@@ -10,7 +10,7 @@ Sections:
 
 * **Analysis** — Plotting (sub-pages: Line Graphs, Bar Plots, Scatter Plot,
   Distribution, Heat Map), Statistics.
-* **Images** — Image Table, Segmentation (sub-pages: Segmentation, smFISH).
+* **Images** — Image Table, Segmentation, smFISH.
 * **Data** — Review CSV, Sample Definitions, Batch Export.
 
 Pages are also built lazily: only the initially active "Plotting" page
@@ -132,7 +132,7 @@ def build_centre(app, parent: QWidget) -> None:
     # skimage, tifffile) that aren't worth amortising at startup. smFISH
     # used to live here; it is now a sub-tab inside the Segmentation
     # parent, and its builder defers itself via the segmentation sub-stack.
-    lazy_only: Set[str] = set()
+    lazy_only: Set[str] = {"smFISH"}
     app._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
@@ -586,111 +586,31 @@ def build_centre(app, parent: QWidget) -> None:
         build_image_table_picker(app, app._sidebar_image_table_frame)
 
     def _build_cell_segmentation() -> None:
-        """Build the Segmentation parent tab with two sub-tabs:
-        the original review-image panel (kept under the "Segmentation"
-        sub-tab name so the existing _on_tab_change branch still applies),
-        and the smFISH panel that used to live at top level. A
-        ``QTabBar`` styled to match the Plotting / Sample Definitions
-        sub-tabs sits above the sub-stack and toggles between them; the
-        smFISH side is lazily built on first activation since it pulls
-        in tifffile / skimage / matplotlib-QtAgg.
+        """Build the Segmentation tab — the review-image panel.
+
+        smFISH used to ride here as a second sub-tab; it is now its own
+        top-level rail entry (``_build_smfish``), so this is a single panel.
         """
-        from PySide6.QtWidgets import QTabBar
-
         parent = tab_frames["Segmentation"]
-        outer = parent.layout()
-        if outer is None:
-            outer = QVBoxLayout(parent)
-            outer.setContentsMargins(0, 0, 0, 0)
+        if parent.layout() is None:
+            QVBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
+        build_review_image_panel(app, parent)
 
-        # ── sub-tab bar ─────────────────────────────────────────────────
-        # QTabBar with SampleDefinitionsSubTabs object name picks up the
-        # existing rectangular-tab QSS used by the Plotting ctxbar; keeps
-        # the tab styling consistent across every multi-pane area of the
-        # app (Plotting, Segmentation, Sample Definitions).
-        from theme import Colors as _C, Spacing as _S
-        bar = QWidget(parent)
-        bar.setObjectName("CellSegCtxbar")
-        bar.setAttribute(Qt.WA_StyledBackground, True)
-        bar.setStyleSheet(
-            f"#CellSegCtxbar {{ background-color: {_C.surface}; "
-            f"border-bottom: 1px solid {_C.border_subtle}; }}"
-        )
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(_S.md, 6, _S.md, 6)
-        bl.setSpacing(_S.sm)
-        _SEG_SUBTABS = ("Segmentation", "smFISH")
-        sub_seg = QTabBar()
-        sub_seg.setObjectName("SampleDefinitionsSubTabs")
-        sub_seg.setExpanding(False)
-        sub_seg.setElideMode(Qt.ElideNone)
-        sub_seg.setUsesScrollButtons(True)
-        sub_seg.setDrawBase(False)
-        for title in _SEG_SUBTABS:
-            sub_seg.addTab(title)
-        bl.addWidget(sub_seg, 1)
-        outer.addWidget(bar, 0)
+    def _build_smfish() -> None:
+        """Build the smFISH tab (its own top-level rail entry).
 
-        # ── nested page stack ────────────────────────────────────────────
-        sub_stack = NamedPageStack(parent)
-        sub_stack.setObjectName("CellSegmentationSubTabs")
-        outer.addWidget(sub_stack, 1)
-        app._cell_segmentation_notebook = sub_stack
-
-        # Build the Segmentation sub-page eagerly so the user sees content
-        # on first click. The smFISH sub-page is lazily built on first
-        # activation (it pulls heavy deps).
-        seg_page = QWidget()
-        QVBoxLayout(seg_page).setContentsMargins(0, 0, 0, 0)
-        build_review_image_panel(app, seg_page)
-        sub_stack.addPage("Segmentation", seg_page)
-
-        smfish_page = QWidget()
-        QVBoxLayout(smfish_page).setContentsMargins(0, 0, 0, 0)
-        sub_stack.addPage("smFISH", smfish_page)
-        app._cell_segmentation_smfish_built = False
-
-        def _ensure_smfish_built() -> None:
-            if getattr(app, "_cell_segmentation_smfish_built", False):
-                return
-            try:
-                from well_viewer.features.smfish.tab_view import build_smfish_tab
-                build_smfish_tab(app._ctx, smfish_page)
-                app._cell_segmentation_smfish_built = True
-            except Exception:
-                _logger.exception("Deferred build for smFISH sub-tab failed")
-
-        # Seed the tab bar to mirror the stack's initial page before
-        # wiring signals — addPage("Segmentation", ...) above made that
-        # the default current page. Setting the tab first avoids an
-        # extra _on_tab_change emit during build.
-        blocked = sub_seg.blockSignals(True)
+        Lazy-only (see ``lazy_only``) because it pulls heavy deps
+        (tifffile / skimage / matplotlib-QtAgg) — it constructs on first
+        click rather than during the background drain.
+        """
+        parent = tab_frames["smFISH"]
+        if parent.layout() is None:
+            QVBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
         try:
-            sub_seg.setCurrentIndex(_SEG_SUBTABS.index("Segmentation"))
-        finally:
-            sub_seg.blockSignals(blocked)
-
-        def _on_cell_seg_subtab(_i: int = 0) -> None:
-            name = sub_stack.currentName()
-            if name == "smFISH":
-                _ensure_smfish_built()
-            on_tab_change(app, None)
-            if sub_seg.tabText(sub_seg.currentIndex()) != name:
-                blocked = sub_seg.blockSignals(True)
-                try:
-                    if name in _SEG_SUBTABS:
-                        sub_seg.setCurrentIndex(_SEG_SUBTABS.index(name))
-                finally:
-                    sub_seg.blockSignals(blocked)
-
-        sub_stack.currentChanged.connect(_on_cell_seg_subtab)
-
-        def _on_cell_seg_sub_seg(idx: int = 0) -> None:
-            target = sub_seg.tabText(idx)
-            if target:
-                sub_stack.setCurrentByName(target)
-
-        sub_seg.currentChanged.connect(_on_cell_seg_sub_seg)
+            from well_viewer.features.smfish.tab_view import build_smfish_tab
+            build_smfish_tab(app._ctx, parent)
+        except Exception:
+            _logger.exception("Build for smFISH tab failed")
 
     def _build_stats() -> None:
         from well_viewer.features.stats.view import (
@@ -725,12 +645,11 @@ def build_centre(app, parent: QWidget) -> None:
             # Movie Montage was folded into Image Table — pick a well, set
             # the channel to NUC+SEG (or any other), and click "Distribute
             # Timepoints" to get the same per-timepoint grid.
-            # smFISH used to live under Analysis; it now lives as a sub-tab
-            # of "Segmentation" (alongside the original review-image panel,
-            # also called "Segmentation" at the leaf) so both image-
-            # segmentation surfaces share one rail entry.
             ("Image Table", _build_image_table),
             ("Segmentation", _build_cell_segmentation),
+            # smFISH has its own rail entry (it briefly lived as a sub-tab of
+            # Segmentation). Lazy-only — heavy deps build on first click.
+            ("smFISH", _build_smfish),
         ]),
         ("Data", [
             ("Review CSV", _build_review_csv),

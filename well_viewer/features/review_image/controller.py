@@ -284,17 +284,9 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
         return
 
     if hasattr(app, "_notebook"):
-        # The Segmentation rail entry now hosts a nested stack with two
-        # sub-pages: "Segmentation" (the review image) and "smFISH".
-        # Switch the outer page first, then drive the inner stack to the
-        # Segmentation sub-page so jumps from Review CSV always land on
-        # the review image (not the smFISH side if that was last open).
+        # Segmentation is a plain top-level tab (the review image); jumps from
+        # Review CSV land straight on it. (smFISH is its own rail entry now.)
         _select_tab_by_text(app._notebook, "Segmentation")
-        cs_nb = getattr(app, "_cell_segmentation_notebook", None)
-        if cs_nb is not None:
-            setter = getattr(cs_nb, "setCurrentByName", None)
-            if setter is not None:
-                setter("Segmentation")
 
     # Set the target nucleus before any refresh so intermediate renders can
     # already draw the yellow highlight.

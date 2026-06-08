@@ -399,6 +399,7 @@ class WellViewerApp(QWidget):
         "Statistics":         "sigma",
         "Image Table":        "layout-grid",
         "Segmentation":       "scan-line",
+        "smFISH":             "dna",
         "Review CSV":         "file-spreadsheet",
         "Sample Definitions": "tag",
         "Batch Export":       "boxes",

@@ -225,14 +225,11 @@ def run_tab_switch_smoke_checks(
 def current_centre_tab(app) -> str:
     """Return the effective current tab name.
 
-    When the "Plotting" or "Segmentation" top-level tab is active
-    the real content lives in a nested QStackedWidget. This helper
-    resolves that one level of indirection so callers can always
-    compare against leaf names like "Bar Plots", "Heat Map",
-    "Segmentation", or "smFISH". (The Segmentation parent and its
-    default leaf share the same name; descending is still correct —
-    the inner stack returns "Segmentation" or "smFISH" depending on
-    which sub-tab is active.)
+    When the "Plotting" top-level tab is active the real content lives in a
+    nested QStackedWidget; this helper resolves that one level of indirection
+    so callers can always compare against leaf names like "Bar Plots",
+    "Heat Map", etc. ("Segmentation" and "smFISH" are now plain top-level
+    tabs — smFISH was promoted out of the old Segmentation sub-stack.)
     """
     nb = getattr(app, "_notebook", None)
     if nb is None:
@@ -246,13 +243,6 @@ def current_centre_tab(app) -> str:
         if plotting_nb is not None and plotting_nb.count() > 0:
             try:
                 return plotting_nb.currentName()
-            except Exception:
-                pass
-    elif tab == "Segmentation":
-        cs_nb = getattr(app, "_cell_segmentation_notebook", None)
-        if cs_nb is not None and cs_nb.count() > 0:
-            try:
-                return cs_nb.currentName()
             except Exception:
                 pass
     return tab

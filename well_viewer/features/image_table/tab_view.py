@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.data.crop_tool import CropTool
@@ -25,7 +25,11 @@ from well_viewer.features.image_table.controller import image_table_apply_dimens
 from well_viewer.features.image_table.controller import image_table_apply_global
 from well_viewer.features.image_table.controller import image_table_rebuild_grid
 from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
-from well_viewer.features.image_table.controller import image_table_toggle_binary
+from well_viewer.features.image_table.controller import image_table_set_binary_mode
+from well_viewer.features.image_table.controller import image_table_refresh_channel_picker
+from well_viewer.features.image_table.controller import image_table_set_zoom
+from well_viewer.features.image_table.controller import image_table_add_varied_row
+from well_viewer.features.image_table.controller import image_table_on_addrow_dim_changed
 from well_viewer.features.image_table.controller import image_table_toggle_boundaries
 from well_viewer.features.image_table.controller import image_table_toggle_tophat
 from functools import partial
@@ -68,8 +72,10 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         ctx.app._image_table_use_tophat = False
     if not hasattr(ctx.app, "_image_table_show_boundaries"):
         ctx.app._image_table_show_boundaries = False
-    if not hasattr(ctx.app, "_image_table_show_binary"):
-        ctx.app._image_table_show_binary = False
+    if not hasattr(ctx.app, "_image_table_binary_mode"):
+        ctx.app._image_table_binary_mode = ""   # "", "mask", or "threshold"
+    if not hasattr(ctx.app, "_image_table_zoom"):
+        ctx.app._image_table_zoom = 1.0
     if not hasattr(ctx.app, "_image_table_active_channels"):
         ctx.app._image_table_active_channels = set()
     if not hasattr(ctx.app, "_image_table_row_axis"):
@@ -154,15 +160,24 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gl.addStretch(1)
     il.addWidget(glob)
 
-    # ── Smart layout builder: rows = ▾  cols = ▾  + Build + presets ─────────
-    # Declare what varies down rows and across cols; Build auto-sizes the grid
-    # to the current selection (plate wells / ticked channels / timepoints /
-    # FOVs) and fills every cell, holding the off-axis dims at the Global value.
-    builder = QWidget(inner)
-    builder.setObjectName("TabCtrl")
-    bl = QHBoxLayout(builder)
-    bl.setContentsMargins(8, 6, 8, 6)
-    bl.setSpacing(6)
+    # ── Build Layout panel ──────────────────────────────────────────────────
+    # One coherent, framed panel for assembling the selector grid:
+    #   • Row 1: declare the row/column axes + which channels + Build.
+    #   • Row 2: one-click presets for the common pairings.
+    #   • Row 3: manual fill helpers (advanced).
+    # Build only assembles the selector grid; the user presses Generate to
+    # render the images.
+    builder = QFrame(inner)
+    builder.setObjectName("ImageTableSelector")
+    builder.setFrameShape(QFrame.StyledPanel)
+    bv = QVBoxLayout(builder)
+    bv.setContentsMargins(8, 6, 8, 8)
+    bv.setSpacing(6)
+
+    build_title = QLabel("Build Layout", builder)
+    build_title.setProperty("role", "section")
+    bv.addWidget(build_title)
+
     _AXES = [("Channels", "channel"), ("Wells", "well"),
              ("Timepoints", "timepoint"), ("FOVs", "fov")]
 
@@ -174,48 +189,128 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         cb.setCurrentIndex(idx if idx >= 0 else 0)
         return cb
 
-    bl.addWidget(QLabel("Layout — Rows:", builder))
+    # Row 1 — axes + channels + Build.
+    axes_row = QWidget(builder)
+    ar = QHBoxLayout(axes_row)
+    ar.setContentsMargins(0, 0, 0, 0)
+    ar.setSpacing(6)
+
+    ar.addWidget(QLabel("Rows:", axes_row))
     row_axis_cb = _axis_combo(ctx.app._image_table_row_axis)
-    bl.addWidget(row_axis_cb)
+    ar.addWidget(row_axis_cb)
     ctx.app._image_table_row_axis_cb = row_axis_cb
 
-    bl.addWidget(QLabel("Cols:", builder))
+    ar.addWidget(QLabel("×  Columns:", axes_row))
     col_axis_cb = _axis_combo(ctx.app._image_table_col_axis)
-    bl.addWidget(col_axis_cb)
+    ar.addWidget(col_axis_cb)
     ctx.app._image_table_col_axis_cb = col_axis_cb
 
-    bl.addWidget(btn_primary(
-        builder, "Build table", partial(image_table_build_layout, ctx.app),
+    # Channel multi-select dropdown (drives the "Channels" axis; default all).
+    chan_btn = QToolButton(axes_row)
+    chan_btn.setText("Channels: all")
+    chan_btn.setPopupMode(QToolButton.InstantPopup)
+    chan_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    chan_btn.setToolTip(
+        "Pick which channels go on the Channels axis (none = all channels)."
+    )
+    chan_menu = QMenu(chan_btn)
+    chan_btn.setMenu(chan_menu)
+    ctx.app._image_table_channel_btn = chan_btn
+    ctx.app._image_table_channel_menu = chan_menu
+    ar.addWidget(chan_btn)
+
+    ar.addSpacing(8)
+    ar.addWidget(btn_primary(
+        axes_row, "Build table", partial(image_table_build_layout, ctx.app),
     ))
-    bl.addWidget(QLabel("Presets:", builder))
-    for label, (ra, ca) in (
+    ar.addStretch(1)
+    bv.addWidget(axes_row)
+
+    # Row 2 — quick presets.
+    preset_row = QWidget(builder)
+    pr = QHBoxLayout(preset_row)
+    pr.setContentsMargins(0, 0, 0, 0)
+    pr.setSpacing(6)
+    pr.addWidget(QLabel("Presets:", preset_row))
+    for label, (ra_, ca_) in (
         ("Channels × Time", ("channel", "timepoint")),
         ("Channels × Wells", ("channel", "well")),
         ("Wells × Time", ("well", "timepoint")),
         ("Wells × Channels", ("well", "channel")),
     ):
-        bl.addWidget(btn_secondary(
-            builder, label, partial(image_table_apply_preset, ctx.app, ra, ca),
+        pr.addWidget(btn_secondary(
+            preset_row, label, partial(image_table_apply_preset, ctx.app, ra_, ca_),
         ))
-    bl.addStretch(1)
-    il.addWidget(builder)
+    pr.addStretch(1)
+    bv.addWidget(preset_row)
 
-    # ── Layout actions (operate on the selector grid above) ────────────────
-    layout_actions = QWidget(inner)
-    la = QHBoxLayout(layout_actions)
-    la.setContentsMargins(0, 0, 0, 0)
-    la.setSpacing(6)
-    la.addWidget(btn_secondary(
-        layout_actions, "Load Heatmap Layout", partial(image_table_load_heatmap_layout, ctx.app),
+    # Row 3 — manual fill helpers (advanced).
+    manual_row = QWidget(builder)
+    mr = QHBoxLayout(manual_row)
+    mr.setContentsMargins(0, 0, 0, 0)
+    mr.setSpacing(6)
+    mr.addWidget(QLabel("Manual fill:", manual_row))
+    mr.addWidget(btn_secondary(
+        manual_row, "Distribute Wells", partial(image_table_distribute_wells, ctx.app),
     ))
-    la.addWidget(btn_secondary(
-        layout_actions, "Distribute Wells", partial(image_table_distribute_wells, ctx.app),
+    mr.addWidget(btn_secondary(
+        manual_row, "Distribute Timepoints", partial(image_table_distribute_timepoints, ctx.app),
     ))
-    la.addWidget(btn_secondary(
-        layout_actions, "Distribute Timepoints", partial(image_table_distribute_timepoints, ctx.app),
+    mr.addWidget(btn_secondary(
+        manual_row, "Load Heatmap Layout", partial(image_table_load_heatmap_layout, ctx.app),
     ))
-    la.addStretch(1)
-    il.addWidget(layout_actions)
+    mr.addStretch(1)
+    bv.addWidget(manual_row)
+
+    # Row 4 — clone a row, varying one dimension (propagate-but-mutate).
+    addrow_row = QWidget(builder)
+    arr2 = QHBoxLayout(addrow_row)
+    arr2.setContentsMargins(0, 0, 0, 0)
+    arr2.setSpacing(6)
+    arr2.addWidget(QLabel("Add row like", addrow_row))
+
+    addrow_src_cb = QComboBox(addrow_row)
+    addrow_src_cb.setToolTip("Existing row to clone.")
+    arr2.addWidget(addrow_src_cb)
+    ctx.app._image_table_addrow_src_cb = addrow_src_cb
+
+    arr2.addWidget(QLabel("varying", addrow_row))
+    addrow_dim_cb = QComboBox(addrow_row)
+    for label, key in (("Channel", "channel"), ("Timepoint", "timepoint"),
+                       ("FOV", "fov"), ("Well", "well")):
+        addrow_dim_cb.addItem(label, key)
+    arr2.addWidget(addrow_dim_cb)
+    ctx.app._image_table_addrow_dim_cb = addrow_dim_cb
+
+    addrow_mode_cb = QComboBox(addrow_row)
+    addrow_mode_cb.addItem("Uniform →", "uniform")
+    addrow_mode_cb.addItem("Step +1", "step")
+    addrow_mode_cb.setToolTip(
+        "Uniform: set the chosen dimension to one value across the new row.\n"
+        "Step +1: advance each cell's value for that dimension by one."
+    )
+    arr2.addWidget(addrow_mode_cb)
+    ctx.app._image_table_addrow_mode_cb = addrow_mode_cb
+
+    addrow_val_cb = QComboBox(addrow_row)
+    addrow_val_cb.setToolTip("New value (Uniform mode only).")
+    arr2.addWidget(addrow_val_cb)
+    ctx.app._image_table_addrow_val_cb = addrow_val_cb
+
+    addrow_dim_cb.currentIndexChanged.connect(
+        lambda _i: image_table_on_addrow_dim_changed(ctx.app)
+    )
+    addrow_mode_cb.currentIndexChanged.connect(
+        lambda _i: image_table_on_addrow_dim_changed(ctx.app)
+    )
+
+    arr2.addWidget(btn_secondary(
+        addrow_row, "Add row", partial(image_table_add_varied_row, ctx.app),
+    ))
+    arr2.addStretch(1)
+    bv.addWidget(addrow_row)
+
+    il.addWidget(builder)
 
     sep1 = QFrame(inner)
     sep1.setObjectName("Separator")
@@ -325,17 +420,37 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ctx.app._image_table_boundaries_btn = boundaries_btn
     tr.addWidget(boundaries_btn)
 
-    binary_btn = QPushButton("Binary", tools_row)
-    binary_btn.setProperty("variant", "toggle")
-    binary_btn.setCheckable(True)
-    binary_btn.setChecked(bool(ctx.app._image_table_show_binary))
-    binary_btn.setToolTip(
-        "Show segmentation mask as binary: labeled cells white, background black."
+    _mode = ctx.app._image_table_binary_mode
+
+    binary_mask_btn = QPushButton("Binary (mask)", tools_row)
+    binary_mask_btn.setProperty("variant", "toggle")
+    binary_mask_btn.setCheckable(True)
+    binary_mask_btn.setChecked(_mode == "mask")
+    binary_mask_btn.setToolTip(
+        "Show the segmentation mask as binary: every labeled cell white, "
+        "background black."
     )
-    binary_btn.clicked.connect(lambda _=False: image_table_toggle_binary(ctx.app))
-    _wire_toggle_check(binary_btn, "Binary")
-    ctx.app._image_table_binary_btn = binary_btn
-    tr.addWidget(binary_btn)
+    binary_mask_btn.clicked.connect(
+        lambda _=False: image_table_set_binary_mode(ctx.app, "mask")
+    )
+    _wire_toggle_check(binary_mask_btn, "Binary (mask)")
+    ctx.app._image_table_binary_mask_btn = binary_mask_btn
+    tr.addWidget(binary_mask_btn)
+
+    binary_thresh_btn = QPushButton("Binary (≥ ON threshold)", tools_row)
+    binary_thresh_btn.setProperty("variant", "toggle")
+    binary_thresh_btn.setCheckable(True)
+    binary_thresh_btn.setChecked(_mode == "threshold")
+    binary_thresh_btn.setToolTip(
+        "Show only cells above the active ON threshold as binary white "
+        "(same gating as the bar plot / Review Image tab)."
+    )
+    binary_thresh_btn.clicked.connect(
+        lambda _=False: image_table_set_binary_mode(ctx.app, "threshold")
+    )
+    _wire_toggle_check(binary_thresh_btn, "Binary (≥ ON threshold)")
+    ctx.app._image_table_binary_thresh_btn = binary_thresh_btn
+    tr.addWidget(binary_thresh_btn)
 
     crop_sep = QFrame(tools_row)
     crop_sep.setFrameShape(QFrame.VLine)
@@ -360,9 +475,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr.addWidget(btn_secondary(
         tools_row, "Copy PNG", partial(image_table_copy_png, ctx.app), icon="copy",
     ))
-    _b = btn_secondary(tools_row, "", partial(image_table_copy_svg, ctx.app), icon="copy")
-    _b.setToolTip("Copy SVG")
-    tr.addWidget(_b)
+    tr.addWidget(btn_secondary(
+        tools_row, "Copy SVG", partial(image_table_copy_svg, ctx.app), icon="copy",
+    ))
     tr.addWidget(btn_secondary(
         tools_row, "Export", partial(image_table_export, ctx.app), icon="download",
     ))
@@ -375,6 +490,35 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     gr.setSpacing(6)
     gr.addWidget(btn_primary(generate_row, "Generate", partial(image_table_generate, ctx.app)))
     gr.addStretch(1)
+
+    # Zoom controls for the rendered table (− / level / + / reset).
+    gr.addWidget(QLabel("Zoom:", generate_row))
+    zoom_out = QPushButton("−", generate_row)
+    zoom_out.setProperty("variant", "secondary")
+    zoom_out.setFixedWidth(32)
+    zoom_out.setToolTip("Zoom out")
+    zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1 / 1.25, relative=True))
+    gr.addWidget(zoom_out)
+
+    zoom_lbl = QLabel(f"{ctx.app._image_table_zoom * 100:.0f}%", generate_row)
+    zoom_lbl.setAlignment(Qt.AlignCenter)
+    zoom_lbl.setFixedWidth(48)
+    ctx.app._image_table_zoom_lbl = zoom_lbl
+    gr.addWidget(zoom_lbl)
+
+    zoom_in = QPushButton("+", generate_row)
+    zoom_in.setProperty("variant", "secondary")
+    zoom_in.setFixedWidth(32)
+    zoom_in.setToolTip("Zoom in")
+    zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1.25, relative=True))
+    gr.addWidget(zoom_in)
+
+    zoom_reset = QPushButton("Reset", generate_row)
+    zoom_reset.setProperty("variant", "secondary")
+    zoom_reset.setToolTip("Reset zoom to 100%")
+    zoom_reset.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1.0))
+    gr.addWidget(zoom_reset)
+
     il.addWidget(generate_row)
 
     # ── Rendered image table (drawn BELOW the action strip) ────────────────

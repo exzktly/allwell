@@ -8,12 +8,8 @@ that explicitly ignores replicate sets / groups. State is held in
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QPushButton, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from well_viewer.features.image_table.controller import image_table_clear_active
-from well_viewer.features.image_table.controller import image_table_on_channel_toggled
-from well_viewer.features.image_table.controller import image_table_refresh_channel_picker
 from well_viewer.features.image_table.controller import image_table_refresh_picker
 from well_viewer.features.image_table.controller import image_table_select_all
 
@@ -75,32 +71,14 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     app._image_table_count_lbl.setAlignment(Qt.AlignLeft)
     layout.addWidget(app._image_table_count_lbl)
 
-    # ── Channel multi-select ────────────────────────────────────────────────
-    # Mirrors the plate picker but for channels: ticked channels feed the
-    # "Channels" axis of the smart-layout builder. Populated on dataset load.
-    chan_hdr = QLabel("Channels (for layout):", parent)
-    chan_hdr.setObjectName("Muted")
-    layout.addWidget(chan_hdr)
-
-    chan_list = QListWidget(parent)
-    chan_list.setMaximumHeight(120)
-    chan_list.setToolTip(
-        "Tick channels to place on the 'Channels' axis of the smart layout "
-        "builder. None ticked = use all channels."
-    )
-    chan_list.itemChanged.connect(lambda _it: image_table_on_channel_toggled(app))
-    layout.addWidget(chan_list)
-    app._image_table_channel_list = chan_list
-
     layout.addStretch(1)
 
     help_lbl = QLabel(
-        "Select wells (and tick channels) above, then use the Layout builder's "
-        "Build / preset buttons to auto-size and fill the table.", parent,
+        "Select wells here, choose channels in the Build Layout row, then press "
+        "Build table followed by Generate.", parent,
     )
     help_lbl.setObjectName("Muted")
     help_lbl.setWordWrap(True)
     layout.addWidget(help_lbl)
 
     image_table_refresh_picker(app)
-    image_table_refresh_channel_picker(app)

@@ -184,10 +184,14 @@ def build_lut_row(
         return
     layout = container.layout()
 
+    # Preserve prior text AND the per-channel auto flag (True = the box shows
+    # the data-fitted number and should keep tracking; False = user override).
     prev_values: Dict[str, Tuple[str, str]] = {}
+    prev_auto: Dict[str, bool] = {}
     for chan, entry in (getattr(app, "_image_table_lut", None) or {}).items():
         try:
             prev_values[chan] = (entry["min"].text(), entry["max"].text())
+            prev_auto[chan] = bool(entry.get("auto", True))
         except Exception:
             continue
 
@@ -200,27 +204,39 @@ def build_lut_row(
         cb_l.setContentsMargins(6, 8, 6, 4)
         cb_l.setSpacing(4)
 
-        prev_min, prev_max = prev_values.get(chan, ("auto", "auto"))
+        prev_min, prev_max = prev_values.get(chan, ("", ""))
+        is_auto = prev_auto.get(chan, True)
+
+        def _mk_edit(text: str) -> QLineEdit:
+            le = QLineEdit(text, chan_box)
+            le.setFixedWidth(70)
+            # Real fitted numbers fill these after Generate; until then the
+            # placeholder reads "auto" (empty = auto-scale per image). Editing
+            # a box marks the channel as a manual override so Generate stops
+            # overwriting it; the "Fit" button re-enables tracking.
+            le.setPlaceholderText("auto")
+            le.textEdited.connect(
+                lambda _t, c=chan: app._image_table_lut.get(c, {}).__setitem__("auto", False)
+            )
+            # No auto-generate on edit — wait for the user to press Generate.
+            return le
 
         cb_l.addWidget(QLabel("min:", chan_box))
-        min_edit = QLineEdit(prev_min, chan_box)
-        min_edit.setFixedWidth(70)
-        # No auto-generate on edit — wait for the user to press Generate.
+        min_edit = _mk_edit(prev_min)
         cb_l.addWidget(min_edit)
 
         cb_l.addWidget(QLabel("max:", chan_box))
-        max_edit = QLineEdit(prev_max, chan_box)
-        max_edit.setFixedWidth(70)
-        # No auto-generate on edit — wait for the user to press Generate.
+        max_edit = _mk_edit(prev_max)
         cb_l.addWidget(max_edit)
 
-        auto_btn = btn_secondary(
-            chan_box, "Auto",
+        fit_btn = btn_secondary(
+            chan_box, "Fit",
             lambda c=chan: on_auto_lut(app, c),
         )
-        cb_l.addWidget(auto_btn)
+        fit_btn.setToolTip("Re-fit min/max to the actual pooled image range for this channel.")
+        cb_l.addWidget(fit_btn)
 
         layout.addWidget(chan_box)
-        app._image_table_lut[chan] = {"min": min_edit, "max": max_edit}
+        app._image_table_lut[chan] = {"min": min_edit, "max": max_edit, "auto": is_auto}
 
     layout.addStretch(1)

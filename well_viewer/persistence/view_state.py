@@ -203,7 +203,7 @@ def _snapshot_image_table(app) -> dict:
     toggles = {
         "tophat": bool(getattr(app, "_image_table_use_tophat", False)),
         "boundaries": bool(getattr(app, "_image_table_show_boundaries", False)),
-        "binary": bool(getattr(app, "_image_table_show_binary", False)),
+        "binary_mode": getattr(app, "_image_table_binary_mode", "") or "",
     }
     out["toggles"] = toggles
     luts = getattr(app, "_image_table_lut", None) or {}
@@ -538,7 +538,6 @@ def _apply_image_table(app, state: dict) -> None:
         for key, attr, btn in (
             ("tophat",     "_image_table_use_tophat",       "_image_table_tophat_btn"),
             ("boundaries", "_image_table_show_boundaries",  "_image_table_boundaries_btn"),
-            ("binary",     "_image_table_show_binary",      "_image_table_binary_btn"),
         ):
             if key not in toggles:
                 continue
@@ -554,6 +553,24 @@ def _apply_image_table(app, state: dict) -> None:
                     b.setChecked(v)
                 finally:
                     b.blockSignals(blocked)
+
+        # Binary is a tri-state mode ("", "mask", "threshold") driven by two
+        # mutually-exclusive buttons. Accept the new "binary_mode" string, and
+        # fall back to the legacy "binary" bool (True → "mask") for old states.
+        mode = toggles.get("binary_mode")
+        if mode is None and "binary" in toggles:
+            mode = "mask" if bool(toggles.get("binary")) else ""
+        if mode in ("", "mask", "threshold"):
+            app._image_table_binary_mode = mode
+            for m, b_attr in (("mask", "_image_table_binary_mask_btn"),
+                              ("threshold", "_image_table_binary_thresh_btn")):
+                b = getattr(app, b_attr, None)
+                if b is not None and hasattr(b, "setChecked"):
+                    blocked = b.blockSignals(True)
+                    try:
+                        b.setChecked(mode == m)
+                    finally:
+                        b.blockSignals(blocked)
 
     chan_luts = state.get("channel_luts") or {}
     live_luts = getattr(app, "_image_table_lut", None) or {}

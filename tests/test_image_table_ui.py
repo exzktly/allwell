@@ -37,22 +37,38 @@ def test_build_does_not_render(loaded_app):
     assert not app._image_table_last_render
 
 
-def test_binary_modes_mutually_exclusive(loaded_app):
+def test_binary_modes_via_display_menu_radio(loaded_app):
     app = loaded_app
     C.image_table_apply_preset(app, "channel", "timepoint")
+    # The Display ▾ menu's Binary radio group (None / Mask / ≥ Threshold) is
+    # exclusive and sets the mode absolutely.
     C.image_table_set_binary_mode(app, "mask")
     assert app._image_table_binary_mode == "mask"
-    assert app._image_table_binary_mask_btn.isChecked()
-    assert not app._image_table_binary_thresh_btn.isChecked()
-    # switching to threshold turns mask off
+    assert app._image_table_binary_act_mask.isChecked()
+    assert not app._image_table_binary_act_thresh.isChecked()
+    assert not app._image_table_binary_act_none.isChecked()
+
     C.image_table_set_binary_mode(app, "threshold")
     assert app._image_table_binary_mode == "threshold"
-    assert not app._image_table_binary_mask_btn.isChecked()
-    assert app._image_table_binary_thresh_btn.isChecked()
-    # clicking the active one again turns binary off
-    C.image_table_set_binary_mode(app, "threshold")
+    assert app._image_table_binary_act_thresh.isChecked()
+    assert not app._image_table_binary_act_mask.isChecked()
+
+    C.image_table_set_binary_mode(app, "")  # None turns binary off
     assert app._image_table_binary_mode == ""
-    assert not app._image_table_binary_thresh_btn.isChecked()
+    assert app._image_table_binary_act_none.isChecked()
+    assert not app._image_table_binary_act_thresh.isChecked()
+
+
+def test_display_menu_toggles_flip_state(loaded_app):
+    app = loaded_app
+    t0 = bool(app._image_table_use_tophat)
+    C.image_table_toggle_tophat(app)
+    assert app._image_table_use_tophat is (not t0)
+    assert app._image_table_tophat_act.isChecked() is (not t0)
+    b0 = bool(app._image_table_show_boundaries)
+    C.image_table_toggle_boundaries(app)
+    assert app._image_table_show_boundaries is (not b0)
+    assert app._image_table_boundaries_act.isChecked() is (not b0)
 
 
 def _row_values(app, dim):
@@ -73,14 +89,8 @@ def test_add_row_uniform_clones_and_varies_channel(loaded_app):
     # Add a row cloned from row 1, uniformly set to a chosen channel.
     chans = C._channel_options(app)
     target = chans[-1]
-    app._image_table_addrow_src_cb.setCurrentIndex(0)            # row 1
-    app._image_table_addrow_dim_cb.setCurrentIndex(
-        app._image_table_addrow_dim_cb.findData("channel"))
-    app._image_table_addrow_mode_cb.setCurrentIndex(
-        app._image_table_addrow_mode_cb.findData("uniform"))
-    iv = app._image_table_addrow_val_cb.findText(target)
-    app._image_table_addrow_val_cb.setCurrentIndex(iv)
-    C.image_table_add_varied_row(app)
+    C.image_table_add_varied_row(
+        app, src_idx=0, dim="channel", mode="uniform", value=target)
 
     assert len(app._image_table_cells) == n0 + 1
     new_row = app._image_table_cells[-1]
@@ -102,12 +112,8 @@ def test_add_row_step_advances_each_cell(loaded_app):
         _pytest.skip("need ≥2 timepoints to test Step mode")
     src_tps = _row_values(app, "timepoint")[0]
 
-    app._image_table_addrow_src_cb.setCurrentIndex(0)
-    app._image_table_addrow_dim_cb.setCurrentIndex(
-        app._image_table_addrow_dim_cb.findData("timepoint"))
-    app._image_table_addrow_mode_cb.setCurrentIndex(
-        app._image_table_addrow_mode_cb.findData("step"))
-    C.image_table_add_varied_row(app)
+    C.image_table_add_varied_row(
+        app, src_idx=0, dim="timepoint", mode="step", value="")
 
     new_tps = _row_values(app, "timepoint")[-1]
     # each cell advanced one timepoint (clamped at the last value)

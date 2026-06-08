@@ -535,42 +535,33 @@ def _apply_image_table(app, state: dict) -> None:
 
     toggles = state.get("toggles") or {}
     if isinstance(toggles, dict):
-        for key, attr, btn in (
-            ("tophat",     "_image_table_use_tophat",       "_image_table_tophat_btn"),
-            ("boundaries", "_image_table_show_boundaries",  "_image_table_boundaries_btn"),
+        for key, attr in (
+            ("tophat",     "_image_table_use_tophat"),
+            ("boundaries", "_image_table_show_boundaries"),
         ):
             if key not in toggles:
                 continue
             try:
-                v = bool(toggles[key])
+                setattr(app, attr, bool(toggles[key]))
             except Exception:
                 continue
-            setattr(app, attr, v)
-            b = getattr(app, btn, None)
-            if b is not None and hasattr(b, "setChecked"):
-                blocked = b.blockSignals(True)
-                try:
-                    b.setChecked(v)
-                finally:
-                    b.blockSignals(blocked)
 
-        # Binary is a tri-state mode ("", "mask", "threshold") driven by two
-        # mutually-exclusive buttons. Accept the new "binary_mode" string, and
-        # fall back to the legacy "binary" bool (True → "mask") for old states.
+        # Binary is a tri-state mode ("", "mask", "threshold"). Accept the new
+        # "binary_mode" string, and fall back to the legacy "binary" bool
+        # (True → "mask") for old states.
         mode = toggles.get("binary_mode")
         if mode is None and "binary" in toggles:
             mode = "mask" if bool(toggles.get("binary")) else ""
         if mode in ("", "mask", "threshold"):
             app._image_table_binary_mode = mode
-            for m, b_attr in (("mask", "_image_table_binary_mask_btn"),
-                              ("threshold", "_image_table_binary_thresh_btn")):
-                b = getattr(app, b_attr, None)
-                if b is not None and hasattr(b, "setChecked"):
-                    blocked = b.blockSignals(True)
-                    try:
-                        b.setChecked(mode == m)
-                    finally:
-                        b.blockSignals(blocked)
+
+        # Drive the Display ▾ menu's QActions from the restored state (the
+        # toggles/binary are now menu actions, not standalone buttons).
+        try:
+            from well_viewer.features.image_table.controller import _refresh_display_menu
+            _refresh_display_menu(app)
+        except Exception:
+            pass
 
     chan_luts = state.get("channel_luts") or {}
     live_luts = getattr(app, "_image_table_lut", None) or {}

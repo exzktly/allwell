@@ -35,6 +35,39 @@ def save_notes(app) -> None:
         _logger.exception("Notes auto-save failed")
 
 
+def autosave_to_pipeline_info(app) -> None:
+    """Debounced-autosave variant of :func:`save_to_pipeline_info`.
+
+    Writes the sample-definitions block silently — no dialogs, no status toast —
+    and no-ops when there is no data directory or v2 writes are disabled, so it
+    is safe to fire on every edit through the persistence registry (matching how
+    notes / ratios / view-state already autosave). The explicit Save button
+    keeps using the loud :func:`save_to_pipeline_info`.
+    """
+    from well_viewer.domain.sample_definitions import (
+        build_sample_definitions_v2,
+        save_to_pipeline_info as _write_block,
+    )
+    ds = app._app_state.dataset
+    if not ds.data_dir or app._app_state.selection.v2_writes_disabled:
+        return
+    notes_edit = getattr(app, "_notes_edit", None)
+    notes_text = (
+        notes_edit.toPlainText() if notes_edit is not None
+        else getattr(app, "_notes_text", "") or ""
+    )
+    app._notes_text = notes_text
+    selections = list(app._app_state.selection.selections or [])
+    current_id = app._app_state.selection.current_selection_id
+    block = build_sample_definitions_v2(
+        ds.well_labels, selections, current_id, notes=notes_text,
+    )
+    try:
+        _write_block(ds.data_dir, block)
+    except (OSError, FileNotFoundError):
+        _logger.exception("sample_definitions autosave failed")
+
+
 def save_to_pipeline_info(app) -> None:
     """Merge well labels + the unified ``selections`` model into pipeline_info.json."""
     from well_viewer.domain.sample_definitions import (

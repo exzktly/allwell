@@ -119,6 +119,9 @@ def label_panel_refresh(app) -> None:
                 app._app_state.dataset.well_labels.pop(t, None)
             if hasattr(app, "_invalidate_stats_cache"):
                 app._invalidate_stats_cache()
+            p = getattr(app, "_persistence", None)
+            if p is not None:
+                p.schedule_save("sample_definitions")
 
         entry.textChanged.connect(_on_change)
         inner_layout.addWidget(row)

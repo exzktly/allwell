@@ -96,6 +96,14 @@ def build_pipeline_args(
         args += ["--tophat_radius_fluor", str(int(opts["tophat_radius_fluor"]))]
     except (TypeError, ValueError, KeyError):
         pass
+    try:
+        args += ["--fft_small_nir", str(int(opts["fft_small_nir"]))]
+    except (TypeError, ValueError, KeyError):
+        pass
+    try:
+        args += ["--fft_small_fluor", str(int(opts["fft_small_fluor"]))]
+    except (TypeError, ValueError, KeyError):
+        pass
 
     for flag in (
         "no_tophat_nir",

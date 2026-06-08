@@ -1583,7 +1583,35 @@ def test_required_files_list_is_what_we_promised():
         "auto_threshold_core.py",
         "well_token.py",
         "shape_features_core.py",
+        "flatfield_core.py",
         "_Docs/requirements-remote.txt",
+    )
+
+
+def test_required_remote_files_cover_pipeline_root_module_imports():
+    """Every repo-root single-file module ``process_microscopy`` imports (at any
+    level) must be uploaded, or a remote run aborts with ModuleNotFoundError —
+    the ``flatfield_core`` regression. Guards against future drift when a new
+    shared repo-root module is added to the pipeline.
+    """
+    import ast
+    from services.remote_runner import repo_root
+    root = repo_root()
+    tree = ast.parse((root / "process_microscopy.py").read_text(encoding="utf-8"))
+    imported_roots: set[str] = set()
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names = [node.module.split(".")[0]]
+        elif isinstance(node, ast.Import):
+            names = [a.name.split(".")[0] for a in node.names]
+        for nm in names:
+            if (root / f"{nm}.py").is_file():   # a repo-root single-file module
+                imported_roots.add(f"{nm}.py")
+    missing = imported_roots - set(_REQUIRED_REMOTE_FILES)
+    assert not missing, (
+        "repo-root modules imported by process_microscopy but NOT in "
+        f"_REQUIRED_REMOTE_FILES (remote run would ModuleNotFoundError): {sorted(missing)}"
     )
 
 

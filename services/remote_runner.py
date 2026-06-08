@@ -99,6 +99,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # §C shape features: process_microscopy.compute_shape_features imports
     # this on every run, so the remote needs it too (else ModuleNotFoundError).
     "shape_features_core.py",
+    # Flat-field estimators: process_microscopy imports flatfield_core at module
+    # top level (the empty-well / gaussian / basic correction), so the remote
+    # needs it too or the import aborts the run with ModuleNotFoundError.
+    "flatfield_core.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.

@@ -1187,7 +1187,7 @@ def image_table_toggle_tophat(app) -> None:
     raw fluor as before.
     """
     app._image_table_use_tophat = not bool(getattr(app, "_image_table_use_tophat", False))
-    _refresh_display_menu(app)
+    image_table_refresh_display_menu(app)
     # Tossing the cache so the next Generate fetches the right dict.
     app._image_table_image_cache = {}
     image_table_generate(app)
@@ -1621,12 +1621,12 @@ def image_table_toggle_boundaries(app) -> None:
     app._image_table_show_boundaries = not bool(
         getattr(app, "_image_table_show_boundaries", False)
     )
-    _refresh_display_menu(app)
+    image_table_refresh_display_menu(app)
     app._image_table_image_cache = {}
     image_table_generate(app)
 
 
-def _refresh_display_menu(app) -> None:
+def image_table_refresh_display_menu(app) -> None:
     """Sync the Display ▾ menu's QAction checked states from app state.
 
     Driven from the toggle/binary handlers and from view_state restore so the
@@ -1688,7 +1688,7 @@ def image_table_set_binary_mode(app, mode: str) -> None:
     if mode not in ("", "mask", "threshold"):
         return
     app._image_table_binary_mode = mode
-    _refresh_display_menu(app)
+    image_table_refresh_display_menu(app)
     image_table_generate(app)
 
 

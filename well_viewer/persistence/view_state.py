@@ -558,8 +558,8 @@ def _apply_image_table(app, state: dict) -> None:
         # Drive the Display ▾ menu's QActions from the restored state (the
         # toggles/binary are now menu actions, not standalone buttons).
         try:
-            from well_viewer.features.image_table.controller import _refresh_display_menu
-            _refresh_display_menu(app)
+            from well_viewer.features.image_table.controller import image_table_refresh_display_menu
+            image_table_refresh_display_menu(app)
         except Exception:
             pass
 

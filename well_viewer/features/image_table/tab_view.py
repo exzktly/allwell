@@ -334,7 +334,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.addWidget(sep2)
 
     # ── Action strip — Generate · Display▾ · crop status … Export▾ · Zoom ──
-    from well_viewer.features.image_table.controller import _refresh_display_menu
+    from well_viewer.features.image_table.controller import image_table_refresh_display_menu
 
     action_row = QWidget(inner)
     tr = QHBoxLayout(action_row)
@@ -393,7 +393,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
     def _sync_display_menu() -> None:
-        _refresh_display_menu(ctx.app)
+        image_table_refresh_display_menu(ctx.app)
         blocked = crop_act.blockSignals(True)
         try:
             crop_act.setChecked(bool(_crop.mode))

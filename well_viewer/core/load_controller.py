@@ -154,6 +154,14 @@ def load_directory(app, d: Path, label=None) -> None:
         qc_gate_refresh_widgets(app)  # sync the Segmentation gate row if built
     except Exception:
         pass
+    # Hydrate the dataset-wide crop region (persistence.json::crop_region) and
+    # project Crop_Pass onto any already-cached rows. Safe no-op when unset.
+    try:
+        app._persistence.load("crop_region")
+        from well_viewer.features.crop.controller import apply_crop_to_cache
+        apply_crop_to_cache(app)
+    except Exception:
+        pass
     # Hydrate user-defined line-plot draw order (line_order.json).
     try:
         app._persistence.load("line_order")

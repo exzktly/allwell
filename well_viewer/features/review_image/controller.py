@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QTableWidgetItem
 
 from well_viewer.features.review_image.renderer import refresh_review_image
 from well_viewer.features.review_image.renderer import update_preview
+from well_viewer.features.review_image.box_select import (
+    box_select_begin, box_select_finish, box_select_update,
+)
 from well_viewer.core.channel_state_controller import set_active_image_channel
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.data.data_loading import parse_timepoint_hours
@@ -340,48 +343,24 @@ def on_review_image_wheel(app, event) -> None:
 
 @_guard_event
 def on_review_image_press(app, event) -> None:
-    # In include-edit mode, LMB drag draws a rubber-band rectangle for
-    # bulk delete instead of panning. We record the anchor in label-local
-    # pixels (event.position()) so it is invariant to window position
-    # and scrollbar state.
-    from PySide6.QtCore import QRect
-    from PySide6.QtWidgets import QRubberBand
-    if app._app_state.review_image.include_edit_mode:
-        pos = event.position()
-        ax, ay = float(pos.x()), float(pos.y())
-        app._app_state.review_image.box_anchor = (ax, ay)
-        app._app_state.review_image.box_active = True
-        label = getattr(app, "_review_image_label", None)
-        if label is not None:
-            rb = app._review_image_rubber_band
-            if rb is None:
-                rb = QRubberBand(QRubberBand.Rectangle, label)
-                app._review_image_rubber_band = rb
-            rb.setGeometry(QRect(int(ax), int(ay), 1, 1))
-            rb.show()
+    # In include-edit (delete) or crop-edit mode, LMB drag draws a rubber-band
+    # rectangle instead of panning. The anchor is recorded in label-local
+    # pixels (invariant to window position / scrollbar state) by the shared
+    # box-select helper; only the release action differs between the modes.
+    ri = app._app_state.review_image
+    if ri.include_edit_mode or ri.crop_edit_mode:
+        box_select_begin(app, event)
         return
-    app._app_state.review_image.dragging = True
-    app._app_state.review_image.drag_moved = False
+    ri.dragging = True
+    ri.drag_moved = False
     gp = event.globalPosition().toPoint()
-    app._app_state.review_image.drag_last_xy = (int(gp.x()), int(gp.y()))
+    ri.drag_last_xy = (int(gp.x()), int(gp.y()))
 
 
 def on_review_image_drag(app, event) -> None:
     # Rubber-band update path: stay anchored in label-local pixels.
-    from PySide6.QtCore import QRect
     if app._app_state.review_image.box_active:
-        anchor = app._app_state.review_image.box_anchor
-        rb = app._review_image_rubber_band
-        if anchor is None or rb is None:
-            return
-        ax, ay = anchor
-        pos = event.position()
-        cx, cy = float(pos.x()), float(pos.y())
-        x0 = int(min(ax, cx))
-        y0 = int(min(ay, cy))
-        w = max(1, int(abs(cx - ax)))
-        h = max(1, int(abs(cy - ay)))
-        rb.setGeometry(QRect(x0, y0, w, h))
+        box_select_update(app, event)
         return
     if not app._app_state.review_image.dragging:
         return
@@ -401,36 +380,24 @@ def on_review_image_drag(app, event) -> None:
 
 @_guard_event
 def on_review_image_release(app, event) -> None:
-    # Rubber-band finalize path. A drag shorter than this many label-local
-    # pixels in either axis falls through to the existing single-cell
-    # click handler, so quick taps in edit mode still toggle one cell.
-    _CLICK_PX_THRESH = 3
-    if app._app_state.review_image.box_active:
-        anchor = app._app_state.review_image.box_anchor
-        rb = app._review_image_rubber_band
-        app._app_state.review_image.box_active = False
-        app._app_state.review_image.box_anchor = None
-        if rb is not None:
-            rb.hide()
-        if anchor is None:
+    # Rubber-band finalize path, shared by delete and crop modes. A drag too
+    # short to be a box returns None: in delete mode that quick tap toggles one
+    # cell (the existing click handler); in crop mode it is a no-op.
+    ri = app._app_state.review_image
+    if ri.box_active:
+        crop_mode = ri.crop_edit_mode
+        rect = box_select_finish(app, event)
+        if rect is None:
+            if not crop_mode:
+                app._on_review_image_click(event)
             return
-        ax, ay = anchor
-        pos = event.position()
-        rx, ry = float(pos.x()), float(pos.y())
-        if abs(rx - ax) < _CLICK_PX_THRESH and abs(ry - ay) < _CLICK_PX_THRESH:
-            app._on_review_image_click(event)
-            return
-        scale = float(getattr(app, "_review_image_scale", 1.0) or 1.0)
-        label = getattr(app, "_review_image_label", None)
-        off_x, off_y = 0, 0
-        if label is not None:
-            pm = label.pixmap()
-            if pm is not None and not pm.isNull():
-                off_x = max(0, (label.width() - pm.width()) // 2)
-                off_y = max(0, (label.height() - pm.height()) // 2)
-        mx0, mx1 = int((ax - off_x) / scale), int((rx - off_x) / scale)
-        my0, my1 = int((ay - off_y) / scale), int((ry - off_y) / scale)
-        apply_box_delete(app,mx0, my0, mx1, my1)
+        mx0, my0, mx1, my1 = rect
+        if crop_mode:
+            # Crop stores a row/col region; release gives x=col, y=row.
+            from well_viewer.features.crop.controller import set_crop_region
+            set_crop_region(app, (my0, mx0, my1, mx1))
+        else:
+            apply_box_delete(app, mx0, my0, mx1, my1)
         return
     was_dragging = app._app_state.review_image.dragging
     moved = app._app_state.review_image.drag_moved
@@ -663,8 +630,15 @@ def review_build_include_map(
                     qc = sub["QC_Pass"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
                 else:
                     qc = pd.Series(1, index=sub.index)
+                # Crop layer (Crop_Pass) composes the same way: a cell whose
+                # centroid is outside the crop region shows excluded. Absent
+                # column → all-pass (no crop / older data).
+                if "Crop_Pass" in sub.columns:
+                    crop = sub["Crop_Pass"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
+                else:
+                    crop = pd.Series(1, index=sub.index)
                 overrides = app._review_included_overrides
-                for nid, base_incl, qc_pass in zip(nids, incl, qc):
+                for nid, base_incl, qc_pass, crop_pass in zip(nids, incl, qc, crop):
                     if nid is None:
                         continue
                     ovr = overrides.get((well, fov, tp, str(nid)))
@@ -674,7 +648,7 @@ def review_build_include_map(
                         inc = bool(base_incl)
                     else:
                         continue
-                    include_by_nid[nid] = inc and bool(qc_pass)
+                    include_by_nid[nid] = inc and bool(qc_pass) and bool(crop_pass)
     # Apply overrides for cells present in the mask but without a CSV row
     # (e.g. when no pipeline results are loaded yet).
     for (ovr_well, ovr_fov, ovr_tp, ovr_nid), val in app._review_included_overrides.items():
@@ -1240,14 +1214,16 @@ def review_effective_included(app, label: str, row: dict) -> str:
             val = ovr
     if val is None:
         val = str(row.get("Included", "1"))
-    # Compose the QC layer: a QC-failed cell (QC_Pass == 0) is excluded
-    # regardless of manual curation — effective = manual-keep AND passes-QC.
-    qc = row.get("QC_Pass", 1)
-    try:
-        if int(float(str(qc).strip() or "1")) == 0:
-            return "0"
-    except (TypeError, ValueError):
-        pass
+    # Compose the QC and crop layers: a QC-failed cell (QC_Pass == 0) or a cell
+    # cropped out (Crop_Pass == 0) is excluded regardless of manual curation —
+    # effective = manual-keep AND passes-QC AND inside-crop.
+    for col in ("QC_Pass", "Crop_Pass"):
+        flag = row.get(col, 1)
+        try:
+            if int(float(str(flag).strip() or "1")) == 0:
+                return "0"
+        except (TypeError, ValueError):
+            pass
     return val
 
 

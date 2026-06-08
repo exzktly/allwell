@@ -13,7 +13,10 @@ from PySide6.QtWidgets import (
     QToolTip, QVBoxLayout, QWidget,
 )
 
-from well_viewer.core.ui_helpers import btn_card, btn_secondary
+from well_viewer.core.ui_helpers import btn_card, btn_danger, btn_secondary
+from well_viewer.features.crop.controller import (
+    clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
+)
 from well_viewer.features.review_image.controller import on_review_image_channel_selected
 from well_viewer.features.review_image.renderer import refresh_review_image
 from functools import partial
@@ -83,6 +86,29 @@ def build_review_image_panel(self, parent: QWidget) -> None:
         lambda _=False: self._toggle_selected_review_cell()
     )
     cl.addWidget(self._review_image_delete_btn)
+
+    # Crop region: drag a rectangle to keep only cells whose centroid is inside;
+    # applies to every FOV/timepoint/channel/well. Clear crop removes just the
+    # box; Reset restores every cell (incl. manual deletes) and removes the crop.
+    self._review_image_crop_btn = QPushButton("Crop Region", ctrl)
+    self._review_image_crop_btn.setProperty("variant", "toggle")
+    self._review_image_crop_btn.setCheckable(True)
+    self._review_image_crop_btn.setChecked(False)
+    self._review_image_crop_btn.setToolTip(
+        "Enter crop mode, then drag a rectangle.\n"
+        "• Cells whose centroid is inside are kept; cells outside are excluded.\n"
+        "• Applies to all FOVs / timepoints / channels / wells.\n"
+        "Note: the box is drawn in the current FOV's pixel space and applied to all."
+    )
+    self._review_image_crop_btn.clicked.connect(
+        lambda _=False: toggle_crop_edit_mode(self)
+    )
+    cl.addWidget(self._review_image_crop_btn)
+
+    cl.addWidget(btn_secondary(
+        ctrl, "Clear crop", lambda: clear_crop_region(self)))
+    cl.addWidget(btn_danger(
+        ctrl, "Reset", lambda: reset_crop_and_overrides(self)))
 
     # Raw vs top-hat fluorescence source toggle. Defaults to top-hat.
     self._review_image_raw_btn = QPushButton("Top-hat", ctrl)

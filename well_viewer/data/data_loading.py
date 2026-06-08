@@ -235,10 +235,12 @@ def df_included_mask(df: pd.DataFrame) -> pd.Series:
     layer.
 
     Manual curation / cell-gating own the ``Included`` column; the QC layer owns
-    a separate ``QC_Pass`` column (1 = passes debris gating). The effective
-    inclusion is the AND of the two — ``manual-keep AND passes-QC`` — so QC
-    re-gating never clobbers hand-curated edits. ``QC_Pass`` is optional: when
-    absent (no QC layer / older data) it is treated as all-pass.
+    a separate ``QC_Pass`` column (1 = passes debris gating); the crop layer owns
+    a ``Crop_Pass`` column (1 = centroid inside the crop region). The effective
+    inclusion is the AND of the three — ``manual-keep AND passes-QC AND
+    inside-crop`` — so QC re-gating and crop changes never clobber hand-curated
+    edits. ``QC_Pass`` / ``Crop_Pass`` are optional: when absent (no QC/crop
+    layer / older data) each is treated as all-pass.
     """
     if "Included" not in df.columns:
         mask = pd.Series(True, index=df.index)
@@ -248,6 +250,9 @@ def df_included_mask(df: pd.DataFrame) -> pd.Series:
     if "QC_Pass" in df.columns:
         qc = pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1)
         mask = mask & qc.eq(1)
+    if "Crop_Pass" in df.columns:
+        crop = pd.to_numeric(df["Crop_Pass"], errors="coerce").fillna(1)
+        mask = mask & crop.eq(1)
     return mask
 
 

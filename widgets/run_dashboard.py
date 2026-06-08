@@ -104,6 +104,14 @@ class RunDashboard(QWidget):
         self._headline.setStyleSheet(f"color:{TXT_PRI};")
         root.addWidget(self._headline)
 
+        # The single authoritative overall-completion bar for the whole run
+        # (grouping → pipeline). Per-stage detail lives in the rail below and
+        # per-well detail in the plate; this is the one at-a-glance fraction.
+        self._bar = QProgressBar(self)
+        self._bar.setRange(0, 100); self._bar.setValue(0)
+        self._bar.setTextVisible(False)
+        root.addWidget(self._bar)
+
         # body: rail | plate (+ per-well FOV rails beneath it) | legend
         self._body = QWidget(self)
         body = QHBoxLayout(self._body)
@@ -182,6 +190,7 @@ class RunDashboard(QWidget):
         self._active_stage = ""
         self._clear_fov_rows()
         self._fov_scroll.setVisible(False)
+        self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
         self._plate.setEnabledWells(None)
@@ -192,6 +201,17 @@ class RunDashboard(QWidget):
     def set_total(self, total: int) -> None:
         self._total = int(total)
         self._refresh_rail()
+
+    def set_overall_range(self, total: int) -> None:
+        """Set the denominator of the overall-completion bar."""
+        self._bar.setRange(0, max(1, int(total)))
+
+    def set_overall(self, value: int) -> None:
+        """Set the numerator of the overall-completion bar."""
+        self._bar.setValue(max(0, int(value)))
+
+    def overall_maximum(self) -> int:
+        return self._bar.maximum()
 
     def set_well_stage(self, well_id: str, stage: str) -> None:
         """Record that *well_id* reached *stage* (the main driver). Each stage is

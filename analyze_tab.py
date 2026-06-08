@@ -23,7 +23,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+    QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -1169,9 +1169,6 @@ class AnalyzeTab(QWidget):
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(12, 6, 12, 6)
         hl.addWidget(QLabel("Pipeline Output", hdr))
-        self._status_lbl = QLabel("Idle", hdr)
-        self._status_lbl.setObjectName("Muted")
-        hl.addWidget(self._status_lbl)
         hl.addStretch(1)
         clear_btn = QPushButton("Clear", hdr)
         clear_btn.setProperty("variant", "secondary")
@@ -1182,29 +1179,11 @@ class AnalyzeTab(QWidget):
         r1 = QFrame(parent); r1.setFrameShape(QFrame.HLine); r1.setObjectName("HRule")
         rl.addWidget(r1)
 
-        # Visual run dashboard (stage stepper + live plate map + headline/ETA),
-        # fed from the same progress events as the bar below.
+        # Visual run dashboard — the single place run progress is reported:
+        # status + ETA (header), overall % (headline + bar), per-stage rail and
+        # the live per-well plate map. The raw log sits beneath it.
         self._dashboard = RunDashboard(parent)
         rl.addWidget(self._dashboard)
-        rdiv = QFrame(parent); rdiv.setFrameShape(QFrame.HLine); rdiv.setObjectName("HRule")
-        rl.addWidget(rdiv)
-
-        prog_widget = QWidget(parent)
-        prog_widget
-        pl = QHBoxLayout(prog_widget)
-        pl.setContentsMargins(12, 6, 12, 6)
-        self._prog_lbl = QLabel("", prog_widget)
-        self._prog_lbl.setObjectName("Muted")
-        pl.addWidget(self._prog_lbl)
-        self._progress = QProgressBar(prog_widget)
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._progress.setTextVisible(False)
-        pl.addWidget(self._progress, 1)
-        self._eta_lbl = QLabel("", prog_widget)
-        self._eta_lbl.setObjectName("Muted")
-        pl.addWidget(self._eta_lbl)
-        rl.addWidget(prog_widget)
 
         r2 = QFrame(parent); r2.setFrameShape(QFrame.HLine); r2.setObjectName("HRule")
         rl.addWidget(r2)
@@ -1296,7 +1275,8 @@ class AnalyzeTab(QWidget):
                 self._running = False
                 self._run_btn.setEnabled(True)
                 self._stop_btn.setEnabled(False)
-                self._status_lbl.setText("Idle")
+                self._dashboard.set_headline("Idle")
+                self._dashboard.set_status("")
                 return
         # v5.2.11: unchecked = "none" (safe default for shared
         # machines). Checked = "all" (delete per-run output AND the
@@ -1350,14 +1330,12 @@ class AnalyzeTab(QWidget):
         self._well_done  = 0
         self._progress_tracker.reset()
         self._dashboard.reset(remote=self._remote_cb.currentData() is not None)
-        self._progress.setValue(0)
-        self._prog_lbl.setText("Preparing…")
         self._eta_deadline = None
-        self._eta_lbl.setText("ETA")
+        self._dashboard.set_eta("ETA")
         self._pipeline_started_at = _time.monotonic()
         self._run_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
-        self._status_lbl.setText("Running…")
+        self._dashboard.set_status("Running…")
         # Status light goes yellow (warn) for the lifetime of the pipeline
         # run. ``finished`` (in ``_poll_log``) pops the count.
         try:
@@ -1584,7 +1562,7 @@ class AnalyzeTab(QWidget):
         done = int(getattr(self, "_eta_done", 0))
         total = int(getattr(self, "_eta_total", 0))
         if started is None:
-            self._eta_lbl.setText("")
+            self._dashboard.set_eta("")
             return
         if total > 0 and done >= total:
             # All wells finished. The pipeline still has post-well work
@@ -1592,7 +1570,7 @@ class AnalyzeTab(QWidget):
             # before the "finished" event fires; surface that state
             # explicitly so the user doesn't see a stale ETA / blank
             # while the progress bar sits at 100%.
-            self._eta_lbl.setText("Finalizing…")
+            self._dashboard.set_eta("Finalizing…")
             return
         deadline = getattr(self, "_eta_deadline", None)
 
@@ -1607,10 +1585,10 @@ class AnalyzeTab(QWidget):
         if deadline is None:
             # Pipeline is running but no well has completed yet — show a
             # placeholder so the user sees the timer is alive.
-            self._eta_lbl.setText("ETA")
+            self._dashboard.set_eta("ETA")
             return
         remaining = deadline - _time.monotonic()
-        self._eta_lbl.setText(f"ETA {_fmt(remaining)}")
+        self._dashboard.set_eta(f"ETA {_fmt(remaining)}")
 
     def _stop_eta_timer(self) -> None:
         timer = getattr(self, "_eta_timer", None)
@@ -1625,28 +1603,23 @@ class AnalyzeTab(QWidget):
         if kind == "well_total":
             total = int(payload)  # type: ignore[arg-type]
             self._well_total = total
-            self._progress.setRange(0, total)
-            self._progress.setValue(0)
-            self._prog_lbl.setText(f"Pipeline: 0 / {total} wells")
             self._dashboard.set_total(total)
+            self._dashboard.set_overall_range(total)
+            self._dashboard.set_overall(0)
             self._dashboard.set_headline(f"Processing 0 / {total} wells")
         elif kind == "well_done":
             done, total = payload  # type: ignore[misc]
             self._well_done = int(done)
-            self._progress.setValue(self._well_done)
+            self._dashboard.set_overall(self._well_done)
             pct = int(self._well_done / max(1, total) * 100)
-            self._prog_lbl.setText(
-                f"Pipeline: {self._well_done} / {total} wells  ({pct}%)"
-            )
             self._update_eta(self._well_done, total)
             self._dashboard.set_headline(
                 f"Processing {self._well_done} / {total} wells  ({pct}%)")
-            self._dashboard.set_eta(self._eta_lbl.text())
             # The auto-threshold pass runs *after* the last well — show
             # an explicit finalizing state so the user doesn't see the
             # progress bar pinned at 100% with nothing happening.
             if total > 0 and self._well_done >= total:
-                self._status_lbl.setText("Finalizing…")
+                self._dashboard.set_status("Finalizing…")
         elif kind == "stage":
             self._dashboard.set_active_stage(str(payload))
         elif kind == "well_stage":
@@ -1658,7 +1631,6 @@ class AnalyzeTab(QWidget):
         elif kind == "status":
             # Descriptive finalize-phase status (auto-threshold / remote drain
             # / cleanup) so the post-well work doesn't read as a hang.
-            self._status_lbl.setText(str(payload))
             self._dashboard.set_status(str(payload))
 
     def _poll_log(self) -> None:
@@ -1677,33 +1649,30 @@ class AnalyzeTab(QWidget):
                 elif kind == "zipper_start":
                     n = payload or 96
                     self._zipper_done = 0
-                    self._progress.setRange(0, n)
-                    self._progress.setValue(0)
-                    self._prog_lbl.setText(f"Grouping: 0 / {n} wells")
                     self._dashboard.set_total(n)
+                    self._dashboard.set_overall_range(n)
+                    self._dashboard.set_overall(0)
                     self._dashboard.set_active_stage("group")
                     self._dashboard.set_headline(f"Grouping 0 / {n} wells")
                 elif kind == "zipper_well":
-                    n_total = self._progress.maximum() or 96
+                    n_total = self._dashboard.overall_maximum() or 96
                     self._zipper_done = getattr(self, "_zipper_done", 0) + 1
-                    self._progress.setValue(self._zipper_done)
+                    self._dashboard.set_overall(self._zipper_done)
                     pct = int(self._zipper_done / n_total * 100)
-                    self._prog_lbl.setText(f"Grouping: {self._zipper_done} / {n_total} wells  ({pct}%)")
                     self._update_eta(self._zipper_done, n_total)
                     self._dashboard.set_active_stage("group")
                     if payload:
                         self._dashboard.set_well_stage(str(payload), "group")
                     self._dashboard.set_headline(
                         f"Grouping {self._zipper_done} / {n_total} wells  ({pct}%)")
-                    self._dashboard.set_eta(self._eta_lbl.text())
                 elif kind == "zipper_done":
-                    self._progress.setRange(0, 100)
-                    self._progress.setValue(0)
+                    self._dashboard.set_overall_range(100)
+                    self._dashboard.set_overall(0)
                     self._well_total = 0
                     self._well_done  = 0
-                    self._prog_lbl.setText("Grouping complete — starting pipeline…")
+                    self._dashboard.set_headline("Grouping complete — starting pipeline…")
                     self._stop_eta_timer()
-                    self._eta_lbl.setText("ETA")
+                    self._dashboard.set_eta("ETA")
                     # Reset the per-phase clock so the pipeline-phase ETA
                     # isn't biased by the (typically short) grouping phase.
                     self._pipeline_started_at = _time.monotonic()
@@ -1723,12 +1692,10 @@ class AnalyzeTab(QWidget):
                         pct = float(payload)
                     except (TypeError, ValueError):
                         pct = 0.0
-                    self._status_lbl.setText(f"Transferring… {int(pct * 100)}%")
                     self._dashboard.set_status(f"Transferring… {int(pct * 100)}%")
                 elif kind == "done":
-                    self._progress.setValue(self._progress.maximum() or 100)
+                    self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
                     n = self._well_done or getattr(self, "_zipper_done", 0)
-                    self._prog_lbl.setText(f"Complete — {n} well(s) processed")
                     self._dashboard.set_headline(f"Complete — {n} well(s) processed")
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")
@@ -1750,8 +1717,8 @@ class AnalyzeTab(QWidget):
                     self._running = False
                     self._run_btn.setEnabled(True)
                     self._stop_btn.setEnabled(False)
-                    self._status_lbl.setText("Idle")
-                    self._eta_lbl.setText("")
+                    self._dashboard.set_status("")
+                    self._dashboard.set_eta("")
                     self._stop_eta_timer()
                     if getattr(self, "_status_signal_pushed", False):
                         try:

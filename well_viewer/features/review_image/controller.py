@@ -420,7 +420,13 @@ def _show_image_pixel_tooltip(app, event, channel_label: str, label) -> None:
     from PySide6.QtWidgets import QToolTip
 
     lbl = label
+    # Prefer the array stashed on the label; fall back to the last-drawn array
+    # on state so a hover still works if the label handle was reset between
+    # renders. Both are the *displayed* array, so the readout matches the
+    # active view mode (raw / flat-field / corrected).
     arr = getattr(lbl, "_raw_arr", None)
+    if arr is None:
+        arr = getattr(app._app_state.review_image, "last_fluor_arr", None)
     if arr is None or not app._NP_AVAILABLE:
         QToolTip.hideText()
         return
@@ -480,7 +486,7 @@ def on_review_image_hover(app, event) -> None:
     _show_image_pixel_tooltip(
         app,
         event,
-        f"{app._app_state.channel.active_image_channel.upper()}",
+        str(app._app_state.channel.active_image_channel or "").upper(),
         label=app._review_image_label,
     )
 

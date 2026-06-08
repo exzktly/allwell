@@ -168,8 +168,8 @@ def _snapshot_image_table(app) -> dict:
     if not cells:
         return {}
     out: dict[str, Any] = {
-        "rows": int(getattr(app, "_image_table_rows", len(cells))),
-        "cols": int(getattr(app, "_image_table_cols",
+        "rows": int(getattr(app._app_state.image_table, "rows", len(cells))),
+        "cols": int(getattr(app._app_state.image_table, "cols",
                              len(cells[0]) if cells else 0)),
     }
     grid: list[list[dict[str, str]]] = []
@@ -201,9 +201,9 @@ def _snapshot_image_table(app) -> dict:
         if v is not None:
             out[key] = v
     toggles = {
-        "tophat": bool(getattr(app, "_image_table_use_tophat", False)),
-        "boundaries": bool(getattr(app, "_image_table_show_boundaries", False)),
-        "binary_mode": getattr(app, "_image_table_binary_mode", "") or "",
+        "tophat": bool(getattr(app._app_state.image_table, "use_tophat", False)),
+        "boundaries": bool(getattr(app._app_state.image_table, "show_boundaries", False)),
+        "binary_mode": getattr(app._app_state.image_table, "binary_mode", "") or "",
     }
     out["toggles"] = toggles
     luts = getattr(app, "_image_table_lut", None) or {}
@@ -553,7 +553,7 @@ def _apply_image_table(app, state: dict) -> None:
         if mode is None and "binary" in toggles:
             mode = "mask" if bool(toggles.get("binary")) else ""
         if mode in ("", "mask", "threshold"):
-            app._image_table_binary_mode = mode
+            app._app_state.image_table.binary_mode = mode
 
         # Drive the Display ▾ menu's QActions from the restored state (the
         # toggles/binary are now menu actions, not standalone buttons).

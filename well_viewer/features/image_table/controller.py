@@ -88,23 +88,23 @@ def image_table_refresh_picker(app) -> None:
     if plate is not None:
         plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
         active = sorted(
-            (w for w in app._image_table_active_wells if w in app._app_state.dataset.well_paths),
+            (w for w in app._app_state.image_table.active_wells if w in app._app_state.dataset.well_paths),
             key=app._parse_rc,
         )
         plate.setSelectedWellIds(active)
     lbl = getattr(app, "_image_table_count_lbl", None)
     if lbl is not None:
-        n = len(app._image_table_active_wells)
+        n = len(app._app_state.image_table.active_wells)
         lbl.setText(f"{n} well{'s' if n != 1 else ''} active")
 
 
 def image_table_select_all(app) -> None:
-    app._image_table_active_wells = set(app._app_state.dataset.well_paths.keys())
+    app._app_state.image_table.active_wells = set(app._app_state.dataset.well_paths.keys())
     image_table_refresh_picker(app)
 
 
 def image_table_clear_active(app) -> None:
-    app._image_table_active_wells = set()
+    app._app_state.image_table.active_wells = set()
     image_table_refresh_picker(app)
 
 
@@ -337,8 +337,8 @@ def image_table_apply_dimensions(app) -> None:
     """Read rows / cols spinners and rebuild the selector grid."""
     rows = int(app._image_table_rows_spin.value())
     cols = int(app._image_table_cols_spin.value())
-    app._image_table_rows = rows
-    app._image_table_cols = cols
+    app._app_state.image_table.rows = rows
+    app._app_state.image_table.cols = cols
     image_table_rebuild_grid(app)
 
 
@@ -347,8 +347,8 @@ def image_table_rebuild_grid(app) -> None:
     per-row channel + LUT-colour column at column 0."""
     from well_viewer.features.image_table.grid_view import build_image_table_grid
 
-    rows = int(getattr(app, "_image_table_rows", 2) or 2)
-    cols = int(getattr(app, "_image_table_cols", 3) or 3)
+    rows = int(getattr(app._app_state.image_table, "rows", 2) or 2)
+    cols = int(getattr(app._app_state.image_table, "cols", 3) or 3)
 
     chan_opts = _channel_options(app)
     tp_opts = _timepoint_options(app)
@@ -742,10 +742,10 @@ def _axis_values(app, axis: str) -> List[str]:
     """Ordered value list an axis expands into, drawn from the live selections."""
     if axis == "channel":
         opts = _channel_options(app)
-        sel = getattr(app, "_image_table_active_channels", None) or set()
+        sel = getattr(app._app_state.image_table, "active_channels", None) or set()
         return [c for c in opts if c in sel] if sel else list(opts)
     if axis == "well":
-        sel = sorted(getattr(app, "_image_table_active_wells", set()) or set(),
+        sel = sorted(getattr(app._app_state.image_table, "active_wells", set()) or set(),
                      key=app._parse_rc)
         return sel if sel else _well_options(app)
     if axis == "timepoint":
@@ -769,7 +769,7 @@ def _fixed_off_axis(app, on_axis: set) -> Dict[str, str]:
 
     fixed = {"well": "", "channel": "", "timepoint": "", "fov": ""}
     if "well" not in on_axis:
-        sel = sorted(getattr(app, "_image_table_active_wells", set()) or set(),
+        sel = sorted(getattr(app._app_state.image_table, "active_wells", set()) or set(),
                      key=app._parse_rc)
         fixed["well"] = sel[0] if sel else _first(_well_options(app))
     if "channel" not in on_axis:
@@ -848,8 +848,8 @@ def image_table_build_layout(app) -> None:
     rows, cols = len(row_vals), len(col_vals)
 
     # Size the grid (sync the spinners) and rebuild the empty selector cells.
-    app._image_table_rows = rows
-    app._image_table_cols = cols
+    app._app_state.image_table.rows = rows
+    app._app_state.image_table.cols = cols
     for attr, val in (("_image_table_rows_spin", rows), ("_image_table_cols_spin", cols)):
         spin = getattr(app, attr, None)
         if spin is not None:
@@ -911,7 +911,7 @@ def _update_channel_btn_text(app) -> None:
     if btn is None:
         return
     opts = _channel_options(app)
-    sel = getattr(app, "_image_table_active_channels", None) or set()
+    sel = getattr(app._app_state.image_table, "active_channels", None) or set()
     ordered = [c for c in opts if c in sel]
     if not ordered or len(ordered) == len(opts):
         btn.setText("Channels: all")
@@ -930,8 +930,8 @@ def image_table_refresh_channel_picker(app) -> None:
     if menu is None:
         return
     opts = _channel_options(app)
-    active = getattr(app, "_image_table_active_channels", None) or set()
-    app._image_table_active_channels = {c for c in active if c in opts}
+    active = getattr(app._app_state.image_table, "active_channels", None) or set()
+    app._app_state.image_table.active_channels = {c for c in active if c in opts}
 
     menu.clear()
     act_all = menu.addAction("Select all")
@@ -943,7 +943,7 @@ def image_table_refresh_channel_picker(app) -> None:
         act = QAction(ch, menu)
         act.setCheckable(True)
         # Set state BEFORE wiring so building the menu doesn't fire toggled.
-        act.setChecked(ch in app._image_table_active_channels)
+        act.setChecked(ch in app._app_state.image_table.active_channels)
         act.toggled.connect(lambda checked, c=ch: image_table_toggle_channel(app, c, checked))
         menu.addAction(act)
     _update_channel_btn_text(app)
@@ -951,18 +951,18 @@ def image_table_refresh_channel_picker(app) -> None:
 
 def image_table_toggle_channel(app, channel: str, checked: bool) -> None:
     """Add/remove a single channel from the active set (menu item toggled)."""
-    sel = set(getattr(app, "_image_table_active_channels", None) or set())
+    sel = set(getattr(app._app_state.image_table, "active_channels", None) or set())
     if checked:
         sel.add(channel)
     else:
         sel.discard(channel)
-    app._image_table_active_channels = sel
+    app._app_state.image_table.active_channels = sel
     _update_channel_btn_text(app)
 
 
 def image_table_set_all_channels(app, on: bool) -> None:
     """Select-all / clear from the dropdown header actions."""
-    app._image_table_active_channels = set(_channel_options(app)) if on else set()
+    app._app_state.image_table.active_channels = set(_channel_options(app)) if on else set()
     image_table_refresh_channel_picker(app)  # rebuild to refresh checkmarks
 
 
@@ -1052,7 +1052,7 @@ def image_table_add_varied_row(app, *, src_idx: int, dim: str, mode: str, value:
     # Grow the grid by one row, rebuild the empty cells, then restore the old
     # rows plus the freshly-built one.
     new_rows = len(snap) + 1
-    app._image_table_rows = new_rows
+    app._app_state.image_table.rows = new_rows
     spin = getattr(app, "_image_table_rows_spin", None)
     if spin is not None:
         spin.blockSignals(True)
@@ -1186,10 +1186,10 @@ def image_table_toggle_tophat(app) -> None:
     ``_load_array`` reads from the pre-filtered tophat dict; when OFF, it reads
     raw fluor as before.
     """
-    app._image_table_use_tophat = not bool(getattr(app, "_image_table_use_tophat", False))
+    app._app_state.image_table.use_tophat = not bool(getattr(app._app_state.image_table, "use_tophat", False))
     image_table_refresh_display_menu(app)
     # Tossing the cache so the next Generate fetches the right dict.
-    app._image_table_image_cache = {}
+    app._app_state.image_table.image_cache = {}
     image_table_generate(app)
 
 
@@ -1232,8 +1232,8 @@ def image_table_load_heatmap_layout(app) -> None:
             spin.setValue(val)
         finally:
             spin.blockSignals(blocked)
-    app._image_table_rows = target_rows
-    app._image_table_cols = target_cols
+    app._app_state.image_table.rows = target_rows
+    app._app_state.image_table.cols = target_cols
     image_table_rebuild_grid(app)
 
     cells = getattr(app, "_image_table_cells", None) or []
@@ -1294,7 +1294,7 @@ def image_table_distribute_wells(app) -> None:
     if not cells:
         app._set_status("Image Table: build a grid first (set rows/cols and click Apply).")
         return
-    active = sorted(app._image_table_active_wells, key=app._parse_rc)
+    active = sorted(app._app_state.image_table.active_wells, key=app._parse_rc)
     if not active:
         app._set_status("Image Table: no active wells in the sidebar picker.")
         return
@@ -1618,11 +1618,11 @@ def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_ar
 
 def image_table_toggle_boundaries(app) -> None:
     """Flip the boundary-overlay flag and re-render (Display ▾ menu action)."""
-    app._image_table_show_boundaries = not bool(
-        getattr(app, "_image_table_show_boundaries", False)
+    app._app_state.image_table.show_boundaries = not bool(
+        getattr(app._app_state.image_table, "show_boundaries", False)
     )
     image_table_refresh_display_menu(app)
-    app._image_table_image_cache = {}
+    app._app_state.image_table.image_cache = {}
     image_table_generate(app)
 
 
@@ -1641,9 +1641,9 @@ def image_table_refresh_display_menu(app) -> None:
             finally:
                 act.blockSignals(blocked)
 
-    _set("_image_table_tophat_act", getattr(app, "_image_table_use_tophat", False))
-    _set("_image_table_boundaries_act", getattr(app, "_image_table_show_boundaries", False))
-    mode = getattr(app, "_image_table_binary_mode", "") or ""
+    _set("_image_table_tophat_act", getattr(app._app_state.image_table, "use_tophat", False))
+    _set("_image_table_boundaries_act", getattr(app._app_state.image_table, "show_boundaries", False))
+    mode = getattr(app._app_state.image_table, "binary_mode", "") or ""
     _set("_image_table_binary_act_none", mode == "")
     _set("_image_table_binary_act_mask", mode == "mask")
     _set("_image_table_binary_act_thresh", mode == "threshold")
@@ -1659,16 +1659,16 @@ def image_table_set_zoom(app, factor: float, *, relative: bool = False) -> None:
     ``relative=True`` multiplies the current zoom by *factor* (zoom in/out
     buttons); otherwise *factor* is the absolute level (1.0 = 240 px cells).
     """
-    cur = float(getattr(app, "_image_table_zoom", 1.0) or 1.0)
+    cur = float(getattr(app._app_state.image_table, "zoom", 1.0) or 1.0)
     new = cur * factor if relative else factor
     new = max(_ZOOM_MIN, min(_ZOOM_MAX, new))
-    app._image_table_zoom = new
+    app._app_state.image_table.zoom = new
     lbl = getattr(app, "_image_table_zoom_lbl", None)
     if lbl is not None:
         lbl.setText(f"{new * 100:.0f}%")
     # Only re-render if a table has already been generated; otherwise just
     # store the level for the next Generate.
-    if getattr(app, "_image_table_last_render", None):
+    if getattr(app._app_state.image_table, "last_render", None):
         image_table_generate(app)
 
 
@@ -1687,7 +1687,7 @@ def image_table_set_binary_mode(app, mode: str) -> None:
     """
     if mode not in ("", "mask", "threshold"):
         return
-    app._image_table_binary_mode = mode
+    app._app_state.image_table.binary_mode = mode
     image_table_refresh_display_menu(app)
     image_table_generate(app)
 
@@ -1965,11 +1965,11 @@ def image_table_generate(app) -> None:
     cache: Dict[Tuple[str, str, str], Dict] = {}
     rendered: Dict[Tuple[int, int], Any] = {}
     crop_tool = getattr(app, "_image_table_crop_tool", None)
-    use_tophat = bool(getattr(app, "_image_table_use_tophat", False))
-    show_boundaries = bool(getattr(app, "_image_table_show_boundaries", False))
-    binary_mode = getattr(app, "_image_table_binary_mode", "") or ""
+    use_tophat = bool(getattr(app._app_state.image_table, "use_tophat", False))
+    show_boundaries = bool(getattr(app._app_state.image_table, "show_boundaries", False))
+    binary_mode = getattr(app._app_state.image_table, "binary_mode", "") or ""
     # Per-cell thumbnail size, scaled by the zoom factor (240 px = 1.0×).
-    zoom = float(getattr(app, "_image_table_zoom", 1.0) or 1.0)
+    zoom = float(getattr(app._app_state.image_table, "zoom", 1.0) or 1.0)
     sz = max(80, int(round(240 * zoom)))
 
     for r, row in enumerate(cells):
@@ -2060,8 +2060,8 @@ def image_table_generate(app) -> None:
 
             grid.addWidget(cell_widget, r, c)
 
-    app._image_table_last_render = rendered
-    app._image_table_image_cache = cache
+    app._app_state.image_table.last_render = rendered
+    app._app_state.image_table.image_cache = cache
     # Fill the per-channel LUT min/max boxes with the actual pooled numbers so
     # the user sees real values instead of "auto" (skips manually-edited rows).
     _refresh_lut_fields_from_render(app, rendered)
@@ -2102,12 +2102,12 @@ def image_table_auto_lut(app, channel: str) -> None:
     """Pool min/max across loaded cells for one channel; write result and redraw."""
     chan_upper = channel.upper()
     cells = getattr(app, "_image_table_cells", None) or []
-    rendered = getattr(app, "_image_table_last_render", None) or {}
-    cache = getattr(app, "_image_table_image_cache", None)
+    rendered = getattr(app._app_state.image_table, "last_render", None) or {}
+    cache = getattr(app._app_state.image_table, "image_cache", None)
     if cache is None:
         cache = {}
-        app._image_table_image_cache = cache
-    use_tophat = bool(getattr(app, "_image_table_use_tophat", False))
+        app._app_state.image_table.image_cache = cache
+    use_tophat = bool(getattr(app._app_state.image_table, "use_tophat", False))
 
     try:
         import numpy as _np
@@ -2168,7 +2168,7 @@ def image_table_auto_lut(app, channel: str) -> None:
 
 def _export_opts(app) -> Dict[str, Any]:
     """Return the image-table export option dict, seeding defaults on demand."""
-    opts = getattr(app, "_image_table_export_opts", None)
+    opts = getattr(app._app_state.image_table, "export_opts", None)
     if not isinstance(opts, dict):
         opts = {
             "pad_inches": 0.10,    # outer margin around the saved figure
@@ -2178,7 +2178,7 @@ def _export_opts(app) -> Dict[str, Any]:
             "dpi": 300,
             "transparent_bg": True,
         }
-        app._image_table_export_opts = opts
+        app._app_state.image_table.export_opts = opts
     return opts
 
 
@@ -2289,17 +2289,17 @@ def _build_export_figure(app):
     dpi = int(opts.get("dpi", 300))
     transparent_bg = bool(opts.get("transparent_bg", True))
 
-    rows = int(getattr(app, "_image_table_rows", len(cells)) or len(cells))
-    cols = int(getattr(app, "_image_table_cols", len(cells[0])) or len(cells[0]))
+    rows = int(getattr(app._app_state.image_table, "rows", len(cells)) or len(cells))
+    cols = int(getattr(app._app_state.image_table, "cols", len(cells[0])) or len(cells[0]))
 
-    cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(app, "_image_table_image_cache", None) or {})
-    rendered = getattr(app, "_image_table_last_render", None) or {}
+    cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(app._app_state.image_table, "image_cache", None) or {})
+    rendered = getattr(app._app_state.image_table, "last_render", None) or {}
     crop_tool = getattr(app, "_image_table_crop_tool", None)
-    use_tophat = bool(getattr(app, "_image_table_use_tophat", False))
+    use_tophat = bool(getattr(app._app_state.image_table, "use_tophat", False))
     # Mirror the live thumbnail's overlay toggles so the export matches
     # what the user sees on screen.
-    binary_mode = getattr(app, "_image_table_binary_mode", "") or ""
-    show_boundaries = bool(getattr(app, "_image_table_show_boundaries", False))
+    binary_mode = getattr(app._app_state.image_table, "binary_mode", "") or ""
+    show_boundaries = bool(getattr(app._app_state.image_table, "show_boundaries", False))
 
     bg_face = "none" if transparent_bg else "white"
     # Probe the first available cell to learn the image aspect ratio. With

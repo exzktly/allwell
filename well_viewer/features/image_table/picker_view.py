@@ -2,7 +2,7 @@
 
 A multi-select well picker (a ``widgets.WellPlateSelector`` in "select" mode)
 that explicitly ignores replicate sets / groups. State is held in
-``app._image_table_active_wells`` (a ``set`` of well tokens).
+``app._app_state.image_table.active_wells`` (a ``set`` of well tokens).
 """
 
 from __future__ import annotations
@@ -43,9 +43,9 @@ def build_image_table_picker(app, parent: QWidget) -> None:
 
     def _on_plate_changed(ids) -> None:
         new = {w for w in ids if w in app._app_state.dataset.well_paths}
-        if new == app._image_table_active_wells:
+        if new == app._app_state.image_table.active_wells:
             return
-        app._image_table_active_wells = new
+        app._app_state.image_table.active_wells = new
         image_table_refresh_picker(app)
     plate.selectionChanged.connect(_on_plate_changed)
 

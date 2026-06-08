@@ -79,34 +79,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     layout.setSpacing(0)
 
     # State defaults — controller methods read these.
-    if not hasattr(ctx.app, "_image_table_active_wells"):
-        ctx.app._image_table_active_wells = set()
-    if not hasattr(ctx.app, "_image_table_rows"):
-        ctx.app._image_table_rows = 2
-    if not hasattr(ctx.app, "_image_table_cols"):
-        ctx.app._image_table_cols = 3
+    # Image Table data/options/caches live on the typed ImageTableState
+    # (``ctx.app._app_state.image_table``), constructed with AppState — no
+    # loose-attr defaults needed here. Only widget-handle containers and the
+    # CropTool helper are seeded on the app below.
     if not hasattr(ctx.app, "_image_table_cells"):
         ctx.app._image_table_cells = []
     if not hasattr(ctx.app, "_image_table_lut"):
         ctx.app._image_table_lut = {}
-    if not hasattr(ctx.app, "_image_table_last_render"):
-        ctx.app._image_table_last_render = {}
-    if not hasattr(ctx.app, "_image_table_image_cache"):
-        ctx.app._image_table_image_cache = {}
-    if not hasattr(ctx.app, "_image_table_use_tophat"):
-        ctx.app._image_table_use_tophat = False
-    if not hasattr(ctx.app, "_image_table_show_boundaries"):
-        ctx.app._image_table_show_boundaries = False
-    if not hasattr(ctx.app, "_image_table_binary_mode"):
-        ctx.app._image_table_binary_mode = ""   # "", "mask", or "threshold"
-    if not hasattr(ctx.app, "_image_table_zoom"):
-        ctx.app._image_table_zoom = 1.0
-    if not hasattr(ctx.app, "_image_table_active_channels"):
-        ctx.app._image_table_active_channels = set()
-    if not hasattr(ctx.app, "_image_table_row_axis"):
-        ctx.app._image_table_row_axis = "channel"
-    if not hasattr(ctx.app, "_image_table_col_axis"):
-        ctx.app._image_table_col_axis = "timepoint"
     # Shared square-region crop helper. on_change re-runs Generate so the
     # rendered grid follows mode toggles and crop changes automatically.
     if not hasattr(ctx.app, "_image_table_crop_tool"):
@@ -159,12 +139,12 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ar.setSpacing(6)
 
     ar.addWidget(QLabel("Rows:", axes_row))
-    row_axis_cb = _axis_combo(ctx.app._image_table_row_axis)
+    row_axis_cb = _axis_combo(ctx.app._app_state.image_table.row_axis)
     ar.addWidget(row_axis_cb)
     ctx.app._image_table_row_axis_cb = row_axis_cb
 
     ar.addWidget(QLabel("×  Columns:", axes_row))
-    col_axis_cb = _axis_combo(ctx.app._image_table_col_axis)
+    col_axis_cb = _axis_combo(ctx.app._app_state.image_table.col_axis)
     ar.addWidget(col_axis_cb)
     ctx.app._image_table_col_axis_cb = col_axis_cb
 
@@ -250,7 +230,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     orow.addWidget(QLabel("Grid:", opts_row))
     rows_spin = QSpinBox(opts_row)
     rows_spin.setRange(1, 12)
-    rows_spin.setValue(int(ctx.app._image_table_rows))
+    rows_spin.setValue(int(ctx.app._app_state.image_table.rows))
     rows_spin.setFixedWidth(56)
     rows_spin.setToolTip("Grid rows (Build sets this automatically).")
     rows_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
@@ -259,7 +239,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     orow.addWidget(QLabel("×", opts_row))
     cols_spin = QSpinBox(opts_row)
     cols_spin.setRange(1, 12)
-    cols_spin.setValue(int(ctx.app._image_table_cols))
+    cols_spin.setValue(int(ctx.app._app_state.image_table.cols))
     cols_spin.setFixedWidth(56)
     cols_spin.setToolTip("Grid columns (Build sets this automatically).")
     cols_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
@@ -349,14 +329,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     tophat_act = QAction("Tophat (background-subtracted)", dmenu)
     tophat_act.setCheckable(True)
-    tophat_act.setChecked(bool(ctx.app._image_table_use_tophat))
+    tophat_act.setChecked(bool(ctx.app._app_state.image_table.use_tophat))
     tophat_act.toggled.connect(lambda _c=False: image_table_toggle_tophat(ctx.app))
     dmenu.addAction(tophat_act)
     ctx.app._image_table_tophat_act = tophat_act
 
     boundaries_act = QAction("Cell boundaries", dmenu)
     boundaries_act.setCheckable(True)
-    boundaries_act.setChecked(bool(ctx.app._image_table_show_boundaries))
+    boundaries_act.setChecked(bool(ctx.app._app_state.image_table.show_boundaries))
     boundaries_act.toggled.connect(lambda _c=False: image_table_toggle_boundaries(ctx.app))
     dmenu.addAction(boundaries_act)
     ctx.app._image_table_boundaries_act = boundaries_act
@@ -365,7 +345,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     bin_sub = dmenu.addMenu("Binary")
     bin_group = QActionGroup(bin_sub)
     bin_group.setExclusive(True)
-    _bmode = ctx.app._image_table_binary_mode or ""
+    _bmode = ctx.app._app_state.image_table.binary_mode or ""
     for _label, _key, _attr in (
         ("None (off)", "", "none"),
         ("Mask — all cells", "mask", "mask"),
@@ -433,7 +413,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1 / 1.25, relative=True))
     tr.addWidget(zoom_out)
 
-    zoom_lbl = QPushButton(f"{ctx.app._image_table_zoom * 100:.0f}%", action_row)
+    zoom_lbl = QPushButton(f"{ctx.app._app_state.image_table.zoom * 100:.0f}%", action_row)
     zoom_lbl.setFlat(True)
     zoom_lbl.setFixedWidth(52)
     zoom_lbl.setToolTip("Click to reset zoom to 100%")

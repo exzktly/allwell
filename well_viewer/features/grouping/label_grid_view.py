@@ -112,6 +112,10 @@ class LabelGrid(QWidget):
         self._row_hdrs: list[_HeaderLabel] = []
         self._col_hdrs: list[_HeaderLabel] = []
         self._selected: set[str] = set()
+        # Set by textEdited (a real user edit, not a programmatic refresh); a
+        # commit (Enter / focus-out) persists only when set, so a freeform label
+        # isn't rewritten to pipeline_info.json on every keystroke.
+        self._dirty: bool = False
         # Start with no wells enabled — the host calls setEnabledWells() with
         # ``app._app_state.dataset.well_paths.keys()`` once a dataset is loaded. Treating None
         # as "all enabled" is only useful for the standalone __main__ demo.
@@ -156,7 +160,12 @@ class LabelGrid(QWidget):
                 tok = f"{_ROW_LETTERS[r]}{c + 1:02d}"
                 cell = _LabelCell(tok, grid_host)
                 cell.setEnabled(False)
+                # textChanged keeps the in-memory label current (per keystroke);
+                # textEdited flags a real user edit; editingFinished (Enter /
+                # focus-out) is the commit that persists to pipeline_info.json.
                 cell.textChanged.connect(lambda txt, t=tok: self._on_text_changed(t, txt))
+                cell.textEdited.connect(lambda *_: setattr(self, "_dirty", True))
+                cell.editingFinished.connect(self._on_commit)
                 self._cells[tok] = cell
                 g.addWidget(cell, r + 1, c + 1)
         for c in range(_N_COLS):
@@ -235,7 +244,19 @@ class LabelGrid(QWidget):
             app._app_state.dataset.well_labels.pop(tok, None)
         if hasattr(app, "_invalidate_stats_cache"):
             app._invalidate_stats_cache()
-        p = getattr(app, "_persistence", None)
+
+    def _on_commit(self) -> None:
+        """Persist labels when a cell edit is committed (Enter / focus-out).
+
+        Saves only when the user actually changed a cell (the dirty flag), so
+        tabbing / clicking through cells doesn't churn pipeline_info.json. The
+        registered ``sample_definitions`` autosave is debounced and no-ops
+        without a data dir.
+        """
+        if not self._dirty:
+            return
+        self._dirty = False
+        p = getattr(self._app, "_persistence", None)
         if p is not None:
             p.schedule_save("sample_definitions")
 

@@ -390,12 +390,14 @@ special combined case described below.
 | **`none`** | Image unchanged. | — |
 | **`top_hat`** | `img − grey_opening(img, square)`, square footprint of side `2·radius+1`. | Fast (separable 1-D passes) but the square footprint leaves anisotropic, *terraced* residuals — square halos/hotspots next to bright objects. Legacy method. |
 | **`sliding_disk`** | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | **Default & recommended.** A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
+| **`fov_median`** | `img − median(img)`. | Subtracts a **single scalar**, the median intensity of the whole field of view. Most pixels in a field are background, so the median is a robust flat-background estimate (insensitive to bright cells/debris). Removes a **uniform offset only** — it does *not* flatten spatial gradients (use a morphological method or `empty_well` for that). No radius and no reference well needed; the cheapest correction. |
 | **`empty_well`** | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). No-op if no field is available for the channel. Requires a Background well. |
 
 The **Nuclear radius** / **Fluor radius** entries set the background length scale
 (in px) for the morphological methods only (`top_hat` / `sliding_disk`); these
-controls are hidden for `none` / `empty_well`, which take no radius. Each channel
-has a **Disable** checkbox to skip background subtraction for that channel.
+controls are hidden for `none` / `fov_median` / `empty_well`, which take no radius.
+Each channel has a **Disable** checkbox to skip background subtraction for that
+channel.
 
 #### Combined empty-well correction (the special case)
 

@@ -1022,6 +1022,55 @@ def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarra
     return gaussian_filter(median, sigma=float(sigma)).astype(np.float32)
 
 
+def _match_background_scale(img: np.ndarray, bg: np.ndarray) -> np.ndarray:
+    """Fit the measured background field to *img*'s actual background.
+
+    The empty-well field ``B`` is captured at the reference well's exposure /
+    illumination. If the target image differs in exposure, gain, illumination
+    level, or carries a constant dark offset, subtracting the raw ``B`` leaves a
+    residual that follows ``B``'s spatial shape — e.g. a corner-bright field
+    leaves bright corners behind. So instead of subtracting ``B`` verbatim, fit
+    the image's background as ``a·B + c`` (a least-squares regression of image
+    intensity on the field over the background-dominated — dimmest ~60% —
+    pixels, which excludes bright cells), and return that fitted field. The
+    multiplicative term ``a`` absorbs the exposure/illumination mismatch and the
+    constant ``c`` absorbs a uniform pedestal, so subtracting the result flattens
+    the background regardless of where ``B`` is bright — with no assumption about
+    its shape.
+
+    ``a`` is clamped to ``[0.05, 20]`` so a near-constant / pathological field
+    can't blow up the fit; on a degenerate field the original is returned.
+    """
+    i = np.asarray(img, dtype=np.float32)
+    b = np.asarray(bg, dtype=np.float32)
+    finite = np.isfinite(i) & np.isfinite(b)
+    if int(finite.sum()) < 16:
+        return b
+    iv = i[finite]
+    bv = b[finite]
+    # Background-dominated subset: the dimmest ~60% of pixels. Bright cells sit
+    # in the top tail and would otherwise pull the regression up.
+    thr = float(np.percentile(iv, 60.0))
+    mask = iv <= thr
+    if int(mask.sum()) < 16:
+        mask = np.ones_like(iv, dtype=bool)
+    x = bv[mask]
+    y = iv[mask]
+    xm = float(x.mean())
+    ym = float(y.mean())
+    denom = float(((x - xm) ** 2).sum())
+    if not np.isfinite(denom) or denom <= 0.0:
+        return b
+    a = float(((x - xm) * (y - ym)).sum() / denom)
+    if not np.isfinite(a):
+        return b
+    a = float(min(20.0, max(0.05, a)))
+    c = ym - a * xm
+    fitted = (a * b + c).astype(np.float32)
+    fitted[~np.isfinite(fitted)] = 0.0
+    return fitted
+
+
 def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
     """Force a background-subtracted image non-negative **and** finite.
 
@@ -1094,6 +1143,10 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
         if bg_field is not None:
             bg = np.asarray(bg_field, dtype=np.float32)
             if bg.shape == img.shape:
+                # Match the field to this image's background level first, so an
+                # exposure/illumination mismatch can't leave a residual in the
+                # field's shape (e.g. bright corners).
+                bg = _match_background_scale(img, bg)
                 return _floor_after_subtract(img - bg)
         return img
     return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
@@ -1116,6 +1169,7 @@ def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
     if bg_field is not None:
         b = np.asarray(bg_field, dtype=np.float32)
         if b.shape == img.shape:
+            b = _match_background_scale(img, b)
             img = _floor_after_subtract(img - b)
     return apply_flatfield(img, ff_field)
 

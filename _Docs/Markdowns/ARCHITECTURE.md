@@ -372,15 +372,19 @@ and registers every centre page. The current page-list:
 | Analysis | **Plotting** | Line Graphs / Bar Plots / Scatter Plot / Distribution / Heat Map |
 | Analysis | **Statistics** | — |
 | Images | **Image Table** | — |
-| Images | **Segmentation** | Segmentation / smFISH |
+| Images | **Segmentation** | — |
+| Images | **smFISH** | — |
 | Data | **Review CSV** | — |
 | Data | **Sample Definitions** | (includes Cell Gating as a sub-section) |
 | Data | **Batch Export** | — |
 
-Two of the top-level entries (Plotting, Segmentation) are *parent* tabs
-whose body is a nested `NamedPageStack`. `WellViewerApp._current_centre_tab()`
-descends through that one level of indirection so the rest of the app can
-always pattern-match on a leaf name (e.g. `"Line Graphs"`, `"smFISH"`).
+**Plotting** is the only *parent* tab — its body is a nested `NamedPageStack`.
+`WellViewerApp._current_centre_tab()` descends through that one level of
+indirection so the rest of the app can always pattern-match on a leaf name
+(e.g. `"Line Graphs"`). Segmentation and smFISH are plain top-level tabs;
+smFISH was promoted out of an earlier Segmentation sub-stack into its own rail
+entry, so it now follows the standard one-package-per-tab layout
+(`features/smfish/{controller,worker,tab_view}.py`) with no nesting.
 
 The left **rail navigation** (`RailNav` from `widgets/rail_nav.py`) is the
 single visible selector for the top-level pages. It mirrors the notebook —

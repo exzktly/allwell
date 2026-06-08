@@ -400,6 +400,7 @@ def image_table_rebuild_grid(app) -> None:
             )
 
     image_table_rebuild_lut_row(app)
+    image_table_refresh_addrow_controls(app)
 
 
 def _row_cmap_name(app, r: int) -> Optional[str]:
@@ -964,6 +965,188 @@ def image_table_set_all_channels(app, on: bool) -> None:
     """Select-all / clear from the dropdown header actions."""
     app._image_table_active_channels = set(_channel_options(app)) if on else set()
     image_table_refresh_channel_picker(app)  # rebuild to refresh checkmarks
+
+
+# ── Add row (clone an existing row, vary one dimension) ───────────────────────
+
+
+def _all_dim_options(app, dim: str) -> List[str]:
+    """Every available value for a dimension (not selection-filtered)."""
+    if dim == "channel":
+        return _channel_options(app)
+    if dim == "well":
+        return _well_options(app)
+    if dim == "timepoint":
+        return _timepoint_options(app)
+    if dim == "fov":
+        return _fov_options(app)
+    return []
+
+
+_DIM_KEY = {"well": "well_cb", "channel": "chan_cb",
+            "timepoint": "tp_cb", "fov": "fov_cb"}
+
+
+def _snapshot_cells(app) -> List[List[Dict[str, str]]]:
+    """Capture every cell's (well, channel, timepoint, fov) selections."""
+    snap: List[List[Dict[str, str]]] = []
+    for row in (getattr(app, "_image_table_cells", None) or []):
+        snap.append([
+            {dim: cell[key].currentText().strip() for dim, key in _DIM_KEY.items()}
+            for cell in row
+        ])
+    return snap
+
+
+def _write_cell(cell, vals: Dict[str, str]) -> None:
+    for dim, key in _DIM_KEY.items():
+        cb = cell.get(key)
+        txt = vals.get(dim, "")
+        if cb is None or not txt:
+            continue
+        cb.blockSignals(True)
+        try:
+            if cb.findText(txt) >= 0:
+                cb.setCurrentText(txt)
+        finally:
+            cb.blockSignals(False)
+
+
+def image_table_refresh_addrow_controls(app) -> None:
+    """Repopulate the Add-row source-row list and value list from the grid."""
+    src_cb = getattr(app, "_image_table_addrow_src_cb", None)
+    if src_cb is not None:
+        n = len(getattr(app, "_image_table_cells", None) or [])
+        prev = src_cb.currentData()
+        src_cb.blockSignals(True)
+        src_cb.clear()
+        for i in range(n):
+            src_cb.addItem(f"Row {i + 1}", i)
+        if prev is not None:
+            idx = src_cb.findData(prev)
+            src_cb.setCurrentIndex(idx if idx >= 0 else max(0, src_cb.count() - 1))
+        src_cb.blockSignals(False)
+    image_table_on_addrow_dim_changed(app)
+
+
+def image_table_on_addrow_dim_changed(app) -> None:
+    """Refill the Add-row value list for the chosen dimension; the value list
+    is only relevant in Uniform mode (Step advances each cell by one)."""
+    dim_cb = getattr(app, "_image_table_addrow_dim_cb", None)
+    val_cb = getattr(app, "_image_table_addrow_val_cb", None)
+    mode_cb = getattr(app, "_image_table_addrow_mode_cb", None)
+    if dim_cb is None or val_cb is None:
+        return
+    dim = dim_cb.currentData() or "channel"
+    prev = val_cb.currentText().strip()
+    val_cb.blockSignals(True)
+    val_cb.clear()
+    opts = _all_dim_options(app, dim)
+    val_cb.addItems(opts)
+    if prev in opts:
+        val_cb.setCurrentText(prev)
+    val_cb.blockSignals(False)
+    if mode_cb is not None:
+        val_cb.setEnabled((mode_cb.currentData() or "uniform") == "uniform")
+
+
+def image_table_add_varied_row(app) -> None:
+    """Append a new row cloned from an existing one, varying one dimension.
+
+    Uniform mode sets the chosen dimension to a single value across the whole
+    new row; Step mode advances each cell's value for that dimension by one
+    (clamped to the last available value). Other dimensions are copied as-is.
+    Builds the selector row only — press Generate to render.
+    """
+    cells = getattr(app, "_image_table_cells", None) or []
+    if not cells:
+        app._set_status("Image Table: build a table first, then add a row.")
+        return
+
+    src_cb = getattr(app, "_image_table_addrow_src_cb", None)
+    dim_cb = getattr(app, "_image_table_addrow_dim_cb", None)
+    val_cb = getattr(app, "_image_table_addrow_val_cb", None)
+    mode_cb = getattr(app, "_image_table_addrow_mode_cb", None)
+    src_idx = src_cb.currentData() if src_cb is not None else None
+    dim = (dim_cb.currentData() if dim_cb is not None else "channel") or "channel"
+    mode = (mode_cb.currentData() if mode_cb is not None else "uniform") or "uniform"
+    value = val_cb.currentText().strip() if val_cb is not None else ""
+
+    snap = _snapshot_cells(app)
+    if src_idx is None or not (0 <= src_idx < len(snap)):
+        src_idx = len(snap) - 1
+    src_row = snap[src_idx]
+    opts = _all_dim_options(app, dim)
+
+    new_row: List[Dict[str, str]] = []
+    for cell_vals in src_row:
+        nv = dict(cell_vals)
+        if mode == "uniform":
+            if value:
+                nv[dim] = value
+        else:  # step: advance this cell's value by one
+            cur = cell_vals.get(dim, "")
+            if opts:
+                try:
+                    i = opts.index(cur)
+                except ValueError:
+                    i = -1
+                nv[dim] = opts[min(i + 1, len(opts) - 1)] if i >= 0 else opts[0]
+        new_row.append(nv)
+
+    # Grow the grid by one row, rebuild the empty cells, then restore the old
+    # rows plus the freshly-built one.
+    new_rows = len(snap) + 1
+    app._image_table_rows = new_rows
+    spin = getattr(app, "_image_table_rows_spin", None)
+    if spin is not None:
+        spin.blockSignals(True)
+        spin.setValue(new_rows)
+        spin.blockSignals(False)
+    image_table_rebuild_grid(app)
+
+    full = snap + [new_row]
+    for r, row in enumerate(getattr(app, "_image_table_cells", None) or []):
+        if r >= len(full):
+            break
+        for c, cell in enumerate(row):
+            if c < len(full[r]):
+                _write_cell(cell, full[r][c])
+
+    # When the varied dimension is the channel and the whole new row shares one
+    # channel (uniform), mirror it onto the row's channel combo + colormap.
+    if dim == "channel" and mode == "uniform" and value:
+        _apply_row_channel_styling_for_row(app, new_rows - 1, value)
+
+    image_table_rebuild_lut_row(app)
+    image_table_refresh_addrow_controls(app)
+    verb = f"set {dim} = {value}" if mode == "uniform" else f"stepped {dim}"
+    app._set_status(
+        f"Image Table: added row {new_rows} cloned from row {src_idx + 1} "
+        f"({verb}). Press Generate to render."
+    )
+
+
+def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
+    """Set one row's channel combo + a distinct colormap (used by Add-row)."""
+    row_chan = getattr(app, "_image_table_row_chan_cbs", None) or []
+    row_lut = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    palette = [n for n in LUT_COLOR_NAMES if n != "Greys"] or LUT_COLOR_NAMES
+    if 0 <= row_idx < len(row_chan) and row_chan[row_idx] is not None:
+        cb = row_chan[row_idx]
+        cb.blockSignals(True)
+        if cb.findText(channel) >= 0:
+            cb.setCurrentText(channel)
+        cb.blockSignals(False)
+    if palette and 0 <= row_idx < len(row_lut) and row_lut[row_idx] is not None \
+            and hasattr(row_lut[row_idx], "setLut"):
+        sel = row_lut[row_idx]
+        sel.blockSignals(True)
+        try:
+            sel.setLut(palette[row_idx % len(palette)])
+        except Exception:  # noqa: BLE001
+            pass
+        sel.blockSignals(False)
 
 
 def image_table_toggle_tophat(app) -> None:

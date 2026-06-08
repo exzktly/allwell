@@ -28,6 +28,8 @@ from well_viewer.features.image_table.controller import image_table_repopulate_d
 from well_viewer.features.image_table.controller import image_table_set_binary_mode
 from well_viewer.features.image_table.controller import image_table_refresh_channel_picker
 from well_viewer.features.image_table.controller import image_table_set_zoom
+from well_viewer.features.image_table.controller import image_table_add_varied_row
+from well_viewer.features.image_table.controller import image_table_on_addrow_dim_changed
 from well_viewer.features.image_table.controller import image_table_toggle_boundaries
 from well_viewer.features.image_table.controller import image_table_toggle_tophat
 from functools import partial
@@ -259,6 +261,54 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ))
     mr.addStretch(1)
     bv.addWidget(manual_row)
+
+    # Row 4 — clone a row, varying one dimension (propagate-but-mutate).
+    addrow_row = QWidget(builder)
+    arr2 = QHBoxLayout(addrow_row)
+    arr2.setContentsMargins(0, 0, 0, 0)
+    arr2.setSpacing(6)
+    arr2.addWidget(QLabel("Add row like", addrow_row))
+
+    addrow_src_cb = QComboBox(addrow_row)
+    addrow_src_cb.setToolTip("Existing row to clone.")
+    arr2.addWidget(addrow_src_cb)
+    ctx.app._image_table_addrow_src_cb = addrow_src_cb
+
+    arr2.addWidget(QLabel("varying", addrow_row))
+    addrow_dim_cb = QComboBox(addrow_row)
+    for label, key in (("Channel", "channel"), ("Timepoint", "timepoint"),
+                       ("FOV", "fov"), ("Well", "well")):
+        addrow_dim_cb.addItem(label, key)
+    arr2.addWidget(addrow_dim_cb)
+    ctx.app._image_table_addrow_dim_cb = addrow_dim_cb
+
+    addrow_mode_cb = QComboBox(addrow_row)
+    addrow_mode_cb.addItem("Uniform →", "uniform")
+    addrow_mode_cb.addItem("Step +1", "step")
+    addrow_mode_cb.setToolTip(
+        "Uniform: set the chosen dimension to one value across the new row.\n"
+        "Step +1: advance each cell's value for that dimension by one."
+    )
+    arr2.addWidget(addrow_mode_cb)
+    ctx.app._image_table_addrow_mode_cb = addrow_mode_cb
+
+    addrow_val_cb = QComboBox(addrow_row)
+    addrow_val_cb.setToolTip("New value (Uniform mode only).")
+    arr2.addWidget(addrow_val_cb)
+    ctx.app._image_table_addrow_val_cb = addrow_val_cb
+
+    addrow_dim_cb.currentIndexChanged.connect(
+        lambda _i: image_table_on_addrow_dim_changed(ctx.app)
+    )
+    addrow_mode_cb.currentIndexChanged.connect(
+        lambda _i: image_table_on_addrow_dim_changed(ctx.app)
+    )
+
+    arr2.addWidget(btn_secondary(
+        addrow_row, "Add row", partial(image_table_add_varied_row, ctx.app),
+    ))
+    arr2.addStretch(1)
+    bv.addWidget(addrow_row)
 
     il.addWidget(builder)
 

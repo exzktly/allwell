@@ -55,6 +55,67 @@ def test_binary_modes_mutually_exclusive(loaded_app):
     assert not app._image_table_binary_thresh_btn.isChecked()
 
 
+def _row_values(app, dim):
+    key = {"channel": "chan_cb", "timepoint": "tp_cb",
+           "fov": "fov_cb", "well": "well_cb"}[dim]
+    return [[cell[key].currentText().strip() for cell in row]
+            for row in app._image_table_cells]
+
+
+def test_add_row_uniform_clones_and_varies_channel(loaded_app):
+    app = loaded_app
+    C.image_table_repopulate_dropdowns(app)
+    C.image_table_apply_preset(app, "channel", "timepoint")
+    n0 = len(app._image_table_cells)
+    cols0 = len(app._image_table_cells[0])
+    tps_before = _row_values(app, "timepoint")
+
+    # Add a row cloned from row 1, uniformly set to a chosen channel.
+    chans = C._channel_options(app)
+    target = chans[-1]
+    app._image_table_addrow_src_cb.setCurrentIndex(0)            # row 1
+    app._image_table_addrow_dim_cb.setCurrentIndex(
+        app._image_table_addrow_dim_cb.findData("channel"))
+    app._image_table_addrow_mode_cb.setCurrentIndex(
+        app._image_table_addrow_mode_cb.findData("uniform"))
+    iv = app._image_table_addrow_val_cb.findText(target)
+    app._image_table_addrow_val_cb.setCurrentIndex(iv)
+    C.image_table_add_varied_row(app)
+
+    assert len(app._image_table_cells) == n0 + 1
+    new_row = app._image_table_cells[-1]
+    # whole new row carries the chosen channel…
+    assert all(cell["chan_cb"].currentText().strip() == target for cell in new_row)
+    # …but the other dimension (timepoints) is copied from the source row.
+    assert _row_values(app, "timepoint")[-1] == tps_before[0]
+    assert len(new_row) == cols0
+
+
+def test_add_row_step_advances_each_cell(loaded_app):
+    app = loaded_app
+    C.image_table_repopulate_dropdowns(app)
+    # rows = wells, cols = timepoints so the source row has a single channel
+    C.image_table_apply_preset(app, "well", "timepoint")
+    tp_opts = C._timepoint_options(app)
+    if len(tp_opts) < 2:
+        import pytest as _pytest
+        _pytest.skip("need ≥2 timepoints to test Step mode")
+    src_tps = _row_values(app, "timepoint")[0]
+
+    app._image_table_addrow_src_cb.setCurrentIndex(0)
+    app._image_table_addrow_dim_cb.setCurrentIndex(
+        app._image_table_addrow_dim_cb.findData("timepoint"))
+    app._image_table_addrow_mode_cb.setCurrentIndex(
+        app._image_table_addrow_mode_cb.findData("step"))
+    C.image_table_add_varied_row(app)
+
+    new_tps = _row_values(app, "timepoint")[-1]
+    # each cell advanced one timepoint (clamped at the last value)
+    for src, new in zip(src_tps, new_tps):
+        i = tp_opts.index(src)
+        assert new == tp_opts[min(i + 1, len(tp_opts) - 1)]
+
+
 def test_zoom_updates_label(loaded_app):
     app = loaded_app
     C.image_table_set_zoom(app, 1.5)

@@ -581,29 +581,55 @@ def _flatfield_qc(app, key: str, default: str = "") -> str:
     return str(qc.get(key, default) or default).strip()
 
 
-def _load_arrays_from_refs(refs, *, limit: int):
-    """Decode up to *limit* arrays from a ``(fov,tp)->ImgRef`` map."""
-    from well_viewer.data.image_discovery import open_imgref_as_array
-    out = []
-    for ref in list((refs or {}).values())[:limit]:
-        arr = open_imgref_as_array(ref, greyscale=True)
-        if arr is not None:
-            out.append(_np.asarray(arr, dtype=_np.float32))
+def _split_background_wells(value) -> "list[str]":
+    """Parse a comma-separated ``background_well`` value into a deduped well list
+    (case-insensitive). A single ``"H12"`` → ``["H12"]`` (back-compat)."""
+    seen, out = set(), []
+    for tok in str(value or "").replace(";", ",").split(","):
+        w = tok.strip()
+        if w and w.lower() not in seen:
+            seen.add(w.lower())
+            out.append(w)
     return out
 
 
-def flatfield_field_for(app, channel: str, fluor_arr):
+def _load_arrays_from_refs(refs, *, limit: int, tp=None):
+    """Decode up to *limit* arrays from a ``(fov,tp)->ImgRef`` map.
+
+    When *tp* is given, only frames whose timepoint normalizes to the same key
+    are decoded (per-timepoint empty-well field); otherwise all frames pool."""
+    from well_viewer.data.image_discovery import open_imgref_as_array
+    from well_viewer.data.image_identity import normalize_tp
+    want = normalize_tp(tp) if tp is not None else None
+    out = []
+    for k, ref in list((refs or {}).items()):
+        if want is not None:
+            ref_tp = k[1] if isinstance(k, tuple) and len(k) > 1 else k
+            if normalize_tp(ref_tp) != want:
+                continue
+        arr = open_imgref_as_array(ref, greyscale=True)
+        if arr is not None:
+            out.append(_np.asarray(arr, dtype=_np.float32))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def flatfield_field_for(app, channel: str, fluor_arr, tp=None):
     """Return the mean-1 flat-field field for the current view, or None (identity).
 
     Recomputes the flat-field METHOD the pipeline used (read from
     ``pipeline_info['qc_options']['flatfield']``) so the Segmentation tab can
     show the flat-field stage in isolation, before any background subtraction.
-    Cached per ``(channel, mode)`` in ``ReviewImageState.flatfield_field_cache``.
+    Cached per ``(channel, mode, tp)`` in ``ReviewImageState.flatfield_field_cache``.
 
     Fidelity: exact for ``none`` / ``gaussian`` / ``empty_well`` (same estimator
     and inputs the pipeline used); ``basic`` is approximated from the *current
-    well's* FOVs (the pipeline samples the whole plate). The estimate is capped
-    at a few frames and cached so the UI thread isn't blocked on repeat views.
+    well's* FOVs (the pipeline samples the whole plate). ``empty_well`` pools all
+    comma-separated background wells and builds the field from the frames at the
+    *displayed* timepoint (background drifts over time), falling back to the
+    all-timepoint pooled estimate when that timepoint is absent. The estimate is
+    capped at a few frames and cached so the UI thread isn't blocked on repeats.
     """
     import flatfield_core as _ffc
 
@@ -615,8 +641,10 @@ def flatfield_field_for(app, channel: str, fluor_arr):
         return _ffc.estimate_gaussian_flatfield(fluor_arr)
 
     chan = str(channel or "").lower()
+    from well_viewer.data.image_identity import normalize_tp
+    tp_key = normalize_tp(tp) if (mode == "empty_well" and tp is not None) else ""
     cache = app._app_state.review_image.flatfield_field_cache
-    key = (chan, mode)
+    key = (chan, mode, tp_key)
     if key in cache:
         return cache[key]
 
@@ -629,18 +657,32 @@ def flatfield_field_for(app, channel: str, fluor_arr):
                 app._app_state.preview.fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
             field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
         elif mode == "empty_well":
-            bg_well = _flatfield_qc(app, "background_well", "")
-            if bg_well:
+            wells = _split_background_wells(_flatfield_qc(app, "background_well", ""))
+            if wells:
                 if hasattr(app, "_set_status"):
                     app._set_status("Computing flat-field (empty well) for preview…")
                 from well_viewer.data.image_discovery import find_well_images_and_masks
                 ds = app._app_state.dataset
-                fluor, _ov, _mk, _th = find_well_images_and_masks(
-                    ds.data_dir, bg_well, fluor_token=channel,
-                    in_dir=ds.in_dir, _fov_tp_extractor=ds.fov_tp_extractor,
-                    _pipeline_info=ds.pipeline_info,
-                )
-                arrs = _load_arrays_from_refs(fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
+                refs_by_well = []
+                for w in wells:
+                    fluor, _ov, _mk, _th = find_well_images_and_masks(
+                        ds.data_dir, w, fluor_token=channel,
+                        in_dir=ds.in_dir, _fov_tp_extractor=ds.fov_tp_extractor,
+                        _pipeline_info=ds.pipeline_info,
+                    )
+                    if fluor:
+                        refs_by_well.append(fluor)
+                # Prefer frames at the displayed timepoint; pool across wells.
+                arrs = []
+                if tp is not None:
+                    for refs in refs_by_well:
+                        arrs.extend(_load_arrays_from_refs(
+                            refs, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES, tp=tp))
+                if not arrs:
+                    # Global pooled-median fallback (timepoint absent / no tp).
+                    for refs in refs_by_well:
+                        arrs.extend(_load_arrays_from_refs(
+                            refs, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES))
                 field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
     except Exception:  # noqa: BLE001 — a failed preview field falls back to raw
         _logger.exception("flat-field preview recompute failed (mode=%s)", mode)

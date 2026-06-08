@@ -1192,33 +1192,83 @@ def _load_image_source(source) -> "np.ndarray | None":
         return None
 
 
+# Empty-well models are keyed ``{token: {tp_key: field, _POOLED_TP: field}}`` so a
+# per-timepoint field tracks background drift; ``_POOLED_TP`` is the
+# all-timepoints fallback used when a sample's timepoint has no blank frame.
+_POOLED_TP = "__pooled__"
+
+
+def _split_background_wells(value) -> "list[str]":
+    """Parse the comma-separated background-well value into a clean, de-duped list.
+
+    Accepts a single well (``"H12"``), a comma-separated string (``"H12, G12"``),
+    or an already-split list. Order-preserving; case-insensitive de-dupe.
+    """
+    items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
+    out: "list[str]" = []
+    seen: set = set()
+    for it in items:
+        w = str(it or "").strip()
+        if w and w.lower() not in seen:
+            seen.add(w.lower())
+            out.append(w)
+    return out
+
+
+def _empty_well_tp_key(token_value) -> str:
+    """Canonical timepoint key for grouping/matching empty-well frames.
+
+    Parseable forms (``T01`` / ``24`` / ``24h`` / ``day1``) collapse to
+    ``f"{hours:g}"`` so the empty-well frames and the sample image key identically;
+    opaque labels pass through stripped. Empty when there's no timepoint.
+    """
+    raw = str(token_value or "").strip()
+    if not raw:
+        return ""
+    h = _parse_timepoint_hours(raw)
+    return raw if h != h else f"{h:g}"   # h != h ⇒ NaN (unparseable)
+
+
+def _empty_well_field(models, token: str, tp_key: str):
+    """Look up the per-(channel, timepoint) empty-well field, falling back to the
+    pooled all-timepoints field when this timepoint has no blank frame. Returns
+    None when the channel has no model at all."""
+    per_tok = (models or {}).get(str(token).lower())
+    if not isinstance(per_tok, dict):
+        return per_tok            # defensive: legacy flat shape
+    field = per_tok.get(tp_key)
+    return field if field is not None else per_tok.get(_POOLED_TP)
+
+
 def sample_empty_well_images(
     input_dir: Path,
     *,
     tokens: "list[str]",
     schema: "list[str] | None",
     sep: str,
-    background_well: str,
+    background_wells: "list[str]",
     max_samples: int = 30,
-) -> "dict[str, list[np.ndarray]]":
-    """Sample up to *max_samples* images per channel token from the empty /
-    background well, reading from **whichever input layout holds it**: a
-    per-well ``<WELL>.zip`` (the default mode), a per-well folder, or loose
-    TIFFs in *input_dir*. Returns ``{token_lower: [array, ...]}`` — the
-    per-channel stacks the empty-well estimators consume; empty when the well
-    can't be located or carries none of the requested channels.
+) -> "dict[str, dict[str, list[np.ndarray]]]":
+    """Sample empty/background-well frames, pooled across the given *background_
+    wells* and **grouped by timepoint**.
 
-    This closes the gap where the empty-well flat-field / background models were
-    built only from TIFFs *loose on disk*: in the default zip-per-well mode the
-    background well stayed compressed, every model came back empty, and
-    ``--flatfield empty_well`` / ``--background empty_well`` silently became a
-    no-op (corrected values identical to raw).
+    Returns ``{token_lower: {tp_key: [array, ...]}}`` — per-channel, per-timepoint
+    stacks the empty-well estimators consume. ``tp_key`` is the canonical
+    timepoint (:func:`_empty_well_tp_key`); the special ``_POOLED_TP`` key holds
+    every frame for that channel across all timepoints (the missing-timepoint
+    fallback). Frames from all named blank wells (and all their FOVs) at a given
+    timepoint are pooled. Reads from whichever input layout holds each well: a
+    per-well ``<WELL>.zip`` (default), a per-well folder, or loose TIFFs.
+
+    Background drifts over time, so a per-timepoint field corrects each timepoint
+    on its own; pooling multiple blank wells de-noises the estimate.
     """
     fields = list(schema or [])
     chan_idx = fields.index("channel") if "channel" in fields else -1
     well_idx = fields.index("well") if "well" in fields else -1
-    bg = str(background_well or "").strip().lower()
-    if chan_idx < 0 or not bg:
+    tp_idx = fields.index("timepoint") if "timepoint" in fields else -1
+    wells = {w.lower() for w in _split_background_wells(background_wells)}
+    if chan_idx < 0 or not wells:
         return {}
     want = {str(t).strip().lower() for t in (tokens or [])}
 
@@ -1228,21 +1278,32 @@ def sample_empty_well_images(
             return None
         if require_well:
             if well_idx < 0 or well_idx >= len(parts) \
-                    or parts[well_idx].strip().lower() != bg:
+                    or parts[well_idx].strip().lower() not in wells:
                 return None
         tok = parts[chan_idx].strip().lower()
         if want and tok not in want:
             return None
         return tok
 
-    # source := Path on disk | (zip_path, member_name)
-    by_token: "dict[str, list]" = defaultdict(list)
+    def _tp_of(stem: str) -> str:
+        parts = stem.split(sep)
+        if 0 <= tp_idx < len(parts):
+            return _empty_well_tp_key(parts[tp_idx])
+        return ""
 
-    # 1) per-well zip (default mode): <input_dir>/<WELL>.zip. The well is
+    # source := Path on disk | (zip_path, member_name); grouped (token, tp_key).
+    by_token_tp: "dict[str, dict[str, list]]" = defaultdict(lambda: defaultdict(list))
+
+    def _add(stem: str, source) -> None:
+        tok = _token_of(stem, require_well=False)
+        if tok is not None:
+            by_token_tp[tok][_tp_of(stem)].append(source)
+
+    # 1) per-well zip(s) (default mode): <input_dir>/<WELL>.zip. The well is
     #    established by the zip name, so members need not carry the well token.
     zip_hit = False
     for well, zpath in find_well_zips(input_dir):
-        if well.lower() != bg:
+        if well.lower() not in wells:
             continue
         zip_hit = True
         try:
@@ -1252,37 +1313,46 @@ def sample_empty_well_images(
                     if not name or name.startswith(".") \
                             or Path(name).suffix.lower() not in (".tif", ".tiff"):
                         continue
-                    tok = _token_of(Path(name).stem, require_well=False)
-                    if tok is not None:
-                        by_token[tok].append((zpath, member.filename))
+                    _add(Path(name).stem, (zpath, member.filename))
         except (OSError, zipfile.BadZipFile):
             continue
 
-    # 2) per-well folder: <input_dir>/<WELL>/...  (well set by folder name).
+    # 2) per-well folder(s): <input_dir>/<WELL>/...  (well set by folder name).
     if not zip_hit:
         for well, folder in find_well_folders(input_dir):
-            if well.lower() != bg:
+            if well.lower() not in wells:
                 continue
             for p in sorted(folder.rglob("*.tif*")):
-                tok = _token_of(p.stem, require_well=False)
-                if tok is not None:
-                    by_token[tok].append(p)
+                _add(p.stem, p)
 
     # 3) loose TIFFs anywhere under input_dir — the filename must carry the well.
-    if not by_token:
+    if not by_token_tp:
         for p in sorted(input_dir.rglob("*.tif*")):
             tok = _token_of(p.stem, require_well=True)
             if tok is not None:
-                by_token[tok].append(p)
+                by_token_tp[tok][_tp_of(p.stem)].append(p)
 
-    out: "dict[str, list[np.ndarray]]" = {}
-    for tok, sources in by_token.items():
+    def _load_capped(sources) -> "list[np.ndarray]":
         step = max(1, len(sources) // max_samples)
-        imgs = [a for a in (_load_image_source(s)
+        return [a for a in (_load_image_source(s)
                             for s in sources[::step][:max_samples]) if a is not None]
-        if imgs:
-            out[tok] = imgs
+
+    out: "dict[str, dict[str, list[np.ndarray]]]" = {}
+    for tok, by_tp in by_token_tp.items():
+        per_tp: "dict[str, list[np.ndarray]]" = {}
+        pooled_sources: list = []
+        for tp_key, sources in by_tp.items():
+            imgs = _load_capped(sources)
+            if imgs:
+                per_tp[tp_key] = imgs
+            pooled_sources.extend(sources)
+        pooled = _load_capped(pooled_sources)
+        if pooled:
+            per_tp[_POOLED_TP] = pooled
+        if per_tp:
+            out[tok] = per_tp
     return out
+
 
 
 def build_background_models(
@@ -1291,25 +1361,28 @@ def build_background_models(
     tokens: "list[str]",
     schema: "list[str] | None",
     sep: str,
-    background_well: str = "",
+    background_wells: "list[str] | str" = "",
     max_samples: int = 30,
-) -> "dict[str, np.ndarray]":
-    """Per-channel **additive** background fields from the empty/background well
-    (for ``--background empty_well``). Mirrors :func:`build_flatfield_models`'s
-    empty-well sampling but uses :func:`estimate_background_field` (keeps the
-    measured level for subtraction, not a mean-1 field for division). Reads the
-    well from whichever input layout holds it (zip / folder / loose) via
-    :func:`sample_empty_well_images`. Returns ``{token_lower: field}``; channels
-    with no usable empty-well images omitted.
+) -> "dict[str, dict[str, np.ndarray]]":
+    """Per-channel, **per-timepoint** additive background fields from the empty/
+    background well(s) (for ``--background empty_well``). Pools frames across all
+    named blank wells and groups by timepoint via :func:`sample_empty_well_images`,
+    then builds one :func:`estimate_background_field` per (channel, timepoint) plus
+    a pooled all-timepoints field. Returns ``{token_lower: {tp_key: field,
+    _POOLED_TP: field}}``; channels with no usable empty-well images omitted.
     """
     stacks = sample_empty_well_images(
         input_dir, tokens=tokens, schema=schema, sep=sep,
-        background_well=background_well, max_samples=max_samples)
-    models: "dict[str, np.ndarray]" = {}
-    for tok, imgs in stacks.items():
-        field = estimate_background_field(imgs)
-        if field is not None:
-            models[tok] = field
+        background_wells=background_wells, max_samples=max_samples)
+    models: "dict[str, dict[str, np.ndarray]]" = {}
+    for tok, by_tp in stacks.items():
+        per_tp: "dict[str, np.ndarray]" = {}
+        for tp_key, imgs in by_tp.items():
+            field = estimate_background_field(imgs)
+            if field is not None:
+                per_tp[tp_key] = field
+        if per_tp:
+            models[tok] = per_tp
     return models
 
 
@@ -1501,19 +1574,19 @@ def build_flatfield_models(
     schema: "list[str] | None",
     sep: str,
     mode: str,
-    background_well: str = "",
+    background_wells: "list[str] | str" = "",
     max_samples: int = 30,
-) -> "dict[str, np.ndarray]":
+) -> "dict[str, dict[str, np.ndarray]]":
     """Precompute per-channel flat-field models for the ``basic`` / ``empty_well`` modes.
 
-    Globs the input tree for TIFFs, groups them by channel token (parsed from
-    the filename schema), evenly samples up to *max_samples* per channel, and
-    estimates one BaSiC-style field per token via :func:`estimate_basic_flatfield`.
-    For ``empty_well`` only images from *background_well* are used, read from
-    whichever input layout holds it (zip / folder / loose) via
-    :func:`sample_empty_well_images`; ``basic`` samples the whole plate from
-    TIFFs present on disk. Returns ``{token_lower: flatfield}``; channels with no
-    usable images are omitted (so :func:`apply_flatfield` no-ops them).
+    Returns the uniform nested shape ``{token_lower: {tp_key: field, _POOLED_TP:
+    field}}`` so the per-image lookup (:func:`_empty_well_field`) is the same for
+    both modes. For ``empty_well`` the field is built **per timepoint** (and a
+    pooled fallback) from frames pooled across all named blank wells, via
+    :func:`sample_empty_well_images`. ``basic`` samples the whole plate
+    (time-collapsed) from TIFFs on disk and stores one ``_POOLED_TP`` field per
+    channel. Each field is a mean-1 :func:`estimate_basic_flatfield`; channels
+    with no usable images are omitted (so :func:`apply_flatfield` no-ops them).
     """
     if mode not in ("basic", "empty_well"):
         return {}
@@ -1523,12 +1596,21 @@ def build_flatfield_models(
         return {}
     want = {str(t).strip().lower() for t in (tokens or [])}
 
+    models: "dict[str, dict[str, np.ndarray]]" = {}
     if mode == "empty_well":
-        if not str(background_well or "").strip():
+        if not _split_background_wells(background_wells):
             return {}
-        by_token_imgs = sample_empty_well_images(
+        stacks = sample_empty_well_images(
             input_dir, tokens=tokens, schema=schema, sep=sep,
-            background_well=background_well, max_samples=max_samples)
+            background_wells=background_wells, max_samples=max_samples)
+        for tok, by_tp in stacks.items():
+            per_tp: "dict[str, np.ndarray]" = {}
+            for tp_key, imgs in by_tp.items():
+                field = estimate_basic_flatfield(imgs)
+                if field is not None:
+                    per_tp[tp_key] = field
+            if per_tp:
+                models[tok] = per_tp
     else:  # basic — whole-plate sampling from loose/folder TIFFs on disk.
         by_token: "dict[str, list[Path]]" = {}
         for path in sorted(input_dir.rglob("*.tif*")):
@@ -1539,19 +1621,15 @@ def build_flatfield_models(
             if want and tok not in want:
                 continue
             by_token.setdefault(tok, []).append(path)
-        by_token_imgs = {}
         for tok, paths in by_token.items():
             step = max(1, len(paths) // max_samples)
             imgs = [a for a in (_load_image_source(p)
                                 for p in paths[::step][:max_samples]) if a is not None]
-            if imgs:
-                by_token_imgs[tok] = imgs
-
-    models: "dict[str, np.ndarray]" = {}
-    for tok, imgs in by_token_imgs.items():
-        field = estimate_basic_flatfield(imgs)
-        if field is not None:
-            models[tok] = field
+            if not imgs:
+                continue
+            field = estimate_basic_flatfield(imgs)
+            if field is not None:
+                models[tok] = {_POOLED_TP: field}
     return models
 
 
@@ -2116,13 +2194,20 @@ def process_image_group(
     # one per-channel step below and the standalone flat-field is skipped.
     combined_ew = (flatfield_mode == "empty_well" and background_method == "empty_well")
 
+    # This image group's timepoint, used to pick the per-timepoint empty-well
+    # field (background drifts over time). All images in a group share the
+    # nuclear frame's fov/timepoint. Falls back to the pooled all-timepoints
+    # field via _empty_well_field when this timepoint has no blank frame.
+    _grp_tp = _empty_well_tp_key(
+        parse_filename(nuclear_path, schema=schema, sep=sep).get("timepoint", ""))
+
     def _flatfield_for(token: str, img: np.ndarray):
         if flatfield_mode == "gaussian":
             return estimate_gaussian_flatfield(img)
-        return (flatfield_models or {}).get(str(token).lower())
+        return _empty_well_field(flatfield_models, token, _grp_tp)
 
     def _bg_for(token: str):
-        return (background_models or {}).get(str(token).lower())
+        return _empty_well_field(background_models, token, _grp_tp)
 
     # Flat-field up front for every channel, unless folded into the combined step.
     if flatfield_mode and flatfield_mode != "none" and not combined_ew:
@@ -4323,8 +4408,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "one field per channel from a sample of the dataset (pure-numpy "
                         "BaSiC); 'empty_well' uses --background_well as the reference.")
     p.add_argument("--background_well", default="",
-                   help="Well label of an empty/background well used as the reference "
-                        "for --flatfield=empty_well and/or --background=empty_well.")
+                   help="Empty/background well(s) used as the reference for "
+                        "--flatfield=empty_well and/or --background=empty_well. One "
+                        "well (e.g. H12) or several comma-separated (e.g. 'H12,G12') "
+                        "to pool for a cleaner estimate. The field is built per "
+                        "timepoint (background drifts over time), with a pooled "
+                        "all-timepoints fallback for timepoints the blank lacks.")
     p.add_argument("--background", choices=BACKGROUND_METHODS, default="sliding_disk",
                    help="Background-subtraction method (applied per channel where "
                         "top-hat is enabled). 'top_hat' = fast square morphological "
@@ -4647,7 +4736,7 @@ def main() -> None:
             schema=schema,
             sep=sep,
             mode=args.flatfield,
-            background_well=args.background_well,
+            background_wells=_split_background_wells(args.background_well),
         )
         log.info("Flat-field (%s): built field(s) for channel(s): %s",
                  args.flatfield, sorted(shared_kwargs["flatfield_models"]) or "(none found)")
@@ -4660,7 +4749,7 @@ def main() -> None:
             tokens=[args.nuclear_token] + list(fluor_tokens_for_quant),
             schema=schema,
             sep=sep,
-            background_well=args.background_well,
+            background_wells=_split_background_wells(args.background_well),
         )
         log.info("Background (empty_well): built field(s) for channel(s): %s",
                  sorted(shared_kwargs["background_models"]) or "(none found)")

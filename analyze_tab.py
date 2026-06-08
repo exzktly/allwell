@@ -1475,15 +1475,30 @@ class AnalyzeTab(QWidget):
         """
         try:
             log_q.put(("zipper_start", self._expected_well_count(opts)))
+            grouped = {"n": 0}
+
+            def _on_group(tok: str) -> None:
+                grouped["n"] += 1
+                log_q.put(("zipper_well", tok))
+
             input_dir, output_dir, on_success = resolve_input_output(
                 opts["raw"],
                 log_fn=lambda msg: log_q.put(("line", msg)),
-                progress_fn=lambda tok: log_q.put(("zipper_well", tok)),
+                progress_fn=_on_group,
                 filename_schema=opts["filename_schema"],
                 filename_sep=opts["filename_sep"],
                 proc_hook=proc_hook,
                 move_source_tifs=bool(opts.get("move_source_tifs", False)),
             )
+            # When the inputs are already grouped/zipped the zipper is skipped
+            # and fires no per-well progress — surface the existing wells so the
+            # Group stage still shows progress and the plate marks each well
+            # queued (pending) instead of jumping from empty straight to
+            # processing.
+            if grouped["n"] == 0:
+                from services.input_resolution_service import iter_well_tokens
+                for tok in iter_well_tokens(input_dir):
+                    log_q.put(("zipper_well", tok))
             log_q.put(("zipper_done", None))
             # v5.x.x: forward the optional success callback as a
             # 3-tuple. PipelineRunner unpacks it and runs it after

@@ -301,7 +301,10 @@ def compute_auto_thresholds(
                   f"distribution (min == max == {arr.min():.3g}).")
             continue
         try:
-            thr = float(_threshold_otsu(arr))
+            # Round to the nearest integer before saving — the gating cut is an
+            # intensity value; a clean integer default matches the pipeline's
+            # auto-threshold and what the user can type back in.
+            thr = float(round(float(_threshold_otsu(arr))))
         except Exception as exc:
             _emit(f"Auto-threshold: Otsu failed for {ch.upper()}: {exc}")
             continue

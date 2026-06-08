@@ -37,7 +37,8 @@ _LABELS = {"group": "grouped", "upload": "uploaded", "active": "processing",
 _STAGE_KEYS = ("group", "upload", "active", "process", "threshold", "download")
 
 # Plate colours.
-_COL_PROCESSING = WARN          # amber — computing / queued
+_COL_PENDING = TXT_MUT          # slate — grouped/queued, awaiting processing
+_COL_PROCESSING = WARN          # amber — actively computing
 _COL_FETCHED = ACCENT           # blue — computed (remote: on server, awaiting fetch)
 _COL_COMPLETE = CLR_SUCCESS     # green — done with data local
 _COL_ERROR = CLR_DANGER         # red
@@ -313,16 +314,20 @@ class RunDashboard(QWidget):
                 return _COL_COMPLETE                      # fetched locally — done
             if self._has("process", w) or self._has("threshold", w):
                 return _COL_FETCHED                       # computed on server, awaiting fetch
-            if w in self._active or self._has("upload", w) or self._has("group", w):
-                return _COL_PROCESSING
+            if w in self._active or self._has("upload", w):
+                return _COL_PROCESSING                    # actively uploading / computing
+            if self._has("group", w):
+                return _COL_PENDING                        # grouped, queued for processing
             return None
         # local
         if self._has("threshold", w):
             return _COL_COMPLETE
         if self._has("process", w):
             return _COL_FETCHED
-        if w in self._active or self._has("group", w):
-            return _COL_PROCESSING
+        if w in self._active:
+            return _COL_PROCESSING                        # actively computing
+        if self._has("group", w):
+            return _COL_PENDING                            # grouped, queued for processing
         return None
 
     def _count(self, stage: str) -> int:

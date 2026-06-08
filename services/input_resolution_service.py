@@ -91,6 +91,35 @@ def well_present_in_input(input_dir: Path, well: str, *,
     return False
 
 
+def iter_well_tokens(input_dir: Path) -> "list[str]":
+    """Canonical well tokens (``A01``) present in a *resolved* input dir.
+
+    Reads the same already-grouped layouts the pipeline does — per-well
+    ``<WELL>.zip`` files and per-well ``<WELL>/`` folders — and returns the
+    canonical tokens in sorted order. Used to surface grouping progress when the
+    inputs are already grouped/zipped: the zipper is skipped in that case and so
+    emits no per-well progress of its own, leaving the Group stage stuck at 0 and
+    the wells jumping straight from empty to processing.
+    """
+    from well_token import canonical_well_label
+    seen: set[str] = set()
+    out: list[str] = []
+    try:
+        entries = sorted(input_dir.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return out
+    for p in entries:
+        tok = None
+        if p.is_file() and p.suffix.lower() == ".zip":
+            tok = canonical_well_label(p.stem)
+        elif p.is_dir():
+            tok = canonical_well_label(p.name)
+        if tok and tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    return out
+
+
 def run_zipper(
     tif_folder: Path,
     out_folder: Path,

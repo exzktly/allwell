@@ -149,7 +149,8 @@ well_viewer/
 │   ├── heatmap/      controller.py, models.py, sidebar_view.py, tab_view.py
 │   ├── distribution/ controller.py, tab_view.py
 │   ├── stats/        controller.py, state.py, view.py
-│   ├── review_image/ controller.py, renderer.py, state.py, csv_tab_view.py
+│   ├── review_image/ controller.py, renderer.py, state.py, csv_tab_view.py,
+│   │                 box_select.py
 │   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py
 │   ├── image_table/  controller.py, tab_view.py, panel_view.py,
@@ -542,7 +543,7 @@ The relevant modules:
 
 | Module | Job |
 |--------|-----|
-| `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. Measurement columns are normalised to lower-case at read time so per-channel lookups are case-insensitive; for `smfish_count` metrics the bar / line / heatmap / scatter-aggregate paths pass `threshold=-1.0` (not `0`) so zero-spot cells contribute to the mean and the population count. `resolve_value_series` emits a deduped WARN naming the missing column when both the direct and case-folded lookups miss, surfacing schema-mismatch bugs that would otherwise show up as silently-empty plots. |
+| `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. `df_included_mask` is the single inclusion chokepoint — effective inclusion is `Included==1 AND QC_Pass==1 AND Crop_Pass==1` (the optional `QC_Pass` / `Crop_Pass` layers default to pass when absent), and every consumer (overlay, plots, stats, aggregation, export) composes it so QC debris-gating and the Segmentation crop apply uniformly. Measurement columns are normalised to lower-case at read time so per-channel lookups are case-insensitive; for `smfish_count` metrics the bar / line / heatmap / scatter-aggregate paths pass `threshold=-1.0` (not `0`) so zero-spot cells contribute to the mean and the population count. `resolve_value_series` emits a deduped WARN naming the missing column when both the direct and case-folded lookups miss, surfacing schema-mismatch bugs that would otherwise show up as silently-empty plots. |
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
 | `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
@@ -562,7 +563,8 @@ Every "save state into the dataset folder" path lives under
 |--------------|--------|---------------|
 | `pipeline_info.json::cell_gating` | `cell_gating.py` | Cell-area + per-channel `fluor_gates` + `thresh_frac_on`. |
 | `pipeline_info.json::smfish_thresholds` | `smfish.py` | Per-channel smFISH spot-detection threshold (`{channel: float}`). Saved only on a successful Apply Global Threshold so the value the spinbox shows matches the spot counts baked into the per-well CSVs. Restored on dataset open and on channel-combo switch. |
-| `pipeline_info.json::sample_definitions` | `sample_definitions.py` (top level) | Saved selections (`_selections`). |
+| `pipeline_info.json::sample_definitions` | `sample_definitions.py` (top level) | Saved selections + replicate sets / groups + well labels + notes. **Auto-saves** on edit via the registry (`autosave_to_pipeline_info`, a silent variant — no dialogs/toast, no-op without a data dir) in addition to the explicit Save button; well-label cells and the Notes box commit on `editingFinished` / focus-out (not per keystroke), discrete rep-set/group edits via `rebuild_all`. |
+| `persistence.json::crop_region` | `crop_region.py` | Dataset-wide crop rectangle drawn on the Segmentation tab (`DatasetState.crop_region`, source-mask pixel tuple). Feeds the `Crop_Pass` inclusion layer; an absent / cleared crop removes the section. |
 | `persistence.json::ratios` | `ratios.py` | User-defined ratio channels. |
 | `persistence.json::heatmap_layouts` | `heatmap_layouts.py` | Saved heatmap layouts + cmap/scale state. |
 | `persistence.json::line_order` | `line_order.py` | Line plot replicate-set / well draw order. |
@@ -599,9 +601,13 @@ catches per-well `PermissionError` so one locked well's CSV (e.g. user has
 it open in Excel) doesn't kill the rest of the run — the locked well is
 skipped with a WARN naming the file + likely cause. The registry owns the **one** debounced-save path — `schedule_save`
 with a shared pending-set — so signal storms (ratio-panel field edits, heatmap
-layout drag-and-drop, cell-override toggles) coalesce into one disk write per
-500 ms burst; this replaced five identical per-domain `schedule_save`/`_flush`
-pairs and their `_<name>_save_pending` flags. `cell_overrides.json` v2 stamps
+layout drag-and-drop, cell-override toggles, sample-definition edits, crop
+drags) coalesce into one disk write per 500 ms burst; this replaced five
+identical per-domain `schedule_save`/`_flush` pairs and their
+`_<name>_save_pending` flags. Auto-saving domains: `ratios`,
+`heatmap_layouts`, `cell_overrides`, `line_order`, `view_state`, `qc_params`,
+`notes`, `sample_definitions`, and `crop_region` (`bar_groups.json` is the lone
+explicit user-picked file with no autosave). `cell_overrides.json` v2 stamps
 each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.

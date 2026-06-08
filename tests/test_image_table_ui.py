@@ -21,20 +21,20 @@ def test_channel_dropdown_populates_and_filters(loaded_app):
     opts = C._channel_options(app)
     assert {a.text() for a in checkable} == set(opts)
     # Toggling channels off the dropdown filters the Channels axis.
-    app._image_table_active_channels = set()
+    app._app_state.image_table.active_channels = set()
     C.image_table_toggle_channel(app, opts[0], True)
     assert C._axis_values(app, "channel") == [opts[0]]
 
 
 def test_build_does_not_render(loaded_app):
     app = app = loaded_app
-    app._image_table_last_render = {}
+    app._app_state.image_table.last_render = {}
     # rows=channels, cols=timepoints
     C.image_table_apply_preset(app, "channel", "timepoint")
     # Selector grid was built…
     assert app._image_table_cells, "Build should assemble the selector grid"
     # …but no images were rendered (Build must not auto-generate).
-    assert not app._image_table_last_render
+    assert not app._app_state.image_table.last_render
 
 
 def test_binary_modes_via_display_menu_radio(loaded_app):
@@ -43,31 +43,31 @@ def test_binary_modes_via_display_menu_radio(loaded_app):
     # The Display ▾ menu's Binary radio group (None / Mask / ≥ Threshold) is
     # exclusive and sets the mode absolutely.
     C.image_table_set_binary_mode(app, "mask")
-    assert app._image_table_binary_mode == "mask"
+    assert app._app_state.image_table.binary_mode == "mask"
     assert app._image_table_binary_act_mask.isChecked()
     assert not app._image_table_binary_act_thresh.isChecked()
     assert not app._image_table_binary_act_none.isChecked()
 
     C.image_table_set_binary_mode(app, "threshold")
-    assert app._image_table_binary_mode == "threshold"
+    assert app._app_state.image_table.binary_mode == "threshold"
     assert app._image_table_binary_act_thresh.isChecked()
     assert not app._image_table_binary_act_mask.isChecked()
 
     C.image_table_set_binary_mode(app, "")  # None turns binary off
-    assert app._image_table_binary_mode == ""
+    assert app._app_state.image_table.binary_mode == ""
     assert app._image_table_binary_act_none.isChecked()
     assert not app._image_table_binary_act_thresh.isChecked()
 
 
 def test_display_menu_toggles_flip_state(loaded_app):
     app = loaded_app
-    t0 = bool(app._image_table_use_tophat)
+    t0 = bool(app._app_state.image_table.use_tophat)
     C.image_table_toggle_tophat(app)
-    assert app._image_table_use_tophat is (not t0)
+    assert app._app_state.image_table.use_tophat is (not t0)
     assert app._image_table_tophat_act.isChecked() is (not t0)
-    b0 = bool(app._image_table_show_boundaries)
+    b0 = bool(app._app_state.image_table.show_boundaries)
     C.image_table_toggle_boundaries(app)
-    assert app._image_table_show_boundaries is (not b0)
+    assert app._app_state.image_table.show_boundaries is (not b0)
     assert app._image_table_boundaries_act.isChecked() is (not b0)
 
 
@@ -125,7 +125,7 @@ def test_add_row_step_advances_each_cell(loaded_app):
 def test_zoom_updates_label(loaded_app):
     app = loaded_app
     C.image_table_set_zoom(app, 1.5)
-    assert abs(app._image_table_zoom - 1.5) < 1e-9
+    assert abs(app._app_state.image_table.zoom - 1.5) < 1e-9
     assert app._image_table_zoom_lbl.text() == "150%"
 
 

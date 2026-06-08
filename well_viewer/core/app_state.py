@@ -18,6 +18,7 @@ from well_viewer.core.channel_state import ChannelState
 from well_viewer.core.dataset_state import DatasetState
 from well_viewer.core.plot_state import PlotState
 from well_viewer.features.barplot.state import BarPlotState
+from well_viewer.features.image_table.state import ImageTableState
 from well_viewer.features.review_image.state import PreviewState, ReviewImageState
 from well_viewer.core.selection_state import SelectionState
 from well_viewer.features.stats.state import StatsState
@@ -35,3 +36,4 @@ class AppState:
     review_image: ReviewImageState = field(default_factory=ReviewImageState)
     preview: PreviewState = field(default_factory=PreviewState)
     bar: BarPlotState = field(default_factory=BarPlotState)
+    image_table: ImageTableState = field(default_factory=ImageTableState)

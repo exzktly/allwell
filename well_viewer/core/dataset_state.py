@@ -58,6 +58,11 @@ class DatasetState:
     fov_tp_extractor: Callable[[str], tuple[str, str]] | None = None
     persistence_doc: object = None
 
+    # Dataset-wide crop rectangle (row0, col0, row1, col1) in source-mask pixels,
+    # or None. Owned by features/crop; cells whose centroid falls outside are
+    # excluded at the df_included_mask chokepoint via the Crop_Pass column.
+    crop_region: tuple[int, int, int, int] | None = None
+
     # ── status ───────────────────────────────────────────────────────────────
 
     @property
@@ -82,6 +87,8 @@ class DatasetState:
         self.persistence_doc = None
         self.well_paths.clear()
         self.cache.clear()
+        # A new dataset has no crop until its persisted region (if any) loads.
+        self.crop_region = None
 
     def rebuild_timepoints(self) -> None:
         """Recompute the canonical numeric timepoint list.

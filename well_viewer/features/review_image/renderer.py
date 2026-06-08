@@ -426,6 +426,7 @@ def draw_review_image(
             sel_boundary = boundary & (center == int(sel_nid))
             rgb[sel_boundary] = sel_color
 
+    _draw_crop_outline(app, rgb)
     app._review_image_base_rgb = _np.ascontiguousarray(rgb)
     app._app_state.review_image.base_pil = (
         _PILImage.fromarray(rgb, mode="RGB") if _PIL_AVAILABLE else None
@@ -455,6 +456,32 @@ def draw_review_image(
             float(app._app_state.review_image.pan_x),
             float(app._app_state.review_image.pan_y),
         )
+
+
+def _draw_crop_outline(app, rgb) -> None:
+    """Draw the active dataset-wide crop rectangle as an outline on ``rgb``.
+
+    The region is in mask-pixel (row, col) space — the same coordinate system as
+    ``rgb`` for the displayed FOV — so it maps directly. No-op when no crop is
+    set. A distinct cyan edge keeps it readable over both the red boundaries and
+    the white binary mask.
+    """
+    region = app._app_state.dataset.crop_region
+    if not region:
+        return
+    h, w = rgb.shape[:2]
+    r0, c0, r1, c1 = region
+    r0 = max(0, min(h - 1, int(r0)))
+    r1 = max(0, min(h - 1, int(r1)))
+    c0 = max(0, min(w - 1, int(c0)))
+    c1 = max(0, min(w - 1, int(c1)))
+    if r1 <= r0 or c1 <= c0:
+        return
+    color = _np.array([0, 220, 255], dtype=_np.uint8)
+    rgb[r0, c0:c1 + 1] = color
+    rgb[r1, c0:c1 + 1] = color
+    rgb[r0:r1 + 1, c0] = color
+    rgb[r0:r1 + 1, c1] = color
 
 
 def render_review_image_display(app, *, pan_only: bool = False) -> None:
@@ -583,7 +610,10 @@ def apply_review_image_cursor(app) -> None:
     to both the label and the scroll viewport so it does not flicker
     back to the arrow over scrollbar gutters or padding.
     """
-    enabled = bool(app._app_state.review_image.include_edit_mode)
+    enabled = bool(
+        app._app_state.review_image.include_edit_mode
+        or app._app_state.review_image.crop_edit_mode
+    )
     cursor = Qt.CrossCursor if enabled else Qt.PointingHandCursor
     if hasattr(app, "_review_image_label"):
         app._review_image_label.setCursor(cursor)
@@ -665,11 +695,20 @@ def toggle_review_image_source(app) -> None:
 
 
 def set_review_image_include_mode(app, enabled: bool) -> None:
-    app._app_state.review_image.include_edit_mode = bool(enabled)
+    enabled = bool(enabled)
+    app._app_state.review_image.include_edit_mode = enabled
+    if enabled and app._app_state.review_image.crop_edit_mode:
+        # Mutually exclusive with crop-draw mode so an armed rubber band is
+        # unambiguous on release. Clear it directly (avoids importing the crop
+        # controller, which imports this module).
+        app._app_state.review_image.crop_edit_mode = False
+        crop_btn = getattr(app, "_review_image_crop_btn", None)
+        if crop_btn is not None:
+            crop_btn.setChecked(False)
     app._apply_review_image_cursor()
     btn = getattr(app, "_review_image_delete_btn", None)
     if btn is not None:
-        btn.setChecked(bool(enabled))
+        btn.setChecked(enabled)
     if enabled:
         app._set_status(
             "Delete mode ON — click a cell to exclude it, or drag a rectangle to bulk-exclude."

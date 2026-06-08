@@ -743,19 +743,41 @@ def review_build_include_map(
 
 
 
+def _binary_gate_columns(app):
+    """Return ``(val_col, threshold)`` for the Segmentation binary mask.
+
+    Keyed to the **displayed image channel** (``active_image_channel``) — the
+    channel the Segmentation tab is actually showing — so "Binary (≥ ON
+    threshold)" binarises the channel you're viewing. The global plotting
+    channel (``active_val_col`` / the active-channel threshold) can differ and
+    would otherwise pull the wrong channel. Falls back to the plotting column
+    when no image channel is set (e.g. the nuc+seg overlay).
+    """
+    img_chan = str(app._app_state.channel.active_image_channel or "").strip()
+    if img_chan:
+        return (f"{img_chan}_{app._app_state.channel.active_metric}",
+                app._get_thresh_frac_on(img_chan))
+    return (app._app_state.channel.active_val_col, app._get_thresh_frac_on())
+
+
 def review_build_threshold_map(
     app, mask_arr, well: str, fov: str, tp: str,
 ) -> Dict[int, bool]:
     """Build {nid: above_threshold} for cells in the displayed FOV/timepoint.
 
-    Mirrors the bar plot's gating logic: a cell is "above threshold" only
-    when it passes (a) cell-area gating, (b) every fluorescence gate, and
-    (c) ``row[active_val_col] > thresh_frac_on``.
+    Mirrors the bar plot's gating logic: a cell is "above threshold" only when it
+    passes (a) cell-area gating, (b) every fluorescence gate, and (c)
+    ``row[val_col] > thresh_frac_on``. The value column + ON threshold are taken
+    from the **displayed image channel** (``active_image_channel``) — the channel
+    the Segmentation tab is actually showing — not the global plotting channel
+    (``active_val_col``), which can differ and would otherwise binarise the
+    wrong channel.
     """
     center = _np.asarray(mask_arr)
     fluor_gates = app._get_all_fluor_gates()
-    threshold = app._get_thresh_frac_on()
-    val_col = app._app_state.channel.active_val_col
+    # Gate against the channel being viewed on the Segmentation tab, not the
+    # global plotting channel — see _binary_gate_columns.
+    val_col, threshold = _binary_gate_columns(app)
     ratios = app._app_state.channel.ratio_index
     above_by_nid: Dict[int, bool] = {
         int(nid): False for nid in _np.unique(center) if int(nid) > 0

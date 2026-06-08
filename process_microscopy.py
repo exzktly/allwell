@@ -2029,7 +2029,10 @@ def _estimate_thresholds_standalone(
                      ch.upper(), float(arr.min()))
             continue
         try:
-            thr = float(threshold_otsu(arr))
+            # Round the calculated threshold to the nearest integer before it is
+            # saved — the gating cut is an intensity value, and a clean integer
+            # default reads better and matches what the user can type back in.
+            thr = float(round(float(threshold_otsu(arr))))
         except Exception as exc:
             log.warning("Auto-threshold: Otsu failed for %s: %s", ch.upper(), exc)
             continue

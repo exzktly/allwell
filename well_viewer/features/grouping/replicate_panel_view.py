@@ -16,13 +16,33 @@ Sample Definitions tab is split between three places:
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary
 from well_viewer.features.grouping.label_grid_view import build_label_grid
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.selection_controller import update_active_group_label
+
+
+class _NotesEdit(QPlainTextEdit):
+    """Notes box that commits on focus-out instead of on every keystroke.
+
+    ``QPlainTextEdit`` has no ``editingFinished`` signal, so we persist when the
+    widget loses focus (clicking elsewhere, switching tab, closing the window) —
+    one save per editing session rather than one per letter.
+    """
+
+    def __init__(self, parent, on_commit) -> None:
+        super().__init__(parent)
+        self._on_commit = on_commit
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().focusOutEvent(event)
+        try:
+            self._on_commit()
+        except Exception:  # never let an autosave failure escape the event loop
+            pass
 
 
 def build_replicate_panel(app, parent: QWidget) -> None:
@@ -214,7 +234,6 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     from PySide6.QtWidgets import (
         QFrame as _QFrame,
         QHBoxLayout as _QHBoxLayout,
-        QPlainTextEdit as _QPlainTextEdit,
         QTabWidget as _QTabWidget,
         QVBoxLayout as _QVBoxLayout,
         QWidget as _QWidget,
@@ -330,10 +349,11 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     notes_tab = _QWidget(sub_tabs)
     nl = _QVBoxLayout(notes_tab)
     nl.setContentsMargins(6, 6, 6, 6)
-    app._notes_edit = _QPlainTextEdit(notes_tab)
+    # Commit on focus-out (not per keystroke): a freeform notes box shouldn't
+    # rewrite pipeline_info.json on every letter typed.
+    app._notes_edit = _NotesEdit(notes_tab, app._notes_schedule_save)
     app._notes_edit.setPlaceholderText("Project notes…")
     app._notes_edit.setPlainText(getattr(app, "_notes_text", "") or "")
-    app._notes_edit.textChanged.connect(app._notes_schedule_save)
     nl.addWidget(app._notes_edit, 1)
     sub_tabs.addTab(notes_tab, "Notes")
 

@@ -90,4 +90,10 @@ def load_from_pipeline_info(app) -> bool:
                 edit.setText(str(fval))
                 applied = True
 
+    # Mirror the just-loaded value into the plotting ctxbar quick-edit so it
+    # shows the persisted threshold on load (guarded; no-op before it's built).
+    refresh = getattr(app, "_refresh_thresh_frac_quick_edit", None)
+    if callable(refresh):
+        refresh()
+
     return applied

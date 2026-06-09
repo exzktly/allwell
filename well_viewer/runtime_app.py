@@ -187,7 +187,7 @@ from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from functools import partial
 from well_viewer.core.selection_controller import labels_apply_affix
 from well_viewer.features.barplot.controller import toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display
-from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
+from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
 from well_viewer.features.export.service import export_scatter_agg_data
 from well_viewer.features.export.style import open_export_style_panel
 from well_viewer.features.grouping.controller import rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded
@@ -350,6 +350,10 @@ class WellViewerApp(QWidget):
     def _get_all_fluor_gates(self) -> Dict[str, float]: return get_all_fluor_gates(self)
 
     def _get_thresh_frac_on(self, channel: Optional[str] = None) -> float: return get_thresh_frac_on(self, channel)
+
+    def _set_thresh_frac_on(self, value, channel: Optional[str] = None) -> None: return set_thresh_frac_on(self, value, channel)
+
+    def _refresh_thresh_frac_quick_edit(self) -> None: return refresh_thresh_frac_quick_edit(self)
 
     # ── UI ────────────────────────────────────────────────────────────────────
 

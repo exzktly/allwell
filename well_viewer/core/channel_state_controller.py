@@ -248,6 +248,8 @@ def set_active_channel(app, channel: str) -> None:
     recalculate_threshold(app)
     app._invalidate_stats_cache()
     refresh_metric_combo_for_channel(app)
+    # Keep the ctxbar ThreshFracOn quick-edit showing the new channel's value.
+    refresh_thresh_frac_quick_edit(app)
     # Announce on the bus. The RedrawCoordinator subscriber coalesces the
     # redraw — visible scope now, the other marked dirty for redraw on tab
     # switch (see redraw_coordinator.py / fold_change_scopes.py).
@@ -852,6 +854,60 @@ def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
     return cell_gating_get_thresh_frac_on(app, channel)
 
 
+def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
+    """Set ThreshFracOn for a channel (the active channel by default).
+
+    Writes *through* the Cell Gating tab's edit — the single source of truth that
+    persistence reads from — then runs the existing change handler (validate →
+    save → persist → redraw). This is the write half of the plotting-tab
+    quick-edit; editing here stays consistent with the Cell Gating tab,
+    Auto-threshold, stats, and exports. No-op until a dataset is loaded.
+    """
+    if not app._app_state.dataset.data_dir:
+        return
+    if channel is None:
+        channel = app._app_state.channel.active_channel
+    if not channel or channel == "—":
+        return
+    # The Cell Gating tab is built lazily; materialize it (same pattern as
+    # persistence.cell_gating.load_from_pipeline_info) so its edits dict exists.
+    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
+        build = getattr(app, "_centre_build_pending", None)
+        if callable(build):
+            build("Sample Definitions")
+        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
+        build_cell_gating_subtab(app)
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        _cell_gating_resolve_key,
+        cell_gating_on_threshold_frac_on_change,
+    )
+    edits = getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}
+    edit = edits.get(_cell_gating_resolve_key(app, channel))
+    if edit is None:
+        return
+    blocked = edit.blockSignals(True)
+    try:
+        edit.setText(str(float(value)))
+    finally:
+        edit.blockSignals(blocked)
+    cell_gating_on_threshold_frac_on_change(app)
+
+
+def refresh_thresh_frac_quick_edit(app) -> None:
+    """Sync the ctxbar quick-edit Stepper to the active channel's ThreshFracOn.
+
+    Signals are blocked so this display sync doesn't loop back through
+    ``set_thresh_frac_on`` (``Stepper.setValue`` emits ``valueChanged``). No-op
+    when the stepper hasn't been built yet.
+    """
+    stepper = getattr(app, "_plotting_thresh_frac_stepper", None)
+    if stepper is None:
+        return
+    blocked = stepper.blockSignals(True)
+    try:
+        stepper.setValue(float(get_thresh_frac_on(app)))
+    finally:
+        stepper.blockSignals(blocked)
 
 
 def get_fluor_gate(app, channel: str) -> float:

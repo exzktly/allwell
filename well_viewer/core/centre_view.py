@@ -345,6 +345,33 @@ def build_centre(app, parent: QWidget) -> None:
         app._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
         arl.addWidget(app._plotting_metric_cb)
 
+        # Quick-edit for the active channel's ThreshFracOn (the per-channel
+        # ON/OFF intensity threshold that drives the fraction-above- and
+        # mean-above-threshold series). Editing here writes through the Cell
+        # Gating tab's field (the single source of truth) and re-renders, so a
+        # user can tune it without leaving the plot. Hidden on scatter sub-tabs
+        # (per-axis channels) by ``_refresh_channel_chip``.
+        from widgets.stepper import Stepper as _Stepper
+        thresh_lbl = QLabel("Threshold")
+        thresh_lbl.setStyleSheet(
+            f"color: {_C.text_muted}; font-size: {_T.caption_size}px; "
+            f"letter-spacing: 0.08em;"
+        )
+        arl.addWidget(thresh_lbl)
+        app._plotting_thresh_frac_lbl = thresh_lbl
+        app._plotting_thresh_frac_stepper = _Stepper(
+            value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
+        app._plotting_thresh_frac_stepper.setFixedWidth(96)
+        app._plotting_thresh_frac_stepper.setToolTip(
+            "ON/OFF intensity threshold for the active channel — cells above it "
+            "count toward the fraction-above- and mean-above-threshold series. "
+            "Edits the same value as the Cell Gating tab's ThreshFracOn."
+        )
+        app._plotting_thresh_frac_stepper.valueChanged.connect(
+            lambda v: app._set_thresh_frac_on(v)
+        )
+        arl.addWidget(app._plotting_thresh_frac_stepper)
+
         arl.addStretch(1)
 
         # "+ Add panel" button retired — the underlying per-renderer
@@ -427,18 +454,25 @@ def build_centre(app, parent: QWidget) -> None:
             """
             global_cb = getattr(app, "_plotting_channel_cb", None)
             metric_cb = getattr(app, "_plotting_metric_cb", None)
-            # Hide the global Channel/Property combos on scatter sub-tabs
-            # — those tabs own per-axis (channel, property) selectors.
+            # Hide the global Channel/Property combos and the ThreshFracOn
+            # quick-edit on scatter sub-tabs — those tabs own per-axis
+            # (channel, property) selectors, so a single active-channel control
+            # would be ambiguous.
             is_scatter = title in ("Scatter Plot", "Scatter Cells", "Scatter Agg")
-            for cb in (global_cb, metric_cb):
-                if cb is not None:
-                    cb.setVisible(not is_scatter)
-            # Also hide the "Channel" / "Property" labels in the action row
-            # so the row looks intentional (not just empty boxes hidden).
-            for lbl_attr in ("_plotting_channel_lbl", "_plotting_metric_lbl"):
+            for w in (global_cb, metric_cb,
+                      getattr(app, "_plotting_thresh_frac_stepper", None)):
+                if w is not None:
+                    w.setVisible(not is_scatter)
+            # Also hide the "Channel" / "Property" / "Threshold" labels in the
+            # action row so the row looks intentional (not just empty boxes hidden).
+            for lbl_attr in ("_plotting_channel_lbl", "_plotting_metric_lbl",
+                             "_plotting_thresh_frac_lbl"):
                 lbl = getattr(app, lbl_attr, None)
                 if lbl is not None:
                     lbl.setVisible(not is_scatter)
+            # Keep the quick-edit showing the active channel's value on every
+            # sub-tab switch (guarded; no-op before the stepper is built).
+            app._refresh_thresh_frac_quick_edit()
             if global_cb is None:
                 return
             real_labels = [str(ch).upper() for ch in

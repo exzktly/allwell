@@ -1316,6 +1316,54 @@ def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
     return apply_flatfield(img, ff_field)
 
 
+def _subtract_background_step(img: np.ndarray, *, radius: int,
+                              background_method: str, bg_field, fft_small: float = 0.0,
+                              mesh_ratio: float = 3.0, mesh_sigma: float = 3.0,
+                              combined_ew: bool = False, ff_field=None) -> np.ndarray:
+    """The background half of per-channel correction, shared by the batch
+    pipeline (``process_image_group._correct``) and the interactive Playground.
+
+    In combined empty-well mode this IS the full correction
+    ``(raw − B)/(B/mean(B))``; otherwise it is ``subtract_background(method)``.
+    Extracted so both call sites run the exact same dispatch — a change to any
+    method or to the combined rule affects the pipeline and the Playground
+    identically.
+    """
+    if combined_ew:
+        return combined_empty_well_correct(img, bg_field, ff_field)
+    return subtract_background(img, radius, background_method, bg_field,
+                               fft_small=fft_small, mesh_ratio=mesh_ratio,
+                               mesh_sigma=mesh_sigma)
+
+
+def correct_single_frame(image, *, flatfield_mode: str = "none",
+                         background_method: str = "none", radius: int = 50,
+                         fft_small: float = 0.0, mesh_ratio: float = 3.0,
+                         mesh_sigma: float = 3.0, ff_field=None,
+                         bg_field=None) -> np.ndarray:
+    """Full flat-field + background correction for ONE raw frame, in the pipeline's
+    order (flat-field divide → background subtract), with the combined empty-well
+    special case folded in. Mirrors the orchestration of
+    ``process_image_group`` so the interactive Playground produces exactly what a
+    batch run would bake into the saved image.
+
+    ``ff_field`` / ``bg_field`` are precomputed per-channel fields (None when the
+    mode doesn't need them; ``gaussian`` self-estimates from the frame). For the
+    combined case (both flat-field and background ``empty_well``), pass the
+    additive ``bg_field`` (B) and the mean-1 ``ff_field`` (= B/mean(B)).
+    """
+    img = np.asarray(image, dtype=np.float32)
+    combined_ew = (flatfield_mode == "empty_well" and background_method == "empty_well")
+    # Flat-field up front unless folded into the combined step.
+    if flatfield_mode and flatfield_mode != "none" and not combined_ew:
+        ff = estimate_gaussian_flatfield(img) if flatfield_mode == "gaussian" else ff_field
+        img = apply_flatfield(img, ff)
+    return _subtract_background_step(
+        img, radius=radius, background_method=background_method, bg_field=bg_field,
+        fft_small=fft_small, mesh_ratio=mesh_ratio, mesh_sigma=mesh_sigma,
+        combined_ew=combined_ew, ff_field=ff_field)
+
+
 def _load_image_source(source) -> "np.ndarray | None":
     """Load a 2-D float32 image from either a ``Path`` on disk or a
     ``(zip_path, member_name)`` tuple (a TIFF stored inside a per-well zip).
@@ -2371,14 +2419,17 @@ def process_image_group(
 
     def _correct(img: np.ndarray, token: str, radius: int, enabled: bool,
                  small_px: int = 0) -> np.ndarray:
+        # Flat-field is already applied up front (above); this is the background
+        # half only, shared verbatim with the interactive Playground via
+        # _subtract_background_step.
         if not enabled:
             return img
-        if combined_ew:
-            return combined_empty_well_correct(
-                img, _bg_for(token), _flatfield_for(token, img))
-        return subtract_background(img, radius, background_method, _bg_for(token),
-                                   fft_small=small_px, mesh_ratio=mesh_ratio,
-                                   mesh_sigma=mesh_sigma)
+        return _subtract_background_step(
+            img, radius=radius, background_method=background_method,
+            bg_field=_bg_for(token), fft_small=small_px,
+            mesh_ratio=mesh_ratio, mesh_sigma=mesh_sigma,
+            combined_ew=combined_ew,
+            ff_field=_flatfield_for(token, img) if combined_ew else None)
 
     _t = time.perf_counter()
     nir_corr = _correct(nir_raw, nuclear_token, tophat_radius_nir, tophat_nir,

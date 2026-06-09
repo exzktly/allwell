@@ -1,0 +1,263 @@
+"""Playground tab — controller (logic, event handlers, no Qt-app import).
+
+Drives the single-frame correction testbed: populate the well/channel/timepoint/
+fov selectors (reusing the Image Table option helpers), load the chosen RAW frame
+and its precomputed segmentation mask (reusing the Image Table loaders), apply the
+chosen correction via the shared ``process_microscopy.correct_single_frame``
+(identical code path to the batch pipeline), and render through the Playground
+renderer. Reference-well methods (empty_well / basic) build their per-channel
+field on a worker thread.
+
+Widget reads are all guarded (``getattr``) so the controller can be driven purely
+through ``app._app_state.playground`` in headless tests.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+import process_microscopy as pm
+from well_viewer.features.image_table.controller import (
+    _channel_options, _fov_options, _load_array, _load_mask_array,
+    _timepoint_options, _well_options,
+)
+from well_viewer.features.playground.renderer import (
+    build_playground_rgb, render_playground_display,
+)
+from well_viewer.features.playground.worker import request_reference_fields
+
+
+def _st(app):
+    return app._app_state.playground
+
+
+def _is_real_channel(label: str) -> bool:
+    """Exclude the virtual NUC+SEG overlay and ratio channels — the Playground
+    corrects real single-channel frames only."""
+    return bool(label) and label != "NUC+SEG" and "/" not in label
+
+
+# ── dropdown population ──────────────────────────────────────────────────────
+
+def _set_combo(app, attr: str, options, current):
+    cb = getattr(app, attr, None)
+    if cb is None:
+        return
+    from well_viewer.core.ui_helpers import set_combo_values
+    set_combo_values(cb, options or ["—"])
+    if current and cb.findText(str(current)) >= 0:
+        blocked = cb.blockSignals(True)
+        try:
+            cb.setCurrentText(str(current))
+        finally:
+            cb.blockSignals(blocked)
+
+
+def playground_repopulate_dropdowns(app) -> None:
+    """Refresh the frame selectors from the loaded dataset (idempotent)."""
+    st = _st(app)
+    wells = _well_options(app)
+    channels = [c for c in _channel_options(app) if _is_real_channel(c)]
+    tps = _timepoint_options(app)
+    fovs = _fov_options(app)
+    st.well = st.well or (wells[0] if wells else None)
+    st.channel = st.channel or (channels[0] if channels else None)
+    st.timepoint = st.timepoint or (tps[0] if tps else None)
+    st.fov = st.fov or (fovs[0] if fovs else None)
+    _set_combo(app, "_playground_well_cb", wells, st.well)
+    _set_combo(app, "_playground_chan_cb", channels, st.channel)
+    _set_combo(app, "_playground_tp_cb", tps, st.timepoint)
+    _set_combo(app, "_playground_fov_cb", fovs, st.fov)
+
+
+# ── widget → state ───────────────────────────────────────────────────────────
+
+def _read_combo(app, attr: str):
+    cb = getattr(app, attr, None)
+    if cb is None:
+        return None
+    txt = str(cb.currentText() or "").strip()
+    return txt if txt and txt != "—" else None
+
+
+def _read_float(app, attr: str, default: float) -> float:
+    e = getattr(app, attr, None)
+    if e is None:
+        return default
+    try:
+        return float(str(e.text()).strip())
+    except (ValueError, AttributeError):
+        return default
+
+
+def _read_widgets_into_state(app) -> None:
+    """Pull current widget values into state. No-op for widgets not built yet
+    (so headless tests can set ``app._app_state.playground`` fields directly)."""
+    st = _st(app)
+    for attr, field in (("_playground_well_cb", "well"),
+                        ("_playground_chan_cb", "channel"),
+                        ("_playground_tp_cb", "timepoint"),
+                        ("_playground_fov_cb", "fov")):
+        v = _read_combo(app, attr)
+        if v is not None:
+            setattr(st, field, v)
+    bg_cb = getattr(app, "_playground_bg_cb", None)
+    if bg_cb is not None:
+        st.background_method = str(bg_cb.currentText() or "none")
+    ff_cb = getattr(app, "_playground_ff_cb", None)
+    if ff_cb is not None:
+        st.flatfield_mode = str(ff_cb.currentText() or "none")
+    bw = getattr(app, "_playground_bgwell_edit", None)
+    if bw is not None:
+        st.background_well = str(bw.text() or "").strip() or None
+    st.radius = int(_read_float(app, "_playground_radius_edit", st.radius))
+    st.fft_small = _read_float(app, "_playground_fft_small_edit", st.fft_small)
+    st.mesh_ratio = _read_float(app, "_playground_mesh_ratio_edit", st.mesh_ratio)
+    st.mesh_sigma = _read_float(app, "_playground_mesh_sigma_edit", st.mesh_sigma)
+    lut = getattr(app, "_playground_cmap_cb", None)
+    if lut is not None and hasattr(lut, "lut"):
+        name = lut.lut()
+        st.cmap_name = (name + "_r") if (hasattr(lut, "isReversed") and lut.isReversed()) else name
+
+
+# ── LUT ──────────────────────────────────────────────────────────────────────
+
+def _resolve_lut(app, arr):
+    """Parse the playground LUT min/max edits ('auto'/blank/number); fall back to
+    the array's min/max. Mirrors review_image_resolve_lut."""
+    def _num(attr, fallback):
+        e = getattr(app, attr, None)
+        if e is None:
+            return fallback
+        txt = str(e.text() or "").strip().lower()
+        if not txt or txt == "auto":
+            return fallback
+        try:
+            return float(txt)
+        except ValueError:
+            return fallback
+    a = np.asarray(arr, dtype=np.float32)
+    lo = _num("_playground_lmin_entry", float(a.min()) if a.size else 0.0)
+    hi = _num("_playground_lmax_entry", float(a.max()) if a.size else 1.0)
+    if hi <= lo:
+        hi = lo + 1.0
+    # Keep the edits showing the applied numbers (signals blocked).
+    for attr, val in (("_playground_lmin_entry", lo), ("_playground_lmax_entry", hi)):
+        e = getattr(app, attr, None)
+        if e is not None:
+            blocked = e.blockSignals(True)
+            try:
+                e.setText(f"{val:.0f}")
+            finally:
+                e.blockSignals(blocked)
+    return lo, hi
+
+
+def _set_status(app, text: str) -> None:
+    lbl = getattr(app, "_playground_status", None)
+    if lbl is not None:
+        lbl.setText(text)
+
+
+# ── main render ──────────────────────────────────────────────────────────────
+
+def playground_on_change(app) -> None:
+    """Reload + recorrect + rerender on any selector / param / toggle change."""
+    st = _st(app)
+    _read_widgets_into_state(app)
+    if not (st.well and st.channel and st.timepoint and st.fov):
+        _set_status(app, "Select a well, channel, timepoint, and FOV.")
+        return
+    if app._app_state.dataset.data_dir is None:
+        _set_status(app, "Load a dataset first.")
+        return
+
+    cache = st.image_cache
+    raw = _load_array(app, cache, st.well, st.channel, st.timepoint, st.fov,
+                      use_tophat=False)
+    if raw is None:
+        st.raw_arr = None
+        _set_status(app, "No raw image for the selected frame.")
+        return
+    st.raw_arr = np.asarray(raw, dtype=np.float32)
+    st.mask_arr = _load_mask_array(app, cache, st.well, st.timepoint, st.fov)
+
+    if not st.show_corrected:
+        _render(app, st.raw_arr)
+        _set_status(app, f"Raw — {st.well} {st.channel} t{st.timepoint} fov{st.fov}")
+        return
+
+    chan_lower = st.channel.lower()
+    if st.needs_reference_field():
+        if not st.background_well:
+            _set_status(app, "Pick a background well for empty_well / basic.")
+            _render(app, st.raw_arr)
+            return
+        if st.reference_stale():
+            _build_reference_then_render(app, chan_lower)
+            return
+        ff = st.ff_field_by_chan.get(chan_lower)
+        bg = st.bg_field_by_chan.get(chan_lower)
+    else:
+        ff = bg = None
+
+    corrected = pm.correct_single_frame(
+        st.raw_arr, flatfield_mode=st.flatfield_mode,
+        background_method=st.background_method, radius=st.radius,
+        fft_small=st.fft_small, mesh_ratio=st.mesh_ratio, mesh_sigma=st.mesh_sigma,
+        ff_field=ff, bg_field=bg)
+    _render(app, corrected)
+    _set_status(
+        app, f"Corrected ({st.flatfield_mode}+{st.background_method}) — "
+        f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}")
+
+
+def _render(app, arr) -> None:
+    st = _st(app)
+    lo, hi = _resolve_lut(app, arr)
+    mask = st.mask_arr if (st.show_overlay or st.binary_mask) else None
+    st.base_rgb = build_playground_rgb(
+        arr, mask, lo=lo, hi=hi, cmap_name=st.cmap_name, binary=st.binary_mask,
+        show_boundary=st.show_overlay, tint=tuple(st.tint_color))
+    render_playground_display(app)
+
+
+def _build_reference_then_render(app, chan_lower: str) -> None:
+    """Kick off the reference-field worker; re-render when it lands."""
+    st = _st(app)
+    _set_status(app, f"Building {st.flatfield_mode}/{st.background_method} model "
+                     f"from well {st.background_well}…")
+    try:
+        from well_viewer.core.status_signal import warn_push
+        warn_push()
+        app._playground_warn_pushed = True
+    except Exception:
+        app._playground_warn_pushed = False
+
+    def _on_done(well, chan, ff_field, bg_field):
+        if ff_field is not None:
+            st.ff_field_by_chan[chan] = ff_field
+        if bg_field is not None:
+            st.bg_field_by_chan[chan] = bg_field
+        st.model_well = st.background_well
+        if getattr(app, "_playground_warn_pushed", False):
+            try:
+                from well_viewer.core.status_signal import warn_pop
+                warn_pop()
+            finally:
+                app._playground_warn_pushed = False
+        playground_on_change(app)
+
+    def _on_failed(msg):
+        if getattr(app, "_playground_warn_pushed", False):
+            try:
+                from well_viewer.core.status_signal import warn_pop
+                warn_pop()
+            finally:
+                app._playground_warn_pushed = False
+        _set_status(app, f"Model build failed: {msg}")
+
+    app._playground_ref_bridge = request_reference_fields(
+        app, st.background_well, chan_lower,
+        flatfield_mode=st.flatfield_mode, background_method=st.background_method,
+        on_done=_on_done, on_failed=_on_failed)

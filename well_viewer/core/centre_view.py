@@ -29,7 +29,7 @@ from typing import Callable, Dict, Set
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.features.preview.panel_view import build_review_image_panel
@@ -620,15 +620,48 @@ def build_centre(app, parent: QWidget) -> None:
         build_image_table_picker(app, app._sidebar_image_table_frame)
 
     def _build_cell_segmentation() -> None:
-        """Build the Segmentation tab — the review-image panel.
+        """Build the Segmentation page — a QTabWidget hosting the Review Image
+        panel and the Playground (interactive single-frame correction testbed).
 
-        smFISH used to ride here as a second sub-tab; it is now its own
-        top-level rail entry (``_build_smfish``), so this is a single panel.
+        The Playground sub-tab is built lazily on first click (it pulls the
+        correction estimators), mirroring the Sample Definitions sub-tab pattern.
         """
         parent = tab_frames["Segmentation"]
         if parent.layout() is None:
             QVBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
-        build_review_image_panel(app, parent)
+
+        sub_tabs = QTabWidget(parent)
+        sub_tabs.setObjectName("SegmentationSubTabs")
+        parent.layout().addWidget(sub_tabs)
+        app._segmentation_subtabs = sub_tabs
+
+        review_tab = QWidget(sub_tabs)
+        QVBoxLayout(review_tab).setContentsMargins(0, 0, 0, 0)
+        build_review_image_panel(app, review_tab)
+        sub_tabs.addTab(review_tab, "Review Image")
+
+        playground_tab = QWidget(sub_tabs)
+        QHBoxLayout(playground_tab).setContentsMargins(0, 0, 0, 0)
+        sub_tabs.addTab(playground_tab, "Playground")
+        app._playground_subtab_frame = playground_tab
+        app._playground_subtab_built = False
+
+        def _on_seg_subtab(idx: int) -> None:
+            if sub_tabs.tabText(idx) != "Playground":
+                return
+            from well_viewer.features.playground.controller import (
+                playground_repopulate_dropdowns,
+            )
+            if not app._playground_subtab_built:
+                from well_viewer.features.playground.tab_view import (
+                    build_playground_tab,
+                )
+                build_playground_tab(app._ctx, app._playground_subtab_frame)
+                app._playground_subtab_built = True
+            else:
+                # Pick up a dataset loaded after the tab was first built.
+                playground_repopulate_dropdowns(app)
+        sub_tabs.currentChanged.connect(_on_seg_subtab)
 
     def _build_smfish() -> None:
         """Build the smFISH tab (its own top-level rail entry).

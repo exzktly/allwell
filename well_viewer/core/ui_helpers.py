@@ -604,6 +604,33 @@ def make_fluor_thumb(arr, sz_w: int, sz_h: int,
     return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
 
+def lut_colormap_to_rgb(arr, lo: Optional[float] = None,
+                        hi: Optional[float] = None, cmap_name: str = ""):
+    """Map a 2-D array to an (H, W, 3) uint8 RGB via a [lo, hi] LUT window and an
+    optional matplotlib colormap. ``lo``/``hi`` default to the array min/max;
+    an empty/None ``cmap_name`` (or an unknown one) falls back to greyscale.
+
+    Shared by the Image Table cell renderer and the Playground renderer so the
+    LUT + colormap math has a single source of truth.
+    """
+    import numpy as _np
+
+    a = _np.asarray(arr, dtype=_np.float32)
+    alo = lo if lo is not None else float(a.min())
+    ahi = hi if hi is not None else float(a.max())
+    if ahi <= alo:
+        ahi = alo + 1.0
+    norm = _np.clip((a - alo) / (ahi - alo), 0.0, 1.0)
+    if cmap_name:
+        try:
+            from matplotlib import colormaps as _mpl_cmaps
+            return (_mpl_cmaps[cmap_name](norm)[..., :3] * 255).astype(_np.uint8).copy()
+        except Exception:
+            pass
+    gray = (norm * 255).astype(_np.uint8)
+    return _np.stack([gray, gray, gray], axis=-1)
+
+
 def make_overlay_thumb(arr, sz_w: int, sz_h: int,
                        lo: Optional[float] = None, hi: Optional[float] = None,
                        crop=None):

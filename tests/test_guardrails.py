@@ -31,6 +31,7 @@ STATE_FILES = [
     REPO_ROOT / "well_viewer" / "features" / "stats" / "state.py",
     REPO_ROOT / "well_viewer" / "features" / "review_image" / "state.py",
     REPO_ROOT / "well_viewer" / "features" / "image_table" / "state.py",
+    REPO_ROOT / "well_viewer" / "features" / "playground" / "state.py",
 ]
 FEATURES_DIR = REPO_ROOT / "well_viewer" / "features"
 

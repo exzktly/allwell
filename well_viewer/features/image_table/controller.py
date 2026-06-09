@@ -1577,29 +1577,16 @@ def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_ar
     wherever the boundary of *mask_arr* falls (same padded-diff approach used
     in the review image renderer). Returns a QPixmap or None on failure.
     """
-    from well_viewer.core.ui_helpers import make_fluor_thumb, make_overlay_thumb
+    from well_viewer.core.ui_helpers import (
+        lut_colormap_to_rgb, make_fluor_thumb, make_overlay_thumb,
+    )
     try:
         import numpy as _np
     except Exception:
         return make_fluor_thumb(arr_2d, sz_w, sz_h, lo, hi, cmap=cmap_name)
 
     arr = _np.asarray(arr_2d, dtype=_np.float32)
-    alo = lo if lo is not None else float(arr.min())
-    ahi = hi if hi is not None else float(arr.max())
-    if ahi <= alo:
-        ahi = alo + 1.0
-    norm = _np.clip((arr - alo) / (ahi - alo), 0.0, 1.0)
-
-    if cmap_name:
-        try:
-            from matplotlib import colormaps as _mpl_cmaps
-            rgb = (_mpl_cmaps[cmap_name](norm)[..., :3] * 255).astype(_np.uint8).copy()
-        except Exception:
-            gray = (norm * 255).astype(_np.uint8)
-            rgb = _np.stack([gray, gray, gray], axis=-1)
-    else:
-        gray = (norm * 255).astype(_np.uint8)
-        rgb = _np.stack([gray, gray, gray], axis=-1)
+    rgb = lut_colormap_to_rgb(arr, lo, hi, cmap_name)
 
     center_int = _np.asarray(mask_arr, dtype=_np.int32)
     if center_int.shape[:2] == arr.shape[:2]:

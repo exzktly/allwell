@@ -1159,21 +1159,27 @@ def _fft_butterworth_bandpass(img: np.ndarray, large_px: float,
     return out[ph:ph + h, pw:pw + w].astype(np.float32)
 
 
-def _robust_grid_background(img: np.ndarray, box: int) -> np.ndarray:
+def _robust_grid_background(img: np.ndarray, box: int,
+                            sigma: float = 3.0) -> np.ndarray:
     """Robust local background on a coarse grid (SExtractor / photutils
     ``Background2D`` style), interpolated to full resolution.
 
-    Each ``box``-sized tile yields a 3-sigma-clipped background level (the
+    Each ``box``-sized tile yields a ``sigma``-clipped background level (the
     SExtractor mode ``2.5*median - 1.5*mean`` on uncrowded tiles, else the
     clipped median) — robust to bright / confluent objects, since most pixels in
     a tile are background. The mesh is median-filtered (drops tiles swamped by a
     single large object) then bicubically upsampled to a smooth full-resolution
     background. The background scale is set by the tile size, not by a
     structuring element that must out-size every object.
+
+    ``sigma`` is the sigma-clip threshold (default 3.0): smaller rejects object /
+    outlier pixels more aggressively (use on crowded fields), larger keeps more
+    pixels (use when objects are sparse and you want a tighter estimate).
     """
     from scipy.ndimage import median_filter, zoom
     a = np.asarray(img, dtype=np.float32)
     h, w = a.shape
+    sigma = float(sigma) if float(sigma) > 0 else 3.0
     box = max(8, int(round(float(box))))
     ny, nx = max(1, -(-h // box)), max(1, -(-w // box))   # ceil division
     Hh, Ww = ny * box, nx * box
@@ -1184,10 +1190,10 @@ def _robust_grid_background(img: np.ndarray, box: int) -> np.ndarray:
     tiles[~np.isfinite(tiles)] = np.nan
     data = tiles
     with np.errstate(invalid="ignore"):
-        for _ in range(3):                                   # iterative 3-sigma clip
+        for _ in range(3):                                   # iterative sigma clip
             med = np.nanmedian(data, axis=2, keepdims=True)
             std = np.nanstd(data, axis=2, keepdims=True)
-            data = np.where(np.abs(data - med) <= 3.0 * std, data, np.nan)
+            data = np.where(np.abs(data - med) <= sigma * std, data, np.nan)
         med = np.nanmedian(data, axis=2)
         mean = np.nanmean(data, axis=2)
         std0 = np.nanstd(data, axis=2)
@@ -1209,7 +1215,9 @@ def _robust_grid_background(img: np.ndarray, box: int) -> np.ndarray:
 
 def subtract_background(image, radius: int, method: str = "sliding_disk",
                         bg_field: "np.ndarray | None" = None,
-                        fft_small: float = 0.0) -> np.ndarray:
+                        fft_small: float = 0.0,
+                        mesh_ratio: float = 3.0,
+                        mesh_sigma: float = 3.0) -> np.ndarray:
     """White background subtraction, dispatched by *method*.
 
     - ``top_hat`` — ``img - grey_opening(square)``: fast (separable 1-D passes)
@@ -1234,11 +1242,14 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
       no-op when no field is available for the channel.
     - ``robust_mesh`` — ``img - robust_grid_background``: a SExtractor /
       photutils ``Background2D``-style estimator (sigma-clipped local background
-      on a coarse grid ~``radius/3`` per tile, mesh-median-filtered, bicubically
-      interpolated). Robust to bright / confluent objects because the local
-      background level is estimated per tile with a robust statistic, not by a
-      structuring element that must out-size every object — handles uneven
-      background the morphological methods can't flatten.
+      on a coarse grid ~``radius/mesh_ratio`` per tile, mesh-median-filtered,
+      bicubically interpolated). Robust to bright / confluent objects because the
+      local background level is estimated per tile with a robust statistic, not
+      by a structuring element that must out-size every object — handles uneven
+      background the morphological methods can't flatten. ``mesh_ratio`` sets the
+      tile size relative to ``radius`` (larger → coarser/smoother background);
+      ``mesh_sigma`` is the per-tile sigma-clip threshold (smaller → rejects
+      bright object pixels more aggressively on crowded fields).
     - ``fft_bandpass`` — a 2-D FFT Butterworth band-pass. A high-pass removes
       low-frequency background (illumination, gradients, large blobs) regardless
       of object size; ``fft_small > 0`` adds a low-pass that also denoises
@@ -1255,11 +1266,14 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
     if method == "sliding_disk":
         return _isotropic_disk_tophat(img, int(radius))
     if method == "robust_mesh":
-        # Tile ≈ radius/3 so the grid has several nodes across a background
-        # feature of size ~radius (the bicubic interpolation then follows it),
-        # while each tile still holds far more background than object pixels.
-        box = max(8, int(round(int(radius) / 3.0)))
-        return _floor_after_subtract(img - _robust_grid_background(img, box))
+        # Tile ≈ radius/mesh_ratio so the grid has several nodes across a
+        # background feature of size ~radius (the bicubic interpolation then
+        # follows it), while each tile still holds far more background than
+        # object pixels. Guard the ratio against 0 / negative input.
+        ratio = float(mesh_ratio) if float(mesh_ratio) > 0 else 3.0
+        box = max(8, int(round(int(radius) / ratio)))
+        return _floor_after_subtract(
+            img - _robust_grid_background(img, box, sigma=mesh_sigma))
     if method == "fft_bandpass":
         return _floor_after_subtract(
             _fft_butterworth_bandpass(img, large_px=int(radius), small_px=float(fft_small)))
@@ -2258,6 +2272,8 @@ def process_image_group(
     tophat_radius_fluor: "list[int]",
     fft_small_nir: int = 0,
     fft_small_fluor: "list[int] | None" = None,
+    mesh_ratio: float = 3.0,
+    mesh_sigma: float = 3.0,
     save_tophat_images: bool = True,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
@@ -2364,7 +2380,8 @@ def process_image_group(
             return combined_empty_well_correct(
                 img, _bg_for(token), _flatfield_for(token, img))
         return subtract_background(img, radius, background_method, _bg_for(token),
-                                   fft_small=small_px)
+                                   fft_small=small_px, mesh_ratio=mesh_ratio,
+                                   mesh_sigma=mesh_sigma)
 
     _t = time.perf_counter()
     nir_corr = _correct(nir_raw, nuclear_token, tophat_radius_nir, tophat_nir,
@@ -4536,6 +4553,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="For --background=fft_bandpass: small-structure (high-"
                         "frequency) cutoff applied to every fluorescent channel "
                         "(pixels). 0 = high-pass only.")
+    p.add_argument("--mesh_ratio", type=float, default=3.0,
+                   help="For --background=robust_mesh: tile size as a fraction of "
+                        "the radius (tile = radius / mesh_ratio). Larger → "
+                        "coarser, smoother background. Default 3.0.")
+    p.add_argument("--mesh_sigma", type=float, default=3.0,
+                   help="For --background=robust_mesh: per-tile sigma-clip "
+                        "threshold. Smaller rejects bright object pixels more "
+                        "aggressively (crowded fields). Default 3.0.")
     p.add_argument("--no_tophat_nir", action="store_true",
                    help="Disable white top-hat on the nuclear channel")
     p.add_argument("--no_tophat_fluor", action="store_true",
@@ -4737,6 +4762,8 @@ def main() -> None:
                 "background_well": args.background_well or "",
                 "fft_small_nir": int(args.fft_small_nir or 0),
                 "fft_small_fluor": int(args.fft_small_fluor or 0),
+                "mesh_ratio": float(args.mesh_ratio or 3.0),
+                "mesh_sigma": float(args.mesh_sigma or 3.0),
                 "remove_debris": bool(args.qc_remove_debris),
                 "min_area": float(args.qc_min_area or 0.0),
                 "max_area": float(args.qc_max_area or 0.0),
@@ -4859,6 +4886,8 @@ def main() -> None:
         tophat_radius_fluor=tophat_radius_fluor,
         fft_small_nir=args.fft_small_nir,
         fft_small_fluor=fft_small_fluor,
+        mesh_ratio=args.mesh_ratio,
+        mesh_sigma=args.mesh_sigma,
         save_tophat_images=not args.no_save_tophat,
         schema=schema,
         sep=sep,

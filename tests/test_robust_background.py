@@ -91,6 +91,46 @@ def test_fft_lowpass_reduces_noise():
     assert float(np.std(bandpass)) < float(np.std(highpass))
 
 
+def test_mesh_defaults_unchanged():
+    # The new mesh_ratio / mesh_sigma defaults must reproduce the prior
+    # hard-coded behaviour (radius/3 tiles, 3-sigma clip) exactly.
+    img, _ = _scene()
+    default = pm.subtract_background(img, 100, "robust_mesh")
+    explicit = pm.subtract_background(img, 100, "robust_mesh",
+                                      mesh_ratio=3.0, mesh_sigma=3.0)
+    assert np.array_equal(default, explicit)
+
+
+def test_mesh_ratio_changes_tile_scale():
+    # A different tile ratio changes the tile size and therefore the estimated
+    # background — the output must actually differ from the default.
+    img, _ = _scene()
+    default = pm.subtract_background(img, 100, "robust_mesh", mesh_ratio=3.0)
+    coarser = pm.subtract_background(img, 100, "robust_mesh", mesh_ratio=6.0)
+    assert not np.array_equal(default, coarser)
+    assert np.isfinite(coarser).all() and (coarser >= 0).all()
+
+
+def test_mesh_sigma_changes_clipping():
+    # A tighter sigma-clip rejects more pixels per tile and changes the result.
+    img, _ = _scene()
+    default = pm.subtract_background(img, 100, "robust_mesh", mesh_sigma=3.0)
+    tighter = pm.subtract_background(img, 100, "robust_mesh", mesh_sigma=1.5)
+    assert not np.array_equal(default, tighter)
+    assert np.isfinite(tighter).all() and (tighter >= 0).all()
+
+
+def test_mesh_param_guards():
+    # Non-positive ratio / sigma fall back to the 3.0 defaults rather than
+    # dividing by zero or disabling the clip.
+    img, _ = _scene()
+    default = pm.subtract_background(img, 100, "robust_mesh")
+    assert np.array_equal(
+        default, pm.subtract_background(img, 100, "robust_mesh", mesh_ratio=0))
+    assert np.array_equal(
+        default, pm.subtract_background(img, 100, "robust_mesh", mesh_sigma=0))
+
+
 def test_dispatch_registered():
     for m in ("robust_mesh", "fft_bandpass"):
         assert m in pm.BACKGROUND_METHODS

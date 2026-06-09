@@ -104,6 +104,14 @@ def build_pipeline_args(
         args += ["--fft_small_fluor", str(int(opts["fft_small_fluor"]))]
     except (TypeError, ValueError, KeyError):
         pass
+    try:
+        args += ["--mesh_ratio", str(float(opts["mesh_ratio"]))]
+    except (TypeError, ValueError, KeyError):
+        pass
+    try:
+        args += ["--mesh_sigma", str(float(opts["mesh_sigma"]))]
+    except (TypeError, ValueError, KeyError):
+        pass
 
     for flag in (
         "no_tophat_nir",

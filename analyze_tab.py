@@ -648,6 +648,25 @@ class AnalyzeTab(QWidget):
         self._fft_small_rows = (fft_nir_row.parentWidget(),
                                 fft_fluor_row.parentWidget(), fft_hint)
 
+        # robust_mesh-only tuning. These are algorithm constants (applied to all
+        # channels), not per-channel like the radius: the tile size relative to
+        # the radius, and the per-tile sigma-clip threshold.
+        mesh_ratio_row = self._row(sec, "Mesh tile ratio")
+        self._mesh_ratio_edit = self._entry(mesh_ratio_row, "3.0", width=60)
+        mesh_ratio_row.layout().addStretch(1)
+        mesh_sigma_row = self._row(sec, "Mesh sigma-clip")
+        self._mesh_sigma_edit = self._entry(mesh_sigma_row, "3.0", width=60)
+        mesh_sigma_row.layout().addStretch(1)
+        mesh_hint = QLabel("Tile = radius / ratio (larger → coarser, smoother "
+                           "background). Sigma-clip threshold: smaller rejects "
+                           "bright object pixels more aggressively on crowded "
+                           "fields. Defaults 3.0 / 3.0.", sec)
+        mesh_hint.setObjectName("Muted")
+        mesh_hint.setWordWrap(True)
+        sec.layout().addWidget(mesh_hint)
+        self._mesh_param_rows = (mesh_ratio_row.parentWidget(),
+                                 mesh_sigma_row.parentWidget(), mesh_hint)
+
         rbw = self._row(sec, "Background well")
         self._background_well_edit = self._entry(rbw, "", width=160)
         self._background_well_edit.setPlaceholderText("H12 or H12, G12")
@@ -679,6 +698,9 @@ class AnalyzeTab(QWidget):
             # The small-structure (high-frequency) cutoff is fft_bandpass-only.
             for w in self._fft_small_rows:
                 w.setVisible(bg_method == "fft_bandpass")
+            # Tile-ratio / sigma-clip tuning is robust_mesh-only.
+            for w in self._mesh_param_rows:
+                w.setVisible(bg_method == "robust_mesh")
         self._flatfield_cb.currentIndexChanged.connect(_sync_bg)
         self._background_cb.currentIndexChanged.connect(_sync_bg)
         _sync_bg()
@@ -736,24 +758,6 @@ class AnalyzeTab(QWidget):
             "Folder mode only: Compress output well folders to .zip", sec)
         self._compress_output_cb.setChecked(True)
         sec.layout().addWidget(self._compress_output_cb)
-
-        # v5.4.6: remote batched mode. ``0`` (default) uploads every
-        # well-zip up front and runs the pipeline once across the
-        # whole plate — lowest total runtime. Any positive integer
-        # processes that many wells at a time: peak remote disk ≈
-        # batch_size wells of input + ~1 well of output (per-well
-        # Fetcher cleanup), at the cost of one StarDist reload per
-        # batch (~5–10 s overhead each). Pick based on the remote's
-        # free disk.
-        bs_row = self._row(sec, "Remote batch size (0=off)")
-        self._remote_batch_size_edit = self._entry(bs_row, "0", width=40)
-        bs_hint = QLabel(
-            "(remote-only · bounds peak disk to ~N wells of input)",
-            bs_row,
-        )
-        bs_hint.setObjectName("Muted")
-        bs_hint.setWordWrap(True)
-        bs_row.layout().addWidget(bs_hint, 1)
 
         r = self._row(sec, "CSV prefix")
         self._csv_prefix_edit = self._entry(r, "measurements", width=160)
@@ -813,15 +817,37 @@ class AnalyzeTab(QWidget):
         rl.addStretch(1)
         parent.layout().addWidget(remote_widget)
 
-        # Auto-delete checkbox on its own row so the label has room to
-        # breathe and so its enabled/disabled state is visually distinct
-        # from the remote-selection row above.
-        cleanup_row = QWidget(parent)
-        cl_rl = QHBoxLayout(cleanup_row)
-        cl_rl.setContentsMargins(12, 0, 12, 0)
-        cl_rl.setSpacing(8)
+        # ── Remote-only parameters, grouped in one place ─────────────────────
+        # Every knob that only matters for a remote run lives in this container:
+        # the batch size (folded in from the former Output-Options section), the
+        # auto-delete toggle, and its dry-run companion. The whole group is
+        # shown only when a remote is selected (see _refresh_remote_controls),
+        # so a Local run isn't cluttered with options that do nothing.
+        self._remote_params_widget = QWidget(parent)
+        rp = QVBoxLayout(self._remote_params_widget)
+        rp.setContentsMargins(12, 4, 12, 0)
+        rp.setSpacing(4)
+
+        rp_title = QLabel("Remote options", self._remote_params_widget)
+        rp_title.setObjectName("SectionTitle")
+        rp.addWidget(rp_title)
+
+        # Batched mode. ``0`` (default) uploads every well-zip up front and runs
+        # the pipeline once across the whole plate — lowest total runtime. Any
+        # positive integer processes that many wells at a time: peak remote disk
+        # ≈ batch_size wells of input + ~1 well of output (per-well Fetcher
+        # cleanup), at the cost of one StarDist reload per batch (~5–10 s
+        # overhead each). Pick based on the remote's free disk.
+        bs_row = self._row(self._remote_params_widget, "Batch size (0=off)")
+        self._remote_batch_size_edit = self._entry(bs_row, "0", width=40)
+        bs_hint = QLabel("(bounds peak disk to ~N wells of input)", bs_row)
+        bs_hint.setObjectName("Muted")
+        bs_hint.setWordWrap(True)
+        bs_row.layout().addWidget(bs_hint, 1)
+
+        # Auto-delete checkbox.
         self._cleanup_remote_cb = QCheckBox(
-            "Auto-delete remote files when done", cleanup_row,
+            "Auto-delete remote files when done", self._remote_params_widget,
         )
         self._cleanup_remote_cb.setToolTip(
             "v5.2.11+: unchecked (default) = leave everything on the remote "
@@ -829,20 +855,13 @@ class AnalyzeTab(QWidget):
             "verified-successful run, delete both the per-run output dir "
             "AND the cached input on the remote."
         )
-        cl_rl.addWidget(self._cleanup_remote_cb)
-        cl_rl.addStretch(1)
-        parent.layout().addWidget(cleanup_row)
+        rp.addWidget(self._cleanup_remote_cb)
 
-        # Dry-run cleanup row (v5.2.23): log what auto-delete WOULD
-        # remove without actually removing anything. Only enabled
-        # when auto-delete itself is checked.
-        dry_run_row = QWidget(parent)
-        dr_rl = QHBoxLayout(dry_run_row)
-        dr_rl.setContentsMargins(12, 0, 12, 0)
-        dr_rl.setSpacing(8)
+        # Dry-run cleanup (v5.2.23): log what auto-delete WOULD remove without
+        # actually removing anything. Only enabled when auto-delete is checked.
         self._dry_run_cleanup_cb = WrapCheckBox(
             "Dry-run cleanup (show what would be deleted, don't delete)",
-            dry_run_row,
+            self._remote_params_widget,
         )
         self._dry_run_cleanup_cb.setToolTip(
             "v5.2.23: with auto-delete enabled, log path + file count + "
@@ -851,12 +870,11 @@ class AnalyzeTab(QWidget):
             "for confirming what auto-delete will do on a shared remote "
             "before committing to it."
         )
-        # Fill the row (stretch=1, no trailing spacer) so the wrapping label gets
-        # the full width — matching the other WrapCheckBoxes in this form.
-        dr_rl.addWidget(self._dry_run_cleanup_cb, 1)
-        parent.layout().addWidget(dry_run_row)
+        rp.addWidget(self._dry_run_cleanup_cb)
 
-        # Disable the cleanup checkbox until the user picks a remote.
+        parent.layout().addWidget(self._remote_params_widget)
+
+        # Show the remote-only group only when a remote is selected.
         self._remote_cb.currentIndexChanged.connect(self._refresh_remote_controls)
         # Dry-run only makes sense when auto-delete is on.
         self._cleanup_remote_cb.toggled.connect(self._refresh_remote_controls)
@@ -883,11 +901,12 @@ class AnalyzeTab(QWidget):
         parent.layout().addWidget(btn_widget)
 
     def _refresh_remote_controls(self) -> None:
-        """Enable the cleanup checkbox only when a remote is selected.
-        Enable the dry-run-cleanup checkbox only when both a remote
-        is selected AND auto-delete is checked."""
+        """Show the remote-only parameter group only when a remote is selected,
+        and within it gate the dry-run-cleanup checkbox on auto-delete being
+        checked. Switching back to Local resets the toggles so a stale value
+        can't be submitted for the next remote run."""
         is_remote = self._remote_cb.currentData() is not None
-        self._cleanup_remote_cb.setEnabled(is_remote)
+        self._remote_params_widget.setVisible(is_remote)
         if not is_remote:
             self._cleanup_remote_cb.setChecked(False)
         dry_run_enabled = is_remote and self._cleanup_remote_cb.isChecked()
@@ -1446,6 +1465,8 @@ class AnalyzeTab(QWidget):
             tophat_radius_fluor=self._tophat_radius_fluor_edit.text(),
             fft_small_nir=self._fft_small_nir_edit.text(),
             fft_small_fluor=self._fft_small_fluor_edit.text(),
+            mesh_ratio=self._mesh_ratio_edit.text(),
+            mesh_sigma=self._mesh_sigma_edit.text(),
             no_tophat_nir=self._no_tophat_nir_cb.isChecked(),
             no_tophat_fluor=self._no_tophat_fluor_cb.isChecked(),
             compress_input_well_folders=self._compress_input_cb.isChecked(),

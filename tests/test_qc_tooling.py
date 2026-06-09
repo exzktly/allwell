@@ -415,6 +415,12 @@ def test_build_pipeline_args_background_mapping():
                                        fft_small_nir="3", fft_small_fluor="5"))
     assert a[a.index("--fft_small_nir") + 1] == "3"
     assert a[a.index("--fft_small_fluor") + 1] == "5"
+    # robust_mesh forwards its tile-ratio / sigma-clip tuning.
+    a = build_pipeline_args(P, Path("/in"), Path("/out"),
+                            _base_opts(background="robust_mesh",
+                                       mesh_ratio="4", mesh_sigma="2.5"))
+    assert float(a[a.index("--mesh_ratio") + 1]) == 4.0
+    assert float(a[a.index("--mesh_sigma") + 1]) == 2.5
 
 
 def test_subtract_background_none_is_noop():

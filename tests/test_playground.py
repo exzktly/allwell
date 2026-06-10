@@ -340,6 +340,25 @@ def test_on_change_handles_missing_frame(playground_app, monkeypatch):
     assert "No raw image" in app._playground_status.text()
 
 
+def test_ctxbar_threshold_box_reflects_set_value(loaded_app):
+    """Regression: the plotting ctxbar threshold box must show the actual
+    ThreshFracOn (e.g. after an auto-threshold or Cell Gating edit), not stay at
+    its 50.0 default, and follow the active channel."""
+    app = loaded_app
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        cell_gating_on_threshold_frac_on_change,
+    )
+    from well_viewer.core.channel_state_controller import set_active_channel
+    set_active_channel(app, "gfp")
+    app._cell_gating_thresh_frac_edits["gfp"].setText("123")
+    cell_gating_on_threshold_frac_on_change(app)
+    assert app._plotting_thresh_frac_stepper.value() == 123.0
+    app._cell_gating_thresh_frac_edits["mcherry"].setText("77")
+    cell_gating_on_threshold_frac_on_change(app)
+    set_active_channel(app, "mcherry")
+    assert app._plotting_thresh_frac_stepper.value() == 77.0
+
+
 def test_threshold_change_redraws_scope_plots(loaded_app, monkeypatch):
     """Regression: a ThreshFracOn edit must fan out to the fold-change scope
     plots (Bar / Scatter), not just the default-scope plots — otherwise the

@@ -155,6 +155,8 @@ well_viewer/
 │   ├── smfish/       controller.py, worker.py, tab_view.py
 │   ├── image_table/  controller.py, tab_view.py, panel_view.py,
 │   │                 grid_view.py, picker_view.py
+│   ├── playground/   controller.py, renderer.py, state.py, tab_view.py,
+│   │                 worker.py   ← single-frame background-correction testbed
 │   ├── grouping/     controller.py, view.py, label_grid_view.py,
 │   │                 label_editor_view.py, replicate_panel_view.py,
 │   │                 cell_gating_tab_view.py
@@ -375,22 +377,23 @@ and registers every centre page. The current page-list:
 
 | Section | Tab | Sub-pages |
 |---------|-----|-----------|
-| Analysis | **Plotting** | Line Graphs / Bar Plots / Scatter Plot / Distribution / Heat Map |
+| Analysis | **Plotting** | Bar Plots / Line Graphs / Scatter Plot / Distribution / Heat Map |
 | Analysis | **Statistics** | — |
 | Images | **Image Table** | — |
-| Images | **Segmentation** | — |
+| Images | **Segmentation** | Review Image / Playground |
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |
-| Data | **Sample Definitions** | (includes Cell Gating as a sub-section) |
+| Data | **Sample Definitions** | Cell Gating / Groups / Well Labels / Ratios / Pipeline Info / Notes |
 | Data | **Batch Export** | — |
 
-**Plotting** is the only *parent* tab — its body is a nested `NamedPageStack`.
-`WellViewerApp._current_centre_tab()` descends through that one level of
-indirection so the rest of the app can always pattern-match on a leaf name
-(e.g. `"Line Graphs"`). Segmentation and smFISH are plain top-level tabs;
-smFISH was promoted out of an earlier Segmentation sub-stack into its own rail
-entry, so it now follows the standard one-package-per-tab layout
-(`features/smfish/{controller,worker,tab_view}.py`) with no nesting.
+**Plotting** is a `NamedPageStack`; **Segmentation** (`QTabWidget`: the
+review-image panel + the **Playground** single-frame correction testbed, lazily
+built) and **Sample Definitions** (`QTabWidget` led by Cell Gating) also nest.
+`WellViewerApp._current_centre_tab()` descends through the Plotting level so the
+rest of the app can pattern-match on a leaf name (e.g. `"Bar Plots"` — the
+first/default sub-tab). smFISH was promoted out of an earlier Segmentation
+sub-stack into its own rail entry, so it follows the standard
+one-package-per-tab layout (`features/smfish/{controller,worker,tab_view}.py`).
 
 The left **rail navigation** (`RailNav` from `widgets/rail_nav.py`) is the
 single visible selector for the top-level pages. It mirrors the notebook —
@@ -506,6 +509,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` (read side) and `role_output_filename` (write side, called from `process_microscopy.build_processed_output_path`) both consume it. The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
 | `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `flatfield_core` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
+| `features/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods on a single raw frame chosen by well/channel/timepoint/FOV. Loads the raw frame + precomputed mask via the Image Table loaders (`_load_array` / `_load_mask_array`) and applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern). Display reuses the LUT/colormap (`ui_helpers.lut_colormap_to_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
 
@@ -660,6 +664,7 @@ owning its own invariants (behaviour lives *in* the type, not just data):
 | `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization | `core/plot_state.py` |
 | `StatsState` | Statistics-tab comparison groups + result cache | `features/stats/state.py` |
 | `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview image maps (`fluor` / `overlay` / `mask`) shared by the Segmentation review-image and Image Table | `features/review_image/state.py` |
+| `PlaygroundState` | Playground frame selection + chosen correction method/params, per-source LUT memory, frame-local binary threshold, QC size cleanup, and zoom/pan + caches | `features/playground/state.py` |
 
 `AppState` (`core/app_state.py`) is a plain aggregate of all of the above —
 *not* a mega-dataclass with behaviour. `WellViewerApp` builds one as

@@ -219,6 +219,68 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
     assert get_thresh_frac_on(app, (st.channel or "").lower()) == before
 
 
+def test_qc_size_filter_drops_out_of_range_cells(playground_app, monkeypatch):
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.playground import controller as C
+    img = np.zeros((40, 40), dtype=np.float32)
+    mask = np.zeros((40, 40), dtype=np.int32)
+    mask[2:5, 2:5] = 1
+    img[2:5, 2:5] = 1000.0            # small cell (area 9)
+    mask[10:20, 10:20] = 2
+    img[10:20, 10:20] = 1000.0        # big cell (area 100)
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: img)
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: mask)
+    st.source = "raw"
+    st.binary_mask = True
+    st.threshold = 10.0
+    C.playground_on_change(app)
+    assert int((st.base_rgb == 255).all(axis=2).sum()) == 109   # both cells
+    # qc_min_area is read from the widget each change — drive the widget.
+    app._playground_qc_min_area_edit.setText("20")
+    C.playground_on_change(app)
+    assert int((st.base_rgb == 255).all(axis=2).sum()) == 100   # small one dropped
+
+
+def test_per_source_lut_memory(playground_app, monkeypatch):
+    app = playground_app
+    from well_viewer.features.playground import controller as C
+    img = _frame(11)
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: img)
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
+    seg = app._playground_source_seg
+    seg.setCurrentByData("raw")
+    app._playground_lmin_entry.setText("10")
+    app._playground_lmax_entry.setText("800")
+    app._playground_lmin_entry.editingFinished.emit()
+    seg.setCurrentByData("corrected")
+    assert app._playground_lmin_entry.text() == "auto"      # corrected: own (auto)
+    seg.setCurrentByData("raw")
+    assert (app._playground_lmin_entry.text(), app._playground_lmax_entry.text()) == ("10", "800")
+
+
+def test_pan_updates_state(playground_app, monkeypatch):
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.playground import controller as C
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: _frame(12))
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
+    st.source = "raw"
+    C.playground_on_change(app)
+
+    class _Ev:
+        def __init__(self, x, y):
+            self._x, self._y = x, y
+
+        def position(self):
+            from PySide6.QtCore import QPointF
+            return QPointF(self._x, self._y)
+    before = (st.pan_x, st.pan_y)
+    C.playground_pan_press(app, _Ev(50, 50))
+    C.playground_pan_move(app, _Ev(70, 65))
+    assert (st.pan_x - before[0], st.pan_y - before[1]) == (20.0, 15.0)
+
+
 def test_hover_tooltip_reads_display_value(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground
@@ -276,3 +338,20 @@ def test_on_change_handles_missing_frame(playground_app, monkeypatch):
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: None)
     C.playground_on_change(app)        # must not raise
     assert "No raw image" in app._playground_status.text()
+
+
+def test_threshold_change_redraws_scope_plots(loaded_app, monkeypatch):
+    """Regression: a ThreshFracOn edit must fan out to the fold-change scope
+    plots (Bar / Scatter), not just the default-scope plots — otherwise the
+    (now default) Bar Plots tab goes stale. The handler emits
+    ``plot_options_changed``, which the RedrawCoordinator routes to
+    ``redraw_scopes_or_defer``."""
+    import well_viewer.domain.fold_change_scopes as fcs
+    from well_viewer.core.channel_state_controller import set_thresh_frac_on
+    calls = {"n": 0}
+    orig = fcs.redraw_scopes_or_defer
+    monkeypatch.setattr(
+        fcs, "redraw_scopes_or_defer",
+        lambda a, *ar, **k: (calls.__setitem__("n", calls["n"] + 1), orig(a, *ar, **k))[1])
+    set_thresh_frac_on(loaded_app, 123.0)
+    assert calls["n"] >= 1

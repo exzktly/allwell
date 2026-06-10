@@ -386,8 +386,13 @@ def on_review_image_release(app, event) -> None:
         mx0, my0, mx1, my1 = rect
         if crop_mode:
             # Crop stores a row/col region; release gives x=col, y=row.
-            from well_viewer.features.crop.controller import set_crop_region
+            from well_viewer.features.crop.controller import (
+                set_crop_edit_mode, set_crop_region,
+            )
             set_crop_region(app, (my0, mx0, my1, mx1))
+            # The crop is a one-shot draw — leave crop mode (and un-check the
+            # Crop Region button) once the region is committed.
+            set_crop_edit_mode(app, False)
         else:
             apply_box_delete(app, mx0, my0, mx1, my1)
         return

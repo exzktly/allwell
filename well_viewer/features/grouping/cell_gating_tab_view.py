@@ -295,6 +295,22 @@ def build_cell_gating_subtab(app) -> None:
         app._cell_gating_subtab_built = True
 
 
+def _cell_gating_valid_rows(frame_df):
+    """Rows that pass the crop region AND the QC debris gate (absent columns ⇒
+    all-pass). The per-channel fluorescence gate is deliberately NOT applied:
+    these CDFs are what the user reads to SET that gate, so filtering by it (via
+    the ``Included`` column) would be circular — raising the threshold would
+    shrink the very curve being read. Crop + QC are independent of the gate, so
+    the CDFs show the valid population without that feedback loop.
+    """
+    mask = pd.Series(True, index=frame_df.index)
+    for col in ("QC_Pass", "Crop_Pass"):
+        if col in frame_df.columns:
+            vals = pd.to_numeric(frame_df[col], errors="coerce").fillna(1)
+            mask = mask & vals.eq(1)
+    return frame_df[mask]
+
+
 def cell_gating_load_cell_areas(app) -> None:
     """Repopulate cell-area + per-channel fluorescence CDFs from selected wells."""
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
@@ -311,6 +327,11 @@ def cell_gating_load_cell_areas(app) -> None:
             continue
         frame_df, _ = _cell_gating_first_frame_rows(df)
         if frame_df is None or frame_df.empty:
+            continue
+        # Respect the crop region + QC debris gate (not the fluorescence gate —
+        # these CDFs are used to set it).
+        frame_df = _cell_gating_valid_rows(frame_df)
+        if frame_df.empty:
             continue
         if "area_px" in frame_df.columns:
             area = pd.to_numeric(frame_df["area_px"], errors="coerce").to_numpy()
@@ -425,7 +446,13 @@ def cell_gating_on_threshold_frac_on_change(app) -> None:
             float(edit.text())
         _cell_gating_save_threshold_frac_on(app)
         _cell_gating_persist_params(app)
+        app._invalidate_stats_cache()
+        # ``_redraw`` only fans out to the default-scope plots (line /
+        # distribution / heat map). Bar and scatter redraw via the fold-change
+        # scope registry, so also emit ``plot_options_changed`` — otherwise a
+        # ThreshFracOn edit leaves the (now default) Bar Plots tab stale.
         app._redraw()
+        app._event_bus.plot_options_changed.emit(app._app_state.plot)
     except ValueError:
         pass
 

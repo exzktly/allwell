@@ -304,7 +304,16 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     outer_layout.addWidget(sub_tabs, 1)
     app._sample_definitions_subtabs = sub_tabs
 
-    # Sub-tab 0: Groups — hoisted out of the sidebar so the
+    # Sub-tab 0: Cell Gating — the global per-cell config users reach for most,
+    # so it leads. Built explicitly below (it's the default tab, so the lazy
+    # currentChanged build wouldn't fire for it).
+    cell_gating_tab = _QWidget(sub_tabs)
+    _QVBoxLayout(cell_gating_tab).setContentsMargins(0, 0, 0, 0)
+    sub_tabs.addTab(cell_gating_tab, "Cell Gating")
+    app._cell_gating_subtab_frame = cell_gating_tab
+    app._cell_gating_subtab_built = False
+
+    # Sub-tab 1: Groups — hoisted out of the sidebar so the
     # SavedSelectionsList has full vertical room and the sidebar plate
     # can stay full-aspect.
     groups_tab = _QWidget(sub_tabs)
@@ -325,14 +334,6 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     rl.addWidget(build_ratios_inline_panel(app, ratio_tab))
     rl.addStretch(1)
     sub_tabs.addTab(ratio_tab, "Ratios")
-
-    # Sub-tab 3: Cell Gating — lazy-built on first activation so a
-    # user who only edits labels never pays the matplotlib import.
-    cell_gating_tab = _QWidget(sub_tabs)
-    _QVBoxLayout(cell_gating_tab).setContentsMargins(0, 0, 0, 0)
-    sub_tabs.addTab(cell_gating_tab, "Cell Gating")
-    app._cell_gating_subtab_frame = cell_gating_tab
-    app._cell_gating_subtab_built = False
 
     # Sub-tab 4: Pipeline Info — the run's recorded parameters (read-only),
     # including which background method actually ran.
@@ -376,3 +377,6 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
             if hasattr(app, "_rep_active_group_lbl"):
                 update_active_group_label(app)
     sub_tabs.currentChanged.connect(_on_sample_def_subtab)
+    # Cell Gating leads and is the default tab, so build it now (currentChanged
+    # won't fire for the already-current index 0).
+    build_cell_gating_subtab(app)

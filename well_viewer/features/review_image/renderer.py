@@ -53,6 +53,11 @@ def _update_preview_impl(app, well_label: Optional[str]) -> None:
     from well_viewer.data.image_discovery import find_well_images_and_masks
     from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 
+    # Switching wells keeps the current zoom/pan — browsing well-to-well
+    # shouldn't snap the view back to fit each time. (FOV / timepoint / channel
+    # changes go through refresh_review_image directly and still reset.)
+    app._app_state.review_image.preserve_view_on_refresh = True
+
     channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
     if well_label is None:
         if hasattr(app, "_preview_well_lbl"):
@@ -492,10 +497,17 @@ def _draw_crop_outline(app, rgb) -> None:
     if r1 <= r0 or c1 <= c0:
         return
     color = _np.array([0, 220, 255], dtype=_np.uint8)
-    rgb[r0, c0:c1 + 1] = color
-    rgb[r1, c0:c1 + 1] = color
-    rgb[r0:r1 + 1, c0] = color
-    rgb[r0:r1 + 1, c1] = color
+    # Draw the border as bands scaled to the image size (~0.5% of the smaller
+    # dimension, min 2 px) so it survives the downscale when zoomed out — a
+    # single-pixel edge subsamples away and the crop looks like it vanished.
+    t = max(2, int(round(min(h, w) / 200)))
+
+    def _band(rl, rh, cl, ch) -> None:
+        rgb[max(0, rl):min(h, rh), max(0, cl):min(w, ch)] = color
+    _band(r0, r0 + t, c0, c1 + 1)            # top
+    _band(r1 - t + 1, r1 + 1, c0, c1 + 1)    # bottom
+    _band(r0, r1 + 1, c0, c0 + t)            # left
+    _band(r0, r1 + 1, c1 - t + 1, c1 + 1)    # right
 
 
 def render_review_image_display(app, *, pan_only: bool = False) -> None:

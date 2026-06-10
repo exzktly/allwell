@@ -49,6 +49,9 @@ class PlaygroundState:
 
     # display controls (mirror the Segmentation review image)
     cmap_name: str = "Greys_r"
+    # Per-source LUT memory: source ("raw"/"flatfield"/"corrected") -> (min, max)
+    # entry texts, so each stage keeps the range the user set for it.
+    lut_by_source: dict = field(default_factory=dict)
     binary_mask: bool = False
     show_overlay: bool = True           # precomputed-mask boundary overlay on/off
     tint_color: tuple = (255, 255, 255)
@@ -56,6 +59,10 @@ class PlaygroundState:
     # channel's app-wide ThreshFracOn as the default; editing it here NEVER
     # writes back to the app-wide cell-gating value.
     threshold: "float | None" = None
+    # QC size-based cleanup (px², 0 = no bound) — drops mask labels outside the
+    # bounds from the overlay / binary, previewing the pipeline's debris gate.
+    qc_min_area: float = 0.0
+    qc_max_area: float = 0.0
 
     # per-render caches (rebuilt on change; never persisted)
     raw_arr: object = None              # last-loaded raw frame

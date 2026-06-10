@@ -114,6 +114,8 @@ def _read_widgets_into_state(app) -> None:
     st.fft_small = _read_float(app, "_playground_fft_small_edit", st.fft_small)
     st.mesh_ratio = _read_float(app, "_playground_mesh_ratio_edit", st.mesh_ratio)
     st.mesh_sigma = _read_float(app, "_playground_mesh_sigma_edit", st.mesh_sigma)
+    st.qc_min_area = _read_float(app, "_playground_qc_min_area_edit", st.qc_min_area)
+    st.qc_max_area = _read_float(app, "_playground_qc_max_area_edit", st.qc_max_area)
     lut = getattr(app, "_playground_cmap_cb", None)
     if lut is not None and hasattr(lut, "lut"):
         name = lut.lut()
@@ -243,6 +245,29 @@ def _effective_threshold(app) -> float:
         return 0.0
 
 
+def _qc_size_filtered(mask, min_area: float, max_area: float):
+    """Return *mask* with labels whose pixel area falls outside [min_area,
+    max_area] zeroed out (0 = no bound). Mirrors the pipeline's size-based
+    debris gate so the Playground can preview it. Returns the mask unchanged
+    when no bound is set."""
+    if mask is None or (min_area <= 0 and max_area <= 0):
+        return mask
+    center = np.asarray(mask, dtype=np.int32)
+    counts = np.bincount(center.ravel())
+    keep = np.ones(counts.shape[0], dtype=bool)
+    if min_area > 0:
+        keep &= counts >= float(min_area)
+    if max_area > 0:
+        keep &= counts <= float(max_area)
+    keep[0] = True                         # background label stays 0 either way
+    drop = np.where(~keep)[0]
+    if drop.size == 0:
+        return center
+    out = center.copy()
+    out[np.isin(center, drop)] = 0
+    return out
+
+
 def _cells_above(arr, mask, threshold: float):
     """Label ids whose mean intensity in *arr* exceeds *threshold* (per-cell
     gate over the precomputed mask). None when the mask doesn't match the frame."""
@@ -263,13 +288,16 @@ def _render(app, arr) -> None:
     st = _st(app)
     st.display_arr = np.asarray(arr, dtype=np.float32)
     lo, hi = _resolve_lut(app, arr)
-    mask = st.mask_arr if (st.show_overlay or st.binary_mask) else None
+    # Apply the QC size-based cleanup to the mask before display, so the overlay
+    # and binary reflect the debris gate.
+    qc_mask = _qc_size_filtered(st.mask_arr, st.qc_min_area, st.qc_max_area)
+    mask = qc_mask if (st.show_overlay or st.binary_mask) else None
     above_ids = None
     thr = None
     if st.binary_mask:
         thr = _effective_threshold(app)
-        if st.mask_arr is not None:
-            above_ids = _cells_above(arr, st.mask_arr, thr)
+        if qc_mask is not None:
+            above_ids = _cells_above(arr, qc_mask, thr)
     st.base_rgb = build_playground_rgb(
         arr, mask, lo=lo, hi=hi, cmap_name=st.cmap_name, binary=st.binary_mask,
         show_boundary=st.show_overlay, tint=tuple(st.tint_color),
@@ -331,6 +359,35 @@ def _refresh_threshold_display(app) -> None:
         stp.blockSignals(blocked)
 
 
+def _event_xy(event):
+    try:
+        pos = event.position()          # Qt6 QMouseEvent
+        return float(pos.x()), float(pos.y())
+    except AttributeError:
+        return float(event.x()), float(event.y())
+
+
+def playground_pan_press(app, event) -> None:
+    """Record the drag origin so the next moves pan relative to it."""
+    st = _st(app)
+    mx, my = _event_xy(event)
+    app._playground_pan_drag = (mx, my, float(st.pan_x), float(st.pan_y))
+
+
+def playground_pan_move(app, event) -> None:
+    """Pan the image by the drag delta (view is kept in state, so it persists
+    across source/parameter changes)."""
+    drag = getattr(app, "_playground_pan_drag", None)
+    if drag is None:
+        return
+    st = _st(app)
+    mx, my = _event_xy(event)
+    sx, sy, ox, oy = drag
+    st.pan_x = ox + (mx - sx)
+    st.pan_y = oy + (my - sy)
+    render_playground_display(app)
+
+
 def playground_hover(app, event) -> None:
     """Show a tooltip with the hovered pixel's intensity in the displayed frame."""
     st = _st(app)
@@ -341,11 +398,7 @@ def playground_hover(app, event) -> None:
         return
     a = np.asarray(arr)
     nw, nh, iw, ih = disp["nw"], disp["nh"], disp["iw"], disp["ih"]
-    try:
-        pos = event.position()          # Qt6 QMouseEvent
-        mx, my = pos.x(), pos.y()
-    except AttributeError:
-        mx, my = event.x(), event.y()
+    mx, my = _event_xy(event)
     # The pixmap is centred in the (possibly larger) label.
     off_x = max(0, (label.width() - nw) // 2)
     off_y = max(0, (label.height() - nh) // 2)

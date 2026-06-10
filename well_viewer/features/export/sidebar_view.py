@@ -234,7 +234,10 @@ class ExportStyleSidebar(QWidget):
             "x_log", "y_log",
         )
         self._axis_buckets: dict[str, dict] = dict(self._prefs.get("axis_buckets") or {})
-        self._current_axis = str(self._prefs.get("axis_target", "All"))
+        # Default the targeted axis to the subplot showing the active metric (so
+        # edits land on the plot in view) rather than "All"; a saved explicit
+        # choice is respected.
+        self._current_axis = self._default_axis_target()
         self._axis_buckets.setdefault(
             self._current_axis, {k: self._prefs.get(k) for k in self._axis_keys},
         )
@@ -665,6 +668,17 @@ class ExportStyleSidebar(QWidget):
         for k in self._axis_keys:
             bucket[k] = self._prefs.get(k)
         self._prefs["axis_buckets"] = self._axis_buckets
+
+    def _default_axis_target(self) -> str:
+        """The axis the panel targets by default: the subplot showing the active
+        metric, so edits land on the plot in view instead of spreading across
+        "All". The global Property (active metric) always drives the FIRST
+        subplot — the value axis on the Bar/Line stacks [value, fraction, count]
+        and the only axis on Scatter / Distribution / Heat Map — so that's axis
+        1. A saved explicit (non-"All") choice is respected.
+        """
+        saved = str(self._prefs.get("axis_target", "All"))
+        return saved if saved != "All" else "1"
 
     def _on_axis_target_changed(self, new_axis: str) -> None:
         if self._updating:

@@ -112,26 +112,49 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     # Display options
     _section("Display")
+    from widgets.segmented_control import SegmentedControl
     src_row = _row(controls, "Source")
-    raw_corr_cb = QComboBox(src_row)
-    raw_corr_cb.addItems(["Corrected", "Raw"])
+    source_seg = SegmentedControl(src_row)
+    for _lbl, _data in (("Raw", "raw"), ("Flat-field", "flatfield"),
+                        ("Corrected", "corrected")):
+        source_seg.addSegment(_lbl, data=_data)
+    source_seg.setCurrentByData("corrected")
+    source_seg.setToolTip(
+        "Image stage shown:\n"
+        "• Raw — unprocessed frame.\n"
+        "• Flat-field — only the selected flat-field applied.\n"
+        "• Corrected — flat-field + background (the full method).")
 
     def _on_source(_i: int) -> None:
-        app._app_state.playground.show_corrected = (raw_corr_cb.currentText() == "Corrected")
+        app._app_state.playground.source = source_seg.currentData() or "corrected"
         on_change()
-    raw_corr_cb.currentIndexChanged.connect(_on_source)
-    src_row.layout().addWidget(raw_corr_cb)
-    app._playground_source_cb = raw_corr_cb
+    source_seg.currentChanged.connect(_on_source)
+    src_row.layout().addWidget(source_seg)
+    app._playground_source_seg = source_seg
 
     lut_row = _row(controls, "LUT min/max")
     lmin = QLineEdit("auto", lut_row)
-    lmin.setFixedWidth(64)
+    lmin.setFixedWidth(56)
     lmax = QLineEdit("auto", lut_row)
-    lmax.setFixedWidth(64)
+    lmax.setFixedWidth(56)
     lmin.editingFinished.connect(on_change)
     lmax.editingFinished.connect(on_change)
+    lut_auto = QPushButton("Auto", lut_row)
+    lut_auto.setFixedWidth(46)
+    lut_auto.setToolTip("Reset the LUT min/max to the displayed frame's range.")
+
+    def _on_lut_auto() -> None:
+        for e in (lmin, lmax):
+            blocked = e.blockSignals(True)
+            try:
+                e.setText("auto")
+            finally:
+                e.blockSignals(blocked)
+        on_change()
+    lut_auto.clicked.connect(lambda _=False: _on_lut_auto())
     lut_row.layout().addWidget(lmin)
     lut_row.layout().addWidget(lmax)
+    lut_row.layout().addWidget(lut_auto)
     lut_row.layout().addStretch(1)
     app._playground_lmin_entry = lmin
     app._playground_lmax_entry = lmax
@@ -142,6 +165,25 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     cmap.lutChanged.connect(lambda *_a: on_change())
     cmap_row.layout().addWidget(cmap)
     app._playground_cmap_cb = cmap
+
+    # Frame-local binary threshold — drives binary mode; defaults to the
+    # channel's app-wide ThreshFracOn but editing it here never writes back.
+    from widgets.stepper import Stepper
+    thr_row = _row(controls, "Threshold")
+    thr_stepper = Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0,
+                          decimals=1)
+    thr_stepper.setToolTip(
+        "Binary-mode threshold for THIS frame (cells whose mean corrected "
+        "intensity exceeds it are shown). Local to the Playground — does not "
+        "change the app-wide ThreshFracOn.")
+
+    def _on_threshold(v: float) -> None:
+        app._app_state.playground.threshold = float(v)
+        on_change()
+    thr_stepper.valueChanged.connect(_on_threshold)
+    thr_row.layout().addWidget(thr_stepper)
+    thr_row.layout().addStretch(1)
+    app._playground_threshold_stepper = thr_stepper
 
     toggles = QWidget(controls)
     tl = QHBoxLayout(toggles)
@@ -205,10 +247,20 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     canvas.setAlignment(Qt.AlignCenter)
     label = QLabel(canvas)
     label.setAlignment(Qt.AlignCenter)
+    label.setMouseTracking(True)
     canvas.setWidget(label)
     parent.layout().addWidget(canvas, 1)
     app._playground_image_canvas = canvas
     app._playground_image_label = label
+
+    # Hover tooltip: show the pixel's intensity value in the displayed frame.
+    from well_viewer.features.playground.controller import playground_hover
+    _orig_move = label.mouseMoveEvent
+
+    def _on_move(ev) -> None:
+        playground_hover(app, ev)
+        _orig_move(ev)
+    label.mouseMoveEvent = _on_move
 
     # Show/hide param rows by method (mirrors analyze_tab._sync_bg).
     def _sync_method_rows(_=None) -> None:

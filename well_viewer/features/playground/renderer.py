@@ -39,12 +39,15 @@ def build_playground_rgb(fluor_arr, mask_arr, *, lo=None, hi=None,
                          cmap_name: str = "", binary: bool = False,
                          show_boundary: bool = True,
                          boundary_color=(255, 255, 255),
-                         tint=(255, 255, 255)) -> np.ndarray:
+                         tint=(255, 255, 255), above_ids=None,
+                         threshold=None) -> np.ndarray:
     """Render a corrected frame (+ optional precomputed-mask overlay) to RGB.
 
-    ``binary`` paints the labelled cell footprint white on black (the Playground
-    overlays existing labels, so there is no per-cell intensity gate); otherwise
-    the LUT+colormap image is shown with an optional tint and white cell
+    ``binary`` paints an above-threshold mask white on black. With a label mask
+    and ``above_ids`` (the label ids whose mean intensity clears the frame-local
+    threshold) those cells are filled; with no mask it falls back to a pixel
+    threshold (``arr > threshold``); otherwise it shows the labelled footprint.
+    Non-binary shows the LUT+colormap image with an optional tint and white cell
     boundaries from ``mask_arr``.
     """
     arr = np.asarray(fluor_arr, dtype=np.float32)
@@ -52,10 +55,20 @@ def build_playground_rgb(fluor_arr, mask_arr, *, lo=None, hi=None,
 
     if binary:
         rgb = np.zeros((h, w, 3), dtype=np.uint8)
+        center = None
         if mask_arr is not None:
-            center = np.asarray(mask_arr, dtype=np.int32)
-            if center.shape[:2] == (h, w):
-                rgb[center > 0] = (255, 255, 255)
+            c = np.asarray(mask_arr, dtype=np.int32)
+            if c.shape[:2] == (h, w):
+                center = c
+        if center is not None and above_ids is not None:
+            ids = np.fromiter((int(i) for i in above_ids), dtype=center.dtype,
+                              count=len(above_ids))
+            if ids.size:
+                rgb[np.isin(center, ids)] = (255, 255, 255)
+        elif threshold is not None:
+            rgb[arr > float(threshold)] = (255, 255, 255)
+        elif center is not None:
+            rgb[center > 0] = (255, 255, 255)
         return rgb
 
     rgb = lut_colormap_to_rgb(arr, lo, hi, cmap_name)
@@ -102,6 +115,8 @@ def render_playground_display(app) -> None:
         pm = pm.scaled(nw, nh, Qt.IgnoreAspectRatio, Qt.FastTransformation)
     label.setPixmap(pm)
     label.resize(max(nw, cw), max(nh, ch))
+    # Geometry for the hover-tooltip pixel mapping (label space → image pixel).
+    app._playground_disp = {"nw": nw, "nh": nh, "iw": iw, "ih": ih}
 
     cx = max(0, (max(nw, cw) - cw) // 2) - int(st.pan_x)
     cy = max(0, (max(nh, ch) - ch) // 2) - int(st.pan_y)

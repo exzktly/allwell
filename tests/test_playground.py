@@ -155,16 +155,119 @@ def test_on_change_corrects_and_renders(playground_app, monkeypatch):
 
     app._playground_bg_cb.setCurrentText("sliding_disk")
     app._playground_radius_edit.setText("12")
-    app._playground_source_cb.setCurrentText("Corrected")
+    st.source = "corrected"
     C.playground_on_change(app)
     assert st.base_rgb is not None
     assert app._playground_image_label.pixmap() is not None
     corrected_rgb = st.base_rgb.copy()
 
     # Raw vs Corrected differ for a non-none method.
-    app._playground_source_cb.setCurrentText("Raw")
+    st.source = "raw"
     C.playground_on_change(app)
     assert not np.array_equal(corrected_rgb, st.base_rgb)
+
+
+def test_source_segmented_control_has_three_stages(playground_app):
+    seg = playground_app._playground_source_seg
+    for stage in ("raw", "flatfield", "corrected"):
+        seg.setCurrentByData(stage)
+        assert seg.currentData() == stage
+
+
+def test_flatfield_source_applies_only_flatfield(playground_app, monkeypatch):
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.playground import controller as C
+    import process_microscopy as pm
+    frame = _frame(7)
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
+    # flatfield_mode / background_method are read from the widgets each change.
+    app._playground_ff_cb.setCurrentText("gaussian")
+    app._playground_bg_cb.setCurrentText("sliding_disk")
+    st.source = "flatfield"
+    C.playground_on_change(app)
+    # Flat-field source == flatfield only (background = none).
+    want = pm.correct_single_frame(frame, flatfield_mode="gaussian",
+                                   background_method="none")
+    assert np.allclose(st.display_arr, want)
+
+
+def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypatch):
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.playground import controller as C
+    from well_viewer.core.channel_state_controller import get_thresh_frac_on
+    frame = np.zeros((20, 20), dtype=np.float32)
+    frame[2:6, 2:6] = 1000.0     # bright cell
+    frame[12:16, 12:16] = 10.0   # dim cell
+    mask = np.zeros((20, 20), dtype=np.int32)
+    mask[2:6, 2:6] = 1
+    mask[12:16, 12:16] = 2
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: mask)
+
+    before = get_thresh_frac_on(app, (st.channel or "").lower())
+    st.source = "raw"
+    st.binary_mask = True
+    st.threshold = 100.0          # local override between the two cells
+    C.playground_on_change(app)
+    rgb = st.base_rgb
+    assert (rgb[3, 3] == (255, 255, 255)).all()    # bright cell ON
+    assert (rgb[14, 14] == (0, 0, 0)).all()        # dim cell OFF
+    # The app-wide ThreshFracOn is untouched.
+    assert get_thresh_frac_on(app, (st.channel or "").lower()) == before
+
+
+def test_hover_tooltip_reads_display_value(playground_app, monkeypatch):
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.playground import controller as C
+    frame = _frame(9)
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
+    st.source = "raw"
+    C.playground_on_change(app)
+    # display_arr is the shown frame; geometry was recorded for the mapping.
+    assert st.display_arr is not None
+    assert app._playground_disp["iw"] == frame.shape[1]
+
+    class _Ev:
+        def position(self):
+            class _P:
+                def x(self_inner): return 0.0
+                def y(self_inner): return 0.0
+            return _P()
+    C.playground_hover(app, _Ev())     # must not raise
+
+
+def test_auto_lut_stays_live_and_reflects_param_changes(playground_app, monkeypatch):
+    """Regression: an 'auto' LUT must NOT be overwritten with the first render's
+    numbers, so subtle correction-parameter changes (e.g. robust_mesh) keep
+    being reflected on screen instead of being masked by a locked window."""
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.playground import controller as C
+    rng = np.random.default_rng(3)
+    yy, xx = np.mgrid[0:128, 0:128]
+    img = (300 + 600 * np.exp(-((yy - 40) ** 2 + (xx - 90) ** 2) / (2 * 50 ** 2))
+           + rng.normal(0, 40, (128, 128))).astype(np.float32)
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: img)
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
+    app._playground_bg_cb.setCurrentText("robust_mesh")
+    app._playground_radius_edit.setText("100")
+    st.source = "corrected"
+
+    app._playground_mesh_sigma_edit.setText("1.0")
+    C.playground_on_change(app)
+    a = st.base_rgb.copy()
+    # The LUT entries are left as "auto" (live), not clobbered with numbers.
+    assert app._playground_lmin_entry.text() == "auto"
+    assert app._playground_lmax_entry.text() == "auto"
+
+    app._playground_mesh_sigma_edit.setText("5.0")
+    C.playground_on_change(app)
+    assert not np.array_equal(a, st.base_rgb)
 
 
 def test_on_change_handles_missing_frame(playground_app, monkeypatch):

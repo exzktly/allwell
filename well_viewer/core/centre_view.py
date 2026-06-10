@@ -151,7 +151,7 @@ def build_centre(app, parent: QWidget) -> None:
     QVBoxLayout(plotting_container).setContentsMargins(0, 0, 0, 0)
 
     _PLOT_SUBTABS = [
-        "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
+        "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map",
     ]
 
     # Sidebars referenced by data-load + tab-switch logic must exist
@@ -400,7 +400,7 @@ def build_centre(app, parent: QWidget) -> None:
             plotting_nb.addPage(title, tab_frames[title])
 
         # Build the first sub-tab immediately so the user sees content.
-        _build_pending("Line Graphs")
+        _build_pending(_PLOT_SUBTABS[0])
 
         def _on_plotting_subtab(_i: int = 0) -> None:
             sub_title = plotting_nb.currentName()
@@ -429,8 +429,7 @@ def build_centre(app, parent: QWidget) -> None:
                 plotting_nb.setCurrentByName(target)
 
         sub_seg.currentChanged.connect(_on_sub_seg)
-        if "Line Graphs" in _PLOT_SUBTABS:
-            sub_seg.setCurrentIndex(_PLOT_SUBTABS.index("Line Graphs"))
+        sub_seg.setCurrentIndex(0)
 
         def _refresh_channel_chip(title: str) -> None:
             """Re-populate the global ctxbar channel combo on sub-tab switch.
@@ -611,7 +610,7 @@ def build_centre(app, parent: QWidget) -> None:
                 return
         app._save_active_card_figure = _save_active_card_figure
 
-        _refresh_channel_chip("Line Graphs")
+        _refresh_channel_chip(_PLOT_SUBTABS[0])
 
     def _build_image_table() -> None:
         from well_viewer.features.image_table.tab_view import build_image_table_tab
@@ -631,7 +630,13 @@ def build_centre(app, parent: QWidget) -> None:
             QVBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
 
         sub_tabs = QTabWidget(parent)
-        sub_tabs.setObjectName("SegmentationSubTabs")
+        # Reuse the SampleDefinitionsSubTabs QSS (rounded rectangular tabs with a
+        # min-width) so the bold selected-tab text isn't clipped — same pattern
+        # the plotting sub-tab bar uses to pick up that styling.
+        sub_tabs.setObjectName("SampleDefinitionsSubTabs")
+        sub_tabs.tabBar().setExpanding(False)
+        sub_tabs.tabBar().setElideMode(Qt.ElideNone)
+        sub_tabs.tabBar().setUsesScrollButtons(True)
         parent.layout().addWidget(sub_tabs)
         app._segmentation_subtabs = sub_tabs
 

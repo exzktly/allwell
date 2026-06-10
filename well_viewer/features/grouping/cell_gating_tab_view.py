@@ -425,7 +425,13 @@ def cell_gating_on_threshold_frac_on_change(app) -> None:
             float(edit.text())
         _cell_gating_save_threshold_frac_on(app)
         _cell_gating_persist_params(app)
+        app._invalidate_stats_cache()
+        # ``_redraw`` only fans out to the default-scope plots (line /
+        # distribution / heat map). Bar and scatter redraw via the fold-change
+        # scope registry, so also emit ``plot_options_changed`` — otherwise a
+        # ThreshFracOn edit leaves the (now default) Bar Plots tab stale.
         app._redraw()
+        app._event_bus.plot_options_changed.emit(app._app_state.plot)
     except ValueError:
         pass
 

@@ -125,39 +125,57 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         "• Flat-field — only the selected flat-field applied.\n"
         "• Corrected — flat-field + background (the full method).")
 
-    def _on_source(_i: int) -> None:
-        app._app_state.playground.source = source_seg.currentData() or "corrected"
-        on_change()
-    source_seg.currentChanged.connect(_on_source)
-    src_row.layout().addWidget(source_seg)
-    app._playground_source_seg = source_seg
-
     lut_row = _row(controls, "LUT min/max")
     lmin = QLineEdit("auto", lut_row)
     lmin.setFixedWidth(56)
     lmax = QLineEdit("auto", lut_row)
     lmax.setFixedWidth(56)
-    lmin.editingFinished.connect(on_change)
-    lmax.editingFinished.connect(on_change)
+    app._playground_lmin_entry = lmin
+    app._playground_lmax_entry = lmax
+
+    def _set_lut_entries(lo_txt: str, hi_txt: str) -> None:
+        for e, t in ((lmin, lo_txt), (lmax, hi_txt)):
+            blocked = e.blockSignals(True)
+            try:
+                e.setText(t)
+            finally:
+                e.blockSignals(blocked)
+
+    def _remember_lut() -> None:
+        st = app._app_state.playground
+        st.lut_by_source[st.source] = (lmin.text(), lmax.text())
+
+    def _on_source(_i: int) -> None:
+        st = app._app_state.playground
+        new_source = source_seg.currentData() or "corrected"
+        if new_source != st.source:
+            _remember_lut()                       # save the stage we're leaving
+            st.source = new_source
+            lo_txt, hi_txt = st.lut_by_source.get(new_source, ("auto", "auto"))
+            _set_lut_entries(lo_txt, hi_txt)       # restore this stage's LUT
+        on_change()
+    source_seg.currentChanged.connect(_on_source)
+    src_row.layout().addWidget(source_seg)
+    app._playground_source_seg = source_seg
+
+    def _on_lut_edit() -> None:
+        _remember_lut()
+        on_change()
+    lmin.editingFinished.connect(_on_lut_edit)
+    lmax.editingFinished.connect(_on_lut_edit)
     lut_auto = QPushButton("Auto", lut_row)
     lut_auto.setFixedWidth(46)
     lut_auto.setToolTip("Reset the LUT min/max to the displayed frame's range.")
 
     def _on_lut_auto() -> None:
-        for e in (lmin, lmax):
-            blocked = e.blockSignals(True)
-            try:
-                e.setText("auto")
-            finally:
-                e.blockSignals(blocked)
+        _set_lut_entries("auto", "auto")
+        _remember_lut()
         on_change()
     lut_auto.clicked.connect(lambda _=False: _on_lut_auto())
     lut_row.layout().addWidget(lmin)
     lut_row.layout().addWidget(lmax)
     lut_row.layout().addWidget(lut_auto)
     lut_row.layout().addStretch(1)
-    app._playground_lmin_entry = lmin
-    app._playground_lmax_entry = lmax
 
     cmap_row = _row(controls, "Colormap")
     from widgets.lut_selector import LutSelector
@@ -184,6 +202,13 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     thr_row.layout().addWidget(thr_stepper)
     thr_row.layout().addStretch(1)
     app._playground_threshold_stepper = thr_stepper
+
+    # QC size-based cleanup (px², 0 = no bound) — previews the pipeline's debris
+    # gate by dropping out-of-range mask labels from the overlay / binary.
+    qc_min_row = _row(controls, "QC min area")
+    _edit(qc_min_row, "0", "_playground_qc_min_area_edit")
+    qc_max_row = _row(controls, "QC max area")
+    _edit(qc_max_row, "0", "_playground_qc_max_area_edit")
 
     toggles = QWidget(controls)
     tl = QHBoxLayout(toggles)
@@ -253,13 +278,30 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     app._playground_image_canvas = canvas
     app._playground_image_label = label
 
-    # Hover tooltip: show the pixel's intensity value in the displayed frame.
-    from well_viewer.features.playground.controller import playground_hover
-    _orig_move = label.mouseMoveEvent
+    # Auto-fit: re-blit (fit-to-viewport × zoom) whenever the canvas resizes —
+    # including the first real layout pass, so the image isn't stuck tiny.
+    _orig_canvas_resize = canvas.resizeEvent
+
+    def _on_canvas_resize(ev) -> None:
+        _orig_canvas_resize(ev)
+        render_playground_display(app)
+    canvas.resizeEvent = _on_canvas_resize
+
+    # Click-drag to pan; hover (no button) shows the pixel intensity tooltip.
+    from well_viewer.features.playground.controller import (
+        playground_hover, playground_pan_move, playground_pan_press,
+    )
+
+    def _on_press(ev) -> None:
+        playground_pan_press(app, ev)
 
     def _on_move(ev) -> None:
-        playground_hover(app, ev)
-        _orig_move(ev)
+        from PySide6.QtCore import Qt as _Qt
+        if ev.buttons() & _Qt.LeftButton:
+            playground_pan_move(app, ev)
+        else:
+            playground_hover(app, ev)
+    label.mousePressEvent = _on_press
     label.mouseMoveEvent = _on_move
 
     # Show/hide param rows by method (mirrors analyze_tab._sync_bg).

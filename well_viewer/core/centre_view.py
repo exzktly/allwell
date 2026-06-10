@@ -362,6 +362,12 @@ def build_centre(app, parent: QWidget) -> None:
         app._plotting_thresh_frac_stepper = _Stepper(
             value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
         app._plotting_thresh_frac_stepper.setFixedWidth(96)
+        # Don't let the threshold box grab keyboard focus when the window first
+        # shows (it auto-focused on load) — only take focus on click.
+        app._plotting_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
+        _thr_edit = getattr(app._plotting_thresh_frac_stepper, "_edit", None)
+        if _thr_edit is not None:
+            _thr_edit.setFocusPolicy(Qt.ClickFocus)
         app._plotting_thresh_frac_stepper.setToolTip(
             "ON/OFF intensity threshold for the active channel — cells above it "
             "count toward the fraction-above- and mean-above-threshold series. "

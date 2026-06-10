@@ -359,6 +359,29 @@ def test_ctxbar_threshold_box_reflects_set_value(loaded_app):
     assert app._plotting_thresh_frac_stepper.value() == 77.0
 
 
+def test_ctxbar_threshold_box_loads_saved_value(viewer_app, mini_dataset):
+    """Regression: on load, the ctxbar threshold box must show the threshold
+    saved in pipeline_info.json (per active channel), not its 50.0 default."""
+    import json
+    pinfo = mini_dataset / "pipeline_info.json"
+    info = json.loads(pinfo.read_text()) if pinfo.exists() else {}
+    info.setdefault("cell_gating", {})["thresh_frac_on"] = {"gfp": 200.0}
+    pinfo.write_text(json.dumps(info))
+    viewer_app._load_path(mini_dataset)
+    assert viewer_app._app_state.channel.active_channel == "gfp"
+    assert viewer_app._plotting_thresh_frac_stepper.value() == 200.0
+
+
+def test_ctxbar_threshold_box_does_not_grab_focus(loaded_app):
+    """The threshold box must not auto-grab keyboard focus on show — ClickFocus
+    on the stepper and its inner edit so it only focuses on click."""
+    from PySide6.QtCore import Qt
+    stp = loaded_app._plotting_thresh_frac_stepper
+    assert stp.focusPolicy() == Qt.ClickFocus
+    edit = getattr(stp, "_edit", None)
+    assert edit is not None and edit.focusPolicy() == Qt.ClickFocus
+
+
 def test_threshold_change_redraws_scope_plots(loaded_app, monkeypatch):
     """Regression: a ThreshFracOn edit must fan out to the fold-change scope
     plots (Bar / Scatter), not just the default-scope plots — otherwise the

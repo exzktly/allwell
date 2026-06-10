@@ -48,9 +48,23 @@ class RedrawCoordinator(QObject):
         redraw_scopes_or_defer(self._app)
 
     def _on_dataset_loaded(self, _state=None) -> None:
-        """A dataset finished loading — redraw the default-scope plots.
+        """A dataset finished loading — redraw every plot.
 
-        Uses the full ``_redraw`` (line / distribution / heat map) rather than
-        the scope coalescer: a freshly loaded dataset invalidates every plot.
+        ``_redraw`` (``redraw_app``) covers the default-scope plots
+        (line / distribution / heat map); the Bar / Scatter plots redraw
+        through their own scope callables, which ``_redraw`` does not cover. So
+        after ``_redraw`` we draw the visible non-default scope and defer the
+        rest — otherwise a freshly loaded dataset leaves the (now default) Bar
+        Plots tab as an empty white axis until the user touches a control.
+        Passing ``_redraw``'s callable as ``default_redraw`` keeps the line
+        scope from being drawn twice when the line tab is the visible one.
         """
         self._app._redraw()
+        from well_viewer.domain.fold_change_scopes import (
+            get_scope, redraw_scopes_after_load,
+        )
+        line_scope = get_scope("line")
+        redraw_scopes_after_load(
+            self._app,
+            default_redraw=line_scope.redraw if line_scope is not None else None,
+        )

@@ -47,3 +47,37 @@ def test_export_axis_default_targets_first_subplot():
     assert fn(default_self) == "1"
     explicit_self = SimpleNamespace(_prefs={"axis_target": "3"})
     assert fn(explicit_self) == "3"
+
+
+def test_export_click_selects_axis():
+    """Clicking a subplot syncs the Export-Style 'Axis #' to that axis; a click
+    that misses every axis, or one made while the sidebar is hidden, no-ops so
+    normal canvas interaction is untouched."""
+    from types import SimpleNamespace
+    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+    fn = ExportStyleSidebar._on_canvas_axis_pick
+
+    class FakeCombo:
+        def __init__(self):
+            self._t = "1"
+        def currentText(self):
+            return self._t
+        def setCurrentText(self, t):
+            self._t = str(t)
+
+    ax0, ax1, ax2 = object(), object(), object()
+    flashed = []
+    s = SimpleNamespace(
+        _fig=SimpleNamespace(axes=[ax0, ax1, ax2]),
+        _axis_cb=FakeCombo(),
+        isVisible=lambda: True,
+        _flash_axis=lambda ax: flashed.append(ax),
+    )
+    fn(s, SimpleNamespace(inaxes=ax1))
+    assert s._axis_cb.currentText() == "2"
+    assert flashed == [ax1]
+    fn(s, SimpleNamespace(inaxes=None))          # miss → no change
+    assert s._axis_cb.currentText() == "2"
+    s.isVisible = lambda: False                   # hidden → no change
+    fn(s, SimpleNamespace(inaxes=ax0))
+    assert s._axis_cb.currentText() == "2"

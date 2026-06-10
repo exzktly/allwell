@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
@@ -250,9 +250,22 @@ class ExportStyleSidebar(QWidget):
         # Getter/setter only (no auto-apply): switching the target axis must
         # not push the currently displayed limits onto the new one.
         add_row(s_axes, "Axis #", axis_cb)
+        self._axis_cb = axis_cb
         self._getters["axis_target"] = axis_cb.currentText
         self._setters["axis_target"] = lambda v, w=axis_cb: w.setCurrentText(str(v))
         axis_cb.currentTextChanged.connect(lambda t: self._on_axis_target_changed(t))
+        # Click a subplot in the figure to target it: the Axis # field tracks the
+        # axis currently being viewed. Connected once (the sidebar is cached per
+        # figure); the handler no-ops while the sidebar is hidden.
+        self._axis_pick_cid = None
+        self._axis_highlight = None
+        if self._canvas is not None:
+            try:
+                self._axis_pick_cid = self._canvas.mpl_connect(
+                    "button_press_event", self._on_canvas_axis_pick
+                )
+            except Exception:
+                self._axis_pick_cid = None
         from widgets.stepper import Stepper as _Stepper
         for key, label, lo, hi in [
             ("axis_label_size", "Axis label size", 1, 96),
@@ -679,6 +692,48 @@ class ExportStyleSidebar(QWidget):
         """
         saved = str(self._prefs.get("axis_target", "All"))
         return saved if saved != "All" else "1"
+
+    def _on_canvas_axis_pick(self, event) -> None:
+        """Clicking a subplot targets it: sync the Axis # field to the clicked
+        axis and flash it. No-op while the sidebar is hidden or the click misses
+        every axis, so it never interferes with normal canvas interaction."""
+        if not self.isVisible():
+            return
+        ax = getattr(event, "inaxes", None)
+        if ax is None:
+            return
+        try:
+            idx = list(self._fig.axes).index(ax)
+        except ValueError:
+            return
+        target = str(idx + 1)
+        cb = getattr(self, "_axis_cb", None)
+        if cb is not None and cb.currentText() != target:
+            cb.setCurrentText(target)  # drives _on_axis_target_changed
+        self._flash_axis(ax)
+
+    def _flash_axis(self, ax) -> None:
+        """Briefly outline *ax* so it's clear which subplot is now targeted."""
+        try:
+            spines = list(ax.spines.values())
+            saved = [(sp, sp.get_edgecolor(), sp.get_linewidth(), sp.get_visible())
+                     for sp in spines]
+            for sp in spines:
+                sp.set_visible(True)
+                sp.set_edgecolor(theme.Colors.accent)
+                sp.set_linewidth(2.5)
+            self._canvas.draw_idle()
+
+            def _restore():
+                for sp, ec, lw, vis in saved:
+                    sp.set_edgecolor(ec)
+                    sp.set_linewidth(lw)
+                    sp.set_visible(vis)
+                self._canvas.draw_idle()
+
+            QTimer.singleShot(500, _restore)
+        except Exception:
+            pass
 
     def _on_axis_target_changed(self, new_axis: str) -> None:
         if self._updating:

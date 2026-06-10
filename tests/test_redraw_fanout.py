@@ -137,16 +137,31 @@ def test_fold_change_toggle_redraws_visible_scope_once(counted_app):
 
 # ── Dataset load ─────────────────────────────────────────────────────────────
 
-def test_dataset_loaded_signal_redraws_once(counted_app):
+def test_dataset_loaded_signal_redraws_visible_bar_scope(counted_app):
     app, counter = counted_app
+    _show_centre_tab(app, "Bar Plots")
     counter.reset()
 
     app._event_bus.dataset_loaded.emit(app._app_state.dataset)
 
-    # _redraw (the line-scope method) covers line / distribution / heat map —
-    # the full post-load redraw. Bars redraw lazily on tab entry.
+    # _redraw (the line-scope method) covers line / distribution / heat map.
+    # With Bar Plots the visible tab, the bar scope must also draw on load
+    # (otherwise it's an empty white axis) — exactly once, no fan-out.
     assert counter.counts["line"] == 1, "dataset load must drive exactly one _redraw"
-    assert counter.counts["bar"] == 0
+    assert counter.counts["bar"] == 1, "visible bar scope must draw on load"
+
+
+def test_dataset_loaded_does_not_double_draw_line_scope(counted_app):
+    app, counter = counted_app
+    _show_centre_tab(app, "Line Graphs")
+    counter.reset()
+
+    app._event_bus.dataset_loaded.emit(app._app_state.dataset)
+
+    # The line scope shares _redraw's callable, so when the line tab is visible
+    # the post-load scope pass must NOT redraw it again (would be a fan-out of 2).
+    assert counter.counts["line"] == 1, "line scope must draw exactly once on load"
+    assert counter.counts["bar"] == 0, "hidden bar scope defers (marked dirty)"
 
 
 # ── Deferred-scope flush on tab switch ───────────────────────────────────────

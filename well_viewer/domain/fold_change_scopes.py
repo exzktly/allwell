@@ -114,6 +114,33 @@ def redraw_scopes_or_defer(app) -> None:
             dirty.add(scope.name)
 
 
+def redraw_scopes_after_load(app, *, default_redraw=None) -> None:
+    """Post-load scope refresh that composes with a prior ``_redraw``.
+
+    A freshly loaded dataset invalidates every plot. ``RedrawCoordinator`` runs
+    ``app._redraw`` first (``redraw_app`` — the line / distribution / heat-map
+    plots), then calls this to cover the Bar / Scatter scopes that ``_redraw``
+    does not touch:
+
+    * The scope whose ``redraw`` IS ``default_redraw`` was already drawn by
+      ``_redraw`` — leave it clean (don't redraw it again, avoiding a fan-out
+      when the line tab is the visible one).
+    * The visible non-default scope is drawn now so its tab isn't blank.
+    * Every other scope is marked dirty, so it flushes the moment its tab is
+      next viewed — the same defer-until-viewed contract as any other action.
+    """
+    visible = current_scope_name(app)
+    dirty = _dirty_set(app)
+    for scope in registered_scopes():
+        if default_redraw is not None and scope.redraw is default_redraw:
+            dirty.discard(scope.name)
+        elif scope.name == visible:
+            _call_redraw(app, scope)
+            dirty.discard(scope.name)
+        else:
+            dirty.add(scope.name)
+
+
 def flush_dirty_scopes(app) -> None:
     """Redraw any dirty scope whose tab is now visible. Idempotent.
 

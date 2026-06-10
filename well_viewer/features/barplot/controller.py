@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,7 +70,7 @@ class BarItem:
 def _bar_debug(msg: str) -> None:
     """Emit opt-in bar-plot diagnostics for draw-time label debugging."""
     if debug_flags.review_bar_debug_enabled():
-        print(f"DEBUG barplot_controller: {msg}")
+        _logger.debug("%s", msg)
 
 
 def bar_groups_to_dict(
@@ -684,7 +686,7 @@ def collect_bar_items_fov_pooled(
         if "area_px" in df.columns:
             area = _pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
             with _np.errstate(invalid="ignore"):
-                mask &= _np.isfinite(area) 
+                mask &= _np.isfinite(area)
         for channel, gate in fluor_gates.items():
             col = f"{channel}_mean_intensity"
             if col not in df.columns:

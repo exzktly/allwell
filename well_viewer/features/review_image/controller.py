@@ -742,7 +742,6 @@ def review_build_include_map(
     if df is not None and not df.empty:
         keys = review_row_keys_series(app,df)
         if keys is not None:
-            target = (fov, tp, None)
             fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
             sub = df.loc[fov_eq.fillna(False).to_numpy()]
             if not sub.empty:

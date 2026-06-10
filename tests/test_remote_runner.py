@@ -1194,7 +1194,8 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     """The stuck-final-fetch bug: rsync can exit non-zero (timeout / reset on
     close) *after* the zip is fully across. The well must still materialise —
     not get discarded and re-fetched forever — so the run can finish."""
-    import tempfile, zipfile
+    import tempfile
+    import zipfile
     from pathlib import Path
     run = _make_run(tmp_path)
     logs: list[str] = []

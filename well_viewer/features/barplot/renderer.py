@@ -7,8 +7,11 @@ the matplotlib axes to draw into.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Dict, List, Optional
+
+_logger = logging.getLogger(__name__)
 
 from ui.theme import (
     BORDER,
@@ -780,7 +783,10 @@ def draw_per_cell_bar_mode(
 
     if _debug_flags.review_bar_debug_enabled():
         mode = "violin" if app._bar_violin else "beeswarm"
-        print(f"DEBUG barplot_renderer: per-cell mode={mode} wells={plot_wells!r} labels={plot_labels!r} tps={plot_tps!r}")
+        _logger.debug(
+            "per-cell mode=%s wells=%r labels=%r tps=%r",
+            mode, plot_wells, plot_labels, plot_tps,
+        )
     # Build the per-well scale dict ONCE — same denominator each well uses for
     # its cell values. Pass through to violin / beeswarm so fold-change
     # participation no longer ends at the bar renderer. Fold-change resolves

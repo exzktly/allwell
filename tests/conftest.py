@@ -124,7 +124,7 @@ class MockApp:
 
     def _compute_rep_per_fov_stats(self, rset, target_t: float,
                                    threshold: float, use_sem: bool) -> tuple:
-        gm, gerr, gf, ferr = compute_rep_stats(self, 
+        gm, gerr, gf, ferr = compute_rep_stats(self,
             rset, target_t, threshold, use_sem,
         )
         return (gm, gerr, gf, ferr, 5.0, 0.0)

@@ -306,7 +306,7 @@ def export_plot_data(app) -> None:
 
     rows_out = []
     for label in selected:
-        pts = aggregate_well(app, 
+        pts = aggregate_well(app,
             label, threshold=threshold, use_sem=use_sem,
             val_col=app._app_state.channel.active_val_col,
             fluor_gates=fluor_gates,
@@ -490,7 +490,7 @@ def export_raw_data_csv(app) -> None:
         mask = df_included_mask(df).to_numpy(copy=True)
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) 
+            mask &= np.isfinite(area)
         fluor = pd.to_numeric(df[gate_col], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
             mask &= np.isfinite(fluor) & (fluor > fluor_gate_threshold)

@@ -187,7 +187,7 @@ def _cell_value(
 
     if metric == METRIC_COUNT:
         # Use aggregate to apply gate logic consistently, then read n_total.
-        pts = aggregate_group(app, 
+        pts = aggregate_group(app,
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -196,7 +196,7 @@ def _cell_value(
         return float(matched[0][5]) if matched else 0.0
 
     if metric == METRIC_FRACTION:
-        pts = aggregate_group(app, 
+        pts = aggregate_group(app,
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -236,7 +236,7 @@ def _cell_value(
         )
 
     # METRIC_MEAN (and fallback)
-    pts = aggregate_group(app, 
+    pts = aggregate_group(app,
         valid_wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         fluor_gates=fluor_gates,

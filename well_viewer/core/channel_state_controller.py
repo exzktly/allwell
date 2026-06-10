@@ -279,7 +279,7 @@ def refresh_metric_combo_for_channel(app) -> None:
         channel_label = ""
     smfish_chan = app._app_state.channel.active_channel
     for attr in ("_plotting_metric_cb", "_metric_cb", "_metric_cb_bar"):
-        populate_metric_combo(app, 
+        populate_metric_combo(app,
             getattr(app, attr, None),
             channel_entry=channel_label,
             smfish_channel=smfish_chan,
@@ -689,7 +689,7 @@ def refresh_stats_property_combo(app) -> None:
     channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
     # Strip the " (spots)" suffix so smfish-enable matching works.
     smf_base = channel.split(" ")[0] if channel else app._app_state.channel.active_channel
-    populate_metric_combo(app, 
+    populate_metric_combo(app,
         m_cb, channel_entry=channel, smfish_channel=smf_base,
     )
 

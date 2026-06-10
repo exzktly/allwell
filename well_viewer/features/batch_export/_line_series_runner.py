@@ -83,7 +83,7 @@ def collect_line_series_for_group(
         valid_wells = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
         if not valid_wells:
             continue
-        pts = aggregate_group(app, 
+        pts = aggregate_group(app,
             valid_wells, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -104,7 +104,7 @@ def collect_line_series_for_group(
     for w in group.solo_wells:
         if w not in app._app_state.dataset.well_paths:
             continue
-        pts = aggregate_well(app, 
+        pts = aggregate_well(app,
             w, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,

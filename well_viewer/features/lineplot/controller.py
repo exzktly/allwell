@@ -59,7 +59,7 @@ class LinePoint:
 
 @dataclass
 class LineSeries:
-    """One member's curve on the line plot (rep-set or well).
+    r"""One member's curve on the line plot (rep-set or well).
 
     Fields:
       * ``key`` — drag-order identity. Rep-set name for grouped mode,
@@ -214,7 +214,7 @@ def collect_line_series(
             all_tps: set = set()
             cdf_vals: list = []
             for lbl in valid_wells:
-                for t, *_ in aggregate_well(app, 
+                for t, *_ in aggregate_well(app,
                     lbl, threshold=threshold, use_sem=False,
                     val_col=val_col,
                     fluor_gates=fluor_gates,
@@ -230,11 +230,11 @@ def collect_line_series(
             _raw_pts: list = []
             for t in sorted(all_tps):
                 if rep_per_fov:
-                    gm, gerr, gf, _, _, _ = compute_rep_per_fov_stats(app, 
+                    gm, gerr, gf, _, _, _ = compute_rep_per_fov_stats(app,
                         rset, t, threshold, use_sem,
                     )
                 else:
-                    gm, gerr, gf, _ = compute_rep_stats(app, 
+                    gm, gerr, gf, _ = compute_rep_stats(app,
                         rset, t, threshold, use_sem,
                     )
                 if not (isinstance(gm, float) and math.isnan(gm)):
@@ -269,7 +269,7 @@ def collect_line_series(
     )
     for label in ordered_selected:
         color = app._rank_color_well(label)
-        pts = aggregate_well(app, 
+        pts = aggregate_well(app,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
 import numpy as np
 import pandas as pd
+
+_logger = logging.getLogger(__name__)
 
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series
@@ -111,7 +114,7 @@ def collect_scatter_data(
                 mask &= finite & tp_match
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) 
+            mask &= np.isfinite(area)
         x = resolve_value_series(df, col_x, ratios).to_numpy()
         y = resolve_value_series(df, col_y, ratios).to_numpy()
         gate_x_mask = np.ones_like(x, dtype=bool) if is_count_x else (x > fluor_gate_x)
@@ -128,8 +131,8 @@ def collect_scatter_data(
                        if "nucleus_id" in sel.columns else np.array([""] * len(sel)))
         row_idx = sel.index.to_numpy()
         if debug_flags.review_scatter_debug_enabled() and len(sel) > 0:
-            print(f"DEBUG scatter_controller: Row keys: {list(sel.columns)}")
-            print(f"DEBUG scatter_controller: filename={filenames[0]!r}, nuclear_id={nuclear_ids[0]!r}")
+            _logger.debug("scatter row keys: %s", list(sel.columns))
+            _logger.debug("scatter filename=%r nuclear_id=%r", filenames[0], nuclear_ids[0])
         metadata = [(well_label, fn, nid, int(ri))
                     for fn, nid, ri in zip(filenames, nuclear_ids, row_idx)]
         return x[mask], y[mask], tp[mask], metadata
@@ -512,7 +515,6 @@ def collect_scatter_agg_data(
     threshold_x = 0.0 if metric_x == "ratio" else app._get_thresh_frac_on(ch_x)
     threshold_y = 0.0 if metric_y == "ratio" else app._get_thresh_frac_on(ch_y)
     fluor_gates = app._get_all_fluor_gates()  # Apply all channel gates
-    ratios = app._app_state.channel.ratio_index
     label_to_key = getattr(app, "_label_to_channel_key", None) or {}
 
     # Get active replicates or selected wells
@@ -583,7 +585,7 @@ def collect_scatter_agg_data(
         """
         if not val_col:
             return float("nan"), 0.0
-        gm, gerr, gf, ferr = well_aggregate_stats(app, 
+        gm, gerr, gf, ferr = well_aggregate_stats(app,
             wells, tp,
             threshold=threshold,
             val_col=val_col,
@@ -1084,10 +1086,8 @@ def update_scatter_menus(app) -> None:
 
     # Update timepoint selections for aggregate scatter; all default checked.
     if hasattr(app, '_scatter_agg_tp_selections'):
-        prev_selected = {tp_str for tp_str, v in app._scatter_agg_tp_selections.items() if v}
         app._scatter_agg_tp_selections.clear()
     else:
-        prev_selected = set()
         app._scatter_agg_tp_selections = {}
 
     for tp_str in tp_strs:
@@ -1205,7 +1205,7 @@ def refresh_scatter_agg_metric_for_axis(app, axis: str) -> None:
     if ch_cb is None or m_cb is None:
         return
     channel = str(ch_cb.currentText() or "")
-    populate_metric_combo(app, 
+    populate_metric_combo(app,
         m_cb, channel_entry=channel, smfish_channel=channel,
         include_fraction=True,
     )
@@ -1250,7 +1250,7 @@ def refresh_scatter_metric_for_axis(app, axis: str) -> None:
     if ch_cb is None or m_cb is None:
         return
     channel = str(ch_cb.currentText() or "")
-    populate_metric_combo(app, 
+    populate_metric_combo(app,
         m_cb, channel_entry=channel, smfish_channel=channel,
     )
 

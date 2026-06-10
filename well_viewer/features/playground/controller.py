@@ -141,15 +141,10 @@ def _resolve_lut(app, arr):
     hi = _num("_playground_lmax_entry", float(a.max()) if a.size else 1.0)
     if hi <= lo:
         hi = lo + 1.0
-    # Keep the edits showing the applied numbers (signals blocked).
-    for attr, val in (("_playground_lmin_entry", lo), ("_playground_lmax_entry", hi)):
-        e = getattr(app, attr, None)
-        if e is not None:
-            blocked = e.blockSignals(True)
-            try:
-                e.setText(f"{val:.0f}")
-            finally:
-                e.blockSignals(blocked)
+    # NB: do NOT write the computed range back over an "auto" entry. Keeping
+    # "auto" live means every correction-parameter change re-derives the window
+    # from the current frame, so subtle changes (e.g. robust_mesh tile/sigma)
+    # are reflected on screen instead of being masked by a stale, locked LUT.
     return lo, hi
 
 
@@ -181,19 +176,30 @@ def playground_on_change(app) -> None:
         return
     st.raw_arr = np.asarray(raw, dtype=np.float32)
     st.mask_arr = _load_mask_array(app, cache, st.well, st.timepoint, st.fov)
+    frame_lbl = f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}"
 
-    if not st.show_corrected:
+    # The binary threshold is per-frame: when the frame identity changes, drop
+    # any local override so the control falls back to the channel's app-wide
+    # ThreshFracOn default, and refresh the displayed value.
+    frame_key = (st.well, st.channel, st.timepoint, st.fov)
+    if getattr(app, "_playground_frame_key", None) != frame_key:
+        app._playground_frame_key = frame_key
+        st.threshold = None
+        _refresh_threshold_display(app)
+
+    # Raw — no correction.
+    if st.source == "raw":
         _render(app, st.raw_arr)
-        _set_status(app, f"Raw — {st.well} {st.channel} t{st.timepoint} fov{st.fov}")
+        _set_status(app, f"Raw — {frame_lbl}")
         return
 
     chan_lower = st.channel.lower()
-    if st.needs_reference_field():
+    if _source_needs_reference(st):
         if not st.background_well:
             _set_status(app, "Pick a background well for empty_well / basic.")
             _render(app, st.raw_arr)
             return
-        if st.reference_stale():
+        if st.model_well != st.background_well:
             _build_reference_then_render(app, chan_lower)
             return
         ff = st.ff_field_by_chan.get(chan_lower)
@@ -201,24 +207,73 @@ def playground_on_change(app) -> None:
     else:
         ff = bg = None
 
+    # Flat-field source applies only the flat-field (background = none).
+    bg_method = st.background_method if st.source == "corrected" else "none"
     corrected = pm.correct_single_frame(
         st.raw_arr, flatfield_mode=st.flatfield_mode,
-        background_method=st.background_method, radius=st.radius,
+        background_method=bg_method, radius=st.radius,
         fft_small=st.fft_small, mesh_ratio=st.mesh_ratio, mesh_sigma=st.mesh_sigma,
         ff_field=ff, bg_field=bg)
     _render(app, corrected)
-    _set_status(
-        app, f"Corrected ({st.flatfield_mode}+{st.background_method}) — "
-        f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}")
+    label = ("Flat-field" if st.source == "flatfield"
+             else f"Corrected ({st.flatfield_mode}+{st.background_method})")
+    _set_status(app, f"{label} — {frame_lbl}")
+
+
+def _source_needs_reference(st) -> bool:
+    """A reference-well field is needed for empty_well/basic flat-field (any
+    non-raw source) and for empty_well background (corrected source only)."""
+    if st.source == "raw":
+        return False
+    if st.flatfield_mode in ("empty_well", "basic"):
+        return True
+    return st.source == "corrected" and st.background_method == "empty_well"
+
+
+def _effective_threshold(app) -> float:
+    """Frame-local binary threshold: the user's override if set, else the
+    channel's app-wide ThreshFracOn as a read-only default (never written back)."""
+    st = _st(app)
+    if st.threshold is not None:
+        return float(st.threshold)
+    try:
+        from well_viewer.core.channel_state_controller import get_thresh_frac_on
+        return float(get_thresh_frac_on(app, (st.channel or "").lower()))
+    except Exception:
+        return 0.0
+
+
+def _cells_above(arr, mask, threshold: float):
+    """Label ids whose mean intensity in *arr* exceeds *threshold* (per-cell
+    gate over the precomputed mask). None when the mask doesn't match the frame."""
+    center = np.asarray(mask, dtype=np.int32)
+    if center.shape[:2] != np.asarray(arr).shape[:2]:
+        return None
+    ids = np.unique(center)
+    ids = ids[ids > 0]
+    if ids.size == 0:
+        return set()
+    from scipy import ndimage as ndi
+    means = np.atleast_1d(ndi.mean(np.asarray(arr, dtype=np.float32),
+                                   labels=center, index=ids))
+    return {int(i) for i, m in zip(ids, means) if float(m) > threshold}
 
 
 def _render(app, arr) -> None:
     st = _st(app)
+    st.display_arr = np.asarray(arr, dtype=np.float32)
     lo, hi = _resolve_lut(app, arr)
     mask = st.mask_arr if (st.show_overlay or st.binary_mask) else None
+    above_ids = None
+    thr = None
+    if st.binary_mask:
+        thr = _effective_threshold(app)
+        if st.mask_arr is not None:
+            above_ids = _cells_above(arr, st.mask_arr, thr)
     st.base_rgb = build_playground_rgb(
         arr, mask, lo=lo, hi=hi, cmap_name=st.cmap_name, binary=st.binary_mask,
-        show_boundary=st.show_overlay, tint=tuple(st.tint_color))
+        show_boundary=st.show_overlay, tint=tuple(st.tint_color),
+        above_ids=above_ids, threshold=thr)
     render_playground_display(app)
 
 
@@ -261,3 +316,43 @@ def _build_reference_then_render(app, chan_lower: str) -> None:
         app, st.background_well, chan_lower,
         flatfield_mode=st.flatfield_mode, background_method=st.background_method,
         on_done=_on_done, on_failed=_on_failed)
+
+
+def _refresh_threshold_display(app) -> None:
+    """Sync the Threshold stepper to the effective threshold (signals blocked so
+    the display sync doesn't trigger a re-render)."""
+    stp = getattr(app, "_playground_threshold_stepper", None)
+    if stp is None:
+        return
+    blocked = stp.blockSignals(True)
+    try:
+        stp.setValue(_effective_threshold(app))
+    finally:
+        stp.blockSignals(blocked)
+
+
+def playground_hover(app, event) -> None:
+    """Show a tooltip with the hovered pixel's intensity in the displayed frame."""
+    st = _st(app)
+    arr = st.display_arr
+    disp = getattr(app, "_playground_disp", None)
+    label = getattr(app, "_playground_image_label", None)
+    if arr is None or disp is None or label is None:
+        return
+    a = np.asarray(arr)
+    nw, nh, iw, ih = disp["nw"], disp["nh"], disp["iw"], disp["ih"]
+    try:
+        pos = event.position()          # Qt6 QMouseEvent
+        mx, my = pos.x(), pos.y()
+    except AttributeError:
+        mx, my = event.x(), event.y()
+    # The pixmap is centred in the (possibly larger) label.
+    off_x = max(0, (label.width() - nw) // 2)
+    off_y = max(0, (label.height() - nh) // 2)
+    px = int((mx - off_x) * iw / max(nw, 1))
+    py = int((my - off_y) * ih / max(nh, 1))
+    if not (0 <= px < a.shape[1] and 0 <= py < a.shape[0]):
+        return
+    from PySide6.QtGui import QCursor
+    from PySide6.QtWidgets import QToolTip
+    QToolTip.showText(QCursor.pos(), f"({px}, {py})  =  {float(a[py, px]):.1f}")

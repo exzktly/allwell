@@ -42,7 +42,7 @@ class PlaygroundState:
     model_well: "str | None" = None     # which well the cached fields were built from
 
     # view
-    show_corrected: bool = True         # Raw / Corrected toggle
+    source: str = "corrected"           # "raw" | "flatfield" | "corrected"
     zoom: float = 1.0
     pan_x: float = 0.0
     pan_y: float = 0.0
@@ -52,26 +52,23 @@ class PlaygroundState:
     binary_mask: bool = False
     show_overlay: bool = True           # precomputed-mask boundary overlay on/off
     tint_color: tuple = (255, 255, 255)
+    # Frame-local binary threshold (intensity units). None ⇒ fall back to the
+    # channel's app-wide ThreshFracOn as the default; editing it here NEVER
+    # writes back to the app-wide cell-gating value.
+    threshold: "float | None" = None
 
     # per-render caches (rebuilt on change; never persisted)
     raw_arr: object = None              # last-loaded raw frame
     mask_arr: object = None             # last-loaded precomputed labels
+    display_arr: object = None          # the array currently shown (raw or corrected)
     image_cache: dict = field(default_factory=dict)
     base_rgb: object = None             # last rendered RGB (for zoom/pan re-blit)
-
-    def needs_reference_field(self) -> bool:
-        """True when the chosen method needs a reference-well field built."""
-        return (self.flatfield_mode in ("empty_well", "basic")
-                or self.background_method == "empty_well")
-
-    def reference_stale(self) -> bool:
-        """True when the cached reference fields don't match the chosen well."""
-        return self.needs_reference_field() and self.model_well != self.background_well
 
     def clear_caches(self) -> None:
         """Drop per-frame caches + reference fields (call on dataset swap)."""
         self.raw_arr = None
         self.mask_arr = None
+        self.display_arr = None
         self.base_rgb = None
         self.image_cache.clear()
         self.ff_field_by_chan.clear()

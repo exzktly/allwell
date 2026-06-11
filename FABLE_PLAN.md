@@ -40,7 +40,7 @@ Rules:
 | P2 | Observable exception-swallowing (`swallow` helper) | Low | `[x]` DONE | _this branch_ |
 | P3 | Fix `domain/`→`features/` & `data/`→`features/` layering | Low–Med | `[x]` DONE | _this branch_ |
 | P4 | Decompose the two worst monoliths | Med | `[~]` PARTIAL | _this branch_ |
-| P5 | Raise core-pipeline (`process_microscopy.py`) coverage | Med | `[~]` PARTIAL | _this branch_ |
+| P5 | Raise core-pipeline (`process_microscopy.py`) coverage | Med | `[~]` MOSTLY DONE | _this branch_ |
 
 **Suggested execution order:** P1 → P2 → P3 → P4 → P5 (each builds safety the
 next one relies on). P1 and P2 are independent and can land in parallel.
@@ -120,8 +120,10 @@ no config is committed, so rules are not reproducible. Also removes the 6 stray
       feature tests covering the edited files); full-suite run confirmed no
       failures/timeouts. **TODO for repo owner:** confirm the Actions run is
       green on the first PR and (optionally) add a status badge to the README.
-- [ ] **P1.6** *(optional, deferred)* Register a `slow` marker in `pytest.ini`
-      and mark `test_playground` so a fast local loop can use `-m "not slow"`.
+- [x] **P1.6** Registered a `slow` marker in `pytest.ini` (used by the new
+      end-to-end StarDist test — `-m "not slow"` excludes heavy tests from a fast
+      loop). `test_playground` could also be marked later if its ~4 min runtime
+      becomes a CI problem.
 
 **Acceptance criteria:** A PR shows two passing checks (`lint`, `test`); `ruff
 check .` passes locally on a clean tree; no `print(` remains in
@@ -322,11 +324,20 @@ not an oversight.
       `combined_empty_well_correct`. `process_microscopy.py` re-exports them, so
       `pm.subtract_background(...)` and every call site / the remote worker are
       unchanged. `process_microscopy.py`: **5129 → 4808 lines.**
-- [-] **P4.3 (segmentation.py)** Deferred — needs TF/StarDist to verify; not
-      done blind. Boundary identified: the method-dispatch in
+- [-] **P4.3 (segmentation.py)** Still deferred — **even with the ML stack
+      installed.** Two blockers: (1) the segmentation functions are tightly
+      coupled to worker-global mutable state (`_STARDIST_MODEL`,
+      `_CELLPOSE_MODELS`, `_SEG_FOV_LABEL`, set by `_worker_init`), so a clean
+      extraction means relocating that state + the worker-init wiring; (2) the
+      Cellpose branch **cannot be imported alongside TensorFlow in this sandbox**
+      (TF+Torch OpenMP/`random_device` abort), so a segmentation module that
+      bundles StarDist + Cellpose can't be fully exercised here. The StarDist
+      sub-path is now verifiable (via `test_pipeline_e2e.py`); a future split
+      should separate StarDist from the Torch-based segmenters so each is
+      independently testable. Boundary: the method-dispatch in
       `process_image_group()`.
-- [-] **P4.4 (io_outputs.py)** Deferred — same reason (QC TIFF / CSV writes are
-      interwoven with the TF-dependent orchestrator).
+- [-] **P4.4 (io_outputs.py)** Deferred — QC TIFF / CSV writes are interwoven
+      with the orchestrator; lower value than P4.3 and best done together with it.
 - [x] **P4.5** Remote path handled: added `microscopy_background.py` to
       `services.remote_runner._REQUIRED_REMOTE_FILES`, **and** added
       `tests/test_remote_manifest.py` — an AST guardrail that fails if
@@ -341,6 +352,10 @@ not an oversight.
       caught + fixed one real regression: the moved code referenced
       `_FLATFIELD_SIGMA`, now imported from `flatfield_core` in the new module.)
       A true end-to-end ML pipeline diff is deferred to an ML-capable env (= P5).
+      **Update:** with the ML stack installed, `tests/test_pipeline_e2e.py`
+      (P5.3) now runs the background math through the *real* StarDist pipeline
+      end-to-end — the strongest available confirmation that this extraction is
+      behaviour-preserving.
 
 ### Steps — `image_table/controller.py`
 
@@ -378,18 +393,24 @@ especially an **end-to-end** pipeline test, now tractable after P4's split.
 regression here is the costliest. Currently only specific image-processing
 functions are tested, not orchestration.
 
-**Status:** `[~]` PARTIAL — the extracted module is now unit-tested to 96% and
-coverage is wired into CI; the synthetic-dataset + full end-to-end ML pipeline
-test are deferred (need the TF/StarDist stack, absent here).
+**Status:** `[~]` MOSTLY DONE — synthetic fixture + real-StarDist end-to-end test
+landed (after the ML stack was installed), the extracted module is unit-tested
+to 96%, and coverage is wired into CI. Only deeper orchestration-scenario
+coverage remains.
+
+> **Update (ML stack installed):** TensorFlow 2.13 + StarDist 0.9.1 now run in
+> the dev env, so P5.1 and P5.3 — previously deferred — are **done**. (Torch /
+> Cellpose remain unusable here: TF + Torch can't share a process in this
+> sandbox — OpenMP/`random_device` abort — but the default StarDist path needs
+> neither.)
 
 ### Steps
 
-- [-] **P5.1** *(deferred — needs ML env)* Build a deterministic synthetic-image
-      fixture (tiny TIFFs with known nuclei). Not built here because it's only
-      useful paired with a runnable segmenter (P5.3), which needs TF/StarDist.
-      Note: `tests/test_labelfree_phase.py` already exercises a *non-ML*
-      segmentation path and passes without the ML stack — a partial end-to-end
-      signal already exists.
+- [x] **P5.1** Added `tests/fixtures/synthetic_pipeline.py` —
+      `write_synthetic_fov()` writes schema-named raw TIFFs (nuclear = solid
+      bright disks on dark bg, fluor bright inside nuclei). Empirically the
+      `2D_versatile_fluo` StarDist model detects these 9/9, so tests can assert
+      an exact nucleus count + known geometry. Deterministic, no GPU.
 - [x] **P5.2** Added `tests/test_microscopy_background.py` — 16 direct unit
       tests for the P4-extracted `microscopy_background.py` (apply_tophat,
       subtract_background dispatch incl. each method flooring at 0, empty_well
@@ -399,11 +420,17 @@ test are deferred (need the TF/StarDist stack, absent here).
       `microscopy_background.py`: 96%** (149 stmts, 6 missed — PIL/edge branches).
       (`segmentation`/`io_outputs` modules don't exist yet — P4.3/P4.4 deferred —
       so there's nothing more to unit-test on that front here.)
-- [-] **P5.3** *(deferred — needs ML env)* End-to-end pipeline test over a
-      synthetic dataset asserting the produced CSVs / `pipeline_info.json`. The
-      default-CI "stub-segmenter" variant is feasible but was not built here to
-      avoid shipping an unverifiable test; left for the ML-capable environment,
-      where the StarDist path can also be gated behind a `heavy`/`slow` marker.
+- [x] **P5.3** Added `tests/test_pipeline_e2e.py` — a **real end-to-end** test
+      that runs `process_image_group` through the actual path (flat-field →
+      `microscopy_background` subtraction → **StarDist** nuclear segmentation →
+      per-cell quantification → record assembly + output-image writing) over the
+      synthetic FOV. 4 tests assert: all 9 nuclei recovered + unique ids; record
+      schema + parsed `well/fov/timepoint` + geometry (area ≈ π·r²); fluor
+      quantification above background; and that `_labels.tif` / `_overlay.png` /
+      per-channel `_tophat.tif` are written. Gated with `pytest.importorskip`
+      (skips in the lean CI) + the `slow` marker (`-m "not slow"` to exclude).
+      **This also end-to-end-validates the P4 background extraction through the
+      real pipeline.** Verified: 4 passed in ~9.5s on the installed stack.
 - [x] **P5.4** Wired coverage into CI: `pytest --cov=microscopy_background
       --cov=flatfield_core --cov-report=term-missing` (report-only, not a gate),
       and added `pytest-cov` to `tests/requirements-dev.txt`. Raise to a floor
@@ -413,14 +440,18 @@ test are deferred (need the TF/StarDist stack, absent here).
       Before extraction this math had no *direct* unit coverage (only behavioural
       assertions through `pm.`); it now has a dedicated 96%-covered module.
 
-**Acceptance criteria:** _Partially met._ Extracted module unit-tested (96%) +
-coverage visible in CI. Deterministic full-dataset fixture + end-to-end ML test
-remain for an ML-capable environment.
+**Acceptance criteria:** _Met for the achievable scope._ Deterministic synthetic
+fixture ✓; extracted module unit-tested (96%) ✓; a real end-to-end StarDist
+pipeline test runs (skipped where the stack is absent, `slow`-marked) ✓;
+coverage visible in CI ✓. A `pipeline_info.json` / multi-well CSV-assembly
+end-to-end (driving `run_pipeline_on_directory`) is the natural next increment.
 
 **Notes / evidence:**
-- New test: `tests/test_microscopy_background.py` (16 tests).
+- New: `tests/fixtures/synthetic_pipeline.py`, `tests/test_pipeline_e2e.py`
+  (4 e2e tests, real StarDist), `tests/test_microscopy_background.py` (16 tests).
 - Coverage: `microscopy_background.py` 96% (6/149 stmts missed).
 - CI: `--cov=microscopy_background --cov=flatfield_core` (report-only).
+- `slow` marker registered in `pytest.ini` (also completes deferred P1.6).
 - Commit SHA: _(in status log below)_
 
 ---
@@ -429,11 +460,16 @@ remain for an ML-capable environment.
 
 > Append a dated line every time a status box changes. Newest at top.
 
+- 2026-06-11 **P5 MOSTLY DONE / ML stack installed** — installed the headless ML
+  stack (TF 2.13, StarDist, Torch, Cellpose). With StarDist now runnable, built
+  the synthetic-raw-image fixture (`fixtures/synthetic_pipeline.py`, P5.1) and a
+  real end-to-end StarDist pipeline test (`test_pipeline_e2e.py`, P5.3, 4 tests)
+  that also validates the P4 background extraction through the real pipeline.
+  Registered the `slow` marker (P1.6). Note: TF+Torch can't coexist in this
+  sandbox, so Cellpose/label-free + the P4.3 segmentation split stay deferred.
 - 2026-06-11 **P5 PARTIAL** — added 16 direct unit tests for the extracted
   `microscopy_background.py` (96% coverage); wired report-only coverage into CI
-  (`pytest-cov`). Deferred: synthetic dataset + end-to-end ML pipeline test
-  (need TF/StarDist) — `test_labelfree_phase` already gives a partial non-ML
-  end-to-end signal.
+  (`pytest-cov`).
 - 2026-06-11 **P4 PARTIAL** — extracted the background-correction cluster from
   `process_microscopy.py` (5129→4808) into Qt-free `microscopy_background.py`
   (re-exported for compat); added it to the remote manifest + a manifest
@@ -459,7 +495,8 @@ remain for an ML-capable environment.
   needed (no test requires the ML stack).
 - 2026-06-10 Plan created; all tasks (P1–P5) TODO. — initial commit of FABLE_PLAN.md
 
-**Last updated:** 2026-06-11 — P1–P3 complete; P4 + P5 partial (the
-environment-independent work is done and verified; the parts needing the
-TF/StarDist + remote environment are clearly deferred with documented
-boundaries). See each task's status for exactly what remains.
+**Last updated:** 2026-06-11 — P1–P3 complete; **P5 mostly done** (ML stack
+installed → synthetic fixture + real end-to-end StarDist test landed); P4 partial
+(background slice + guardrails done and now e2e-validated; segmentation/IO split
+deferred — coupled to worker globals + Cellpose can't coexist with TF here). See
+each task's status for exactly what remains.

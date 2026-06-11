@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QVBoxLayout,
+    QWidget,
 )
 from well_viewer.core.safe import swallowed
 
@@ -30,33 +31,26 @@ def build_image_table_grid(
     tp_opts: List[str],
     fov_opts: List[str],
     well_opts: List[str],
-    lut_color_names: List[str],
     on_apply_row_well,
     on_apply_row_channel,
-    on_generate,
 ) -> Tuple[
     List[List[Dict[str, Any]]],
-    List[QComboBox],
     List[QComboBox],
     List[QComboBox],
 ]:
     """Populate ``app._image_table_selector_grid`` with the selector cells.
 
-    Returns ``(cells, row_chan_cbs, row_lut_color_cbs, row_well_cbs)``. The
-    caller (controller) wires those onto ``app`` and re-renders the LUT row.
+    Returns ``(cells, row_chan_cbs, row_well_cbs)``. The per-row colormap / LUT
+    levels / display toggles live in the separate per-row table built by
+    :func:`build_lut_row`, not here.
     """
     from well_viewer.core.ui_helpers import clear_layout
 
     layout = app._image_table_selector_grid
     clear_layout(layout)
 
-    prev_lut_cbs: List[QComboBox] = list(
-        getattr(app, "_image_table_row_lut_color_cbs", []) or []
-    )
-
     cells: List[List[Dict[str, Any]]] = []
     row_chan_cbs: List[QComboBox] = []
-    row_lut_color_cbs: List[QComboBox] = []
     row_well_cbs: List[QComboBox] = []
 
     for r in range(rows):
@@ -96,29 +90,8 @@ def build_image_table_grid(
             lambda _i, ridx=r: on_apply_row_channel(app, ridx)
         )
 
-        col_lbl = QLabel("LUT:", row_box)
-        col_lbl.setStyleSheet("font-size: 10px;")
-        rbl.addWidget(col_lbl)
-        # v2: LutSelector (gradient strip + searchable popover). The
-        # controller's _row_tint translates the selector's mpl colormap
-        # name back to the per-row (r,g,b) tint via LUT_COLORS.
-        from widgets.lut_selector import LutSelector as _LutSelector
-        row_color_cb = _LutSelector(row_box)
-        _initial = lut_color_names[0] if lut_color_names else "Greys"
-        if r < len(prev_lut_cbs):
-            prev = prev_lut_cbs[r]
-            prev_name = prev.lut() if hasattr(prev, "lut") else prev.currentText()
-            if prev_name:
-                _initial = prev_name
-        row_color_cb.setLut(_initial, reversed=False)
-        rbl.addWidget(row_color_cb)
-        # ``lutChanged`` is wired by image_table_controller.image_table_rebuild_grid
-        # to ``image_table_generate`` so the rendered thumbnails re-tint as soon
-        # as the user picks a new colormap.
-
         layout.addWidget(row_box, r, 0)
         row_chan_cbs.append(row_chan_cb)
-        row_lut_color_cbs.append(row_color_cb)
         row_well_cbs.append(row_well_cb)
 
         cell_row: List[Dict[str, Any]] = []
@@ -130,7 +103,7 @@ def build_image_table_grid(
             cell_row.append(cell)
         cells.append(cell_row)
 
-    return cells, row_chan_cbs, row_lut_color_cbs, row_well_cbs
+    return cells, row_chan_cbs, row_well_cbs
 
 
 def build_selector_cell(
@@ -174,26 +147,35 @@ def build_selector_cell(
 def build_lut_row(
     app,
     *,
-    on_generate,
     on_auto_lut,
+    lut_color_names=None,
 ) -> None:
-    """Rebuild the per-row LUT + display editors below the selector grid.
+    """Rebuild the per-row levels + display **table** below the selector grid.
 
-    One box per grid **row** (keyed by row index), not per channel — so two
-    rows showing the same channel have independent min/max, Fit, and display
-    toggles (Tophat / Boundaries / Binary). Mirrors the per-row colormap
-    (``image_compose._row_cmap_name``); the render + export paths read each
-    cell's settings from its row's box.
+    One grid ROW per image-table row (keyed by row index): an aligned table with
+    columns ``Row N · CHAN | Color | Min | Max | Fit | Top-hat | Bound. | Binary``.
+    The checkbox labels live in the column header so the checkboxes are text-less
+    and centred (no overlap). All controls are passive — they stage state read by
+    the render/export paths (``image_compose._parse_lut`` / ``_row_display_opts``
+    / ``_row_cmap_name``); only the explicit **Generate** button renders. The Color
+    selectors are stored in ``app._image_table_row_lut_color_cbs`` (this module
+    owns them; ``build_image_table_grid`` no longer builds a colour column).
     """
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QGridLayout
     from well_viewer.core.ui_helpers import btn_secondary, clear_layout
+    from widgets.lut_selector import LutSelector
 
     container = getattr(app, "_image_table_lut_container", None)
     if container is None:
         return
     layout = container.layout()
+    if not isinstance(layout, QGridLayout):
+        return
 
-    # Preserve prior per-row state (min/max text, auto flag, display toggles)
-    # across rebuilds, keyed by row index.
+    # Preserve prior per-row state (min/max text, auto flag, display toggles,
+    # colormap) across rebuilds, keyed by row index. Read the colour selectors
+    # *before* clear_layout destroys them.
     prev: Dict[int, dict] = {}
     for r, entry in (getattr(app, "_image_table_lut", None) or {}).items():
         try:
@@ -208,12 +190,22 @@ def build_lut_row(
         except Exception:
             swallowed()  # silent except
             continue
+    prev_colors: Dict[int, str] = {}
+    for r, cb in enumerate(getattr(app, "_image_table_row_lut_color_cbs", None) or []):
+        try:
+            name = cb.lut() if hasattr(cb, "lut") else cb.currentText()
+            if name:
+                prev_colors[r] = name
+        except Exception:
+            swallowed()  # silent except
 
     clear_layout(layout)
     app._image_table_lut = {}
+    color_cbs: List[Any] = []
 
     cells = getattr(app, "_image_table_cells", None) or []
     row_chan_cbs = getattr(app, "_image_table_row_chan_cbs", None) or []
+    default_cmap = (lut_color_names[0] if lut_color_names else "Greys") or "Greys"
 
     def _row_channel(r: int) -> str:
         if 0 <= r < len(row_chan_cbs):
@@ -228,58 +220,81 @@ def build_lut_row(
                 return t
         return ""
 
+    # ── header row ───────────────────────────────────────────────────────
+    headers = ("", "Color", "Min", "Max", "", "Top-hat", "Bound.", "Binary")
+    for c, text in enumerate(headers):
+        if not text:
+            continue
+        h = QLabel(text, container)
+        h.setObjectName("Muted")
+        if c in (2, 3) or c >= 5:
+            h.setAlignment(Qt.AlignCenter)
+        layout.addWidget(h, 0, c)
+
+    def _checkbox_cell(checked: bool) -> "tuple":
+        wrap = QWidget(container)
+        wl = QHBoxLayout(wrap)
+        wl.setContentsMargins(0, 0, 0, 0)
+        cb = QCheckBox(wrap)
+        cb.setChecked(bool(checked))
+        wl.addStretch(1)
+        wl.addWidget(cb)
+        wl.addStretch(1)
+        return wrap, cb
+
     for r in range(len(cells)):
+        grow = r + 1  # grid row 0 is the header
         chan = _row_channel(r)
-        title = f"Row {r + 1}" + (f" · {chan.upper()}" if chan else "")
-        box = QGroupBox(title, container)
-        bl = QVBoxLayout(box)
-        bl.setContentsMargins(6, 8, 6, 4)
-        bl.setSpacing(3)
         p = prev.get(r, {})
 
-        # ── min / max / Fit ──────────────────────────────────────────────
-        lut_row = QHBoxLayout()
-        lut_row.setSpacing(4)
+        name_lbl = QLabel(f"Row {r + 1}" + (f" · {chan.upper()}" if chan else ""), container)
+        layout.addWidget(name_lbl, grow, 0)
+
+        # Color (per-row colormap) — moved here from the master grid. Passive:
+        # it stages the colormap; the next Generate re-tints.
+        color_cb = LutSelector(container)
+        color_cb.setLut(prev_colors.get(r, default_cmap), reversed=False)
+        try:
+            color_cb.setFixedWidth(120)
+        except Exception:
+            swallowed()
+        layout.addWidget(color_cb, grow, 1)
+        color_cbs.append(color_cb)
 
         def _mk_edit(text: str) -> QLineEdit:
-            le = QLineEdit(text, box)
-            le.setFixedWidth(64)
-            # Empty = auto-scale per image; a fitted number fills in on Fit /
-            # Generate. Editing marks the row a manual override so Generate
-            # stops overwriting it; "Fit" re-enables tracking.
+            le = QLineEdit(text, container)
+            le.setFixedWidth(70)
+            le.setAlignment(Qt.AlignCenter)
+            # Empty = auto-scale per image; a fitted number fills in on Fit.
+            # Editing marks the row a manual override so Generate / Fit stops
+            # overwriting it; "Fit" re-enables tracking. No auto-render.
             le.setPlaceholderText("auto")
             le.textEdited.connect(
                 lambda _t, rr=r: app._image_table_lut.get(rr, {}).__setitem__("auto", False)
             )
             return le
 
-        lut_row.addWidget(QLabel("min:", box))
         min_edit = _mk_edit(p.get("min", ""))
-        lut_row.addWidget(min_edit)
-        lut_row.addWidget(QLabel("max:", box))
+        layout.addWidget(min_edit, grow, 2)
         max_edit = _mk_edit(p.get("max", ""))
-        lut_row.addWidget(max_edit)
-        fit_btn = btn_secondary(box, "Fit", lambda rr=r: on_auto_lut(app, rr))
-        fit_btn.setToolTip("Re-fit min/max to this row's pooled image range.")
-        lut_row.addWidget(fit_btn)
-        lut_row.addStretch(1)
-        bl.addLayout(lut_row)
+        layout.addWidget(max_edit, grow, 3)
 
-        # ── display: Tophat / Boundaries / Binary (per row) ──────────────
-        disp_row = QHBoxLayout()
-        disp_row.setSpacing(8)
-        tophat_cb = QCheckBox("Tophat", box)
-        tophat_cb.setChecked(bool(p.get("tophat", False)))
+        fit_btn = btn_secondary(container, "Fit", lambda rr=r: on_auto_lut(app, rr))
+        fit_btn.setToolTip("Re-fit min/max to this row's pooled image range (applies on Generate).")
+        try:
+            fit_btn.setFixedWidth(46)
+        except Exception:
+            swallowed()
+        layout.addWidget(fit_btn, grow, 4)
+
+        tophat_wrap, tophat_cb = _checkbox_cell(p.get("tophat", False))
         tophat_cb.setToolTip("Show the background-subtracted (top-hat) image for this row.")
-        tophat_cb.toggled.connect(lambda _c=False: on_generate(app))
-        disp_row.addWidget(tophat_cb)
-        bound_cb = QCheckBox("Boundaries", box)
-        bound_cb.setChecked(bool(p.get("boundaries", False)))
+        layout.addWidget(tophat_wrap, grow, 5)
+        bound_wrap, bound_cb = _checkbox_cell(p.get("boundaries", False))
         bound_cb.setToolTip("Overlay white cell-boundary outlines for this row.")
-        bound_cb.toggled.connect(lambda _c=False: on_generate(app))
-        disp_row.addWidget(bound_cb)
-        disp_row.addWidget(QLabel("Binary:", box))
-        bin_cb = QComboBox(box)
+        layout.addWidget(bound_wrap, grow, 6)
+
+        bin_cb = QComboBox(container)
         for _lbl, _key in (("None", ""), ("Mask", "mask"), ("≥ Thr", "threshold")):
             bin_cb.addItem(_lbl, userData=_key)
         prev_bin = p.get("binary", "") or ""
@@ -287,16 +302,16 @@ def build_lut_row(
             if bin_cb.itemData(i) == prev_bin:
                 bin_cb.setCurrentIndex(i)
                 break
-        bin_cb.currentIndexChanged.connect(lambda _i=0: on_generate(app))
-        disp_row.addWidget(bin_cb)
-        disp_row.addStretch(1)
-        bl.addLayout(disp_row)
+        bin_cb.setFixedWidth(96)
+        layout.addWidget(bin_cb, grow, 7)
 
-        layout.addWidget(box)
         app._image_table_lut[r] = {
             "min": min_edit, "max": max_edit, "auto": bool(p.get("auto", True)),
             "tophat": tophat_cb, "boundaries": bound_cb, "binary": bin_cb,
             "chan": chan,
         }
 
-    layout.addStretch(1)
+    app._image_table_row_lut_color_cbs = color_cbs
+    layout.setColumnStretch(0, 1)
+    layout.setHorizontalSpacing(14)
+    layout.setVerticalSpacing(6)

@@ -45,3 +45,34 @@ def test_generate_runs_with_per_row_display(loaded_app):
     if len(luts) > 1:
         assert _row_display_opts(app, 1)[0] is False
     C.image_table_generate(app)  # exercises the per-row render path end-to-end
+
+
+def test_per_row_controls_do_not_auto_generate(loaded_app, monkeypatch):
+    """Toggling a row's display options / colormap / Fit must NOT render — only
+    the explicit Generate button does (regression for accidental auto-Generate)."""
+    import well_viewer.features.image_table.controller as ic
+
+    app = loaded_app
+    ic.image_table_repopulate_dropdowns(app)
+    ic.image_table_apply_preset(app, "channel", "timepoint")
+    luts = app._image_table_lut
+    assert luts
+
+    calls = []
+    monkeypatch.setattr(ic, "image_table_generate", lambda a: calls.append(a))
+
+    r = sorted(luts)[0]
+    luts[r]["tophat"].setChecked(True)
+    luts[r]["boundaries"].setChecked(True)
+    for i in range(luts[r]["binary"].count()):
+        if luts[r]["binary"].itemData(i) == "mask":
+            luts[r]["binary"].setCurrentIndex(i)
+            break
+    color_cbs = getattr(app, "_image_table_row_lut_color_cbs", [])
+    if color_cbs:
+        try:
+            color_cbs[r].setLut("viridis", reversed=False)
+        except Exception:
+            pass
+    ic.image_table_auto_lut(app, r)  # Fit
+    assert calls == [], f"per-row controls auto-triggered Generate: {len(calls)} call(s)"

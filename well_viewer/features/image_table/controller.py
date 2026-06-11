@@ -211,7 +211,7 @@ def image_table_rebuild_grid(app) -> None:
     fov_opts = _fov_options(app)
     well_opts = _well_options(app)
 
-    cells, row_chan_cbs, row_lut_color_cbs, row_well_cbs = build_image_table_grid(
+    cells, row_chan_cbs, row_well_cbs = build_image_table_grid(
         app,
         rows=rows,
         cols=cols,
@@ -219,19 +219,19 @@ def image_table_rebuild_grid(app) -> None:
         tp_opts=tp_opts,
         fov_opts=fov_opts,
         well_opts=well_opts,
-        lut_color_names=LUT_COLOR_NAMES,
         on_apply_row_well=image_table_apply_row_well,
         on_apply_row_channel=image_table_apply_row_channel,
-        on_generate=image_table_generate,
     )
 
     app._image_table_cells = cells
     app._image_table_row_chan_cbs = row_chan_cbs
-    app._image_table_row_lut_color_cbs = row_lut_color_cbs
     app._image_table_row_well_cbs = row_well_cbs
+    # The per-row colormap selectors live in the per-row table now and are
+    # (re)created + stored on app by image_table_rebuild_lut_row -> build_lut_row.
 
-    # Refresh the per-channel LUT row whenever any cell's channel changes
-    # so unused channels disappear and newly assigned ones get an editor.
+    # Refresh the per-row levels/display table whenever any cell's channel
+    # changes so the row labels + Fit pooling track the new assignment. This
+    # only rebuilds the editor widgets — it does NOT render (Generate does).
     for row in cells:
         for cell in row:
             cb = cell.get("chan_cb")
@@ -239,20 +239,6 @@ def image_table_rebuild_grid(app) -> None:
                 continue
             cb.currentIndexChanged.connect(
                 lambda _i, a=app: image_table_rebuild_lut_row(a)
-            )
-
-    # Re-render thumbnails whenever the user picks a different LUT colour.
-    # The LutSelector emits ``lutChanged(name, reversed)`` on change; legacy
-    # QComboBox fallbacks emit ``currentIndexChanged(int)``.
-    for cb in row_lut_color_cbs:
-        if cb is None:
-            continue
-        sig = getattr(cb, "lutChanged", None)
-        if sig is not None and hasattr(sig, "connect"):
-            sig.connect(lambda _n, _rv, a=app: image_table_generate(a))
-        else:
-            cb.currentIndexChanged.connect(
-                lambda _i, a=app: image_table_generate(a)
             )
 
     image_table_rebuild_lut_row(app)
@@ -923,8 +909,8 @@ def image_table_rebuild_lut_row(app) -> None:
 
     build_lut_row(
         app,
-        on_generate=image_table_generate,
         on_auto_lut=image_table_auto_lut,
+        lut_color_names=LUT_COLOR_NAMES,
     )
 
 
@@ -1365,7 +1351,8 @@ def image_table_auto_lut(app, row_idx: int) -> None:
             le.setText(f"{val:.4g}")
         finally:
             le.blockSignals(blocked)
-    image_table_generate(app)
+    # No auto-render: Fit only fills the min/max numbers; the explicit Generate
+    # button applies them (matches the rest of the per-row table).
 
 
 # ── Export (transparent background, labels above each image) ─────────────────

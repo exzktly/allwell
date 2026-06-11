@@ -27,3 +27,7 @@ Thumbs.db
 
 # Local test run logs (not for commit)
 _pytest*.log
+
+# Coverage data
+.coverage
+htmlcov/

@@ -535,16 +535,16 @@ class AnalyzeTabFormMixin:
         self._qc_min_solidity_edit = self._entry(rs, "0", width=80)
         rs.layout().addStretch(1)
 
-        # The size / solidity bounds only apply when debris removal is on —
-        # gate them on the checkbox (the same pattern the Background-well field
-        # uses for the empty_well flat-field mode) so the cleaning-step options
-        # read as one coherent group rather than always-live orphan fields.
+        # The size / solidity bounds only apply when debris removal is on, so
+        # hide them entirely until it's checked (rather than showing greyed-out
+        # orphan fields) — the cleaning-step options then read as one coherent
+        # group that appears only when relevant.
         self._qc_debris_rows = (ra, rs)
 
         def _sync_debris(_=None) -> None:
             on = self._qc_remove_debris_cb.isChecked()
             for row in self._qc_debris_rows:
-                row.setEnabled(on)
+                row.setVisible(on)
         self._qc_remove_debris_cb.toggled.connect(_sync_debris)
         _sync_debris()
 

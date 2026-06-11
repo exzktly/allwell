@@ -16,7 +16,7 @@ import numpy as np
 
 from well_viewer.data.image_discovery import ImgRef as SmfishImgRef
 from well_viewer.data.image_resolver import output_suffixes_for_kind
-from well_viewer.features.preview.controller import classify_member, read_member_bytes, scan_zip_members
+from well_viewer.data.zip_members import classify_member, read_member_bytes, scan_zip_members
 
 
 logger = logging.getLogger("smfish_tab")

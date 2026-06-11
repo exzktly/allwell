@@ -27,7 +27,7 @@ from well_viewer.data.image_resolver import (
     output_suffixes_for_kind as _output_suffixes_for_kind,
     well_token_matches_text as _well_token_matches_text,
 )
-from well_viewer.features.preview.controller import (
+from well_viewer.data.zip_members import (
     classify_member as _preview_classify_member,
     open_imgref_as_array as _preview_open_imgref_as_array,
     read_member_bytes as _preview_read_member_bytes,

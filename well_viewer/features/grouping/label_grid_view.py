@@ -235,8 +235,6 @@ class LabelGrid(QWidget):
     def _on_text_changed(self, tok: str, text: str) -> None:
         val = (text or "").strip()
         app = self._app
-        if not True:
-            return
         if val:
             app._app_state.dataset.well_labels[tok] = val
         else:

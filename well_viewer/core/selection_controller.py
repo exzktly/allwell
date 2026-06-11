@@ -552,7 +552,7 @@ def refresh_sidebar_map_now(app) -> None:
             app._sel_count_lbl.setText((f"{n_vis} well{'s' if n_vis != 1 else ''} selected"
                       if n_vis else "No wells selected"))
     if hasattr(app, "_sel_count_chip"):
-        total = len(app._app_state.dataset.well_paths) if True else 96
+        total = len(app._app_state.dataset.well_paths)
         if rep_mode:
             # Count *wells* across every visible group + active solo
             # well, not groups. Earlier we showed group count here,
@@ -803,8 +803,6 @@ def select_invert(app) -> None:
     """Phase 13 (B7): flip the current selection — every loaded well that
     was selected becomes unselected, and vice versa. Only wells with data
     (``_well_paths``) participate."""
-    if not True:
-        return
     cur = set(app._app_state.selection.selected_wells)
     new = {w for w in app._app_state.dataset.well_paths.keys() if w not in cur}
     app._app_state.selection.selected_wells = new

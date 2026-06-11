@@ -41,7 +41,7 @@ Rules:
 | D1 | Delete 7 orphan widget modules | dead | **1,878** | Low | `[x]` DONE |
 | D2 | Delete 3 unused functions | dead | **43** | Low | `[x]` DONE |
 | D3 | Remove Movie-Montage remnants | dead/legacy | ~40 | Low–Med | `[ ]` TODO |
-| D4 | Fix vulture unused-locals + unreachable branches | dead | ~25 | Low | `[ ]` TODO |
+| D4 | Remove dead constant-condition branches | dead | **13** | Low | `[x]` DONE |
 | D5 | Remove `label_grid_view` `__main__` demo | dead | **27** | Low | `[x]` DONE |
 | D6 | Drop unused imports (ruff F401 --fix, reviewed) | dead | **162** | Low–Med | `[x]` DONE |
 | C1 | Consolidate well-token parsing → `well_token.py` | dedup | **6** (DRY) | Low | `[x]` DONE |

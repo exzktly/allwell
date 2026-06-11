@@ -108,6 +108,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # empty-well / robust-mesh / fft-bandpass methods), so the remote needs it
     # too or the import aborts the run with ModuleNotFoundError.
     "microscopy_background.py",
+    # Cellpose segmenters: process_microscopy re-imports microscopy_cellpose at
+    # module top level (Torch/cellpose itself stays lazily imported), so the
+    # remote needs this file too or the import aborts with ModuleNotFoundError.
+    "microscopy_cellpose.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.

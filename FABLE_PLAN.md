@@ -324,18 +324,30 @@ not an oversight.
       `combined_empty_well_correct`. `process_microscopy.py` re-exports them, so
       `pm.subtract_background(...)` and every call site / the remote worker are
       unchanged. `process_microscopy.py`: **5129 → 4808 lines.**
-- [-] **P4.3 (segmentation.py)** Still deferred — **even with the ML stack
-      installed.** Two blockers: (1) the segmentation functions are tightly
-      coupled to worker-global mutable state (`_STARDIST_MODEL`,
-      `_CELLPOSE_MODELS`, `_SEG_FOV_LABEL`, set by `_worker_init`), so a clean
-      extraction means relocating that state + the worker-init wiring; (2) the
-      Cellpose branch **cannot be imported alongside TensorFlow in this sandbox**
-      (TF+Torch OpenMP/`random_device` abort), so a segmentation module that
-      bundles StarDist + Cellpose can't be fully exercised here. The StarDist
-      sub-path is now verifiable (via `test_pipeline_e2e.py`); a future split
-      should separate StarDist from the Torch-based segmenters so each is
-      independently testable. Boundary: the method-dispatch in
-      `process_image_group()`.
+- [x] **P4.3a (Cellpose cluster extracted)** Extracted the Torch-backed Cellpose
+      segmenters (`_CELLPOSE_MODELS`, `_cellpose_model`, `_segment_cellpose`)
+      into a new module **`microscopy_cellpose.py`**; `process_microscopy`
+      re-exports them. **Cellpose/Torch stays lazily imported**, so importing
+      `microscopy_cellpose` (and therefore `process_microscopy`) does *not* pull
+      in Torch — verified: `'torch' not in sys.modules` after
+      `import process_microscopy`. This is the key design fix: it isolates the
+      only Torch-importing segmenter behind one boundary so the TF/StarDist path
+      provably never touches it. Added to the remote manifest (+ guarded by
+      `test_remote_manifest.py`). `process_microscopy.py`: 4808 → **4761**.
+      **Verification:** the StarDist e2e (P5.3) still passes (no Torch loaded);
+      the mocked-Cellpose unit test (`test_segment_cellpose_honors_params`,
+      repointed at `microscopy_cellpose._CELLPOSE_MODELS`) passes; and the
+      **real** Cellpose path runs in a TF-free process via the extracted module
+      (Torch loads, `CellposeModel` initialises, no crash) — it only stops at the
+      model-**weights HTTP download** (sandbox network 403), i.e. nothing in the
+      moved code fails.
+- [-] **P4.3b (StarDist segmenters / full segmentation.py)** Still deferred —
+      `_segment_stardist_*` are coupled to worker-global mutable state
+      (`_STARDIST_MODEL`/`_SEG_FOV_LABEL` set by `_worker_init`); cleanly moving
+      them means relocating that state + the worker-init wiring, a larger change
+      best done deliberately. They are already verified end-to-end via
+      `test_pipeline_e2e.py`. The valuable Torch/TF *separation* is now achieved
+      by P4.3a; this remainder is lower-urgency.
 - [-] **P4.4 (io_outputs.py)** Deferred — QC TIFF / CSV writes are interwoven
       with the orchestrator; lower value than P4.3 and best done together with it.
 - [x] **P4.5** Remote path handled: added `microscopy_background.py` to
@@ -460,6 +472,13 @@ end-to-end (driving `run_pipeline_on_directory`) is the natural next increment.
 
 > Append a dated line every time a status box changes. Newest at top.
 
+- 2026-06-11 **P4.3a DONE** — extracted the Cellpose cluster
+  (`_cellpose_model`/`_segment_cellpose`/`_CELLPOSE_MODELS`) into
+  `microscopy_cellpose.py` (Torch stays lazy → importing process_microscopy no
+  longer risks loading Torch). process_microscopy 4808→4761; added to remote
+  manifest; repointed the mocked-cellpose test. Verified: import stays
+  torch-free, StarDist e2e green, real Cellpose runs in a TF-free process (only
+  the weights download is network-blocked).
 - 2026-06-11 **P5 MOSTLY DONE / ML stack installed** — installed the headless ML
   stack (TF 2.13, StarDist, Torch, Cellpose). With StarDist now runnable, built
   the synthetic-raw-image fixture (`fixtures/synthetic_pipeline.py`, P5.1) and a
@@ -495,8 +514,9 @@ end-to-end (driving `run_pipeline_on_directory`) is the natural next increment.
   needed (no test requires the ML stack).
 - 2026-06-10 Plan created; all tasks (P1–P5) TODO. — initial commit of FABLE_PLAN.md
 
-**Last updated:** 2026-06-11 — P1–P3 complete; **P5 mostly done** (ML stack
-installed → synthetic fixture + real end-to-end StarDist test landed); P4 partial
-(background slice + guardrails done and now e2e-validated; segmentation/IO split
-deferred — coupled to worker globals + Cellpose can't coexist with TF here). See
-each task's status for exactly what remains.
+**Last updated:** 2026-06-11 — P1–P3 complete; **P5 mostly done** (synthetic
+fixture + real end-to-end StarDist test); **P4 progressing** — background cluster
++ now the **Cellpose cluster** extracted (`microscopy_background.py`,
+`microscopy_cellpose.py`), the latter isolating Torch behind a lazy boundary so
+the StarDist path never loads it. Remaining P4: relocating the StarDist
+segmenters' worker-global state (lower urgency; already e2e-verified).

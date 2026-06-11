@@ -78,9 +78,15 @@ import imageio.v3 as iio
 # ---------------------------------------------------------------------------
 
 _STARDIST_MODEL: "StarDist2D | None" = None
-# Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
-# run can choose a model without silently reusing another type's cache. Lazy.
-_CELLPOSE_MODELS: "dict[str, object]" = {}
+# Per-worker Cellpose model cache + the Cellpose segmenters live in the Qt-free
+# ``microscopy_cellpose`` module (Torch is imported lazily there, so importing it
+# does not load Torch). Re-exported below so ``_CELLPOSE_MODELS`` /
+# ``_segment_cellpose`` / ``_cellpose_model`` resolve under this module too.
+from microscopy_cellpose import (  # noqa: E402
+    _CELLPOSE_MODELS,
+    _cellpose_model,
+    _segment_cellpose,
+)
 
 # Segmentation-method groups. StarDist methods need the TF model loaded in
 # _worker_init. Cellpose is a *general* segmenter (any channel); the
@@ -1635,59 +1641,6 @@ def _segment_stardist_seeded_watershed_cell(
             mask=cytoplasm_binary_mask,
         ).astype(np.int32)
     return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
-
-
-def _cellpose_model(model_type: str = "cyto3"):
-    """Return the per-worker Cellpose model for *model_type*, loading it once.
-
-    Guarded import so the app / pipeline run without cellpose installed; the
-    error only surfaces when a Cellpose method is actually selected."""
-    key = str(model_type or "cyto3").strip() or "cyto3"
-    model = _CELLPOSE_MODELS.get(key)
-    if model is None:
-        try:
-            from cellpose import models as _cp_models
-        except Exception as exc:  # pragma: no cover - depends on optional dep
-            raise RuntimeError(
-                "Cellpose segmentation requires the 'cellpose' package. Install "
-                f"it (see requirements) — import failed: {exc}"
-            ) from exc
-        model = _cp_models.CellposeModel(model_type=key)
-        _CELLPOSE_MODELS[key] = model
-    return model
-
-
-def _segment_cellpose(
-    image: np.ndarray,
-    *,
-    model_type: str = "cyto3",
-    diameter: float = 0.0,
-    flow_threshold: float = 0.4,
-    cellprob_threshold: float = 0.0,
-    nucleus_image: "np.ndarray | None" = None,
-) -> np.ndarray:
-    """Segment *image* with Cellpose. Works on any channel (fluorescent or
-    brightfield) — the caller chooses the input. ``diameter=0`` auto-estimates.
-
-    When *nucleus_image* is given, the two channels are stacked and Cellpose runs
-    in cyto+nucleus mode (``channels=[1, 2]``); otherwise grayscale
-    (``channels=[0, 0]``). ``flow_threshold`` / ``cellprob_threshold`` tune the
-    mask recovery / probability cut.
-    """
-    model = _cellpose_model(model_type)
-    diam = float(diameter) if diameter and diameter > 0 else None
-    seg = np.asarray(image)
-    if nucleus_image is not None:
-        stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
-        result = model.eval(stacked, diameter=diam, channels=[1, 2],
-                            flow_threshold=flow_threshold,
-                            cellprob_threshold=cellprob_threshold)
-    else:
-        result = model.eval(seg, diameter=diam, channels=[0, 0],
-                            flow_threshold=flow_threshold,
-                            cellprob_threshold=cellprob_threshold)
-    masks = result[0]  # eval returns (masks, flows, styles[, diams])
-    return np.asarray(masks, dtype=np.int32)
 
 
 def _segment_classical(image: np.ndarray) -> np.ndarray:

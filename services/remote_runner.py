@@ -117,6 +117,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # imported), so the remote needs this file too or the import aborts with
     # ModuleNotFoundError.
     "microscopy_stardist.py",
+    # Atomic output writers (images / CSVs / overlay): process_microscopy
+    # re-imports microscopy_io at module top level, so the remote needs this file
+    # too or the import aborts with ModuleNotFoundError.
+    "microscopy_io.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.

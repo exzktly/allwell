@@ -360,8 +360,19 @@ not an oversight.
       StarDist `test_pipeline_e2e.py` (4 tests) passes after the move — the model
       injection + FOV-label + segmentation all wire correctly with the real
       model; plus 20 guard/recovery/segmentation/manifest/budget tests green.
-- [-] **P4.4 (io_outputs.py)** Deferred — QC TIFF / CSV writes are interwoven
-      with the orchestrator; lower value than P4.3 and best done together with it.
+- [x] **P4.4 (microscopy_io.py)** Extracted the atomic output writers into a
+      cohesive Qt-free module: `_safe_imwrite`, `_safe_atomic_text_write` +
+      `_AtomicTextHandle`, `_fsync_path`, `_verify_files_complete`, the per-well
+      CSV writers (`_safe_well`, `_write_single_csv`, `write_csvs_per_well`), and
+      `save_overlay`. `process_microscopy` re-exports all of them (its many
+      `_safe_imwrite` / `write_csvs_per_well` call sites unchanged). Added to the
+      remote manifest. `process_microscopy.py`: 4633 → **4468**. Verified by a
+      new `tests/test_microscopy_io.py` (12 unit tests: tif/png roundtrip, atomic
+      text write success/discard-on-error, per-well CSV partitioning,
+      completeness filter, overlay red boundaries) **plus** the real StarDist
+      e2e — which writes images through the moved `_safe_imwrite`/`save_overlay`
+      end-to-end — and per_fov_checkpoint / qc_tooling / smfish_worker_writeback
+      (66 tests green total).
 - [x] **P4.5** Remote path handled: added `microscopy_background.py` to
       `services.remote_runner._REQUIRED_REMOTE_FILES`, **and** added
       `tests/test_remote_manifest.py` — an AST guardrail that fails if

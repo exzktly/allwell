@@ -31,8 +31,11 @@ T4 extended the same pattern to the plot controllers by splitting the pure
 data-collection half into a ``collect.py`` (mirroring image_table):
 - scatter/controller.py: 875 lines, after ``scatter/collect.py`` — was 1264.
 - barplot/controller.py: 731 lines, after ``barplot/collect.py`` — was 1416.
-review_image/controller.py is budgeted at its current size to stop it regrowing
-while its collect/render split lands incrementally.
+- review_image/controller.py: 963 lines, after ``review_image/collect.py`` (the
+  pure include/threshold-map + row-key + override-projection data layer) — was 1392.
+- analyze_tab.py: 1176 lines, after the ``_build_*`` form-section builders moved
+  verbatim into ``AnalyzeTabFormMixin`` in ``analyze_tab_form.py`` (a behaviour-
+  preserving mixin split of the QWidget god-class) — was 1887.
 """
 
 from pathlib import Path
@@ -44,8 +47,8 @@ PROCESS_MICROSCOPY_BUDGET = 4542
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731
-REVIEW_IMAGE_CONTROLLER_BUDGET = 1392
-ANALYZE_TAB_BUDGET = 1887
+REVIEW_IMAGE_CONTROLLER_BUDGET = 963
+ANALYZE_TAB_BUDGET = 1176
 
 
 def _line_count(rel: str) -> int:

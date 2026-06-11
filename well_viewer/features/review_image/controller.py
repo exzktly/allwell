@@ -132,18 +132,6 @@ def on_review_image_click(app, event, logger) -> None:
     app._select_review_csv_row_for_cell(fov, tp, str(nid))
 
 
-def _resolve_table_column(col_names: list[str], *candidates: str) -> int:
-    """Return the index of the first matching column (case-insensitive), or -1."""
-    lowered = {name.lower(): i for i, name in enumerate(col_names)}
-    for cand in candidates:
-        if cand in col_names:
-            return col_names.index(cand)
-        i = lowered.get(cand.lower())
-        if i is not None:
-            return i
-    return -1
-
-
 def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logger) -> None:
     """Navigate the Review CSV tab to the row for the given cell.
 

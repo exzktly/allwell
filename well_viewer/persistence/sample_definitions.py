@@ -14,7 +14,6 @@ from well_viewer.persistence import (
     cell_gating as _cell_gating,
     ratios as _ratios,
 )
-from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
@@ -296,6 +295,11 @@ def clear_all(app) -> None:
     app._app_state.dataset.well_labels.clear()
     if hasattr(app, "_label_panel_refresh"):
         try:
+            # Function-local feature import: this Clear-All *command* drives a UI
+            # refresh, but the persistence module stays data-only at module scope
+            # (see test_layering) — same escape hatch the cell-gating reset below
+            # already uses.
+            from well_viewer.features.grouping.label_grid_view import label_grid_refresh
             label_grid_refresh(app)
         except Exception:
             swallowed()  # was: pass (silent except)

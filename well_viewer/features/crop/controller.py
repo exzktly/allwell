@@ -72,6 +72,12 @@ def _save_redraw_refresh(app) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
     try:
+        # Sanctioned deferred import: crop and review_image are peer features
+        # with a genuine bidirectional interaction (crop is a draw-mode of the
+        # review-image canvas, and the canvas click handler delegates back to
+        # crop). review_image.controller imports crop.controller, so this stays
+        # function-local to break that cycle (counted by the deferred-import
+        # ratchet in tests/test_deferred_imports.py).
         from well_viewer.features.review_image.renderer import refresh_review_image
         refresh_review_image(app)
     except Exception:
@@ -162,7 +168,8 @@ def set_crop_edit_mode(app, enabled: bool) -> None:
     enabled = bool(enabled)
     app._app_state.review_image.crop_edit_mode = enabled
     if enabled and app._app_state.review_image.include_edit_mode:
-        # Leave delete mode (also un-checks the Delete button).
+        # Leave delete mode (also un-checks the Delete button). Sanctioned
+        # deferred import — see the crop↔review_image note above.
         from well_viewer.features.review_image.renderer import (
             set_review_image_include_mode,
         )

@@ -295,3 +295,19 @@ def loaded_app_shape(viewer_app, mini_dataset_shape):
     """``WellViewerApp`` loaded with the shape-feature mini dataset."""
     viewer_app._load_path(mini_dataset_shape)
     return viewer_app
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-mark full-app Qt tests ``slow``.
+
+    Constructing the full ``WellViewerApp`` (the ``viewer_app`` fixture and its
+    ``loaded_app`` / ``loaded_app_shape`` dependents) is slow under the offscreen
+    QPA platform, so these integration tests don't belong in the fast CI lane.
+    Marking by fixture (rather than by hand on each test) keeps ``-m "not slow"``
+    a fast, reliable, auto-maintained gate; the full-app tests run in the
+    local/manual full pass. The lightweight ``mock_app`` fixture is unaffected.
+    """
+    slow = pytest.mark.slow
+    for item in items:
+        if "viewer_app" in getattr(item, "fixturenames", ()):
+            item.add_marker(slow)

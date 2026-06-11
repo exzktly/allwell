@@ -59,10 +59,15 @@ def test_form_add_mode_defaults_match_dataclass(qtbot, isolated_config):
     qtbot.addWidget(dlg)
     assert dlg._name_edit.text() == ""
     assert dlg._ssh_alias_edit.text() == ""
-    # Defaults from RemoteHost dataclass.
-    assert dlg._project_dir_edit.text() == "~/allwell"
-    assert dlg._staging_dir_edit.text() == "~/.allwell-staging"
-    assert dlg._python_edit.text() == "~/miniforge3/envs/allwell/bin/python"
+    # Defaults from the RemoteHost dataclass now surface as *placeholders*
+    # (the field stays empty; the default is applied at save time via
+    # ``text().strip() or "<default>"``).
+    assert dlg._project_dir_edit.text() == ""
+    assert dlg._project_dir_edit.placeholderText() == "~/allwell"
+    assert dlg._staging_dir_edit.text() == ""
+    assert dlg._staging_dir_edit.placeholderText() == "~/.allwell-staging"
+    assert dlg._python_edit.text() == ""
+    assert dlg._python_edit.placeholderText() == "~/miniforge3/envs/allwell/bin/python"
     assert dlg._cpu_only_cb.isChecked() is False
     assert dlg._cache_budget_spin.value() == 200
     # OK disabled until both required fields are non-empty.
@@ -146,7 +151,10 @@ def test_manage_dialog_empty_state_disables_buttons(qtbot, isolated_config):
     dlg = ManageRemotesDialog()
     qtbot.addWidget(dlg)
     assert dlg._list.count() == 0
-    assert dlg._empty_hint.isVisible()
+    # ``isVisible()`` is False under the offscreen QPA (the top-level is never
+    # shown); ``not isHidden()`` is the robust check that the empty-state hint
+    # wasn't explicitly hidden (it's ``setVisible(count == 0)``).
+    assert not dlg._empty_hint.isHidden()
     # Selection-dependent buttons start disabled.
     assert not dlg._edit_btn.isEnabled()
     assert not dlg._delete_btn.isEnabled()

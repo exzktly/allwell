@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple
 
 from well_viewer.domain import fold_change as _fc
+from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
+from well_viewer.core.plot_style import apply_export_style_to_current
 
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
@@ -327,7 +329,7 @@ def redraw_line_plots(
     # spots still contribute to the mean (see barplot/controller.py for
     # the full rationale — at threshold=0 an all-zero population yields
     # NaN means and the plot stays empty).
-    if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
+    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
@@ -499,7 +501,6 @@ def redraw_line_plots(
     # limits, log scale, etc. survive a redraw (matches what the bar,
     # heatmap, and distribution renderers do).
     try:
-        from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, app._line_fig,
                                       getattr(app, "_line_canvas", None))
     except Exception:  # pragma: no cover - never let style restore break a draw

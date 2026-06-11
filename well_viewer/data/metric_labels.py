@@ -8,36 +8,30 @@ plotting ctxbar lets the user pick which of these drives every plot, stat,
 and CSV export — by swapping the ``_active_metric`` suffix that
 ``_active_val_col`` is built from.
 
-This module is the single source of truth for the label↔key mapping and
-the suffix→display-label table used by axis / stats / scatter label
-helpers across the viewer.
+These label / key / suffix tables are *derived* from the single declarative
+metric catalogue in :mod:`well_viewer.domain.metric_registry` — add a metric
+there and it flows through here (and into every Property combo) automatically.
+This module remains the import site the axis / stats / scatter label helpers
+reach for, and owns the column-splitting + title-wording helpers below.
 """
 
 from __future__ import annotations
 
 from typing import Optional, Tuple
 
-
-METRIC_LABEL_TO_KEY = {
-    "Mean Intensity":  "mean_intensity",
-    "Total Intensity": "total_intensity",
-    "Max Intensity":   "max_intensity",
-    "Min Intensity":   "min_intensity",
-    "Std Intensity":   "std_intensity",
-    "smFISH Count":    "smfish_count",
-}
-
-METRIC_KEY_TO_LABEL = {v: k for k, v in METRIC_LABEL_TO_KEY.items()}
-
-METRIC_ORDER = list(METRIC_LABEL_TO_KEY.keys())
-
-INTENSITY_METRIC_KEYS = (
-    "total_intensity",
-    "mean_intensity",
-    "max_intensity",
-    "min_intensity",
-    "std_intensity",
+from well_viewer.domain.metric_registry import (
+    METRICS,
+    intensity_keys,
+    metric_labels_in_order,
 )
+
+METRIC_LABEL_TO_KEY = {m.label: m.key for m in METRICS}
+
+METRIC_KEY_TO_LABEL = {m.key: m.label for m in METRICS}
+
+METRIC_ORDER = metric_labels_in_order()
+
+INTENSITY_METRIC_KEYS = intensity_keys()
 
 INTENSITY_SUFFIXES = tuple(f"_{k}" for k in INTENSITY_METRIC_KEYS)
 

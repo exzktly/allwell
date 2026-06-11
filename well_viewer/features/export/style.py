@@ -1,9 +1,17 @@
-"""Export-style preferences, profile management, and figure export pipeline.
+"""Export-style profile management + figure export pipeline.
 
 The right-side sidebar widget that hosts the editor lives in
 ``well_viewer.views.export_style_sidebar_view`` so the GUI portion is
-swappable. This module owns the headless concerns: defaults, profile
-lookups, ``apply_export_style_prefs``, and ``launch_export_editor``.
+swappable. This module owns the export *pipeline*: figure render / clipboard
+write, profile lookups (``EXPORT_PROFILES``), and ``launch_export_editor``.
+
+The neutral figure-styling engine (``DEFAULT_EXPORT_STYLE_PREFS``,
+``apply_export_style_prefs``, ``apply_export_style_to_current``) moved to
+``well_viewer.core.plot_style`` (T2) so every plot feature can import it
+*downward* instead of reaching sideways into this export feature — that
+sideways edge had formed a scatter↔export import cycle. The names are
+re-exported below so existing
+``from well_viewer.features.export.style import …`` call sites keep working.
 """
 
 from __future__ import annotations
@@ -12,6 +20,12 @@ import sys
 
 from PySide6.QtWidgets import QMessageBox, QWidget
 from well_viewer.core.safe import swallowed
+from well_viewer.core.plot_style import (  # noqa: F401  (re-export for compat)
+    DEFAULT_EXPORT_STYLE_PREFS,
+    _ensure_export_style_prefs,
+    apply_export_style_prefs,
+    apply_export_style_to_current,
+)
 
 
 def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
@@ -173,39 +187,6 @@ def copy_figure_to_clipboard(fig, *, svg_kwargs=None, pdf_kwargs=None) -> str:
     return "Copied figure to clipboard (PDF/SVG/PNG)."
 
 
-DEFAULT_EXPORT_STYLE_PREFS = {
-    "axis_label_size": 18,
-    "tick_label_size": 18,
-    "title_size": 18,
-    "x_tick_angle": 0,
-    "format": "png",
-    "axis_target": "All",
-    "legend_show": True,
-    "legend_font_size": 12,
-    "legend_loc": "best",
-    "line_width": 1.8,
-    "line_style": "-",
-    "marker_size": 5.0,
-    "marker_style": "o",
-    "marker_edge_width": 0.8,
-    "grid_show": True,
-    "grid_alpha": 0.25,
-    "grid_style": "--",
-    "x_lim_min": "",
-    "x_lim_max": "",
-    "y_lim_min": "",
-    "y_lim_max": "",
-    "x_log": False,
-    "y_log": False,
-    "tick_major": True,
-    "tick_minor": False,
-    "tick_length": 4.0,
-    "tick_direction": "out",
-    "layout_tight": False,
-    "layout_constrained": False,
-    "export_profile": "Custom",
-}
-
 EXPORT_PROFILES = {
     "Custom": {},
     "Illustrator SVG": {"format": "svg", "layout_tight": True},
@@ -220,12 +201,6 @@ EXPORT_PROFILES = {
 }
 
 
-def _ensure_export_style_prefs(app) -> dict:
-    if not hasattr(app, "_export_style_prefs"):
-        app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    return app._export_style_prefs
-
-
 def _ensure_custom_export_profiles(app) -> dict:
     if not hasattr(app, "_export_style_custom_profiles"):
         app._export_style_custom_profiles = {}
@@ -235,265 +210,6 @@ def _ensure_custom_export_profiles(app) -> dict:
 def _get_all_profile_names(app) -> list[str]:
     custom = _ensure_custom_export_profiles(app)
     return [*EXPORT_PROFILES.keys(), *custom.keys()]
-
-
-def _to_float_or_none(value: str):
-    s = str(value).strip()
-    if not s:
-        return None
-    return float(s)
-
-
-def apply_export_style_prefs(fig, prefs: dict) -> None:
-    for ax in fig.axes:
-        if not hasattr(ax, "_fixed_axes_position"):
-            ax._fixed_axes_position = ax.get_position().frozen()
-
-    fig.patch.set_alpha(1.0)
-
-    axis_target = str(prefs.get("axis_target", "All"))
-    target_idx = None if axis_target == "All" else int(axis_target)
-
-    for idx, ax in enumerate(fig.axes, start=1):
-        # Theme-aware chrome: this function used to hardcode "black" everywhere
-        # (publication-ink), which was correct on export but overrode the
-        # PlotCard's screen-theme styling whenever it was called from a redraw.
-        from well_viewer.core.plot_style import tokens_for as _tokens_for_ax
-        _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for_ax(ax)
-        ax.patch.set_alpha(1.0)
-        ax.xaxis.label.set_color(_muted_fg)
-        ax.yaxis.label.set_color(_muted_fg)
-        ax.xaxis.label.set_fontsize(int(prefs.get("axis_label_size", 12)))
-        ax.yaxis.label.set_fontsize(int(prefs.get("axis_label_size", 12)))
-        ax.tick_params(axis="x", labelsize=int(prefs.get("tick_label_size", 10)), colors=_muted_fg)
-        ax.tick_params(axis="y", labelsize=int(prefs.get("tick_label_size", 10)), colors=_muted_fg)
-        ax.title.set_fontsize(int(prefs.get("title_size", 14)))
-        ax.title.set_color(_title_fg)
-
-        for tick in [*ax.get_xticklabels(), *ax.get_yticklabels()]:
-            tick.set_color(_muted_fg)
-            tick.set_fontfamily("Helvetica")
-            tick.set_fontsize(int(prefs.get("tick_label_size", 10)))
-
-        ax.xaxis.label.set_fontfamily("Helvetica")
-        ax.yaxis.label.set_fontfamily("Helvetica")
-        ax.title.set_fontfamily("Helvetica")
-
-        for tick in ax.get_xticklabels():
-            tick.set_rotation(int(prefs.get("x_tick_angle", 0)))
-
-        line_style = str(prefs.get("line_style", "-"))
-        marker_style = str(prefs.get("marker_style", "o"))
-        # Open / hollow markers piggyback on the existing matplotlib token
-        # via an ``_open`` suffix so the combo stays a single dropdown.
-        marker_open = marker_style.endswith("_open")
-        if marker_open:
-            marker_style = marker_style[: -len("_open")] or "o"
-        # Error-bar caps live in ``ax.lines`` too — overriding their marker /
-        # linestyle replaces the tick at the top / bottom of each bar with
-        # the user's data-marker pick, which looks like the error bar is
-        # broken. Collect their ids so the override loop below skips them.
-        cap_ids: set = set()
-        for container in getattr(ax, "containers", []) or []:
-            cap_lines = getattr(container, "caplines", None)
-            if cap_lines is None:
-                children = getattr(container, "lines", None)
-                if isinstance(children, tuple) and len(children) >= 2:
-                    cap_lines = children[1]
-            for cap in (cap_lines or ()):
-                cap_ids.add(id(cap))
-        for ln in ax.lines:
-            if id(ln) in cap_ids:
-                # Error-bar cap markers have their own intrinsic capsize-
-                # based sizing + a default "_" / "|" marker that signals
-                # the cap. Touching their markersize / markeredgewidth /
-                # marker / linestyle either makes the caps look like
-                # data points or stamps the user's data-marker onto the
-                # caps — both read as "error bars suddenly appeared".
-                continue
-            ln.set_linewidth(float(prefs.get("line_width", 1.8)))
-            ln.set_markersize(float(prefs.get("marker_size", 5.0)))
-            ln.set_markeredgewidth(float(prefs.get("marker_edge_width", 0.8)))
-            # ``"keep"`` lets a tab opt out of overriding the renderer's own
-            # marker / linestyle pick (e.g. distinct markers per replicate).
-            # Lines the renderer drew as markers-only (linestyle='None' +
-            # a marker — the scatter / aggregate pattern) keep their no-
-            # connecting-line behaviour; overriding it to "-" stamped
-            # diagonal lines that read as spurious error bars.
-            cur_ls = ln.get_linestyle()
-            cur_mk = ln.get_marker()
-            scatter_only = (
-                getattr(ln, "_scatter_only_artist", False)
-                or (
-                    cur_ls in ("None", "none", "", " ") and
-                    cur_mk not in ("None", "none", "", None)
-                )
-            )
-            if line_style and line_style != "keep" and not scatter_only:
-                ln.set_linestyle(line_style if line_style != "none" else "None")
-            if marker_style and marker_style != "keep":
-                ln.set_marker(marker_style if marker_style != "none" else "None")
-                # Force both edge and face explicitly. Some renderers
-                # (e.g. scatter cells) construct the line with
-                # ``markeredgecolor='none'`` for a clean filled-only
-                # look — that meant "open circle" set face='none' but
-                # the existing edge was 'none' too, producing a fully
-                # invisible marker. Pin the edge to the line colour in
-                # both modes so the ring is always visible.
-                ln_colour = ln.get_color()
-                if marker_open:
-                    ln.set_markerfacecolor("none")
-                    ln.set_markeredgecolor(ln_colour)
-                else:
-                    ln.set_markerfacecolor(ln_colour)
-                    ln.set_markeredgecolor(ln_colour)
-
-        # v5.2.31: ``ax.scatter`` produces a ``PathCollection`` rather
-        # than a ``Line2D`` — pre-v5.2.31 the loop above missed every
-        # scatter-based artist (notably the beeswarm dots), so changing
-        # Marker prefs had no visible effect on them. Renderers that
-        # want scatter artists controlled by the export-style panel
-        # tag their PathCollection with ``_aw_marker_collection =
-        # True``. Other PathCollections (contour, hexbin, errorbar
-        # caps, single-point placeholders) stay untouched.
-        marker_size = float(prefs.get("marker_size", 5.0))
-        marker_edge_width = float(prefs.get("marker_edge_width", 0.8))
-        for coll in ax.collections:
-            if not getattr(coll, "_aw_marker_collection", False):
-                continue
-            # PathCollection ``sizes`` are in points^2 (area), unlike
-            # Line2D ``markersize`` which is points (diameter). Square
-            # the diameter so the visual size matches between the
-            # line- and scatter-based artists on the same plot.
-            try:
-                coll.set_sizes([marker_size * marker_size])
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            try:
-                coll.set_linewidths([marker_edge_width])
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            if marker_style and marker_style != "keep":
-                # Per-point face/edge: read the FIRST currently-set
-                # face colour so we preserve the renderer's per-well
-                # colour assignment. Open vs filled is a function of
-                # the user's pref, not the renderer's choice.
-                try:
-                    faces = coll.get_facecolors()
-                    cur_colour = faces[0] if len(faces) else None
-                except Exception:
-                    cur_colour = None
-                if cur_colour is None:
-                    try:
-                        edges = coll.get_edgecolors()
-                        cur_colour = edges[0] if len(edges) else None
-                    except Exception:
-                        cur_colour = None
-                if cur_colour is not None:
-                    if marker_open:
-                        try:
-                            coll.set_facecolor("none")
-                            coll.set_edgecolor(cur_colour)
-                        except Exception:
-                            swallowed()  # was: pass (silent except)
-                    else:
-                        try:
-                            coll.set_facecolor(cur_colour)
-                            coll.set_edgecolor(cur_colour)
-                        except Exception:
-                            swallowed()  # was: pass (silent except)
-                # Marker shape: swap the path in the PathCollection
-                # to the requested marker's path. Each point in the
-                # collection draws the same path, scaled by size.
-                if marker_style.lower() != "none":
-                    try:
-                        from matplotlib.markers import MarkerStyle
-                        ms = MarkerStyle(marker_style)
-                        new_path = ms.get_path().transformed(
-                            ms.get_transform()
-                        )
-                        coll.set_paths([new_path])
-                    except Exception:
-                        swallowed()  # was: pass (silent except)
-
-        show_grid = bool(prefs.get("grid_show", True))
-        ax.grid(show_grid, alpha=float(prefs.get("grid_alpha", 0.25)), linestyle=str(prefs.get("grid_style", "--")))
-
-        if target_idx is None or idx == target_idx:
-            xlo = _to_float_or_none(prefs.get("x_lim_min", ""))
-            xhi = _to_float_or_none(prefs.get("x_lim_max", ""))
-            ylo = _to_float_or_none(prefs.get("y_lim_min", ""))
-            yhi = _to_float_or_none(prefs.get("y_lim_max", ""))
-            if xlo is not None or xhi is not None:
-                cur = ax.get_xlim()
-                ax.set_xlim(xlo if xlo is not None else cur[0], xhi if xhi is not None else cur[1])
-            if ylo is not None or yhi is not None:
-                cur = ax.get_ylim()
-                ax.set_ylim(ylo if ylo is not None else cur[0], yhi if yhi is not None else cur[1])
-            if not getattr(ax, "_categorical_xaxis", False):
-                ax.set_xscale("log" if bool(prefs.get("x_log", False)) else "linear")
-            if not getattr(ax, "_categorical_yaxis", False):
-                ax.set_yscale("log" if bool(prefs.get("y_log", False)) else "linear")
-
-        if bool(prefs.get("tick_minor", False)):
-            ax.minorticks_on()
-        else:
-            ax.minorticks_off()
-        length = float(prefs.get("tick_length", 4.0))
-        direction = str(prefs.get("tick_direction", "out"))
-        if bool(prefs.get("tick_major", True)):
-            ax.tick_params(which="major", length=length, direction=direction)
-        else:
-            ax.tick_params(which="major", length=0)
-        if bool(prefs.get("tick_minor", False)):
-            ax.tick_params(which="minor", length=max(1.0, length * 0.6), direction=direction)
-
-        leg = ax.get_legend()
-        if leg is not None:
-            show_leg = bool(prefs.get("legend_show", True))
-            leg.set_visible(show_leg)
-            if show_leg:
-                loc_name = str(prefs.get("legend_loc", "best"))
-                try:
-                    leg.set_loc(loc_name)
-                except Exception:
-                    try:
-                        from matplotlib.legend import Legend as _Legend
-                        leg._loc = _Legend.codes.get(loc_name, 0)
-                    except Exception:
-                        swallowed()  # was: pass (silent except)
-            for txt in leg.get_texts():
-                txt.set_fontsize(float(prefs.get("legend_font_size", 9)))
-                txt.set_color(_title_fg)
-                txt.set_fontfamily("Helvetica")
-
-        fixed_pos = getattr(ax, "_fixed_axes_position", None)
-        if fixed_pos is not None:
-            ax.set_position(fixed_pos)
-
-    use_constrained = bool(prefs.get("layout_constrained", False))
-    use_tight = bool(prefs.get("layout_tight", False))
-    try:
-        if use_constrained:
-            fig.set_layout_engine("constrained")
-        elif use_tight:
-            fig.set_layout_engine("tight")
-        else:
-            fig.set_layout_engine(None)
-    except Exception:
-        fig.set_constrained_layout(use_constrained)
-        if use_tight and not use_constrained:
-            try:
-                fig.tight_layout()
-            except Exception:
-                swallowed()  # was: pass (silent except)
-
-
-def apply_export_style_to_current(app, fig, canvas=None) -> None:
-    prefs = _ensure_export_style_prefs(app)
-    apply_export_style_prefs(fig, prefs)
-    if canvas is not None:
-        canvas.draw_idle()
 
 
 class _ExportEditorSession:

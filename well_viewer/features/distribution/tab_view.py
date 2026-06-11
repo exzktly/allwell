@@ -15,6 +15,7 @@ from well_viewer.core.ui_helpers import (
     make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
 from well_viewer.features.export.service import export_distribution_data
+from well_viewer.features.scatter.collect import get_all_timepoints
 
 
 _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)"]
@@ -160,7 +161,6 @@ def refresh_distribution_timepoints(app) -> None:
     if cb is None:
         return
     try:
-        from well_viewer.features.scatter.controller import get_all_timepoints
         tps = get_all_timepoints(app)
     except Exception:
         tps = []

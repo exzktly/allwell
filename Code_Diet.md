@@ -38,11 +38,11 @@ Rules:
 
 | ID | Item | Type | Est. LoC | Risk | Status |
 |----|------|------|----------|------|--------|
-| D1 | Delete 7 orphan widget modules | dead | ~1,878 | Low | `[ ]` TODO |
-| D2 | Delete 3 unused functions | dead | ~40 | Low | `[ ]` TODO |
+| D1 | Delete 7 orphan widget modules | dead | **1,878** | Low | `[x]` DONE |
+| D2 | Delete 3 unused functions | dead | **43** | Low | `[x]` DONE |
 | D3 | Remove Movie-Montage remnants | dead/legacy | ~40 | Low–Med | `[ ]` TODO |
 | D4 | Fix vulture unused-locals + unreachable branches | dead | ~25 | Low | `[ ]` TODO |
-| D5 | Remove `label_grid_view` `__main__` demo | dead | ~26 | Low | `[ ]` TODO |
+| D5 | Remove `label_grid_view` `__main__` demo | dead | **27** | Low | `[x]` DONE |
 | D6 | Drop unused imports (ruff F401 --fix, reviewed) | dead | ~234 lines | Low–Med | `[ ]` TODO |
 | C1 | Consolidate well-token parsing → `well_token.py` | dedup | ~40 | Low | `[ ]` TODO |
 | C2 | Unify the 4 timepoint parsers | dedup | ~100 | Med | `[ ]` TODO |
@@ -62,7 +62,7 @@ Rules:
 
 # Part 1 — Dead / unused / legacy code (DELETE)
 
-### D1 — Orphan widget modules (~1,878 LoC) · `[ ]` TODO
+### D1 — Orphan widget modules (~1,878 LoC) · `[x]` DONE — **1,878 LoC**
 Seven modules in `widgets/` are never imported (verified: `widgets/__init__.py`
 has **no** re-exports; grep for `widgets.<mod>` / `from widgets.<mod>` / the
 class name = **0 external refs**). Each ships a `__main__` visual-QA demo, which
@@ -83,7 +83,7 @@ is the only thing referencing its class.
 - **Risk:** Low (isolated, unreferenced). Likely v1/early-prototype UI leftovers.
 - **Notes:** _(SHA / final grep result)_
 
-### D2 — Unused functions (verified 0 refs) · `[ ]` TODO
+### D2 — Unused functions (verified 0 refs) · `[x]` DONE — **43 LoC**
 Each has **only its definition** repo-wide (verified by grep):
 - `process_microscopy.py:2233` `find_image_pairs()` — "Deprecated alias for find_image_groups". Delete.
 - `WellPlateZipper.py:113` `find_matching_files()` — back-compat shim, marked O(96·N) slower than the `group_by_well()` the code actually uses. Delete.
@@ -103,7 +103,7 @@ From `vulture --min-confidence 80`:
 - Unreachable/unsatisfiable: `selection_controller.py:555` (unreachable else) + `:806` (unsatisfiable if); `stats_compute.py:128/165/229/271` (unsatisfiable if — likely dead guards, **inspect**: could signal a real logic bug rather than dead code).
 - **Risk:** Low for the locals; the unsatisfiable-`if`s in `stats_compute` need eyes (dead guard vs. bug). **Verify:** run `tests/test_stats_state.py` + `tests/test_app_characterization.py`.
 
-### D5 — `label_grid_view.py:437–463` `__main__` demo (26 LoC) · `[ ]` TODO
+### D5 — `label_grid_view.py` `__main__` demo · `[x]` DONE — **27 LoC**
 A `_StubApp` visual demo inside a feature module (not a `widgets/` component).
 Remove it (also clears the 2 leftover `print()`s flagged in P1). Widget-package
 `__main__` demos are **intentional** (per `widgets/__init__.py`) — keep those.

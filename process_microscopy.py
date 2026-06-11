@@ -2230,19 +2230,6 @@ def find_image_groups(
 
 
 # Backward-compatible alias kept for any external callers.
-def find_image_pairs(
-    input_dir: Path,
-    nuclear_token: str,
-    gfp_token: str,
-    schema: "list[str] | None" = None,
-    sep: str = DEFAULT_SEP,
-) -> "list[tuple[Path, Path]]":
-    """Deprecated alias for find_image_groups with a single fluor channel."""
-    groups = find_image_groups(
-        input_dir, nuclear_token, [gfp_token], schema=schema, sep=sep
-    )
-    return [(nuc, fluors[0]) for nuc, fluors in groups]
-
 # ---------------------------------------------------------------------------
 # CSV writer
 # ---------------------------------------------------------------------------

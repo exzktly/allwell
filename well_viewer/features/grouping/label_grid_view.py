@@ -434,30 +434,3 @@ def label_grid_refresh(app) -> None:
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
-if __name__ == "__main__":
-    from PySide6.QtWidgets import QApplication
-
-    class _StubApp:
-        def __init__(self):
-            from well_viewer.core.app_state import AppState
-            self._app_state = AppState()
-            self._app_state.dataset.well_labels = {"A01": "Control", "A02": "High MOI"}
-            self._app_state.dataset.well_paths = {f"{r}{c:02d}": object()
-                                for r in _ROW_LETTERS for c in range(1, 13)}
-
-        def _invalidate_stats_cache(self): pass
-        def _labels_add_prefix(self):
-            print("prefix request on:", self._lbl_grid.selectedTokens())
-        def _labels_add_suffix(self):
-            print("suffix request on:", self._lbl_grid.selectedTokens())
-
-    app = QApplication.instance() or QApplication(_sys.argv)
-    app.setStyleSheet(theme.qss())
-    stub = _StubApp()
-    host = QWidget()
-    host.setWindowTitle("LabelGrid — demo")
-    host.resize(820, 360)
-    build_label_grid(stub, host)
-    label_grid_refresh(stub)
-    host.show()
-    _sys.exit(app.exec())

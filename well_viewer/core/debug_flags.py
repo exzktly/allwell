@@ -37,11 +37,6 @@ def review_scatter_debug_enabled() -> bool:
     return REVIEW_TAB_DEBUG or REVIEW_SCATTER_DEBUG
 
 
-def review_image_debug_enabled() -> bool:
-    """Return whether Review Image tab debug output is enabled."""
-    return REVIEW_TAB_DEBUG or REVIEW_IMAGE_DEBUG
-
-
 def review_image_load_debug_enabled() -> bool:
     """Return whether Review Image image-loading debug output is enabled."""
     return REVIEW_TAB_DEBUG or REVIEW_IMAGE_LOAD_DEBUG

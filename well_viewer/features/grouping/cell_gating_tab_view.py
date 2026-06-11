@@ -461,7 +461,7 @@ def cell_gating_on_threshold_frac_on_change(app) -> None:
         if callable(refresh):
             refresh()
     except ValueError:
-        pass
+        swallowed("cell gating: non-numeric ThreshFracOn edit ignored")
 
 
 def cell_gating_start_gating_worker(app) -> None:
@@ -890,7 +890,7 @@ def _cell_gating_plot_cdf(app) -> None:
             ax.axvline(x=fluor_gate, color=warn,
                        linestyle="--", linewidth=2, alpha=0.7)
         except (ValueError, KeyError):
-            pass
+            swallowed("cell gating CDF: no fluor-gate line (unparsable/missing)")
         next_idx += 1
 
     for ratio_label, values in sorted(ratio_data.items()):
@@ -961,4 +961,4 @@ def _cell_gating_save_threshold_frac_on(app) -> None:
         try:
             app._thresh_frac_on_saved[channel] = float(edit.text())
         except ValueError:
-            pass
+            swallowed(f"cell gating: skip non-numeric ThreshFracOn for {channel!r}")

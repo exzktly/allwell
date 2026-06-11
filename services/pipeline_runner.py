@@ -593,4 +593,4 @@ class PipelineRunner:
                 try:
                     zipped.cleanup()
                 except OSError:
-                    pass
+                    swallowed("remote run: staging zip cleanup failed")

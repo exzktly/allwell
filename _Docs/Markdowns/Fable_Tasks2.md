@@ -55,7 +55,7 @@ commit SHA + the test that proves it in the task's notes.
 | T2 | Break inter-feature cycles; add a deferred-import ratchet | High | Med | `[x]` DONE |
 | T3 | Central metric registry (`domain/metric_registry.py`) | High | Med | `[x]` DONE |
 | T4 | Decompose remaining orchestrators (+budget ratchets) | Med | Med–High | `[~]` PARTIAL — scatter+barplot split; all 5 monoliths budget-locked; process_image_group / review_image / analyze_tab splits deferred (need slow e2e / full-Qt verification) |
-| T6 | Log specific-type silent passes; add a directed integration test | Low | Low | `[ ]` TODO |
+| T6 | Log specific-type silent passes; add a directed integration test | Low | Low | `[x]` DONE |
 
 **Order:** **T5 first** (cheap; gets the suite gating PRs again so T1–T4 are
 guarded), then **T1 → T2 → T3** (the acid-test triad), then **T4** (largest, do
@@ -321,13 +321,34 @@ Mirror the P4 pattern (extract cohesive sub-modules, re-export, ratchet the budg
    load the `mini_dataset`, apply control-normalised fold-change, read bar values,
    assert error bars track the control mean — covering the tab-builder / app-loop
    path that smoke + characterization tests only shallowly touch.
-- **Notes:** _(SHA)_
+- **Done — what shipped:**
+  1. Routed the specific-type silent passes through `swallowed(...)` (a DEBUG-level
+     breadcrumb, behaviour unchanged): `persistence/_io.py` (the two fsync calls +
+     the two tmp-cleanup unlinks in `atomic_write_json`/`atomic_write_text`),
+     `services/pipeline_runner.py` (remote staging-zip cleanup), and
+     `features/grouping/cell_gating_tab_view.py` (the three ThreshFracOn / fluor-gate
+     float-parse guards). All are *specific* excepts (`OSError` / `ValueError` /
+     `(ValueError, KeyError)`), so `test_no_silent_except` stays green — this is
+     diagnosability polish, not a contract change.
+  2. Added `tests/test_fold_change_error_propagation.py` — a directed real-app
+     (`loaded_app` + mini-dataset) test that reads the raw bar mean ± spread, then
+     the control-normalised bars, and asserts the exact quadrature propagation the
+     domain layer implements: the control bar normalises to mean 1.0, a treated bar
+     is the raw-mean ratio, every bar's error bar folds the control's relative error
+     in quadrature, and the **control's own bar carries a non-zero error bar**
+     (√2·σ_ctrl/μ_ctrl) — the property a naive "divide-by-self → 0±0" would break.
+     Auto-marked `slow` (uses `loaded_app`), so it runs in the full/local pass.
+- **Verified:** `test_no_silent_except` (2 pass); the new integration test passes
+  on a real `WellViewerApp`; `ruff` clean.
+- **Notes:** SHA on commit.
 
 ---
 
 ## Status log
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-06-11 **T6 DONE** — routed the specific-type silent passes (persistence/_io fsync + tmp-cleanup, pipeline_runner staging cleanup, cell_gating float-parse guards) through `swallowed(...)` for diagnosability; added `tests/test_fold_change_error_propagation.py`, a directed real-app test asserting control-normalised fold-change propagates the control's relative error into every bar (incl. the control's own √2·σ/μ error bar). no_silent_except green, ruff clean.
+- 2026-06-11 **T4 PARTIAL** — extracted `barplot/collect.py` (data-collection cluster out of the controller, 1416→731) via AST codemod, re-exported for compat; `scatter/controller` is 875 after T2's `collect.py`. Added monolith budget ratchets for scatter (875), barplot (731), review_image (1392), analyze_tab (1887). Deferred `process_image_group` / review_image / analyze_tab deep splits (need slow e2e / full-Qt verification); budgets hold them. test_barplot_collect/autofit/lineplot + all guardrails pass.
 - 2026-06-11 **T3 DONE** — created `domain/metric_registry.py` as the single declarative metric catalogue (`MetricDef` table + derivation helpers + `column_gating_exempt`/`metric_key_gating_exempt`); `data/metric_labels.py` now derives its label/key/order tables from it; de-duplicated the gate-exemption rule across scatter/collect + the 6 line/bar/heatmap/distribution active-metric copies; added `tests/test_metric_registry.py` proving a throwaway metric flows through the combos (the acid test). Verified: 50 tests pass, ruff clean.
 - 2026-06-11 **T2 DONE** — broke the scatter↔export import cycle by relocating the figure-styling engine to `core/plot_style.py` (re-exported from `export/style`) and extracting the scatter data collectors into `features/scatter/collect.py` (re-exported from the controller); promoted 8 now-acyclic deferred imports to module level across lineplot/heatmap/barplot/distribution/scatter/export/plot_orchestrator; documented the one irreducible crop↔review_image deferred pair; added `tests/test_deferred_imports.py` ratchet (budget 137) + recognised `collect.py` in the naming guard. Verified: 59 feature tests pass, 20 guardrails pass, ruff clean, no import cycle.
 - 2026-06-11 **T1 DONE** — `persistence/` is now data-only at module scope. Relocated `QCParams` + `compute_qc_pass` to `domain/qc_params.py` (shim left at `features/qc/params.py`); `persistence/qc_params.py` imports the model downward from `domain` and defers seeding to the qc controller's lazy accessor (sets `None` when no persisted edits); moved the `label_grid_refresh` / `image_table_apply_dimensions` feature imports function-local in the Clear-All command + view-state restore. Extended `test_layering` `GUARDED_LAYERS` with `"persistence"` to lock it. Verified: 28 passed/4 slow-deselected across the qc + persistence + layering set; 18 guardrails green; ruff clean.
@@ -335,4 +356,4 @@ Mirror the P4 pattern (extract cohesive sub-modules, re-export, ratchet the budg
 - 2026-06-11 Plan created from the post-work re-evaluation (both findings verified
   against the tree). All tasks TODO.
 
-**Last updated:** 2026-06-11 — T1, T2, T3, T5 done; T4 + T6 remain.
+**Last updated:** 2026-06-11 — T1, T2, T3, T5, T6 done; T4 partial (2 splits landed, all 5 monoliths budget-locked; 3 deep splits deferred pending e2e/full-Qt verification).

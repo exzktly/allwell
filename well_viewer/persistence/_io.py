@@ -22,6 +22,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from well_viewer.core.safe import swallowed
+
 
 # Bounded retry budget for transient Windows handle conflicts (AV,
 # cloud sync, etc. typically release within 50–500ms). At 100ms base
@@ -89,7 +91,7 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
                 # fsync isn't supported on every filesystem (e.g. some
                 # network mounts). The replace below is still atomic on
                 # POSIX and Windows.
-                pass
+                swallowed("atomic_write_json: fsync unsupported on this fs")
 
     try:
         _retry_on_permission_error("write_tmp", _write_tmp)
@@ -102,7 +104,7 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
             if tmp.exists():
                 _retry_on_permission_error("unlink", tmp.unlink)
         except OSError:
-            pass
+            swallowed("atomic_write_json: tmp cleanup unlink failed")
 
 
 def atomic_write_text(path: Path, text: str) -> None:
@@ -124,7 +126,7 @@ def atomic_write_text(path: Path, text: str) -> None:
             try:
                 os.fsync(fh.fileno())
             except OSError:
-                pass
+                swallowed("atomic_write_text: fsync unsupported on this fs")
 
     try:
         _retry_on_permission_error("write_tmp", _write_tmp)
@@ -134,4 +136,4 @@ def atomic_write_text(path: Path, text: str) -> None:
             if tmp.exists():
                 _retry_on_permission_error("unlink", tmp.unlink)
         except OSError:
-            pass
+            swallowed("atomic_write_text: tmp cleanup unlink failed")

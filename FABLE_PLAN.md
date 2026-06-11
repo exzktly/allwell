@@ -39,7 +39,7 @@ Rules:
 | P1 | CI + committed lint config | Low | `[x]` DONE | _this branch_ |
 | P2 | Observable exception-swallowing (`swallow` helper) | Low | `[x]` DONE | _this branch_ |
 | P3 | Fix `domain/`→`features/` & `data/`→`features/` layering | Low–Med | `[x]` DONE | _this branch_ |
-| P4 | Decompose the two worst monoliths | Med | `[ ]` TODO | — |
+| P4 | Decompose the two worst monoliths | Med | `[~]` PARTIAL | _this branch_ |
 | P5 | Raise core-pipeline (`process_microscopy.py`) coverage | Med | `[ ]` TODO | — |
 
 **Suggested execution order:** P1 → P2 → P3 → P4 → P5 (each builds safety the
@@ -293,59 +293,79 @@ change.**
 "future bug" signature. `process_image_group()` mixes high-level segmentation
 dispatch with low-level numpy + file I/O via 15-variable closures.
 
-**Status:** `[ ]` TODO
+**Status:** `[~]` PARTIAL — background-correction cluster extracted + verified +
+guardrails in place; deeper segmentation/IO split and the image_table split are
+**deferred** (see "Why deferred" below). This is a deliberate stopping point,
+not an oversight.
+
+> **Why deferred (environment honesty):** the deep `process_microscopy` split
+> (segmentation/IO) and an end-to-end pipeline diff **cannot be safely verified
+> in the dev sandbox** — TensorFlow/StarDist/Cellpose aren't installed (can't run
+> segmentation) and there's no remote host (can't validate the upload-manifest
+> contract). Refactoring the most safety-critical, highest-churn file *blind*
+> would risk silently breaking the scientific pipeline and the remote path. So
+> P4 extracted the one **fully test-covered, leaf** cluster (background math),
+> added a manifest guardrail + line budgets to lock in progress and prevent
+> regrowth, and documented the remaining extraction boundaries for whoever has
+> the full ML + remote environment.
 
 ### Steps — `process_microscopy.py`
 
-- [ ] **P4.1** Establish the safety net first: confirm/extend characterization
-      coverage for the current pipeline outputs before touching code (lean on
-      `test_app_characterization.py`, `test_qc_tooling.py`,
-      `test_flatfield_core.py`, `test_robust_background.py`,
-      `test_segmentation_methods.py`). Note any uncovered branch you're about to
-      move; this overlaps with P5 and de-risks both.
-- [ ] **P4.2** Extract `corrections.py` (Qt-free, repo-root or a pipeline
-      subpackage that honors the no-Qt contract): flatfield application,
-      background subtraction/estimation, the `_correct` closure logic — turned
-      into explicit functions with named parameters instead of captured scope.
-- [ ] **P4.3** Extract `segmentation.py`: the method-dispatch `if/elif` in
-      `process_image_group()` becomes a strategy map of named functions
-      (`segment_stardist_watershed`, `segment_cellpose`, …). Keep model-cache
-      globals where they are or pass them explicitly.
-- [ ] **P4.4** Extract `io_outputs.py`: QC TIFF writes, CSV assembly, sidecar
-      generation (`_safe_imwrite` call sites). `process_image_group()` becomes
-      orchestration that calls correction → segmentation → quantify → io.
-- [ ] **P4.5** Keep `process_microscopy.py` as the orchestrator/CLI entry; it
-      imports the new modules. **Re-verify the remote path**: the bootstrap
-      uploads specific files to the worker (history shows a prior crash when
-      `flatfield_core.py` wasn't uploaded). Update
-      `services/remote_runner.py` / `scripts/_bootstrap_lib.py` upload manifest
-      to include any new modules, and add/extend a test asserting the manifest
-      covers all pipeline imports.
-- [ ] **P4.6** Run full suite + a real (or synthetic) end-to-end pipeline run;
-      diff outputs against pre-refactor to confirm bit-stability where the
-      contract requires it (StarDist determinism note in requirements).
+- [x] **P4.1** Safety net confirmed: the background cluster is fully covered by
+      `test_robust_background.py` (13), `test_background_scalematch.py` (5),
+      `test_flatfield_core.py` (8) — all run without the ML stack.
+- [x] **P4.2 (background slice)** Extracted the background-correction cluster
+      into a new Qt-free repo-root module **`microscopy_background.py`** (357
+      lines): `apply_tophat`, `BACKGROUND_METHODS`, `estimate_background_field`,
+      `_match_background_scale`, `_floor_after_subtract`, `_isotropic_disk_tophat`,
+      `_fft_butterworth_bandpass`, `_robust_grid_background`, `subtract_background`,
+      `combined_empty_well_correct`. `process_microscopy.py` re-exports them, so
+      `pm.subtract_background(...)` and every call site / the remote worker are
+      unchanged. `process_microscopy.py`: **5129 → 4808 lines.**
+- [-] **P4.3 (segmentation.py)** Deferred — needs TF/StarDist to verify; not
+      done blind. Boundary identified: the method-dispatch in
+      `process_image_group()`.
+- [-] **P4.4 (io_outputs.py)** Deferred — same reason (QC TIFF / CSV writes are
+      interwoven with the TF-dependent orchestrator).
+- [x] **P4.5** Remote path handled: added `microscopy_background.py` to
+      `services.remote_runner._REQUIRED_REMOTE_FILES`, **and** added
+      `tests/test_remote_manifest.py` — an AST guardrail that fails if
+      `process_microscopy` imports any repo-root module missing from the
+      manifest (prevents the documented "forgot to upload → ModuleNotFoundError"
+      crash class). _(scripts/_bootstrap_lib.py needs no change — it installs
+      requirements; file sync is the runner's manifest.)_
+- [x] **P4.6 (partial)** Ran the covering suites: 26 background tests + the
+      broader `process_microscopy`-importing suites (qc_tooling, segmentation_
+      methods, stardist_finite_guard, per_fov_checkpoint, labelfree_phase,
+      model_recovery, shape_features) — **all green** after the move. (This
+      caught + fixed one real regression: the moved code referenced
+      `_FLATFIELD_SIGMA`, now imported from `flatfield_core` in the new module.)
+      A true end-to-end ML pipeline diff is deferred to an ML-capable env (= P5).
 
 ### Steps — `image_table/controller.py`
 
-- [ ] **P4.7** Split into focused modules under
-      `well_viewer/features/image_table/`:
-      - `image_compose.py` — LUT/colormap tinting + RGB composition.
-      - `grid_layout.py` — grid building / cell distribution.
-      - `export.py` — CSV writing / cell snapshot serialization.
-      - `controller.py` — retains event handling + orchestration only.
-      Preserve public function names (re-export) to avoid touching callers.
-- [ ] **P4.8** Add an `image_table` line-budget guardrail to
-      `tests/test_guardrails.py` (same mechanism as `runtime_app.py`) so the
-      controller can't silently re-bloat.
-- [ ] **P4.9** Verify with `test_image_table_layout.py`,
-      `test_image_table_ui.py`, `test_image_table_*`; suite green.
+- [-] **P4.7** Deferred — the 3-way split (image_compose / grid_layout / export)
+      is verifiable here in principle, but was descoped to keep this PR focused
+      and avoid a second large extraction. Boundaries are documented in the plan;
+      the budget below prevents regrowth in the meantime.
+- [x] **P4.8** Added `tests/test_monolith_budgets.py` — line-budget ratchets for
+      **both** `process_microscopy.py` (≤4808) and
+      `image_table/controller.py` (≤2486), same "only moves down" mechanism as
+      `test_guardrails.py`. A change that regrows either past budget fails CI.
+- [-] **P4.9** N/A until P4.7 lands.
 
-**Acceptance criteria:** Both files materially smaller and cohesive; all tests
-green; remote upload manifest covers new pipeline modules; end-to-end output
-unchanged; new size guardrail in place.
+**Acceptance criteria:** _Partially met._ `process_microscopy.py` is materially
+smaller (−321 lines) with the correction math in a cohesive module; covering
+tests green; manifest updated + guarded; size ratchets in place. The full
+two-file decomposition + end-to-end diff remain for an ML-capable environment.
 
-**Notes / evidence:** _(new module list, before/after LOC, output-diff result,
-commit SHAs)_
+**Notes / evidence:**
+- New module: `microscopy_background.py` (357 lines). `process_microscopy.py`
+  5129 → 4808.
+- New guardrails: `tests/test_remote_manifest.py`, `tests/test_monolith_budgets.py`.
+- Verified: 26 background tests + ~52 other pipeline-importing tests green;
+  ruff clean. Regression found+fixed: `_FLATFIELD_SIGMA` import.
+- Commit SHA: _(in status log below)_
 
 ---
 
@@ -394,6 +414,13 @@ modules unit-tested; at least one end-to-end pipeline test runs in default CI
 
 > Append a dated line every time a status box changes. Newest at top.
 
+- 2026-06-11 **P4 PARTIAL** — extracted the background-correction cluster from
+  `process_microscopy.py` (5129→4808) into Qt-free `microscopy_background.py`
+  (re-exported for compat); added it to the remote manifest + a manifest
+  guardrail (`test_remote_manifest.py`); added line-budget ratchets for both
+  monoliths (`test_monolith_budgets.py`). 26 background + ~52 pipeline tests
+  green (fixed a `_FLATFIELD_SIGMA` regression). Deferred: deep segmentation/IO
+  split + image_table split (unverifiable without ML stack / descoped) — see P4.
 - 2026-06-11 **P3 DONE** — moved bar-group transforms to `domain/bar_groups.py`
   and preview zip/IO helpers to `data/zip_members.py` (re-exported for compat);
   fixed both module-level `domain/data → features` violations; added
@@ -412,4 +439,5 @@ modules unit-tested; at least one end-to-end pipeline test runs in default CI
   needed (no test requires the ML stack).
 - 2026-06-10 Plan created; all tasks (P1–P5) TODO. — initial commit of FABLE_PLAN.md
 
-**Last updated:** 2026-06-11 — P1 + P2 + P3 complete; P4 next.
+**Last updated:** 2026-06-11 — P1–P3 complete; P4 partial (background slice +
+guardrails done, deep split deferred); P5 next.

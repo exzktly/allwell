@@ -103,6 +103,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # top level (the empty-well / gaussian / basic correction), so the remote
     # needs it too or the import aborts the run with ModuleNotFoundError.
     "flatfield_core.py",
+    # Background-subtraction math: process_microscopy re-imports
+    # microscopy_background at module top level (subtract_background plus the
+    # empty-well / robust-mesh / fft-bandpass methods), so the remote needs it
+    # too or the import aborts the run with ModuleNotFoundError.
+    "microscopy_background.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.

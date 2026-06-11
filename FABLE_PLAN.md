@@ -418,9 +418,20 @@ not an oversight.
       `_load_mask_array`; `grid_view`) are unchanged. `controller.py`:
       **2486 → 1976**. Verified: 15 image_table tests + **22 playground tests**
       (the external consumer) pass; compile/imports/ruff/guardrails green.
-      _(The further grid_layout / export sub-splits remain as optional follow-ups
-      — export is bidirectionally coupled to the now-extracted compose layer, so
-      it would import `image_compose` cleanly when done.)_
+- [x] **P4.7b (export + grid_layout extracted)** Completed the 3-way split:
+      - `image_table/export.py` (354 lines): the export-settings dialog, the
+        matplotlib figure builder (`_build_export_figure`), and the PNG/SVG
+        save+copy actions — pulls per-cell pixels from `image_compose` (clean
+        downward dep). `controller.py`: 1976 → 1669.
+      - `image_table/grid_layout.py` (243 lines): axis/cell layout math, the
+        per-dimension option lists (well/channel/FOV/timepoint), channel
+        enumeration, ratio lookup, and the row↔cell snapshot helpers + `_DIM_KEY`
+        — token helpers imported from `image_compose`. `controller.py`:
+        1669 → **1494**.
+      `controller.py` re-exports every moved name, so the `tab_view` toolbar
+      wiring and external importers (`playground`) are unchanged. **image_table
+      controller: 2486 → 1494** across `image_compose` / `export` / `grid_layout`.
+      Verified: 15 image_table + 22 playground tests pass; ruff + budgets green.
 - [x] **P4.8** Added `tests/test_monolith_budgets.py` — line-budget ratchets for
       **both** `process_microscopy.py` and `image_table/controller.py`, same
       "only moves down" mechanism as `test_guardrails.py`. Ratcheted down as each

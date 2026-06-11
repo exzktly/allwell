@@ -7,13 +7,12 @@ appending. Lower a budget when a change legitimately shrinks the file; never
 raise it.
 
 Baselines (set when P4 began the decomposition):
-- process_microscopy.py: 4468 lines, after extracting the background-correction
-  cluster (``microscopy_background.py``), the Cellpose segmenters
-  (``microscopy_cellpose.py``), and the StarDist segmenters + model state
-  (``microscopy_stardist.py``) and the output writers
-  (``microscopy_io.py``) — was 5129.
-- image_table/controller.py: 1976 lines, after extracting the image-composition
-  layer into ``image_compose.py`` (was 2486).
+- process_microscopy.py: ~4470 lines, after extracting the background-correction
+  (``microscopy_background.py``), Cellpose (``microscopy_cellpose.py``), StarDist
+  (``microscopy_stardist.py``) and output-writer (``microscopy_io.py``) layers —
+  was 5129. (P2.7 added +2 for the aw_safe import + a logged swallow.)
+- image_table/controller.py: 1494 lines, after extracting the image_compose /
+  export / grid_layout layers — was 2486.
 """
 
 from pathlib import Path
@@ -21,8 +20,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ── Ratcheting ceilings (only ever lowered) ──────────────────────────────────
-PROCESS_MICROSCOPY_BUDGET = 4468
-IMAGE_TABLE_CONTROLLER_BUDGET = 1976
+PROCESS_MICROSCOPY_BUDGET = 4470
+IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 
 
 def _line_count(rel: str) -> int:

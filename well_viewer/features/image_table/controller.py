@@ -104,67 +104,26 @@ def image_table_clear_active(app) -> None:
 # ── Pipeline-info-driven dropdown options ────────────────────────────────────
 
 
-def _channel_options(app) -> List[str]:
-    """All channel tokens available for selection (uppercase for display).
-
-    Sourced from the canonical ``app._app_state.channel.fluor_channels`` /
-    ``app._app_state.channel.smfish_channels`` lists (built by ``_recalculate_threshold`` from
-    pipeline_info.json + CSV detection — same lists every other tab uses).
-    Falls back to the raw ``app._app_state.dataset.pipeline_info`` dict for the rare case
-    where the tab is repopulated before the first ``_recalculate_threshold``
-    pass. Adds the virtual ``NUC+SEG`` token at the end when a nuclear
-    channel is known — that's where the pre-rendered segmentation overlay
-    images live, and they're how the Image Table replaces the old Movie
-    Montage tab.
-    """
-    info = app._app_state.dataset.pipeline_info or {}
-    chans: List[str] = []
-
-    fluor = list(app._app_state.channel.fluor_channels or [])
-    if not fluor:
-        nuclear_pi = (info.get("nuclear_token") or "").strip().lower()
-        if nuclear_pi:
-            fluor.append(nuclear_pi)
-        for tok in info.get("fluor_tokens", []) or []:
-            tok = str(tok).strip().lower()
-            if tok and tok not in fluor:
-                fluor.append(tok)
-    for tok in fluor:
-        tok = str(tok).strip().lower()
-        if tok and tok not in chans:
-            chans.append(tok)
-
-    smfish = app._app_state.channel.smfish_channels or []
-    for tok in smfish:
-        tok = str(tok).strip().lower()
-        if tok and tok not in chans:
-            chans.append(tok)
-
-    options = [c.upper() for c in chans]
-
-    seg_tok = (getattr(app, "_seg_channel_token", "") or "").strip()
-    if not seg_tok:
-        seg_tok = (info.get("nuclear_token") or "").strip()
-    if seg_tok:
-        options.append(NUC_SEG_TOKEN)
-
-    # Append user-defined ratio metrics as virtual channels.  The display
-    # label "GFP/RFP" is what appears in the dropdown; _find_ratio_for_channel
-    # resolves it back to the RatioMetric at render time.
-    for r in (app._app_state.channel.ratio_metrics or []):
-        lbl = r.display_label()
-        if lbl and lbl not in options:
-            options.append(lbl)
-
-    return options
-
-
-def _find_ratio_for_channel(app, chan: str):
-    """Return the RatioMetric whose display_label matches *chan*, or None."""
-    for r in (app._app_state.channel.ratio_metrics or []):
-        if r.display_label().upper() == chan.strip().upper():
-            return r
-    return None
+# The layout/dimension layer (axis math, per-dim option lists, channel
+# enumeration, cell snapshot) lives in ``grid_layout``. Re-exported so call
+# sites + external importers (playground) are unchanged.
+from well_viewer.features.image_table.grid_layout import (  # noqa: E402,F401
+    _DIM_KEY,
+    _all_dim_options,
+    _axis_values,
+    _cache_column_tokens,
+    _channel_options,
+    _current_axis,
+    _find_ratio_for_channel,
+    _fixed_off_axis,
+    _fov_options,
+    _layout_cell_values,
+    _snapshot_cells,
+    _timepoint_options,
+    _tp_sort_key,
+    _well_options,
+    _write_cell,
+)
 
 
 
@@ -173,61 +132,16 @@ def _find_ratio_for_channel(app, chan: str):
 
 
 
-def _tp_sort_key(tp: str):
-    """Sort key for timepoint strings; uses parse_timepoint_hours so
-    ``01d02h30m``-style values order chronologically."""
-    from well_viewer.data.data_loading import parse_timepoint_hours
-    h = parse_timepoint_hours(str(tp))
-    return (h is None, h if h is not None else 0.0, str(tp))
 
 
-def _cache_column_tokens(app, column: str) -> List[str]:
-    """Unique normalised tokens from ``column`` across every cached DataFrame.
-
-    ``app._app_state.dataset.cache`` values are DataFrames since the pandas migration; iterating
-    one with ``for row in df`` yields *column names*, not rows. Pull the column
-    out vectorised instead — and skip frames that don't carry it at all.
-    """
-    seen: List[str] = []
-    cache = app._app_state.dataset.cache or {}
-    for df in cache.values():
-        if df is None or column not in getattr(df, "columns", ()):
-            continue
-        for val in df[column].dropna().unique():
-            tok = _norm_token(val)
-            if tok and tok not in seen:
-                seen.append(tok)
-    return seen
 
 
-def _timepoint_options(app) -> List[str]:
-    info = app._app_state.dataset.pipeline_info or {}
-    seen: List[str] = []
-    for tp in (info.get("available_timepoints") or []):
-        tok = _norm_token(tp)
-        if tok and tok not in seen:
-            seen.append(tok)
-    if seen:
-        return sorted(seen, key=_tp_sort_key)
-    # Fallback: derive timepoints from loaded CSV rows when pipeline_info
-    # doesn't list them (older runs, custom schemas, etc.).
-    return sorted(_cache_column_tokens(app, "timepoint"), key=_tp_sort_key)
 
 
-def _fov_options(app) -> List[str]:
-    info = app._app_state.dataset.pipeline_info or {}
-    seen: List[str] = []
-    for fv in (info.get("available_fovs") or []):
-        tok = _norm_token(fv)
-        if tok and tok not in seen:
-            seen.append(tok)
-    if seen:
-        return seen
-    return _cache_column_tokens(app, "fov")
 
 
-def _well_options(app) -> List[str]:
-    return sorted(app._app_state.dataset.well_paths.keys(), key=app._parse_rc)
+
+
 
 
 def image_table_repopulate_dropdowns(app) -> None:
@@ -518,58 +432,10 @@ _AXIS_LABEL = {"channel": "Channels", "well": "Wells",
 _AXIS_MAX = 12  # grid is capped at 12×12; longer axes are truncated
 
 
-def _axis_values(app, axis: str) -> List[str]:
-    """Ordered value list an axis expands into, drawn from the live selections."""
-    if axis == "channel":
-        opts = _channel_options(app)
-        sel = getattr(app._app_state.image_table, "active_channels", None) or set()
-        return [c for c in opts if c in sel] if sel else list(opts)
-    if axis == "well":
-        sel = sorted(getattr(app._app_state.image_table, "active_wells", set()) or set(),
-                     key=app._parse_rc)
-        return sel if sel else _well_options(app)
-    if axis == "timepoint":
-        return _timepoint_options(app)
-    if axis == "fov":
-        return _fov_options(app)
-    return []
 
 
-def _fixed_off_axis(app, on_axis: set) -> Dict[str, str]:
-    """Pick a single held value for each dimension NOT on a row/col axis.
-
-    Prefers the matching Global Options dropdown (so the user can change it and
-    re-Build), else the first selected/available value."""
-    def _global(attr: str) -> str:
-        cb = getattr(app, attr, None)
-        return cb.currentText().strip() if cb is not None else ""
-
-    def _first(seq) -> str:
-        return seq[0] if seq else ""
-
-    fixed = {"well": "", "channel": "", "timepoint": "", "fov": ""}
-    if "well" not in on_axis:
-        sel = sorted(getattr(app._app_state.image_table, "active_wells", set()) or set(),
-                     key=app._parse_rc)
-        fixed["well"] = sel[0] if sel else _first(_well_options(app))
-    if "channel" not in on_axis:
-        fixed["channel"] = _global("_image_table_global_chan_cb") or _first(_axis_values(app, "channel"))
-    if "timepoint" not in on_axis:
-        fixed["timepoint"] = _global("_image_table_global_tp_cb") or _first(_timepoint_options(app))
-    if "fov" not in on_axis:
-        fixed["fov"] = _global("_image_table_global_fov_cb") or _first(_fov_options(app))
-    return fixed
 
 
-def _current_axis(app, which: str) -> str:
-    cb = getattr(app, f"_image_table_{which}_axis_cb", None)
-    if cb is not None:
-        data = cb.currentData()
-        if data:
-            return str(data)
-    # state fallback / default
-    return getattr(app, f"_image_table_{which}_axis",
-                   "channel" if which == "row" else "timepoint")
 
 
 def _apply_row_channel_styling(app, channels: List[str]) -> None:
@@ -595,13 +461,6 @@ def _apply_row_channel_styling(app, channels: List[str]) -> None:
             sel.blockSignals(False)
 
 
-def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c) -> Dict[str, str]:
-    """Per-cell (well, channel, timepoint, fov) for the smart layout: off-axis
-    dims held at *fixed*, the row axis driven by *r*, the col axis by *c*."""
-    vals = dict(fixed)
-    vals[row_axis] = row_vals[r]
-    vals[col_axis] = col_vals[c]
-    return vals
 
 
 def image_table_build_layout(app) -> None:
@@ -749,46 +608,12 @@ def image_table_set_all_channels(app, on: bool) -> None:
 # ── Add row (clone an existing row, vary one dimension) ───────────────────────
 
 
-def _all_dim_options(app, dim: str) -> List[str]:
-    """Every available value for a dimension (not selection-filtered)."""
-    if dim == "channel":
-        return _channel_options(app)
-    if dim == "well":
-        return _well_options(app)
-    if dim == "timepoint":
-        return _timepoint_options(app)
-    if dim == "fov":
-        return _fov_options(app)
-    return []
 
 
-_DIM_KEY = {"well": "well_cb", "channel": "chan_cb",
-            "timepoint": "tp_cb", "fov": "fov_cb"}
 
 
-def _snapshot_cells(app) -> List[List[Dict[str, str]]]:
-    """Capture every cell's (well, channel, timepoint, fov) selections."""
-    snap: List[List[Dict[str, str]]] = []
-    for row in (getattr(app, "_image_table_cells", None) or []):
-        snap.append([
-            {dim: cell[key].currentText().strip() for dim, key in _DIM_KEY.items()}
-            for cell in row
-        ])
-    return snap
 
 
-def _write_cell(cell, vals: Dict[str, str]) -> None:
-    for dim, key in _DIM_KEY.items():
-        cb = cell.get(key)
-        txt = vals.get(dim, "")
-        if cb is None or not txt:
-            continue
-        cb.blockSignals(True)
-        try:
-            if cb.findText(txt) >= 0:
-                cb.setCurrentText(txt)
-        finally:
-            cb.blockSignals(False)
 
 
 def image_table_add_varied_row(app, *, src_idx: int, dim: str, mode: str, value: str) -> None:
@@ -1644,333 +1469,26 @@ def image_table_auto_lut(app, channel: str) -> None:
 # ── Export (transparent background, labels above each image) ─────────────────
 
 
-def _export_opts(app) -> Dict[str, Any]:
-    """Return the image-table export option dict, seeding defaults on demand."""
-    opts = getattr(app._app_state.image_table, "export_opts", None)
-    if not isinstance(opts, dict):
-        opts = {
-            "pad_inches": 0.10,    # outer margin around the saved figure
-            "cell_pad": 0.50,      # tight_layout w_pad / h_pad between cells
-            "show_titles": True,
-            "title_fontsize": 7,
-            "dpi": 300,
-            "transparent_bg": True,
-        }
-        app._app_state.image_table.export_opts = opts
-    return opts
+# The export cluster (settings dialog, figure builder, PNG/SVG save+copy)
+# lives in ``export``. Re-exported so the tab_view toolbar wiring is unchanged.
+from well_viewer.features.image_table.export import (  # noqa: E402,F401
+    _export_opts,
+    image_table_open_export_settings,
+    _build_export_figure,
+    image_table_export,
+    image_table_copy_png,
+    image_table_copy_svg,
+)
 
 
-def image_table_open_export_settings(app) -> None:
-    """Pop a small modal dialog to edit the image-table export options."""
-    from PySide6.QtWidgets import (
-        QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-        QSpinBox,
-    )
-
-    opts = _export_opts(app)
-    dlg = QDialog(app)
-    dlg.setWindowTitle("Image Table — Export settings")
-    form = QFormLayout(dlg)
-
-    pad_spin = QDoubleSpinBox(dlg)
-    pad_spin.setRange(0.0, 4.0)
-    pad_spin.setSingleStep(0.05)
-    pad_spin.setDecimals(2)
-    pad_spin.setSuffix(" in")
-    pad_spin.setValue(float(opts.get("pad_inches", 0.10)))
-    pad_spin.setToolTip("Outer margin around the saved figure (pad_inches).")
-    form.addRow("Outer margin:", pad_spin)
-
-    cell_spin = QDoubleSpinBox(dlg)
-    cell_spin.setRange(0.0, 4.0)
-    cell_spin.setSingleStep(0.05)
-    cell_spin.setDecimals(2)
-    cell_spin.setValue(float(opts.get("cell_pad", 0.50)))
-    cell_spin.setToolTip(
-        "Gap between adjacent cells (passed to tight_layout as w_pad / h_pad)."
-    )
-    form.addRow("Cell gap:", cell_spin)
-
-    titles_cb = QCheckBox(dlg)
-    titles_cb.setChecked(bool(opts.get("show_titles", True)))
-    titles_cb.setToolTip("Show the well/channel/timepoint label above each image.")
-    form.addRow("Show titles:", titles_cb)
-
-    title_size_spin = QSpinBox(dlg)
-    title_size_spin.setRange(4, 24)
-    title_size_spin.setValue(int(opts.get("title_fontsize", 7)))
-    form.addRow("Title font size:", title_size_spin)
-
-    dpi_spin = QSpinBox(dlg)
-    dpi_spin.setRange(72, 1200)
-    dpi_spin.setSingleStep(25)
-    dpi_spin.setValue(int(opts.get("dpi", 300)))
-    dpi_spin.setToolTip("Raster DPI used for PNG output.")
-    form.addRow("PNG DPI:", dpi_spin)
-
-    transparent_cb = QCheckBox(dlg)
-    transparent_cb.setChecked(bool(opts.get("transparent_bg", True)))
-    transparent_cb.setToolTip(
-        "Save with a transparent background. Disable for an opaque white BG."
-    )
-    form.addRow("Transparent bg:", transparent_cb)
-
-    btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
-    btns.accepted.connect(dlg.accept)
-    btns.rejected.connect(dlg.reject)
-    form.addRow(btns)
-
-    if dlg.exec() != QDialog.Accepted:
-        return
-
-    opts.update({
-        "pad_inches": float(pad_spin.value()),
-        "cell_pad": float(cell_spin.value()),
-        "show_titles": bool(titles_cb.isChecked()),
-        "title_fontsize": int(title_size_spin.value()),
-        "dpi": int(dpi_spin.value()),
-        "transparent_bg": bool(transparent_cb.isChecked()),
-    })
 
 
 # ── Export (transparent background, labels above each image) ─────────────────
 
 
-def _build_export_figure(app):
-    """Render the current image-table contents to a matplotlib Figure.
-
-    Returns ``(fig, save_kwargs)`` where *save_kwargs* are the format-agnostic
-    keyword arguments to feed into ``fig.savefig`` (caller adds ``format`` and
-    optionally ``dpi`` for raster outputs). Returns ``(None, None)`` when there
-    is nothing to render (no cells, missing matplotlib/numpy).
-    """
-    cells = getattr(app, "_image_table_cells", None) or []
-    if not cells:
-        app._set_status("Image Table: nothing to export.")
-        return None, None
-    try:
-        from matplotlib.figure import Figure
-    except Exception as exc:
-        QMessageBox.critical(app, "Export failed", f"matplotlib unavailable: {exc}")
-        return None, None
-    try:
-        import numpy as _np
-    except Exception as exc:
-        QMessageBox.critical(app, "Export failed", f"numpy unavailable: {exc}")
-        return None, None
-
-    opts = _export_opts(app)
-    pad_inches = float(opts.get("pad_inches", 0.10))
-    cell_pad = float(opts.get("cell_pad", 0.50))
-    show_titles = bool(opts.get("show_titles", True))
-    title_fontsize = int(opts.get("title_fontsize", 7))
-    dpi = int(opts.get("dpi", 300))
-    transparent_bg = bool(opts.get("transparent_bg", True))
-
-    rows = int(getattr(app._app_state.image_table, "rows", len(cells)) or len(cells))
-    cols = int(getattr(app._app_state.image_table, "cols", len(cells[0])) or len(cells[0]))
-
-    cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(app._app_state.image_table, "image_cache", None) or {})
-    rendered = getattr(app._app_state.image_table, "last_render", None) or {}
-    crop_tool = getattr(app, "_image_table_crop_tool", None)
-    use_tophat = bool(getattr(app._app_state.image_table, "use_tophat", False))
-    # Mirror the live thumbnail's overlay toggles so the export matches
-    # what the user sees on screen.
-    binary_mode = getattr(app._app_state.image_table, "binary_mode", "") or ""
-    show_boundaries = bool(getattr(app._app_state.image_table, "show_boundaries", False))
-
-    bg_face = "none" if transparent_bg else "white"
-    # Probe the first available cell to learn the image aspect ratio. With
-    # aspect="equal" axes, a non-square image shrinks the axes box inside
-    # its gridspec cell, which makes the visible inter-row gap differ from
-    # the inter-column gap. Sizing the cell to the actual image aspect
-    # keeps the axes filling the cell so row/column spacing match.
-    img_h: Optional[int] = None
-    img_w: Optional[int] = None
-    for r, row in enumerate(cells):
-        for c, cell in enumerate(row):
-            arr = rendered.get((r, c))
-            if arr is None:
-                well = cell["well_cb"].currentText().strip()
-                chan = cell["chan_cb"].currentText().strip()
-                tp = cell["tp_cb"].currentText().strip()
-                fov = cell["fov_cb"].currentText().strip()
-                if well and chan and tp:
-                    arr = _load_array(app, cache, well, chan, tp, fov, use_tophat=use_tophat)
-            if arr is not None and crop_tool is not None:
-                arr = crop_tool.apply_to_array(arr)
-            if arr is not None:
-                a = _np.asarray(arr)
-                if a.ndim >= 2 and a.shape[0] > 0 and a.shape[1] > 0:
-                    img_h, img_w = int(a.shape[0]), int(a.shape[1])
-                    break
-        if img_h is not None:
-            break
-
-    cell_w = 2.6
-    if img_h and img_w:
-        cell_h = cell_w * (img_h / img_w)
-    else:
-        cell_h = cell_w
-    # Reserve extra inches per row for the per-axes title when enabled.
-    if show_titles:
-        cell_h += 0.2
-    fig = Figure(
-        figsize=(max(2.4, cols * cell_w), max(2.4, rows * cell_h)),
-        dpi=dpi,
-        facecolor=bg_face,
-    )
-    fig.patch.set_alpha(0.0 if transparent_bg else 1.0)
-
-    for r, row in enumerate(cells):
-        for c, cell in enumerate(row):
-            ax = fig.add_subplot(rows, cols, r * cols + c + 1)
-            ax.set_facecolor("none" if transparent_bg else "white")
-            well = cell["well_cb"].currentText().strip()
-            chan = cell["chan_cb"].currentText().strip()
-            tp = cell["tp_cb"].currentText().strip()
-            fov = cell["fov_cb"].currentText().strip()
-
-            arr = rendered.get((r, c))
-            if arr is None and well and chan and tp:
-                arr = _load_array(app, cache, well, chan, tp, fov, use_tophat=use_tophat)
-            if arr is not None and crop_tool is not None:
-                arr = crop_tool.apply_to_array(arr)
-
-            if arr is not None:
-                lo, hi = _parse_lut(app, chan)
-                # Render exactly the same RGB the live thumbnail shows:
-                # full mpl colormap (not the black→tint approximation
-                # this path used before) + show_binary / show_boundaries
-                # toggles + crop. The shared helper is the single source
-                # of truth — anything that changes the live look auto-
-                # propagates to the export.
-                mask_arr = None
-                if show_boundaries and not _is_nuc_seg(chan):
-                    mask_arr = _load_mask_array(app, cache, well, tp, fov)
-                    if mask_arr is not None and crop_tool is not None:
-                        mask_arr = crop_tool.apply_to_array(mask_arr)
-                binary_mask = None
-                if binary_mode in ("mask", "threshold") and not _is_nuc_seg(chan):
-                    binary_mask = _export_binary_mask(
-                        app, cache, well, chan, tp, fov, binary_mode, crop_tool,
-                    )
-                rgb = _compose_image_table_rgb(
-                    arr, mask_arr,
-                    lo=lo, hi=hi,
-                    cmap_name=_row_cmap_name(app, r),
-                    is_overlay=_is_nuc_seg(chan),
-                    binary_mask=binary_mask,
-                    show_boundaries=show_boundaries,
-                )
-                if rgb is not None:
-                    ax.imshow(rgb, aspect="equal")
-                else:
-                    ax.text(
-                        0.5, 0.5, "(unrenderable)",
-                        ha="center", va="center", transform=ax.transAxes, fontsize=7,
-                    )
-            else:
-                ax.text(
-                    0.5, 0.5, "(no image)",
-                    ha="center", va="center", transform=ax.transAxes, fontsize=7,
-                )
-
-            if show_titles:
-                if well and chan and tp:
-                    title = f"{well}  {chan.upper()}  T:{tp}"
-                    if fov:
-                        title += f"  FOV:{fov}"
-                else:
-                    title = "(unset)"
-                ax.set_title(title, fontsize=title_fontsize)
-            ax.set_xticks([])
-            ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-    try:
-        fig.tight_layout(w_pad=cell_pad, h_pad=cell_pad)
-    except Exception:
-        fig.tight_layout()
-
-    save_kwargs: Dict[str, Any] = dict(
-        bbox_inches="tight", pad_inches=pad_inches,
-        facecolor=bg_face, transparent=transparent_bg,
-    )
-    save_kwargs["_dpi"] = dpi  # caller decides whether to forward (raster only)
-    return fig, save_kwargs
 
 
-def image_table_export(app) -> None:
-    """Export the current image table to PNG/PDF/SVG with no background."""
-    fig, save_kwargs = _build_export_figure(app)
-    if fig is None:
-        return
-
-    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
-    initial = (
-        str(Path(initial_dir) / "image_table.png") if initial_dir else "image_table.png"
-    )
-    out, _ = QFileDialog.getSaveFileName(
-        app, "Export image table", initial,
-        "PNG (*.png);;PDF (*.pdf);;SVG (*.svg);;All files (*.*)",
-    )
-    if not out:
-        return
-    fmt = Path(out).suffix.lstrip(".").lower() or "png"
-    dpi = save_kwargs.pop("_dpi")
-    try:
-        kw = dict(save_kwargs, format=fmt)
-        if fmt == "png":
-            kw["dpi"] = dpi
-        fig.savefig(out, **kw)
-        app._set_status(f"Image table saved → {Path(out).name}")
-    except Exception as exc:
-        QMessageBox.critical(app, "Export failed", str(exc))
 
 
-def image_table_copy_png(app) -> None:
-    """Render the image table and place a PNG of it on the system clipboard."""
-    import io
-    from PySide6.QtGui import QGuiApplication, QImage
-
-    fig, save_kwargs = _build_export_figure(app)
-    if fig is None:
-        return
-    dpi = save_kwargs.pop("_dpi")
-    buf = io.BytesIO()
-    try:
-        fig.savefig(buf, format="png", dpi=dpi, **save_kwargs)
-    except Exception as exc:
-        QMessageBox.critical(app, "Copy failed", str(exc))
-        return
-    img = QImage.fromData(buf.getvalue(), "PNG")
-    if img.isNull():
-        QMessageBox.critical(app, "Copy failed", "Could not decode rendered PNG.")
-        return
-    QGuiApplication.clipboard().setImage(img)
-    app._set_status("Image table copied to clipboard (PNG).")
 
 
-def image_table_copy_svg(app) -> None:
-    """Render the image table and copy it to the clipboard, preferring vector.
-
-    On macOS the figure is written natively to ``NSPasteboard`` so Illustrator
-    pastes true editable vector; elsewhere a Qt clipboard payload is used (see
-    ``copy_figure_to_clipboard``).
-    """
-    from well_viewer.features.export.style import copy_figure_to_clipboard
-
-    fig, save_kwargs = _build_export_figure(app)
-    if fig is None:
-        return
-    save_kwargs.pop("_dpi", None)
-    save_kwargs.pop("format", None)
-
-    status = copy_figure_to_clipboard(
-        fig, svg_kwargs=save_kwargs, pdf_kwargs=save_kwargs,
-    )
-    if status.startswith("Copy failed"):
-        QMessageBox.critical(app, "Copy failed", "Could not render the image table.")
-        return
-    app._set_status("Image table " + status[0].lower() + status[1:])

@@ -1673,55 +1673,17 @@ def build_processed_output_path(
 # Per-image worker (runs in a subprocess)
 # ---------------------------------------------------------------------------
 
-def process_image_group(
-    nuclear_path: Path,
-    fluor_paths: "list[Path]",
-    fluor_tokens: "list[str]",
-    output_dir: Path,
-    nuclear_token: str,
-    tophat_nir: bool,
-    tophat_radius_nir: int,
-    tophat_fluor: "list[bool]",
-    tophat_radius_fluor: "list[int]",
-    fft_small_nir: int = 0,
-    fft_small_fluor: "list[int] | None" = None,
-    mesh_ratio: float = 3.0,
-    mesh_sigma: float = 3.0,
-    save_tophat_images: bool = True,
-    schema: "list[str] | None" = None,
-    sep: str = DEFAULT_SEP,
-    smfish_tokens: "list[str] | None" = None,
-    segmentation_method: str = DEFAULT_SEGMENTATION_METHOD,
-    cytoplasm_token: str = "",
-    min_nucleus_area_px: int = 50,
-    shape_features: "list[str] | None" = None,
-    flatfield_mode: str = "none",
-    flatfield_models: "dict | None" = None,
-    background_method: str = "sliding_disk",
-    background_models: "dict | None" = None,
-    qc_remove_debris: bool = False,
-    qc_min_area: "float | None" = None,
-    qc_max_area: "float | None" = None,
-    qc_min_solidity: "float | None" = None,
-    cellpose_diameter: float = 0.0,
-    cellpose_model: str = "cyto3",
-    cellpose_flow_threshold: float = 0.4,
-    cellpose_cellprob_threshold: float = 0.0,
-    cellpose_nuclei_channel: str = "",
-) -> list[dict]:
-    """
-    Process one nuclear image together with an arbitrary number of fluorescent
-    channel images.  Returns a list of per-nucleus measurement dicts.
+# ── process_image_group phases ──────────────────────────────────────────────
+# process_image_group() is a thin orchestrator over these five phases (T4). Each
+# is a verbatim lift of the corresponding block from the original monolith — the
+# leaf work (background subtraction, segmentation, shape/region features, atomic
+# image writes) still lives in microscopy_background / _stardist / _cellpose /
+# _io and the shape_features helpers; these just group the per-FOV sequencing so
+# the orchestrator reads as correct -> segment -> write -> quantify.
 
-    *fluor_paths*        : one Path per fluorescent channel (same order as
-                           *fluor_tokens*).
-    *fluor_tokens*       : channel token strings (e.g. ["GFP", "mCherry"]).
-    *tophat_fluor*       : per-channel top-hat enable flags.
-    *tophat_radius_fluor*: per-channel top-hat radii.
 
-    Output CSV columns for each fluor channel are prefixed with the lower-cased
-    token, e.g. "gfp_total_intensity", "mcherry_mean_intensity".
-    """
+def _load_image_group(nuclear_path, fluor_paths, fluor_tokens):
+    """Load the nuclear frame + every fluor channel; verify shape consistency."""
     log.info("Processing %s  (%d fluor channel(s): %s)",
              nuclear_path.name, len(fluor_paths), ", ".join(fluor_tokens))
     _stardist.set_fov_label(nuclear_path.name)
@@ -1742,7 +1704,24 @@ def process_image_group(
             )
         fluor_raws.append(img)
         log.info("  load fluor:  %.1f s  %s", time.perf_counter() - _t, fp.name)
+    return nir_raw, fluor_raws
 
+
+def _correct_image_group(
+    nir_raw, fluor_raws, *, nuclear_path, nuclear_token, fluor_tokens,
+    tophat_nir, tophat_radius_nir, tophat_fluor, tophat_radius_fluor,
+    fft_small_nir, fft_small_fluor, flatfield_mode, flatfield_models,
+    background_method, background_models, smfish_tokens, mesh_ratio, mesh_sigma,
+    schema, sep,
+):
+    """Flat-field + per-channel background correction (+ smFISH LoG).
+
+    Returns ``(nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr)``. The
+    *raws* are returned because the flat-field step rewrites them in place — and
+    the (flat-fielded) raws are what segmentation (watershed/cellpose) and the
+    overlay image consume downstream, so the orchestrator must use these, not the
+    originals.
+    """
     # ── Flat-field (illumination) + background correction ────────────────────
     # Normal order is flat-field (divide) → background (subtract). The one
     # exception is the proper *combined* empty-well model: when both flat-field
@@ -1823,7 +1802,19 @@ def process_image_group(
             _t = time.perf_counter()
             fluor_corr[i] = apply_smfish_log(fluor_tophat[i])
             log.info("  smfish_log_%s: %.1f s", tok.lower(), time.perf_counter() - _t)
+    return nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr
 
+
+def _segment_image_group(
+    *, segmentation_method, nir_corr, fluor_raws, fluor_tokens, cytoplasm_token,
+    tophat_radius_fluor, min_nucleus_area_px, cellpose_model, cellpose_diameter,
+    cellpose_flow_threshold, cellpose_cellprob_threshold, cellpose_nuclei_channel,
+):
+    """Dispatch to the configured segmenter -> label image (+ watershed extras).
+
+    Returns ``(labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask)``;
+    the last three are ``None`` for every method except seeded-watershed cell.
+    """
     _t = time.perf_counter()
     labels: np.ndarray
     nuclear_points: np.ndarray | None = None
@@ -1879,18 +1870,16 @@ def process_image_group(
         labels = _segment_stardist_nuclei(nir_corr)
         log.info("  stardist:    %.1f s  (%d nuclei detected)",
                  time.perf_counter() - _t, len(np.unique(labels)) - 1)
+    return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
 
-    # QC debris gating is NON-DESTRUCTIVE: every segmented cell is kept and
-    # quantified rather than zeroed out of the mask (which used to delete the
-    # cells' rows entirely). The size/solidity thresholds are recorded in
-    # pipeline_info.json (qc_options) and applied as a reversible per-cell flag
-    # in the Review QC view, where they can be edited without re-segmenting and
-    # compose with manual curation. ``shape_solidity`` is emitted unconditionally
-    # below so that gate is editable post-run. See well_viewer/features/qc/.
-    if qc_remove_debris:
-        log.info("  debris:      gating deferred to Review QC layer "
-                 "(non-destructive; thresholds recorded in pipeline_info)")
 
+def _write_processed_images(
+    *, save_tophat_images, nuclear_path, fluor_paths, fluor_tokens, output_dir,
+    nir_raw, nir_corr, fluor_tophat, fluor_corr, smfish_set, segmentation_method,
+    nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, labels,
+    background_method,
+):
+    """Write the background-corrected tifs, label image, and overlay."""
     # Save QC images.
     # Keep schema tokens in output stems so output names stay harmonized with
     # input naming conventions and schema-driven resolvers.
@@ -1973,6 +1962,13 @@ def process_image_group(
     )
     log.info("  save:        %.1f s", time.perf_counter() - _t)
 
+
+
+def _quantify_image_group(
+    *, labels, fluor_tophat, fluor_tokens, nir_corr, nuclear_path, schema, sep,
+    shape_features,
+):
+    """Per-nucleus intensity + shape/region quantification -> record dicts."""
     # Quantify each nucleus across all fluorescent channels.
     meta    = parse_filename(nuclear_path, schema=schema, sep=sep)
     nuc_ids = np.unique(labels)
@@ -2032,6 +2028,111 @@ def process_image_group(
     log.info("  quantify:    %.1f s  (%d nuclei)", time.perf_counter() - _t, len(records))
 
     return records
+
+
+def process_image_group(
+    nuclear_path: Path,
+    fluor_paths: "list[Path]",
+    fluor_tokens: "list[str]",
+    output_dir: Path,
+    nuclear_token: str,
+    tophat_nir: bool,
+    tophat_radius_nir: int,
+    tophat_fluor: "list[bool]",
+    tophat_radius_fluor: "list[int]",
+    fft_small_nir: int = 0,
+    fft_small_fluor: "list[int] | None" = None,
+    mesh_ratio: float = 3.0,
+    mesh_sigma: float = 3.0,
+    save_tophat_images: bool = True,
+    schema: "list[str] | None" = None,
+    sep: str = DEFAULT_SEP,
+    smfish_tokens: "list[str] | None" = None,
+    segmentation_method: str = DEFAULT_SEGMENTATION_METHOD,
+    cytoplasm_token: str = "",
+    min_nucleus_area_px: int = 50,
+    shape_features: "list[str] | None" = None,
+    flatfield_mode: str = "none",
+    flatfield_models: "dict | None" = None,
+    background_method: str = "sliding_disk",
+    background_models: "dict | None" = None,
+    qc_remove_debris: bool = False,
+    qc_min_area: "float | None" = None,
+    qc_max_area: "float | None" = None,
+    qc_min_solidity: "float | None" = None,
+    cellpose_diameter: float = 0.0,
+    cellpose_model: str = "cyto3",
+    cellpose_flow_threshold: float = 0.4,
+    cellpose_cellprob_threshold: float = 0.0,
+    cellpose_nuclei_channel: str = "",
+) -> list[dict]:
+    """
+    Process one nuclear image together with an arbitrary number of fluorescent
+    channel images.  Returns a list of per-nucleus measurement dicts.
+
+    *fluor_paths*        : one Path per fluorescent channel (same order as
+                           *fluor_tokens*).
+    *fluor_tokens*       : channel token strings (e.g. ["GFP", "mCherry"]).
+    *tophat_fluor*       : per-channel top-hat enable flags.
+    *tophat_radius_fluor*: per-channel top-hat radii.
+
+    Output CSV columns for each fluor channel are prefixed with the lower-cased
+    token, e.g. "gfp_total_intensity", "mcherry_mean_intensity".
+    """
+    nir_raw, fluor_raws = _load_image_group(nuclear_path, fluor_paths, fluor_tokens)
+
+    nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr = _correct_image_group(
+        nir_raw, fluor_raws, nuclear_path=nuclear_path, nuclear_token=nuclear_token,
+        fluor_tokens=fluor_tokens, tophat_nir=tophat_nir,
+        tophat_radius_nir=tophat_radius_nir, tophat_fluor=tophat_fluor,
+        tophat_radius_fluor=tophat_radius_fluor, fft_small_nir=fft_small_nir,
+        fft_small_fluor=fft_small_fluor, flatfield_mode=flatfield_mode,
+        flatfield_models=flatfield_models, background_method=background_method,
+        background_models=background_models, smfish_tokens=smfish_tokens,
+        mesh_ratio=mesh_ratio, mesh_sigma=mesh_sigma, schema=schema, sep=sep,
+    )
+
+    labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask = (
+        _segment_image_group(
+            segmentation_method=segmentation_method, nir_corr=nir_corr,
+            fluor_raws=fluor_raws, fluor_tokens=fluor_tokens,
+            cytoplasm_token=cytoplasm_token, tophat_radius_fluor=tophat_radius_fluor,
+            min_nucleus_area_px=min_nucleus_area_px, cellpose_model=cellpose_model,
+            cellpose_diameter=cellpose_diameter,
+            cellpose_flow_threshold=cellpose_flow_threshold,
+            cellpose_cellprob_threshold=cellpose_cellprob_threshold,
+            cellpose_nuclei_channel=cellpose_nuclei_channel,
+        )
+    )
+
+    # QC debris gating is NON-DESTRUCTIVE: every segmented cell is kept and
+    # quantified rather than zeroed out of the mask (which used to delete the
+    # cells' rows entirely). The size/solidity thresholds are recorded in
+    # pipeline_info.json (qc_options) and applied as a reversible per-cell flag
+    # in the Review QC view, where they can be edited without re-segmenting and
+    # compose with manual curation. ``shape_solidity`` is emitted unconditionally
+    # below so that gate is editable post-run. See well_viewer/features/qc/.
+    if qc_remove_debris:
+        log.info("  debris:      gating deferred to Review QC layer "
+                 "(non-destructive; thresholds recorded in pipeline_info)")
+
+    smfish_set = set(smfish_tokens or [])
+    _write_processed_images(
+        save_tophat_images=save_tophat_images, nuclear_path=nuclear_path,
+        fluor_paths=fluor_paths, fluor_tokens=fluor_tokens, output_dir=output_dir,
+        nir_raw=nir_raw, nir_corr=nir_corr, fluor_tophat=fluor_tophat,
+        fluor_corr=fluor_corr, smfish_set=smfish_set,
+        segmentation_method=segmentation_method, nuclear_points=nuclear_points,
+        cytoplasm_tophat=cytoplasm_tophat,
+        cytoplasm_binary_mask=cytoplasm_binary_mask, labels=labels,
+        background_method=background_method,
+    )
+
+    return _quantify_image_group(
+        labels=labels, fluor_tophat=fluor_tophat, fluor_tokens=fluor_tokens,
+        nir_corr=nir_corr, nuclear_path=nuclear_path, schema=schema, sep=sep,
+        shape_features=shape_features,
+    )
 
 # ---------------------------------------------------------------------------
 # Directory scan

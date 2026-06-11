@@ -73,12 +73,17 @@ allwell/
 ├── all_well.py                  ← app entry point + title bar shell
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
-├── process_microscopy.py        ← the actual analysis pipeline (CLI + library)
+├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
+├── microscopy_background.py     ← Qt-free background/illumination-correction math (re-exported by pm)
+├── microscopy_cellpose.py       ← Qt-free Cellpose segmenters (Torch imported lazily)
+├── microscopy_stardist.py       ← Qt-free StarDist segmenters + per-worker model state (TF lazy)
+├── microscopy_io.py             ← Qt-free atomic output writers (images / CSVs / overlay)
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── auto_threshold_core.py       ← Otsu helpers shared by pipeline + GUI (stdlib + numpy only)
-├── well_token.py                ← canonical 96-well token parser (stdlib only)
+├── well_token.py                ← canonical 96-well token parser (single source of truth, stdlib only)
 ├── shape_features_core.py       ← Qt-free per-cell shape-feature catalog shared by pipeline + GUI
 ├── flatfield_core.py            ← Qt-free flat-field illumination estimators shared by pipeline + GUI
+├── aw_safe.py                   ← Qt-free swallow()/swallowed() (logged exception suppression, pipeline side)
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
@@ -92,10 +97,15 @@ allwell/
 ```
 
 The repo-root helpers `auto_threshold_core.py`, `well_token.py`,
-`shape_features_core.py`, and `flatfield_core.py` are *deliberately at repo
-root* (not under `well_viewer/`): the pipeline contract forbids `well_viewer` /
-`widgets` / Qt imports, so anything both the pipeline and the GUI need to agree
-on has to live in a Qt-free module the pipeline can import. `shape_features_core.py`
+`shape_features_core.py`, `flatfield_core.py`, the `microscopy_*` modules, and
+`aw_safe.py` are *deliberately at repo root* (not under `well_viewer/`): the
+pipeline contract forbids `well_viewer` / `widgets` / Qt imports, so anything
+both the pipeline and the GUI need to agree on has to live in a Qt-free module
+the pipeline can import. **This contract is enforced** by
+`tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient`
+(no `well_viewer`/`widgets`/Qt import at any nesting) and
+`tests/test_remote_manifest.py` (every repo-root module the pipeline imports is
+in the remote upload manifest). `shape_features_core.py`
 (added with the shape-features work) is the single source of truth for the
 per-cell `shape_*` morphology columns — the pipeline emits them, the GUI
 detects/labels them. `flatfield_core.py` holds the flat-field illumination
@@ -506,7 +516,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. |
 | `features/image_table/controller.py` | Image Table grid: per-cell config, distribute, export. |
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The legacy Movie Montage popout — its tab builder (`build_right_panel`), `montage.py` renderer, and `callbacks.py` — was folded into Image Table and then removed entirely (v6.0.x); its one live helper, the image pixel-value hover tooltip, now lives in `review_image/controller.py` next to its only caller. |
-| `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` (read side) and `role_output_filename` (write side, called from `process_microscopy.build_processed_output_path`) both consume it. The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
+| `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` and `role_output_filename` both consume it. (As of the §6.2 self-sufficiency fix this catalog is **reader-side only** — the pipeline writer, `process_microscopy.build_processed_output_path`, uses explicit `suffix=` strings rather than importing `well_viewer`. If catalog-driven *writing* is revived, move `ROLE_CATALOG` into a Qt-free `*_core` module first so the pipeline can import it without breaking the contract.) The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
 | `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `flatfield_core` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
 | `features/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods on a single raw frame chosen by well/channel/timepoint/FOV. Loads the raw frame + precomputed mask via the Image Table loaders (`_load_array` / `_load_mask_array`) and applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern). Display reuses the LUT/colormap (`ui_helpers.lut_colormap_to_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. |
@@ -773,8 +783,22 @@ plus a live-streaming log panel and a Run / Stop button. The Run path:
 ### 6.2 `process_microscopy.py`
 
 The pipeline. **Self-sufficient by design** — no import from `well_viewer/`,
-`widgets/`, or the Qt UI. The pipeline must run in environments that don't
-have the GUI installed (CI workers, headless boxes).
+`widgets/`, or the Qt UI (enforced by
+`test_architecture_contracts.py::test_pipeline_is_self_sufficient`). The pipeline
+must run in environments that don't have the GUI installed (CI workers, headless
+boxes).
+
+**Decomposition.** `process_microscopy.py` is the orchestrator + CLI; the heavy
+cohesive clusters were extracted into sibling Qt-free repo-root modules and
+**re-exported** so `pm.<name>` call sites (and the remote worker) are unchanged:
+`microscopy_background` (background/illumination math), `microscopy_cellpose`
+(Cellpose segmenters; Torch lazy), `microscopy_stardist` (StarDist segmenters +
+per-worker model state behind `set_model`/`set_fov_label`; TensorFlow lazy), and
+`microscopy_io` (atomic image/CSV/overlay writers). The two ML runtimes stay
+behind lazy imports, so importing `process_microscopy` pulls in **neither TF nor
+Torch** — they load only when a worker actually segments. Each extracted module
+is in the remote manifest (`test_remote_manifest.py`) and the file sizes are
+ratcheted by `test_monolith_budgets.py`.
 
 That is also why the auto-threshold estimator was inlined into
 `process_microscopy.py` (`_estimate_thresholds_standalone`,
@@ -1550,6 +1574,12 @@ assets — for visual reference only.
 
 ## 15. Conventions and gotchas
 
+- **Never silently swallow exceptions.** Don't write `except Exception: pass`.
+  Use `well_viewer.core.safe.swallow(...)` / `swallowed(...)` (GUI side) or
+  `aw_safe.swallow(...)` / `swallowed(...)` (pipeline/`services` side, Qt-free) so
+  a suppressed failure still leaves a DEBUG breadcrumb. Enforced by
+  `tests/test_no_silent_except.py`. (Two near-identical helpers exist on purpose:
+  the pipeline must not import `well_viewer` — see §6.2.)
 - **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`
@@ -1580,6 +1610,36 @@ the right next move is to open `well_viewer/runtime_app.py` and scroll
 through `_build_ui` (around line 934) — that's where every widget tree
 hanging off `WellViewerApp` gets stitched together, and every name you'll
 need to grep for is in plain sight.
+
+---
+
+## 16. Enforced contracts (guardrail tests)
+
+Many of the rules above are not just prose — they're checked in CI by AST
+guardrail tests, so contract drift fails the suite rather than rotting silently.
+The map (each rule links to the test that holds it):
+
+| Contract (§) | Enforced by |
+|---|---|
+| Pipeline self-sufficiency — no `well_viewer`/`widgets`/Qt in the pipeline (§6.2) | `tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient` |
+| Every repo-root module the pipeline imports is uploaded to the remote (§6.2) | `tests/test_remote_manifest.py` + `test_remote_runner.py::test_required_files_list_is_what_we_promised` |
+| `services/` stay Qt-free (CLI-reusable, §13) | `test_architecture_contracts.py::test_services_have_no_qt_imports` |
+| `widgets/` carry no app coupling (§13) | `test_architecture_contracts.py::test_widgets_do_not_import_the_app` |
+| Controllers reach the app via the `app` arg, not by importing `WellViewerApp` (§9) | `test_architecture_contracts.py::test_nothing_imports_wellviewerapp_at_runtime` |
+| EventBus is a capped catalogue of exactly 5 signals (§9) | `test_architecture_contracts.py::test_event_bus_signal_catalogue_is_capped` |
+| Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |
+| `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
+| No silent broad-except anywhere (§15) | `tests/test_no_silent_except.py` |
+| `runtime_app` god-object line/attr ratchets + state-package import boundary | `tests/test_guardrails.py` |
+| `process_microscopy` / `image_table` controller line budgets | `tests/test_monolith_budgets.py` |
+
+What is **not** statically enforced (and so relies on review + behavioural
+tests): "never block the UI thread", route redraws through the `WellViewerApp`
+shim, lazy-tab-build `hasattr` guards, app-wide-selection discipline, the
+bar-math / fold-change invariants, and the Playground↔pipeline parity (which has
+its own dedicated parity test). "Never hardcode colours/pixels" is also
+review-only for now — there are pre-existing inline hex literals that would need
+an allowlist before a guard could be clean.
 
 ---
 

@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-import pytest
 
 from well_viewer.persistence import qc_params
 from well_viewer.features.qc.params import QCParams

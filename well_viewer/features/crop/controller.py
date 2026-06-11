@@ -18,6 +18,7 @@ import logging
 from typing import Optional
 
 from .region import CropRegion, compute_crop_pass, normalize_region
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -54,7 +55,7 @@ def recompute_crop_all(app) -> None:
         try:
             app._invalidate_stats_cache()  # clears stats cache + bumps override_version
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def _save_redraw_refresh(app) -> None:
@@ -64,17 +65,17 @@ def _save_redraw_refresh(app) -> None:
         try:
             app._persistence.schedule_save("crop_region")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if hasattr(app, "_redraw"):
         try:
             app._redraw()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     try:
         from well_viewer.features.review_image.renderer import refresh_review_image
         refresh_review_image(app)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def set_crop_region(app, region: Optional[CropRegion]) -> None:
@@ -170,7 +171,7 @@ def set_crop_edit_mode(app, enabled: bool) -> None:
         try:
             app._apply_review_image_cursor()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     btn = getattr(app, "_review_image_crop_btn", None)
     if btn is not None:
         btn.setChecked(enabled)
@@ -223,12 +224,12 @@ def reset_crop_and_overrides(app) -> None:
         try:
             app._invalidate_dataset_cache()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if hasattr(app, "_invalidate_stats_cache"):
         try:
             app._invalidate_stats_cache()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     app._app_state.review_image.override_version += 1
 
     if getattr(app, "_persistence", None) is not None:
@@ -236,7 +237,7 @@ def reset_crop_and_overrides(app) -> None:
             app._persistence.schedule_save("cell_overrides")
             app._persistence.schedule_save("crop_region")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     # Leave crop-draw mode if it was on.
     if app._app_state.review_image.crop_edit_mode:

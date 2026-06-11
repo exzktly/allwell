@@ -19,7 +19,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 # scripts/ isn't a package; the wrappers add the repo root to sys.path
 # at runtime. Mirror that here so the import works under pytest.

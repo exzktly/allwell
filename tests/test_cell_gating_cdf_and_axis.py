@@ -9,7 +9,6 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pandas as pd
-import pytest
 
 
 def test_cell_gating_valid_rows_filters_crop_and_qc_not_fluor_gate():

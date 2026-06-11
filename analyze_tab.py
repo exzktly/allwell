@@ -13,7 +13,6 @@ process_microscopy.py must live alongside this file.
 from __future__ import annotations
 
 import queue
-import re as _re_well
 import sys as _sys
 import time as _time
 from pathlib import Path
@@ -28,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from services.input_resolution_service import resolve_input_output, tif_files_in
+from well_token import is_valid_well_name
 from services.pipeline_runner import (
     PipelineRunner,
     ProgressTracker,
@@ -42,6 +42,7 @@ from widgets.checkable_dropdown import CheckableDropdown
 from widgets.run_dashboard import RunDashboard
 from widgets.wrap_checkbox import WrapCheckBox
 import shape_features_core as _sfc
+from well_viewer.core.safe import swallowed
 
 
 def _safe_qc_float(text: str) -> float:
@@ -84,7 +85,6 @@ _PREVIEW_TOKENS = {
     "ignore":     "X",
 }
 
-_WELL_NAME_RE = _re_well.compile(r"^[A-Ha-h]\d{1,2}$")
 _tif_files_in = tif_files_in
 
 
@@ -92,14 +92,14 @@ def _has_well_content(folder: Path) -> bool:
     if any(folder.glob("*.zip")):
         return True
     try:
-        return any(_WELL_NAME_RE.match(p.name) for p in folder.iterdir() if p.is_dir())
+        return any(is_valid_well_name(p.name) for p in folder.iterdir() if p.is_dir())
     except OSError:
         return False
 
 
 def _count_well_content(folder: Path) -> int:
     zips = list(folder.glob("*.zip"))
-    folders = [p for p in folder.iterdir() if p.is_dir() and _WELL_NAME_RE.match(p.name)]
+    folders = [p for p in folder.iterdir() if p.is_dir() and is_valid_well_name(p.name)]
     return len(zips) or len(folders)
 
 
@@ -1846,7 +1846,7 @@ class AnalyzeTab(QWidget):
                             from well_viewer import status_signal as _status_signal
                             _status_signal.warn_pop()
                         except Exception:
-                            pass
+                            swallowed()  # was: pass (silent except)
                         self._status_signal_pushed = False
         except queue.Empty:
             pass
@@ -1864,7 +1864,7 @@ class AnalyzeTab(QWidget):
                 from well_viewer import status_signal as _status_signal
                 _status_signal.warn_pop()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             self._status_signal_pushed = False
         super().closeEvent(event)
 

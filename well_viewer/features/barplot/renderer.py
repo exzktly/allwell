@@ -7,8 +7,11 @@ the matplotlib axes to draw into.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Dict, List, Optional
+
+_logger = logging.getLogger(__name__)
 
 from ui.theme import (
     BORDER,
@@ -21,8 +24,6 @@ from ui.theme import (
 from well_viewer.features.barplot.controller import (
     apply_bar_ylims as _apply_bar_ylims,
     cluster_x_for_group_keys,
-    collect_bar_items as _collect_bar_items,
-    ordered_bar_keys as _ordered_bar_keys,
     render_bar_items as _render_bar_items,
 )
 import numpy as np
@@ -31,12 +32,12 @@ import pandas as pd
 from well_viewer.data.data_loading import (
     _beeswarm_jitter,
     df_included_mask,
-    extract_well_token as _extract_well_token,
     parse_timepoint_hours,
     resolve_value_series,
 )
 from well_viewer.core.plot_style import apply_ax_style, tokens_for
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.core.safe import swallowed
 
 
 NO_SELECTION_MSG = (
@@ -586,7 +587,7 @@ def draw_bar_empty_state(app, ax_mean, ax_frac, message: str, *, ax_n=None) -> N
     try:
         ax_mean.figure.set_facecolor(_bg)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     axes = [ax_mean, ax_frac]
     if ax_n is not None:
         axes.append(ax_n)
@@ -780,7 +781,10 @@ def draw_per_cell_bar_mode(
 
     if _debug_flags.review_bar_debug_enabled():
         mode = "violin" if app._bar_violin else "beeswarm"
-        print(f"DEBUG barplot_renderer: per-cell mode={mode} wells={plot_wells!r} labels={plot_labels!r} tps={plot_tps!r}")
+        _logger.debug(
+            "per-cell mode=%s wells=%r labels=%r tps=%r",
+            mode, plot_wells, plot_labels, plot_tps,
+        )
     # Build the per-well scale dict ONCE — same denominator each well uses for
     # its cell values. Pass through to violin / beeswarm so fold-change
     # participation no longer ends at the bar renderer. Fold-change resolves

@@ -15,7 +15,7 @@ shared ``app._fc_*`` state so the same selection applies to both tabs.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QWidget,
+    QComboBox, QLabel, QWidget,
 )
 
 
@@ -28,13 +28,10 @@ _T0_LABEL = "t0 (first timepoint)"
 # pulling in PySide6; callers below use the same names as if they were
 # defined here.
 from well_viewer.domain.fold_change_scopes import (  # noqa: E402
-    FoldChangeScope,
-    current_scope_name,
-    flush_dirty_scopes,
     get_scope as _get_scope,
-    register_fold_change_scope,
     registered_scopes,
 )
+from well_viewer.core.safe import swallowed
 
 # Disambiguation suffix appended to a well-token combo entry when there is
 # a replicate set with the same name. Without this, picking the entry
@@ -109,7 +106,7 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
         view = combo.view()
         popup_visible = bool(view is not None and view.isVisible())
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
     blocked = combo.blockSignals(True)
     try:

@@ -1194,7 +1194,8 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     """The stuck-final-fetch bug: rsync can exit non-zero (timeout / reset on
     close) *after* the zip is fully across. The well must still materialise —
     not get discarded and re-fetched forever — so the run can finish."""
-    import tempfile, zipfile
+    import tempfile
+    import zipfile
     from pathlib import Path
     run = _make_run(tmp_path)
     logs: list[str] = []
@@ -1584,6 +1585,14 @@ def test_required_files_list_is_what_we_promised():
         "well_token.py",
         "shape_features_core.py",
         "flatfield_core.py",
+        # Pipeline clusters extracted from process_microscopy (P4) — re-imported
+        # at module top level, so the remote needs each one.
+        "microscopy_background.py",
+        "microscopy_cellpose.py",
+        "microscopy_stardist.py",
+        "microscopy_io.py",
+        # Qt-free observable-suppression helper (P2.7).
+        "aw_safe.py",
         "_Docs/requirements-remote.txt",
     )
 
@@ -2177,7 +2186,7 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
     """Integration: a host with legacy rsync gets the bare argv
     (no --info=stats0), avoiding the 'unknown option' exit 1 that
     blocked the user's bootstrap."""
-    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    from services.remote_runner import _rsync_version
     _rsync_version.cache_clear()
     captured = {}
 
@@ -2208,7 +2217,7 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
 def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatch):
     """Inverse of the above — modern rsync still gets the --info
     flag so the GUI's terser log output is preserved."""
-    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    from services.remote_runner import _rsync_version
     _rsync_version.cache_clear()
     captured = {}
     runner = RemoteRunner(host)

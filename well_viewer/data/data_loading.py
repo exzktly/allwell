@@ -11,7 +11,7 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -24,52 +24,6 @@ _logger = logging.getLogger("well_viewer")
 # One-shot dedupe for the "missing fluor column" warning so a 96-well
 # dataset with a schema mismatch logs once per channel, not 96 times.
 _missing_col_warned: set[str] = set()
-
-
-# ── Timepoint parser ─────────────────────────────────────────────────────────
-
-def parse_timepoint_hours(tp: str) -> Optional[float]:
-    """
-    Convert a timepoint string to fractional hours.
-    Returns None when the string cannot be parsed at all.
-
-    Formats tried in order:
-      1. DDdHHhMMm  e.g. "02d04h30m" -> 52.5
-      2. Standalone unit suffix  e.g. "48h", "2d", "30m"
-      3. Pure number  e.g. "48" or "1.5" -> treated as hours
-      4. Prefixed ordinal  e.g. "T01", "day2" -> numeric suffix as index
-    """
-    s = tp.strip()
-    if not s:
-        return None
-
-    # 1. DDdHHhMMm (all components optional, at least one required)
-    m = re.fullmatch(r"(?:(\d{1,4})d)?(?:(\d{1,2})h)?(?:(\d{1,2})m)?", s, re.I)
-    if m and any(m.groups()):
-        return int(m.group(1) or 0)*24.0 + int(m.group(2) or 0) + int(m.group(3) or 0)/60.0
-
-    # 2. Standalone unit: "48h", "2d", "30m", "90min"
-    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
-                     s, re.I)
-    if m:
-        val, unit = float(m.group(1)), m.group(2)[0].lower()
-        if unit == "h": return val
-        if unit == "d": return val * 24.0
-        if unit == "m": return val / 60.0
-
-    # 3. Pure number (treated as hours)
-    try:
-        return float(s)
-    except ValueError:
-        pass
-
-    # 4. Prefixed ordinal: strip leading non-digit chars, keep trailing number
-    #    e.g. "T01" -> 1.0, "day02" -> 2.0, "tp_3" -> 3.0
-    m = re.search(r"(\d+(?:\.\d+)?)$", s)
-    if m:
-        return float(m.group(1))
-
-    return None
 
 
 # ── CSV loading and channel detection ────────────────────────────────────────
@@ -89,8 +43,10 @@ _METRIC_SUFFIXES = (
 
 
 from well_viewer.data.image_identity import (  # noqa: E402  (after _METRIC_SUFFIXES decl)
+    parse_timepoint_hours,  # re-export: single source of truth in image_identity
     normalize_fov_series as _normalize_fov_series,
 )
+from well_viewer.core.safe import swallowed
 
 
 def normalize_fov_series(fov: pd.Series) -> pd.Series:
@@ -399,7 +355,7 @@ def aggregate_with_threshold_df(
             # rather than letting `~(NaN <= x)` keep them. Without this,
             # aggregation kept NaN-area cells but raw filtering dropped
             # them — same dataset, different counts.
-            mask &= np.isfinite(area) 
+            mask &= np.isfinite(area)
     else:
         return []
 
@@ -577,7 +533,7 @@ def _all_fluor_values_filtered(
     if "area_px" in df.columns:
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) 
+            mask &= np.isfinite(area)
     else:
         return np.empty(0, dtype=float)
 
@@ -709,7 +665,7 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
             try:
                 return rank_rset(rset)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         return "#808080"
 
     def _color_well(w: str) -> str:
@@ -720,7 +676,7 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
             try:
                 return rank_well(w)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         return "#808080"
 
     if rep_sets:

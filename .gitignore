@@ -24,3 +24,10 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Local test run logs (not for commit)
+_pytest*.log
+
+# Coverage data
+.coverage
+htmlcov/

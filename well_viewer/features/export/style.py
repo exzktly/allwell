@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtWidgets import QMessageBox, QWidget
+from well_viewer.core.safe import swallowed
 
 
 def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:
@@ -367,11 +368,11 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             try:
                 coll.set_sizes([marker_size * marker_size])
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             try:
                 coll.set_linewidths([marker_edge_width])
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             if marker_style and marker_style != "keep":
                 # Per-point face/edge: read the FIRST currently-set
                 # face colour so we preserve the renderer's per-well
@@ -394,13 +395,13 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                             coll.set_facecolor("none")
                             coll.set_edgecolor(cur_colour)
                         except Exception:
-                            pass
+                            swallowed()  # was: pass (silent except)
                     else:
                         try:
                             coll.set_facecolor(cur_colour)
                             coll.set_edgecolor(cur_colour)
                         except Exception:
-                            pass
+                            swallowed()  # was: pass (silent except)
                 # Marker shape: swap the path in the PathCollection
                 # to the requested marker's path. Each point in the
                 # collection draws the same path, scaled by size.
@@ -413,7 +414,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                         )
                         coll.set_paths([new_path])
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
 
         show_grid = bool(prefs.get("grid_show", True))
         ax.grid(show_grid, alpha=float(prefs.get("grid_alpha", 0.25)), linestyle=str(prefs.get("grid_style", "--")))
@@ -460,7 +461,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                         from matplotlib.legend import Legend as _Legend
                         leg._loc = _Legend.codes.get(loc_name, 0)
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
             for txt in leg.get_texts():
                 txt.set_fontsize(float(prefs.get("legend_font_size", 9)))
                 txt.set_color(_title_fg)
@@ -485,7 +486,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             try:
                 fig.tight_layout()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
 
 def apply_export_style_to_current(app, fig, canvas=None) -> None:
@@ -574,13 +575,13 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
         try:
             apply_export_style_to_current(app, fig, canvas)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         # Re-populate the line-order lists so they reflect the current rep-set
         # / well selection each time the panel is opened.
         try:
             sb._refresh_line_order_lists()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         return _ExportEditorSession(sb)
     except Exception as exc:
         QMessageBox.warning(app if isinstance(app, QWidget) else None,
@@ -621,7 +622,7 @@ def open_export_style_panel(app, plot_key: str) -> None:
         try:
             existing._close_dock()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         return
     from ui.theme import PLOT_BG
     from well_viewer.features.export.style import launch_export_editor

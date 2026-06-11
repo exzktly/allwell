@@ -36,7 +36,7 @@ from well_viewer.data.data_loading import (
 from well_viewer.domain.ratio_models import build_ratio_index, is_ratio_key, ratio_name_from_key
 from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
 from shape_features_core import is_shape_column, label_for as shape_label_for
-from functools import partial
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -279,7 +279,7 @@ def refresh_metric_combo_for_channel(app) -> None:
         channel_label = ""
     smfish_chan = app._app_state.channel.active_channel
     for attr in ("_plotting_metric_cb", "_metric_cb", "_metric_cb_bar"):
-        populate_metric_combo(app, 
+        populate_metric_combo(app,
             getattr(app, attr, None),
             channel_entry=channel_label,
             smfish_channel=smfish_chan,
@@ -459,12 +459,8 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
     prev_channel = app._app_state.channel.active_image_channel
     app._app_state.channel.active_image_channel = channel
     ch_upper = channel.upper()
-    if hasattr(app, "_montage_chan_var"):
-        app._montage_chan_var.setCurrentText(ch_upper)
     if hasattr(app, "_review_image_chan_var"):
         app._review_image_chan_var.setCurrentText(ch_upper)
-    if hasattr(app, "_mon_lut_chan_lbl"):
-        app._mon_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
     if hasattr(app, "_review_lut_chan_lbl"):
         app._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
     saved_review_lut = app._app_state.review_image.lut_by_channel.get(channel)
@@ -512,6 +508,7 @@ def sync_metric_combos(app, metric: str) -> None:
         try:
             current = str(cb.currentText() or "")
         except Exception:
+            swallowed()  # silent except
             continue
         if current == label:
             continue
@@ -689,7 +686,7 @@ def refresh_stats_property_combo(app) -> None:
     channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
     # Strip the " (spots)" suffix so smfish-enable matching works.
     smf_base = channel.split(" ")[0] if channel else app._app_state.channel.active_channel
-    populate_metric_combo(app, 
+    populate_metric_combo(app,
         m_cb, channel_entry=channel, smfish_channel=smf_base,
     )
 
@@ -740,7 +737,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
         try:
             panel.refresh_from_app()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Cell Gating shows one row per fluor channel + one per ratio. Pull
     # the ratio rows into the table whenever the ratio set changes.
     if hasattr(app, "_cell_gating_fluor_gate_edits"):
@@ -748,7 +745,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Ratio additions become virtual channel entries in every plot-tab
     # combo (including the global ctxbar chip), so refresh those now —
     # otherwise the new ratio doesn't appear in the dropdown until the
@@ -757,7 +754,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
         try:
             update_channel_selector(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 
@@ -825,7 +822,7 @@ def rebuild_ratio_index(app) -> None:
         try:
             app._redraw()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 

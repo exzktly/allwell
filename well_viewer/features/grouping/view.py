@@ -4,6 +4,7 @@ model rendered by a ``widgets.SavedSelectionsList``."""
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
+from well_viewer.core.safe import swallowed
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ def rep_panel_refresh(app) -> None:
     try:
         lst.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     sels = list(app._app_state.selection.selections or [])
     lst.updateSelections(sels)
     cur = app._app_state.selection.current_selection_id
@@ -78,7 +79,7 @@ def rep_panel_refresh(app) -> None:
             lst._current_id = ""
             lst._refresh_current()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # honour a pending inline-rename request (set by the "Rename" action — it
     # stores a position into _selections; see _sel_request_inline_rename)
     idx = getattr(app, "_grp_inline_edit_idx", -1)

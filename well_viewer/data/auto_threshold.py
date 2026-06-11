@@ -48,10 +48,10 @@ import numpy as np
 
 from auto_threshold_core import (
     DEFAULT_CELLS_PER_IMAGE_CAP,
-    parse_tp_hours as _parse_tp_hours,
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,
 )
+from well_viewer.core.safe import swallowed
 
 
 logger = logging.getLogger("well_viewer.data.auto_threshold")
@@ -204,7 +204,7 @@ def compute_auto_thresholds(
             try:
                 progress(msg)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     if out_dir is None or not out_dir.exists():
         _emit(f"Auto-threshold: data directory not found ({out_dir!r}).")

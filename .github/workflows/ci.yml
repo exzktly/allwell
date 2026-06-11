@@ -1,0 +1,37 @@
+name: CI
+
+# Runs ruff (lint) on every PR and on pushes to main.
+#
+# NOTE: there is intentionally no pytest job. The full test suite is run locally
+# / in the dev environment, not in GitHub Actions: several Qt tests block at the
+# C level under the offscreen QPA platform, and pytest's
+# ``--timeout-method=signal`` cannot interrupt a blocking C call (SIGALRM only
+# fires when control returns to Python). On the runner that made the pytest job
+# hang for hours instead of failing fast. Ruff is fast and unaffected, so CI
+# keeps the lint gate. If a bounded test job is wanted later, re-add one that
+# excludes the hangers (e.g. ``pytest -m "not slow"`` + a job ``timeout-minutes``
+# and skips for the app-construction Qt tests).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install "ruff==0.15.8"
+      - name: ruff check
+        run: ruff check .

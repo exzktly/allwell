@@ -7,7 +7,7 @@ attribute to exercise both branches on a single test runner.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import services.subprocess_kill as sk
 from services.subprocess_kill import signal_subprocess

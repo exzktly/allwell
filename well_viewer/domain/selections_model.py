@@ -28,13 +28,15 @@ import re
 import uuid
 from typing import Any, Callable, Iterable, Optional, Sequence
 
+from well_token import canonical_well_label
+from well_viewer.core.safe import swallowed
+
 _logger = logging.getLogger("well_viewer.domain.selections_model")
 
 SCHEMA_VERSION = 2
 
 _PLATE_ROWS = "ABCDEFGH"
 _N_COLS = 12
-_TOKEN_RE = re.compile(r"^([A-Ha-h])\s*0*([1-9]|1[0-2])$")
 _DEFAULT_COLOR = "#888888"
 _FALLBACK_PALETTE = [
     "#5B9BF8", "#F26B6B", "#4ADE80", "#F5A524", "#A78BFA",
@@ -50,19 +52,17 @@ def well_colors() -> list[str]:
         if out:
             return out
     except Exception:  # pragma: no cover - GUI/theme not importable
-        pass
+        swallowed()  # was: pass (silent except)
     return list(_FALLBACK_PALETTE)
 
 
 # ─────────────────────────────────────────────────────────── token helpers ──
 def normalize_token(raw: Any) -> Optional[str]:
-    """``"a1"`` / ``"A01"`` / ``" h12 "`` → ``"A01"`` / ``"H12"``; else ``None``."""
-    if not isinstance(raw, str):
-        return None
-    m = _TOKEN_RE.match(raw.strip())
-    if not m:
-        return None
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}"
+    """``"a1"`` / ``"A01"`` / ``" h12 "`` → ``"A01"`` / ``"H12"``; else ``None``.
+
+    Delegates to the canonical 96-well parser in :mod:`well_token`.
+    """
+    return canonical_well_label(raw) if isinstance(raw, str) else None
 
 
 def well_rank(token: Any) -> int:

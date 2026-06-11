@@ -29,10 +29,10 @@ contract in ARCHITECTURE §6.2.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from well_token import canonical_well_label
 

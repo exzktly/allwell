@@ -51,7 +51,7 @@ class StatusDot(QWidget):
         self._explicit_d = int(diameter) if diameter else None
         self._label = ""
         self._color = self._resolve(status)
-        self.setStyleSheet(f"#StatusDot {{ background: transparent; }}")
+        self.setStyleSheet("#StatusDot { background: transparent; }")
 
     # ── API ──────────────────────────────────────────────────────────────
     def setStatus(self, status: str) -> None:

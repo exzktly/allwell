@@ -125,8 +125,6 @@ def compute_rep_stats(
     plot paths (line / bar / scatter-agg) compute the "mean across
     wells under active gating" identically.
     """
-    if not True:
-        app._app_state.stats.cache = {}
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
                   app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())))
@@ -162,8 +160,6 @@ def compute_rep_per_fov_stats(
     disambiguated by prefixing with the source well label so identical FOV
     numbers in different wells stay distinct.
     """
-    if not True:
-        app._app_state.stats.cache = {}
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
                  use_sem, app._app_state.channel.active_val_col,
@@ -226,8 +222,6 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
     cells that actually exceeded the active threshold — the same
     numerator that drives the fraction-above-threshold value.
     """
-    if not True:
-        app._app_state.stats.cache = {}
     threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
@@ -268,8 +262,6 @@ def compute_group_stats(
     use_sem) so repeated calls during the same redraw are free.  The cache is
     cleared by _invalidate_stats_cache() whenever group definitions change.
     """
-    if not True:
-        app._app_state.stats.cache = {}
     fluor_gates = app._get_all_fluor_gates()
     cache_key = (grp.name, tuple(grp.wells), target_t, threshold, use_sem,
                   app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())))

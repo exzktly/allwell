@@ -24,6 +24,7 @@ from well_viewer.features.review_image.controller import on_review_image_move
 from well_viewer.features.review_image.controller import on_review_image_press
 from well_viewer.features.review_image.controller import on_review_image_release
 from well_viewer.features.review_image.controller import pick_review_image_color
+from well_viewer.core.safe import swallowed
 
 
 def build_review_image_panel(self, parent: QWidget) -> None:
@@ -153,7 +154,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
         from well_viewer.features.qc.tab_view import build_qc_gate_controls
         il.addWidget(build_qc_gate_controls(self, inner))
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
     self._review_image_status = QLabel("", inner)
     self._review_image_status.setObjectName("Muted")
@@ -269,7 +270,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
         try:
             QToolTip.hideText()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     self._review_image_label.leaveEvent = _leave
 
     # Default cursor reflects the initial Include-edit-mode state
@@ -298,5 +299,5 @@ def refresh_fov_btn_state(app) -> None:
         try:
             obs(is_on)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 

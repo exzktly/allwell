@@ -21,13 +21,14 @@ from PySide6.QtCore import Qt, QTimer, Signal, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QScrollArea, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
+    QMessageBox, QScrollArea, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 import theme as theme_v2
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
 from widgets.status_dot import StatusDot
+from well_viewer.core.safe import swallowed
 
 # Global tab-scoped debug toggles.
 REVIEW_TAB_DEBUG = False
@@ -95,7 +96,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v6.1.20")
+        self._version_pill = QLabel("v6.2.0")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "
@@ -212,7 +213,7 @@ class AllWellApp(QMainWindow):
         try:
             self._review._dir_label.hide()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         review_topbar = getattr(self._review, "_top_bar", None)
         if review_topbar is not None and review_topbar.layout() is not None:
             review_topbar.layout().insertWidget(0, self._mode_seg)
@@ -317,7 +318,7 @@ class AllWellApp(QMainWindow):
                 try:
                     nav.save_figure()
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
             return
 
     def _install_app_icon(self) -> None:
@@ -436,7 +437,7 @@ class AllWellApp(QMainWindow):
             try:
                 self._update_dataset_chip(path)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             return result
 
         review._load_path = _patched  # type: ignore[assignment]
@@ -470,7 +471,7 @@ class AllWellApp(QMainWindow):
             tps_attr = getattr(self._review, "_timepoints", None)
             tps = len(tps_attr) if tps_attr is not None else 0
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         tail_bits = []
         if wells:
             tail_bits.append(f"{wells} wells")
@@ -504,7 +505,7 @@ class AllWellApp(QMainWindow):
             try:
                 card.setPlotTheme(self._present_mode)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     def _toggle_help_drawer(self) -> None:
         """Show / hide a v2 Drawer with quick help. Lazy-built on first call."""
@@ -676,7 +677,7 @@ class AllWellApp(QMainWindow):
             try:
                 review._load_path(Path(cur))
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     def _on_reset_view_clicked(self) -> None:
         """Confirm + wipe the view-state (selections, fold-change, combos)."""
@@ -697,7 +698,7 @@ class AllWellApp(QMainWindow):
         try:
             review._view_state_reset()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _toggle_log_drawer(self) -> None:
         if self._log_drawer is None:
@@ -728,7 +729,7 @@ class AllWellApp(QMainWindow):
         try:
             self._log_view.setPlainText("\n".join(self._log_ring[-500:]))
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         if self._log_drawer.isVisible():
             self._log_drawer.close()
         else:
@@ -757,7 +758,7 @@ class AllWellApp(QMainWindow):
                     if record.levelno >= _logging.ERROR:
                         _status_signal.signal_failed()
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
 
         h = _RingHandler()
         h.setFormatter(_logging.Formatter("%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
@@ -818,7 +819,7 @@ class AllWellApp(QMainWindow):
                 from PySide6.QtGui import QDesktopServices
                 QDesktopServices.openUrl(QUrl.fromLocalFile(path))
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     def _on_tab_change(self, idx: int) -> None:
         if self._review is None:
@@ -847,12 +848,12 @@ class AllWellApp(QMainWindow):
             try:
                 self._review._redraw()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         try:
             from well_viewer.features.barplot.renderer import redraw_bars
             redraw_bars(self._review)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _qsettings(self):
         from PySide6.QtCore import QSettings
@@ -880,9 +881,9 @@ class AllWellApp(QMainWindow):
                         try:
                             h_pane.setSizes([int(x) for x in sizes])
                         except Exception:
-                            pass
+                            swallowed()  # was: pass (silent except)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _save_window_state(self) -> None:
         try:
@@ -894,7 +895,7 @@ class AllWellApp(QMainWindow):
                 if h_pane is not None:
                     s.setValue("review/h_pane_sizes", h_pane.sizes())
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_window_state()
@@ -902,12 +903,12 @@ class AllWellApp(QMainWindow):
             try:
                 self._review._persistence.save("view_state")
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         if self._review is not None and hasattr(self._review, "_cleanup_tmp"):
             try:
                 self._review._cleanup_tmp()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         super().closeEvent(event)
 
     # ── Cross-tab threshold ───────────────────────────────────────────────
@@ -916,7 +917,7 @@ class AllWellApp(QMainWindow):
             try:
                 return float(self._analyze._cell_properties_tab.get_threshold())
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         return self._cell_threshold
 
     def set_cell_threshold(self, value: float) -> None:
@@ -925,7 +926,7 @@ class AllWellApp(QMainWindow):
             try:
                 self._analyze._cell_properties_tab.set_threshold(self._cell_threshold)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         self.threshold_changed.emit(self._cell_threshold)
 
 
@@ -933,8 +934,7 @@ def _install_combobox_popup_widener() -> None:
     """Patch QComboBox.showPopup so the popup view sizes itself to the
     widest item text instead of inheriting the field's width — dropdown
     items elsewhere in the app were being clipped at the field width."""
-    from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox
-    from PySide6.QtCore import QSize, Qt
+    from PySide6.QtWidgets import QComboBox, QStyleOptionComboBox
     if getattr(QComboBox, "_aw_popup_widened", False):
         return
     QComboBox._aw_popup_widened = True

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
 
 from well_viewer.features.barplot.controller import (
     BarItem, FC_STATE_OFF, collect_bar_items, collect_bar_items_for_group,

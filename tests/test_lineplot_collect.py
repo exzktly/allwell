@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import math
 
-import pytest
 
 from well_viewer.features.barplot.controller import FC_STATE_OFF
 from well_viewer.features.lineplot.controller import (
-    LinePoint, LineSeries, collect_line_series,
+    LinePoint, collect_line_series,
 )
 
 

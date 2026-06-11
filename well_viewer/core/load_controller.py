@@ -13,6 +13,7 @@ from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.channel_state_controller import recalculate_threshold
 from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
+from well_viewer.core.safe import swallowed
 
 
 def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
@@ -103,7 +104,7 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.data.zipfile_cache import invalidate as _invalidate_zip_cache
         _invalidate_zip_cache()
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     # Signal any in-flight smFISH "Apply to All" worker to abort so
     # it doesn't overwrite the *new* dataset's CSVs with counts
     # computed against the previous dataset.
@@ -112,7 +113,7 @@ def load_directory(app, d: Path, label=None) -> None:
         try:
             smfish_cancel.set()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     n = len(csvs)
     app._show_progress(n, f"Loading {n} CSV file(s)…")
     for i, p in enumerate(csvs, 1):
@@ -133,7 +134,7 @@ def load_directory(app, d: Path, label=None) -> None:
         try:
             app._load_sample_definitions_from_pipeline_info()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Hydrate per-cell Segmentation-tab overrides (cell_overrides.json) before
     # any controller queries cached rows, then project them onto row['Included']
     # so all downstream stats honor user curation. Both calls are safe no-ops
@@ -142,7 +143,7 @@ def load_directory(app, d: Path, label=None) -> None:
         app._persistence.load("cell_overrides")
         apply_review_overrides_to_cache(app)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)
     # and project the QC_Pass verdict onto any already-cached rows. Safe no-op
     # when neither file exists.
@@ -153,7 +154,7 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
         qc_gate_refresh_widgets(app)  # sync the Segmentation gate row if built
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     # Hydrate the dataset-wide crop region (persistence.json::crop_region) and
     # project Crop_Pass onto any already-cached rows. Safe no-op when unset.
     try:
@@ -161,12 +162,12 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.features.crop.controller import apply_crop_to_cache
         apply_crop_to_cache(app)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     # Hydrate user-defined line-plot draw order (line_order.json).
     try:
         app._persistence.load("line_order")
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     app._refresh_sidebar_map()
     if app._app_state.preview.selected_well not in app._app_state.dataset.well_paths:
         app._app_state.preview.selected_well = None
@@ -177,7 +178,7 @@ def load_directory(app, d: Path, label=None) -> None:
             image_table_repopulate_dropdowns(app)
             image_table_refresh_picker(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     label_grid_refresh(app)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
     # appear without requiring a tab switch.
@@ -185,7 +186,7 @@ def load_directory(app, d: Path, label=None) -> None:
         try:
             app._groups_centre_refresh()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Auto-load any persisted ratio definitions and heatmap layouts that live
     # in the same data directory. Both calls are safe no-ops when no file
     # exists; errors are logged and swallowed.
@@ -234,7 +235,7 @@ def load_directory(app, d: Path, label=None) -> None:
             )
             refresh_heatmap_layout_sidebar(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     display = label or str(d)
     app._dir_label.setText(display)
     app._set_status(f"Loaded {n} well(s) — {display}")

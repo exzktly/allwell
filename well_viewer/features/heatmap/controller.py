@@ -15,19 +15,17 @@ import numpy as np
 from matplotlib import patches as mpatches
 from matplotlib import colormaps as mpl_colormaps
 
-import pandas as pd
 
 from well_viewer.data.data_loading import (
     _all_fluor_values_filtered,
-    parse_well_token,
 )
 from well_viewer.features.heatmap.models import (
     HeatmapLayout,
-    PLATE_DEFAULT_NAME,
     make_plate_layout,
 )
 from well_viewer.domain.ratio_models import is_ratio_key
 from well_viewer.domain.stats_compute import aggregate_group
+from well_viewer.core.safe import swallowed
 
 
 METRIC_MEAN = "Mean above threshold"
@@ -187,7 +185,7 @@ def _cell_value(
 
     if metric == METRIC_COUNT:
         # Use aggregate to apply gate logic consistently, then read n_total.
-        pts = aggregate_group(app, 
+        pts = aggregate_group(app,
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -196,7 +194,7 @@ def _cell_value(
         return float(matched[0][5]) if matched else 0.0
 
     if metric == METRIC_FRACTION:
-        pts = aggregate_group(app, 
+        pts = aggregate_group(app,
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -236,7 +234,7 @@ def _cell_value(
         )
 
     # METRIC_MEAN (and fallback)
-    pts = aggregate_group(app, 
+    pts = aggregate_group(app,
         valid_wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         fluor_gates=fluor_gates,
@@ -545,7 +543,7 @@ def redraw_heatmap(app) -> None:
             try:
                 app._heatmap_colorbar.remove()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         try:
             app._heatmap_colorbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
             app._heatmap_colorbar.set_label(_metric_axis_label(metric, app),
@@ -571,7 +569,7 @@ def redraw_heatmap(app) -> None:
         from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, fig, canvas)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
     canvas.draw_idle()
 
@@ -710,6 +708,7 @@ def _label_at_event(app, event) -> Optional[Tuple[str, int]]:
                     bb.y0 - pad <= event.y <= bb.y1 + pad):
                 return ("col", i)
         except Exception:
+            swallowed()  # silent except
             continue
     for i, lbl in enumerate(ax.get_yticklabels()):
         try:
@@ -718,6 +717,7 @@ def _label_at_event(app, event) -> Optional[Tuple[str, int]]:
                     bb.y0 - pad <= event.y <= bb.y1 + pad):
                 return ("row", i)
         except Exception:
+            swallowed()  # silent except
             continue
     return None
 
@@ -768,6 +768,7 @@ def _nearest_label_in_drag(app, event, kind: str) -> Optional[int]:
                 best_dist = dist
                 best = i
         except Exception:
+            swallowed()  # silent except
             continue
     return best
 
@@ -806,13 +807,12 @@ def _set_canvas_cursor(app, cursor_shape) -> None:
     if canvas is None:
         return
     try:
-        from PySide6.QtCore import Qt as _Qt
         if cursor_shape is None:
             canvas.unsetCursor()
         else:
             canvas.setCursor(cursor_shape)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def on_heatmap_label_drag_press(app, event) -> bool:
@@ -831,7 +831,7 @@ def on_heatmap_label_drag_press(app, event) -> bool:
         from PySide6.QtCore import Qt as _Qt
         _set_canvas_cursor(app, _Qt.ClosedHandCursor)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     return True
 
 
@@ -848,7 +848,7 @@ def on_heatmap_label_drag_motion(app, event) -> None:
             else:
                 _set_canvas_cursor(app, None)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         return
     # Use the flexible finder so the highlight tracks the cursor everywhere.
     drag["over"] = _nearest_label_in_drag(app, event, drag["kind"])

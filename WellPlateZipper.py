@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 import shutil
 import argparse
@@ -108,31 +107,6 @@ def _extract_well_from_filename(
     if well_idx >= len(parts):
         return None
     return canonical_well_label(parts[well_idx])
-
-
-def find_matching_files(
-    well: str,
-    search_dir: str,
-    recursive: bool,
-    schema: List[str],
-    sep: str,
-) -> List[str]:
-    """Return all TIFF files in *search_dir* whose well token matches *well*.
-
-    Kept for back-compat. The single-pass main loop uses ``group_by_well``
-    below, which is O(N) instead of O(96 · N).
-    """
-    matches = []
-    for root, _, files in os.walk(search_dir):
-        for fname in files:
-            if not fname.lower().endswith((".tif", ".tiff")):
-                continue
-            extracted = _extract_well_from_filename(fname, schema, sep)
-            if extracted and extracted.upper() == well.upper():
-                matches.append(os.path.join(root, fname))
-        if not recursive:
-            break
-    return matches
 
 
 def group_by_well(

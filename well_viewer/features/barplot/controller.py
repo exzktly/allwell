@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
-from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.core import debug_flags as debug_flags
@@ -16,8 +17,10 @@ from well_viewer.domain.stats_compute import compute_rep_n_above
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
+from well_viewer.core.ui_helpers import parse_float_edit as _parse_float_edit
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -68,60 +71,16 @@ class BarItem:
 def _bar_debug(msg: str) -> None:
     """Emit opt-in bar-plot diagnostics for draw-time label debugging."""
     if debug_flags.review_bar_debug_enabled():
-        print(f"DEBUG barplot_controller: {msg}")
+        _logger.debug("%s", msg)
 
 
-def bar_groups_to_dict(
-    rep_sets: List[ReplicateSet],
-    bar_groups: List[BarGroup],
-    *,
-    extract_well_token: Callable[[str], Optional[str]],
-) -> dict:
-    rep_list = [{"name": r.name, "wells": list(r.wells)} for r in rep_sets]
-    grp_list = []
-    for grp in bar_groups:
-        grp_list.append(
-            {
-                "name": grp.name,
-                "hidden": grp.hidden,
-                "members": [r.name for r in grp.members],
-                "solo_wells": list(grp.solo_wells),
-            }
-        )
-    return {"rep_sets": rep_list, "groups": grp_list}
-
-
-def bar_groups_from_data(data, *, tok_to_label: dict[str, str]) -> Tuple[List[ReplicateSet], List[BarGroup]]:
-    def _norm(tok: str) -> str:
-        tok = tok.strip().upper()
-        m = re.match(r"^([A-H])(\d{1,2})$", tok, re.I)
-        return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else tok
-
-    def _valid_tok(raw: str) -> Optional[str]:
-        n = _norm(raw)
-        return n if n in tok_to_label else None
-
-    rep_sets: List[ReplicateSet] = []
-    bar_groups: List[BarGroup] = []
-
-    if not isinstance(data, dict):
-        return rep_sets, bar_groups
-    for item in data.get("rep_sets", []):
-        wells = [t for t in (_valid_tok(x) for x in item.get("wells", [])) if t is not None]
-        rep_sets.append(ReplicateSet(item.get("name", "R"), wells))
-    rep_by_name = {r.name: r for r in rep_sets}
-    for item in data.get("groups", []):
-        grp = BarGroup(item.get("name", "Group"), hidden=bool(item.get("hidden", False)))
-        for rname in item.get("members", []):
-            if rname in rep_by_name:
-                grp.members.append(rep_by_name[rname])
-        for raw_tok in item.get("solo_wells", []):
-            n = _valid_tok(raw_tok)
-            if n:
-                grp.solo_wells.append(n)
-        bar_groups.append(grp)
-
-    return rep_sets, bar_groups
+# ``bar_groups_to_dict`` / ``bar_groups_from_data`` are pure domain transforms;
+# they moved to ``well_viewer.domain.bar_groups`` so the domain layer can use
+# them without importing this feature. Re-exported here for existing callers.
+from well_viewer.domain.bar_groups import (  # noqa: E402,F401
+    bar_groups_from_data,
+    bar_groups_to_dict,
+)
 
 
 #: Fold-change "off" state — pass to ``collect_bar_items`` or
@@ -684,7 +643,7 @@ def collect_bar_items_fov_pooled(
         if "area_px" in df.columns:
             area = _pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
             with _np.errstate(invalid="ignore"):
-                mask &= _np.isfinite(area) 
+                mask &= _np.isfinite(area)
         for channel, gate in fluor_gates.items():
             col = f"{channel}_mean_intensity"
             if col not in df.columns:
@@ -1021,13 +980,7 @@ def render_bar_items(
 def apply_bar_ylims(app, ax_mean, ax_frac, *, ax_n=None) -> None:
     """Apply user-entered y-limits to the bar panels (linear scale only)."""
     def _parse(edit) -> Optional[float]:
-        txt = edit.text().strip() if hasattr(edit, "text") else str(edit).strip()
-        if not txt:
-            return None
-        try:
-            return float(txt)
-        except ValueError:
-            return None
+        return _parse_float_edit(edit)
 
     mean_lo = _parse(app._bar_ylim_mean_lo_edit)
     mean_hi = _parse(app._bar_ylim_mean_hi_edit)

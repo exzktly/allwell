@@ -11,17 +11,17 @@ from typing import List
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-    QPushButton, QSlider, QVBoxLayout, QWidget,
+    QPushButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, make_band_controls, make_plot_view_switcher,
+    make_plot_view_switcher,
     make_plot_with_right_dock,
 )
-from functools import partial
 from well_viewer.core.channel_state_controller import refresh_metric_combo_for_channel
 from well_viewer.features.export.service import export_heatmap_data
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
+from well_viewer.core.safe import swallowed
 
 
 _CMAP_OPTIONS = ["viridis", "magma", "coolwarm", "RdYlBu_r", "Greys"]
@@ -241,7 +241,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         from well_viewer.persistence.heatmap_layouts import apply_persisted_settings
         apply_persisted_settings(ctx.app)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
     # Refresh the global Property combo + heatmap aggregation enable
     # state so the heatmap's first render reflects the canonical
@@ -254,7 +254,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         if hasattr(ctx.app, "_refresh_heatmap_aggregation_options"):
             refresh_heatmap_aggregation_options(ctx.app, )
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     # Bust any caches that might hold a stale "no values" result from
     # before the tab was fully built (data load timing can leave the
     # global colormap range cache populated with NaNs, which produced
@@ -264,7 +264,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         try:
             ctx.app._invalidate_stats_cache()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     _redraw(ctx.app)
 
 
@@ -403,7 +403,7 @@ def _persist_settings(app) -> None:
     try:
         app._persistence.schedule_save("heatmap_layouts")
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def _on_label_double_click(app, evt) -> None:
@@ -423,6 +423,7 @@ def _on_label_double_click(app, evt) -> None:
         try:
             bb = lbl.get_window_extent(renderer=renderer)
         except Exception:
+            swallowed()  # silent except
             continue
         if bb.contains(evt.x, evt.y):
             target = ("col", i)
@@ -432,6 +433,7 @@ def _on_label_double_click(app, evt) -> None:
             try:
                 bb = lbl.get_window_extent(renderer=renderer)
             except Exception:
+                swallowed()  # silent except
                 continue
             if bb.contains(evt.x, evt.y):
                 target = ("row", i)

@@ -24,7 +24,6 @@ from well_viewer.data.image_identity import (
 from well_viewer.persistence._io import atomic_write_text
 from well_viewer.features.preview.controller import read_member_bytes
 from well_viewer.features.smfish.controller import (
-    SmfishImgRef,
     scan_well_zip,
 )
 

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
     QVBoxLayout, QWidget,
 )
+from well_viewer.core.safe import swallowed
 
 class _GUILogHandler(logging.Handler):
     """Routes logging records into a QTextEdit on the Qt main thread."""
@@ -38,7 +39,7 @@ class _GUILogHandler(logging.Handler):
         try:
             self._w.append(html)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def build_bottom(app) -> None:

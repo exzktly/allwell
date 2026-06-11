@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple
 
 from well_viewer.domain import fold_change as _fc
-from well_viewer.features.barplot.controller import FC_STATE_OFF
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.core.safe import swallowed
 
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
@@ -59,7 +59,7 @@ class LinePoint:
 
 @dataclass
 class LineSeries:
-    """One member's curve on the line plot (rep-set or well).
+    r"""One member's curve on the line plot (rep-set or well).
 
     Fields:
       * ``key`` — drag-order identity. Rep-set name for grouped mode,
@@ -214,7 +214,7 @@ def collect_line_series(
             all_tps: set = set()
             cdf_vals: list = []
             for lbl in valid_wells:
-                for t, *_ in aggregate_well(app, 
+                for t, *_ in aggregate_well(app,
                     lbl, threshold=threshold, use_sem=False,
                     val_col=val_col,
                     fluor_gates=fluor_gates,
@@ -230,11 +230,11 @@ def collect_line_series(
             _raw_pts: list = []
             for t in sorted(all_tps):
                 if rep_per_fov:
-                    gm, gerr, gf, _, _, _ = compute_rep_per_fov_stats(app, 
+                    gm, gerr, gf, _, _, _ = compute_rep_per_fov_stats(app,
                         rset, t, threshold, use_sem,
                     )
                 else:
-                    gm, gerr, gf, _ = compute_rep_stats(app, 
+                    gm, gerr, gf, _ = compute_rep_stats(app,
                         rset, t, threshold, use_sem,
                     )
                 if not (isinstance(gm, float) and math.isnan(gm)):
@@ -269,7 +269,7 @@ def collect_line_series(
     )
     for label in ordered_selected:
         color = app._rank_color_well(label)
-        pts = aggregate_well(app, 
+        pts = aggregate_well(app,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -371,7 +371,7 @@ def redraw_line_plots(
         try:
             app._line_fig.set_facecolor(_bg)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_cdf):
             ax.set_title("")
             ax.cla()
@@ -386,7 +386,7 @@ def redraw_line_plots(
         try:
             app._line_fig.set_facecolor(_bg)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_cdf):
             ax.set_title("")
             ax.set_facecolor(_bg)
@@ -503,7 +503,7 @@ def redraw_line_plots(
         apply_export_style_to_current(app, app._line_fig,
                                       getattr(app, "_line_canvas", None))
     except Exception:  # pragma: no cover - never let style restore break a draw
-        pass
+        swallowed()  # was: pass (silent except)
     app._line_canvas.draw_idle()
 
 
@@ -543,7 +543,7 @@ def toggle_sem(app) -> None:
         try:
             obs(is_sem)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     app._redraw()
     if app._current_centre_tab() == "Bar Plots":
         from well_viewer.features.barplot.renderer import redraw_bars

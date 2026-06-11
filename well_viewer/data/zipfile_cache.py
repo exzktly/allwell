@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional, OrderedDict as TOrderedDict
 from collections import OrderedDict
+from well_viewer.core.safe import swallowed
 
 
 _logger = logging.getLogger("well_viewer.data.zipfile_cache")
@@ -72,7 +73,7 @@ class ZipFileCache:
             try:
                 victim.zf.close()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     def _open_entry(self, path: Path) -> Optional[_Entry]:
         try:
@@ -102,7 +103,7 @@ class ZipFileCache:
             try:
                 stale.zf.close()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         new_entry = self._open_entry(path)
         if new_entry is None:
             return None
@@ -144,7 +145,7 @@ class ZipFileCache:
             try:
                 v.zf.close()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
 
 # Module-level singleton. Process-wide; bounded so we never accumulate

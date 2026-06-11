@@ -9,6 +9,7 @@ from well_viewer.features.batch_export import (
     BarBatchExportPanel,
     ScatterBatchExportPanel,
 )
+from well_viewer.core.safe import swallowed
 
 
 def _refresh_mode_buttons(app, mode: str) -> None:
@@ -120,7 +121,7 @@ def _show_batch_mode(app, mode: str) -> None:
         try:
             active_panel._sync_from_app()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     state["mode"] = mode
     _refresh_mode_buttons(app, mode)

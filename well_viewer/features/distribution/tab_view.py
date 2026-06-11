@@ -7,14 +7,13 @@ chosen timepoint, grouped per replicate set or per well — in a v2 PlotCard.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QSpinBox,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
+    make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
-from functools import partial
 from well_viewer.features.export.service import export_distribution_data
 
 

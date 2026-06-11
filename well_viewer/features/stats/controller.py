@@ -179,7 +179,7 @@ def draw_ks_cdf(app, group_vals: List[Tuple[str, List[float]]], tp_str: str, wel
     try:
         app._stats_fig.tight_layout(pad=0.8)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     app._stats_canvas_widget.draw_idle()
 
 
@@ -406,6 +406,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 from well_viewer.domain.plate_layout import WELL_COLORS
 from well_viewer.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
 from well_viewer.core.channel_state_controller import refresh_stats_property_combo, set_active_metric
+from well_viewer.core.safe import swallowed
 
 
 def stats_active_group(app):
@@ -557,7 +558,7 @@ def stats_on_test_change(app) -> None:
     try:
         refresh_stats_property_combo(app)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def stats_update_tp_menu(app) -> None:
@@ -604,7 +605,7 @@ def stats_update_tp_menu(app) -> None:
     try:
         refresh_stats_property_combo(app)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def stats_refresh_colors(app) -> None:

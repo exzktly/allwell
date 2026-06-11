@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 
 
 class _FakeCombo:
@@ -132,7 +131,6 @@ def test_sync_metric_combos_handles_missing_combos():
 def test_set_active_metric_still_delegates_to_sync():
     """The real ``set_active_metric`` path also goes through the helper
     so a normal user-initiated metric change keeps every combo in sync."""
-    from well_viewer.core.channel_state_controller import sync_metric_combos
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
 
     # Smoke check: METRIC_KEY_TO_LABEL contains the keys we test on, so

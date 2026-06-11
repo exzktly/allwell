@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
+from well_viewer.core.safe import swallowed
 
 
 def _num(text: str) -> float:
@@ -117,7 +118,7 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
             from well_viewer.features.review_image.renderer import refresh_review_image
             refresh_review_image(app)  # reflect QC in the segmentation overlay
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         _update_status()
 
     enable_cb.toggled.connect(lambda _=None: _apply())

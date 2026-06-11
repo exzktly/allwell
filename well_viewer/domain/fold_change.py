@@ -352,7 +352,7 @@ def control_pts_for_line(app, control_label: str, *, threshold: float,
     wells = resolve_control_wells(app, control_label)
     if not wells:
         return []
-    return aggregate_group(app, 
+    return aggregate_group(app,
         wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         fluor_gates=fluor_gates,
@@ -433,7 +433,7 @@ def member_mean_series(
         # only to enumerate the timepoint axis.
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app, 
+            pts = aggregate_well(app,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -444,11 +444,11 @@ def member_mean_series(
         out: Dict[float, float] = {}
         for t in tps:
             if per_fov_spread:
-                gm, *_ = compute_rep_per_fov_stats(app, 
+                gm, *_ = compute_rep_per_fov_stats(app,
                     rset, t, threshold, use_sem,
                 )
             else:
-                gm, *_ = compute_rep_stats(app, 
+                gm, *_ = compute_rep_stats(app,
                     rset, t, threshold, use_sem,
                 )
             if math.isfinite(gm):
@@ -456,7 +456,7 @@ def member_mean_series(
         return out
     # Bare well token.
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app, 
+        pts = aggregate_well(app,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -596,7 +596,7 @@ def member_stats_series(
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app, 
+            pts = aggregate_well(app,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -607,11 +607,11 @@ def member_stats_series(
         out: Dict[float, Tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
-                gm, gerr, *_ = compute_rep_per_fov_stats(app, 
+                gm, gerr, *_ = compute_rep_per_fov_stats(app,
                     rset, t, threshold, use_sem,
                 )
             else:
-                gm, gerr, *_ = compute_rep_stats(app, 
+                gm, gerr, *_ = compute_rep_stats(app,
                     rset, t, threshold, use_sem,
                 )
             if math.isfinite(gm):
@@ -621,7 +621,7 @@ def member_stats_series(
                 out[t] = (float(gm), spread)
         return out
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app, 
+        pts = aggregate_well(app,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,

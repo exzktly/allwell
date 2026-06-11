@@ -38,14 +38,12 @@ import queue
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import contextlib
 from functools import lru_cache
 import tempfile
 import threading
 import time
-import uuid
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
@@ -55,11 +53,11 @@ from typing import Callable, Iterable, Optional
 from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
-    resolve_ssh_binary,
     resolve_ssh_for_rsync,
     to_rsync_path,
     update_bandwidth,
 )
+from aw_safe import swallowed
 
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
@@ -103,6 +101,28 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # top level (the empty-well / gaussian / basic correction), so the remote
     # needs it too or the import aborts the run with ModuleNotFoundError.
     "flatfield_core.py",
+    # Background-subtraction math: process_microscopy re-imports
+    # microscopy_background at module top level (subtract_background plus the
+    # empty-well / robust-mesh / fft-bandpass methods), so the remote needs it
+    # too or the import aborts the run with ModuleNotFoundError.
+    "microscopy_background.py",
+    # Cellpose segmenters: process_microscopy re-imports microscopy_cellpose at
+    # module top level (Torch/cellpose itself stays lazily imported), so the
+    # remote needs this file too or the import aborts with ModuleNotFoundError.
+    "microscopy_cellpose.py",
+    # StarDist segmenters + per-worker model state: process_microscopy re-imports
+    # microscopy_stardist at module top level (TensorFlow/csbdeep stay lazily
+    # imported), so the remote needs this file too or the import aborts with
+    # ModuleNotFoundError.
+    "microscopy_stardist.py",
+    # Atomic output writers (images / CSVs / overlay): process_microscopy
+    # re-imports microscopy_io at module top level, so the remote needs this file
+    # too or the import aborts with ModuleNotFoundError.
+    "microscopy_io.py",
+    # Qt-free observable-suppression helper (logged swallow): process_microscopy
+    # imports aw_safe at module top level, so the remote needs it too or the
+    # import aborts with ModuleNotFoundError.
+    "aw_safe.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.
@@ -3613,7 +3633,7 @@ class RemoteRunner:
             try:
                 self._fetcher.cancel()
             except Exception:  # noqa: BLE001 — best-effort
-                pass
+                swallowed()  # was: pass (silent except)
         if self._run is None:
             return
         run = self._run

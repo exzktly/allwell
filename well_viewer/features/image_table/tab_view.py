@@ -18,18 +18,17 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.data.crop_tool import CropTool
-from well_viewer.core.ui_helpers import btn_primary, btn_secondary
+from well_viewer.core.ui_helpers import btn_primary
 from well_viewer.features.image_table.controller import image_table_open_export_settings
 from well_viewer.features.image_table.controller import image_table_apply_dimensions
 from well_viewer.features.image_table.controller import image_table_apply_global
 from well_viewer.features.image_table.controller import image_table_rebuild_grid
 from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
 from well_viewer.features.image_table.controller import image_table_set_binary_mode
-from well_viewer.features.image_table.controller import image_table_refresh_channel_picker
 from well_viewer.features.image_table.controller import image_table_set_zoom
 from well_viewer.features.image_table.controller import image_table_open_add_row_dialog
 from well_viewer.features.image_table.controller import image_table_toggle_boundaries

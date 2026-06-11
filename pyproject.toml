@@ -1,0 +1,59 @@
+# Project tooling configuration for All-Well.
+#
+# This file pins the ruff configuration that CI enforces (see
+# .github/workflows/ci.yml). The rule set is deliberately curated: it
+# enforces genuine correctness signals (pyflakes, syntax errors,
+# whitespace) while ignoring stylistic families that the codebase has
+# never enforced and whose mass-fix would create enormous, risky churn
+# (line length, multiple-statements, naming). Those can be tightened
+# incrementally later.
+#
+# Blind-except (BLE001) is intentionally NOT enforced here: ruff cannot
+# distinguish a *logged* broad catch from a *silently swallowed* one. The
+# silent-swallow anti-pattern is instead caught by a targeted guardrail
+# test (tests/test_no_silent_except.py), added alongside the `swallow`
+# helper in well_viewer/core/safe.py.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+# Generated / vendored / non-source trees.
+extend-exclude = [
+    "_Docs",
+    "design",
+]
+
+[tool.ruff.lint]
+# Curated, high-signal rule set the tree already satisfies (after the
+# trivial whitespace auto-fixes applied when this config was introduced).
+select = [
+    "E4",   # import formatting (multiple imports on one line)
+    "E7",   # statement-level correctness (a few)
+    "E9",   # syntax errors / IO errors — must always be zero
+    "F",    # pyflakes — the real-bug family (undefined names, bad fstrings, ...)
+    "W",    # whitespace hygiene
+]
+ignore = [
+    # --- Intentional structural patterns -----------------------------------
+    "E402",  # module-import-not-at-top: pipeline/Qt modules must set env vars
+             # (KERAS_HOME, QT_QPA_PLATFORM) *before* importing TF / Qt.
+    "E501",  # line-too-long: never historically enforced; 1200+ sites.
+    "E701",  # multiple-statements-on-one-line (colon): pervasive, stylistic.
+    "E702",  # multiple-statements-on-one-line (semicolon): pervasive.
+    "E731",  # lambda-assignment: a couple of local one-liners, stylistic.
+    "E741",  # ambiguous variable name (l/I/O): a handful, stylistic.
+
+    # --- Pyflakes subcodes that are noise in THIS codebase ------------------
+    "F401",  # unused-import: many are intentional side-effect imports
+             # (e.g. `import tifffile  # codec registration`); removing them
+             # en masse is unsafe. Re-export modules rely on this too.
+    "F811",  # redefinition-while-unused: harmless local re-imports inside
+             # functions that also import at module scope.
+    "F821",  # undefined-name: false positives from quoted forward-reference
+             # type annotations whose names are imported lazily in workers
+             # (e.g. "StarDist2D | None").
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may shadow builtins and use loose patterns.
+"tests/*" = ["F841"]

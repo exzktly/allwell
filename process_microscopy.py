@@ -51,7 +51,6 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 import time
 import zipfile
 from collections import defaultdict
@@ -60,13 +59,11 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import tifffile                                      # noqa: F401  (side-effects)
-from tifffile import imread, imwrite
+from tifffile import imread
 import numpy as np
 from scipy import ndimage as ndi
-from scipy.ndimage import grey_opening
 from skimage.filters import threshold_otsu
-from skimage.segmentation import find_boundaries, watershed
-import imageio.v3 as iio
+from skimage.segmentation import watershed
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -77,10 +74,24 @@ import imageio.v3 as iio
 # Per-worker StarDist model (loaded once at worker startup, not per image)
 # ---------------------------------------------------------------------------
 
-_STARDIST_MODEL: "StarDist2D | None" = None
-# Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
-# run can choose a model without silently reusing another type's cache. Lazy.
-_CELLPOSE_MODELS: "dict[str, object]" = {}
+# Per-worker Cellpose model cache + the Cellpose segmenters live in the Qt-free
+# ``microscopy_cellpose`` module (Torch is imported lazily there, so importing it
+# does not load Torch). Re-exported below so ``_CELLPOSE_MODELS`` /
+# ``_segment_cellpose`` / ``_cellpose_model`` resolve under this module too.
+from microscopy_cellpose import (  # noqa: E402,F401
+    _CELLPOSE_MODELS,
+    _cellpose_model,
+    _segment_cellpose,
+)
+# The StarDist segmenters + their per-worker model/FOV state live in the Qt-free
+# ``microscopy_stardist`` module (TensorFlow is imported lazily there; the model
+# is injected by ``_worker_init`` via ``set_model``). Re-exported so the
+# segmentation dispatch resolves them under this module too.
+import microscopy_stardist as _stardist  # noqa: E402
+from microscopy_stardist import (  # noqa: E402,F401
+    _segment_stardist_nuclei,
+    _segment_stardist_seeded_watershed_cell,
+)
 
 # Segmentation-method groups. StarDist methods need the TF model loaded in
 # _worker_init. Cellpose is a *general* segmenter (any channel); the
@@ -90,18 +101,6 @@ _CELLPOSE_MODELS: "dict[str, object]" = {}
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
 _CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
 _LABELFREE_METHODS = ("cellpose_labelfree",)
-
-# Identifies the FOV currently being segmented, for diagnostic logging — set by
-# process_image_group at entry so the per-FOV ``seg-input`` line (and the last
-# line before a ClipperLib abort) names the culprit image. Per-worker process.
-_SEG_FOV_LABEL: str = ""
-
-# StarDist sees percentile-normalized input anchored to [0, 1]; clamp to this so
-# no out-of-distribution value (e.g. a dim region amplified by empty-well
-# flat-field division) can drive the regressed polygon vertices out of
-# ClipperLib's integer range — the uncatchable "coordinate outside allowed
-# range" abort.
-_STARDIST_INPUT_CLIP = (0.0, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -129,136 +128,21 @@ _STARDIST_INPUT_CLIP = (0.0, 1.0)
 # ---------------------------------------------------------------------------
 
 
-def _fsync_path(path: Path) -> None:
-    """Open *path* read-only and fsync; ignore filesystems that don't support it."""
-    try:
-        fd = os.open(str(path), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        try:
-            os.fsync(fd)
-        except OSError:
-            pass
-    finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-
-
-def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
-    """Atomic image write: tmp file → fsync → rename.
-
-    Routes ``.tif/.tiff`` through tifffile and ``.png`` through imageio v3.
-    Other extensions fall back to tifffile. Cleans up the temp file on
-    failure so the well's output directory never carries partial bytes
-    that a later zip-up step would pack into a corrupt archive.
-
-    The tmp file is named ``__aw_tmp_<stem>.pid<N><ext>`` — a unique
-    prefix the zip-up step's listers explicitly exclude. The trailing
-    original extension is preserved so the codec auto-detects the
-    format from the path.
-    """
-    out_path = Path(out_path)
-    # `__aw_tmp_` prefix is unique enough that the scratch-file
-    # exclusion can match on it without false positives from user
-    # filenames (a TIF named `exp.pidgin.A01.tif` previously matched
-    # the `.pid` substring check below).
-    tmp = out_path.with_name(
-        f"__aw_tmp_{out_path.stem}.pid{os.getpid()}{out_path.suffix}"
-    )
-    suffix = out_path.suffix.lower()
-    try:
-        if suffix == ".png":
-            iio.imwrite(str(tmp), data)
-        else:
-            imwrite(str(tmp), data)
-        _fsync_path(tmp)
-        os.replace(str(tmp), str(out_path))
-    except BaseException:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-        raise
-
-
-def _safe_atomic_text_write(out_path: "Path | str") -> "_AtomicTextHandle":
-    """Return a context manager that yields a file handle for atomic text writing.
-
-    On clean exit the buffered bytes are fsynced and the temp file is renamed
-    over ``out_path``. On exception the temp file is removed and the
-    exception propagates so callers see the original error.
-    """
-    return _AtomicTextHandle(Path(out_path))
-
-
-class _AtomicTextHandle:
-    def __init__(self, out_path: Path) -> None:
-        self._out_path = out_path
-        self._tmp = out_path.with_name(f"__aw_tmp_{out_path.name}.pid{os.getpid()}")
-        self._fh: "io.TextIOBase | None" = None
-
-    def __enter__(self):
-        # newline="" matches csv.writer's expectation; the sole text-write
-        # call site (_write_single_csv) needs that, and it does no harm to
-        # other text content.
-        import io as _io
-        self._fh = open(self._tmp, "w", newline="")
-        return self._fh
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        try:
-            if self._fh is not None:
-                self._fh.flush()
-                try:
-                    os.fsync(self._fh.fileno())
-                except OSError:
-                    pass
-                self._fh.close()
-        finally:
-            self._fh = None
-        if exc_type is not None:
-            try:
-                if self._tmp.exists():
-                    self._tmp.unlink()
-            except OSError:
-                pass
-            return False
-        os.replace(str(self._tmp), str(self._out_path))
-        return False
-
-
-def _verify_files_complete(paths: "list[Path]", min_size: int = 1) -> "list[Path]":
-    """Return only paths that exist and have ``stat.st_size >= min_size``.
-
-    Skipped paths are warned to the worker log so a partial/zero-length file
-    doesn't get silently packed into an output archive that downstream tools
-    will then refuse to open. The minimum size is intentionally tiny — we
-    only want to catch the empty / zero-byte case where a write was started
-    but never delivered any bytes; legitimate single-pixel TIFs are still
-    far above this threshold.
-    """
-    ok: list[Path] = []
-    for p in paths:
-        try:
-            st = p.stat()
-        except OSError as exc:
-            log.warning("Skipping unreadable file: %s (%s)", p, exc)
-            continue
-        if not p.is_file():
-            log.warning("Skipping non-file path: %s", p)
-            continue
-        if st.st_size < min_size:
-            log.warning(
-                "Skipping zero/short file (size=%d): %s",
-                st.st_size, p,
-            )
-            continue
-        ok.append(p)
-    return ok
+# Atomic output writers (images / CSVs / overlay) moved to the Qt-free
+# ``microscopy_io`` module. Re-exported so the many call sites here (and the
+# remote worker) are unchanged. See that module for the implementations + the
+# tmp -> fsync -> rename rationale.
+from microscopy_io import (  # noqa: E402,F401
+    _AtomicTextHandle,
+    _fsync_path,
+    _safe_atomic_text_write,
+    _safe_imwrite,
+    _safe_well,
+    _verify_files_complete,
+    _write_single_csv,
+    save_overlay,
+    write_csvs_per_well,
+)
 
 
 def _report_worker_failure(well_label: str, output_dir: "Path | None", exc: BaseException) -> None:
@@ -980,342 +864,21 @@ def load_2d_gray(path: Path) -> np.ndarray:
     return img.astype(np.float32)
 
 
-def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:
-    """Return white top-hat corrected image (background subtraction).
-
-    Uses scipy.ndimage.grey_closing with a square (2*radius+1) structuring
-    element.  A square footprint enables separable 1D decomposition inside
-    scipy, giving O(radius) complexity per pixel instead of the O(radius²)
-    of skimage's disk-based morphology.  For radius=50 on a 900×900 image
-    this is ~100× faster than the skimage disk path with negligible
-    difference in background-subtraction quality for typical fluorescence
-    images where the background varies slowly.
-    """
-    img = image.astype(np.float32)
-    size = 2 * radius + 1                      # side length of the square
-    background = grey_opening(img, size=(size, size))   # opening = erosion→dilation
-    return img - background                    # always ≥ 0 (opening is anti-extensive)
-
-
-# Background-subtraction methods selectable via ``--background``.
-BACKGROUND_METHODS = ("none", "top_hat", "sliding_disk", "fov_median", "empty_well",
-                      "robust_mesh", "fft_bandpass")
-
-
-def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarray | None":
-    """Additive background field from a stack of (empty-well) single-channel
-    images: the per-pixel **median** (robust to stray signal that moves between
-    fields), Gaussian-smoothed. Unlike :func:`estimate_basic_flatfield` this
-    keeps the measured *level* (no mean-1 normalization) so it can be
-    **subtracted**. Returns None when the stack is empty / shapes differ."""
-    from scipy.ndimage import gaussian_filter
-    if sigma is None:
-        sigma = _FLATFIELD_SIGMA  # defined later in the flat-field section
-    arrs = [np.asarray(a, dtype=np.float32) for a in stack]
-    arrs = [a for a in arrs if a.ndim == 2]
-    if not arrs:
-        return None
-    shp = arrs[0].shape
-    arrs = [a for a in arrs if a.shape == shp]
-    if not arrs:
-        return None
-    median = np.median(np.stack(arrs, axis=0), axis=0)
-    return gaussian_filter(median, sigma=float(sigma)).astype(np.float32)
-
-
-def _match_background_scale(img: np.ndarray, bg: np.ndarray) -> np.ndarray:
-    """Fit the measured background field to *img*'s actual background.
-
-    The empty-well field ``B`` is captured at the reference well's exposure /
-    illumination. If the target image differs in exposure, gain, illumination
-    level, or carries a constant dark offset, subtracting the raw ``B`` leaves a
-    residual that follows ``B``'s spatial shape — e.g. a corner-bright field
-    leaves bright corners behind. So instead of subtracting ``B`` verbatim, fit
-    the image's background as ``a·B + c`` (a least-squares regression of image
-    intensity on the field over the background-dominated — dimmest ~60% —
-    pixels, which excludes bright cells), and return that fitted field. The
-    multiplicative term ``a`` absorbs the exposure/illumination mismatch and the
-    constant ``c`` absorbs a uniform pedestal, so subtracting the result flattens
-    the background regardless of where ``B`` is bright — with no assumption about
-    its shape.
-
-    ``a`` is clamped to ``[0.05, 20]`` so a near-constant / pathological field
-    can't blow up the fit; on a degenerate field the original is returned.
-    """
-    i = np.asarray(img, dtype=np.float32)
-    b = np.asarray(bg, dtype=np.float32)
-    finite = np.isfinite(i) & np.isfinite(b)
-    if int(finite.sum()) < 16:
-        return b
-    iv = i[finite]
-    bv = b[finite]
-    # Background-dominated subset: the dimmest ~60% of pixels. Bright cells sit
-    # in the top tail and would otherwise pull the regression up.
-    thr = float(np.percentile(iv, 60.0))
-    mask = iv <= thr
-    if int(mask.sum()) < 16:
-        mask = np.ones_like(iv, dtype=bool)
-    x = bv[mask]
-    y = iv[mask]
-    xm = float(x.mean())
-    ym = float(y.mean())
-    denom = float(((x - xm) ** 2).sum())
-    if not np.isfinite(denom) or denom <= 0.0:
-        return b
-    a = float(((x - xm) * (y - ym)).sum() / denom)
-    if not np.isfinite(a):
-        return b
-    a = float(min(20.0, max(0.05, a)))
-    c = ym - a * xm
-    fitted = (a * b + c).astype(np.float32)
-    fitted[~np.isfinite(fitted)] = 0.0
-    return fitted
-
-
-def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
-    """Force a background-subtracted image non-negative **and** finite.
-
-    ``np.clip(x, 0, None)`` floors negatives but does **not** remove ``NaN`` /
-    ``±Inf`` (``np.clip(nan, 0, None) is nan``). A measured empty-well field can
-    carry a non-finite pixel (e.g. a NaN in the reference TIFFs survives the
-    median + Gaussian smoothing), and ``img - bg`` then keeps it. Left in, those
-    non-finite pixels crash StarDist's ClipperLib polygon NMS (an uncatchable
-    C++ ``terminate``) and poison intensity sums. So zero out non-finite pixels
-    first, then clip negatives to 0 (white-top-hat convention).
-    """
-    out = np.asarray(diff, dtype=np.float32)
-    if not np.all(np.isfinite(out)):
-        out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
-    return np.clip(out, 0.0, None)
-
-
-def _isotropic_disk_tophat(img: np.ndarray, radius: int) -> np.ndarray:
-    """Sliding-disk background: grayscale white top-hat with a flat *disk*
-    footprint of the given radius, computed at full resolution.
-
-    A disk of radius R slid under the intensity surface flattens regions wider
-    than ~2·R (treated as background) and preserves narrower ones (kept as
-    signal); the flatten/preserve threshold is set by the disk radius. Unlike
-    ``top_hat``'s square footprint the disk is isotropic (no terraced square
-    halos), and running at full resolution means there is no coarse grid to shift
-    the threshold and stamp bright ~150 px disks into confluent regions (the
-    failure of the reverted downscale approximation). The disk is built with
-    skimage's ``decomposition="sequence"`` (a stack of small line erosions) so the
-    opening is ~O(N) rather than O(N·radius²), keeping it fast at full resolution.
-    """
-    from skimage.morphology import disk, white_tophat
-    r = max(1, int(round(float(radius))))
-    try:
-        footprint = disk(r, decomposition="sequence")
-    except TypeError:                       # pragma: no cover - older skimage
-        footprint = disk(r)
-    # white_tophat = img - opening(img); opening is anti-extensive so it's ≥ 0.
-    return np.clip(white_tophat(img, footprint).astype(np.float32), 0.0, None)
-
-
-def _fft_butterworth_bandpass(img: np.ndarray, large_px: float,
-                              small_px: float = 0.0, order: int = 2) -> np.ndarray:
-    """Frequency-domain background flattening via a Butterworth band-pass.
-
-    A Butterworth **high-pass** removes structures LARGER than ~``large_px`` (the
-    slowly-varying background: uneven illumination, gradients, large blobs) —
-    independent of object size, unlike morphological top-hat / rolling-ball,
-    whose one structuring-element radius can never be both larger than every
-    object *and* smaller than the background variation. ``small_px > 0`` adds a
-    **low-pass** that also attenuates structures smaller than ~``small_px`` (pixel
-    noise) for a true band-pass; ``small_px <= 0`` leaves a pure high-pass that
-    preserves signal intensities (best for quantification).
-
-    Computed in float64 complex internally (``np.fft`` never clips); only the
-    final array is cast to float32, and no upper clamp is applied, so a response
-    that exceeds the original max is preserved (no artificial ceiling). The
-    returned image is already background-subtracted (≈ zero-mean); the caller
-    floors it at 0.
-    """
-    a = np.asarray(img, dtype=np.float32)
-    a = np.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
-    h, w = a.shape
-    # Reflect-pad before the FFT to suppress wrap-around / edge ringing.
-    ph, pw = h // 2, w // 2
-    padded = np.pad(a, ((ph, ph), (pw, pw)), mode="reflect")
-    H, W = padded.shape
-    fy = np.fft.fftfreq(H)[:, None]
-    fx = np.fft.fftfreq(W)[None, :]
-    D = np.sqrt(fy * fy + fx * fx)          # radial frequency, 0 at DC
-    transfer = np.ones_like(D)
-    n2 = 2 * int(order)
-    # A feature of size s (px) sits near frequency f ~ 1/s.
-    if large_px and large_px > 1:
-        f_lo = 1.0 / float(large_px)        # high-pass cutoff (remove < f_lo)
-        Dnz = np.where(D > 0, D, 1e-12)
-        hp = 1.0 / (1.0 + (f_lo / Dnz) ** n2)
-        hp[D == 0] = 0.0                     # kill DC (mean) explicitly
-        transfer = transfer * hp
-    if small_px and small_px > 1:
-        f_hi = 1.0 / float(small_px)        # low-pass cutoff (remove > f_hi)
-        lp = 1.0 / (1.0 + (D / f_hi) ** n2)
-        transfer = transfer * lp
-    out = np.fft.ifft2(np.fft.fft2(padded) * transfer).real
-    return out[ph:ph + h, pw:pw + w].astype(np.float32)
-
-
-def _robust_grid_background(img: np.ndarray, box: int,
-                            sigma: float = 3.0) -> np.ndarray:
-    """Robust local background on a coarse grid (SExtractor / photutils
-    ``Background2D`` style), interpolated to full resolution.
-
-    Each ``box``-sized tile yields a ``sigma``-clipped background level (the
-    SExtractor mode ``2.5*median - 1.5*mean`` on uncrowded tiles, else the
-    clipped median) — robust to bright / confluent objects, since most pixels in
-    a tile are background. The mesh is median-filtered (drops tiles swamped by a
-    single large object) then bicubically upsampled to a smooth full-resolution
-    background. The background scale is set by the tile size, not by a
-    structuring element that must out-size every object.
-
-    ``sigma`` is the sigma-clip threshold (default 3.0): smaller rejects object /
-    outlier pixels more aggressively (use on crowded fields), larger keeps more
-    pixels (use when objects are sparse and you want a tighter estimate).
-    """
-    from scipy.ndimage import median_filter, zoom
-    a = np.asarray(img, dtype=np.float32)
-    h, w = a.shape
-    sigma = float(sigma) if float(sigma) > 0 else 3.0
-    box = max(8, int(round(float(box))))
-    ny, nx = max(1, -(-h // box)), max(1, -(-w // box))   # ceil division
-    Hh, Ww = ny * box, nx * box
-    pad = a if (Hh == h and Ww == w) else np.pad(
-        a, ((0, Hh - h), (0, Ww - w)), mode="reflect")
-    tiles = (pad.reshape(ny, box, nx, box).transpose(0, 2, 1, 3)
-                .reshape(ny, nx, box * box).astype(np.float32))
-    tiles[~np.isfinite(tiles)] = np.nan
-    data = tiles
-    with np.errstate(invalid="ignore"):
-        for _ in range(3):                                   # iterative sigma clip
-            med = np.nanmedian(data, axis=2, keepdims=True)
-            std = np.nanstd(data, axis=2, keepdims=True)
-            data = np.where(np.abs(data - med) <= sigma * std, data, np.nan)
-        med = np.nanmedian(data, axis=2)
-        mean = np.nanmean(data, axis=2)
-        std0 = np.nanstd(data, axis=2)
-    # SExtractor mode where the clipped tile isn't too skewed (uncrowded), else
-    # the plain clipped median.
-    crowded = np.abs(mean - med) < 0.3 * np.where(std0 > 0, std0, np.inf)
-    mesh = np.where(crowded, 2.5 * med - 1.5 * mean, med).astype(np.float32)
-    if np.any(np.isfinite(mesh)):
-        mesh[~np.isfinite(mesh)] = float(np.nanmedian(mesh[np.isfinite(mesh)]))
-    else:
-        mesh[:] = 0.0
-    if ny >= 3 and nx >= 3:
-        mesh = median_filter(mesh, size=3, mode="nearest")
-    if mesh.shape == (1, 1):
-        return np.full((h, w), float(mesh[0, 0]), dtype=np.float32)
-    bg = zoom(mesh, (Hh / ny, Ww / nx), order=3, mode="nearest")
-    return bg[:h, :w].astype(np.float32)
-
-
-def subtract_background(image, radius: int, method: str = "sliding_disk",
-                        bg_field: "np.ndarray | None" = None,
-                        fft_small: float = 0.0,
-                        mesh_ratio: float = 3.0,
-                        mesh_sigma: float = 3.0) -> np.ndarray:
-    """White background subtraction, dispatched by *method*.
-
-    - ``top_hat`` — ``img - grey_opening(square)``: fast (separable 1-D passes)
-      but the flat square footprint leaves anisotropic, *terraced* residuals,
-      i.e. halos / hotspots next to bright objects. Current default.
-    - ``sliding_disk`` — isotropic disk white-top-hat (``img - opening(disk)``),
-      computed at FULL resolution via :func:`_isotropic_disk_tophat`. The smooth,
-      isotropic baseline for uneven / structured background: a disk of the given
-      radius flattens regions wider than ~2·radius and preserves narrower ones,
-      isotropically (no square terracing like ``top_hat``) and fast (~1.8 s a
-      1024² frame). An earlier downscale optimisation was reverted because a
-      coarse grid shifts that flatten/preserve threshold and stamps bright ~150 px
-      disks into confluent regions (which corrupt quantification).
-    - ``fov_median`` — ``img - median(img)``: subtract a single scalar, the
-      median intensity of the whole field of view. Because most pixels in a field
-      are background, the median is a robust estimate of the flat background level
-      (insensitive to bright cells/debris). Removes a uniform offset only — it
-      does NOT flatten spatial gradients (use a morphological method or
-      ``empty_well`` for that). No radius and no reference well needed.
-    - ``empty_well`` — ``img - bg_field``: subtract a *measured* per-channel
-      background (smoothed empty-well median, :func:`estimate_background_field`);
-      no-op when no field is available for the channel.
-    - ``robust_mesh`` — ``img - robust_grid_background``: a SExtractor /
-      photutils ``Background2D``-style estimator (sigma-clipped local background
-      on a coarse grid ~``radius/mesh_ratio`` per tile, mesh-median-filtered,
-      bicubically interpolated). Robust to bright / confluent objects because the
-      local background level is estimated per tile with a robust statistic, not
-      by a structuring element that must out-size every object — handles uneven
-      background the morphological methods can't flatten. ``mesh_ratio`` sets the
-      tile size relative to ``radius`` (larger → coarser/smoother background);
-      ``mesh_sigma`` is the per-tile sigma-clip threshold (smaller → rejects
-      bright object pixels more aggressively on crowded fields).
-    - ``fft_bandpass`` — a 2-D FFT Butterworth band-pass. A high-pass removes
-      low-frequency background (illumination, gradients, large blobs) regardless
-      of object size; ``fft_small > 0`` adds a low-pass that also denoises
-      (true band-pass). ``radius`` is the large-structure (low-freq) cutoff;
-      ``fft_small`` the small-structure (high-freq) cutoff in px (0 = high-pass
-      only, which preserves signal intensities for quantification).
-
-    Result is clipped at 0 (white-top-hat convention) so downstream sums stay
-    non-negative.
-    """
-    img = np.asarray(image, dtype=np.float32)
-    if method == "none":
-        return img
-    if method == "sliding_disk":
-        return _isotropic_disk_tophat(img, int(radius))
-    if method == "robust_mesh":
-        # Tile ≈ radius/mesh_ratio so the grid has several nodes across a
-        # background feature of size ~radius (the bicubic interpolation then
-        # follows it), while each tile still holds far more background than
-        # object pixels. Guard the ratio against 0 / negative input.
-        ratio = float(mesh_ratio) if float(mesh_ratio) > 0 else 3.0
-        box = max(8, int(round(int(radius) / ratio)))
-        return _floor_after_subtract(
-            img - _robust_grid_background(img, box, sigma=mesh_sigma))
-    if method == "fft_bandpass":
-        return _floor_after_subtract(
-            _fft_butterworth_bandpass(img, large_px=int(radius), small_px=float(fft_small)))
-    if method == "fov_median":
-        finite = img[np.isfinite(img)]
-        level = float(np.median(finite)) if finite.size else 0.0
-        return _floor_after_subtract(img - level)
-    if method == "empty_well":
-        if bg_field is not None:
-            bg = np.asarray(bg_field, dtype=np.float32)
-            if bg.shape == img.shape:
-                # Match the field to this image's background level first, so an
-                # exposure/illumination mismatch can't leave a residual in the
-                # field's shape (e.g. bright corners).
-                bg = _match_background_scale(img, bg)
-                return _floor_after_subtract(img - bg)
-        return img
-    return apply_tophat(img, int(radius))  # top_hat (default / back-compat)
-
-
-def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
-    """Proper combined empty-well correction when the empty well drives *both*
-    flat-field and background: subtract the measured additive background ``B``
-    (``bg_field``, un-normalized), then divide by the mean-1 illumination field
-    ``ff_field`` (= ``B/mean(B)``) — i.e. ``(raw − B) / (B/mean(B))``.
-
-    This fixes the scale mismatch of doing them separately (flat-field divides,
-    then a raw-scale field is subtracted from the rescaled image). It assumes the
-    additive background **tracks the illumination** (true for media autofluor-
-    escence under uneven excitation): then for ``raw = gain·signal + B`` with
-    ``gain ∝ B`` it recovers ``signal``, and the empty well itself maps to ~0.
-    Each field no-ops when absent / shape-mismatched.
-    """
-    img = np.asarray(image, dtype=np.float32)
-    if bg_field is not None:
-        b = np.asarray(bg_field, dtype=np.float32)
-        if b.shape == img.shape:
-            b = _match_background_scale(img, b)
-            img = _floor_after_subtract(img - b)
-    return apply_flatfield(img, ff_field)
-
-
+# Background-correction math moved to ``microscopy_background.py`` (a Qt-free
+# cohesive module). Re-exported here so ``pm.<name>`` call sites and the remote
+# worker are unchanged. See that module for the implementations.
+from microscopy_background import (  # noqa: E402,F401
+    BACKGROUND_METHODS,
+    apply_tophat,
+    combined_empty_well_correct,
+    estimate_background_field,
+    subtract_background,
+    _floor_after_subtract,
+    _fft_butterworth_bandpass,
+    _isotropic_disk_tophat,
+    _match_background_scale,
+    _robust_grid_background,
+)
 def _subtract_background_step(img: np.ndarray, *, radius: int,
                               background_method: str, bg_field, fft_small: float = 0.0,
                               mesh_ratio: float = 3.0, mesh_sigma: float = 3.0,
@@ -1643,7 +1206,7 @@ FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
 # (the GUI recomputes them for the Segmentation tab's flat-field validation
 # view). Imported under the original names so the rest of this module is
 # unchanged.
-from flatfield_core import (  # noqa: E402
+from flatfield_core import (  # noqa: E402,F401
     _FLATFIELD_FLOOR,
     _FLATFIELD_SIGMA,
     _normalize_flatfield,
@@ -1727,14 +1290,14 @@ def compute_region_areas(
             from skimage.filters import threshold_otsu
             fg = fg | (img > float(threshold_otsu(finite)))
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if close_radius and close_radius > 0:
         try:
             from scipy.ndimage import binary_closing as _binary_closing
             from skimage.morphology import disk
             fg = _binary_closing(fg, structure=disk(int(close_radius)))
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # closing can erode label pixels near the image border; re-union the labels
     # so every nucleus always anchors a component at least its own size.
     fg = np.asarray(fg, dtype=bool) | (lab > 0)
@@ -1823,192 +1386,6 @@ def build_flatfield_models(
     return models
 
 
-def save_overlay(nir_raw: np.ndarray, labels: np.ndarray, out_path: Path) -> None:
-    """Save an 8-bit RGB PNG with nucleus boundaries drawn in red."""
-    mn, mx = nir_raw.min(), nir_raw.max()
-    grey = ((nir_raw - mn) / (mx - mn) * 255).astype(np.uint8) if mx > mn \
-           else np.zeros_like(nir_raw, dtype=np.uint8)
-    rgb = np.stack([grey, grey, grey], axis=-1)
-    boundaries = find_boundaries(labels, mode="outer")
-    rgb[boundaries, 0] = 255
-    rgb[boundaries, 1] = 0
-    rgb[boundaries, 2] = 0
-    _safe_imwrite(out_path, rgb)
-
-
-def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
-    from csbdeep.utils import normalize
-    if _STARDIST_MODEL is None:
-        raise RuntimeError(
-            "StarDist model is not initialised. "
-            "Ensure _worker_init ran before process_image_group."
-        )
-    # StarDist's polygon non-maximum-suppression uses ClipperLib, which casts
-    # polygon coordinates to integers and aborts the whole *process* with an
-    # uncatchable C++ exception —
-    #   terminate called after throwing an instance of
-    #   'ClipperLib::clipperException'  ("Coordinate outside allowed range")
-    # — if the network is fed non-finite OR out-of-distribution input. Two ways
-    # in: (1) a single NaN/Inf pixel — ``normalize`` uses ``np.percentile`` (not
-    # the nan-aware variant), so one NaN turns the percentiles NaN and the whole
-    # image non-finite; (2) huge *finite* values — empty-well flat-field divides
-    # by a near-zero field and amplifies a dim region by ~100x, and the default
-    # ``normalize(clip=False)`` does NOT clip the top end, so those outliers reach
-    # the network and the regressed distances blow up. So: scrub non-finite, then
-    # normalize WITH ``clip=True`` and an explicit clamp so the input is strictly
-    # in [0, 1] — the distribution StarDist was trained on — making the abort
-    # impossible regardless of the upstream correction.
-    arr = np.asarray(nir_corr, dtype=np.float32)
-    if not np.all(np.isfinite(arr)):
-        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-    nir_norm = normalize(arr, 1, 99.8, clip=True)
-    if not np.all(np.isfinite(nir_norm)):
-        nir_norm = np.nan_to_num(nir_norm, nan=0.0, posinf=0.0, neginf=0.0)
-    np.clip(nir_norm, _STARDIST_INPUT_CLIP[0], _STARDIST_INPUT_CLIP[1], out=nir_norm)
-
-    # ── ClipperLib diagnostics ───────────────────────────────────────────────
-    # The abort ("coordinate outside allowed range") happens *inside*
-    # predict_instances, in StarDist's polygon NMS, when the regressed vertices
-    # land at out-of-range integer coordinates — the classic cause being a
-    # pathological / near-constant input (e.g. an empty-well over-subtracted
-    # nuclear field). It's an uncatchable C++ abort, so we can't try/except it;
-    # instead log the input characteristics for *every* FOV. The last
-    # ``seg-input`` line before the process dies names the culprit and its stats.
-    fov = _SEG_FOV_LABEL or "?"
-    lo, hi = float(nir_norm.min()), float(nir_norm.max())
-    log.info("  seg-input %s: shape=%s min=%.4g max=%.4g mean=%.4g dyn_range=%.4g "
-             "finite=%.0f%% nonzero=%.0f%%",
-             fov, tuple(nir_norm.shape), lo, hi, float(nir_norm.mean()), hi - lo,
-             float(np.isfinite(nir_norm).mean()) * 100.0,
-             float(np.count_nonzero(nir_norm)) / nir_norm.size * 100.0)
-
-    # A near-constant field has no nuclei and is the classic ClipperLib trigger —
-    # skip prediction (0 nuclei) rather than risk the uncatchable abort.
-    if hi - lo < 1e-6:
-        log.warning("  seg-input %s: near-constant field (dyn_range≈0) — skipping "
-                    "StarDist (0 nuclei) to avoid a ClipperLib abort", fov)
-        return np.zeros(nir_norm.shape, dtype=np.int32)
-
-    # Opt-in deep trace (ALLWELL_SEG_DEBUG=1): run the raw network once to log the
-    # predicted probability / radial-distance magnitudes. Huge or non-finite
-    # distances are the *direct* source of the out-of-range polygon coordinates;
-    # this pins the failure to prediction vs input. Fully guarded — never alters
-    # the production path, and falls back silently if the split API differs.
-    if os.environ.get("ALLWELL_SEG_DEBUG"):
-        try:
-            pred = _STARDIST_MODEL.predict(nir_norm)
-            prob, dist = pred[0], pred[1]
-            log.info("  seg-debug %s: prob[min=%.3g max=%.3g] dist[min=%.3g "
-                     "max=%.3g] dist_nonfinite=%d prob_shape=%s dist_shape=%s",
-                     fov, float(np.nanmin(prob)), float(np.nanmax(prob)),
-                     float(np.nanmin(dist)), float(np.nanmax(dist)),
-                     int((~np.isfinite(dist)).sum()),
-                     tuple(np.shape(prob)), tuple(np.shape(dist)))
-        except Exception as exc:                                # noqa: BLE001
-            log.warning("  seg-debug %s: predict() trace failed: %s", fov, exc)
-
-    labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
-    return labels.astype(np.int32)
-
-
-def _segment_stardist_seeded_watershed_cell(
-    nir_corr: np.ndarray,
-    cytoplasm_raw: np.ndarray,
-    tophat_radius_fluor: int,
-    min_nucleus_area_px: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    stardist_labels = _segment_stardist_nuclei(nir_corr)
-    nucleus_ids = np.unique(stardist_labels)
-    nucleus_ids = nucleus_ids[nucleus_ids != 0]
-    filtered_ids: list[int] = []
-    for nid in nucleus_ids:
-        area = int(np.count_nonzero(stardist_labels == nid))
-        if area >= min_nucleus_area_px:
-            filtered_ids.append(int(nid))
-
-    nuclear_points = np.zeros_like(stardist_labels, dtype=np.int32)
-    marker_id = 1
-    for nid in filtered_ids:
-        cy, cx = ndi.center_of_mass(stardist_labels == nid)
-        if np.isnan(cy) or np.isnan(cx):
-            continue
-        y = int(np.clip(round(float(cy)), 0, stardist_labels.shape[0] - 1))
-        x = int(np.clip(round(float(cx)), 0, stardist_labels.shape[1] - 1))
-        nuclear_points[y, x] = marker_id
-        marker_id += 1
-
-    # Isotropic disk top-hat (not the square apply_tophat): a square footprint
-    # here stamps square bias onto the cytoplasm mask → square-edged watershed
-    # cells, regardless of the chosen --background method.
-    cytoplasm_tophat = _isotropic_disk_tophat(cytoplasm_raw, tophat_radius_fluor)
-    try:
-        thresh = threshold_otsu(cytoplasm_tophat)
-    except ValueError:
-        thresh = float(np.mean(cytoplasm_tophat))
-    cytoplasm_binary_mask = cytoplasm_tophat > thresh
-    distance = ndi.distance_transform_edt(cytoplasm_binary_mask)
-    if marker_id <= 1:
-        labels = np.zeros_like(stardist_labels, dtype=np.int32)
-    else:
-        labels = watershed(
-            -distance,
-            markers=nuclear_points,
-            mask=cytoplasm_binary_mask,
-        ).astype(np.int32)
-    return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
-
-
-def _cellpose_model(model_type: str = "cyto3"):
-    """Return the per-worker Cellpose model for *model_type*, loading it once.
-
-    Guarded import so the app / pipeline run without cellpose installed; the
-    error only surfaces when a Cellpose method is actually selected."""
-    key = str(model_type or "cyto3").strip() or "cyto3"
-    model = _CELLPOSE_MODELS.get(key)
-    if model is None:
-        try:
-            from cellpose import models as _cp_models
-        except Exception as exc:  # pragma: no cover - depends on optional dep
-            raise RuntimeError(
-                "Cellpose segmentation requires the 'cellpose' package. Install "
-                f"it (see requirements) — import failed: {exc}"
-            ) from exc
-        model = _cp_models.CellposeModel(model_type=key)
-        _CELLPOSE_MODELS[key] = model
-    return model
-
-
-def _segment_cellpose(
-    image: np.ndarray,
-    *,
-    model_type: str = "cyto3",
-    diameter: float = 0.0,
-    flow_threshold: float = 0.4,
-    cellprob_threshold: float = 0.0,
-    nucleus_image: "np.ndarray | None" = None,
-) -> np.ndarray:
-    """Segment *image* with Cellpose. Works on any channel (fluorescent or
-    brightfield) — the caller chooses the input. ``diameter=0`` auto-estimates.
-
-    When *nucleus_image* is given, the two channels are stacked and Cellpose runs
-    in cyto+nucleus mode (``channels=[1, 2]``); otherwise grayscale
-    (``channels=[0, 0]``). ``flow_threshold`` / ``cellprob_threshold`` tune the
-    mask recovery / probability cut.
-    """
-    model = _cellpose_model(model_type)
-    diam = float(diameter) if diameter and diameter > 0 else None
-    seg = np.asarray(image)
-    if nucleus_image is not None:
-        stacked = np.stack([seg, np.asarray(nucleus_image)], axis=-1)  # (Y, X, 2)
-        result = model.eval(stacked, diameter=diam, channels=[1, 2],
-                            flow_threshold=flow_threshold,
-                            cellprob_threshold=cellprob_threshold)
-    else:
-        result = model.eval(seg, diameter=diam, channels=[0, 0],
-                            flow_threshold=flow_threshold,
-                            cellprob_threshold=cellprob_threshold)
-    masks = result[0]  # eval returns (masks, flows, styles[, diams])
-    return np.asarray(masks, dtype=np.int32)
 
 
 def _segment_classical(image: np.ndarray) -> np.ndarray:
@@ -2064,6 +1441,7 @@ from auto_threshold_core import (
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,
 )
+from aw_safe import swallowed
 
 
 def _estimate_thresholds_standalone(
@@ -2273,35 +1651,22 @@ def build_processed_output_path(
     output_dir: Path,
     suffix: str = "",
     ext_override: str | None = None,
-    role: "object | None" = None,
-    channel: str = "",
 ) -> Path:
     """Build output path as input stem + suffix + extension.
 
-    Two equivalent calling conventions:
+    Pass ``suffix="_tophat"`` / ``"_labels"`` etc. directly. The default
+    extension is copied from *src_path* so processed outputs preserve the
+    source file type (``.tif`` / ``.tiff`` etc.) unless explicitly overridden.
 
-    * Legacy: pass ``suffix="_tophat"`` / ``"_labels"`` etc. directly.
-    * Preferred: pass ``role=Role.FLUOR_TOPHAT`` (etc.) so the suffix
-      comes from the canonical :data:`image_identity.ROLE_CATALOG`
-      table — that catalog is the single source of truth shared with
-      the reader-side classifier, so suffix drift between the writer
-      and reader can't happen.
-
-    The default extension is copied from *src_path* so processed outputs
-    preserve source file type (``.tif`` / ``.tiff`` etc.) unless
-    explicitly overridden.
+    (The reader-side ``image_identity.ROLE_CATALOG`` is the canonical suffix
+    table. A previous "preferred" catalog-driven branch here imported it from
+    ``well_viewer`` — a violation of the §6.2 pipeline-self-sufficiency contract,
+    and dead anyway since no caller passed ``role=``. If catalog-driven *writing*
+    is ever revived, move the catalog to a Qt-free ``*_core`` module first.)
     """
     ext = str(ext_override) if ext_override is not None else str(src_path.suffix)
     if not ext:
         ext = ".tif"
-    if role is not None:
-        # Catalog-driven path: consult image_identity for the suffix.
-        # Lazy import so this module's CLI invocation doesn't always
-        # pay the package init cost.
-        from well_viewer.data.image_identity import role_output_filename
-        return output_dir / role_output_filename(
-            src_path.stem, role, channel=channel, ext=ext,
-        )
     return output_dir / f"{src_path.stem}{suffix}{ext}"
 
 # ---------------------------------------------------------------------------
@@ -2359,8 +1724,7 @@ def process_image_group(
     """
     log.info("Processing %s  (%d fluor channel(s): %s)",
              nuclear_path.name, len(fluor_paths), ", ".join(fluor_tokens))
-    global _SEG_FOV_LABEL
-    _SEG_FOV_LABEL = nuclear_path.name
+    _stardist.set_fov_label(nuclear_path.name)
 
     _t = time.perf_counter()
     nir_raw = load_2d_gray(nuclear_path)
@@ -2850,63 +2214,11 @@ def find_image_groups(
 
 
 # Backward-compatible alias kept for any external callers.
-def find_image_pairs(
-    input_dir: Path,
-    nuclear_token: str,
-    gfp_token: str,
-    schema: "list[str] | None" = None,
-    sep: str = DEFAULT_SEP,
-) -> "list[tuple[Path, Path]]":
-    """Deprecated alias for find_image_groups with a single fluor channel."""
-    groups = find_image_groups(
-        input_dir, nuclear_token, [gfp_token], schema=schema, sep=sep
-    )
-    return [(nuc, fluors[0]) for nuc, fluors in groups]
-
 # ---------------------------------------------------------------------------
 # CSV writer
 # ---------------------------------------------------------------------------
 
 
-def _safe_well(label: str) -> str:
-    """Sanitise a well label for use as a filename component."""
-    return label.replace("/", "_").replace("\\", "_")
-
-def _write_single_csv(records: list[dict], out_path: Path) -> None:
-    import csv
-    fieldnames = list(records[0].keys())
-    # Atomic write: tmp → fsync → rename. Without this a downstream consumer
-    # (the GUI's CSV-loader, the Bar / Line plot tabs, or the next pipeline
-    # run with --force) can pick up a half-written file when the worker is
-    # interrupted or when the OS hasn't flushed the page cache before the
-    # follow-up rename / read.
-    with _safe_atomic_text_write(out_path) as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def write_csvs_per_well(
-    all_records: list[dict],
-    output_dir: Path,
-    csv_prefix: str,
-) -> None:
-    """Write one CSV per well, partitioned by the 'well' metadata field."""
-    if not all_records:
-        log.warning("No records to write; no per-well CSVs produced.")
-        return
-
-    from collections import defaultdict
-    by_well: dict[str, list[dict]] = defaultdict(list)
-    for rec in all_records:
-        well = rec.get("well") or "unknown_well"
-        by_well[well].append(rec)
-
-    for well, records in sorted(by_well.items()):
-        safe_well = _safe_well(well)
-        out_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
-        _write_single_csv(records, out_path)
-        log.info("Well %-12s -> %s  (%d rows)", well, out_path.name, len(records))
 
 # ---------------------------------------------------------------------------
 # Worker initialiser
@@ -2927,7 +2239,7 @@ def _ensure_pkg_resources_shim() -> None:
         import pkg_resources  # noqa: F401
         return
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     import types
     from importlib import metadata as _md
 
@@ -3171,7 +2483,6 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     On all other platforms we default to CPU to avoid unexpected CUDA usage.
     """
     import sys as _sys
-    global _STARDIST_MODEL
 
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -3238,7 +2549,7 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
                 if isinstance(_h, logging.StreamHandler):
                     _h.stream = _sys2.stdout
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     # ── Device note for logging ────────────────────────────────────────────────
     if force_cpu:
@@ -3290,7 +2601,7 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     _orig_ssl_ctx = _ssl._create_default_https_context
     _ssl._create_default_https_context = _ssl._create_unverified_context
     try:
-        _STARDIST_MODEL = _load_stardist_pretrained(_StarDist2D, "2D_versatile_fluo")
+        _stardist.set_model(_load_stardist_pretrained(_StarDist2D, "2D_versatile_fluo"))
     finally:
         _ssl._create_default_https_context = _orig_ssl_ctx
     log.info("Worker %d model loaded in %.1f s.", os.getpid(), time.perf_counter() - _t0)
@@ -4323,6 +3634,7 @@ def _collect_image_stems(input_dir: Path) -> "set[str]":
                         continue
                     stems.add(Path(name).stem)
         except Exception:
+            swallowed()  # silent except
             continue
     return stems
 

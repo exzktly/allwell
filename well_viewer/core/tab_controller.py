@@ -15,6 +15,7 @@ from well_viewer.features.review_image.renderer import update_preview
 from well_viewer.features.scatter.controller import update_scatter_menus
 import logging
 from functools import partial
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer.runtime_app")
 
@@ -33,7 +34,7 @@ def on_tab_change(app, _e=None) -> None:
         try:
             sb._close_dock()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     app._sidebar_main_frame.setVisible(False)
     app._sidebar_preview_frame.setVisible(False)
@@ -244,7 +245,7 @@ def current_centre_tab(app) -> str:
             try:
                 return plotting_nb.currentName()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
     return tab
 
 

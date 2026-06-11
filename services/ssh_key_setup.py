@@ -32,7 +32,6 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from services.remote_config import resolve_ssh_binary
 

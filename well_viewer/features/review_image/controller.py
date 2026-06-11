@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
         try:
             app._set_status("Could not navigate to the Review CSV row (see log for details).")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def on_review_csv_row_double_click(app, item) -> None:
@@ -269,7 +270,7 @@ def on_review_csv_row_double_click(app, item) -> None:
                 f"Could not navigate to Segmentation: {exc} (see log for details).",
             )
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def _on_review_csv_row_double_click_impl(app, item) -> None:
@@ -473,7 +474,7 @@ def _show_image_pixel_tooltip(app, event, channel_label: str, label) -> None:
             if nid > 0:
                 extra = f"  cell:{nid}"
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     global_pos = lbl.mapToGlobal(QPoint(ex, ey))
     QToolTip.showText(global_pos, f"x={int(img_x)}  y={int(img_y)}  {channel_label}:{val:.1f}{extra}")
 
@@ -742,7 +743,6 @@ def review_build_include_map(
     if df is not None and not df.empty:
         keys = review_row_keys_series(app,df)
         if keys is not None:
-            target = (fov, tp, None)
             fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
             sub = df.loc[fov_eq.fillna(False).to_numpy()]
             if not sub.empty:
@@ -910,7 +910,7 @@ def set_review_cell_included(app, fov: str, tp: str, nid: str, included: str) ->
         try:
             app._invalidate_stats_cache()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Persist to disk (debounced) so curation survives between sessions.
     app._persistence.schedule_save("cell_overrides")
     # Bump the override version so the include-map cache is bypassed
@@ -963,7 +963,7 @@ def set_review_cells_included_batch(
         try:
             app._invalidate_stats_cache()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     app._persistence.schedule_save("cell_overrides")
     app._app_state.review_image.override_version += 1
     prev_zoom = float(app._app_state.review_image.zoom)
@@ -1076,6 +1076,7 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
         try:
             df = app._get_rows(lbl)
         except Exception:
+            swallowed()  # silent except
             continue
         if df is None or df.empty:
             continue

@@ -62,12 +62,11 @@ def test_preview_defaults():
     assert ps.fluor == {}
     assert ps.overlay == {}
     assert ps.mask == {}
-    assert ps.montage_photos == []
 
 
 def test_preview_mutable_defaults_are_per_instance():
     a, b = PreviewState(), PreviewState()
     a.fluor[("1", "0h")] = object()
-    a.montage_photos.append(object())
+    a.overlay[("1", "0h")] = object()
     assert b.fluor == {}
-    assert b.montage_photos == []
+    assert b.overlay == {}

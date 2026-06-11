@@ -40,7 +40,6 @@ from services.remote_config import (
     RemoteHost,
     delete_remote,
     load_remotes,
-    resolve_ssh_binary,
     write_remote,
 )
 from services import ssh_key_setup

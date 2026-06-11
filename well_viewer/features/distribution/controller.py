@@ -13,6 +13,7 @@ from typing import Iterable, List, Sequence, Tuple
 import numpy as np
 
 from well_viewer.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
+from well_viewer.core.safe import swallowed
 
 
 NO_DATA_MSG = (
@@ -93,7 +94,7 @@ def _apply_export_style(app) -> None:
         from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, fig, canvas)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def _apply_card_style(app, ax) -> None:
@@ -167,7 +168,7 @@ def _setup_axes(app, n_axes: int):
             try:
                 fig._plot_card = card
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         if n_axes == 1:
             axes = [fig.add_subplot(1, 1, 1)]
             fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
@@ -283,7 +284,7 @@ def _retint_axes_text(app) -> None:
             ax.xaxis.label.set_color(sec)
             ax.yaxis.label.set_color(sec)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Faceted-mode uses a figure-level suptitle, not per-axis titles —
     # without this it kept matplotlib's default black ink and disappeared
     # into the dark screen-mode background.
@@ -292,7 +293,7 @@ def _retint_axes_text(app) -> None:
         try:
             suptitle.set_color(fg)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
@@ -325,7 +326,7 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
             try:
                 ax.set_xscale("log")
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         ax.set_xlabel(_xlabel_for(app))
         ax.set_ylabel("Cumulative fraction")
         ax.set_ylim(-0.02, 1.05)
@@ -333,7 +334,7 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
             try:
                 ax.legend(fontsize=7, loc="best", framealpha=0.0, facecolor="none")
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
     else:
         # Histogram / Histogram + KDE / KDE only — shared bin edges so
         # every group's bars line up on the same x-grid.
@@ -354,14 +355,14 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
             try:
                 ax.set_xscale("log")
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         ax.set_xlabel(_xlabel_for(app))
         ax.set_ylabel("Density")
         if any(name for name, _, _ in groups):
             try:
                 ax.legend(fontsize=7, loc="best", framealpha=0.0, facecolor="none")
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     # Threshold marker for non-violin modes. Suppressed for smfish_count —
     # the channel's intensity threshold doesn't map onto a spot-count axis.
@@ -371,7 +372,7 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
             if math.isfinite(threshold):
                 ax.axvline(threshold, color="orange", linestyle="--", linewidth=1.0, alpha=0.8)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     title = _title_for(app, tp_h, int(sum(int(vs.size) for _, _, vs in groups)), len(groups))
     ax.set_title(title, fontsize=9)
@@ -416,7 +417,7 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h) -> None:
             try:
                 ax.set_xscale("log")
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         # Annotate group name on the right edge of each panel so the
         # vertical stack reads top-to-bottom without consuming a slot
         # in a legend or stretching the layout horizontally.

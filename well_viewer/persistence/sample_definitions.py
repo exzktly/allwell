@@ -10,12 +10,12 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
-from well_viewer.data.data_loading import extract_well_token
 from well_viewer.persistence import (
     cell_gating as _cell_gating,
     ratios as _ratios,
 )
 from well_viewer.features.grouping.label_grid_view import label_grid_refresh
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -143,7 +143,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
                 "compatibility mode. Edit and Save to clean up (see log)."
             )
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         return False, {}
     # Detect a legacy v1 block so we can surface a one-time migration toast
     # after the upgrade succeeds. v2 blocks carry schema_version ≥ 2.
@@ -166,7 +166,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
             app._set_status("Couldn't upgrade saved sample definitions — using "
                             "them in compatibility mode (see log).")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         return False, {}
 
     app._app_state.selection.selections = selections
@@ -185,7 +185,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
             else:
                 app._set_status(msg)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if set_notes:
         app._notes_text = notes
         notes_edit = getattr(app, "_notes_edit", None)
@@ -298,7 +298,7 @@ def clear_all(app) -> None:
         try:
             label_grid_refresh(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     app._notes_text = ""
     notes_edit = getattr(app, "_notes_edit", None)
@@ -340,5 +340,5 @@ def clear_all(app) -> None:
         try:
             app._redraw()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     app._set_status("Sample definitions cleared.")

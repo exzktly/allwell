@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.core.safe import swallowed
 
 
 _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
@@ -306,7 +307,7 @@ def export_plot_data(app) -> None:
 
     rows_out = []
     for label in selected:
-        pts = aggregate_well(app, 
+        pts = aggregate_well(app,
             label, threshold=threshold, use_sem=use_sem,
             val_col=app._app_state.channel.active_val_col,
             fluor_gates=fluor_gates,
@@ -490,7 +491,7 @@ def export_raw_data_csv(app) -> None:
         mask = df_included_mask(df).to_numpy(copy=True)
         area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area) 
+            mask &= np.isfinite(area)
         fluor = pd.to_numeric(df[gate_col], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
             mask &= np.isfinite(fluor) & (fluor > fluor_gate_threshold)
@@ -627,7 +628,7 @@ def export_scatter_agg_data(app) -> None:
     try:
         app._sync_scatter_agg_stat_combos()
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
     try:
         stat_x = app._scatter_agg_stat_x_cb.currentText()
@@ -641,7 +642,7 @@ def export_scatter_agg_data(app) -> None:
                     if widget.isChecked():
                         selected_timepoints.append(float(tp_str))
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
             selected_timepoints.sort()
 
         if not selected_timepoints:

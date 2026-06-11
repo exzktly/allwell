@@ -81,13 +81,8 @@ def _read_combo(app, attr: str):
 
 
 def _read_float(app, attr: str, default: float) -> float:
-    e = getattr(app, attr, None)
-    if e is None:
-        return default
-    try:
-        return float(str(e.text()).strip())
-    except (ValueError, AttributeError):
-        return default
+    from well_viewer.core.ui_helpers import parse_float_edit
+    return parse_float_edit(getattr(app, attr, None), default)
 
 
 def _read_widgets_into_state(app) -> None:
@@ -151,9 +146,8 @@ def _resolve_lut(app, arr):
 
 
 def _set_status(app, text: str) -> None:
-    lbl = getattr(app, "_playground_status", None)
-    if lbl is not None:
-        lbl.setText(text)
+    from well_viewer.core.ui_helpers import set_widget_text
+    set_widget_text(app, "_playground_status", text)
 
 
 # ── main render ──────────────────────────────────────────────────────────────

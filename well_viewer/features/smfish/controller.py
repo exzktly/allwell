@@ -16,7 +16,7 @@ import numpy as np
 
 from well_viewer.data.image_discovery import ImgRef as SmfishImgRef
 from well_viewer.data.image_resolver import output_suffixes_for_kind
-from well_viewer.features.preview.controller import classify_member, read_member_bytes, scan_zip_members
+from well_viewer.data.zip_members import classify_member, read_member_bytes, scan_zip_members
 
 
 logger = logging.getLogger("smfish_tab")
@@ -107,7 +107,3 @@ def read_image_arrays(sm_ref: SmfishImgRef, mk_ref: SmfishImgRef):
 # Re-exports — the canonical implementations now live in image_identity.
 # Kept here so existing callers `from well_viewer.features.smfish.controller
 # import normalize_well_token, normalize_id` keep working without churn.
-from well_viewer.data.image_identity import (  # noqa: E402
-    normalize_well_token,
-    normalize_id,
-)

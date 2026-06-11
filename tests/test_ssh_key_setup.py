@@ -18,16 +18,13 @@ are mocked.
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from services.ssh_key_setup import (
     build_copy_command,
     default_key_path,
     generate_keypair,
-    has_ssh_copy_id,
     key_has_passphrase,
     probe_ssh_connection,
     verify_key_works,

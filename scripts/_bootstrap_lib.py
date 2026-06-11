@@ -21,17 +21,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import platform
-import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 # Repo root resolved from this file's location. Used to locate the four

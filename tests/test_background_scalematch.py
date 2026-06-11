@@ -5,7 +5,6 @@ reference well in exposure / offset — i.e. no residual that tracks the field.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 import process_microscopy as pm
 

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
+from aw_safe import swallowed
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
@@ -176,7 +177,7 @@ def run_zipper(
         try:
             proc_hook(proc)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     try:
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -194,7 +195,7 @@ def run_zipper(
             try:
                 proc_hook(None)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
 
 def resolve_input_output(

@@ -105,4 +105,3 @@ class PreviewState:
     fluor: dict = field(default_factory=dict)
     overlay: dict = field(default_factory=dict)
     mask: dict = field(default_factory=dict)
-    montage_photos: list = field(default_factory=list)

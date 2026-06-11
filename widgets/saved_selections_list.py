@@ -41,7 +41,6 @@ API
 from __future__ import annotations
 
 import os as _os
-import re as _re
 import sys as _sys
 import uuid as _uuid
 
@@ -57,6 +56,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 import theme  # noqa: E402
+from well_token import canonical_well_label  # noqa: E402
 
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"
@@ -67,7 +67,6 @@ _CHEV_O = "▾"
 
 _PLATE_ROWS = "ABCDEFGH"
 _ALL_WELLS = [f"{r}{c:02d}" for r in _PLATE_ROWS for c in range(1, 13)]
-_TOKEN_RE = _re.compile(r"^([A-Ha-h])\s*0*([1-9]|1[0-2])$")
 
 
 def _hex6(c) -> str:
@@ -76,10 +75,7 @@ def _hex6(c) -> str:
 
 
 def _norm_token(w) -> str | None:
-    if not isinstance(w, str):
-        return None
-    m = _TOKEN_RE.match(w.strip())
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else None
+    return canonical_well_label(w) if isinstance(w, str) else None
 
 
 def _well_rank(w) -> int:

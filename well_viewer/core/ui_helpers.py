@@ -7,11 +7,44 @@ from typing import Any, Callable, List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
+    QAbstractItemView, QApplication, QFrame, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.data.data_loading import parse_timepoint_hours
+from well_viewer.core.safe import swallowed
+
+
+def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
+    """Parse a ``QLineEdit``'s text as ``float``; return *fallback* on blank,
+    non-numeric, or (when *allow_auto*) the literal ``"auto"``.
+
+    Consolidates the ``try: float(edit.text().strip()) except: fallback`` helper
+    re-implemented across several feature views. A non-widget / ``None`` *edit*
+    also yields *fallback* (so ``getattr(app, attr, None)`` can be passed
+    directly).
+    """
+    try:
+        txt = str(edit.text()).strip()
+    except (AttributeError, TypeError):
+        return fallback
+    if allow_auto and txt.lower() == "auto":
+        return fallback
+    if not txt:
+        return fallback
+    try:
+        return float(txt)
+    except ValueError:
+        return fallback
+
+
+def set_widget_text(app, attr_name: str, text: str) -> None:
+    """Set ``text`` on ``app.<attr_name>`` if that attribute exists and is a
+    text widget — collapses the repeated ``lbl = getattr(...); if lbl: ...``
+    status-setter pattern."""
+    w = getattr(app, attr_name, None)
+    if hasattr(w, "setText"):
+        w.setText(text)
 
 
 def set_combo_values(combo: object, values: List[str]) -> None:
@@ -137,7 +170,7 @@ def refresh_plot_empty_states(app: Any) -> None:
             if stack.currentIndex() != target:
                 stack.setCurrentIndex(target)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def build_section_header(
@@ -206,7 +239,7 @@ def _btn(parent: Optional[QWidget], text: str, command: Optional[Callable[[], An
             dpr = b.devicePixelRatioF() if hasattr(b, "devicePixelRatioF") else 1.0
             b.setIcon(_icons.make_icon(icon, 14, dpr=dpr or 1.0))
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if command is not None:
         b.clicked.connect(lambda _=False: command())
     return b
@@ -244,6 +277,7 @@ def tok_at_event(event: Any, btn_dict: dict) -> Optional[str]:
             if btn is not None and btn.isVisible() and btn.underMouse():
                 return tok
         except Exception:
+            swallowed()  # silent except
             continue
     return None
 
@@ -461,7 +495,7 @@ def make_band_controls(app: Any, parent: QWidget, *, with_fov: bool = False) -> 
             try:
                 app._refresh_fov_btn_state()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     h.addStretch(1)
     return w
@@ -626,7 +660,7 @@ def lut_colormap_to_rgb(arr, lo: Optional[float] = None,
             from matplotlib import colormaps as _mpl_cmaps
             return (_mpl_cmaps[cmap_name](norm)[..., :3] * 255).astype(_np.uint8).copy()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     gray = (norm * 255).astype(_np.uint8)
     return _np.stack([gray, gray, gray], axis=-1)
 
@@ -754,7 +788,7 @@ def on_theme_change(app, theme_name: str = None) -> None:
         from well_viewer.core.ui_helpers import refresh_plot_toolbar_icons
         refresh_plot_toolbar_icons(app)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 
@@ -772,7 +806,7 @@ def apply_theme(app) -> None:
         if app is not None:
             app.setStyleSheet(theme.qss())
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 
@@ -787,7 +821,7 @@ def toast(app, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
         from widgets.toast import Toast
         Toast.show_message(app, msg, kind=kind, msec=msec)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     app._set_status(msg)
 
 

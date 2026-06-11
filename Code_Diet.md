@@ -45,17 +45,28 @@ Rules:
 | D5 | Remove `label_grid_view` `__main__` demo | dead | **27** | Low | `[x]` DONE |
 | D6 | Drop unused imports (ruff F401 --fix, reviewed) | dead | **162** | Low–Med | `[x]` DONE |
 | C1 | Consolidate well-token parsing → `well_token.py` | dedup | **6** (DRY) | Low | `[x]` DONE |
-| C2 | Unify the 4 timepoint parsers | dedup | ~100 | Med | `[ ]` TODO |
+| C2 | Unify the timepoint parsers (GUI pair) | dedup | **45** | Med | `[x]` DONE |
 | C3 | Shared `parse_float_edit` helper | dedup | DRY (~0 net) | Low | `[x]` DONE |
 | C4 | Reuse `set_combo_values` for combo resets | dedup | **8** | Low | `[x]` DONE |
 | C5 | Shared `set_widget_text` status helper | dedup | DRY (~0 net) | Low | `[x]` DONE |
 | C6 | LUT→RGB: image_compose reuses `lut_colormap_to_rgb` | dedup | **12** | Low | `[x]` DONE |
 
-**Estimated total: ~2,400–2,500 LoC removable / consolidated.** Bulk is D1.
+## ✅ RESULT — all items executed
 
-**Deliberately NOT changed** (documented so nobody "fixes" them): see § Non-goals.
+**Net production LoC removed: 2,160** (74,742 → 72,582; 2,185 incl. tests).
+Per-item net: D1 1,878 · D6 162 · C2 45 · D2 43 · D5 27 · D4 13 · C6 12 · C4 8 ·
+C1 6 · D3 5 · C3/C5 DRY (net-neutral — traded inline duplication for shared
+`ui_helpers` helpers). `ruff check .` green throughout; each batch verified with
+guardrails + the relevant feature suites (incl. the slow image_table + playground
+runs and the pm-importing pipeline tests).
 
-**Suggested order:** D2 → D5 → D1 → C4 → C1 → C3 → C5 → D4 → D6 → C6 → D3 → C2
+**C2 scope note:** unified the two **identical** GUI parsers — `data_loading`
+now re-exports `image_identity.parse_timepoint_hours` (proven byte-identical over
+23 inputs; no cycle). The pipeline parsers are left **by design**:
+`process_microscopy._parse_timepoint_hours` can't import `well_viewer` (layering)
+and returns `nan` (its contract); `auto_threshold_core.parse_tp_hours` uses a
+genuinely **divergent** algorithm (handles seconds; additive `findall`), so
+mechanically merging it would change behaviour. Both recorded under § Non-goals.
 (cheap+safe first; C2/D3/D6 need the most care).
 
 ---
@@ -195,7 +206,9 @@ rendered cell. Resolve the disagreement before touching.
 ## Status log
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-06-11 **ALL ITEMS DONE** — executed D1–D6 + C1–C6. Net **2,160** production
+  LoC removed; ruff green; verified per batch. C2/non-goals scoped as noted above.
 - 2026-06-11 Document created from a 3-pass audit + independent verification of all
   deletion candidates. All items TODO.
 
-**Last updated:** 2026-06-11 — audit complete; nothing executed yet (this is the plan).
+**Last updated:** 2026-06-11 — **all 12 items executed; 2,160 production LoC removed.**

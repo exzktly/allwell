@@ -26,52 +26,6 @@ _logger = logging.getLogger("well_viewer")
 _missing_col_warned: set[str] = set()
 
 
-# ── Timepoint parser ─────────────────────────────────────────────────────────
-
-def parse_timepoint_hours(tp: str) -> Optional[float]:
-    """
-    Convert a timepoint string to fractional hours.
-    Returns None when the string cannot be parsed at all.
-
-    Formats tried in order:
-      1. DDdHHhMMm  e.g. "02d04h30m" -> 52.5
-      2. Standalone unit suffix  e.g. "48h", "2d", "30m"
-      3. Pure number  e.g. "48" or "1.5" -> treated as hours
-      4. Prefixed ordinal  e.g. "T01", "day2" -> numeric suffix as index
-    """
-    s = tp.strip()
-    if not s:
-        return None
-
-    # 1. DDdHHhMMm (all components optional, at least one required)
-    m = re.fullmatch(r"(?:(\d{1,4})d)?(?:(\d{1,2})h)?(?:(\d{1,2})m)?", s, re.I)
-    if m and any(m.groups()):
-        return int(m.group(1) or 0)*24.0 + int(m.group(2) or 0) + int(m.group(3) or 0)/60.0
-
-    # 2. Standalone unit: "48h", "2d", "30m", "90min"
-    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
-                     s, re.I)
-    if m:
-        val, unit = float(m.group(1)), m.group(2)[0].lower()
-        if unit == "h": return val
-        if unit == "d": return val * 24.0
-        if unit == "m": return val / 60.0
-
-    # 3. Pure number (treated as hours)
-    try:
-        return float(s)
-    except ValueError:
-        pass
-
-    # 4. Prefixed ordinal: strip leading non-digit chars, keep trailing number
-    #    e.g. "T01" -> 1.0, "day02" -> 2.0, "tp_3" -> 3.0
-    m = re.search(r"(\d+(?:\.\d+)?)$", s)
-    if m:
-        return float(m.group(1))
-
-    return None
-
-
 # ── CSV loading and channel detection ────────────────────────────────────────
 
 # Columns kept as strings (not coerced to float)
@@ -89,6 +43,7 @@ _METRIC_SUFFIXES = (
 
 
 from well_viewer.data.image_identity import (  # noqa: E402  (after _METRIC_SUFFIXES decl)
+    parse_timepoint_hours,  # re-export: single source of truth in image_identity
     normalize_fov_series as _normalize_fov_series,
 )
 from well_viewer.core.safe import swallowed

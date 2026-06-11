@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QGroupBox,
     QHBoxLayout,
@@ -173,11 +174,17 @@ def build_selector_cell(
 def build_lut_row(
     app,
     *,
-    chan_opts: List[str],
     on_generate,
     on_auto_lut,
 ) -> None:
-    """Rebuild the per-channel LUT min/max editors below the selector grid."""
+    """Rebuild the per-row LUT + display editors below the selector grid.
+
+    One box per grid **row** (keyed by row index), not per channel — so two
+    rows showing the same channel have independent min/max, Fit, and display
+    toggles (Tophat / Boundaries / Binary). Mirrors the per-row colormap
+    (``image_compose._row_cmap_name``); the render + export paths read each
+    cell's settings from its row's box.
+    """
     from well_viewer.core.ui_helpers import btn_secondary, clear_layout
 
     container = getattr(app, "_image_table_lut_container", None)
@@ -185,60 +192,111 @@ def build_lut_row(
         return
     layout = container.layout()
 
-    # Preserve prior text AND the per-channel auto flag (True = the box shows
-    # the data-fitted number and should keep tracking; False = user override).
-    prev_values: Dict[str, Tuple[str, str]] = {}
-    prev_auto: Dict[str, bool] = {}
-    for chan, entry in (getattr(app, "_image_table_lut", None) or {}).items():
+    # Preserve prior per-row state (min/max text, auto flag, display toggles)
+    # across rebuilds, keyed by row index.
+    prev: Dict[int, dict] = {}
+    for r, entry in (getattr(app, "_image_table_lut", None) or {}).items():
         try:
-            prev_values[chan] = (entry["min"].text(), entry["max"].text())
-            prev_auto[chan] = bool(entry.get("auto", True))
+            prev[r] = {
+                "min": entry["min"].text(),
+                "max": entry["max"].text(),
+                "auto": bool(entry.get("auto", True)),
+                "tophat": bool(entry["tophat"].isChecked()) if entry.get("tophat") else False,
+                "boundaries": bool(entry["boundaries"].isChecked()) if entry.get("boundaries") else False,
+                "binary": entry["binary"].currentData() if entry.get("binary") else "",
+            }
         except Exception:
             swallowed()  # silent except
             continue
 
     clear_layout(layout)
-
     app._image_table_lut = {}
-    for chan in chan_opts:
-        chan_box = QGroupBox(chan, container)
-        cb_l = QHBoxLayout(chan_box)
-        cb_l.setContentsMargins(6, 8, 6, 4)
-        cb_l.setSpacing(4)
 
-        prev_min, prev_max = prev_values.get(chan, ("", ""))
-        is_auto = prev_auto.get(chan, True)
+    cells = getattr(app, "_image_table_cells", None) or []
+    row_chan_cbs = getattr(app, "_image_table_row_chan_cbs", None) or []
+
+    def _row_channel(r: int) -> str:
+        if 0 <= r < len(row_chan_cbs):
+            t = (row_chan_cbs[r].currentText() or "").strip()
+            if t:
+                return t
+        row = cells[r] if 0 <= r < len(cells) else []
+        for cell in row:
+            cb = cell.get("chan_cb")
+            t = (cb.currentText() or "").strip() if cb is not None else ""
+            if t:
+                return t
+        return ""
+
+    for r in range(len(cells)):
+        chan = _row_channel(r)
+        title = f"Row {r + 1}" + (f" · {chan.upper()}" if chan else "")
+        box = QGroupBox(title, container)
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(6, 8, 6, 4)
+        bl.setSpacing(3)
+        p = prev.get(r, {})
+
+        # ── min / max / Fit ──────────────────────────────────────────────
+        lut_row = QHBoxLayout()
+        lut_row.setSpacing(4)
 
         def _mk_edit(text: str) -> QLineEdit:
-            le = QLineEdit(text, chan_box)
-            le.setFixedWidth(70)
-            # Real fitted numbers fill these after Generate; until then the
-            # placeholder reads "auto" (empty = auto-scale per image). Editing
-            # a box marks the channel as a manual override so Generate stops
-            # overwriting it; the "Fit" button re-enables tracking.
+            le = QLineEdit(text, box)
+            le.setFixedWidth(64)
+            # Empty = auto-scale per image; a fitted number fills in on Fit /
+            # Generate. Editing marks the row a manual override so Generate
+            # stops overwriting it; "Fit" re-enables tracking.
             le.setPlaceholderText("auto")
             le.textEdited.connect(
-                lambda _t, c=chan: app._image_table_lut.get(c, {}).__setitem__("auto", False)
+                lambda _t, rr=r: app._image_table_lut.get(rr, {}).__setitem__("auto", False)
             )
-            # No auto-generate on edit — wait for the user to press Generate.
             return le
 
-        cb_l.addWidget(QLabel("min:", chan_box))
-        min_edit = _mk_edit(prev_min)
-        cb_l.addWidget(min_edit)
+        lut_row.addWidget(QLabel("min:", box))
+        min_edit = _mk_edit(p.get("min", ""))
+        lut_row.addWidget(min_edit)
+        lut_row.addWidget(QLabel("max:", box))
+        max_edit = _mk_edit(p.get("max", ""))
+        lut_row.addWidget(max_edit)
+        fit_btn = btn_secondary(box, "Fit", lambda rr=r: on_auto_lut(app, rr))
+        fit_btn.setToolTip("Re-fit min/max to this row's pooled image range.")
+        lut_row.addWidget(fit_btn)
+        lut_row.addStretch(1)
+        bl.addLayout(lut_row)
 
-        cb_l.addWidget(QLabel("max:", chan_box))
-        max_edit = _mk_edit(prev_max)
-        cb_l.addWidget(max_edit)
+        # ── display: Tophat / Boundaries / Binary (per row) ──────────────
+        disp_row = QHBoxLayout()
+        disp_row.setSpacing(8)
+        tophat_cb = QCheckBox("Tophat", box)
+        tophat_cb.setChecked(bool(p.get("tophat", False)))
+        tophat_cb.setToolTip("Show the background-subtracted (top-hat) image for this row.")
+        tophat_cb.toggled.connect(lambda _c=False: on_generate(app))
+        disp_row.addWidget(tophat_cb)
+        bound_cb = QCheckBox("Boundaries", box)
+        bound_cb.setChecked(bool(p.get("boundaries", False)))
+        bound_cb.setToolTip("Overlay white cell-boundary outlines for this row.")
+        bound_cb.toggled.connect(lambda _c=False: on_generate(app))
+        disp_row.addWidget(bound_cb)
+        disp_row.addWidget(QLabel("Binary:", box))
+        bin_cb = QComboBox(box)
+        for _lbl, _key in (("None", ""), ("Mask", "mask"), ("≥ Thr", "threshold")):
+            bin_cb.addItem(_lbl, userData=_key)
+        prev_bin = p.get("binary", "") or ""
+        for i in range(bin_cb.count()):
+            if bin_cb.itemData(i) == prev_bin:
+                bin_cb.setCurrentIndex(i)
+                break
+        bin_cb.currentIndexChanged.connect(lambda _i=0: on_generate(app))
+        disp_row.addWidget(bin_cb)
+        disp_row.addStretch(1)
+        bl.addLayout(disp_row)
 
-        fit_btn = btn_secondary(
-            chan_box, "Fit",
-            lambda c=chan: on_auto_lut(app, c),
-        )
-        fit_btn.setToolTip("Re-fit min/max to the actual pooled image range for this channel.")
-        cb_l.addWidget(fit_btn)
-
-        layout.addWidget(chan_box)
-        app._image_table_lut[chan] = {"min": min_edit, "max": max_edit, "auto": is_auto}
+        layout.addWidget(box)
+        app._image_table_lut[r] = {
+            "min": min_edit, "max": max_edit, "auto": bool(p.get("auto", True)),
+            "tophat": tophat_cb, "boundaries": bound_cb, "binary": bin_cb,
+            "chan": chan,
+        }
 
     layout.addStretch(1)

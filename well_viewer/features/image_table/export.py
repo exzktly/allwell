@@ -21,6 +21,7 @@ from well_viewer.features.image_table.image_compose import (
     _load_array,
     _load_mask_array,
     _parse_lut,
+    _row_display_opts,
     _row_cmap_name,
 )
 
@@ -151,11 +152,9 @@ def _build_export_figure(app):
     cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(app._app_state.image_table, "image_cache", None) or {})
     rendered = getattr(app._app_state.image_table, "last_render", None) or {}
     crop_tool = getattr(app, "_image_table_crop_tool", None)
-    use_tophat = bool(getattr(app._app_state.image_table, "use_tophat", False))
-    # Mirror the live thumbnail's overlay toggles so the export matches
-    # what the user sees on screen.
-    binary_mode = getattr(app._app_state.image_table, "binary_mode", "") or ""
-    show_boundaries = bool(getattr(app._app_state.image_table, "show_boundaries", False))
+    # Display toggles (top-hat / boundaries / binary) + LUT are per ROW —
+    # mirror the live thumbnail, reading each from the cell's row box so the
+    # export matches what's on screen.
 
     bg_face = "none" if transparent_bg else "white"
     # Probe the first available cell to learn the image aspect ratio. With
@@ -166,6 +165,7 @@ def _build_export_figure(app):
     img_h: Optional[int] = None
     img_w: Optional[int] = None
     for r, row in enumerate(cells):
+        use_tophat, _sb, _bm = _row_display_opts(app, r)
         for c, cell in enumerate(row):
             arr = rendered.get((r, c))
             if arr is None:
@@ -201,6 +201,7 @@ def _build_export_figure(app):
     fig.patch.set_alpha(0.0 if transparent_bg else 1.0)
 
     for r, row in enumerate(cells):
+        use_tophat, show_boundaries, binary_mode = _row_display_opts(app, r)
         for c, cell in enumerate(row):
             ax = fig.add_subplot(rows, cols, r * cols + c + 1)
             ax.set_facecolor("none" if transparent_bg else "white")
@@ -216,7 +217,7 @@ def _build_export_figure(app):
                 arr = crop_tool.apply_to_array(arr)
 
             if arr is not None:
-                lo, hi = _parse_lut(app, chan)
+                lo, hi = _parse_lut(app, r)
                 # Render exactly the same RGB the live thumbnail shows:
                 # full mpl colormap (not the black→tint approximation
                 # this path used before) + show_binary / show_boundaries

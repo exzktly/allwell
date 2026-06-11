@@ -15,7 +15,7 @@ split-buttons rather than a wall of flat buttons):
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
     QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
@@ -28,11 +28,8 @@ from well_viewer.features.image_table.controller import image_table_apply_dimens
 from well_viewer.features.image_table.controller import image_table_apply_global
 from well_viewer.features.image_table.controller import image_table_rebuild_grid
 from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
-from well_viewer.features.image_table.controller import image_table_set_binary_mode
 from well_viewer.features.image_table.controller import image_table_set_zoom
 from well_viewer.features.image_table.controller import image_table_open_add_row_dialog
-from well_viewer.features.image_table.controller import image_table_toggle_boundaries
-from well_viewer.features.image_table.controller import image_table_toggle_tophat
 from functools import partial
 from well_viewer.features.image_table.controller import image_table_copy_png
 from well_viewer.features.image_table.controller import image_table_copy_svg
@@ -312,9 +309,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     sep2.setFixedHeight(1)
     il.addWidget(sep2)
 
-    # ── Action strip — Generate · Display▾ · crop status … Export▾ · Zoom ──
-    from well_viewer.features.image_table.controller import image_table_refresh_display_menu
-
+    # ── Action strip — Generate · Crop▾ · crop status … Export▾ · Zoom ──
     action_row = QWidget(inner)
     tr = QHBoxLayout(action_row)
     tr.setContentsMargins(0, 0, 0, 0)
@@ -322,64 +317,29 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     tr.addWidget(btn_primary(action_row, "Generate", partial(image_table_generate, ctx.app)))
 
-    # Display ▾ — render options (tophat / boundaries / binary / crop).
-    display_btn = _menu_button(action_row, "Display", tooltip="Image display options")
-    dmenu = display_btn.menu()
-
-    tophat_act = QAction("Tophat (background-subtracted)", dmenu)
-    tophat_act.setCheckable(True)
-    tophat_act.setChecked(bool(ctx.app._app_state.image_table.use_tophat))
-    tophat_act.toggled.connect(lambda _c=False: image_table_toggle_tophat(ctx.app))
-    dmenu.addAction(tophat_act)
-    ctx.app._image_table_tophat_act = tophat_act
-
-    boundaries_act = QAction("Cell boundaries", dmenu)
-    boundaries_act.setCheckable(True)
-    boundaries_act.setChecked(bool(ctx.app._app_state.image_table.show_boundaries))
-    boundaries_act.toggled.connect(lambda _c=False: image_table_toggle_boundaries(ctx.app))
-    dmenu.addAction(boundaries_act)
-    ctx.app._image_table_boundaries_act = boundaries_act
-
-    dmenu.addSeparator()
-    bin_sub = dmenu.addMenu("Binary")
-    bin_group = QActionGroup(bin_sub)
-    bin_group.setExclusive(True)
-    _bmode = ctx.app._app_state.image_table.binary_mode or ""
-    for _label, _key, _attr in (
-        ("None (off)", "", "none"),
-        ("Mask — all cells", "mask", "mask"),
-        ("≥ ON threshold", "threshold", "thresh"),
-    ):
-        a = QAction(_label, bin_sub)
-        a.setCheckable(True)
-        a.setChecked(_bmode == _key)
-        bin_group.addAction(a)
-        bin_sub.addAction(a)
-        a.toggled.connect(
-            lambda checked, k=_key: checked and image_table_set_binary_mode(ctx.app, k)
-        )
-        setattr(ctx.app, f"_image_table_binary_act_{_attr}", a)
-
-    dmenu.addSeparator()
+    # The per-display options (Tophat / Boundaries / Binary) are now per-row,
+    # in the LUT boxes below the grid (each row independent). This menu keeps the
+    # dataset-wide crop tool.
+    crop_btn = _menu_button(action_row, "Crop", tooltip="Crop region tool")
+    cmenu = crop_btn.menu()
     _crop = ctx.app._image_table_crop_tool
-    crop_act = QAction("Crop region (drag on image)", dmenu)
+    crop_act = QAction("Crop region (drag on image)", cmenu)
     crop_act.setCheckable(True)
     crop_act.setChecked(bool(_crop.mode))
     crop_act.toggled.connect(lambda _c=False: _crop.toggle_mode())
-    dmenu.addAction(crop_act)
+    cmenu.addAction(crop_act)
     ctx.app._image_table_crop_act = crop_act
-    reset_crop_act = dmenu.addAction("Reset crop")
+    reset_crop_act = cmenu.addAction("Reset crop")
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
-    def _sync_display_menu() -> None:
-        image_table_refresh_display_menu(ctx.app)
+    def _sync_crop_menu() -> None:
         blocked = crop_act.blockSignals(True)
         try:
             crop_act.setChecked(bool(_crop.mode))
         finally:
             crop_act.blockSignals(blocked)
-    dmenu.aboutToShow.connect(_sync_display_menu)
-    tr.addWidget(display_btn)
+    cmenu.aboutToShow.connect(_sync_crop_menu)
+    tr.addWidget(crop_btn)
 
     # Crop status, shown inline so an active crop is visible at a glance.
     tr.addWidget(_crop.make_status_label(action_row))

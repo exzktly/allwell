@@ -262,16 +262,36 @@ def _compose_image_table_rgb(
 
     return rgb
 
-def _parse_lut(app, chan: str) -> Tuple[Optional[float], Optional[float]]:
-    """Read (lo, hi) for a channel; returns (None, None) when 'auto'."""
+def _parse_lut(app, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
+    """Read (lo, hi) for grid row *row_idx*; returns (None, None) when 'auto'.
+
+    The LUT table is keyed per grid row (not per channel) so two rows showing
+    the same channel have independent ranges — see ``grid_view.build_lut_row``.
+    """
     luts = getattr(app, "_image_table_lut", None) or {}
-    entry = luts.get(chan.upper())
+    entry = luts.get(row_idx)
     if not entry:
         return None, None
 
     from well_viewer.core.ui_helpers import parse_float_edit
     return (parse_float_edit(entry["min"], allow_auto=True),
             parse_float_edit(entry["max"], allow_auto=True))
+
+
+def _row_display_opts(app, row_idx: int) -> Tuple[bool, bool, str]:
+    """Per-row display toggles: ``(use_tophat, show_boundaries, binary_mode)``.
+
+    Read from the row's LUT/Display box widgets (``grid_view.build_lut_row``);
+    defaults to all-off when the row has no box yet.
+    """
+    entry = (getattr(app, "_image_table_lut", None) or {}).get(row_idx) or {}
+    tophat_w = entry.get("tophat")
+    bound_w = entry.get("boundaries")
+    bin_w = entry.get("binary")
+    use_tophat = bool(tophat_w.isChecked()) if tophat_w is not None else False
+    show_boundaries = bool(bound_w.isChecked()) if bound_w is not None else False
+    binary_mode = (bin_w.currentData() if bin_w is not None else "") or ""
+    return use_tophat, show_boundaries, binary_mode
 
 def _load_well_channel(
     app,

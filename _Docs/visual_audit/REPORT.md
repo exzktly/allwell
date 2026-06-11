@@ -28,12 +28,12 @@ Cleanliness · Usability · Professionalism**. Findings are tagged
 | Plotting · Scatter (per-cell) | 4 | 4 | 3 | 2 | 4 | 4 | 4 | `gfp` lowercase vs `GFP`; mpl toolbar appears |
 | Plotting · Scatter (per-well) | 3 | 4 | 3 | 2 | 3 | 3 | 3 | Blank 0–1 axes; casing; mpl toolbar |
 | Plotting · Distribution | 4 | 4 | 4 | 3 | 4 | 4 | 4 | mpl toolbar appears (inconsistent w/ line/bar) |
-| Plotting · Heat Map | 2 | 3 | 3 | 1 | 2 | 3 | 2 | **White figure in dark UI**; cramped |
-| Statistics | 3 | 2 | 3 | 2 | 3 | 3 | 3 | **"Run test" floats far-right, misaligned**; casing |
+| Plotting · Heat Map | 3 | 3 | 3 | 4 | 4 | 3 | 4 | ✅ dark bg fixed; still cramped when no layout configured |
+| Statistics | 3 | 4 | 3 | 2 | 4 | 4 | 4 | ✅ "Run test" + column alignment fixed; casing (`gfp`) remains |
 | Image Table | 1 | 2 | 2 | 2 | 2 | 2 | 2 | **Most cluttered**; dup Row boxes; label/control gap; truncation |
 | Segmentation · Review Image | 3 | 3 | 3 | 3 | 3 | 3 | 3 | Dense single-row toolbar; many buttons |
 | Segmentation · Playground | – | – | – | – | – | – | – | Did not render (optional deps) |
-| smFISH | 2 | 3 | 2 | 2 | 2 | 2 | 3 | **Duplicate empty-state message**; controls active w/ no data |
+| smFISH | 3 | 3 | 3 | 3 | 4 | 3 | 4 | ✅ duplicate message fixed; controls still active w/ no data |
 | Review CSV | 4 | 4 | 4 | 4 | 5 | 4 | 5 | Header text right-aligned for text cols |
 | Sample Def · Cell Gating | 4 | 4 | 4 | 4 | 4 | 4 | 4 | CDF auto-range crams data to edge |
 | Sample Def · Groups | 3 | 3 | 3 | 3 | 3 | 3 | 4 | Action bar marooned at bottom; big empty middle |
@@ -152,9 +152,10 @@ underlying app is not dimmed, so the drawer edge blends into the content.
    Segmentation LUT). Disable or hide controls until their data exists.
 3. **[H] Plot background theme is inconsistent** — Heat Map renders white while all other plots
    use the dark plot theme.
-4. **[M] Icon-only buttons lack tooltips** in three places: window header (refresh/present/
-   home/info), every plot card (download/copy/save/sliders), and the Sample-Definitions doc
-   toolbar (save/download/+/×). Add tooltips so actions are discoverable.
+4. **[L] Icon-only buttons** (window header, plot cards, Sample-Definitions doc toolbar).
+   *Correction after code review:* these **already have `setToolTip` text** — they simply
+   don't surface in static screenshots (hover-only). No change needed; the discoverability
+   concern is lower than the screenshots suggested.
 5. **[M] matplotlib nav toolbar appears unevenly** (Distribution / Scatter / Cell Gating yes;
    Line / Bar no). Choose one policy — the `PlotCard` already provides export/copy, so the
    redundant mpl toolbar can be hidden everywhere for a cleaner, consistent look.
@@ -180,16 +181,35 @@ visual scope, flagged for the maintainer.
 
 ---
 
-## Prioritized fix backlog
+## Fixes applied in this pass
 
-| # | Sev | Fix | Primary file(s) |
-|---|-----|-----|-----------------|
-| 1 | H | Uppercase channel-token display in Scatter & Statistics combos | `well_viewer/features/scatter/*`, `well_viewer/features/stats/view.py` |
-| 2 | H | Dark plot background for Heat Map (screen mode) | `well_viewer/features/heatmap/*`, `widgets/plot_card.py` |
-| 3 | H | Statistics "Run test" button alignment | `well_viewer/features/stats/view.py` |
-| 4 | H | Remove duplicate smFISH empty-state message | `well_viewer/features/smfish/tab_view.py` |
-| 5 | M | Tooltips on icon-only buttons | `all_well.py`, `widgets/plot_card.py`, sample-def toolbar |
-| 6 | M | Hide redundant matplotlib nav toolbar | `widgets/plot_card.py` / per-tab figure setup |
-| 7 | M | Image Table: associate per-row controls; fix truncated labels | `well_viewer/features/image_table/grid_view.py` |
-| 8 | M | Disable plot/control bars when no dataset loaded | `well_viewer/core/centre_view.py` + tab views |
-| 9 | L | Analyze schema-string field width; Groups action-bar placement | `analyze_tab.py`, `well_viewer/features/grouping/*` |
+| Sev | Fix | File(s) | Status |
+|-----|-----|---------|--------|
+| H | **Heat Map dark background** — figure/axes background and empty-cell fill now track the active plot theme (`_bg` token) instead of matplotlib-default white. | `well_viewer/features/heatmap/controller.py` | ✅ done |
+| H | **Statistics "Run test" alignment** — moved to its own row under the form; added a trailing stretch column so labels/fields hug the left instead of splitting width 3 ways. | `well_viewer/features/stats/view.py` | ✅ done |
+| H | **smFISH duplicate empty-state message** — full guidance now shown once (on the canvas); the status line is a concise one-liner. | `well_viewer/features/smfish/tab_view.py` | ✅ done |
+
+Verified by re-rendering: see `10-plotting-heat-map.png`, `20-statistics.png`, `50-smfish.png`
+(the screenshots in this folder are the post-fix state). `ruff` clean; the runnable fast
+test lane (700 tests) passes — the 5 + 7 skipped/errored modules are pre-existing
+`tifffile`/heavy-ML import gaps in the audit environment, unrelated to these changes.
+
+The harness also gained a canvas-compositing step in `grab()`: offscreen window-grab failed
+to blit the deeply-nested heatmap canvas (it came out white though the figure rendered dark),
+so each `FigureCanvas` is now drawn synchronously and composited onto the window pixmap.
+
+## Deferred (higher-risk or larger-scope — recommended follow-ups)
+
+| # | Sev | Item | Why deferred |
+|---|-----|------|--------------|
+| 1 | H | **Channel-token casing** (`gfp`→`GFP` in Scatter/Statistics) | Not display-only: `col_for_scatter_entry` builds CSV column names straight from the combo text (`f"{entry}_{metric}"`), and view-state persistence stores the raw text. A safe fix needs a display↔token mapping across ~8 read/persistence sites — a focused refactor, not a one-liner. |
+| 2 | M | **Image Table clutter** — duplicate Row 1/Row 2 boxes vs the cell grid; per-row display label↔control gap; truncated "Timepoi"/"Bound." | Layout redesign of a dense, much-tested view; warrants its own change + test pass. |
+| 3 | M | **Disable control bars in empty / no-data states** (empty plotting bar, smFISH, Segmentation LUT) | Touches `centre_view.py` + several tab views; needs care to re-enable correctly on load. |
+| 4 | M | **matplotlib nav toolbar consistency** (present on some plot tabs, not others) | Could be deliberate (pan/zoom on interactive plots); removing it changes behaviour — confirm intent first. |
+| 5 | L | Analyze schema-string field width; Groups action-bar placement; CDF auto-range | Cosmetic polish. |
+
+## Discovered functional regression (flagged, not fixed)
+
+The `flush_dirty_scopes` `ImportError` on every tab switch (see above) is a real bug but
+outside the visual scope — left for the maintainer to fix or remove the dead import at
+`well_viewer/core/tab_controller.py:178`.

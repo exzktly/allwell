@@ -412,10 +412,17 @@ def redraw_heatmap(app) -> None:
     app._heatmap_global_vmin = g_vmin
     app._heatmap_global_vmax = g_vmax
 
-    # Render.
+    # Render. Resolve the active plot-theme tokens up front so the empty-cell
+    # fill, figure background, and axes background all track the theme — the
+    # heatmap deliberately skips PlotCard.setPlotTheme on redraw, so without
+    # this the figure rendered on matplotlib's default white inside the dark UI.
+    from well_viewer.core.plot_style import tokens_for as _tokens_for
+    _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for(ax)
+    fig.patch.set_facecolor(_bg)
+
     vmin, vmax = _resolve_color_scale(arr, app)
     cmap = mpl_colormaps.get_cmap(cmap_name).copy()
-    cmap.set_bad(color="#ECEFF4")  # neutral light fill for empty cells
+    cmap.set_bad(color=_bg)  # empty cells blend into the themed background
 
     masked = np.ma.masked_invalid(arr)
 
@@ -438,6 +445,7 @@ def redraw_heatmap(app) -> None:
             masked = np.ma.masked_where(~np.isfinite(masked.filled(np.nan)) | (masked.filled(np.nan) <= 0), masked)
 
     ax.clear()
+    ax.set_facecolor(_bg)  # ax.clear() resets to white; re-apply the theme bg
     if norm is not None:
         im = ax.imshow(masked, aspect="equal", cmap=cmap, norm=norm,
                        origin="upper", interpolation="nearest")
@@ -525,9 +533,8 @@ def redraw_heatmap(app) -> None:
     # each redraw, which is what made the plot creep left and shrink.
     # Theme-aware text colors so the colorbar/title invert with the PlotCard's
     # publication↔screen toggle instead of staying mpl-default black.
-    from well_viewer.core.plot_style import tokens_for as _tokens_for
-    _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for(ax)
-
+    # Theme tokens (_bg/_title_fg/_muted_fg/_spine) were resolved up front in
+    # the render section above and the figure/axes backgrounds already painted.
     cax = getattr(app, "_heatmap_cax", None)
     if cax is not None:
         try:

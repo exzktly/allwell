@@ -28,9 +28,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from PySide6.QtGui import QFontDatabase  # noqa: E402
+from PySide6.QtCore import QPoint  # noqa: E402
+from PySide6.QtGui import QFontDatabase, QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication, QTabWidget, QWidget  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: E402
 
 OUT_DIR = REPO_ROOT / "_Docs" / "visual_audit" / "screenshots"
 WIN_W, WIN_H = 1640, 980
@@ -61,7 +63,23 @@ def settle(app: QApplication, ms: int = 250) -> None:
 def grab(widget: QWidget, slug: str, desc: str) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{slug}.png"
-    widget.grab().save(str(path))
+    # Force a *synchronous* draw on every matplotlib canvas first. Tabs render
+    # via ``draw_idle()`` (deferred), so a bare ``widget.grab()`` can capture a
+    # stale/blank Agg buffer.
+    canvases = [c for c in widget.findChildren(FigureCanvasQTAgg) if c.isVisible()]
+    for canvas in canvases:
+        canvas.draw()
+    QApplication.processEvents()
+    pixmap = widget.grab()
+    # Offscreen window-grab can fail to blit deeply-nested canvases (e.g. the
+    # heatmap, which sits inside an extra dock + empty-state stack) — its region
+    # came out white though the figure rendered dark. Grabbing each canvas
+    # directly works, so composite those over the window pixmap.
+    painter = QPainter(pixmap)
+    for canvas in canvases:
+        painter.drawPixmap(canvas.mapTo(widget, QPoint(0, 0)), canvas.grab())
+    painter.end()
+    pixmap.save(str(path))
     size = path.stat().st_size
     _manifest.append((slug, desc))
     print(f"  saved {slug}.png ({size:,} B) — {desc}")

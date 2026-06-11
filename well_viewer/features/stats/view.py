@@ -206,9 +206,22 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     )
     cl.addWidget(app._stats_statistic_cb, 4, 1, Qt.AlignLeft)
 
-    run_btn = btn_primary(app._stats_ctrl, "Run test", app._stats_run)
-    cl.addWidget(run_btn, 0, 2, 5, 1)
+    # Keep the label/field columns tight against the left edge. Without a
+    # trailing stretch column the grid split its width evenly across all
+    # columns, leaving a large empty gap between every label and its field.
+    cl.setColumnStretch(2, 1)
     layout.addWidget(app._stats_ctrl)
+
+    # "Run test" on its own row beneath the form — previously it spanned all
+    # five grid rows in a third column and rendered vertically centered (it
+    # appeared to float beside the Channel row, disconnected from the form).
+    run_row = QWidget(parent)
+    rrl = QHBoxLayout(run_row)
+    rrl.setContentsMargins(12, 0, 12, 6)
+    run_btn = btn_primary(run_row, "Run test", app._stats_run)
+    rrl.addWidget(run_btn)
+    rrl.addStretch(1)
+    layout.addWidget(run_row)
 
     app._stats_sep = QFrame(parent)
     app._stats_sep.setObjectName("Separator")

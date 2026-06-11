@@ -476,7 +476,9 @@ def _smfish_set_controls_enabled(app, enabled: bool) -> None:
 
 
 def _smfish_show_no_smfish_state(app) -> None:
-    _smfish_set_status(app, _NO_SMFISH_MESSAGE.replace("\n", "  "))
+    # The full guidance is drawn once, centered on the canvas below; keep the
+    # status line concise so the same paragraph is not shown twice.
+    _smfish_set_status(app, "smFISH not enabled for this dataset.")
     for cb in (app._smfish_channel_cb, app._smfish_fov_cb, app._smfish_tp_cb):
         cb.blockSignals(True)
         cb.clear()

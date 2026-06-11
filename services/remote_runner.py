@@ -112,6 +112,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # module top level (Torch/cellpose itself stays lazily imported), so the
     # remote needs this file too or the import aborts with ModuleNotFoundError.
     "microscopy_cellpose.py",
+    # StarDist segmenters + per-worker model state: process_microscopy re-imports
+    # microscopy_stardist at module top level (TensorFlow/csbdeep stay lazily
+    # imported), so the remote needs this file too or the import aborts with
+    # ModuleNotFoundError.
+    "microscopy_stardist.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.

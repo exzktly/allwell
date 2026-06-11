@@ -19,6 +19,9 @@ import numpy as np
 import pytest
 
 import process_microscopy as pm
+# The StarDist segmenters + per-worker model state moved here (pm re-exports the
+# functions); the model global must be patched where it actually lives.
+import microscopy_stardist as _stardist
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +67,7 @@ class _FiniteOnlyModel:
 @pytest.fixture
 def fake_model(monkeypatch):
     m = _FiniteOnlyModel()
-    monkeypatch.setattr(pm, "_STARDIST_MODEL", m)
+    monkeypatch.setattr(_stardist, "_STARDIST_MODEL", m)
     return m
 
 

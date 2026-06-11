@@ -7,9 +7,10 @@ appending. Lower a budget when a change legitimately shrinks the file; never
 raise it.
 
 Baselines (set when P4 began the decomposition):
-- process_microscopy.py: 4761 lines, after extracting the background-correction
-  cluster into ``microscopy_background.py`` and the Cellpose segmenters into
-  ``microscopy_cellpose.py`` (was 5129).
+- process_microscopy.py: 4633 lines, after extracting the background-correction
+  cluster (``microscopy_background.py``), the Cellpose segmenters
+  (``microscopy_cellpose.py``), and the StarDist segmenters + model state
+  (``microscopy_stardist.py``) — was 5129.
 - image_table/controller.py: 2486 lines (extraction pending — the budget caps
   it where it is so it can't grow before the split lands).
 """
@@ -19,7 +20,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ── Ratcheting ceilings (only ever lowered) ──────────────────────────────────
-PROCESS_MICROSCOPY_BUDGET = 4761
+PROCESS_MICROSCOPY_BUDGET = 4633
 IMAGE_TABLE_CONTROLLER_BUDGET = 2486
 
 

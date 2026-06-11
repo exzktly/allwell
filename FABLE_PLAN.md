@@ -341,13 +341,25 @@ not an oversight.
       (Torch loads, `CellposeModel` initialises, no crash) — it only stops at the
       model-**weights HTTP download** (sandbox network 403), i.e. nothing in the
       moved code fails.
-- [-] **P4.3b (StarDist segmenters / full segmentation.py)** Still deferred —
-      `_segment_stardist_*` are coupled to worker-global mutable state
-      (`_STARDIST_MODEL`/`_SEG_FOV_LABEL` set by `_worker_init`); cleanly moving
-      them means relocating that state + the worker-init wiring, a larger change
-      best done deliberately. They are already verified end-to-end via
-      `test_pipeline_e2e.py`. The valuable Torch/TF *separation* is now achieved
-      by P4.3a; this remainder is lower-urgency.
+- [x] **P4.3b (StarDist segmenters extracted)** Moved `_segment_stardist_nuclei`,
+      `_segment_stardist_seeded_watershed_cell`, the per-worker model/FOV state
+      (`_STARDIST_MODEL`, `_SEG_FOV_LABEL`) and the `_STARDIST_INPUT_CLIP`
+      constant into a new **`microscopy_stardist.py`**. The worker-global state
+      is now encapsulated behind `set_model()` / `set_fov_label()`:
+      `_worker_init` calls `_stardist.set_model(_load_stardist_pretrained(...))`
+      and `process_image_group` calls `_stardist.set_fov_label(...)`
+      (the `global _STARDIST_MODEL` / `global _SEG_FOV_LABEL` statements are
+      gone). **TensorFlow/csbdeep stay lazily imported**, so importing
+      `process_microscopy` still loads neither TF nor Torch (verified). Kept in
+      `process_microscopy`: `_worker_init`, `_load_stardist_pretrained` + its
+      lock constants (the `test_model_recovery` patch points), and
+      `_segment_classical` (pure skimage, not StarDist). Added to the remote
+      manifest; repointed the `test_stardist_finite_guard` model patch to
+      `microscopy_stardist._STARDIST_MODEL`. `process_microscopy.py`: 4761 →
+      **4633** (5129 → 4633 across all of P4). **Verified end-to-end:** the real
+      StarDist `test_pipeline_e2e.py` (4 tests) passes after the move — the model
+      injection + FOV-label + segmentation all wire correctly with the real
+      model; plus 20 guard/recovery/segmentation/manifest/budget tests green.
 - [-] **P4.4 (io_outputs.py)** Deferred — QC TIFF / CSV writes are interwoven
       with the orchestrator; lower value than P4.3 and best done together with it.
 - [x] **P4.5** Remote path handled: added `microscopy_background.py` to
@@ -472,6 +484,12 @@ end-to-end (driving `run_pipeline_on_directory`) is the natural next increment.
 
 > Append a dated line every time a status box changes. Newest at top.
 
+- 2026-06-11 **P4.3b DONE** — extracted the StarDist segmenters + per-worker
+  model/FOV state into `microscopy_stardist.py` (state encapsulated behind
+  `set_model`/`set_fov_label`; TF stays lazy → process_microscopy import loads
+  neither TF nor Torch). process_microscopy 4761→4633 (5129→4633 across P4);
+  added to remote manifest; repointed `test_stardist_finite_guard`. Verified by
+  the real StarDist e2e (4 tests) + 20 unit/guardrail tests.
 - 2026-06-11 **P4.3a DONE** — extracted the Cellpose cluster
   (`_cellpose_model`/`_segment_cellpose`/`_CELLPOSE_MODELS`) into
   `microscopy_cellpose.py` (Torch stays lazy → importing process_microscopy no
@@ -515,8 +533,10 @@ end-to-end (driving `run_pipeline_on_directory`) is the natural next increment.
 - 2026-06-10 Plan created; all tasks (P1–P5) TODO. — initial commit of FABLE_PLAN.md
 
 **Last updated:** 2026-06-11 — P1–P3 complete; **P5 mostly done** (synthetic
-fixture + real end-to-end StarDist test); **P4 progressing** — background cluster
-+ now the **Cellpose cluster** extracted (`microscopy_background.py`,
-`microscopy_cellpose.py`), the latter isolating Torch behind a lazy boundary so
-the StarDist path never loads it. Remaining P4: relocating the StarDist
-segmenters' worker-global state (lower urgency; already e2e-verified).
+fixture + real end-to-end StarDist test); **P4 well advanced** — extracted the
+background, **Cellpose**, and **StarDist** clusters from `process_microscopy.py`
+(5129 → 4633) into `microscopy_background.py` / `microscopy_cellpose.py` /
+`microscopy_stardist.py`; Torch + TensorFlow now both stay behind lazy
+boundaries (importing `process_microscopy` loads neither), and the StarDist path
+is end-to-end-verified. Remaining P4: `io_outputs` split + the `image_table`
+controller split.

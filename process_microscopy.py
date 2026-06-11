@@ -1293,14 +1293,14 @@ def compute_region_areas(
             from skimage.filters import threshold_otsu
             fg = fg | (img > float(threshold_otsu(finite)))
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if close_radius and close_radius > 0:
         try:
             from scipy.ndimage import binary_closing as _binary_closing
             from skimage.morphology import disk
             fg = _binary_closing(fg, structure=disk(int(close_radius)))
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # closing can erode label pixels near the image border; re-union the labels
     # so every nucleus always anchors a component at least its own size.
     fg = np.asarray(fg, dtype=bool) | (lab > 0)
@@ -1444,6 +1444,7 @@ from auto_threshold_core import (
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,
 )
+from aw_safe import swallowed
 
 
 def _estimate_thresholds_standalone(
@@ -2267,7 +2268,7 @@ def _ensure_pkg_resources_shim() -> None:
         import pkg_resources  # noqa: F401
         return
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     import types
     from importlib import metadata as _md
 
@@ -2577,7 +2578,7 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
                 if isinstance(_h, logging.StreamHandler):
                     _h.stream = _sys2.stdout
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     # ── Device note for logging ────────────────────────────────────────────────
     if force_cpu:
@@ -3662,6 +3663,7 @@ def _collect_image_stems(input_dir: Path) -> "set[str]":
                         continue
                     stems.add(Path(name).stem)
         except Exception:
+            swallowed()  # silent except
             continue
     return stems
 

@@ -214,12 +214,20 @@ persistence).
   `tests/test_no_silent_except.py`.
 - Commit SHA: _(in status log below)_
 
-- [ ] **P2.7** *(follow-up, deferred)* Apply the same `swallowed`-style logging
-      to silent broad-excepts in `services/` and the top-level pipeline files
-      (`process_microscopy.py`, `analyze_tab.py`). These can't import
-      `well_viewer` (layering), so they need a Qt-free equivalent (e.g. a tiny
-      `swallowed()` in a repo-root module, or a local logger call). Many already
-      log; lower priority than the GUI layer addressed here.
+- [x] **P2.7** Done. Added a Qt-free `aw_safe.py` (repo-root `swallow`/
+      `swallowed`, logs to `allwell.swallowed`) for code that must not import
+      `well_viewer` (the headless pipeline + `services`). Migrated **30** silent
+      broad-excepts: pipeline side (`process_microscopy.py` 5, `services/` 4) →
+      `aw_safe.swallowed`; GUI shells (`all_well.py` 19, `analyze_tab.py` 2) →
+      `well_viewer.core.safe.swallowed`. (The AST codemod correctly skipped
+      specific-tuple catches like `except (OSError, ValueError): pass`.) Added
+      `aw_safe.py` to the remote manifest, and **extended
+      `test_no_silent_except.py`** with a second test guarding the pipeline/
+      services side (so it can't regress either). Verified: imports clean,
+      guardrails + manifest tests green, ruff clean; the only test failures in
+      the GUI-shell run are two pre-existing offscreen-Qt `.isVisible()` flakes in
+      `test_remote_dialog` (confirmed by stashing all changes — they import none
+      of the migrated files).
 
 ---
 

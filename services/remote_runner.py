@@ -60,6 +60,7 @@ from services.remote_config import (
     to_rsync_path,
     update_bandwidth,
 )
+from aw_safe import swallowed
 
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
@@ -121,6 +122,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # re-imports microscopy_io at module top level, so the remote needs this file
     # too or the import aborts with ModuleNotFoundError.
     "microscopy_io.py",
+    # Qt-free observable-suppression helper (logged swallow): process_microscopy
+    # imports aw_safe at module top level, so the remote needs it too or the
+    # import aborts with ModuleNotFoundError.
+    "aw_safe.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.
@@ -3631,7 +3636,7 @@ class RemoteRunner:
             try:
                 self._fetcher.cancel()
             except Exception:  # noqa: BLE001 — best-effort
-                pass
+                swallowed()  # was: pass (silent except)
         if self._run is None:
             return
         run = self._run

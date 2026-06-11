@@ -42,6 +42,7 @@ from widgets.checkable_dropdown import CheckableDropdown
 from widgets.run_dashboard import RunDashboard
 from widgets.wrap_checkbox import WrapCheckBox
 import shape_features_core as _sfc
+from well_viewer.core.safe import swallowed
 
 
 def _safe_qc_float(text: str) -> float:
@@ -1846,7 +1847,7 @@ class AnalyzeTab(QWidget):
                             from well_viewer import status_signal as _status_signal
                             _status_signal.warn_pop()
                         except Exception:
-                            pass
+                            swallowed()  # was: pass (silent except)
                         self._status_signal_pushed = False
         except queue.Empty:
             pass
@@ -1864,7 +1865,7 @@ class AnalyzeTab(QWidget):
                 from well_viewer import status_signal as _status_signal
                 _status_signal.warn_pop()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             self._status_signal_pushed = False
         super().closeEvent(event)
 

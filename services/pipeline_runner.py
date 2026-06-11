@@ -36,6 +36,7 @@ from services.remote_runner import (
     stage_local_zips,
 )
 from services.subprocess_kill import signal_subprocess
+from aw_safe import swallowed
 
 
 def classify_log_line(line: str) -> str:
@@ -349,7 +350,7 @@ class PipelineRunner:
                 inner = getattr(self._proc, "_ssh", None) or self._proc
                 self._remote_runner.cancel(inner)
             except Exception:  # noqa: BLE001 — best-effort kill
-                pass
+                swallowed()  # was: pass (silent except)
 
     @staticmethod
     def _signal_subprocess(proc: Optional[subprocess.Popen]) -> None:

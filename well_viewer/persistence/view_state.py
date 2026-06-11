@@ -18,7 +18,6 @@ import logging
 from typing import Any
 
 from well_viewer.persistence import _doc
-from well_viewer.features.image_table.controller import image_table_apply_dimensions
 from well_viewer.core.channel_state_controller import set_active_channel
 from well_viewer.core.safe import swallowed
 
@@ -488,6 +487,12 @@ def _apply_image_table(app, state: dict) -> None:
                 swallowed()  # was: pass (silent except)
         if changed and hasattr(app, "_image_table_apply_dimensions"):
             try:
+                # Function-local feature import keeps this persistence module
+                # data-only at module scope (see test_layering) — mirrors the
+                # deferred ``image_table_refresh_display_menu`` import below.
+                from well_viewer.features.image_table.controller import (
+                    image_table_apply_dimensions,
+                )
                 image_table_apply_dimensions(app)
             except Exception:
                 _logger.debug("image_table: apply_dimensions failed", exc_info=True)

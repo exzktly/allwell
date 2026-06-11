@@ -48,10 +48,20 @@ def test_legacy_sidecar_is_absorbed_then_deleted(tmp_path):
     assert pj["qc_params"]["min_area"] == 42
 
 
-def test_no_persisted_state_seeds_from_pipeline_info(tmp_path):
+def test_no_persisted_state_clears_then_controller_seeds(tmp_path):
+    # The persistence loader is now data-only: with no persisted edits it clears
+    # any stale params to None (so a previous dataset's gate can't leak across a
+    # switch). The QC controller's accessor then lazily seeds from this dataset's
+    # pipeline_info — which is exactly what the load sequence's apply_qc_to_cache
+    # triggers next. This keeps persistence from importing feature code.
+    from well_viewer.features.qc.controller import get_qc_params
+
     app = _app(tmp_path, pipeline_info={"qc_options": {"remove_debris": True,
                                                        "min_area": 15}})
+    app._qc_params = QCParams(enabled=True, min_area=999)  # stale, from a prior dataset
     qc_params.load_from_data_dir(app)
-    assert app._qc_params.enabled and app._qc_params.min_area == 15
+    assert app._qc_params is None                          # persistence cleared it
+    seeded = get_qc_params(app)                            # controller seeds lazily
+    assert seeded.enabled and seeded.min_area == 15
     # seeding alone doesn't write a file
     assert not (tmp_path / "qc_params.json").exists()

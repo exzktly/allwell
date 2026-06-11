@@ -51,7 +51,7 @@ commit SHA + the test that proves it in the task's notes.
 | ID | Task | Leverage | Risk | Status |
 |----|------|----------|------|--------|
 | T5 | Restore a bounded CI test job | Med | Low | `[x]` DONE |
-| T1 | `persistence/` → data-only; close the layering-guard gap | High | Med | `[ ]` TODO |
+| T1 | `persistence/` → data-only; close the layering-guard gap | High | Med | `[x]` DONE |
 | T2 | Break inter-feature cycles; add a deferred-import ratchet | High | Med | `[ ]` TODO |
 | T3 | Central metric registry (`domain/metric_registry.py`) | High | Med | `[ ]` TODO |
 | T4 | Decompose remaining orchestrators (+budget ratchets) | Med | Med–High | `[ ]` TODO |
@@ -118,7 +118,35 @@ the fix must **not** add a 6th signal. Use the existing post-load seam:
   `test_sample_def_autosave.py`, `test_view_state_metric_combo_sync.py`,
   `test_qc_params_persistence.py`. **Risk:** Med (touches load order — verify the
   app still loads a dataset and the affected tabs refresh).
-- **Notes:** _(SHA)_
+- **Done — what shipped:**
+  1. **`QCParams` + `compute_qc_pass` relocated** `features/qc/params.py` →
+     **`well_viewer/domain/qc_params.py`** (Qt-free, pandas-only verdict model
+     belongs in the foundational layer). `features/qc/params.py` is now a thin
+     re-export shim, so every existing `from well_viewer.features.qc.params import …`
+     call site (controller, tab_view, `__init__`, the test suite) keeps working —
+     verified `domain.QCParams is features.qc.params.QCParams`.
+  2. **`persistence/qc_params.py` is data-only:** imports `QCParams` from `domain`
+     (downward); dropped the `seed_qc_from_pipeline_info` feature import. When no
+     persisted edits exist it now sets `app._qc_params = None` (clears a prior
+     dataset's stale gate); the qc controller's `get_qc_params` accessor lazily
+     re-seeds from this dataset's `pipeline_info` — which the very next load step
+     (`apply_qc_to_cache`) already triggers. Behaviour identical, no feature import.
+  3. **`sample_definitions.py` / `view_state.py`:** the two remaining module-level
+     feature imports (`label_grid_refresh`, `image_table_apply_dimensions`) moved
+     **function-local** into the Clear-All command / view-state restore — the same
+     sanctioned escape hatch those exact modules already use for their other
+     feature touchpoints (cell-gating reset, `image_table_refresh_display_menu`).
+     Persistence's *module scope* is now feature-free.
+  4. **Guard extended:** `tests/test_layering.py` `GUARDED_LAYERS` now includes
+     `"persistence"` (test renamed `test_foundational_layers_do_not_import_features`),
+     locking the fix — a module-level `persistence → features` import now fails CI.
+- **Verified:** `test_layering + test_qc_layer + test_qc_integration +
+  test_qc_params_persistence + test_sample_def_autosave + test_view_state_metric_combo_sync`
+  → **28 passed, 4 deselected** (the `loaded_app` Qt tests are `slow`); full
+  guardrail suite (`architecture_contracts, layering, no_silent_except,
+  monolith_budgets, guardrails, remote_manifest`) **18 passed**; `ruff` clean.
+  `test_qc_params_persistence` updated to assert the new data-only contract
+  (loader clears to `None`; controller accessor seeds).
 
 ## T2 — Break the inter-feature cycles; ratchet deferred imports
 
@@ -214,8 +242,9 @@ Mirror the P4 pattern (extract cohesive sub-modules, re-export, ratchet the budg
 ## Status log
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-06-11 **T1 DONE** — `persistence/` is now data-only at module scope. Relocated `QCParams` + `compute_qc_pass` to `domain/qc_params.py` (shim left at `features/qc/params.py`); `persistence/qc_params.py` imports the model downward from `domain` and defers seeding to the qc controller's lazy accessor (sets `None` when no persisted edits); moved the `label_grid_refresh` / `image_table_apply_dimensions` feature imports function-local in the Clear-All command + view-state restore. Extended `test_layering` `GUARDED_LAYERS` with `"persistence"` to lock it. Verified: 28 passed/4 slow-deselected across the qc + persistence + layering set; 18 guardrails green; ruff clean.
 - 2026-06-11 **T5 DONE** — conftest auto-marks `viewer_app`-fixture tests `slow`; added a CI `pytest (fast lane)` job running `-m "not slow"` (803 tests ~40s, green) with `timeout-minutes: 15`. Fixed 3 pre-existing failures CI surfaced: stale `_FakeApp` double in test_thresh_frac_quick_edit (added `_invalidate_stats_cache`/`_event_bus`/`plot`), and 2 stale test_remote_dialog asserts (placeholder-default UX + offscreen `isHidden` vs `isVisible`).
 - 2026-06-11 Plan created from the post-work re-evaluation (both findings verified
   against the tree). All tasks TODO.
 
-**Last updated:** 2026-06-11 — plan authored; nothing executed yet.
+**Last updated:** 2026-06-11 — T1 + T5 done; T2 next.

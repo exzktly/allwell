@@ -1,10 +1,11 @@
 """QC-layer threshold persistence — ``qc_params`` section of ``persistence.json``.
 
 Stores the live debris-gating thresholds edited in the QC sidebar view so the
-curation survives between sessions. On load, falls back to seeding from the
-dataset's ``pipeline_info.json`` (the thresholds used at run time) when no
-persisted edits exist — so a freshly-processed dataset opens with the run's QC
-settings already in place.
+curation survives between sessions. When no persisted edits exist, this loader
+clears ``app._qc_params`` and the QC controller's accessor lazily seeds it from
+the dataset's ``pipeline_info.json`` (the thresholds used at run time) — so a
+freshly-processed dataset opens with the run's QC settings already in place,
+without this data-only module importing feature code.
 
 Lives in the consolidated ``persistence.json`` document (like ``ratios`` /
 ``heatmap_layouts`` / ``line_order`` / ``view_state``), not a standalone sidecar.
@@ -19,8 +20,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from well_viewer.features.qc.controller import seed_qc_from_pipeline_info
-from well_viewer.features.qc.params import QCParams
+from well_viewer.domain.qc_params import QCParams
 from well_viewer.persistence import _doc
 
 _logger = logging.getLogger("well_viewer")
@@ -45,8 +45,14 @@ def load_from_data_dir(app) -> None:
     if data is None:
         data = _absorb_legacy_sidecar(app)
     if data is None:
-        # No persisted edits — seed from the run's pipeline_info thresholds.
-        seed_qc_from_pipeline_info(app)
+        # No persisted edits — clear any stale params from a previously open
+        # dataset. The QC controller's accessor (``get_qc_params``) lazily
+        # re-seeds from this dataset's ``pipeline_info`` thresholds on first
+        # read (the very next step in the load sequence is ``apply_qc_to_cache``,
+        # which reads through that accessor). Keeping the seed there — rather
+        # than calling a *feature* function from this persistence module —
+        # is what lets ``persistence`` stay data-only (see test_layering).
+        app._qc_params = None
         return
     app._qc_params = QCParams.from_dict(data)
 

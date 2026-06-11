@@ -549,10 +549,6 @@ def on_review_image_channel_selected(app, _e=None) -> None:
 
 # ── Flat-field validation view (recompute the selected flat-field) ────────────
 
-# Keep the on-the-fly preview field cheap: the illumination envelope is smooth,
-# so a handful of frames is plenty for the basic/empty-well median estimate.
-_FLATFIELD_PREVIEW_MAX_SAMPLES = 8
-
 
 
 

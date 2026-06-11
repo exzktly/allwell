@@ -387,6 +387,9 @@ def on_review_image_release(app, event) -> None:
         mx0, my0, mx1, my1 = rect
         if crop_mode:
             # Crop stores a row/col region; release gives x=col, y=row.
+            # Sanctioned deferred import: crop.controller imports back into
+            # review_image, so keeping this function-local breaks the genuine
+            # crop↔review_image cycle (counted by the deferred-import ratchet).
             from well_viewer.features.crop.controller import (
                 set_crop_edit_mode, set_crop_region,
             )

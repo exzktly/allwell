@@ -52,7 +52,7 @@ commit SHA + the test that proves it in the task's notes.
 |----|------|----------|------|--------|
 | T5 | Restore a bounded CI test job | Med | Low | `[x]` DONE |
 | T1 | `persistence/` → data-only; close the layering-guard gap | High | Med | `[x]` DONE |
-| T2 | Break inter-feature cycles; add a deferred-import ratchet | High | Med | `[ ]` TODO |
+| T2 | Break inter-feature cycles; add a deferred-import ratchet | High | Med | `[x]` DONE |
 | T3 | Central metric registry (`domain/metric_registry.py`) | High | Med | `[ ]` TODO |
 | T4 | Decompose remaining orchestrators (+budget ratchets) | Med | Med–High | `[ ]` TODO |
 | T6 | Log specific-type silent passes; add a directed integration test | Low | Low | `[ ]` TODO |
@@ -179,7 +179,41 @@ function-local cycle-workarounds. Concrete cycles:
   cycle check (as in P3).
 - **Verify:** `test_scatter_smfish.py`, `test_export_formats.py`, the crop /
   review_image suites, and the new ratchet. **Risk:** Med (import order).
-- **Notes:** _(SHA)_
+- **Done — what shipped:**
+  1. **Scatter↔export cycle broken.** Relocated the neutral figure-styling engine
+     (`DEFAULT_EXPORT_STYLE_PREFS`, `_ensure_export_style_prefs`,
+     `apply_export_style_prefs`, `apply_export_style_to_current`) from
+     `features/export/style.py` → **`core/plot_style.py`**. `export/style.py`
+     re-exports them for compat. Every plot feature now imports the styling entry
+     point *downward* from `core` — scatter's module-level `…export.style` import
+     is gone, and the deferred imports in **lineplot / heatmap / barplot / distribution
+     controllers + `core/plot_orchestrator`** were promoted to module-level
+     downward imports (5 deferred imports removed).
+  2. **Export→scatter / distribution→scatter cleaned.** Extracted the pure data
+     collectors (`collect_scatter_data`, `collect_scatter_agg_data`,
+     `get_all_timepoints`) into new **`features/scatter/collect.py`** (no
+     rendering); `scatter/controller.py` re-exports them. `export/service.py` and
+     `distribution/tab_view.py` now import the collectors *downward* at module
+     scope (3 more deferred imports removed). `scatter/controller.py` shed its
+     now-unused `matplotlib`/`numpy`/`pandas`/`df_included_mask`/
+     `resolve_value_series`/`well_aggregate_stats`/`debug_flags` imports.
+  3. **crop ↔ review_image:** a genuine bidirectional interactive coupling (crop
+     is a draw-mode of the review-image canvas; the canvas click handler delegates
+     back to crop). Kept the **documented** deferred imports at both ends (the
+     sanctioned escape hatch) rather than forcing a risky restructure of the
+     interactive click path — these are part of the ratchet budget.
+  4. **Promoted** every now-acyclic deferred import (8 total) to module level.
+  5. **Ratchet guard added:** `tests/test_deferred_imports.py` counts every
+     function-local `from well_viewer.features …` import and asserts it never
+     exceeds the budget (**seeded at 137**, the post-T2 count) — and a companion
+     test fails if the budget drifts >5 above the real count, forcing it down as
+     cycles are broken. Also taught `test_architecture_contracts.test_feature_module_naming`
+     (+ ARCHITECTURE §3) that `collect.py` is a first-class module name.
+- **Verified:** clean `python -c "import …"` cycle check (no import cycle); the
+  scatter / export / barplot / lineplot / crop / review_image feature suites
+  → **59 passed** (`-m "not slow"`); full guardrail suite (incl. the new ratchet)
+  **20 passed**; `ruff check .` clean across the repo.
+- **Notes:** SHA on commit.
 
 ## T3 — Central metric registry (`domain/metric_registry.py`)
 
@@ -242,9 +276,10 @@ Mirror the P4 pattern (extract cohesive sub-modules, re-export, ratchet the budg
 ## Status log
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-06-11 **T2 DONE** — broke the scatter↔export import cycle by relocating the figure-styling engine to `core/plot_style.py` (re-exported from `export/style`) and extracting the scatter data collectors into `features/scatter/collect.py` (re-exported from the controller); promoted 8 now-acyclic deferred imports to module level across lineplot/heatmap/barplot/distribution/scatter/export/plot_orchestrator; documented the one irreducible crop↔review_image deferred pair; added `tests/test_deferred_imports.py` ratchet (budget 137) + recognised `collect.py` in the naming guard. Verified: 59 feature tests pass, 20 guardrails pass, ruff clean, no import cycle.
 - 2026-06-11 **T1 DONE** — `persistence/` is now data-only at module scope. Relocated `QCParams` + `compute_qc_pass` to `domain/qc_params.py` (shim left at `features/qc/params.py`); `persistence/qc_params.py` imports the model downward from `domain` and defers seeding to the qc controller's lazy accessor (sets `None` when no persisted edits); moved the `label_grid_refresh` / `image_table_apply_dimensions` feature imports function-local in the Clear-All command + view-state restore. Extended `test_layering` `GUARDED_LAYERS` with `"persistence"` to lock it. Verified: 28 passed/4 slow-deselected across the qc + persistence + layering set; 18 guardrails green; ruff clean.
 - 2026-06-11 **T5 DONE** — conftest auto-marks `viewer_app`-fixture tests `slow`; added a CI `pytest (fast lane)` job running `-m "not slow"` (803 tests ~40s, green) with `timeout-minutes: 15`. Fixed 3 pre-existing failures CI surfaced: stale `_FakeApp` double in test_thresh_frac_quick_edit (added `_invalidate_stats_cache`/`_event_bus`/`plot`), and 2 stale test_remote_dialog asserts (placeholder-default UX + offscreen `isHidden` vs `isVisible`).
 - 2026-06-11 Plan created from the post-work re-evaluation (both findings verified
   against the tree). All tasks TODO.
 
-**Last updated:** 2026-06-11 — T1 + T5 done; T2 next.
+**Last updated:** 2026-06-11 — T1, T2, T5 done; T3 next.

@@ -1,0 +1,88 @@
+"""Ratchet guard: the count of *function-local* ``from well_viewer.features …``
+imports may only go **down**.
+
+Function-local (deferred) feature imports are the sanctioned escape hatch for a
+genuine, isolated cycle break (see ``tests/test_layering.py``). They are not
+free, though: a high count is the symptom of inter-feature cycles, and an audit
+of this codebase found ~47% of all ``from well_viewer`` imports were deferred
+cycle-workarounds. T2 broke the worst offenders (the scatter↔export cycle, via
+``core/plot_style.py`` + ``scatter/collect.py``) and promoted the now-acyclic
+deferred imports to module scope.
+
+This guard locks that progress in: it counts every deferred
+``from well_viewer.features...`` import and asserts the total never exceeds the
+current budget. The budget is a *ceiling that only ratchets down* — when you
+remove a deferred import (by breaking a cycle and promoting it to module level),
+lower ``MAX_DEFERRED_FEATURE_IMPORTS`` to the new count in the same commit so the
+win can't silently regress. Adding a new deferred feature import fails this test:
+break the cycle properly (extract shared code down a layer, or invert the
+dependency) instead.
+
+A genuinely irreducible bidirectional interaction (e.g. crop↔review_image, where
+crop is a draw-mode of the review-image canvas) may keep *one* documented
+deferred import — those are part of the budget below.
+"""
+
+import ast
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
+FEATURE_PREFIX = "well_viewer.features"
+
+# Ceiling. Seeded at the post-T2 count. ONLY EVER LOWER THIS NUMBER.
+MAX_DEFERRED_FEATURE_IMPORTS = 137
+
+
+def _is_feature_import(node: ast.ImportFrom) -> bool:
+    mod = node.module or ""
+    return mod == FEATURE_PREFIX or mod.startswith(FEATURE_PREFIX + ".")
+
+
+def _deferred_feature_imports(tree: ast.Module):
+    """Yield ``(lineno, module)`` for every ``from well_viewer.features …``
+    import that is NOT at module top level (i.e. nested in a function / method
+    / conditional block)."""
+    toplevel = {id(n) for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and _is_feature_import(node)
+            and id(node) not in toplevel
+        ):
+            yield node.lineno, node.module
+
+
+def _collect():
+    hits = []
+    for path in sorted(ROOT.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for lineno, module in _deferred_feature_imports(tree):
+            hits.append(f"{path.relative_to(ROOT.parent)}:{lineno} -> {module}")
+    return hits
+
+
+def test_deferred_feature_imports_do_not_exceed_budget():
+    hits = _collect()
+    count = len(hits)
+    assert count <= MAX_DEFERRED_FEATURE_IMPORTS, (
+        f"Deferred (function-local) 'from well_viewer.features …' imports rose to "
+        f"{count}, above the budget of {MAX_DEFERRED_FEATURE_IMPORTS}. A deferred "
+        f"feature import is a cycle-workaround — break the cycle (extract the "
+        f"shared code into a lower layer, or invert the dependency) rather than "
+        f"adding another. If you genuinely removed some, lower the budget instead.\n"
+        + "\n".join(hits)
+    )
+
+
+def test_budget_is_not_set_too_high():
+    """Keep the ceiling honest: if the real count drops well below the budget,
+    the budget should have been lowered to match. Fails when the budget is more
+    than 5 above the actual count (a reminder to ratchet it down)."""
+    count = len(_collect())
+    assert MAX_DEFERRED_FEATURE_IMPORTS - count <= 5, (
+        f"Only {count} deferred feature imports remain but the budget is "
+        f"{MAX_DEFERRED_FEATURE_IMPORTS}. Lower MAX_DEFERRED_FEATURE_IMPORTS to "
+        f"{count} to lock in the improvement."
+    )

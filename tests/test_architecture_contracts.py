@@ -188,8 +188,8 @@ FEATURE_NAME_EXCEPTIONS = {
 
 
 def _feature_name_ok(name: str) -> bool:
-    if name in {"controller.py", "renderer.py", "state.py", "worker.py",
-                "callbacks.py", "__init__.py"}:
+    if name in {"controller.py", "renderer.py", "collect.py", "state.py",
+                "worker.py", "callbacks.py", "__init__.py"}:
         return True
     if name.endswith("_view.py") or name.endswith("_panel.py"):
         return True
@@ -200,9 +200,11 @@ def _feature_name_ok(name: str) -> bool:
 
 def test_feature_module_naming():
     """ARCHITECTURE §3: per-feature files follow a small naming scheme
-    (`controller`/`renderer`/`state`/`worker`/`callbacks`, `*_view`, `*_panel`,
-    `_private`), with a fixed list of documented exceptions. A new name outside
-    the scheme should be a deliberate choice — add it here + to the doc."""
+    (`controller`/`renderer`/`collect`/`state`/`worker`/`callbacks`, `*_view`,
+    `*_panel`, `_private`), with a fixed list of documented exceptions. A new
+    name outside the scheme should be a deliberate choice — add it here + to the
+    doc. ``collect.py`` is the pure data-collection half paired with a
+    ``renderer.py`` (e.g. scatter)."""
     offenders = [
         str(p.relative_to(REPO_ROOT))
         for p in _walk_py(WELL_VIEWER / "features")

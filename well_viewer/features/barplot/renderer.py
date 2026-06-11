@@ -35,7 +35,11 @@ from well_viewer.data.data_loading import (
     parse_timepoint_hours,
     resolve_value_series,
 )
-from well_viewer.core.plot_style import apply_ax_style, tokens_for
+from well_viewer.core.plot_style import (
+    apply_ax_style,
+    apply_export_style_to_current,
+    tokens_for,
+)
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
 
@@ -560,7 +564,6 @@ def redraw_bars(app) -> None:
         tp_str=tp_str_combined,
         threshold=threshold,
     ):
-        from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))
         return
     draw_grouped_bar_mode(
@@ -575,8 +578,6 @@ def redraw_bars(app) -> None:
         band_lbl=band_lbl,
         use_sem=use_sem,
     )
-    from well_viewer.features.export.style import apply_export_style_to_current
-
     apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))
 
 

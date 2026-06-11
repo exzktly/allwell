@@ -26,6 +26,7 @@ from well_viewer.features.heatmap.models import (
 from well_viewer.domain.ratio_models import is_ratio_key
 from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.safe import swallowed
+from well_viewer.core.plot_style import apply_export_style_to_current
 
 
 METRIC_MEAN = "Mean above threshold"
@@ -566,7 +567,6 @@ def redraw_heatmap(app) -> None:
     # Apply the Export Style sidebar prefs (font sizes, grid, log scale, …)
     # so toggling those in the configurator survives a redraw.
     try:
-        from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, fig, canvas)
     except Exception:
         swallowed()  # was: pass (silent except)

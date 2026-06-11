@@ -9,6 +9,14 @@ from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
+# Scatter data collection lives in the pure-data ``scatter.collect`` module, so
+# the CSV export imports it *downward* at module scope (T2). Before the collectors
+# were split out of ``scatter.controller`` this had to be a function-local import
+# to dodge the scatter↔export cycle.
+from well_viewer.features.scatter.collect import (
+    collect_scatter_agg_data as _scatter_collect_agg_data,
+    collect_scatter_data as _scatter_collect_data,
+)
 
 
 _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
@@ -523,8 +531,6 @@ def export_raw_data_csv(app) -> None:
 
 def export_scatter_data(app) -> None:
     """Export scatter plot data to CSV."""
-    from well_viewer.features.scatter.controller import collect_scatter_data as _scatter_collect_data
-
     try:
         ch_x_entry = app._scatter_ch_x_cb.currentText()
         ch_y_entry = app._scatter_ch_y_cb.currentText()
@@ -621,8 +627,6 @@ def export_scatter_data(app) -> None:
 
 def export_scatter_agg_data(app) -> None:
     """Export aggregate scatter plot data to CSV."""
-    from well_viewer.features.scatter.controller import collect_scatter_agg_data as _scatter_collect_agg_data
-
     # Keep the legacy stat combos in sync with the new per-axis
     # (channel, property) state — the export reads from those.
     try:

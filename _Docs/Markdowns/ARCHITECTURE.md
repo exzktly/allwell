@@ -154,7 +154,7 @@ well_viewer/
 ├── features/                      ← one package per UI feature
 │   ├── barplot/      controller.py, renderer.py, tab_view.py
 │   ├── lineplot/     controller.py, tab_view.py
-│   ├── scatter/      controller.py, callbacks.py, ratio_panel_view.py,
+│   ├── scatter/      controller.py, collect.py, callbacks.py, ratio_panel_view.py,
 │   │                 tab_view.py, cells_tab_view.py, agg_tab_view.py
 │   ├── heatmap/      controller.py, models.py, sidebar_view.py, tab_view.py
 │   ├── distribution/ controller.py, tab_view.py
@@ -185,6 +185,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 |---|---|---|
 | `controller.py` / `_controller.py` | Orchestrator: event handlers, business logic, state mutation. Owns the feature's behaviour. | `features/barplot/controller.py`, `core/load_controller.py`, `core/channel_state_controller.py` |
 | `renderer.py` | Pure matplotlib drawing. Decoupled from Qt — takes a figure / axes and a state snapshot. | `features/barplot/renderer.py`, `features/review_image/renderer.py` |
+| `collect.py` | Pure data collection — the half of a plot feature that walks the loaded wells and returns plain dicts/arrays, with no matplotlib axes or Qt. Paired with a `renderer.py`; importable downward by exporters without pulling the renderer. | `features/scatter/collect.py` |
 | `tab_view.py` | Qt builder for a feature's main tab page (returns the assembled `QWidget`). | every `features/*/tab_view.py` |
 | `*_view.py` | Qt builder for a sub-panel, sidebar, or sub-dialog. | `sidebar_view.py`, `panel_view.py`, `csv_tab_view.py`, `picker_view.py`, `core/app_shell_view.py` |
 | `state.py` / `_state.py` | Dataclass state container; no logic, only fields + defaults. | `core/app_state.py`, `core/channel_state.py`, `features/stats/state.py` |

@@ -14,6 +14,7 @@ import numpy as np
 
 from well_viewer.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
 from well_viewer.core.safe import swallowed
+from well_viewer.core.plot_style import apply_export_style_to_current
 
 
 NO_DATA_MSG = (
@@ -91,7 +92,6 @@ def _apply_export_style(app) -> None:
     if fig is None:
         return
     try:
-        from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, fig, canvas)
     except Exception:
         swallowed()  # was: pass (silent except)

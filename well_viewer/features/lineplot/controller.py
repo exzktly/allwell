@@ -11,6 +11,7 @@ from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
+from well_viewer.core.plot_style import apply_export_style_to_current
 
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
@@ -499,7 +500,6 @@ def redraw_line_plots(
     # limits, log scale, etc. survive a redraw (matches what the bar,
     # heatmap, and distribution renderers do).
     try:
-        from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, app._line_fig,
                                       getattr(app, "_line_canvas", None))
     except Exception:  # pragma: no cover - never let style restore break a draw

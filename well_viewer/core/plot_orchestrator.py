@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
-from well_viewer.core.plot_style import apply_ax_style
+from well_viewer.core.plot_style import apply_ax_style, apply_export_style_to_current
 from ui.theme import WARN
 from well_viewer.core.safe import swallowed
 
@@ -212,7 +212,6 @@ def redraw_app(app) -> None:
         except Exception:
             _status_signal.signal_failed()
             raise
-    from well_viewer.features.export.style import apply_export_style_to_current
     apply_export_style_to_current(app, app._line_fig, getattr(app, "_line_canvas", None))
 
     # Keep the Export Configurator's line-order lists in sync with the

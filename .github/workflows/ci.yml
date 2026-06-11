@@ -54,6 +54,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         # Per-test timeout guards against a single test hanging the runner.
+        # Coverage of the pipeline correction modules is reported (not enforced)
+        # so the trend is visible; raise to a floor once a baseline is trusted.
         run: |
           python -m pytest tests/ -q \
-            --timeout=180 --timeout-method=signal
+            --timeout=180 --timeout-method=signal \
+            --cov=microscopy_background --cov=flatfield_core \
+            --cov-report=term-missing

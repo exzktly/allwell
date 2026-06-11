@@ -459,12 +459,8 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
     prev_channel = app._app_state.channel.active_image_channel
     app._app_state.channel.active_image_channel = channel
     ch_upper = channel.upper()
-    if hasattr(app, "_montage_chan_var"):
-        app._montage_chan_var.setCurrentText(ch_upper)
     if hasattr(app, "_review_image_chan_var"):
         app._review_image_chan_var.setCurrentText(ch_upper)
-    if hasattr(app, "_mon_lut_chan_lbl"):
-        app._mon_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
     if hasattr(app, "_review_lut_chan_lbl"):
         app._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
     saved_review_lut = app._app_state.review_image.lut_by_channel.get(channel)

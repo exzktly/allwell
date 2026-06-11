@@ -211,7 +211,6 @@ def _compose_image_table_rgb(
     data.
     """
     import numpy as _np
-    from matplotlib import colormaps as _mpl_cmaps
 
     if arr is None:
         return None
@@ -240,22 +239,11 @@ def _compose_image_table_rgb(
         binary = (cm > 0).astype(_np.uint8) * 255
         return _np.stack([binary, binary, binary], axis=-1)
 
-    # 3. Greyscale fluorescence → apply LUT then colormap.
+    # 3. Greyscale fluorescence → apply LUT + colormap (shared single-source
+    #    helper; also used by the Playground renderer).
+    from well_viewer.core.ui_helpers import lut_colormap_to_rgb
     af = a.astype(_np.float32)
-    alo = lo if lo is not None else float(af.min())
-    ahi = hi if hi is not None else float(af.max())
-    if ahi <= alo:
-        ahi = alo + 1.0
-    norm = _np.clip((af - alo) / (ahi - alo), 0.0, 1.0)
-    if cmap_name:
-        try:
-            rgb = (_mpl_cmaps[cmap_name](norm)[..., :3] * 255).astype(_np.uint8).copy()
-        except Exception:
-            gray = (norm * 255).astype(_np.uint8)
-            rgb = _np.stack([gray, gray, gray], axis=-1)
-    else:
-        gray = (norm * 255).astype(_np.uint8)
-        rgb = _np.stack([gray, gray, gray], axis=-1)
+    rgb = lut_colormap_to_rgb(af, lo, hi, cmap_name or "")
 
     # 4. Boundary overlay: paint white pixels at the segmentation
     # boundaries (same padded-diff scheme used by the live renderer).

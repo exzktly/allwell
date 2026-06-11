@@ -232,15 +232,20 @@ def collect_line_series(
             _raw_pts: list = []
             for t in sorted(all_tps):
                 if rep_per_fov:
-                    gm, gerr, gf, _, _, _ = compute_rep_per_fov_stats(app,
+                    gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(app,
                         rset, t, threshold, use_sem,
                     )
                 else:
                     gm, gerr, gf, _ = compute_rep_stats(app,
                         rset, t, threshold, use_sem,
                     )
+                    gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
-                    _raw_pts.append((t, gm, gerr, gf, 0, 0, 0.0, 0.0, 0.0))
+                    # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
+                    # per-FOV n-above mean/spread. These were previously dropped,
+                    # so the "fraction above threshold" subplot had no FOV error
+                    # to draw and fell back to shading the area under the line.
+                    _raw_pts.append((t, gm, gerr, gf, 0, 0, gfe, gnpf_m, gnpf_s))
             if _raw_pts and (fc_control_stats or fc_vs_t0):
                 _raw_pts = _fc.normalize_pts(
                     _raw_pts,
@@ -423,16 +428,29 @@ def redraw_line_plots(
                 [m + e for m, e in zip(agg_means, agg_errs)],
                 color=color, alpha=0.15, zorder=2,
             )
-            vf = [(p.t, p.frac) for p in series.points if p.has_frac]
+            vf = [(p.t, p.frac, p.frac_spread) for p in series.points if p.has_frac]
             if vf:
-                vt2, vf2 = zip(*vf)
+                vt2, vf2, vfe = zip(*vf)
                 app._line_ax_frac.plot(
                     vt2, vf2, color=color, lw=2,
                     marker="s", markersize=3, label=series.display, zorder=3,
                 )
-                app._line_ax_frac.fill_between(
-                    vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
-                )
+                if any(e > 0 for e in vfe):
+                    # FOV / replicate spread present (e.g. "FOV errors" mode):
+                    # draw a ±error band around the fraction line, matching the
+                    # mean subplot — NOT a fill down to the x-axis (which read as
+                    # "colouring the area underneath" and carried no error info).
+                    lo = [max(0.0, f - e) for f, e in zip(vf2, vfe)]
+                    hi = [f + e for f, e in zip(vf2, vfe)]
+                    app._line_ax_frac.fill_between(
+                        vt2, lo, hi, color=color, alpha=0.15, zorder=2,
+                    )
+                else:
+                    # No spread (single FOV / no error mode): keep the light
+                    # area shading under the curve as before.
+                    app._line_ax_frac.fill_between(
+                        vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
+                    )
             any_ts = True
         if series.cdf_vals:
             fluor_s = sorted(series.cdf_vals)

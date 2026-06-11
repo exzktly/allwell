@@ -143,3 +143,28 @@ def test_linepoint_as_aggpoint_round_trip():
     assert out[4] == pt[4]
     assert out[5] == pt[5]
     assert out[6] == pt[6]
+
+
+def test_collect_line_series_fov_spread_populates_frac_spread(mock_app, monkeypatch):
+    """Regression: in FOV-error (per-FOV spread) mode the rep-set collector must
+    carry the per-FOV fraction error (``compute_rep_per_fov_stats``'s 4th return)
+    into ``LinePoint.frac_spread``. It used to drop it (hardcoded 0.0), so the
+    "fraction above threshold" subplot had no error band and fell back to shading
+    the area under the line.
+    """
+    import well_viewer.features.lineplot.controller as lp
+
+    # Force FOV-spread mode and stub the per-FOV stats with a known non-zero
+    # fraction error (idx 3) + per-FOV n-above mean/spread (idx 4/5).
+    monkeypatch.setattr(mock_app, "_use_fov_spread_active", lambda: True, raising=False)
+    monkeypatch.setattr(
+        lp, "compute_rep_per_fov_stats",
+        lambda app, rset, t, thr, sem: (100.0, 5.0, 0.4, 0.12, 3.0, 1.0),
+    )
+
+    series, _ = collect_line_series(mock_app, **_kw())
+    frac_pts = [p for s in series for p in s.points if p.has_frac]
+    assert frac_pts, "expected fraction points in rep-set FOV-spread mode"
+    assert all(math.isclose(p.frac, 0.4) for p in frac_pts)
+    assert all(math.isclose(p.frac_spread, 0.12) for p in frac_pts), \
+        [p.frac_spread for p in frac_pts]

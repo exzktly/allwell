@@ -499,14 +499,16 @@ def test_analyze_qc_section_present_and_gated():
     titles = {l.text() for l in tab.findChildren(QLabel)}
     assert "Quality Control" in titles
 
-    # Debris bounds disabled until the checkbox is on, then re-disabled when off.
+    # Debris bounds hidden until the checkbox is on, then re-hidden when off.
+    # (``isHidden`` is the offscreen-robust check — ``isVisible`` is False for
+    # every widget when the top-level window is never shown.)
     ra, rs = tab._qc_debris_rows
     assert tab._qc_remove_debris_cb.isChecked() is False
-    assert ra.isEnabled() is False and rs.isEnabled() is False
+    assert ra.isHidden() and rs.isHidden()
     tab._qc_remove_debris_cb.setChecked(True)
-    assert ra.isEnabled() is True and rs.isEnabled() is True
+    assert not ra.isHidden() and not rs.isHidden()
     tab._qc_remove_debris_cb.setChecked(False)
-    assert ra.isEnabled() is False
+    assert ra.isHidden()
 
     # Background well still gates on the empty_well flat-field mode.
     assert tab._background_well_edit.isEnabled() is False

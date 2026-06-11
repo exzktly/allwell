@@ -50,6 +50,7 @@ from well_viewer.features.image_table.image_compose import (  # noqa: E402,F401
     _norm_token,
     _numeric_token,
     _parse_lut,
+    _row_display_opts,
     _render_mask_binary,
     _render_threshold_binary,
     _render_with_boundary_overlay,
@@ -173,12 +174,12 @@ def image_table_repopulate_dropdowns(app) -> None:
             set_combo_values(cell["tp_cb"], tp_opts)
             set_combo_values(cell["fov_cb"], fov_opts)
 
-    # The LUT row is built once at tab-construction time, when the canonical
-    # channel lists may still be empty. Rebuild it now so the per-channel
-    # min/max entry boxes appear once channels are known. ``build_lut_row``
-    # preserves any previously-entered values keyed by channel.
+    # The LUT/Display row is built once at tab-construction time, when the grid
+    # may not exist yet. Rebuild it now so a per-row box appears for each grid
+    # row. ``build_lut_row`` preserves prior per-row values across rebuilds.
+    cells = getattr(app, "_image_table_cells", None) or []
     existing = set((getattr(app, "_image_table_lut", None) or {}).keys())
-    if set(chan_opts) != existing:
+    if set(range(len(cells))) != existing:
         image_table_rebuild_lut_row(app)
 
     # Keep the sidebar channel multi-select in sync with the dataset's channels.
@@ -774,18 +775,6 @@ def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
         sel.blockSignals(False)
 
 
-def image_table_toggle_tophat(app) -> None:
-    """Flip the raw/tophat source flag and re-render.
-
-    Bound to the Display ▾ menu's checkable Tophat action. When ON,
-    ``_load_array`` reads from the pre-filtered tophat dict; when OFF, it reads
-    raw fluor as before.
-    """
-    app._app_state.image_table.use_tophat = not bool(getattr(app._app_state.image_table, "use_tophat", False))
-    image_table_refresh_display_menu(app)
-    # Tossing the cache so the next Generate fetches the right dict.
-    app._app_state.image_table.image_cache = {}
-    image_table_generate(app)
 
 
 def image_table_load_heatmap_layout(app) -> None:
@@ -928,36 +917,12 @@ def image_table_distribute_wells(app) -> None:
 # ── LUT row ──────────────────────────────────────────────────────────────────
 
 
-def _assigned_channels(app) -> List[str]:
-    """Channels currently selected in any cell of the image-table grid.
-
-    Order follows ``_channel_options`` so the LUT row stays stable as the
-    user edits assignments. Empty when no grid has been built yet.
-    """
-    cells = getattr(app, "_image_table_cells", None) or []
-    used: set[str] = set()
-    for row in cells:
-        for cell in row:
-            cb = cell.get("chan_cb")
-            if cb is None:
-                continue
-            text = (cb.currentText() or "").strip().upper()
-            if text:
-                used.add(text)
-    return [c for c in _channel_options(app) if c in used]
-
-
 def image_table_rebuild_lut_row(app) -> None:
-    """Rebuild the per-channel LUT editors (one min/max pair per channel).
-
-    Only the channels currently assigned to a cell in the grid get a LUT
-    box; unused channels are hidden.
-    """
+    """Rebuild the per-row LUT + display editors (one box per grid row)."""
     from well_viewer.features.image_table.grid_view import build_lut_row
 
     build_lut_row(
         app,
-        chan_opts=_assigned_channels(app),
         on_generate=image_table_generate,
         on_auto_lut=image_table_auto_lut,
     )
@@ -976,39 +941,6 @@ def image_table_rebuild_lut_row(app) -> None:
 
 
 
-
-
-def image_table_toggle_boundaries(app) -> None:
-    """Flip the boundary-overlay flag and re-render (Display ▾ menu action)."""
-    app._app_state.image_table.show_boundaries = not bool(
-        getattr(app._app_state.image_table, "show_boundaries", False)
-    )
-    image_table_refresh_display_menu(app)
-    app._app_state.image_table.image_cache = {}
-    image_table_generate(app)
-
-
-def image_table_refresh_display_menu(app) -> None:
-    """Sync the Display ▾ menu's QAction checked states from app state.
-
-    Driven from the toggle/binary handlers and from view_state restore so the
-    menu always mirrors ``_image_table_use_tophat`` / ``_show_boundaries`` /
-    ``_image_table_binary_mode`` (signals blocked to avoid re-entrancy)."""
-    def _set(attr, checked) -> None:
-        act = getattr(app, attr, None)
-        if act is not None and hasattr(act, "setChecked"):
-            blocked = act.blockSignals(True)
-            try:
-                act.setChecked(bool(checked))
-            finally:
-                act.blockSignals(blocked)
-
-    _set("_image_table_tophat_act", getattr(app._app_state.image_table, "use_tophat", False))
-    _set("_image_table_boundaries_act", getattr(app._app_state.image_table, "show_boundaries", False))
-    mode = getattr(app._app_state.image_table, "binary_mode", "") or ""
-    _set("_image_table_binary_act_none", mode == "")
-    _set("_image_table_binary_act_mask", mode == "mask")
-    _set("_image_table_binary_act_thresh", mode == "threshold")
 
 
 _ZOOM_MIN = 0.33
@@ -1032,26 +964,6 @@ def image_table_set_zoom(app, factor: float, *, relative: bool = False) -> None:
     # store the level for the next Generate.
     if getattr(app._app_state.image_table, "last_render", None):
         image_table_generate(app)
-
-
-def image_table_set_binary_mode(app, mode: str) -> None:
-    """Set the binary display mode and re-render.
-
-    ``mode`` is one of:
-      * ``""``         — off (normal fluorescence / overlay).
-      * ``"mask"``     — every segmented cell drawn white on black.
-      * ``"threshold"``— only cells above the active ON threshold drawn white
-        (reuses the Review Image gating logic via
-        ``review_build_threshold_map``).
-
-    Driven by the Display ▾ menu's exclusive Binary radio group (None / Mask /
-    ≥ Threshold), so the mode is set absolutely rather than toggled.
-    """
-    if mode not in ("", "mask", "threshold"):
-        return
-    app._app_state.image_table.binary_mode = mode
-    image_table_refresh_display_menu(app)
-    image_table_generate(app)
 
 
 # ── Per-cell mouse handling: hover pixel readout + crop drag ────────────────
@@ -1183,10 +1095,10 @@ def _install_cell_events(
 
 
 def _refresh_lut_fields_from_render(app, rendered) -> None:
-    """Pool the actual min/max per channel from the just-rendered arrays and
-    write the numbers into the LUT boxes, except rows the user has overridden.
+    """Pool the actual min/max per ROW from the just-rendered arrays and write
+    the numbers into that row's LUT box, except rows the user has overridden.
 
-    A channel's entry carries an ``auto`` flag (True until the user edits its
+    Each row's entry carries an ``auto`` flag (True until the user edits its
     min/max); only auto rows get refreshed, so manual overrides stick.
     """
     luts = getattr(app, "_image_table_lut", None) or {}
@@ -1198,30 +1110,22 @@ def _refresh_lut_fields_from_render(app, rendered) -> None:
     except Exception:
         return
 
-    pooled: Dict[str, Tuple[float, float]] = {}
     for r, row in enumerate(cells):
-        for c, cell in enumerate(row):
+        entry = luts.get(r)
+        if not isinstance(entry, dict) or not entry.get("auto", True):
+            continue  # missing or user-edited — leave alone
+        lo: Optional[float] = None
+        hi: Optional[float] = None
+        for c, _cell in enumerate(row):
             arr = rendered.get((r, c))
             if arr is None or getattr(arr, "ndim", 2) >= 3:
                 continue  # skip empty cells and pre-rendered RGB overlays
-            chan = cell["chan_cb"].currentText().strip().upper()
-            if not chan:
-                continue
             a = _np.asarray(arr, dtype=_np.float32)
             mn, mx = float(a.min()), float(a.max())
-            if chan in pooled:
-                p0, p1 = pooled[chan]
-                pooled[chan] = (min(p0, mn), max(p1, mx))
-            else:
-                pooled[chan] = (mn, mx)
-
-    for chan, entry in luts.items():
-        if not entry.get("auto", True):
-            continue  # user-edited — leave alone
-        rng = pooled.get(chan.upper())
-        if rng is None:
+            lo = mn if lo is None else min(lo, mn)
+            hi = mx if hi is None else max(hi, mx)
+        if lo is None or hi is None:
             continue
-        lo, hi = rng
         if hi <= lo:
             hi = lo + 1.0
         for key, val in (("min", lo), ("max", hi)):
@@ -1258,14 +1162,15 @@ def image_table_generate(app) -> None:
     cache: Dict[Tuple[str, str, str], Dict] = {}
     rendered: Dict[Tuple[int, int], Any] = {}
     crop_tool = getattr(app, "_image_table_crop_tool", None)
-    use_tophat = bool(getattr(app._app_state.image_table, "use_tophat", False))
-    show_boundaries = bool(getattr(app._app_state.image_table, "show_boundaries", False))
-    binary_mode = getattr(app._app_state.image_table, "binary_mode", "") or ""
     # Per-cell thumbnail size, scaled by the zoom factor (240 px = 1.0×).
     zoom = float(getattr(app._app_state.image_table, "zoom", 1.0) or 1.0)
     sz = max(80, int(round(240 * zoom)))
 
     for r, row in enumerate(cells):
+        # Display options (top-hat / boundaries / binary) + LUT are per ROW —
+        # read from this row's box so two rows on the same channel stay
+        # independent (see grid_view.build_lut_row).
+        use_tophat, show_boundaries, binary_mode = _row_display_opts(app, r)
         for c, cell in enumerate(row):
             well = cell["well_cb"].currentText().strip()
             chan = cell["chan_cb"].currentText().strip()
@@ -1281,7 +1186,7 @@ def image_table_generate(app) -> None:
                     arr = _load_array(app, cache, well, chan, tp, fov, use_tophat=use_tophat)
             rendered[(r, c)] = arr
 
-            lo, hi = _parse_lut(app, chan)
+            lo, hi = _parse_lut(app, r)
             cell_widget = QWidget()
             cl = QVBoxLayout(cell_widget)
             cl.setContentsMargins(2, 2, 2, 2)
@@ -1391,16 +1296,22 @@ def image_table_generate(app) -> None:
             swallowed()  # was: pass (silent except)
 
 
-def image_table_auto_lut(app, channel: str) -> None:
-    """Pool min/max across loaded cells for one channel; write result and redraw."""
-    chan_upper = channel.upper()
+def image_table_auto_lut(app, row_idx: int) -> None:
+    """Pool min/max across grid row *row_idx*'s loaded cells; write + redraw.
+
+    Per-row Fit: pools the image range of the cells in this row (whatever
+    channel each shows — normally the one row channel), honouring the row's
+    own top-hat toggle, and writes the result into the row's LUT box.
+    """
     cells = getattr(app, "_image_table_cells", None) or []
+    if not (0 <= row_idx < len(cells)):
+        return
     rendered = getattr(app._app_state.image_table, "last_render", None) or {}
     cache = getattr(app._app_state.image_table, "image_cache", None)
     if cache is None:
         cache = {}
         app._app_state.image_table.image_cache = cache
-    use_tophat = bool(getattr(app._app_state.image_table, "use_tophat", False))
+    use_tophat, _show_b, _bm = _row_display_opts(app, row_idx)
 
     try:
         import numpy as _np
@@ -1410,36 +1321,37 @@ def image_table_auto_lut(app, channel: str) -> None:
 
     pooled_min: Optional[float] = None
     pooled_max: Optional[float] = None
-    for r, row in enumerate(cells):
-        for c, cell in enumerate(row):
-            if cell["chan_cb"].currentText().strip().upper() != chan_upper:
-                continue
-            arr = rendered.get((r, c))
-            if arr is None:
-                # Lazy-load if Generate hasn't been clicked yet.
-                well = cell["well_cb"].currentText().strip()
-                tp = cell["tp_cb"].currentText().strip()
-                fov = cell["fov_cb"].currentText().strip()
-                if well and tp and fov:
-                    arr = _load_array(app, cache, well, chan_upper, tp, fov, use_tophat=use_tophat)
-            if arr is None:
-                continue
-            a = _np.asarray(arr, dtype=_np.float32)
-            mn = float(a.min())
-            mx = float(a.max())
-            pooled_min = mn if pooled_min is None else min(pooled_min, mn)
-            pooled_max = mx if pooled_max is None else max(pooled_max, mx)
+    r = row_idx
+    for c, cell in enumerate(cells[r]):
+        chan = cell["chan_cb"].currentText().strip()
+        if not chan:
+            continue
+        arr = rendered.get((r, c))
+        if arr is None:
+            # Lazy-load if Generate hasn't been clicked yet.
+            well = cell["well_cb"].currentText().strip()
+            tp = cell["tp_cb"].currentText().strip()
+            fov = cell["fov_cb"].currentText().strip()
+            if well and tp and fov:
+                arr = _load_array(app, cache, well, chan.upper(), tp, fov, use_tophat=use_tophat)
+        if arr is None:
+            continue
+        a = _np.asarray(arr, dtype=_np.float32)
+        mn = float(a.min())
+        mx = float(a.max())
+        pooled_min = mn if pooled_min is None else min(pooled_min, mn)
+        pooled_max = mx if pooled_max is None else max(pooled_max, mx)
 
     if pooled_min is None or pooled_max is None:
         app._set_status(
-            f"Image Table: no loaded images for channel {chan_upper}; cannot auto-LUT."
+            f"Image Table: no loaded images for row {row_idx + 1}; cannot auto-LUT."
         )
         return
     if pooled_max <= pooled_min:
         pooled_max = pooled_min + 1.0
 
     luts = getattr(app, "_image_table_lut", None) or {}
-    entry = luts.get(chan_upper)
+    entry = luts.get(row_idx)
     if entry is None:
         return
     # "Fit" re-enables auto-tracking so the boxes follow the data again.

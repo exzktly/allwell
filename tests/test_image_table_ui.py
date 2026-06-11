@@ -37,38 +37,32 @@ def test_build_does_not_render(loaded_app):
     assert not app._app_state.image_table.last_render
 
 
-def test_binary_modes_via_display_menu_radio(loaded_app):
+def test_display_options_are_per_row(loaded_app):
+    """Top-hat / boundaries / binary now live in each row's LUT/Display box and
+    are read per-row by the renderer (image_compose._row_display_opts)."""
+    from well_viewer.features.image_table.image_compose import _row_display_opts
+
     app = loaded_app
+    C.image_table_repopulate_dropdowns(app)
     C.image_table_apply_preset(app, "channel", "timepoint")
-    # The Display ▾ menu's Binary radio group (None / Mask / ≥ Threshold) is
-    # exclusive and sets the mode absolutely.
-    C.image_table_set_binary_mode(app, "mask")
-    assert app._app_state.image_table.binary_mode == "mask"
-    assert app._image_table_binary_act_mask.isChecked()
-    assert not app._image_table_binary_act_thresh.isChecked()
-    assert not app._image_table_binary_act_none.isChecked()
+    luts = app._image_table_lut or {}
+    assert luts, "per-row LUT/Display boxes should exist after a build"
+    # Each row has its own tophat/boundaries/binary widgets.
+    for r, entry in luts.items():
+        assert {"tophat", "boundaries", "binary"} <= set(entry)
 
-    C.image_table_set_binary_mode(app, "threshold")
-    assert app._app_state.image_table.binary_mode == "threshold"
-    assert app._image_table_binary_act_thresh.isChecked()
-    assert not app._image_table_binary_act_mask.isChecked()
-
-    C.image_table_set_binary_mode(app, "")  # None turns binary off
-    assert app._app_state.image_table.binary_mode == ""
-    assert app._image_table_binary_act_none.isChecked()
-    assert not app._image_table_binary_act_thresh.isChecked()
-
-
-def test_display_menu_toggles_flip_state(loaded_app):
-    app = loaded_app
-    t0 = bool(app._app_state.image_table.use_tophat)
-    C.image_table_toggle_tophat(app)
-    assert app._app_state.image_table.use_tophat is (not t0)
-    assert app._image_table_tophat_act.isChecked() is (not t0)
-    b0 = bool(app._app_state.image_table.show_boundaries)
-    C.image_table_toggle_boundaries(app)
-    assert app._app_state.image_table.show_boundaries is (not b0)
-    assert app._image_table_boundaries_act.isChecked() is (not b0)
+    rows = sorted(luts)
+    assert len(rows) >= 2, "need ≥2 rows to prove independence"
+    r0, r1 = rows[0], rows[1]
+    # Flip row r0's options; r1 must stay untouched.
+    luts[r0]["tophat"].setChecked(True)
+    luts[r0]["boundaries"].setChecked(True)
+    for i in range(luts[r0]["binary"].count()):
+        if luts[r0]["binary"].itemData(i) == "mask":
+            luts[r0]["binary"].setCurrentIndex(i)
+            break
+    assert _row_display_opts(app, r0) == (True, True, "mask")
+    assert _row_display_opts(app, r1) == (False, False, "")
 
 
 def _row_values(app, dim):

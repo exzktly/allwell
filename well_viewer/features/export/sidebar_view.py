@@ -791,9 +791,39 @@ class ExportStyleSidebar(QWidget):
             for k, v in DEFAULT_EXPORT_STYLE_PREFS.items():
                 if k in self._setters:
                     self._setters[k](v)
+            # Drop every per-axis override bucket so *all* axes reset, not just
+            # the one currently shown in the axis picker.
+            self._axis_buckets = {}
         finally:
             self._updating = False
+        self._persist()
+        # Clearing the axis-limit *fields* doesn't actually reset the axes:
+        # apply_export_style only ever *sets* limits, it never re-enables
+        # autoscale, and the plots set intentional limits (e.g. the fraction
+        # subplot's [-0.05, 1.05]). Re-run the active plot's own redraw so the
+        # axes return to their natural / intentional values, then re-apply the
+        # (now default) style on top via _on_fields_changed.
+        self._redraw_active_plot()
         self._on_fields_changed()
+
+    def _redraw_active_plot(self) -> None:
+        """Re-run the active plot tab's own draw so axes return to their natural
+        limits (the style sidebar can't restore autoscale by clearing fields)."""
+        app = self._app
+        try:
+            tab = app._current_centre_tab()
+        except Exception:
+            tab = ""
+        try:
+            if tab == "Bar Plots":
+                redraw_bars(app)
+            elif tab == "Scatter Plot":
+                from well_viewer.features.scatter.tab_view import scatter_redraw_active
+                scatter_redraw_active(app)
+            else:
+                app._redraw()
+        except Exception:
+            swallowed()  # reset must never raise out of the click handler
 
     def _save_preset(self) -> None:
         try:

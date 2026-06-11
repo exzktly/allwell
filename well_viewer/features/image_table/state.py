@@ -24,9 +24,10 @@ class ImageTableState:
     ``rows`` / ``cols`` mirror the grid spinners; ``row_axis`` / ``col_axis``
     are the layout-builder axis keys ("channel"/"well"/"timepoint"/"fov").
     ``active_wells`` / ``active_channels`` are the sidebar / dropdown
-    multi-selections. ``use_tophat`` / ``show_boundaries`` / ``binary_mode`` /
-    ``zoom`` are display options. ``last_render`` / ``image_cache`` are the
-    hot-path caches rebuilt by ``image_table_generate`` (not persisted).
+    multi-selections. ``zoom`` is the only global display option; top-hat /
+    boundaries / binary are per-row (on the LUT/Display boxes). ``last_render``
+    / ``image_cache`` are the hot-path caches rebuilt by ``image_table_generate``
+    (not persisted).
     """
 
     # selections
@@ -39,10 +40,8 @@ class ImageTableState:
     row_axis: str = "channel"
     col_axis: str = "timepoint"
 
-    # display options
-    use_tophat: bool = False
-    show_boundaries: bool = False
-    binary_mode: str = ""          # "", "mask", or "threshold"
+    # display options. Top-hat / boundaries / binary are now per ROW (stored on
+    # the per-row LUT/Display boxes — see grid_view.build_lut_row), not global.
     zoom: float = 1.0
 
     # export-dialog settings (pad/cell-gap/titles/dpi/transparent-bg)

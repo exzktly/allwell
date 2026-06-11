@@ -38,18 +38,41 @@ class AnalyzeTabFormMixin:
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
-    def _section(self, parent: QWidget, title: str) -> QWidget:
-        """Add a labelled section to *parent* and return its body widget."""
+    def _section(self, parent: QWidget, title: str, info: str = "") -> QWidget:
+        """Add a labelled section to *parent* and return its body widget.
+
+        When *info* is given, a small ``ⓘ`` marker is placed next to the title
+        and the text is shown as its hover tooltip — keeping long explanatory
+        notes available on demand instead of cluttering the form inline.
+        """
         container = QWidget(parent)
-        container
         cl = QVBoxLayout(container)
         cl.setContentsMargins(0, 4, 0, 4)
         cl.setSpacing(2)
 
-        title_lbl = QLabel(title, container)
-        title_lbl.setObjectName("SectionTitle")
-        title_lbl.setContentsMargins(12, 6, 12, 2)
-        cl.addWidget(title_lbl)
+        if info:
+            header = QWidget(container)
+            hl = QHBoxLayout(header)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(4)
+            title_lbl = QLabel(title, header)
+            title_lbl.setObjectName("SectionTitle")
+            title_lbl.setContentsMargins(12, 6, 0, 2)
+            hl.addWidget(title_lbl)
+            info_lbl = QLabel("ⓘ", header)
+            info_lbl.setObjectName("InfoHint")
+            info_lbl.setToolTip(info)
+            # A non-empty WhatsThis also surfaces the note via the ?-cursor and
+            # keeps the tooltip readable (Qt wraps long tooltips on its own).
+            info_lbl.setWhatsThis(info)
+            hl.addWidget(info_lbl)
+            hl.addStretch(1)
+            cl.addWidget(header)
+        else:
+            title_lbl = QLabel(title, container)
+            title_lbl.setObjectName("SectionTitle")
+            title_lbl.setContentsMargins(12, 6, 12, 2)
+            cl.addWidget(title_lbl)
 
         rule = QFrame(container)
         rule.setFrameShape(QFrame.HLine)
@@ -316,14 +339,11 @@ class AnalyzeTabFormMixin:
         self._input_edit.textChanged.connect(lambda _: self._refresh_output())
 
     def _build_shape_features_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Shape Metrics")
-
-        hint = QLabel(
-            "Per-cell morphology features to measure (emitted as shape_… "
-            "columns; cell centroids are always recorded).", sec)
-        hint.setObjectName("Muted")
-        hint.setWordWrap(True)
-        sec.layout().addWidget(hint)
+        sec = self._section(
+            parent, "Shape Metrics",
+            info="Per-cell morphology features to measure (emitted as shape_… "
+                 "columns; cell centroids are always recorded).",
+        )
 
         # A compact checkbox dropdown rather than a wide chip grid — the
         # selectable-feature list is long enough to overflow the narrow
@@ -350,18 +370,16 @@ class AnalyzeTabFormMixin:
         sec.layout().addWidget(chip_row)
 
     def _build_qc_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Quality Control")
-
-        hint = QLabel(
-            "Optional pre-measurement clean-up, applied per channel at "
-            "quantification time. Two independent correction stages — flat-field "
-            "(divide out uneven illumination) then background subtraction "
-            "(remove a baseline) — plus a size/shape debris filter. The pixel "
-            "corrections change the measured values, so they can only be changed "
-            "by re-running; debris removal is editable later in Segmentation.", sec)
-        hint.setObjectName("Muted")
-        hint.setWordWrap(True)
-        sec.layout().addWidget(hint)
+        sec = self._section(
+            parent, "Quality Control",
+            info="Optional pre-measurement clean-up, applied per channel at "
+                 "quantification time. Two independent correction stages — "
+                 "flat-field (divide out uneven illumination) then background "
+                 "subtraction (remove a baseline) — plus a size/shape debris "
+                 "filter. The pixel corrections change the measured values, so "
+                 "they can only be changed by re-running; debris removal is "
+                 "editable later in Segmentation.",
+        )
 
         r = self._row(sec, "Flat-field correction")
         self._flatfield_cb = QComboBox(r)
@@ -535,16 +553,16 @@ class AnalyzeTabFormMixin:
         self._qc_min_solidity_edit = self._entry(rs, "0", width=80)
         rs.layout().addStretch(1)
 
-        # The size / solidity bounds only apply when debris removal is on —
-        # gate them on the checkbox (the same pattern the Background-well field
-        # uses for the empty_well flat-field mode) so the cleaning-step options
-        # read as one coherent group rather than always-live orphan fields.
+        # The size / solidity bounds only apply when debris removal is on, so
+        # hide them entirely until it's checked (rather than showing greyed-out
+        # orphan fields) — the cleaning-step options then read as one coherent
+        # group that appears only when relevant.
         self._qc_debris_rows = (ra, rs)
 
         def _sync_debris(_=None) -> None:
             on = self._qc_remove_debris_cb.isChecked()
             for row in self._qc_debris_rows:
-                row.setEnabled(on)
+                row.setVisible(on)
         self._qc_remove_debris_cb.toggled.connect(_sync_debris)
         _sync_debris()
 

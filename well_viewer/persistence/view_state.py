@@ -200,33 +200,39 @@ def _snapshot_image_table(app) -> dict:
         v = _combo_text(app, attr)
         if v is not None:
             out[key] = v
-    toggles = {
-        "tophat": bool(getattr(app._app_state.image_table, "use_tophat", False)),
-        "boundaries": bool(getattr(app._app_state.image_table, "show_boundaries", False)),
-        "binary_mode": getattr(app._app_state.image_table, "binary_mode", "") or "",
-    }
-    out["toggles"] = toggles
+    # Per-row LUT + display options (top-hat / boundaries / binary), keyed by
+    # row index. Display is now per-row (grid_view.build_lut_row), not a set of
+    # global toggles.
     luts = getattr(app, "_image_table_lut", None) or {}
-    chan_luts: dict[str, dict[str, str]] = {}
+    row_luts: dict[str, dict[str, Any]] = {}
     if isinstance(luts, dict):
-        for ch, edits in luts.items():
+        for r, edits in luts.items():
             if not isinstance(edits, dict):
                 continue
-            slot: dict[str, str] = {}
+            slot: dict[str, Any] = {}
             mn = edits.get("min")
             mx = edits.get("max")
+            tophat = edits.get("tophat")
+            bound = edits.get("boundaries")
+            binw = edits.get("binary")
             try:
                 if mn is not None:
                     slot["min"] = str(mn.text())
                 if mx is not None:
                     slot["max"] = str(mx.text())
+                if tophat is not None:
+                    slot["tophat"] = bool(tophat.isChecked())
+                if bound is not None:
+                    slot["boundaries"] = bool(bound.isChecked())
+                if binw is not None:
+                    slot["binary"] = str(binw.currentData() or "")
             except Exception:
                 swallowed()  # silent except
                 continue
             if slot:
-                chan_luts[str(ch)] = slot
-    if chan_luts:
-        out["channel_luts"] = chan_luts
+                row_luts[str(r)] = slot
+    if row_luts:
+        out["row_luts"] = row_luts
     return out
 
 
@@ -349,18 +355,23 @@ def _activate_tab(app, name: str) -> None:
         _logger.debug("view_state: tab activation failed for %r", name, exc_info=True)
 
 
-def apply_pending_tab_state(app, tab_name: str) -> None:
+def apply_pending_tab_state(app, tab_name: str) -> bool:
     """Pop *tab_name*'s pending state (if any) into live widgets.
 
     Called from ``_on_tab_change`` so a tab that built lazily still receives
     its restored combo values the first time the user lands on it.
+
+    Returns ``True`` when pending state for *tab_name* was found and applied, so
+    the caller can redraw — the apply runs *after* the tab's initial draw, and
+    some restored state (the Bar timepoint multi-select, swarm/violin, scatter
+    axes) changes what should be plotted.
     """
     pending = getattr(app, "_view_state_pending", None)
     if not pending:
-        return
+        return False
     state = pending.pop(tab_name, None)
     if not state:
-        return
+        return False
     try:
         if tab_name == "Bar Plots":
             _apply_bar(app, state)
@@ -372,6 +383,7 @@ def apply_pending_tab_state(app, tab_name: str) -> None:
             _apply_image_table(app, state)
     except Exception:
         _logger.debug("view_state: apply_pending_tab_state(%r) failed", tab_name, exc_info=True)
+    return True
 
 
 def _set_combo_if_valid(app, attr: str, value: str) -> None:
@@ -540,42 +552,18 @@ def _apply_image_table(app, state: dict) -> None:
         if key in state and isinstance(state[key], str):
             _set_combo_if_valid(app, attr, state[key])
 
-    toggles = state.get("toggles") or {}
-    if isinstance(toggles, dict):
-        for key, attr in (
-            ("tophat",     "_image_table_use_tophat"),
-            ("boundaries", "_image_table_show_boundaries"),
-        ):
-            if key not in toggles:
-                continue
-            try:
-                setattr(app, attr, bool(toggles[key]))
-            except Exception:
-                swallowed()  # silent except
-                continue
-
-        # Binary is a tri-state mode ("", "mask", "threshold"). Accept the new
-        # "binary_mode" string, and fall back to the legacy "binary" bool
-        # (True → "mask") for old states.
-        mode = toggles.get("binary_mode")
-        if mode is None and "binary" in toggles:
-            mode = "mask" if bool(toggles.get("binary")) else ""
-        if mode in ("", "mask", "threshold"):
-            app._app_state.image_table.binary_mode = mode
-
-        # Drive the Display ▾ menu's QActions from the restored state (the
-        # toggles/binary are now menu actions, not standalone buttons).
-        try:
-            from well_viewer.features.image_table.controller import image_table_refresh_display_menu
-            image_table_refresh_display_menu(app)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-
-    chan_luts = state.get("channel_luts") or {}
+    # Per-row LUT + display restore (row_luts keyed by str(row index)). Display
+    # (top-hat / boundaries / binary) is per-row now, so it round-trips here
+    # alongside min/max rather than as separate global toggles.
+    row_luts = state.get("row_luts") or {}
     live_luts = getattr(app, "_image_table_lut", None) or {}
-    if isinstance(chan_luts, dict) and isinstance(live_luts, dict):
-        for ch, slot in chan_luts.items():
-            edits = live_luts.get(ch)
+    if isinstance(row_luts, dict) and isinstance(live_luts, dict):
+        for r_key, slot in row_luts.items():
+            try:
+                r = int(r_key)
+            except (TypeError, ValueError):
+                continue
+            edits = live_luts.get(r)
             if not isinstance(edits, dict) or not isinstance(slot, dict):
                 continue
             for k in ("min", "max"):
@@ -591,6 +579,32 @@ def _apply_image_table(app, state: dict) -> None:
                         edit.blockSignals(blocked)
                 except Exception:
                     swallowed()  # was: pass (silent except)
+            for k in ("tophat", "boundaries"):
+                w = edits.get(k)
+                if w is None or k not in slot:
+                    continue
+                try:
+                    blocked = w.blockSignals(True)
+                    try:
+                        w.setChecked(bool(slot[k]))
+                    finally:
+                        w.blockSignals(blocked)
+                except Exception:
+                    swallowed()
+            binw = edits.get("binary")
+            bmode = slot.get("binary")
+            if binw is not None and isinstance(bmode, str):
+                try:
+                    for i in range(binw.count()):
+                        if binw.itemData(i) == bmode:
+                            blocked = binw.blockSignals(True)
+                            try:
+                                binw.setCurrentIndex(i)
+                            finally:
+                                binw.blockSignals(blocked)
+                            break
+                except Exception:
+                    swallowed()
 
     # Intentionally NOT calling image_table_generate here — restore only
     # pre-fills the dropdowns, the user clicks Generate when they actually

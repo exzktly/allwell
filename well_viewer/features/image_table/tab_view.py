@@ -275,30 +275,24 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.addWidget(selector_box)
     il.addSpacing(6)
 
-    # ── LUT row (rebuilt per channel by the controller) ─────────────────────
-    # Wrap the row in a tinted frame so it visually reads as a global
-    # control strip, not as another row of per-cell selectors.
+    # ── Per-row levels & display table (rebuilt by the controller) ──────────
+    # An aligned table — one row per grid row — for the per-row colormap, LUT
+    # min/max + Fit, and the Top-hat / Boundaries / Binary display toggles.
     lut_outer = QFrame(inner)
-    lut_outer.setObjectName("ImageTableLutRow")
-    lut_outer.setStyleSheet(
-        "QFrame#ImageTableLutRow { "
-        "background-color: rgba(245, 158, 11, 0.12); "
-        "border: 1px solid rgba(245, 158, 11, 0.40); "
-        "border-radius: 4px; "
-        "}"
-    )
+    lut_outer.setObjectName("Panel")
     lut_outer_layout = QVBoxLayout(lut_outer)
-    lut_outer_layout.setContentsMargins(8, 6, 8, 6)
-    lut_outer_layout.setSpacing(4)
+    lut_outer_layout.setContentsMargins(10, 8, 10, 8)
+    lut_outer_layout.setSpacing(6)
 
-    lut_lbl = QLabel("LUT (per channel) — applies to every cell of that channel", lut_outer)
-    lut_lbl.setProperty("role", "section")
+    lut_lbl = QLabel("Per-row levels & display", lut_outer)
+    lut_lbl.setObjectName("SectionTitle")
     lut_outer_layout.addWidget(lut_lbl)
 
     lut_container = QWidget(lut_outer)
-    lut_layout = QHBoxLayout(lut_container)
+    lut_layout = QGridLayout(lut_container)
     lut_layout.setContentsMargins(0, 0, 0, 0)
-    lut_layout.setSpacing(6)
+    lut_layout.setHorizontalSpacing(14)
+    lut_layout.setVerticalSpacing(6)
     ctx.app._image_table_lut_container = lut_container
     lut_outer_layout.addWidget(lut_container)
     il.addWidget(lut_outer)

@@ -142,7 +142,21 @@ def on_tab_change(app, _e=None) -> None:
     # are populated and apply step can validate combo items.
     if getattr(app, "_view_state_pending", None):
         from well_viewer.persistence import view_state as _vs
-        _vs.apply_pending_tab_state(app, tab)
+        if _vs.apply_pending_tab_state(app, tab):
+            # The restore lands *after* this tab's initial draw above, so that
+            # draw used pre-restore defaults — e.g. the Bar timepoint popup,
+            # which ``_update_bar_tp_menu`` had defaulted to a single checked
+            # timepoint, so the plot showed one timepoint even though the saved
+            # selection (now applied) has several. Redraw the plot tabs so they
+            # reflect the restored state. (Image Table deliberately does not
+            # auto-regenerate, so it is intentionally excluded.)
+            if tab == "Bar Plots":
+                redraw_bars(app)
+            elif tab == "Scatter Plot":
+                from well_viewer.features.scatter.tab_view import scatter_redraw_active
+                scatter_redraw_active(app)
+            elif tab == "Distribution":
+                app._redraw()
 
 
 def on_notebook_current_changed(app, _idx) -> None:

@@ -349,18 +349,23 @@ def _activate_tab(app, name: str) -> None:
         _logger.debug("view_state: tab activation failed for %r", name, exc_info=True)
 
 
-def apply_pending_tab_state(app, tab_name: str) -> None:
+def apply_pending_tab_state(app, tab_name: str) -> bool:
     """Pop *tab_name*'s pending state (if any) into live widgets.
 
     Called from ``_on_tab_change`` so a tab that built lazily still receives
     its restored combo values the first time the user lands on it.
+
+    Returns ``True`` when pending state for *tab_name* was found and applied, so
+    the caller can redraw — the apply runs *after* the tab's initial draw, and
+    some restored state (the Bar timepoint multi-select, swarm/violin, scatter
+    axes) changes what should be plotted.
     """
     pending = getattr(app, "_view_state_pending", None)
     if not pending:
-        return
+        return False
     state = pending.pop(tab_name, None)
     if not state:
-        return
+        return False
     try:
         if tab_name == "Bar Plots":
             _apply_bar(app, state)
@@ -372,6 +377,7 @@ def apply_pending_tab_state(app, tab_name: str) -> None:
             _apply_image_table(app, state)
     except Exception:
         _logger.debug("view_state: apply_pending_tab_state(%r) failed", tab_name, exc_info=True)
+    return True
 
 
 def _set_combo_if_valid(app, attr: str, value: str) -> None:

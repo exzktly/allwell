@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
+    install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
 from functools import partial
 from well_viewer.features.export.service import export_plot_data

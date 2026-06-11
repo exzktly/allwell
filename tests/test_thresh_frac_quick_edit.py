@@ -12,7 +12,6 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import pytest
 
 from well_viewer.core.channel_state_controller import (
     get_thresh_frac_on,

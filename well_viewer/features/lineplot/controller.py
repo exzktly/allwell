@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple
 
 from well_viewer.domain import fold_change as _fc
-from well_viewer.features.barplot.controller import FC_STATE_OFF
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well

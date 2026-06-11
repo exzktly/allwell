@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, make_band_controls, make_plot_with_right_dock,
+    make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 

@@ -21,8 +21,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from pathlib import Path
-from typing import Callable
 
 import numpy as np
 from PySide6.QtCore import QObject, Signal
@@ -40,7 +38,6 @@ from well_viewer.features.smfish.controller import (
     scan_well_zip,
 )
 from well_viewer.features.smfish.worker import apply_global_threshold_async
-from well_viewer.core.ui_helpers import attach_plot_toolbar
 from well_viewer.domain.viewer_state import make_schema_extractor
 from well_viewer.core.channel_state_controller import recalculate_threshold
 from well_viewer.core.safe import swallowed

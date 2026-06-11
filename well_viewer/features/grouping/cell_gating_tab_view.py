@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 
 from ui.theme import get_color
 from well_viewer.core import debug_flags as _debug_flags
-from well_viewer.core.ui_helpers import attach_plot_toolbar, install_canvas_wheel_scroll
+from well_viewer.core.ui_helpers import install_canvas_wheel_scroll
 from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.core.safe import swallowed
 

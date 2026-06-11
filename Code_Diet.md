@@ -43,12 +43,12 @@ Rules:
 | D3 | Remove Movie-Montage remnants | dead/legacy | ~40 | Low–Med | `[ ]` TODO |
 | D4 | Fix vulture unused-locals + unreachable branches | dead | ~25 | Low | `[ ]` TODO |
 | D5 | Remove `label_grid_view` `__main__` demo | dead | **27** | Low | `[x]` DONE |
-| D6 | Drop unused imports (ruff F401 --fix, reviewed) | dead | ~234 lines | Low–Med | `[ ]` TODO |
-| C1 | Consolidate well-token parsing → `well_token.py` | dedup | ~40 | Low | `[ ]` TODO |
+| D6 | Drop unused imports (ruff F401 --fix, reviewed) | dead | **162** | Low–Med | `[x]` DONE |
+| C1 | Consolidate well-token parsing → `well_token.py` | dedup | **6** (DRY) | Low | `[x]` DONE |
 | C2 | Unify the 4 timepoint parsers | dedup | ~100 | Med | `[ ]` TODO |
-| C3 | Shared `parse_float_edit` helper | dedup | ~50 | Low | `[ ]` TODO |
-| C4 | Reuse `set_combo_values` for combo resets | dedup | ~25 | Low | `[ ]` TODO |
-| C5 | Shared `set_widget_text` status helper | dedup | ~10 | Low | `[ ]` TODO |
+| C3 | Shared `parse_float_edit` helper | dedup | DRY (~0 net) | Low | `[x]` DONE |
+| C4 | Reuse `set_combo_values` for combo resets | dedup | **8** | Low | `[x]` DONE |
+| C5 | Shared `set_widget_text` status helper | dedup | DRY (~0 net) | Low | `[x]` DONE |
 | C6 | LUT→RGB overlap (image_compose vs ui_helpers) | dedup | ~25? | Low | `[ ]` TODO (investigate) |
 
 **Estimated total: ~2,400–2,500 LoC removable / consolidated.** Bulk is D1.

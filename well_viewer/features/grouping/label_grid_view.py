@@ -31,8 +31,7 @@ if _ROOT not in _sys.path:
 
 from PySide6.QtCore import Qt, Signal  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import theme  # noqa: E402

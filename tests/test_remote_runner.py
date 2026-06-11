@@ -2186,7 +2186,7 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
     """Integration: a host with legacy rsync gets the bare argv
     (no --info=stats0), avoiding the 'unknown option' exit 1 that
     blocked the user's bootstrap."""
-    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    from services.remote_runner import _rsync_version
     _rsync_version.cache_clear()
     captured = {}
 
@@ -2217,7 +2217,7 @@ def test_sync_required_files_omits_info_flag_on_legacy_rsync(host, monkeypatch):
 def test_sync_required_files_includes_info_flag_on_modern_rsync(host, monkeypatch):
     """Inverse of the above — modern rsync still gets the --info
     flag so the GUI's terser log output is preserved."""
-    from services.remote_runner import _rsync_supports_info_flag, _rsync_version
+    from services.remote_runner import _rsync_version
     _rsync_version.cache_clear()
     captured = {}
     runner = RemoteRunner(host)

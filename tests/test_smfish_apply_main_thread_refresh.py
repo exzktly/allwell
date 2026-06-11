@@ -31,7 +31,6 @@ their job. These tests pin:
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 import pytest
 
@@ -42,7 +41,6 @@ pytestmark = pytest.mark.usefixtures("qtbot")
 def test_worker_bridge_exposes_after_csv_signal():
     """The bridge class must declare an ``after_csv`` signal that
     carries a callable — that's the contract apply-handler relies on."""
-    from PySide6.QtCore import Signal
     from well_viewer.features.smfish.tab_view import _WorkerBridge
 
     # The class attribute is a PySide6 ``Signal`` descriptor; the

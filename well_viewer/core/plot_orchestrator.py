@@ -7,7 +7,6 @@ from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.plot_style import apply_ax_style
-from well_viewer.data.data_loading import _all_fluor_values
 from ui.theme import WARN
 from well_viewer.core.safe import swallowed
 

@@ -27,7 +27,7 @@ if _ROOT not in _sys.path:
 from PySide6.QtCore import (  # noqa: E402
     QEasingCurve, QEvent, QPropertyAnimation, QRect, Qt, Signal,
 )
-from PySide6.QtGui import QColor, QPainter  # noqa: E402
+from PySide6.QtGui import QPainter  # noqa: E402
 from PySide6.QtWidgets import QVBoxLayout, QWidget  # noqa: E402
 
 import theme  # noqa: E402
@@ -182,7 +182,7 @@ class Drawer(QWidget):
 # ── standalone visual test ──────────────────────────────────────────────────
 if __name__ == "__main__":
     from PySide6.QtWidgets import (
-        QApplication, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+        QApplication, QLabel, QLineEdit, QPushButton, QVBoxLayout,
         QWidget as _QW,
     )
 

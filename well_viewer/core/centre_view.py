@@ -222,7 +222,6 @@ def build_centre(app, parent: QWidget) -> None:
         them into a single shared PlotCanvas.
         """
         from PySide6.QtWidgets import QTabBar
-        from widgets.icon_button import IconButton as _IconButton
 
         # ── ctxbar ─ Row 1 (plot-type QTabBar, matching Sample Definitions style) ──
         # Switched from SegmentedControl (pill style) to a styled QTabBar so

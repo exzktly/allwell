@@ -15,15 +15,12 @@ import numpy as np
 from matplotlib import patches as mpatches
 from matplotlib import colormaps as mpl_colormaps
 
-import pandas as pd
 
 from well_viewer.data.data_loading import (
     _all_fluor_values_filtered,
-    parse_well_token,
 )
 from well_viewer.features.heatmap.models import (
     HeatmapLayout,
-    PLATE_DEFAULT_NAME,
     make_plate_layout,
 )
 from well_viewer.domain.ratio_models import is_ratio_key
@@ -810,7 +807,6 @@ def _set_canvas_cursor(app, cursor_shape) -> None:
     if canvas is None:
         return
     try:
-        from PySide6.QtCore import Qt as _Qt
         if cursor_shape is None:
             canvas.unsetCursor()
         else:

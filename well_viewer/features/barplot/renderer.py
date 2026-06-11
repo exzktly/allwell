@@ -24,8 +24,6 @@ from ui.theme import (
 from well_viewer.features.barplot.controller import (
     apply_bar_ylims as _apply_bar_ylims,
     cluster_x_for_group_keys,
-    collect_bar_items as _collect_bar_items,
-    ordered_bar_keys as _ordered_bar_keys,
     render_bar_items as _render_bar_items,
 )
 import numpy as np
@@ -34,7 +32,6 @@ import pandas as pd
 from well_viewer.data.data_loading import (
     _beeswarm_jitter,
     df_included_mask,
-    extract_well_token as _extract_well_token,
     parse_timepoint_hours,
     resolve_value_series,
 )

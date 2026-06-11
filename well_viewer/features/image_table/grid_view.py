@@ -7,7 +7,7 @@ focused on data loading, applying user choices, and exporting.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from PySide6.QtWidgets import (
     QComboBox,

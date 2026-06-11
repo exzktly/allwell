@@ -10,7 +10,6 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
-from well_viewer.data.data_loading import extract_well_token
 from well_viewer.persistence import (
     cell_gating as _cell_gating,
     ratios as _ratios,

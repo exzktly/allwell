@@ -7,12 +7,44 @@ from typing import Any, Callable, List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
+    QAbstractItemView, QApplication, QFrame, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.data.data_loading import parse_timepoint_hours
 from well_viewer.core.safe import swallowed
+
+
+def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
+    """Parse a ``QLineEdit``'s text as ``float``; return *fallback* on blank,
+    non-numeric, or (when *allow_auto*) the literal ``"auto"``.
+
+    Consolidates the ``try: float(edit.text().strip()) except: fallback`` helper
+    re-implemented across several feature views. A non-widget / ``None`` *edit*
+    also yields *fallback* (so ``getattr(app, attr, None)`` can be passed
+    directly).
+    """
+    try:
+        txt = str(edit.text()).strip()
+    except (AttributeError, TypeError):
+        return fallback
+    if allow_auto and txt.lower() == "auto":
+        return fallback
+    if not txt:
+        return fallback
+    try:
+        return float(txt)
+    except ValueError:
+        return fallback
+
+
+def set_widget_text(app, attr_name: str, text: str) -> None:
+    """Set ``text`` on ``app.<attr_name>`` if that attribute exists and is a
+    text widget — collapses the repeated ``lbl = getattr(...); if lbl: ...``
+    status-setter pattern."""
+    w = getattr(app, attr_name, None)
+    if hasattr(w, "setText"):
+        w.setText(text)
 
 
 def set_combo_values(combo: object, values: List[str]) -> None:

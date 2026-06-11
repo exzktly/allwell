@@ -26,7 +26,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import pytest
 from well_viewer.domain.stats_compute import compute_rep_stats

@@ -11,7 +11,7 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd

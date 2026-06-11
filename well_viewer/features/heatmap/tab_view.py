@@ -11,14 +11,13 @@ from typing import List
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-    QPushButton, QSlider, QVBoxLayout, QWidget,
+    QPushButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, make_band_controls, make_plot_view_switcher,
+    make_plot_view_switcher,
     make_plot_with_right_dock,
 )
-from functools import partial
 from well_viewer.core.channel_state_controller import refresh_metric_combo_for_channel
 from well_viewer.features.export.service import export_heatmap_data
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options

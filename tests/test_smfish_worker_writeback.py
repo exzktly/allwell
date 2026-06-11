@@ -33,7 +33,6 @@ Pins four writer bugs that made Apply Global Threshold appear to do nothing:
 
 from __future__ import annotations
 
-import io
 import logging
 from pathlib import Path
 

@@ -19,10 +19,8 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
 
 from __future__ import annotations
 
-import os
 import queue
 import re
-import signal
 import subprocess
 import threading
 from pathlib import Path

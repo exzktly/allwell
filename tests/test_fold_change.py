@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import math
 
-import pytest
 
-from well_viewer.domain import fold_change as fc
 from well_viewer.domain.fold_change import (
     _match_control_mean, _TP_REL_TOL, _rel_err_sq, _propagate_spread,
     build_cell_scaling,

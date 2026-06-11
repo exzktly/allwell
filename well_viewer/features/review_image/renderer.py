@@ -161,7 +161,6 @@ def _update_preview_impl(app, well_label: Optional[str]) -> None:
 
 def refresh_review_image(app) -> None:
     """Reload the Review Image canvas for the active well/FOV/timepoint."""
-    from well_viewer.data.image_discovery import open_imgref_as_array
     from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 
     if not hasattr(app, "_review_image_label"):

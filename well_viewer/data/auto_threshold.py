@@ -48,7 +48,6 @@ import numpy as np
 
 from auto_threshold_core import (
     DEFAULT_CELLS_PER_IMAGE_CAP,
-    parse_tp_hours as _parse_tp_hours,
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,
 )

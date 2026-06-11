@@ -76,7 +76,7 @@ class _Segment(QToolButton):
         Drawing the content manually is the most reliable cross-platform way
         to centre Review / Analyze labels in their Expanding segments.
         """
-        from PySide6.QtCore import QPoint, QRect
+        from PySide6.QtCore import QRect
         from PySide6.QtGui import QPalette
 
         p = QPainter(self)

@@ -21,7 +21,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QScrollArea, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
+    QMessageBox, QScrollArea, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 import theme as theme_v2
@@ -934,8 +934,7 @@ def _install_combobox_popup_widener() -> None:
     """Patch QComboBox.showPopup so the popup view sizes itself to the
     widest item text instead of inheriting the field's width — dropdown
     items elsewhere in the app were being clipped at the field width."""
-    from PySide6.QtWidgets import QComboBox, QStyle, QStyleOptionComboBox
-    from PySide6.QtCore import QSize, Qt
+    from PySide6.QtWidgets import QComboBox, QStyleOptionComboBox
     if getattr(QComboBox, "_aw_popup_widened", False):
         return
     QComboBox._aw_popup_widened = True

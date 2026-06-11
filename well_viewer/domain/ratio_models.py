@@ -10,9 +10,8 @@ The encoding for a ratio "key" used in place of a CSV column name is
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Iterable, List
 
 
 RATIO_PREFIX = "ratio:"

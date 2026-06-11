@@ -23,7 +23,6 @@ import pytest
 
 from well_viewer.data.image_identity import (
     CellKey,
-    PipelineSchema,
     Role,
     ROLE_CATALOG,
     build_image_filename,

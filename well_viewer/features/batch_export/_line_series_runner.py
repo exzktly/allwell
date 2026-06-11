@@ -24,7 +24,7 @@ from typing import List, Tuple
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.batch_models import BarGroup
 from well_viewer.features.lineplot.controller import (
-    LinePoint, LineSeries, _aggpoint_to_linepoint,
+    LineSeries, _aggpoint_to_linepoint,
 )
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group

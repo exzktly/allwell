@@ -38,14 +38,12 @@ import queue
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import contextlib
 from functools import lru_cache
 import tempfile
 import threading
 import time
-import uuid
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
@@ -55,7 +53,6 @@ from typing import Callable, Iterable, Optional
 from services.remote_config import (
     RemoteHost,
     resolve_rsync_binary,
-    resolve_ssh_binary,
     resolve_ssh_for_rsync,
     to_rsync_path,
     update_bandwidth,

@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 from well_viewer.persistence import smfish as _smfish_persist
 

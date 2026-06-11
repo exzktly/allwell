@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import csv
 import json
 import math
@@ -14,7 +13,6 @@ from typing import Callable, Dict, List, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -23,13 +21,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
-    QListWidgetItem,
     QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -41,12 +37,8 @@ from well_viewer.features.batch_export._common import (
     WARN,
     get_color,
     BarGroup,
-    _bar_render_items,
-    _all_fluor_values,
-    _extract_well_token,
     _PLATE_COLS,
     _PLATE_ROWS,
-    WELL_COLORS,
     apply_ax_style,
     ask_name_dialog,
     btn_card,
@@ -54,13 +46,9 @@ from well_viewer.features.batch_export._common import (
     btn_primary,
     btn_secondary,
     _clear_layout_helper,
-    _groups_with_loaded_wells,
     _logger,
     _CLR_DANGER,
     _CLR_SUCCESS_DARK,
-    _CLR_PLACEHOLDER,
-    _CLR_DISABLED_WELL,
-    _CLR_ERR_BAR,
     _CLR_WHITE,
 )
 from well_viewer.features.batch_export.well_grid_button import _WellGridButton

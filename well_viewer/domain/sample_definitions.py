@@ -31,7 +31,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from well_viewer.domain.bar_groups import bar_groups_from_data, bar_groups_to_dict
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet

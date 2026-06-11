@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSlider, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
-    btn_primary, btn_secondary, install_canvas_wheel_scroll, make_band_controls,
+    install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,

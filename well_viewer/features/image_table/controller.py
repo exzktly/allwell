@@ -15,15 +15,14 @@ and drive the Image Table tab:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QVBoxLayout, QWidget,
+    QLabel, QVBoxLayout, QWidget,
 )
 from well_viewer.core.safe import swallowed
+from well_viewer.core.ui_helpers import set_combo_values
 
 
 # ── LUT colour palette ──────────────────────────────────────────────────────
@@ -155,33 +154,24 @@ def image_table_repopulate_dropdowns(app) -> None:
     fov_opts = _fov_options(app)
     well_opts = _well_options(app)
 
-    def _reset_combo(cb, options):
-        cur = cb.currentText()
-        cb.blockSignals(True)
-        cb.clear()
-        cb.addItems(options)
-        if cur in options:
-            cb.setCurrentText(cur)
-        cb.blockSignals(False)
-
     if hasattr(app, "_image_table_global_chan_cb"):
-        _reset_combo(app._image_table_global_chan_cb, chan_opts)
+        set_combo_values(app._image_table_global_chan_cb, chan_opts)
     if hasattr(app, "_image_table_global_tp_cb"):
-        _reset_combo(app._image_table_global_tp_cb, tp_opts)
-        _reset_combo(app._image_table_global_fov_cb, fov_opts)
+        set_combo_values(app._image_table_global_tp_cb, tp_opts)
+        set_combo_values(app._image_table_global_fov_cb, fov_opts)
 
     for cb in getattr(app, "_image_table_row_chan_cbs", None) or []:
-        _reset_combo(cb, chan_opts)
+        set_combo_values(cb, chan_opts)
     for cb in getattr(app, "_image_table_row_well_cbs", None) or []:
-        _reset_combo(cb, well_opts)
+        set_combo_values(cb, well_opts)
 
     cells = getattr(app, "_image_table_cells", None) or []
     for row in cells:
         for cell in row:
-            _reset_combo(cell["well_cb"], well_opts)
-            _reset_combo(cell["chan_cb"], chan_opts)
-            _reset_combo(cell["tp_cb"], tp_opts)
-            _reset_combo(cell["fov_cb"], fov_opts)
+            set_combo_values(cell["well_cb"], well_opts)
+            set_combo_values(cell["chan_cb"], chan_opts)
+            set_combo_values(cell["tp_cb"], tp_opts)
+            set_combo_values(cell["fov_cb"], fov_opts)
 
     # The LUT row is built once at tab-construction time, when the canonical
     # channel lists may still be empty. Rebuild it now so the per-channel

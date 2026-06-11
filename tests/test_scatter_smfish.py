@@ -14,9 +14,7 @@ the fluor-gate for that axis. This test pins that contract.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from well_viewer.features.scatter.controller import collect_scatter_data

@@ -12,7 +12,7 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
     QScrollArea, QSpinBox, QVBoxLayout, QWidget,

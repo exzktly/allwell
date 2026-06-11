@@ -10,12 +10,8 @@ external importers (playground, grid_view) are unchanged.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLineEdit
-from well_viewer.core.safe import swallowed
 
 
 LUT_COLORS: Dict[str, Optional[Tuple[float, float, float]]] = {
@@ -285,16 +281,9 @@ def _parse_lut(app, chan: str) -> Tuple[Optional[float], Optional[float]]:
     if not entry:
         return None, None
 
-    def _val(le: QLineEdit) -> Optional[float]:
-        text = (le.text() or "").strip().lower()
-        if not text or text == "auto":
-            return None
-        try:
-            return float(text)
-        except ValueError:
-            return None
-
-    return _val(entry["min"]), _val(entry["max"])
+    from well_viewer.core.ui_helpers import parse_float_edit
+    return (parse_float_edit(entry["min"], allow_auto=True),
+            parse_float_edit(entry["max"], allow_auto=True))
 
 def _load_well_channel(
     app,

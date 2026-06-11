@@ -51,7 +51,6 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 import time
 import zipfile
 from collections import defaultdict
@@ -60,13 +59,11 @@ import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import tifffile                                      # noqa: F401  (side-effects)
-from tifffile import imread, imwrite
+from tifffile import imread
 import numpy as np
 from scipy import ndimage as ndi
-from scipy.ndimage import grey_opening
 from skimage.filters import threshold_otsu
-from skimage.segmentation import find_boundaries, watershed
-import imageio.v3 as iio
+from skimage.segmentation import watershed
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -81,7 +78,7 @@ import imageio.v3 as iio
 # ``microscopy_cellpose`` module (Torch is imported lazily there, so importing it
 # does not load Torch). Re-exported below so ``_CELLPOSE_MODELS`` /
 # ``_segment_cellpose`` / ``_cellpose_model`` resolve under this module too.
-from microscopy_cellpose import (  # noqa: E402
+from microscopy_cellpose import (  # noqa: E402,F401
     _CELLPOSE_MODELS,
     _cellpose_model,
     _segment_cellpose,
@@ -91,7 +88,7 @@ from microscopy_cellpose import (  # noqa: E402
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
 # segmentation dispatch resolves them under this module too.
 import microscopy_stardist as _stardist  # noqa: E402
-from microscopy_stardist import (  # noqa: E402
+from microscopy_stardist import (  # noqa: E402,F401
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
 )
@@ -1209,7 +1206,7 @@ FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
 # (the GUI recomputes them for the Segmentation tab's flat-field validation
 # view). Imported under the original names so the rest of this module is
 # unchanged.
-from flatfield_core import (  # noqa: E402
+from flatfield_core import (  # noqa: E402,F401
     _FLATFIELD_FLOOR,
     _FLATFIELD_SIGMA,
     _normalize_flatfield,

@@ -11,6 +11,7 @@ matplotlib drawing stays in ``review_image/renderer``.
 
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 
 import numpy as np
@@ -21,6 +22,12 @@ from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 from well_viewer.core.safe import swallowed
+
+_logger = logging.getLogger(__name__)
+
+# Keep the on-the-fly preview field cheap: the illumination envelope is smooth,
+# so a handful of frames is plenty for the basic/empty-well median estimate.
+_FLATFIELD_PREVIEW_MAX_SAMPLES = 8
 
 
 def review_row_keys_series(app, df: pd.DataFrame) -> Optional[pd.Series]:

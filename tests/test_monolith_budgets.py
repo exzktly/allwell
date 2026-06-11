@@ -12,8 +12,8 @@ Baselines (set when P4 began the decomposition):
   (``microscopy_cellpose.py``), and the StarDist segmenters + model state
   (``microscopy_stardist.py``) and the output writers
   (``microscopy_io.py``) — was 5129.
-- image_table/controller.py: 2486 lines (extraction pending — the budget caps
-  it where it is so it can't grow before the split lands).
+- image_table/controller.py: 1976 lines, after extracting the image-composition
+  layer into ``image_compose.py`` (was 2486).
 """
 
 from pathlib import Path
@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ── Ratcheting ceilings (only ever lowered) ──────────────────────────────────
 PROCESS_MICROSCOPY_BUDGET = 4468
-IMAGE_TABLE_CONTROLLER_BUDGET = 2486
+IMAGE_TABLE_CONTROLLER_BUDGET = 1976
 
 
 def _line_count(rel: str) -> int:

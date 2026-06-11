@@ -40,7 +40,7 @@ Rules:
 | P2 | Observable exception-swallowing (`swallow` helper) | Low | `[x]` DONE | _this branch_ |
 | P3 | Fix `domain/`→`features/` & `data/`→`features/` layering | Low–Med | `[x]` DONE | _this branch_ |
 | P4 | Decompose the two worst monoliths | Med | `[x]` DONE | _this branch_ |
-| P5 | Raise core-pipeline (`process_microscopy.py`) coverage | Med | `[~]` MOSTLY DONE | _this branch_ |
+| P5 | Raise core-pipeline (`process_microscopy.py`) coverage | Med | `[x]` DONE | _this branch_ |
 
 **Suggested execution order:** P1 → P2 → P3 → P4 → P5 (each builds safety the
 next one relies on). P1 and P2 are independent and can land in parallel.
@@ -445,10 +445,9 @@ especially an **end-to-end** pipeline test, now tractable after P4's split.
 regression here is the costliest. Currently only specific image-processing
 functions are tested, not orchestration.
 
-**Status:** `[~]` MOSTLY DONE — synthetic fixture + real-StarDist end-to-end test
-landed (after the ML stack was installed), the extracted module is unit-tested
-to 96%, and coverage is wired into CI. Only deeper orchestration-scenario
-coverage remains.
+**Status:** `[x]` DONE — synthetic fixture + real-StarDist end-to-end tests
+(per-FOV **and** multi-well directory-level), the extracted module unit-tested to
+96%, and coverage wired into CI.
 
 > **Update (ML stack installed):** TensorFlow 2.13 + StarDist 0.9.1 now run in
 > the dev env, so P5.1 and P5.3 — previously deferred — are **done**. (Torch /
@@ -482,7 +481,13 @@ coverage remains.
       per-channel `_tophat.tif` are written. Gated with `pytest.importorskip`
       (skips in the lean CI) + the `slow` marker (`-m "not slow"` to exclude).
       **This also end-to-end-validates the P4 background extraction through the
-      real pipeline.** Verified: 4 passed in ~9.5s on the installed stack.
+      real pipeline.** **Extended** with directory-level coverage: two more tests
+      drive `process_well_folder_task` (the per-well lifecycle) over multi-FOV
+      well folders for two wells — asserting FOV-group discovery, multi-FOV
+      processing, per-well **CSV assembly** (partitioning + row counts + well
+      tagging + both FOVs present), the staging→final output-folder rename, and
+      the `pipeline_info.json` **sidecar** (`write_pipeline_info`). Verified: 6
+      e2e tests pass in ~9.5s on the installed stack.
 - [x] **P5.4** Wired coverage into CI: `pytest --cov=microscopy_background
       --cov=flatfield_core --cov-report=term-missing` (report-only, not a gate),
       and added `pytest-cov` to `tests/requirements-dev.txt`. Raise to a floor

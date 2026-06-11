@@ -28,6 +28,7 @@ import process_microscopy as pm  # noqa: E402
 from tests.fixtures.synthetic_pipeline import (  # noqa: E402
     DEFAULT_CENTERS,
     write_synthetic_fov,
+    write_synthetic_well_folder,
 )
 
 pytestmark = pytest.mark.slow
@@ -111,3 +112,92 @@ def test_pipeline_writes_output_images(tmp_path, stardist_worker):
     assert any(n.endswith("_overlay.png") for n in written)
     assert any("DAPI" in n and n.endswith("_tophat.tif") for n in written)
     assert any("GFP" in n and n.endswith("_tophat.tif") for n in written)
+
+
+# ── Directory-level (multi-well) pipeline: folder discovery -> CSV assembly ───
+#
+# These drive ``process_well_folder_task`` — the picklable per-well lifecycle the
+# worker pool dispatches — directly (in-process, after one _worker_init), so the
+# higher orchestration above ``process_image_group`` is exercised: FOV-group
+# discovery in a well folder, multi-FOV processing, per-well CSV assembly, and
+# the staging -> final output-folder rename. Two wells confirm the partitioning.
+
+SCHEMA = "experiment:channel:well:fov:timepoint".split(":")
+
+
+def _template():
+    return dict(
+        fluor_tokens=["GFP"],
+        nuclear_token="DAPI",
+        tophat_nir=False, tophat_radius_nir=50,
+        tophat_fluor=[False], tophat_radius_fluor=[50],
+        schema=SCHEMA, sep="_",
+        segmentation_method="stardist_nuclei",
+        background_method="none", flatfield_mode="none",
+        min_nucleus_area_px=20,
+    )
+
+
+def _run_well(well, n_fovs, in_root, out_dir, worker):
+    folder = write_synthetic_well_folder(in_root, well=well, n_fovs=n_fovs)
+    return pm.process_well_folder_task(
+        well, folder, out_dir, _template(), "DAPI", ["GFP"], "measurements",
+        schema=SCHEMA, sep="_",
+    )
+
+
+def test_directory_pipeline_assembles_per_well_csvs(tmp_path, stardist_worker):
+    import csv as _csv
+    in_root = tmp_path / "input"
+    out = tmp_path / "out"
+    out.mkdir()
+
+    recs_a, failed_a = _run_well("A01", 2, in_root, out, stardist_worker)
+    recs_b, failed_b = _run_well("B02", 1, in_root, out, stardist_worker)
+
+    assert failed_a == [] and failed_b == []
+    # 9 nuclei per FOV: A01 has 2 FOVs (18), B02 has 1 (9).
+    assert len(recs_a) >= 16 and len(recs_b) >= 8
+
+    csv_a = out / "measurements_A01.csv"
+    csv_b = out / "measurements_B02.csv"
+    assert csv_a.exists() and csv_b.exists()
+
+    rows_a = list(_csv.DictReader(csv_a.open()))
+    rows_b = list(_csv.DictReader(csv_b.open()))
+    # CSV row counts match the returned records; A01 spans both FOVs.
+    assert len(rows_a) == len(recs_a)
+    assert sorted({r["fov"] for r in rows_a}) == ["1", "2"]
+    assert all(r["well"] == "A01" for r in rows_a)
+    assert all(r["well"] == "B02" for r in rows_b)
+
+    # Per-well output folder produced (staging dir renamed into place).
+    assert (out / "A01").is_dir() and (out / "B02").is_dir()
+    assert any(p.name.endswith("_labels.tif") for p in (out / "A01").iterdir())
+
+
+def test_pipeline_info_sidecar_written(tmp_path, stardist_worker):
+    import json
+    in_root = tmp_path / "input"
+    out = tmp_path / "out"
+    out.mkdir()
+    _run_well("A01", 1, in_root, out, stardist_worker)
+
+    path = pm.write_pipeline_info(
+        out,
+        input_dir=in_root,
+        filename_schema="experiment:channel:well:fov:timepoint",
+        filename_sep="_",
+        nuclear_token="DAPI",
+        fluor_tokens=["GFP"],
+        smfish_tokens=[],
+        segmentation_method="stardist_nuclei",
+        cytoplasm_token="",
+        min_nucleus_area_px=20,
+    )
+    assert path == out / "pipeline_info.json"
+    info = json.loads(path.read_text())
+    assert info["nuclear_token"] == "DAPI"
+    assert info["segmentation_method"] == "stardist_nuclei"
+    assert "GFP" in info["fluor_tokens"]
+    assert info["schema"] == "experiment:channel:well:fov:timepoint"

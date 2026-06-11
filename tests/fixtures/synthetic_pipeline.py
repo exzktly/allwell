@@ -72,3 +72,30 @@ def write_synthetic_fov(
     tifffile.imwrite(nuclear_path, nuclear)
     tifffile.imwrite(fluor_path, fluor)
     return nuclear_path, fluor_path
+
+
+def write_synthetic_well_folder(
+    parent: Path,
+    *,
+    well: str = "A01",
+    n_fovs: int = 2,
+    timepoint: str = "0",
+    nuclear_token: str = "DAPI",
+    fluor_token: str = "GFP",
+    sep: str = "_",
+) -> Path:
+    """Write a per-well folder ``parent/<well>/`` with ``n_fovs`` FOVs, each a
+    nuclear + fluor TIFF named per the default 5-field schema. Returns the folder.
+
+    Used by the directory-level end-to-end test (``process_well_folder_task``),
+    which discovers FOV groups in the folder, segments each, and assembles one
+    per-well CSV.
+    """
+    folder = Path(parent) / well
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(1, n_fovs + 1):
+        write_synthetic_fov(
+            folder, well=well, fov=str(i), timepoint=timepoint,
+            nuclear_token=nuclear_token, fluor_token=fluor_token, sep=sep,
+        )
+    return folder

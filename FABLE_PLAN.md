@@ -276,10 +276,18 @@ tracked as a stretch step P3.5.)
       cycles); `ruff check .` clean; layering + no-silent guardrails green;
       74 pure tests + smfish/scatter standalone (9) pass. (Full Qt suite not
       run in-sandbox — environmental hangs; GitHub CI runs it.)
-- [-] **P3.5** *(deferred)* Partially addressed — repointing smfish removed one
-      feature→feature edge. The deferred-import couplings (export↔scatter,
-      crop↔review_image) remain as the optional stretch; not pursued here to keep
-      P3 scoped. Revisit if it becomes a maintenance pain.
+- [~] **P3.5** *(partially done)* (1) Repointing smfish removed one
+      feature→feature edge (P3.2). (2) Promoted the 4 function-local
+      `scatter.controller → export.style` imports to a single module-level import
+      — verified safe (both feature `__init__` are empty; `export.style` is a
+      pure leaf importing only `core.safe`, so no cycle; confirmed by a
+      deterministic import check). The remaining deferred imports are kept **on
+      purpose**, not as debt: `export.service → scatter.controller` stays lazy so
+      importing `export` doesn't eagerly pull scatter's matplotlib/pandas; and
+      `crop ↔ review_image` is genuinely bidirectional (crop→ri.renderer,
+      ri.controller→crop) where a function-local import is the correct,
+      cycle-free pattern. Forcing those to module level would trade a non-issue
+      for startup-cost / cycle risk.
 
 **Acceptance criteria:** `domain/` and `data/` have zero module-level
 `features.*` imports; `tests/test_layering.py` enforces it; existing tests green;
@@ -591,6 +599,21 @@ end-to-end (driving `run_pipeline_on_directory`) is the natural next increment.
   ruff subset rather than the (never-clean) broad set; no ML `heavy` marker
   needed (no test requires the ML stack).
 - 2026-06-10 Plan created; all tasks (P1–P5) TODO. — initial commit of FABLE_PLAN.md
+
+**Last updated:** 2026-06-11 — **P1–P5 complete** (every item achievable in this
+environment is done). Final round: closed P5 (multi-well directory e2e +
+`pipeline_info.json` sidecar), P2.7 (Qt-free `aw_safe` + 30 pipeline/GUI silent
+excepts migrated + guardrail extended), the image_table 3-way split finished
+(`export.py` + `grid_layout.py`; controller 2486 → 1494), and P3.5 partially
+(promoted the safe scatter→export.style imports; rest kept lazy by design).
+Version bumped v6.1.20 → v6.1.21. **Cannot be done here** (environment, not code):
+confirm GitHub Actions is green on the PR; validate the actual remote-execution
+run; run Cellpose/Torch inference end-to-end (TF+Torch can't coexist in this
+sandbox; weights download is network-blocked).
+
+---
+
+## Original plan (historical) — superseded by the status above
 
 **Last updated:** 2026-06-11 — **P1–P4 complete; P5 mostly done.** P4 decomposed
 both monoliths: `process_microscopy.py` 5129 → 4468 across four Qt-free modules

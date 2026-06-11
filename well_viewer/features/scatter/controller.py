@@ -20,6 +20,7 @@ from well_viewer.core.channel_state_controller import populate_metric_combo
 from well_viewer.domain.ratio_models import is_ratio_key
 from shape_features_core import is_shape_column
 from well_viewer.core.safe import swallowed
+from well_viewer.features.export.style import apply_export_style_to_current
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -415,7 +416,6 @@ def redraw_scatter(
     # Re-apply Export Style sidebar prefs so axis limits / log scale /
     # font sizes survive a redraw — matches bar/heatmap/distribution.
     try:
-        from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, app._scatter_fig,
                                       getattr(app, "_scatter_canvas", None))
     except Exception:  # pragma: no cover
@@ -747,7 +747,6 @@ def redraw_scatter_agg(
 
     # Redraw canvas
     try:
-        from well_viewer.features.export.style import apply_export_style_to_current
         apply_export_style_to_current(app, app._scatter_agg_fig,
                                       getattr(app, "_scatter_agg_canvas", None))
     except Exception:  # pragma: no cover
@@ -838,7 +837,6 @@ def redraw_scatter_orchestrate(app) -> None:
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )
-    from well_viewer.features.export.style import apply_export_style_to_current
     apply_export_style_to_current(app, app._scatter_fig, getattr(app, "_scatter_canvas", None))
 
 
@@ -985,7 +983,6 @@ def redraw_scatter_agg_orchestrate(app) -> None:
         selected_timepoints,
         well_colors=WELL_COLORS,
     )
-    from well_viewer.features.export.style import apply_export_style_to_current
     apply_export_style_to_current(app, app._scatter_agg_fig, getattr(app, "_scatter_agg_canvas", None))
 
 

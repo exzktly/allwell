@@ -31,3 +31,6 @@ _pytest*.log
 # Coverage data
 .coverage
 htmlcov/
+
+# CI fast-lane JUnit report (gates on this instead of the segfault-prone exit code)
+.pytest-report.xml

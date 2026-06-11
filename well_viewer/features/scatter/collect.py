@@ -25,7 +25,7 @@ import pandas as pd
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 from well_viewer.domain.stats_compute import well_aggregate_stats
-from shape_features_core import is_shape_column
+from well_viewer.domain.metric_registry import column_gating_exempt
 
 _logger = logging.getLogger(__name__)
 
@@ -95,11 +95,9 @@ def collect_scatter_data(
     # smFISH counts are integer spot tallies and shape features are morphology
     # values — neither is a fluorescence intensity, so the per-channel
     # fluor-gate (an intensity floor like 50–1500) would gate out every such
-    # cell. Bypass the gate on count / shape axes.
-    def _gate_exempt(col) -> bool:
-        return isinstance(col, str) and (col.endswith("_smfish_count") or is_shape_column(col))
-    is_count_x = _gate_exempt(col_x)
-    is_count_y = _gate_exempt(col_y)
+    # cell. The metric registry owns the "bypass the gate" rule.
+    is_count_x = column_gating_exempt(col_x)
+    is_count_y = column_gating_exempt(col_y)
 
     def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, list]]:
         df = app._get_rows(well_label)

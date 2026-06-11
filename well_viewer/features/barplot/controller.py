@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import compute_rep_stats
@@ -139,7 +140,7 @@ def collect_bar_items(
     # standard 'mean spots per cell across the whole population'
     # (fraction-above-threshold loses meaning at this floor; the title
     # helpers acknowledge this with 'thresholds ignored').
-    if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
+    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
@@ -619,7 +620,7 @@ def collect_bar_items_fov_pooled(
         return [], band_lbl
 
     if threshold is None:
-        if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
+        if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
             threshold = -1.0
         else:
             threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)

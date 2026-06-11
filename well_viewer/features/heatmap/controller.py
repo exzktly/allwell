@@ -24,6 +24,7 @@ from well_viewer.features.heatmap.models import (
     make_plate_layout,
 )
 from well_viewer.domain.ratio_models import is_ratio_key
+from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
@@ -373,7 +374,7 @@ def redraw_heatmap(app) -> None:
     # smFISH counts: use a negative floor so cells with zero detected
     # spots contribute to the mean — at threshold=0 an all-zero
     # population gives NaN and the heatmap cell stays empty.
-    if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
+    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)

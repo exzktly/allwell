@@ -53,7 +53,7 @@ commit SHA + the test that proves it in the task's notes.
 | T5 | Restore a bounded CI test job | Med | Low | `[x]` DONE |
 | T1 | `persistence/` → data-only; close the layering-guard gap | High | Med | `[x]` DONE |
 | T2 | Break inter-feature cycles; add a deferred-import ratchet | High | Med | `[x]` DONE |
-| T3 | Central metric registry (`domain/metric_registry.py`) | High | Med | `[ ]` TODO |
+| T3 | Central metric registry (`domain/metric_registry.py`) | High | Med | `[x]` DONE |
 | T4 | Decompose remaining orchestrators (+budget ratchets) | Med | Med–High | `[ ]` TODO |
 | T6 | Log specific-type silent passes; add a directed integration test | Low | Low | `[ ]` TODO |
 
@@ -235,7 +235,37 @@ collection logic — so "add a metric" is a 6–8-file change (the failed acid t
   `ui_helpers.set_combo_values_sectioned` for combo wiring.
 - **Verify:** `test_barplot_collect.py`, `test_lineplot_collect.py`,
   `test_scatter_smfish.py`, `test_view_state_metric_combo_sync.py`. **Risk:** Med.
-- **Notes:** _(SHA)_
+- **Done — what shipped:**
+  1. **`well_viewer/domain/metric_registry.py`** is the single declarative
+     catalogue: a frozen `MetricDef(key, label, kind, gating_exempt)` table
+     (`METRICS`) + `METRIC_BY_KEY` / `METRIC_BY_LABEL` lookups and pure derivation
+     helpers (`metric_labels_in_order`, `intensity_keys`, `metric_key_gating_exempt`,
+     `column_gating_exempt`). Lives in `domain` (Qt-free) so every layer imports
+     it downward. Ratios / shape stay out of the table (single computed values,
+     no flavour choice — handled by the existing `is_ratio_key` / `is_shape_column`
+     combo-collapse).
+  2. **`data/metric_labels.py` now derives** `METRIC_LABEL_TO_KEY`,
+     `METRIC_KEY_TO_LABEL`, `METRIC_ORDER`, `INTENSITY_METRIC_KEYS`,
+     `INTENSITY_SUFFIXES` from `METRICS` instead of hand-maintaining a parallel
+     copy — so `populate_metric_combo` (which reads `METRIC_ORDER`) and all 17
+     `metric_labels` consumers pick up a registry edit automatically.
+  3. **Gate-exemption de-duplicated:** the rule was inlined two ways — a *column*
+     check (`col.endswith("_smfish_count") or is_shape_column(col)`, in
+     scatter/collect) and an *active-metric* check
+     (`active_metric == "smfish_count" or is_shape_active()`, copied across the
+     line / bar (×2) / heatmap / distribution controllers). Both now route through
+     `column_gating_exempt` / `metric_key_gating_exempt`; all 6 active-metric copies
+     replaced. (The two remaining `== "smfish_count"` reads are smFISH-specific
+     *labeling*, a different concern, intentionally left.)
+  4. **Acceptance test** (`tests/test_metric_registry.py`): asserts the
+     `metric_labels` tables are derived from `METRICS`, the gate-exemption helpers
+     follow the `gating_exempt` flag, and — the acid test — a throwaway `MetricDef`
+     added to the registry surfaces in `METRIC_ORDER` and in a `populate_metric_combo`
+     Property combo, with no other file touched.
+- **Verified:** `test_metric_registry + test_barplot_collect + test_lineplot_collect +
+  test_scatter_smfish + test_view_state_metric_combo_sync` + the full guardrail
+  suite → **50 passed**; `ruff` clean.
+- **Notes:** SHA on commit.
 
 ## T4 — Decompose the remaining orchestrators *(largest; do incrementally, one PR each)*
 
@@ -276,10 +306,11 @@ Mirror the P4 pattern (extract cohesive sub-modules, re-export, ratchet the budg
 ## Status log
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-06-11 **T3 DONE** — created `domain/metric_registry.py` as the single declarative metric catalogue (`MetricDef` table + derivation helpers + `column_gating_exempt`/`metric_key_gating_exempt`); `data/metric_labels.py` now derives its label/key/order tables from it; de-duplicated the gate-exemption rule across scatter/collect + the 6 line/bar/heatmap/distribution active-metric copies; added `tests/test_metric_registry.py` proving a throwaway metric flows through the combos (the acid test). Verified: 50 tests pass, ruff clean.
 - 2026-06-11 **T2 DONE** — broke the scatter↔export import cycle by relocating the figure-styling engine to `core/plot_style.py` (re-exported from `export/style`) and extracting the scatter data collectors into `features/scatter/collect.py` (re-exported from the controller); promoted 8 now-acyclic deferred imports to module level across lineplot/heatmap/barplot/distribution/scatter/export/plot_orchestrator; documented the one irreducible crop↔review_image deferred pair; added `tests/test_deferred_imports.py` ratchet (budget 137) + recognised `collect.py` in the naming guard. Verified: 59 feature tests pass, 20 guardrails pass, ruff clean, no import cycle.
 - 2026-06-11 **T1 DONE** — `persistence/` is now data-only at module scope. Relocated `QCParams` + `compute_qc_pass` to `domain/qc_params.py` (shim left at `features/qc/params.py`); `persistence/qc_params.py` imports the model downward from `domain` and defers seeding to the qc controller's lazy accessor (sets `None` when no persisted edits); moved the `label_grid_refresh` / `image_table_apply_dimensions` feature imports function-local in the Clear-All command + view-state restore. Extended `test_layering` `GUARDED_LAYERS` with `"persistence"` to lock it. Verified: 28 passed/4 slow-deselected across the qc + persistence + layering set; 18 guardrails green; ruff clean.
 - 2026-06-11 **T5 DONE** — conftest auto-marks `viewer_app`-fixture tests `slow`; added a CI `pytest (fast lane)` job running `-m "not slow"` (803 tests ~40s, green) with `timeout-minutes: 15`. Fixed 3 pre-existing failures CI surfaced: stale `_FakeApp` double in test_thresh_frac_quick_edit (added `_invalidate_stats_cache`/`_event_bus`/`plot`), and 2 stale test_remote_dialog asserts (placeholder-default UX + offscreen `isHidden` vs `isVisible`).
 - 2026-06-11 Plan created from the post-work re-evaluation (both findings verified
   against the tree). All tasks TODO.
 
-**Last updated:** 2026-06-11 — T1, T2, T5 done; T3 next.
+**Last updated:** 2026-06-11 — T1, T2, T3, T5 done; T4 + T6 remain.

@@ -41,6 +41,7 @@ from well_viewer.core.plot_style import (
     tokens_for,
 )
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.core.safe import swallowed
 
 
@@ -495,7 +496,7 @@ def redraw_bars(app) -> None:
     band_lbl = "SEM" if use_sem else "SD"
     # smfish_count: include zero-spot cells in the mean / beeswarm / violin
     # population (see barplot/controller.py for the full rationale).
-    if app._app_state.channel.active_metric == "smfish_count" or app._app_state.channel.is_shape_active():
+    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)

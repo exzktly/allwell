@@ -15,6 +15,10 @@ import pytest
 
 import process_microscopy as pm
 
+# Heavy: builds the Qt Playground worker/UI; ~4 min. Excluded from the fast CI
+# lane (`-m "not slow"`); run explicitly in the local/manual full pass.
+pytestmark = pytest.mark.slow
+
 
 # ── shared correction (pure, no Qt) ──────────────────────────────────────────
 

@@ -67,10 +67,20 @@ class _FakeDataset:
     data_dir = "/tmp/somewhere"
 
 
+class _FakeSignal:
+    def emit(self, *args) -> None:
+        pass
+
+
+class _FakeBus:
+    plot_options_changed = _FakeSignal()
+
+
 class _FakeState:
     def __init__(self) -> None:
         self.channel = _FakeChannel()
         self.dataset = _FakeDataset()
+        self.plot = object()  # emit payload for plot_options_changed
 
 
 class _FakeApp:
@@ -83,9 +93,15 @@ class _FakeApp:
             "mcherry": _FakeEdit("50.0"),
         }
         self.redraws = 0
+        self._event_bus = _FakeBus()
 
     def _redraw(self) -> None:
         self.redraws += 1
+
+    def _invalidate_stats_cache(self) -> None:
+        # No-op stand-in: the cell-gating change handler invalidates the stats
+        # cache on the real app; the double only needs the method to exist.
+        pass
 
 
 def test_set_writes_through_active_channel_edit():

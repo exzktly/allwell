@@ -50,7 +50,7 @@ commit SHA + the test that proves it in the task's notes.
 
 | ID | Task | Leverage | Risk | Status |
 |----|------|----------|------|--------|
-| T5 | Restore a bounded CI test job | Med | Low | `[ ]` TODO |
+| T5 | Restore a bounded CI test job | Med | Low | `[x]` DONE |
 | T1 | `persistence/` → data-only; close the layering-guard gap | High | Med | `[ ]` TODO |
 | T2 | Break inter-feature cycles; add a deferred-import ratchet | High | Med | `[ ]` TODO |
 | T3 | Central metric registry (`domain/metric_registry.py`) | High | Med | `[ ]` TODO |
@@ -64,7 +64,7 @@ separate PRs.
 
 ---
 
-## T5 — Restore a bounded CI test job *(do first: cheap, makes everything else safer)*
+## T5 — Restore a bounded CI test job · `[x]` DONE
 
 **Why first:** the suite currently only runs locally, so T1–T4 would land unguarded.
 
@@ -214,6 +214,7 @@ Mirror the P4 pattern (extract cohesive sub-modules, re-export, ratchet the budg
 ## Status log
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-06-11 **T5 DONE** — conftest auto-marks `viewer_app`-fixture tests `slow`; added a CI `pytest (fast lane)` job running `-m "not slow"` (803 tests ~40s, green) with `timeout-minutes: 15`. Fixed 3 pre-existing failures CI surfaced: stale `_FakeApp` double in test_thresh_frac_quick_edit (added `_invalidate_stats_cache`/`_event_bus`/`plot`), and 2 stale test_remote_dialog asserts (placeholder-default UX + offscreen `isHidden` vs `isVisible`).
 - 2026-06-11 Plan created from the post-work re-evaluation (both findings verified
   against the tree). All tasks TODO.
 

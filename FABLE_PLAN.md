@@ -92,13 +92,14 @@ no config is committed, so rules are not reproducible. Also removes the 6 stray
       actually satisfies** (`E4`,`E7`,`E9`,`F`,`W`) and ignores the stylistic
       families (`E402/E501/E701/E702/E731/E741`, `F401/F811/F821`). `ruff`
       pinned to `0.15.8`, `target-version = "py310"`. `ruff check .` → clean.
-- [x] **P1.2** Added `.github/workflows/ci.yml` with two jobs: `lint`
-      (`ruff==0.15.8` → `ruff check .`) and `test` (installs Qt system libs +
-      `tests/requirements-dev.txt`, runs `pytest` under
-      `QT_QPA_PLATFORM=offscreen` with a 180s per-test timeout). Runs on Python
-      **3.11** (verified working in the dev sandbox; the ML pins that require
-      3.10 are deliberately not installed). Triggers on `pull_request` + push to
-      `main`, with `concurrency` cancellation.
+- [x] **P1.2** Added `.github/workflows/ci.yml`. **Update (post-merge):** the
+      `test` (pytest) job was **removed** — on the GitHub runner it hung for
+      hours because several Qt tests block at the C level under the offscreen QPA
+      and pytest's `--timeout-method=signal` can't interrupt a blocking C call.
+      CI now runs **ruff only** (`ruff==0.15.8` → `ruff check .`); the full suite
+      is run locally / in the dev environment. Triggers on `pull_request` + push
+      to `main`, with `concurrency` cancellation. (See the header comment in
+      `ci.yml` for how to re-add a bounded test job later.)
 - [x] **P1.3** Converted the **4 production** flag-gated `DEBUG print()`s to
       `logging.getLogger(__name__).debug(...)` (added module loggers to
       `scatter/controller.py`, `barplot/controller.py`, `barplot/renderer.py`).

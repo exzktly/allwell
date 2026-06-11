@@ -54,7 +54,7 @@ commit SHA + the test that proves it in the task's notes.
 | T1 | `persistence/` → data-only; close the layering-guard gap | High | Med | `[x]` DONE |
 | T2 | Break inter-feature cycles; add a deferred-import ratchet | High | Med | `[x]` DONE |
 | T3 | Central metric registry (`domain/metric_registry.py`) | High | Med | `[x]` DONE |
-| T4 | Decompose remaining orchestrators (+budget ratchets) | Med | Med–High | `[ ]` TODO |
+| T4 | Decompose remaining orchestrators (+budget ratchets) | Med | Med–High | `[~]` PARTIAL — scatter+barplot split; all 5 monoliths budget-locked; process_image_group / review_image / analyze_tab splits deferred (need slow e2e / full-Qt verification) |
 | T6 | Log specific-type silent passes; add a directed integration test | Low | Low | `[ ]` TODO |
 
 **Order:** **T5 first** (cheap; gets the suite gating PRs again so T1–T4 are
@@ -287,7 +287,29 @@ Mirror the P4 pattern (extract cohesive sub-modules, re-export, ratchet the budg
 - **Reuse:** the P4 extraction script + re-export + budget-ratchet playbook.
 - **Risk:** Med–High (the big controllers run under Qt; lean on the feature
   suites + the e2e). **Do last, incrementally — never a big-bang.**
-- **Notes:** _(SHA per sub-step)_
+- **Status: `[~]` PARTIAL — the verifiable splits landed; the rest is budget-locked.**
+  - **`scatter/collect.py`** (T2) + **`barplot/collect.py`** (this round) extracted
+    via the P4-style throwaway AST codemod, re-exported from each controller for
+    compat. `scatter/controller.py` 1264 → **875**; `barplot/controller.py`
+    1416 → **731** (its ~715-line data-collection cluster — `BarItem`, `_bar_debug`,
+    `FC_STATE_OFF`, `collect_bar_items{,_for_group,_fov_pooled,_for_app}`,
+    `_pooled_wells_for_fov_mode` — moved out). Verified by `test_barplot_collect`
+    + `test_barplot_autofit` + `test_lineplot_collect` (23 pass) and a re-export
+    identity check.
+  - **`tests/test_monolith_budgets.py` extended** with ratchets for
+    `scatter/controller ≤ 875`, `barplot/controller ≤ 731`,
+    `review_image/controller ≤ 1392`, and `analyze_tab ≤ 1887` — so all five
+    monoliths (plus `process_microscopy`/`image_table`) are now locked against
+    regrowth, even the ones not yet split.
+  - **Deliberately deferred (highest-risk, do incrementally):**
+    `process_image_group()` — a behaviour-preserving extraction of the scientific
+    pipeline core must be gated by the slow real-StarDist `test_pipeline_e2e.py`
+    byte-compare, which isn't part of the fast lane; the budget already holds it
+    at 4441 ≤ 4470. The `review_image` collect/render split and the `analyze_tab`
+    form/validation/run carve are Qt-interactive and need the full (non-offscreen)
+    suite to verify safely. All three are budget-locked so they can't grow while
+    the splits land in follow-up PRs.
+- **Notes:** SHA on commit.
 
 ## T6 — Durability cleanups
 1. Route the ~4 specific-type silent passes through `swallowed(...)` for

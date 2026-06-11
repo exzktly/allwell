@@ -223,42 +223,33 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
         finally:
             app._review_fov_cb.blockSignals(False)
             app._review_tp_cb.blockSignals(False)
-        app._refresh_review_csv_rows()
+
+        # Rebuild the table only when the visible row set actually changes
+        # (different well selection / FOV / timepoint). ``refresh_review_csv_rows``
+        # stamps the rendered (wells, fov, tp) signature and a {(fov,tp,nid):
+        # row} index onto the app; repeated clicks within the same FOV+timepoint
+        # reuse them, so navigation is an O(1) index lookup + selectRow instead of
+        # rebuilding the whole QTableWidget and linearly rescanning it every click.
+        sel_wells = tuple(sorted(app._app_state.selection.selected_wells, key=app._parse_rc))
+        want_sig = (sel_wells, fov_n, tp_n)
+        if (getattr(app, "_review_csv_render_sig", None) != want_sig
+                or not getattr(app, "_review_csv_row_index", None)):
+            app._refresh_review_csv_rows()
 
         table = app._review_csv_table
-        col_names = _table_column_names(table)
-        fov_ci = _resolve_table_column(col_names, "fov", "FOV")
-        tp_ci = _resolve_table_column(col_names, "timepoint", "tp", "time", "time_h", "timepoint_hours")
-        nid_ci = _resolve_table_column(col_names, "nucleus_id", "nucleus id", "nucleusId", "nucleusID")
-
-        def _cell(row_idx: int, ci: int) -> str:
-            if ci < 0:
-                return ""
-            item = table.item(row_idx, ci)
-            return item.text() if item is not None else ""
-
-        debug_candidates = []
-        for row_idx in range(table.rowCount()):
-            mini = {}
-            if fov_ci >= 0:
-                mini[col_names[fov_ci]] = _cell(row_idx, fov_ci)
-            if tp_ci >= 0:
-                mini[col_names[tp_ci]] = _cell(row_idx, tp_ci)
-            if nid_ci >= 0:
-                mini[col_names[nid_ci]] = _cell(row_idx, nid_ci)
-            rf, rt, rn = app._review_row_keys(mini)
-            if len(debug_candidates) < 10:
-                debug_candidates.append((rf, rt, rn))
-            if rf == fov_n and rt == tp_n and rn == nucleus_n:
-                table.selectRow(row_idx)
-                item = table.item(row_idx, 0)
-                if item:
-                    table.scrollToItem(item)
-                app._set_status(f"Matched Review CSV row for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}.")
-                return
+        row_idx = (getattr(app, "_review_csv_row_index", None) or {}).get(
+            (fov_n, tp_n, nucleus_n)
+        )
+        if row_idx is not None:
+            table.selectRow(row_idx)
+            item = table.item(row_idx, 0)
+            if item:
+                table.scrollToItem(item)
+            app._set_status(f"Matched Review CSV row for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}.")
+            return
         logger.warning(
-            "Review CSV exact row match not found. target=(%s,%s,%s) rows=%d sample=%s",
-            fov_n, tp_n, nucleus_n, table.rowCount(), debug_candidates,
+            "Review CSV exact row match not found. target=(%s,%s,%s) rows=%d",
+            fov_n, tp_n, nucleus_n, table.rowCount(),
         )
         app._set_status(
             f"No exact Review CSV row match for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}; showing fallback rows."
@@ -845,6 +836,10 @@ def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
         return
     table = app._review_csv_table
     table.setRowCount(0)
+    # Reset the navigation index + render signature; rebuilt below once the
+    # table is populated (used by select_review_csv_row_for_cell for O(1) jumps).
+    app._review_csv_row_index = {}
+    app._review_csv_render_sig = None
 
     if rows is None:
         sels = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
@@ -913,8 +908,13 @@ def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
     cols = list(filtered[0].keys())
     table.setColumnCount(len(cols))
     table.setHorizontalHeaderLabels(cols)
-    for ci in range(len(cols)):
-        table.setColumnWidth(ci, 120)
+    # Size each column so the *header label* never clips (a flat 120 px cut off
+    # longer column names). Header-text width only — cheap, no per-row scan — so
+    # the populate stays fast; the user can still drag-resize.
+    from PySide6.QtGui import QFontMetrics
+    fm = QFontMetrics(table.horizontalHeader().font())
+    for ci, c in enumerate(cols):
+        table.setColumnWidth(ci, max(120, fm.horizontalAdvance(str(c)) + 28))
     # Rows are now references into the per-well row caches (no deep copy),
     # so row['Included'] reflects the gating-computed value, not any user
     # override applied via the Review Image tab. Compute the effective
@@ -924,16 +924,31 @@ def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
         included_col = cols.index("Included")
     except ValueError:
         included_col = -1
-    for row in filtered:
-        r = table.rowCount()
-        table.insertRow(r)
-        well_label = str(row.get("well", "") or "")
-        for ci, c in enumerate(cols):
-            if ci == included_col and well_label:
-                value = app._review_effective_included(well_label, row)
-            else:
-                value = row.get(c, "")
-            table.setItem(r, ci, QTableWidgetItem(str(value)))
+    # Build the (fov, tp, nid) -> row-index map while populating so navigation
+    # clicks can jump straight to the row. Batch the populate with painting off
+    # — a QTableWidget relays out on every insertRow otherwise.
+    row_index: dict = {}
+    table.setUpdatesEnabled(False)
+    try:
+        for row in filtered:
+            r = table.rowCount()
+            table.insertRow(r)
+            well_label = str(row.get("well", "") or "")
+            for ci, c in enumerate(cols):
+                if ci == included_col and well_label:
+                    value = app._review_effective_included(well_label, row)
+                else:
+                    value = row.get(c, "")
+                table.setItem(r, ci, QTableWidgetItem(str(value)))
+            rf, rt, rn = app._review_row_keys(row)
+            row_index.setdefault((rf, rt, rn), r)
+    finally:
+        table.setUpdatesEnabled(True)
+    app._review_csv_row_index = row_index
+    app._review_csv_render_sig = (
+        tuple(sorted(app._app_state.selection.selected_wells, key=app._parse_rc)),
+        fov_sel, tp_sel,
+    )
     if truncated:
         app._review_csv_msg_lbl.setText(
             f"Showing first {len(filtered):,} of {n_total:,} row(s) "

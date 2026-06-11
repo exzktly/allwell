@@ -1651,35 +1651,22 @@ def build_processed_output_path(
     output_dir: Path,
     suffix: str = "",
     ext_override: str | None = None,
-    role: "object | None" = None,
-    channel: str = "",
 ) -> Path:
     """Build output path as input stem + suffix + extension.
 
-    Two equivalent calling conventions:
+    Pass ``suffix="_tophat"`` / ``"_labels"`` etc. directly. The default
+    extension is copied from *src_path* so processed outputs preserve the
+    source file type (``.tif`` / ``.tiff`` etc.) unless explicitly overridden.
 
-    * Legacy: pass ``suffix="_tophat"`` / ``"_labels"`` etc. directly.
-    * Preferred: pass ``role=Role.FLUOR_TOPHAT`` (etc.) so the suffix
-      comes from the canonical :data:`image_identity.ROLE_CATALOG`
-      table — that catalog is the single source of truth shared with
-      the reader-side classifier, so suffix drift between the writer
-      and reader can't happen.
-
-    The default extension is copied from *src_path* so processed outputs
-    preserve source file type (``.tif`` / ``.tiff`` etc.) unless
-    explicitly overridden.
+    (The reader-side ``image_identity.ROLE_CATALOG`` is the canonical suffix
+    table. A previous "preferred" catalog-driven branch here imported it from
+    ``well_viewer`` — a violation of the §6.2 pipeline-self-sufficiency contract,
+    and dead anyway since no caller passed ``role=``. If catalog-driven *writing*
+    is ever revived, move the catalog to a Qt-free ``*_core`` module first.)
     """
     ext = str(ext_override) if ext_override is not None else str(src_path.suffix)
     if not ext:
         ext = ".tif"
-    if role is not None:
-        # Catalog-driven path: consult image_identity for the suffix.
-        # Lazy import so this module's CLI invocation doesn't always
-        # pay the package init cost.
-        from well_viewer.data.image_identity import role_output_filename
-        return output_dir / role_output_filename(
-            src_path.stem, role, channel=channel, ext=ext,
-        )
     return output_dir / f"{src_path.stem}{suffix}{ext}"
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ import logging
 import re
 import uuid
 from typing import Any, Callable, Iterable, Optional, Sequence
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer.domain.selections_model")
 
@@ -50,7 +51,7 @@ def well_colors() -> list[str]:
         if out:
             return out
     except Exception:  # pragma: no cover - GUI/theme not importable
-        pass
+        swallowed()  # was: pass (silent except)
     return list(_FALLBACK_PALETTE)
 
 

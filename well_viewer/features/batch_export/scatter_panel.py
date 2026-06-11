@@ -64,6 +64,7 @@ from well_viewer.features.batch_export._common import (
 )
 from well_viewer.features.batch_export.base_panel import BatchExportPanel
 from well_viewer.features.batch_export.well_grid_button import _WellGridButton
+from well_viewer.core.safe import swallowed
 
 
 class ScatterBatchExportPanel(BatchExportPanel):
@@ -296,7 +297,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         cb.blockSignals(blocked)
                     self._refresh_scatter_axis_property(cb)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _init_scatter_cells_axes(self) -> None:
         options = self._scatter_channel_options()

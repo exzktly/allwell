@@ -22,6 +22,7 @@ from well_viewer.data.image_resolver import (
     normalize_row_filename,
     resolve_filename_candidates,
 )
+from well_viewer.core.safe import swallowed
 
 if TYPE_CHECKING:
     from .runtime_app import WellViewerApp
@@ -269,7 +270,7 @@ class ScatterCellViewer(QDialog):
             try:
                 self._img_label.setText(f"Error loading cell: {exc}")
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
     def _load_cell_data_impl(self) -> None:
         # State hygiene — wipe everything that's tied to the *previous*

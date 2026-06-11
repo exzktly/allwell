@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.features.heatmap.models import HeatmapLayout
+from well_viewer.core.safe import swallowed
 
 
 SIDEBAR_LAYOUT_NAME = "Sidebar"
@@ -449,10 +450,10 @@ def _persist_and_redraw(app) -> None:
     try:
         app._persistence.schedule_save("heatmap_layouts")
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     if hasattr(app, "_heatmap_canvas"):
         try:
             from well_viewer.features.heatmap.controller import redraw_heatmap
             redraw_heatmap(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)

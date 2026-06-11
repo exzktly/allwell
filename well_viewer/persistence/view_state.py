@@ -20,6 +20,7 @@ from typing import Any
 from well_viewer.persistence import _doc
 from well_viewer.features.image_table.controller import image_table_apply_dimensions
 from well_viewer.core.channel_state_controller import set_active_channel
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -117,7 +118,7 @@ def _snapshot_bar(app) -> dict:
         try:
             out["violin_smooth"] = int(slider.value())
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     plot = getattr(app._app_state, "plot", None) if hasattr(app, "_app_state") else None
     if plot is not None:
         if hasattr(plot, "bar_group_mode"):
@@ -188,7 +189,7 @@ def _snapshot_image_table(app) -> dict:
                     try:
                         slc[key] = str(w.currentText())
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
             row_out.append(slc)
         grid.append(row_out)
     out["cells"] = grid
@@ -221,6 +222,7 @@ def _snapshot_image_table(app) -> dict:
                 if mx is not None:
                     slot["max"] = str(mx.text())
             except Exception:
+                swallowed()  # silent except
                 continue
             if slot:
                 chan_luts[str(ch)] = slot
@@ -256,7 +258,7 @@ def restore(app, state: dict) -> None:
         try:
             app._app_state.plot.use_sem = bool(state["use_sem"])
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     fc = state.get("fold_change") or {}
     if isinstance(fc, dict):
@@ -382,7 +384,7 @@ def _set_combo_if_valid(app, attr: str, value: str) -> None:
         if value in items:
             w.setCurrentText(value)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def _apply_bar(app, state: dict) -> None:
@@ -394,7 +396,7 @@ def _apply_bar(app, state: dict) -> None:
                 str(k): bool(v) for k, v in state["timepoint_selections"].items()
             }
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if "swarm" in state:
         app._bar_swarm = bool(state["swarm"])
     if "violin" in state:
@@ -404,7 +406,7 @@ def _apply_bar(app, state: dict) -> None:
         try:
             slider.setValue(int(state["violin_smooth"]))
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     plot = getattr(app._app_state, "plot", None) if hasattr(app, "_app_state") else None
     if plot is not None:
         if "group_mode" in state and str(state["group_mode"]) in ("well", "timepoint"):
@@ -430,7 +432,7 @@ def _apply_distribution(app, state: dict) -> None:
             try:
                 spin.setValue(bins)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         app._distribution_bins = bins
     if "log_x" in state:
         app._distribution_log_x = bool(state["log_x"])
@@ -439,7 +441,7 @@ def _apply_distribution(app, state: dict) -> None:
             try:
                 cb.setChecked(bool(state["log_x"]))
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
 
 def _apply_scatter(app, state: dict) -> None:
@@ -483,7 +485,7 @@ def _apply_image_table(app, state: dict) -> None:
                         spin.blockSignals(blocked)
                     changed = True
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         if changed and hasattr(app, "_image_table_apply_dimensions"):
             try:
                 image_table_apply_dimensions(app)
@@ -523,7 +525,7 @@ def _apply_image_table(app, state: dict) -> None:
                             finally:
                                 w.blockSignals(blocked)
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
 
     for key, attr in (
         ("global_chan", "_image_table_global_chan_cb"),
@@ -544,6 +546,7 @@ def _apply_image_table(app, state: dict) -> None:
             try:
                 setattr(app, attr, bool(toggles[key]))
             except Exception:
+                swallowed()  # silent except
                 continue
 
         # Binary is a tri-state mode ("", "mask", "threshold"). Accept the new
@@ -561,7 +564,7 @@ def _apply_image_table(app, state: dict) -> None:
             from well_viewer.features.image_table.controller import image_table_refresh_display_menu
             image_table_refresh_display_menu(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     chan_luts = state.get("channel_luts") or {}
     live_luts = getattr(app, "_image_table_lut", None) or {}
@@ -582,7 +585,7 @@ def _apply_image_table(app, state: dict) -> None:
                     finally:
                         edit.blockSignals(blocked)
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
 
     # Intentionally NOT calling image_table_generate here — restore only
     # pre-fills the dropdowns, the user clicks Generate when they actually
@@ -679,7 +682,7 @@ def _reset_bar(app) -> None:
         try:
             slider.setValue(100)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def _reset_distribution(app) -> None:
@@ -688,19 +691,19 @@ def _reset_distribution(app) -> None:
         try:
             mode.setCurrentText("Histogram + KDE")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     layout = getattr(app, "_distribution_layout_cb", None)
     if layout is not None:
         try:
             layout.setCurrentText("Overlay")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     spin = getattr(app, "_distribution_bins_spin", None)
     if spin is not None:
         try:
             spin.setValue(40)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     app._distribution_bins = 40
     app._distribution_log_x = False
     cb = getattr(app, "_distribution_log_x_cb", None)
@@ -708,7 +711,7 @@ def _reset_distribution(app) -> None:
         try:
             cb.setChecked(False)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def _reset_scatter(app) -> None:
@@ -723,4 +726,4 @@ def _reset_scatter(app) -> None:
             if w.count() > 0:
                 w.setCurrentIndex(0)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)

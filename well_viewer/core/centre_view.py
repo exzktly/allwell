@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.features.preview.panel_view import build_review_image_panel
 from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
+from well_viewer.core.safe import swallowed
 
 
 _logger = logging.getLogger("well_viewer.centre_view")
@@ -300,7 +301,7 @@ def build_centre(app, parent: QWidget) -> None:
             try:
                 on_select(app._plotting_channel_cb)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
         app._plotting_channel_cb.currentIndexChanged.connect(_on_global_channel)
         arl.addWidget(app._plotting_channel_cb)
@@ -340,7 +341,7 @@ def build_centre(app, parent: QWidget) -> None:
             try:
                 handler()
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
         app._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
         arl.addWidget(app._plotting_metric_cb)
@@ -531,7 +532,7 @@ def build_centre(app, parent: QWidget) -> None:
                     try:
                         nav.configure_subplots()
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
                 return
 
         def _edit_axes() -> None:
@@ -545,7 +546,7 @@ def build_centre(app, parent: QWidget) -> None:
                     try:
                         nav.edit_parameters()
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
                 return
 
         app._plot_config_subplots = _config_subplots
@@ -584,7 +585,7 @@ def build_centre(app, parent: QWidget) -> None:
                         try:
                             card.setPlotTheme(prev_theme)
                         except Exception:
-                            pass
+                            swallowed()  # was: pass (silent except)
                 if hasattr(app, "_set_status"):
                     app._set_status(status)
                 return
@@ -612,7 +613,7 @@ def build_centre(app, parent: QWidget) -> None:
                 try:
                     app._save_matplotlib_fig(fig, default)
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
                 return
         app._save_active_card_figure = _save_active_card_figure
 

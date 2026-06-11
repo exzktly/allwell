@@ -10,6 +10,7 @@ from typing import Callable, Dict, Optional, Tuple
 
 from well_viewer.data.image_resolver import classify_filename_kind
 from well_viewer.core import debug_flags
+from well_viewer.core.safe import swallowed
 
 
 class _NullContext:
@@ -29,7 +30,7 @@ class _NullContext:
         try:
             self._zf.close()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def classify_member(

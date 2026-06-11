@@ -37,6 +37,7 @@ from well_viewer.domain.ratio_models import build_ratio_index, is_ratio_key, rat
 from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
 from shape_features_core import is_shape_column, label_for as shape_label_for
 from functools import partial
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -512,6 +513,7 @@ def sync_metric_combos(app, metric: str) -> None:
         try:
             current = str(cb.currentText() or "")
         except Exception:
+            swallowed()  # silent except
             continue
         if current == label:
             continue
@@ -740,7 +742,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
         try:
             panel.refresh_from_app()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Cell Gating shows one row per fluor channel + one per ratio. Pull
     # the ratio rows into the table whenever the ratio set changes.
     if hasattr(app, "_cell_gating_fluor_gate_edits"):
@@ -748,7 +750,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     # Ratio additions become virtual channel entries in every plot-tab
     # combo (including the global ctxbar chip), so refresh those now —
     # otherwise the new ratio doesn't appear in the dropdown until the
@@ -757,7 +759,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
         try:
             update_channel_selector(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 
@@ -825,7 +827,7 @@ def rebuild_ratio_index(app) -> None:
         try:
             app._redraw()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 

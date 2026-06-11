@@ -22,6 +22,7 @@ from functools import partial
 from well_viewer.features.stats.controller import stats_grp_add
 from well_viewer.features.stats.controller import stats_grp_clear_all
 from well_viewer.core.channel_state_controller import refresh_stats_property_combo
+from well_viewer.core.safe import swallowed
 
 
 def build_stats_tab(app, parent: QWidget) -> None:
@@ -261,4 +262,4 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
             finally:
                 app._stats_property_cb.blockSignals(blocked)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)

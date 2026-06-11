@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QVBoxLayout,
 )
+from well_viewer.core.safe import swallowed
 
 
 def build_image_table_grid(
@@ -193,6 +194,7 @@ def build_lut_row(
             prev_values[chan] = (entry["min"].text(), entry["max"].text())
             prev_auto[chan] = bool(entry.get("auto", True))
         except Exception:
+            swallowed()  # silent except
             continue
 
     clear_layout(layout)

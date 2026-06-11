@@ -43,6 +43,7 @@ from ui.theme import get_color
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.ui_helpers import attach_plot_toolbar, install_canvas_wheel_scroll
 from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
+from well_viewer.core.safe import swallowed
 
 
 logger = logging.getLogger("well_viewer.gating_worker")
@@ -145,7 +146,7 @@ class GatingWorker(QThread):
             try:
                 apply_review_overrides_to_cache(self._app, )
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             # CRITICAL: Only invalidate stats cache, NOT _refresh_review_csv_rows.
             # That call deep-copies every cached row across every well and
             # blows up memory by orders of magnitude.
@@ -564,7 +565,7 @@ def cell_gating_auto_threshold(app) -> None:
                 "Auto-threshold: load a dataset first."
             )
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         return
     channels = [str(ch).strip().lower() for ch in (app._app_state.channel.fluor_channels or []) if str(ch).strip()]
     if not channels:
@@ -573,7 +574,7 @@ def cell_gating_auto_threshold(app) -> None:
                 "Auto-threshold: no fluorescence channels detected in the loaded dataset."
             )
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         return
     # Stop any previous worker still running.
     prev = getattr(app, "_cell_gating_auto_worker", None)
@@ -581,7 +582,7 @@ def cell_gating_auto_threshold(app) -> None:
         try:
             prev.wait(50)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     btn = getattr(app, "_cell_gating_auto_btn", None)
     if btn is not None:
         btn.setEnabled(False)
@@ -591,7 +592,7 @@ def cell_gating_auto_threshold(app) -> None:
         try:
             app._set_status(msg)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _on_done(result) -> None:
         if btn is not None:
@@ -603,7 +604,7 @@ def cell_gating_auto_threshold(app) -> None:
                     "Auto-threshold finished — no thresholds were updated."
                 )
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             return
         edits = app._cell_gating_thresh_frac_edits or {}
         written: list[str] = []
@@ -615,20 +616,21 @@ def cell_gating_auto_threshold(app) -> None:
                 edit.setText(f"{float(thr):.2f}")
                 written.append(f"{ch.upper()}={float(thr):.2f}")
             except Exception:
+                swallowed()  # silent except
                 continue
         # Persist + re-render the CDF + kick the gating worker exactly as
         # the user typing a new ThreshFracOn would.
         try:
             cell_gating_on_threshold_frac_on_change(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         try:
             app._set_status(
                 "Auto-threshold updated " + ", ".join(written) if written
                 else "Auto-threshold finished — no ThreshFracOn edits were touched."
             )
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _on_failed(msg: str) -> None:
         import logging as _logging
@@ -638,7 +640,7 @@ def cell_gating_auto_threshold(app) -> None:
         try:
             app._set_status(f"Auto-threshold failed: {msg}")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     well_labels = list(app._app_state.dataset.well_paths or {})
     in_dir = app._app_state.dataset.in_dir
@@ -861,7 +863,7 @@ def _cell_gating_plot_cdf(app) -> None:
                 axes[0].axvline(x=float(_qc_min), color=warn,
                                 linestyle="--", linewidth=2, alpha=0.7)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     colors = [accent, "#FF9500", "#FF3B30", "#34C759"]
     next_idx = 1

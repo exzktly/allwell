@@ -7,6 +7,7 @@ from well_viewer.features.barplot.renderer import redraw_bars
 from well_viewer.features.scatter.controller import update_scatter_menus
 from well_viewer.features.grouping.view import rep_panel_refresh
 from well_viewer.features.grouping.label_grid_view import label_grid_refresh
+from well_viewer.core.safe import swallowed
 
 
 def _active_tab(app) -> str:
@@ -21,7 +22,7 @@ def _active_tab(app) -> str:
             if tab:
                 return tab
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if not hasattr(app, "_notebook"):
         return ""
     try:
@@ -353,7 +354,7 @@ def import_selections_from_json(app) -> None:
         try:
             app._groups_centre_refresh()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     app._toast(f"Imported {added} selection(s) from {path}.", kind="success")
 
 
@@ -662,7 +663,7 @@ def groups_centre_refresh(app) -> None:
         try:
             tab_visible = nb.currentName() == "Sample Definitions"
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     if tab_visible:
         rep_panel_refresh(app)

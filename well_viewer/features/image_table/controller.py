@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QVBoxLayout, QWidget,
 )
+from well_viewer.core.safe import swallowed
 
 
 # ── LUT colour palette ──────────────────────────────────────────────────────
@@ -811,7 +812,7 @@ def _apply_row_channel_styling(app, channels: List[str]) -> None:
             try:
                 sel.setLut(palette[r % len(palette)])
             except Exception:  # noqa: BLE001 — colormap styling is best-effort
-                pass
+                swallowed()  # was: pass (silent except)
             sel.blockSignals(False)
 
 
@@ -1175,7 +1176,7 @@ def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
         try:
             sel.setLut(palette[row_idx % len(palette)])
         except Exception:  # noqa: BLE001
-            pass
+            swallowed()  # was: pass (silent except)
         sel.blockSignals(False)
 
 
@@ -2082,7 +2083,7 @@ def image_table_generate(app) -> None:
                 )
                 break
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def image_table_auto_lut(app, channel: str) -> None:

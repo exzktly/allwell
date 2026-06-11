@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.core.safe import swallowed
 
 
 _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
@@ -627,7 +628,7 @@ def export_scatter_agg_data(app) -> None:
     try:
         app._sync_scatter_agg_stat_combos()
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
     try:
         stat_x = app._scatter_agg_stat_x_cb.currentText()
@@ -641,7 +642,7 @@ def export_scatter_agg_data(app) -> None:
                     if widget.isChecked():
                         selected_timepoints.append(float(tp_str))
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
             selected_timepoints.sort()
 
         if not selected_timepoints:

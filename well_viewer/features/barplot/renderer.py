@@ -40,6 +40,7 @@ from well_viewer.data.data_loading import (
 )
 from well_viewer.core.plot_style import apply_ax_style, tokens_for
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.core.safe import swallowed
 
 
 NO_SELECTION_MSG = (
@@ -589,7 +590,7 @@ def draw_bar_empty_state(app, ax_mean, ax_frac, message: str, *, ax_n=None) -> N
     try:
         ax_mean.figure.set_facecolor(_bg)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     axes = [ax_mean, ax_frac]
     if ax_n is not None:
         axes.append(ax_n)

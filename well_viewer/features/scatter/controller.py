@@ -19,6 +19,7 @@ from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.channel_state_controller import populate_metric_combo
 from well_viewer.domain.ratio_models import is_ratio_key
 from shape_features_core import is_shape_column
+from well_viewer.core.safe import swallowed
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -269,7 +270,7 @@ def redraw_scatter(
     try:
         app._scatter_fig.set_facecolor(_bg)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     app._ax_scatter.set_facecolor(_bg)
     for sp in app._ax_scatter.spines.values():
         sp.set_color(_spine)
@@ -356,7 +357,7 @@ def redraw_scatter(
             try:
                 line.set_gid(gid)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             first_well_in_group = False
 
         # Store metadata for click tracking
@@ -418,7 +419,7 @@ def redraw_scatter(
         apply_export_style_to_current(app, app._scatter_fig,
                                       getattr(app, "_scatter_canvas", None))
     except Exception:  # pragma: no cover
-        pass
+        swallowed()  # was: pass (silent except)
     app._scatter_canvas.draw()
 
 
@@ -658,7 +659,7 @@ def redraw_scatter_agg(
     try:
         app._scatter_agg_fig.set_facecolor(_bg)
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
     app._ax_scatter_agg.set_facecolor(_bg)
     for sp in app._ax_scatter_agg.spines.values():
         sp.set_color(_spine)
@@ -731,7 +732,7 @@ def redraw_scatter_agg(
             try:
                 container.lines[0]._scatter_only_artist = True
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
 
         # Format axes
         app._ax_scatter_agg.set_xlabel(stat_x)
@@ -750,7 +751,7 @@ def redraw_scatter_agg(
         apply_export_style_to_current(app, app._scatter_agg_fig,
                                       getattr(app, "_scatter_agg_canvas", None))
     except Exception:  # pragma: no cover
-        pass
+        swallowed()  # was: pass (silent except)
     app._scatter_agg_canvas.draw()
 
 
@@ -890,7 +891,7 @@ def on_scatter_click(app, event) -> None:
             box.setDetailedText(tb)
             box.exec()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def on_scatter_motion(app, event) -> None:
@@ -924,7 +925,7 @@ def on_scatter_motion(app, event) -> None:
             app._set_status("")
 
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def redraw_scatter_agg_orchestrate(app) -> None:

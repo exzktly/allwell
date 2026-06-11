@@ -38,6 +38,7 @@ from widgets.toggle_switch import ToggleSwitch
 from well_viewer.features.barplot.renderer import redraw_bars
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
+from well_viewer.core.safe import swallowed
 
 
 #: Single source of truth for the style-panel width — read by both the
@@ -328,7 +329,7 @@ class ExportStyleSidebar(QWidget):
                     try:
                         self._app._toggle_sem()
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
 
             err_sc.currentChanged.connect(_on_err_change)
             add_stacked(s_stats, "Error bars", err_sc)
@@ -347,7 +348,7 @@ class ExportStyleSidebar(QWidget):
                         _stats_state["err"] = target
                         _update_stats_preview()
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
 
             if not hasattr(self._app, "_sem_observers"):
                 self._app._sem_observers = []
@@ -371,7 +372,7 @@ class ExportStyleSidebar(QWidget):
                     try:
                         self._app._toggle_fov_replicates()
                     except Exception:
-                        pass
+                        swallowed()  # was: pass (silent except)
 
             across_sc.currentChanged.connect(_on_across_change)
             add_stacked(s_stats, "Across", across_sc)
@@ -388,7 +389,7 @@ class ExportStyleSidebar(QWidget):
                         _stats_state["across"] = "FOV" if use_fov else "Replicates"
                         _update_stats_preview()
                 except Exception:
-                    pass
+                    swallowed()  # was: pass (silent except)
 
             if not hasattr(self._app, "_fov_observers"):
                 self._app._fov_observers = []
@@ -733,7 +734,7 @@ class ExportStyleSidebar(QWidget):
 
             QTimer.singleShot(500, _restore)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _on_axis_target_changed(self, new_axis: str) -> None:
         if self._updating:
@@ -776,7 +777,7 @@ class ExportStyleSidebar(QWidget):
             self._persist()
             apply_export_style_to_current(self._app, self._fig, self._canvas)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _close_dock(self) -> None:
         self.hide()
@@ -933,7 +934,7 @@ class ExportStyleSidebar(QWidget):
         try:
             app._persistence.schedule_save("line_order")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
         self._redraw_bound_figure()
 
     def _redraw_bound_figure(self) -> None:
@@ -958,7 +959,7 @@ class ExportStyleSidebar(QWidget):
                 return
             app._redraw()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
     def _refresh_line_order_lists(self) -> None:
         """Repopulate the rep-set / well order lists from current app state.

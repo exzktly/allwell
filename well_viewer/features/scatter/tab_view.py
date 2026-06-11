@@ -25,6 +25,7 @@ from well_viewer.features.scatter.cells_tab_view import build_scatter_cells_tab
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from well_viewer.features.scatter.controller import update_scatter_menus
+from well_viewer.core.safe import swallowed
 
 
 _MODE_CELLS = "cells"
@@ -70,11 +71,11 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
             try:
                 update_scatter_menus(ctx.app)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             try:
                 redraw_scatter_agg_orchestrate(ctx.app)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         else:
             if tab_widget.currentIndex() != 0:
                 tab_widget.setCurrentIndex(0)
@@ -82,11 +83,11 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
             try:
                 update_scatter_menus(ctx.app)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
             try:
                 redraw_scatter_orchestrate(ctx.app)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
     ctx.app._scatter_set_mode = _set_mode
 
     tab_widget.currentChanged.connect(

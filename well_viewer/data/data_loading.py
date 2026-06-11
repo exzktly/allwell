@@ -91,6 +91,7 @@ _METRIC_SUFFIXES = (
 from well_viewer.data.image_identity import (  # noqa: E402  (after _METRIC_SUFFIXES decl)
     normalize_fov_series as _normalize_fov_series,
 )
+from well_viewer.core.safe import swallowed
 
 
 def normalize_fov_series(fov: pd.Series) -> pd.Series:
@@ -709,7 +710,7 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
             try:
                 return rank_rset(rset)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         return "#808080"
 
     def _color_well(w: str) -> str:
@@ -720,7 +721,7 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
             try:
                 return rank_well(w)
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         return "#808080"
 
     if rep_sets:

@@ -23,6 +23,7 @@ from well_viewer.core.ui_helpers import btn_primary, btn_secondary
 from well_viewer.features.grouping.label_grid_view import build_label_grid
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.selection_controller import update_active_group_label
+from well_viewer.core.safe import swallowed
 
 
 class _NotesEdit(QPlainTextEdit):
@@ -42,7 +43,7 @@ class _NotesEdit(QPlainTextEdit):
         try:
             self._on_commit()
         except Exception:  # never let an autosave failure escape the event loop
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def build_replicate_panel(app, parent: QWidget) -> None:
@@ -95,7 +96,7 @@ def build_replicate_panel(app, parent: QWidget) -> None:
                 if sub_tabs.tabText(sub_tabs.currentIndex()) != "Groups":
                     return
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         sid = app._app_state.selection.current_selection_id
         sel = app._sel_by_id(sid) if sid else None
         if sel is None:

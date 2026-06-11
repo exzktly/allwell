@@ -11,6 +11,7 @@ import logging
 import math
 
 from well_viewer.persistence import _doc
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -60,7 +61,7 @@ def load_from_data_dir(app) -> None:
             )
             refresh_heatmap_layout_sidebar(app)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     apply_persisted_settings(app)
 
 

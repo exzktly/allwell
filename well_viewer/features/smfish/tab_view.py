@@ -43,6 +43,7 @@ from well_viewer.features.smfish.worker import apply_global_threshold_async
 from well_viewer.core.ui_helpers import attach_plot_toolbar
 from well_viewer.domain.viewer_state import make_schema_extractor
 from well_viewer.core.channel_state_controller import recalculate_threshold
+from well_viewer.core.safe import swallowed
 
 logger = logging.getLogger("smfish_tab")
 
@@ -474,7 +475,7 @@ def _smfish_set_controls_enabled(app, enabled: bool) -> None:
         try:
             w.setEnabled(enabled)
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def _smfish_show_no_smfish_state(app) -> None:
@@ -501,7 +502,7 @@ def _smfish_show_no_smfish_state(app) -> None:
         if app._smfish_canvas_img is not None:
             app._smfish_canvas_img.draw_idle()
     except Exception:
-        pass
+        swallowed()  # was: pass (silent except)
 
 
 def _smfish_selected_well_token(app) -> str | None:

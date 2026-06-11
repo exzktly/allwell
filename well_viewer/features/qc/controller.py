@@ -14,6 +14,7 @@ import logging
 from typing import Optional
 
 from .params import QCParams, compute_qc_pass
+from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -63,7 +64,7 @@ def recompute_qc_all(app) -> None:
         try:
             app._invalidate_stats_cache()  # clears stats cache + bumps override_version
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def set_qc_params(app, params: QCParams) -> None:
@@ -75,12 +76,12 @@ def set_qc_params(app, params: QCParams) -> None:
         try:
             app._persistence.schedule_save("qc_params")
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
     if hasattr(app, "_redraw"):
         try:
             app._redraw()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 def qc_excluded_count(app, labels=None, params: Optional[QCParams] = None) -> "tuple[int, int]":

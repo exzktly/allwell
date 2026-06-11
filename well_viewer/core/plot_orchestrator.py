@@ -9,6 +9,7 @@ from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.plot_style import apply_ax_style
 from well_viewer.data.data_loading import _all_fluor_values
 from ui.theme import WARN
+from well_viewer.core.safe import swallowed
 
 
 
@@ -165,7 +166,7 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
                 if widget.isChecked():
                     selected_timepoints.append(float(tp_str))
             except Exception:
-                pass
+                swallowed()  # was: pass (silent except)
         selected_timepoints.sort()
 
     if selected_timepoints:
@@ -222,7 +223,7 @@ def redraw_app(app) -> None:
             if getattr(sb, "_is_line_fig", lambda: False)():
                 sb._refresh_line_order_lists()
         except Exception:
-            pass
+            swallowed()  # was: pass (silent except)
 
 
 

@@ -161,7 +161,7 @@ def build_lut_row(
     """Rebuild the per-row levels + display **table** below the selector grid.
 
     One grid ROW per image-table row (keyed by row index): an aligned table with
-    columns ``Row N · CHAN | Color | Min | Max | Fit | Top-hat | Boundaries | Binary``.
+    columns ``Row N · CHAN | Color | Min | Max | Fit | Source | Boundaries | Binary``.
     The checkbox labels live in the column header so the checkboxes are text-less
     and centred (no overlap). All controls are passive — they stage state read by
     the render/export paths (``image_compose._parse_lut`` / ``_row_display_opts``
@@ -191,7 +191,7 @@ def build_lut_row(
                 "min": entry["min"].text(),
                 "max": entry["max"].text(),
                 "auto": bool(entry.get("auto", True)),
-                "tophat": bool(entry["tophat"].isChecked()) if entry.get("tophat") else False,
+                "source": entry["source"].currentData() if entry.get("source") else "raw",
                 "boundaries": bool(entry["boundaries"].isChecked()) if entry.get("boundaries") else False,
                 "binary": entry["binary"].currentData() if entry.get("binary") else "",
             }
@@ -229,7 +229,7 @@ def build_lut_row(
         return ""
 
     # ── header row ───────────────────────────────────────────────────────
-    headers = ("", "Color", "Min", "Max", "", "Top-hat", "Boundaries", "Binary")
+    headers = ("", "Color", "Min", "Max", "", "Source", "Boundaries", "Binary")
     for c, text in enumerate(headers):
         if not text:
             continue
@@ -295,9 +295,25 @@ def build_lut_row(
             swallowed()
         layout.addWidget(fit_btn, grow, 4)
 
-        tophat_wrap, tophat_cb = _checkbox_cell(p.get("tophat", False))
-        tophat_cb.setToolTip("Show the background-subtracted (top-hat) image for this row.")
-        layout.addWidget(tophat_wrap, grow, 5)
+        # Image stage to show for this row: Raw (unprocessed) vs Corrected (the
+        # saved top-hat / background-subtracted output — same "corrected" the
+        # Review Image tab shows). Replaces the old single Top-hat checkbox.
+        source_cb = QComboBox(container)
+        for _lbl, _key in (("Raw", "raw"), ("Corrected", "corrected")):
+            source_cb.addItem(_lbl, userData=_key)
+        prev_src = p.get("source", "raw") or "raw"
+        for i in range(source_cb.count()):
+            if source_cb.itemData(i) == prev_src:
+                source_cb.setCurrentIndex(i)
+                break
+        source_cb.setToolTip(
+            "Image stage shown for this row:\n"
+            "• Raw — unprocessed fluorescence.\n"
+            "• Corrected — the saved top-hat / background-subtracted image "
+            "(falls back to raw when no corrected image exists)."
+        )
+        source_cb.setFixedWidth(110)
+        layout.addWidget(source_cb, grow, 5)
         bound_wrap, bound_cb = _checkbox_cell(p.get("boundaries", False))
         bound_cb.setToolTip("Overlay white cell-boundary outlines for this row.")
         layout.addWidget(bound_wrap, grow, 6)
@@ -315,7 +331,7 @@ def build_lut_row(
 
         app._image_table_lut[r] = {
             "min": min_edit, "max": max_edit, "auto": bool(p.get("auto", True)),
-            "tophat": tophat_cb, "boundaries": bound_cb, "binary": bin_cb,
+            "source": source_cb, "boundaries": bound_cb, "binary": bin_cb,
             "chan": chan,
         }
 

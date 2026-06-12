@@ -47,15 +47,15 @@ def test_display_options_are_per_row(loaded_app):
     C.image_table_apply_preset(app, "channel", "timepoint")
     luts = app._image_table_lut or {}
     assert luts, "per-row LUT/Display boxes should exist after a build"
-    # Each row has its own tophat/boundaries/binary widgets.
+    # Each row has its own source/boundaries/binary widgets.
     for r, entry in luts.items():
-        assert {"tophat", "boundaries", "binary"} <= set(entry)
+        assert {"source", "boundaries", "binary"} <= set(entry)
 
     rows = sorted(luts)
     assert len(rows) >= 2, "need ≥2 rows to prove independence"
     r0, r1 = rows[0], rows[1]
     # Flip row r0's options; r1 must stay untouched.
-    luts[r0]["tophat"].setChecked(True)
+    luts[r0]["source"].setCurrentText("Corrected")
     luts[r0]["boundaries"].setChecked(True)
     for i in range(luts[r0]["binary"].count()):
         if luts[r0]["binary"].itemData(i) == "mask":

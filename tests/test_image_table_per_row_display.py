@@ -38,9 +38,9 @@ def test_generate_runs_with_per_row_display(loaded_app):
     C.image_table_apply_preset(app, "channel", "timepoint")
     luts = app._image_table_lut
     assert luts
-    # Turn on top-hat for row 0 only, then render — must not raise and must
-    # read row 0's option (True) independently of the other rows (False).
-    luts[0]["tophat"].setChecked(True)
+    # Switch row 0 to the Corrected (top-hat) source only, then render — must
+    # not raise and must read row 0's option (True) independently of the others.
+    luts[0]["source"].setCurrentText("Corrected")
     assert _row_display_opts(app, 0)[0] is True
     if len(luts) > 1:
         assert _row_display_opts(app, 1)[0] is False
@@ -62,7 +62,7 @@ def test_per_row_controls_do_not_auto_generate(loaded_app, monkeypatch):
     monkeypatch.setattr(ic, "image_table_generate", lambda a: calls.append(a))
 
     r = sorted(luts)[0]
-    luts[r]["tophat"].setChecked(True)
+    luts[r]["source"].setCurrentText("Corrected")
     luts[r]["boundaries"].setChecked(True)
     for i in range(luts[r]["binary"].count()):
         if luts[r]["binary"].itemData(i) == "mask":

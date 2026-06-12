@@ -285,10 +285,12 @@ def _row_display_opts(app, row_idx: int) -> Tuple[bool, bool, str]:
     defaults to all-off when the row has no box yet.
     """
     entry = (getattr(app, "_image_table_lut", None) or {}).get(row_idx) or {}
-    tophat_w = entry.get("tophat")
+    source_w = entry.get("source")
     bound_w = entry.get("boundaries")
     bin_w = entry.get("binary")
-    use_tophat = bool(tophat_w.isChecked()) if tophat_w is not None else False
+    # "Corrected" loads the top-hat / background-subtracted output (use_tophat);
+    # "Raw" loads the unprocessed fluorescence.
+    use_tophat = (source_w.currentData() == "corrected") if source_w is not None else False
     show_boundaries = bool(bound_w.isChecked()) if bound_w is not None else False
     binary_mode = (bin_w.currentData() if bin_w is not None else "") or ""
     return use_tophat, show_boundaries, binary_mode

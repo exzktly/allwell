@@ -61,7 +61,7 @@ def _build_spread_row(app, parent: QWidget) -> QWidget:
     if not getattr(app, "_sem_btn", None):
         app._sem_btn = sem_btn
 
-    spread_lbl = QLabel("  Spread:", row)
+    spread_lbl = QLabel("  Per-FOV points:", row)
     spread_lbl.setObjectName("Muted")
     rl.addWidget(spread_lbl)
 
@@ -123,6 +123,12 @@ def _show_batch_mode(app, mode: str) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
 
+    # The Error-Band / per-FOV row only affects line & bar exports — hide it on
+    # the scatter modes so it doesn't read as an applicable (but inert) control.
+    band_row = state.get("band_row")
+    if band_row is not None:
+        band_row.setVisible(mode in ("line", "bar"))
+
     state["mode"] = mode
     _refresh_mode_buttons(app, mode)
 
@@ -146,18 +152,18 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(title)
 
     subtitle = QLabel(
-        "Configure and run inline line/bar batch export workflows from this tab.",
+        "Configure and run inline line / bar / scatter batch-export workflows "
+        "from this tab.",
         parent,
     )
     subtitle.setObjectName("Muted")
     subtitle.setWordWrap(True)
     layout.addWidget(subtitle)
 
-    layout.addWidget(_build_spread_row(ctx.app, parent))
-
     # v2: pick-one mode via SegmentedControl instead of a row of toggle
     # QPushButtons. Each segment carries the mode key in data; currentChanged
-    # routes to the appropriate _open_*_batch_export entrypoint.
+    # routes to the appropriate _open_*_batch_export entrypoint. The chart-type
+    # selector leads; the (line/bar-only) Error-Band row sits beneath it.
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
     switch_row = _SegmentedControl(parent)
     switch_row.addSegment("Line", data="line")
@@ -180,6 +186,12 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     switch_row.currentChanged.connect(_on_mode_changed)
     layout.addWidget(switch_row)
 
+    # Error-Band / per-FOV row — beneath the chart-type selector, and only
+    # shown for the line/bar modes it actually affects (toggled in
+    # ``_show_batch_mode``).
+    band_row = _build_spread_row(ctx.app, parent)
+    layout.addWidget(band_row)
+
     host = QWidget(parent)
     QVBoxLayout(host)
     layout.addWidget(host, 1)
@@ -189,6 +201,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "panels": {},
         "mode": "line",
         "mode_segmented": switch_row,
+        "band_row": band_row,
     }
     ctx.app._batch_export_set_mode = lambda mode="line": _show_batch_mode(ctx.app, mode)
     ctx.app._batch_export_set_mode("line")

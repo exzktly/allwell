@@ -489,13 +489,21 @@ def _smfish_show_no_smfish_state(app) -> None:
     app._smfish_current_labels = None
     app._smfish_current_sorted_vals = None
     try:
+        # Paint the empty-state message on the theme background like every
+        # other plot's empty/no-selection warning (was a bare white axes on a
+        # dark app + a hardcoded grey).
+        bg_panel = get_color("BG_PANEL")
+        txt_mut = get_color("TXT_MUT")
         app._smfish_ax_img.clear()
+        app._smfish_ax_img.set_facecolor(bg_panel)
+        if app._smfish_fig_img is not None:
+            app._smfish_fig_img.patch.set_facecolor(bg_panel)
         app._smfish_ax_img.set_axis_off()
         app._smfish_ax_img.text(
             0.5, 0.5, _NO_SMFISH_MESSAGE,
             transform=app._smfish_ax_img.transAxes,
             ha="center", va="center",
-            color="#888888",
+            color=txt_mut,
             fontsize=11, wrap=True,
         )
         if app._smfish_canvas_img is not None:

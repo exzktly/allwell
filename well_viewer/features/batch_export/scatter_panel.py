@@ -24,6 +24,7 @@ from well_viewer.features.batch_export._common import (
     BarGroup,
     WELL_COLORS,
     _groups_with_loaded_wells,
+    unique_export_stem,
 )
 from well_viewer.features.batch_export.base_panel import BatchExportPanel
 from well_viewer.core.safe import swallowed
@@ -347,6 +348,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return
         fmt = self._fmt_cb.currentText()
         split_by_tp = self._scatter_split_tp_cb.isChecked()
+        used_stems: set = set()  # uniquify output stems across groups
         if split_by_tp:
             jobs = [(grp, tp) for grp in groups_with_data for tp in timepoints]
 
@@ -358,7 +360,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 grp, tp_h = job
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
                 safe_tp = f"{tp_h:.1f}".replace(".", "_")
-                stem = f"scatter_{self._scatter_mode}_{safe_grp}_t{safe_tp}"
+                stem = unique_export_stem(
+                    f"scatter_{self._scatter_mode}_{safe_grp}_t{safe_tp}", used_stems)
                 csv_path = out_dir / f"{stem}.csv"
                 fig_path = out_dir / f"{stem}.{fmt}"
                 if self._scatter_mode == "cells":
@@ -374,7 +377,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             def _run_job(job) -> Optional[str]:
                 grp = job
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
-                stem = f"scatter_{self._scatter_mode}_{safe_grp}_all_tps"
+                stem = unique_export_stem(
+                    f"scatter_{self._scatter_mode}_{safe_grp}_all_tps", used_stems)
                 csv_path = out_dir / f"{stem}.csv"
                 fig_path = out_dir / f"{stem}.{fmt}"
                 if self._scatter_mode == "cells":

@@ -241,7 +241,9 @@ all_well_launcher.main()                       (PyInstaller bundle only)
     ▼ regular Python run jumps in here:
 all_well.main()
     ├── QApplication(sys.argv)
-    ├── theme_v2.Typography.family ← app.font().family()      ← collapse QSS family list
+    ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
+    │       ← register bundled Inter / JetBrains Mono (static instances),
+    │         falling back to app.font().family() if unavailable
     ├── app.setStyleSheet(theme.qss())                        ← global QSS
     ├── AllWellApp().__init__
     │       ├── _build_ui()
@@ -764,11 +766,15 @@ ceiling at the current floor; it can only ratchet down from here.
 
 ## 6. The Analyze side
 
-### 6.1 `analyze_tab.py`
+### 6.1 `analyze_tab.py` / `analyze_tab_form.py`
 
-A single-file Qt form that builds the input panel (folder pickers, channel
-tokens, top-hat radii, segmentation method, smFISH options, worker count)
-plus a live-streaming log panel and a Run / Stop button. The Run path:
+The Qt form that builds the input panel (folder pickers, channel tokens,
+top-hat radii, segmentation method, smFISH options, worker count) plus a
+live-streaming log panel and a Run / Stop button. The form-building code was
+extracted into `analyze_tab_form.py` (a mixin consumed by `AnalyzeTab`) during
+the Code-Diet pass so `analyze_tab.py` stays under its line budget; the two are
+edited together. Verbose inline helper paragraphs are collapsed behind hover
+`ⓘ` icons (`_info_icon` / `_section(info=…)`). The Run path:
 
 1. Validate the form.
 2. Call `services.pipeline_service.find_pipeline_script()` to locate
@@ -1649,6 +1655,12 @@ an allowlist before a guard could be clean.
 The 6.0 series adds the live run-status dashboard and hardens the run path
 (remote fetch, crash-safety, dead-code removal) on top of the 5.5 analysis
 line. Newest first:
+
+- **6.3.0 — UI polish: bundled static fonts + Analyze info tooltips + dropdown carets + smFISH empty-state.** Shipped static weight instances of Inter / JetBrains Mono (generated via `scripts/make_static_fonts.py`) so the bundled faces register reliably on Windows (variable-font `addApplicationFont` was silently falling back to the platform default). Subsumed the inline helper paragraphs under the Analyze tab's Fluorescent-channels, Radius and Output-options areas into hover `ⓘ` info icons. Reserved space for dropdown-button carets in the global QSS so the `▾`/menu-indicator no longer overlaps button text. Made the smFISH "not enabled" empty state paint on the theme background like every other plot's empty warning (was a bare white axes + hardcoded grey). Version pill → `v6.3.0`.
+
+- **6.2.x — Visual UI audit + fix wave (PRs #406–#417, #410, #413).** A headless render harness (`tests/visual/render_views.py`) grabs every view/tab/empty-state to PNG (offscreen Qt + Agg, compositing nested matplotlib canvases), feeding a graded audit (`_Docs/visual_audit/REPORT.md` + committed screenshots). The audit drove a wave of fixes: bundled **Inter** (UI) + **JetBrains Mono** (numeric) fonts so the chrome and plots match across OSes (`well_viewer/core/app_fonts.py`, wired once in `all_well.main` and read by `plot_style`); fixed a `flush_dirty_scopes` import crash and a scatter `math` `NameError` that cascaded through load (#407); Image-Table declutter — Source **Raw/Corrected** options and a per-channel `≥Thr` threshold map that respects sample-definition thresholds (`image_compose.py`, `review_image/collect.py`, #408/#409); Batch-Export header cleanup (#412), a **filename-collision** guard so two groups with punctuation-only name differences no longer silently overwrite each other (`batch_export/_common.py::unique_export_stem`, #414), and OUTPUT-SETTINGS field alignment + button regrouping (#416); plus scatter agg-title de-clip and a Statistics empty-state hint (#417). Font packaging fixes for frozen builds + the `monospace` QSS alias warning (#413).
+
+- **6.1.x — "Code Diet" extraction + CI/test hardening (PRs #400–#405).** Split the oversized monoliths to bring them under enforced line budgets: extracted `analyze_tab_form.py` from `analyze_tab.py`, refactored the Image-Table `grid_view.py` / `controller.py`, and trimmed dead `review_image` code. Added the CI workflow (`ruff` + `pytest` fast lane) and ratchet guards — `test_monolith_budgets.py` (per-file line ceilings, only ever lowered), `test_extracted_module_names.py`, and `test_deferred_imports.py` — plus regression tests (review-image binary, per-row display, CSV-index perf, bar-timepoint restore). Reorganised planning docs under `_Docs/Markdowns/`.
 
 - **6.0.x — Review-CSV crash + Movie Montage removal + rsync tests (PR #356).** Fixed an OOM/SIGKILL when clicking a segmentation cell or the Review-CSV sidebar link: the non-editable FOV combo now carries `review_norm_fov`-normalised values (so cell-click `setCurrentText` hits the exact-match path instead of stranding the filter on a zero-row pair), and `refresh_review_csv_rows` hard-caps the materialised table at 5000 rows so it can never allocate millions of `QTableWidgetItem`s. Removed the dormant Movie Montage subsystem (~1490 lines: `preview/montage.py`, `preview/callbacks.py`, the dead tab builder, the `_montage_crop_tool` delegates, and `export.save_montage_figure`) now that the tab is folded into Image Table; the one live helper (`_show_image_pixel_tooltip`) moved into `review_image/controller.py`. Un-staled the three rsync-retry tests against the cancellable chunked backoff (the schedule is unchanged — they now assert it by reconstructing per-retry totals from the ≤0.25s sleep chunks).
 

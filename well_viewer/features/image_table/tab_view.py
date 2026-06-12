@@ -62,6 +62,7 @@ def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") 
     if tooltip:
         btn.setToolTip(tooltip)
     btn.setProperty("variant", "secondary")
+    btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
     return btn
 
 
@@ -149,6 +150,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     chan_btn.setText("Channels: all")
     chan_btn.setPopupMode(QToolButton.InstantPopup)
     chan_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    chan_btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
     chan_btn.setToolTip(
         "Pick which channels go on the Channels axis (none = all channels)."
     )

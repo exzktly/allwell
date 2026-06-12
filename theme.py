@@ -312,6 +312,24 @@ QPushButton:disabled, QToolButton:disabled {{
     border-color: {c.border_subtle};
 }}
 
+/* Dropdown-caret tool buttons (those marked ``hasMenu``). Reserve room on the
+   right so the caret sits in its own space instead of being painted on top of
+   the centred label ("Channels: al▾"). Split buttons (MenuButtonPopup) get
+   Qt's native arrow in the dedicated menu-button section; we just give that
+   section a clean borderless look. (Instant-popup buttons can't render a
+   styled caret under Qt's stylesheet style, so their affordance is the label
+   itself — e.g. "More" — with the reserved padding keeping the layout tidy.) */
+QToolButton[hasMenu="true"] {{
+    padding-right: 20px;
+}}
+QToolButton[hasMenu="true"]::menu-button {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 18px;
+    border: none;
+    background: transparent;
+}}
+
 QPushButton#Primary {{
     background-color: {c.accent};
     border-color: {c.accent};

@@ -73,6 +73,14 @@ extra_data: list = []
 if _markdowns_dir.is_dir():
     extra_data.append((str(_markdowns_dir), "Markdowns"))
 
+# Bundled UI fonts (Inter + JetBrains Mono). Loaded at startup by
+# well_viewer.core.app_fonts, which resolves ``_MEIPASS/assets/fonts`` in a
+# frozen build — so without this the app silently falls back to the platform
+# font. Ship them under the same ``assets/fonts`` layout the loader expects.
+_fonts_dir = _parent / "assets" / "fonts"
+if _fonts_dir.is_dir():
+    extra_data.append((str(_fonts_dir), "assets/fonts"))
+
 datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 
 

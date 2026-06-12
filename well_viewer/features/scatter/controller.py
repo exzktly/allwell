@@ -349,8 +349,11 @@ def redraw_scatter_agg(
         app._ax_scatter_agg.set_xlabel(stat_x)
         app._ax_scatter_agg.set_ylabel(stat_y)
         tp_range = f"t={min(timepoints_h)}h to {max(timepoints_h)}h" if timepoints_h else ""
+        # The x/y axis labels already carry stat_x / stat_y, so keep the title
+        # short — repeating both in the title overran the axes and clipped its
+        # first characters at the left edge.
         app._ax_scatter_agg.set_title(
-            f"Aggregate Scatter: {stat_x} vs {stat_y} ({tp_range})",
+            f"Per-well aggregate ({tp_range})" if tp_range else "Per-well aggregate",
             color=_title_fg,
         )
         app._ax_scatter_agg.grid(True, alpha=0.3, color=_grid)

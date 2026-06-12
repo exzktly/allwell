@@ -254,6 +254,11 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     app._stats_result_text = QTextEdit(app._stats_res_frame)
     app._stats_result_text.setReadOnly(True)
     app._stats_result_text.setLineWrapMode(QTextEdit.WidgetWidth)
+    # Hint in the otherwise-blank results panel before the first run.
+    app._stats_result_text.setPlaceholderText(
+        "Select two comparison groups (left panel), choose a test, then click "
+        "Run test to see results here."
+    )
     rl.addWidget(app._stats_result_text)
     layout.addWidget(app._stats_res_frame, 1)
 

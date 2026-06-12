@@ -561,8 +561,9 @@ def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
         return None
     above_by_nid: Dict[int, bool] = {}
     try:
-        from well_viewer.features.review_image.controller import review_build_threshold_map
-        from well_viewer.features.review_image.collect import review_norm_fov
+        from well_viewer.features.review_image.controller import (
+            review_build_threshold_map, review_norm_fov,
+        )
         # The CSV row keys are normalised (e.g. timepoint "0h" -> "0"); the
         # Image Table cell carries the raw image-filename token, so normalise
         # tp/fov the same way the Review Image tab does before the lookup —

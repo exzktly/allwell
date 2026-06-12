@@ -54,6 +54,10 @@ from well_viewer.features.batch_export._common import (
 )
 from well_viewer.features.batch_export.well_grid_button import _WellGridButton
 
+# Shared width for OUTPUT-SETTINGS row labels so the value controls line up in a
+# single column (Folder / Format / Style Preset / Channel / Fold change).
+_FIELD_LABEL_W = 108
+
 
 def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
                    vs_control: bool, vs_t0: bool, control_label: str) -> None:
@@ -154,6 +158,7 @@ class BatchExportPanel(QWidget):
         outer.addWidget(right, 1)
 
     def _build_group_editor(self, layout: QVBoxLayout) -> None:
+        # Row 1: title + the two ways to *create* groups (Add / Quick Setup).
         hdr1 = QHBoxLayout()
         hdr1.setContentsMargins(8, 4, 8, 4)
         title = QLabel("EXPORT GROUPS")
@@ -162,14 +167,7 @@ class BatchExportPanel(QWidget):
         title.setFont(f)
         hdr1.addWidget(title)
         hdr1.addStretch(1)
-        clear_btn = btn_secondary(None, "Clear All", self._grp_clear_all)
-        add_btn = btn_primary(None, "+ Add", self._grp_add)
-        hdr1.addWidget(clear_btn)
-        hdr1.addWidget(add_btn)
-        layout.addLayout(hdr1)
-
-        hdr2 = QHBoxLayout()
-        hdr2.setContentsMargins(8, 2, 8, 2)
+        hdr1.addWidget(btn_primary(None, "+ Add", self._grp_add))
         qs_btn = QToolButton()
         # Plain dropdown-style button \u2014 no visible arrow indicator.
         # Qt's `QToolButton::menu-indicator` is the small dropdown
@@ -182,12 +180,18 @@ class BatchExportPanel(QWidget):
         qs_menu.addAction("One group per row  (Row A = all A wells, \u2026)", self._quick_by_row)
         qs_menu.addAction("One group per column  (Col 01 = all col-01 wells, \u2026)", self._quick_by_col)
         qs_btn.setMenu(qs_menu)
-        hdr2.addWidget(qs_btn)
+        hdr1.addWidget(qs_btn)
+        layout.addLayout(hdr1)
+
+        # Row 2: persistence (Save / Load / Sync) on the left; the destructive
+        # Clear All isolated on the right so it isn't fat-fingered next to Add.
+        hdr2 = QHBoxLayout()
+        hdr2.setContentsMargins(8, 2, 8, 2)
         hdr2.addWidget(btn_secondary(None, "Save\u2026", self._save_groups))
         hdr2.addWidget(btn_secondary(None, "Load\u2026", self._load_groups))
-        hdr2.addSpacing(12)
         hdr2.addWidget(btn_secondary(None, "Sync from app", self._sync_from_app))
         hdr2.addStretch(1)
+        hdr2.addWidget(btn_secondary(None, "Clear All", self._grp_clear_all))
         layout.addLayout(hdr2)
 
         sep = QFrame()
@@ -315,6 +319,7 @@ class BatchExportPanel(QWidget):
         row.setContentsMargins(12, 2, 12, 2)
         lbl = QLabel("Channel:")
         f = lbl.font(); f.setBold(True); lbl.setFont(f)
+        lbl.setMinimumWidth(_FIELD_LABEL_W)
         row.addWidget(lbl)
         cb = QComboBox()
         cb.addItems(channels)
@@ -538,6 +543,7 @@ class BatchExportPanel(QWidget):
         row.setContentsMargins(12, 2, 12, 2)
         lbl = QLabel("Style Preset:")
         f = lbl.font(); f.setBold(True); lbl.setFont(f)
+        lbl.setMinimumWidth(_FIELD_LABEL_W)
         row.addWidget(lbl)
         self._profile_combo = QComboBox()
         self._profile_combo.addItems(self._export_profile_names())
@@ -602,9 +608,11 @@ class BatchExportPanel(QWidget):
             self._out_dir_edit.setText(chosen)
 
     @staticmethod
-    def _add_bold_label(layout, text: str) -> QLabel:
+    def _add_bold_label(layout, text: str, *, min_width: int = 0) -> QLabel:
         lbl = QLabel(text)
         f = lbl.font(); f.setBold(True); lbl.setFont(f)
+        if min_width:
+            lbl.setMinimumWidth(min_width)
         layout.addWidget(lbl)
         return lbl
 
@@ -620,7 +628,7 @@ class BatchExportPanel(QWidget):
 
         out_row = QHBoxLayout()
         out_row.setContentsMargins(12, 6, 12, 6)
-        self._add_bold_label(out_row, "Folder:")
+        self._add_bold_label(out_row, "Folder:", min_width=_FIELD_LABEL_W)
         self._out_dir_edit = QLineEdit(self._out_dir_value)
         self._out_dir_edit.setMinimumWidth(240)
         out_row.addWidget(self._out_dir_edit, 1)
@@ -629,7 +637,7 @@ class BatchExportPanel(QWidget):
 
         fmt_row = QHBoxLayout()
         fmt_row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(fmt_row, "Format:")
+        self._add_bold_label(fmt_row, "Format:", min_width=_FIELD_LABEL_W)
         self._fmt_cb = QComboBox()
         self._fmt_cb.addItems(["png", "svg", "eps", "pdf"])
         self._fmt_cb.setCurrentText(self._fmt_value)
@@ -682,6 +690,7 @@ class BatchExportPanel(QWidget):
         """
         fc_lbl = QLabel("Fold change:")
         f = fc_lbl.font(); f.setBold(True); fc_lbl.setFont(f)
+        fc_lbl.setMinimumWidth(_FIELD_LABEL_W)
         row.addWidget(fc_lbl)
 
         row.addWidget(QLabel("Control"))

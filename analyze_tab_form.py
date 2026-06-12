@@ -152,9 +152,11 @@ class AnalyzeTabFormMixin:
 
         schema_str_row = self._row(sec, "Schema string")
         self._schema_str_edit = QLineEdit(DEFAULT_SCHEMA, schema_str_row)
-        self._schema_str_edit.setFixedWidth(170)
-        schema_str_row.layout().addWidget(self._schema_str_edit)
-        schema_str_row.layout().addStretch(1)
+        # Expand to fill the row — a fixed 170 px clipped the full schema string
+        # (e.g. "experiment:channel:well:fov:timepoint" → "nnel:well:fov:…").
+        self._schema_str_edit.setMinimumWidth(220)
+        self._schema_str_edit.setCursorPosition(0)  # show the start, not the tail
+        schema_str_row.layout().addWidget(self._schema_str_edit, 1)
         self._schema_str_edit.editingFinished.connect(self._sync_dropdowns_from_string)
 
         self._schema_err_lbl = QLabel("", sec)

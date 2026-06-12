@@ -333,6 +333,10 @@ class WellViewerApp(QWidget):
         from well_viewer.core.app_shell_view import build_ui
         build_ui(self)
         self._apply_theme()
+        # Gate the per-tab control bars to the no-data state on launch (they are
+        # re-enabled the moment a dataset loads). Lazily-built tabs pick this up
+        # on their first redraw via the same helper.
+        refresh_plot_empty_states(self)
 
         if data_path is not None:
             QTimer.singleShot(100, lambda: self._load_path(data_path))

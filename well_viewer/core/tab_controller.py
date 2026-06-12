@@ -178,8 +178,7 @@ def on_notebook_current_changed(app, _idx) -> None:
         from well_viewer.domain.fold_change_controls import flush_dirty_scopes
         flush_dirty_scopes(app)
     except Exception:
-        import traceback
-        traceback.print_exc()
+        _logger.exception("flush_dirty_scopes failed on tab change")
     # Record the visit in the tab-history stack so cmd-left / cmd-right can
     # walk through it. _tab_history_replaying is set by the back/forward
     # shortcuts to suppress appending while they replay an entry.

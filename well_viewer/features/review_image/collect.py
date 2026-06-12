@@ -260,7 +260,7 @@ def review_build_include_map(
     return include_by_nid
 
 
-def _binary_gate_columns(app):
+def _binary_gate_columns(app, channel=None):
     """Return ``(val_col, threshold)`` for the Segmentation binary mask.
 
     Keyed to the **displayed image channel** (``active_image_channel``) — the
@@ -269,8 +269,16 @@ def _binary_gate_columns(app):
     channel (``active_val_col`` / the active-channel threshold) can differ and
     would otherwise pull the wrong channel. Falls back to the plotting column
     when no image channel is set (e.g. the nuc+seg overlay).
+
+    ``channel`` overrides the channel whose value-column + per-channel
+    ThreshFracOn are used — the Image Table passes the *cell's* channel so each
+    cell honours its own Sample-Definitions threshold rather than whatever the
+    Segmentation tab last displayed.
     """
-    img_chan = str(app._app_state.channel.active_image_channel or "").strip()
+    if channel is not None:
+        img_chan = str(channel).strip().lower()
+    else:
+        img_chan = str(app._app_state.channel.active_image_channel or "").strip()
     if img_chan:
         return (f"{img_chan}_{app._app_state.channel.active_metric}",
                 app._get_thresh_frac_on(img_chan))
@@ -278,7 +286,7 @@ def _binary_gate_columns(app):
 
 
 def review_build_threshold_map(
-    app, mask_arr, well: str, fov: str, tp: str,
+    app, mask_arr, well: str, fov: str, tp: str, channel=None,
 ) -> Dict[int, bool]:
     """Build {nid: above_threshold} for cells in the displayed FOV/timepoint.
 
@@ -294,7 +302,7 @@ def review_build_threshold_map(
     fluor_gates = app._get_all_fluor_gates()
     # Gate against the channel being viewed on the Segmentation tab, not the
     # global plotting channel — see _binary_gate_columns.
-    val_col, threshold = _binary_gate_columns(app)
+    val_col, threshold = _binary_gate_columns(app, channel)
     ratios = app._app_state.channel.ratio_index
     above_by_nid: Dict[int, bool] = {
         int(nid): False for nid in _np.unique(center) if int(nid) > 0

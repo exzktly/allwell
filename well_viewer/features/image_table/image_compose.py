@@ -571,7 +571,16 @@ def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
         # (an all-black mask) for any non-integer timepoint token.
         norm_tp = app._norm_timepoint(tp) if hasattr(app, "_norm_timepoint") else tp
         norm_fov = review_norm_fov(fov)
-        above_by_nid = review_build_threshold_map(app, mask_arr, well, norm_fov, norm_tp) or {}
+        # Gate each cell by ITS OWN channel's ThreshFracOn (set per-channel in
+        # Sample Definitions), not whatever channel the Segmentation tab last
+        # showed. Only override for real fluor channels — nuc+seg / ratio cells
+        # fall back to the displayed-channel default.
+        chan_l = str(chan or "").strip().lower()
+        fluor = {str(c).strip().lower() for c in (app._app_state.channel.fluor_channels or [])}
+        gate_channel = chan_l if chan_l in fluor else None
+        above_by_nid = review_build_threshold_map(
+            app, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
+        ) or {}
     except Exception:  # noqa: BLE001 — fall back to an all-off mask on any error
         above_by_nid = {}
     m = _np.asarray(mask_arr)

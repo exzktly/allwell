@@ -175,7 +175,7 @@ def on_notebook_current_changed(app, _idx) -> None:
     # fold-change state mutations (and active-channel changes) now mark
     # non-visible scopes dirty rather than eagerly redrawing both.
     try:
-        from well_viewer.domain.fold_change_controls import flush_dirty_scopes
+        from well_viewer.domain.fold_change_scopes import flush_dirty_scopes
         flush_dirty_scopes(app)
     except Exception:
         _logger.exception("flush_dirty_scopes failed on tab change")

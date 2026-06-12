@@ -319,7 +319,7 @@ class LabelGrid(QWidget):
         return super().eventFilter(obj, event)
 
     def _build_qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
+        c, r, t = theme.Colors, theme.Radii, theme.Typography
         return f"""
         #LabelGridHost {{
             background-color: {c.panel};
@@ -328,7 +328,7 @@ class LabelGrid(QWidget):
         }}
         QLabel#LabelGridHeader {{
             color: {c.text_muted};
-            font-family: monospace;
+            font-family: {t.family_mono};
             font-size: 11px;
             font-weight: 600;
             background: transparent;

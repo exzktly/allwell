@@ -31,6 +31,7 @@ from well_viewer.features.batch_export._common import (
     _bar_render_items,
     apply_ax_style,
     _groups_with_loaded_wells,
+    unique_export_stem,
     _CLR_PLACEHOLDER,
     _CLR_DISABLED_WELL,
     _CLR_ERR_BAR,
@@ -224,6 +225,8 @@ class BarBatchExportPanel(BatchExportPanel):
             tp_lbl = tp_strs[0] if len(tp_strs) == 1 else f"[{','.join(tp_strs)}]"
             return f"'{grp.name}' @ t={tp_lbl}h  ({step}/{total})"
 
+        used_stems: set = set()
+
         def _run_job(job) -> Optional[str]:
             grp, tp_strs = job
             safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
@@ -234,9 +237,11 @@ class BarBatchExportPanel(BatchExportPanel):
 
             if len(tp_strs) == 1:
                 safe_tp = tp_strs[0].replace(".", "_").replace("-", "m")
-                base = out_dir / f"bar_{safe_grp}_t{safe_tp}"
+                stem = f"bar_{safe_grp}_t{safe_tp}"
             else:
-                base = out_dir / f"bar_{safe_grp}_t_multi"
+                stem = f"bar_{safe_grp}_t_multi"
+            # Uniquify so same-after-sanitise group names don't overwrite.
+            base = out_dir / unique_export_stem(stem, used_stems)
 
             try:
                 from well_viewer.features.barplot.controller import (

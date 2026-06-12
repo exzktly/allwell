@@ -70,6 +70,14 @@ def build_image_table_grid(
         rbl.setContentsMargins(6, 8, 6, 6)
         rbl.setSpacing(4)
 
+        # Make clear this tinted box is a row-wide shortcut, not another cell:
+        # its Well/Channel apply to every cell in the row.
+        hint_lbl = QLabel("Apply to whole row", row_box)
+        hint_lbl.setObjectName("Muted")
+        hint_lbl.setStyleSheet("font-size: 9px;")
+        hint_lbl.setWordWrap(True)
+        rbl.addWidget(hint_lbl)
+
         well_lbl = QLabel("Well:", row_box)
         well_lbl.setStyleSheet("font-size: 10px;")
         rbl.addWidget(well_lbl)
@@ -122,7 +130,7 @@ def build_selector_cell(
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(4)
         lbl = QLabel(label_text, box)
-        lbl.setFixedWidth(54)
+        lbl.setFixedWidth(72)  # wide enough for "Timepoint:" (was 54 → "Timepoi…")
         rl.addWidget(lbl)
         cb = QComboBox(box)
         cb.addItems(options)
@@ -153,7 +161,7 @@ def build_lut_row(
     """Rebuild the per-row levels + display **table** below the selector grid.
 
     One grid ROW per image-table row (keyed by row index): an aligned table with
-    columns ``Row N · CHAN | Color | Min | Max | Fit | Top-hat | Bound. | Binary``.
+    columns ``Row N · CHAN | Color | Min | Max | Fit | Top-hat | Boundaries | Binary``.
     The checkbox labels live in the column header so the checkboxes are text-less
     and centred (no overlap). All controls are passive — they stage state read by
     the render/export paths (``image_compose._parse_lut`` / ``_row_display_opts``
@@ -221,7 +229,7 @@ def build_lut_row(
         return ""
 
     # ── header row ───────────────────────────────────────────────────────
-    headers = ("", "Color", "Min", "Max", "", "Top-hat", "Bound.", "Binary")
+    headers = ("", "Color", "Min", "Max", "", "Top-hat", "Boundaries", "Binary")
     for c, text in enumerate(headers):
         if not text:
             continue
@@ -312,6 +320,11 @@ def build_lut_row(
         }
 
     app._image_table_row_lut_color_cbs = color_cbs
-    layout.setColumnStretch(0, 1)
+    # Keep the label + control columns hugging the left; let a trailing spacer
+    # column absorb the extra width. Previously column 0 (the "Row N · CHAN"
+    # label) was stretched, which shoved every control to the far right and left
+    # a large empty gap between each row label and its controls.
+    layout.setColumnStretch(0, 0)
+    layout.setColumnStretch(len(headers), 1)
     layout.setHorizontalSpacing(14)
     layout.setVerticalSpacing(6)

@@ -30,7 +30,7 @@ Cleanliness · Usability · Professionalism**. Findings are tagged
 | Plotting · Distribution | 4 | 4 | 4 | 3 | 4 | 4 | 4 | mpl toolbar appears (inconsistent w/ line/bar) |
 | Plotting · Heat Map | 3 | 3 | 3 | 4 | 4 | 3 | 4 | ✅ dark bg fixed; still cramped when no layout configured |
 | Statistics | 3 | 4 | 3 | 2 | 4 | 4 | 4 | ✅ "Run test" + column alignment fixed; casing (`gfp`) remains |
-| Image Table | 1 | 2 | 2 | 2 | 2 | 2 | 2 | **Most cluttered**; dup Row boxes; label/control gap; truncation |
+| Image Table | 3 | 4 | 3 | 3 | 3 | 3 | 3 | ✅ row table aligned, labels fixed, row-boxes captioned; still dense by nature |
 | Segmentation · Review Image | 3 | 3 | 3 | 3 | 3 | 3 | 3 | Dense single-row toolbar; many buttons |
 | Segmentation · Playground | – | – | – | – | – | – | – | Did not render (optional deps) |
 | smFISH | 3 | 3 | 3 | 3 | 4 | 3 | 4 | ✅ duplicate message fixed; controls still active w/ no data |
@@ -87,15 +87,18 @@ Good, readable. **[L]** matplotlib nav toolbar present (inconsistent with line/b
   right-aligned across all rows).
 - **[M]** `gfp` lowercase. **[L]** Large empty results panel before a run — add a hint.
 
-### Image Table — `30-image-table.png`
-The single most cluttered view.
-- **[H]** **Duplicate selectors**: "Row 1 / Row 2" boxes on the left (Well + Channel) sit
-  beside a (1,1)…(2,3) grid whose cells *also* carry Well/Channel/Timepoint/FOV. The
-  relationship is unclear and the screen is dense with ~24 input fields.
-- **[H]** **"Per-row levels & display"** row labels (Row 1 / Row 2) are on the far left while
-  their controls (Color/Min/Max/Top-hat/Bound./Binary) are on the far right with a vast
-  empty gap between — hard to associate a row with its controls.
-- **[M]** Truncated labels: grid cells show **"Timepoi"**; column abbreviated **"Bound."**.
+### Image Table — `30-image-table.png` *(fixed in this pass)*
+Was the single most cluttered view. Fixes applied:
+- **[H→fixed]** The tinted "Row 1 / Row 2" shortcut boxes (Well + Channel that apply to a
+  whole row) now carry an **"Apply to whole row"** caption, so they read as row-wide
+  controls rather than duplicate cells beside the (1,1)…(2,3) grid.
+- **[H→fixed]** The **"Per-row levels & display"** table no longer stretches the label
+  column — Color/Min/Max/Fit/Top-hat/Boundaries/Binary now hug the left next to each
+  "Row N" label (the large empty gap is gone).
+- **[M→fixed]** Cell label no longer truncates ("Timepoint:" shows in full); the
+  **"Bound."** column header is now **"Boundaries"**.
+- *Remaining:* the per-cell grid is inherently dense (4 dropdowns × R×C) — acceptable for
+  the feature; no further change made.
 
 ### Segmentation · Review Image — `40-segmentation-review-image.png`
 - **[M]** Toolbar packs ~10 buttons in one row (Delete Cell · Crop Region · Clear crop · Reset
@@ -188,6 +191,8 @@ visual scope, flagged for the maintainer.
 | H | **Heat Map dark background** — figure/axes background and empty-cell fill now track the active plot theme (`_bg` token) instead of matplotlib-default white. | `well_viewer/features/heatmap/controller.py` | ✅ done |
 | H | **Statistics "Run test" alignment** — moved to its own row under the form; added a trailing stretch column so labels/fields hug the left instead of splitting width 3 ways. | `well_viewer/features/stats/view.py` | ✅ done |
 | H | **smFISH duplicate empty-state message** — full guidance now shown once (on the canvas); the status line is a concise one-liner. | `well_viewer/features/smfish/tab_view.py` | ✅ done |
+| M | **Image Table clutter** — fixed the truncated "Timepoint:" cell label (width 54→72); the per-row levels table no longer stretches the label column (controls hug the left instead of floating far-right with a big gap); "Bound." → "Boundaries"; the tinted row-shortcut boxes now carry an "Apply to whole row" caption so they read as row-wide controls, not stray cells. | `well_viewer/features/image_table/grid_view.py` | ✅ done |
+| — | **`flush_dirty_scopes` regression** (functional) — `tab_controller` imported it from `fold_change_controls`, which never re-exported it, so every tab switch threw `ImportError` (Qt-swallowed). Added the missing re-export and replaced the debug `traceback.print_exc()` with a logged swallow. | `well_viewer/domain/fold_change_controls.py`, `well_viewer/core/tab_controller.py` | ✅ done |
 
 Verified by re-rendering: see `10-plotting-heat-map.png`, `20-statistics.png`, `50-smfish.png`
 (the screenshots in this folder are the post-fix state). `ruff` clean; the runnable fast
@@ -203,13 +208,14 @@ so each `FigureCanvas` is now drawn synchronously and composited onto the window
 | # | Sev | Item | Why deferred |
 |---|-----|------|--------------|
 | 1 | H | **Channel-token casing** (`gfp`→`GFP` in Scatter/Statistics) | Not display-only: `col_for_scatter_entry` builds CSV column names straight from the combo text (`f"{entry}_{metric}"`), and view-state persistence stores the raw text. A safe fix needs a display↔token mapping across ~8 read/persistence sites — a focused refactor, not a one-liner. |
-| 2 | M | **Image Table clutter** — duplicate Row 1/Row 2 boxes vs the cell grid; per-row display label↔control gap; truncated "Timepoi"/"Bound." | Layout redesign of a dense, much-tested view; warrants its own change + test pass. |
-| 3 | M | **Disable control bars in empty / no-data states** (empty plotting bar, smFISH, Segmentation LUT) | Touches `centre_view.py` + several tab views; needs care to re-enable correctly on load. |
+| 2 | M | **Disable control bars in empty / no-data states** (empty plotting bar, smFISH, Segmentation LUT) | Touches `centre_view.py` + several tab views; needs care to re-enable correctly on load. |
 | 4 | M | **matplotlib nav toolbar consistency** (present on some plot tabs, not others) | Could be deliberate (pan/zoom on interactive plots); removing it changes behaviour — confirm intent first. |
 | 5 | L | Analyze schema-string field width; Groups action-bar placement; CDF auto-range | Cosmetic polish. |
 
-## Discovered functional regression (flagged, not fixed)
+## Discovered functional regression (now fixed)
 
-The `flush_dirty_scopes` `ImportError` on every tab switch (see above) is a real bug but
-outside the visual scope — left for the maintainer to fix or remove the dead import at
-`well_viewer/core/tab_controller.py:178`.
+The `flush_dirty_scopes` `ImportError` thrown on every tab switch — `tab_controller`
+imported the symbol from `fold_change_controls`, which re-exported the other scope helpers
+(`get_scope`, `registered_scopes`) but had omitted `flush_dirty_scopes`. Added the missing
+re-export and swapped the debug `traceback.print_exc()` for a logged swallow. Tab switches
+no longer raise; the deferred fold-change scope redraw now actually flushes on tab change.

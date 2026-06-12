@@ -562,7 +562,15 @@ def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
     above_by_nid: Dict[int, bool] = {}
     try:
         from well_viewer.features.review_image.controller import review_build_threshold_map
-        above_by_nid = review_build_threshold_map(app, mask_arr, well, fov, tp) or {}
+        from well_viewer.features.review_image.collect import review_norm_fov
+        # The CSV row keys are normalised (e.g. timepoint "0h" -> "0"); the
+        # Image Table cell carries the raw image-filename token, so normalise
+        # tp/fov the same way the Review Image tab does before the lookup —
+        # otherwise no rows match and every cell reads as below-threshold
+        # (an all-black mask) for any non-integer timepoint token.
+        norm_tp = app._norm_timepoint(tp) if hasattr(app, "_norm_timepoint") else tp
+        norm_fov = review_norm_fov(fov)
+        above_by_nid = review_build_threshold_map(app, mask_arr, well, norm_fov, norm_tp) or {}
     except Exception:  # noqa: BLE001 — fall back to an all-off mask on any error
         above_by_nid = {}
     m = _np.asarray(mask_arr)

@@ -18,6 +18,47 @@ Cleanliness · Usability · Professionalism**. Findings are tagged
 
 ---
 
+## Re-analysis pass — 2026-06-12 (zoomed, post-fix)
+
+The original audit graded every tab but assessed several of the denser ones from the
+down-scaled full-window thumbnail rather than a zoomed centre-pane crop, so a few findings
+were shallow (Batch Export especially). This pass re-rendered every view **off the updated
+`main`** — now in the bundled **Inter** UI font — and re-examined each centre pane at a
+1.5× crop. Screenshots in [`screenshots/`](./screenshots) are this state.
+
+### Fixed since the original audit (shipped across follow-up PRs)
+- **Font** — app now ships Inter (UI) + JetBrains Mono (numeric); plots match the chrome
+  (no more "Helvetica not found"). *(#410; build-bundle + `monospace`-warning fix in #413.)*
+- **Heat Map** dark background; **Statistics** "Run test" alignment; **smFISH** duplicate
+  empty-state message; **Image Table** declutter (aligned per-row table, fixed truncation,
+  "Apply to whole row" caption); **empty-state control bars** greyed until data loads;
+  **Analyze** schema field; **Groups** empty-state hint; **Cell Gating** CDF auto-range.
+  *(#406.)*
+- **`flush_dirty_scopes`** tab-switch crash and **scatter `math` NameError** on load. *(#407.)*
+- **Image Table** `≥ Thr` binary honours per-channel thresholds; per-row **Raw/Corrected**
+  source selector. *(#409 / #411.)*
+- **Batch Export** chart-type/Error-Band header reorder + relabel *(#412)*; export-logic
+  audit confirmed the pipeline correct and fixed **filename collisions silently
+  overwriting outputs** *(#414)*.
+
+### Remaining concrete issues (this zoomed pass)
+| Sev | Tab | Issue |
+|-----|-----|-------|
+| H | Scatter / Statistics / Batch Export | **Channel casing** still `gfp` vs `GFP` — deferred refactor (display↔token mapping across read/persistence sites). |
+| M | Batch Export → OUTPUT SETTINGS | Field labels (Folder/Format/Style Preset/Channel/Fold-change) are different widths, so the value controls don't share a column — needs a label-width/grid pass in the shared `base_panel`. |
+| L | Analyze | When idle, the lower half of the right (Pipeline Output) pane is empty — fills during a run; acceptable. |
+| L | Ratios | Empty metrics table shows headers but no empty-state hint (QTableWidget overlay — low value). |
+| L | Help drawer | Underlay isn't dimmed, so the drawer edge blends into the content. |
+| L | Review CSV / Ratios | Column headers right-/spread-aligned for text columns. |
+
+### Known follow-up (parked at user's request)
+- **macOS: bundled font not applied from source.** Reasoning from the report (no
+  `app_fonts` traceback; only the `monospace` warning) points to Qt not honouring the
+  **variable** TTFs on macOS. Planned fix: ship **static weight instances** (generated from
+  the variable files via `fontTools` instancer) so registration is reliable cross-platform.
+
+---
+
 ## Score summary
 
 | View | Clut | Algn | Act | Cons | Clean | Use | Prof | Worst issues |

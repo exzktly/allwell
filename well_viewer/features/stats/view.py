@@ -141,6 +141,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     layout.addWidget(app._stats_hdr)
 
     app._stats_ctrl = QWidget(parent)
+    app._stats_ctrl.setObjectName("TabCtrl")  # data-gated until a dataset loads
     cl = QGridLayout(app._stats_ctrl)
     cl.setContentsMargins(12, 6, 12, 6)
 
@@ -216,6 +217,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     # five grid rows in a third column and rendered vertically centered (it
     # appeared to float beside the Channel row, disconnected from the form).
     run_row = QWidget(parent)
+    run_row.setObjectName("TabCtrl")  # data-gated with the stats form above
     rrl = QHBoxLayout(run_row)
     rrl.setContentsMargins(12, 0, 12, 6)
     run_btn = btn_primary(run_row, "Run test", app._stats_run)

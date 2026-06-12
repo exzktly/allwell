@@ -22,7 +22,7 @@ Cleanliness · Usability · Professionalism**. Findings are tagged
 
 | View | Clut | Algn | Act | Cons | Clean | Use | Prof | Worst issues |
 |------|:--:|:--:|:--:|:--:|:--:|:--:|:--:|------|
-| Empty state | 2 | 4 | 3 | 3 | 3 | 3 | 3 | Full plot toolbar active with no data |
+| Empty state | 4 | 4 | 4 | 4 | 4 | 4 | 4 | ✅ control bars greyed until a dataset loads |
 | Plotting · Bar Plots | 3 | 4 | 3 | 3 | 4 | 4 | 4 | Tall 4-row toolbar; unlabeled icons; stray bar labels |
 | Plotting · Line Graphs | 4 | 4 | 3 | 3 | 4 | 4 | 4 | Unlabeled icons; legend repeated per subplot |
 | Plotting · Scatter (per-cell) | 4 | 4 | 3 | 2 | 4 | 4 | 4 | `gfp` lowercase vs `GFP`; mpl toolbar appears |
@@ -33,30 +33,30 @@ Cleanliness · Usability · Professionalism**. Findings are tagged
 | Image Table | 3 | 4 | 3 | 3 | 3 | 3 | 3 | ✅ row table aligned, labels fixed, row-boxes captioned; still dense by nature |
 | Segmentation · Review Image | 3 | 3 | 3 | 3 | 3 | 3 | 3 | Dense single-row toolbar; many buttons |
 | Segmentation · Playground | – | – | – | – | – | – | – | Did not render (optional deps) |
-| smFISH | 3 | 3 | 3 | 3 | 4 | 3 | 4 | ✅ duplicate message fixed; controls still active w/ no data |
+| smFISH | 4 | 3 | 3 | 3 | 4 | 4 | 4 | ✅ duplicate message fixed; controls greyed until data loads |
 | Review CSV | 4 | 4 | 4 | 4 | 5 | 4 | 5 | Header text right-aligned for text cols |
-| Sample Def · Cell Gating | 4 | 4 | 4 | 4 | 4 | 4 | 4 | CDF auto-range crams data to edge |
-| Sample Def · Groups | 3 | 3 | 3 | 3 | 3 | 3 | 4 | Action bar marooned at bottom; big empty middle |
+| Sample Def · Cell Gating | 4 | 4 | 4 | 4 | 5 | 4 | 5 | ✅ CDF axes now focus on the data range |
+| Sample Def · Groups | 4 | 4 | 4 | 3 | 4 | 4 | 4 | ✅ empty-state hint fills the void; footer reads in context |
 | Sample Def · Well Labels | 4 | 5 | 4 | 3 | 5 | 4 | 5 | `a01` lowercase vs plate `A01` |
 | Sample Def · Ratios | 4 | 3 | 4 | 4 | 4 | 4 | 4 | Header alignment; split action bar |
 | Sample Def · Pipeline Info | 5 | 5 | 5 | 5 | 5 | 5 | 5 | — (reference for the rest) |
 | Sample Def · Notes | 5 | 5 | 4 | 4 | 5 | 5 | 5 | Doc toolbar icons unlabeled |
 | Batch Export | 3 | 3 | 3 | 3 | 3 | 3 | 4 | Dense two-column; large top gap |
-| Analyze | 3 | 4 | 4 | 4 | 3 | 4 | 4 | Schema string truncated; large empty right pane |
+| Analyze | 4 | 4 | 4 | 4 | 3 | 4 | 4 | ✅ schema field widened/shows start; right pane still sparse when idle |
 | Help drawer | 4 | 4 | 4 | 4 | 4 | 4 | 4 | Underlay not dimmed |
 
 ---
 
 ## Per-view findings
 
-### Empty state — `00-empty-state.png`
-The "Load a directory" placeholder is clear and well-centered, **but the entire Plotting
-control bar** (Channel `—`, Property, Threshold 50.0, Fold change, Timepoints, Group by
-Well, Beeswarm, Violin, Smooth) **is fully rendered and interactive with no data behind
-it**. It implies actions that do nothing.
-- **[H]** Hide or disable the per-tab control bars until a dataset is loaded; show only the
-  empty-state prompt.
-- **[M]** Header icon buttons (refresh / image / home / info) are icon-only and ambiguous.
+### Empty state — `00-empty-state.png` *(fixed in this pass)*
+The "Load a directory" placeholder is clear and well-centered.
+- **[H→fixed]** The Plotting control bar (Channel / Property / Threshold / Fold change /
+  Timepoints / Group by Well / Beeswarm / Violin / Smooth) is now **greyed out until a
+  dataset loads**, so the empty state no longer presents a wall of live-looking controls
+  that do nothing. The sub-tab selector stays active.
+- **[L]** Header icon buttons (refresh / image / home / info) are icon-only — but they all
+  carry tooltips (hover-only; see cross-cutting note 4).
 
 ### Plotting · Bar Plots / Line Graphs — `10-plotting-bar-plots.png`, `10-plotting-line-graphs.png`
 Plots themselves are clean and professional. Issues:
@@ -73,7 +73,8 @@ Plots themselves are clean and professional. Issues:
 - **[L]** A matplotlib navigation toolbar appears at the bottom here but not on line/bar plots.
 
 ### Plotting · Distribution — `10-plotting-distribution.png`
-Good, readable. **[L]** matplotlib nav toolbar present (inconsistent with line/bar tabs).
+Good, readable. *(The matplotlib nav toolbar here is consistent with the other plots — see
+the closed re-investigation note in Deferred.)*
 
 ### Plotting · Heat Map — `10-plotting-heat-map.png`
 - **[H]** The heat-map figure is rendered on a **bright white background inside the dark UI** —
@@ -116,12 +117,12 @@ Clean and professional. **[L]** Column headers are right-aligned even for text c
 (well, channel), which looks slightly off against left-read values.
 
 ### Sample Definitions
-- **Cell Gating** `70-sample-def-cell-gating.png`: well-organized; **[M]** CDF plots auto-range
-  so the threshold marker sits at x=0 while data crams against the right edge (partly fixture
-  data, but the auto-range should focus on the data).
-- **Groups** `70-sample-def-groups.png`: **[M]** the "From selection / Import…" action bar is
-  marooned at the very bottom of a large empty panel, far from the GROUPS header and its
-  +Add/Clear-All controls.
+- **Cell Gating** `70-sample-def-cell-gating.png`: well-organized. **[M→fixed]** each CDF
+  x-axis is now clamped to its data range, so the curve spreads across the plot instead of
+  cramming against one edge while a gate line at 0 stretched the axis.
+- **Groups** `70-sample-def-groups.png`: **[M→fixed]** the empty list now shows a centered
+  "No groups yet — use +Add above or From selection below" hint, filling the void so the
+  footer reads in context instead of marooned at the bottom.
 - **Well Labels** `70-sample-def-well-labels.png`: excellent grid. **[L]** cells show `a01`
   lowercase vs uppercase `A01` elsewhere.
 - **Ratios** `70-sample-def-ratios.png`: clean; **[L]** split action bar (Add/Remove bottom-left,
@@ -136,9 +137,10 @@ Two-card layout (Export Groups | Output Settings) is reasonable. **[M]** dense; 
 empty band between the header and content.
 
 ### Analyze — `90-analyze.png`
-Good structure (schema form | run dashboard with plate + legend). **[M]** the **Schema
-string** field is truncated ("nnel:well:fov:timepoint"); **[M]** the right pane has a large
-empty lower half once the dashboard is idle.
+Good structure (schema form | run dashboard with plate + legend). **[M→fixed]** the **Schema
+string** field no longer clips — it expands to fill the row and shows from the start.
+**[M]** the right pane still has a large empty lower half once the dashboard is idle
+(left as-is; it fills during a run).
 
 ### Help drawer — `95-dialog-help.png`
 Readable right-side drawer with Workflow / Shortcuts / Reference sections. **[L]** the
@@ -151,21 +153,22 @@ underlying app is not dimmed, so the drawer edge blends into the content.
 1. **[H] Channel-name casing is inconsistent** — `GFP` (global combo, plot titles, Cell Gating)
    vs `gfp` (Scatter X/Y fields, Statistics, Pipeline Info). Pick one display casing
    (uppercase for fluor tokens) and apply everywhere combos are populated.
-2. **[H] Control bars stay active in empty / no-data states** (Empty plotting bar, smFISH,
-   Segmentation LUT). Disable or hide controls until their data exists.
-3. **[H] Plot background theme is inconsistent** — Heat Map renders white while all other plots
-   use the dark plot theme.
+2. **[H→fixed] Control bars stayed active in empty / no-data states** (plotting bar, smFISH,
+   Segmentation LUT) — now greyed out until a dataset loads (central gating on the shared
+   `TabCtrl` marker), re-enabled on load.
+3. **[H→fixed] Plot background theme was inconsistent** — Heat Map rendered white while all
+   other plots use the dark plot theme; now themed.
 4. **[L] Icon-only buttons** (window header, plot cards, Sample-Definitions doc toolbar).
    *Correction after code review:* these **already have `setToolTip` text** — they simply
    don't surface in static screenshots (hover-only). No change needed; the discoverability
    concern is lower than the screenshots suggested.
-5. **[M] matplotlib nav toolbar appears unevenly** (Distribution / Scatter / Cell Gating yes;
-   Line / Bar no). Choose one policy — the `PlotCard` already provides export/copy, so the
-   redundant mpl toolbar can be hidden everywhere for a cleaner, consistent look.
-6. **[M] Duplicate / redundant messaging** — smFISH empty text twice; status "Ready." in both
-   the status bar and the status-dot label.
-7. **[M] Marooned action bars & label↔control gaps** — Groups (bottom action bar) and Image
-   Table (per-row display) separate related elements across large empty space.
+5. **[resolved — no change] matplotlib nav toolbar** — looked uneven but is actually
+   consistent (every PlotCard embeds one; it just scrolls off-screen on the tall stacked
+   plots). See the closed re-investigation note under Deferred.
+6. **[M] Duplicate / redundant messaging** — smFISH empty text twice *(fixed)*; status
+   "Ready." in both the status bar and the status-dot label *(still present)*.
+7. **[fixed] Marooned action bars & label↔control gaps** — Groups (empty-state hint added)
+   and Image Table (per-row controls now hug the left) resolved.
 
 ## Discovered functional bug (not visual)
 
@@ -193,8 +196,13 @@ visual scope, flagged for the maintainer.
 | H | **smFISH duplicate empty-state message** — full guidance now shown once (on the canvas); the status line is a concise one-liner. | `well_viewer/features/smfish/tab_view.py` | ✅ done |
 | M | **Image Table clutter** — fixed the truncated "Timepoint:" cell label (width 54→72); the per-row levels table no longer stretches the label column (controls hug the left instead of floating far-right with a big gap); "Bound." → "Boundaries"; the tinted row-shortcut boxes now carry an "Apply to whole row" caption so they read as row-wide controls, not stray cells. | `well_viewer/features/image_table/grid_view.py` | ✅ done |
 | — | **`flush_dirty_scopes` regression** (functional) — `tab_controller` imported it from `fold_change_controls`, which never re-exported it, so every tab switch threw `ImportError` (Qt-swallowed). Added the missing re-export and replaced the debug `traceback.print_exc()` with a logged swallow. | `well_viewer/domain/fold_change_controls.py`, `well_viewer/core/tab_controller.py` | ✅ done |
+| M | **Control bars greyed out in the empty / no-data state** — the per-tab control rows (which all share the `TabCtrl` object name) plus the plotting ctxbar's channel row are now disabled until a dataset loads, and re-enabled the moment one does. Central one-point gating in `refresh_plot_empty_states`; Segmentation + Statistics control rows tagged `TabCtrl` so they're included. | `well_viewer/core/ui_helpers.py`, `well_viewer/runtime_app.py`, `well_viewer/features/preview/panel_view.py`, `well_viewer/features/stats/view.py` | ✅ done |
+| L | **Analyze schema-string field** — was a fixed 170 px that clipped the schema; now expands to fill the row and shows from the start. | `analyze_tab_form.py` | ✅ done |
+| L | **Groups empty state** — the empty list panel now shows a centered "No groups yet" hint instead of a void above the marooned "From selection / Import" footer. | `widgets/saved_selections_list.py` | ✅ done |
+| L | **Cell Gating CDF auto-range** — each CDF x-axis is clamped to its data range (+ pad) so a gate line at 0 no longer stretches the axis and crams the curve against one edge. | `well_viewer/features/grouping/cell_gating_tab_view.py` | ✅ done |
 
-Verified by re-rendering: see `10-plotting-heat-map.png`, `20-statistics.png`, `50-smfish.png`
+Verified by re-rendering: see `00-empty-state.png`, `10-plotting-heat-map.png`, `20-statistics.png`,
+`50-smfish.png`, `70-sample-def-cell-gating.png`, `70-sample-def-groups.png`, `90-analyze.png`
 (the screenshots in this folder are the post-fix state). `ruff` clean; the runnable fast
 test lane (700 tests) passes — the 5 + 7 skipped/errored modules are pre-existing
 `tifffile`/heavy-ML import gaps in the audit environment, unrelated to these changes.
@@ -207,10 +215,16 @@ so each `FigureCanvas` is now drawn synchronously and composited onto the window
 
 | # | Sev | Item | Why deferred |
 |---|-----|------|--------------|
-| 1 | H | **Channel-token casing** (`gfp`→`GFP` in Scatter/Statistics) | Not display-only: `col_for_scatter_entry` builds CSV column names straight from the combo text (`f"{entry}_{metric}"`), and view-state persistence stores the raw text. A safe fix needs a display↔token mapping across ~8 read/persistence sites — a focused refactor, not a one-liner. |
-| 2 | M | **Disable control bars in empty / no-data states** (empty plotting bar, smFISH, Segmentation LUT) | Touches `centre_view.py` + several tab views; needs care to re-enable correctly on load. |
-| 4 | M | **matplotlib nav toolbar consistency** (present on some plot tabs, not others) | Could be deliberate (pan/zoom on interactive plots); removing it changes behaviour — confirm intent first. |
-| 5 | L | Analyze schema-string field width; Groups action-bar placement; CDF auto-range | Cosmetic polish. |
+| 1 | H | **Channel-token casing** (`gfp`→`GFP` in Scatter/Statistics) | Not display-only: `col_for_scatter_entry` builds CSV column names straight from the combo text (`f"{entry}_{metric}"`), and view-state persistence stores the raw text. A safe fix needs a display↔token mapping across ~8 read/persistence sites — a focused refactor, not a one-liner. **Per the user's instruction this is the only item intentionally left undone.** |
+
+### Re-investigated and closed without a code change
+
+- **matplotlib nav toolbar consistency** — on closer inspection it is already consistent:
+  every PlotCard plot (line / bar / scatter / distribution / heatmap) embeds the same
+  `MplToolbar`, and the raw-canvas tabs (cell-gating, smFISH) add one explicitly. It only
+  *looked* absent on Line/Bar because those are tall 3-subplot plots where the toolbar
+  scrolls below the fold. The toolbar provides pan/zoom that image-based tabs rely on, so
+  removing it would lose function — no change made.
 
 ## Discovered functional regression (now fixed)
 

@@ -40,6 +40,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     layout.addWidget(inner, 1)
 
     ctrl = QWidget(inner)
+    ctrl.setObjectName("TabCtrl")  # data-gated: greyed out until a dataset loads
     cl = QHBoxLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
     self._review_image_well_lbl = QLabel("No well selected", ctrl)
@@ -161,6 +162,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     il.addWidget(self._review_image_status)
 
     lut_row = QWidget(inner)
+    lut_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
     lr = QHBoxLayout(lut_row)
     lr.setContentsMargins(8, 2, 8, 2)
     self._review_lut_chan_lbl = QLabel(
@@ -186,6 +188,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # ── Color customization + binary-mask toggle row ───────────────────
     from PySide6.QtWidgets import QPushButton as _QPushButton
     color_row = QWidget(inner)
+    color_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
     cr = QHBoxLayout(color_row)
     cr.setContentsMargins(8, 2, 8, 2)
     self._review_image_color_swatches = {}

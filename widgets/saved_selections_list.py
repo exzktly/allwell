@@ -902,7 +902,20 @@ class SavedSelectionsList(QWidget):
             if it.widget():
                 it.widget().deleteLater()
         self._rows = {}
-        for s in self._display_order():
+        order = self._display_order()
+        if not order:
+            # Fill the empty panel with a centered hint instead of leaving a
+            # large void above the marooned "From selection" / "Import" footer.
+            self._vbox.insertStretch(0)
+            hint = QLabel(
+                "No groups yet.\nUse “+ Add” above or “From selection” below "
+                "to create one."
+            )
+            hint.setObjectName("Muted")
+            hint.setAlignment(Qt.AlignCenter)
+            hint.setWordWrap(True)
+            self._vbox.insertWidget(self._vbox.count() - 1, hint)
+        for s in order:
             row = _SelectionRow(s, self._body)
             row.activated.connect(self._on_activated)
             row.visibilityToggled.connect(self._on_visibility)

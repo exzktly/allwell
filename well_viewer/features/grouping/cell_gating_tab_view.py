@@ -814,6 +814,18 @@ def _cell_gating_source_wells(app) -> list[str]:
     return sorted(selected, key=app._parse_rc)
 
 
+def _focus_cdf_xaxis(ax, vals) -> None:
+    """Clamp the x-axis to the data range (+ small pad) so a gate line at 0 —
+    or far outside the data — doesn't stretch the axis and cram the CDF against
+    one edge. Called after the gate axvline so it has the final say."""
+    if len(vals) == 0:
+        return
+    lo = float(np.min(vals))
+    hi = float(np.max(vals))
+    pad = (hi - lo) * 0.04 if hi > lo else (abs(hi) * 0.05 or 1.0)
+    ax.set_xlim(lo - pad, hi + pad)
+
+
 def _cell_gating_plot_cdf(app) -> None:
     ratio_data = getattr(app, "_cell_gating_ratio_data", {}) or {}
     if (not app._cell_gating_cell_areas
@@ -864,6 +876,7 @@ def _cell_gating_plot_cdf(app) -> None:
                                 linestyle="--", linewidth=2, alpha=0.7)
         except Exception:
             swallowed()  # was: pass (silent except)
+        _focus_cdf_xaxis(axes[0], areas)
 
     colors = [accent, "#FF9500", "#FF3B30", "#34C759"]
     next_idx = 1
@@ -891,6 +904,7 @@ def _cell_gating_plot_cdf(app) -> None:
                        linestyle="--", linewidth=2, alpha=0.7)
         except (ValueError, KeyError):
             swallowed("cell gating CDF: no fluor-gate line (unparsable/missing)")
+        _focus_cdf_xaxis(ax, vals)
         next_idx += 1
 
     for ratio_label, values in sorted(ratio_data.items()):
@@ -908,6 +922,7 @@ def _cell_gating_plot_cdf(app) -> None:
                      fontsize=10, fontweight="bold")
         ax.grid(True, alpha=0.2, color=txt_mut)
         ax.tick_params(colors=txt_mut, labelsize=8)
+        _focus_cdf_xaxis(ax, vals)
         next_idx += 1
 
     app._cell_gating_ax = axes[0]

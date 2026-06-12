@@ -158,6 +158,14 @@ def wrap_with_empty_state(
     return stack
 
 
+#: Object names of per-tab control-bar containers that act on the loaded
+#: dataset. They are greyed out until a dataset is present (see
+#: ``refresh_plot_empty_states``) so the empty state isn't a wall of live-looking
+#: controls that do nothing. ``TabCtrl`` is the shared marker every tab's control
+#: row already uses; ``PlottingActionRow`` is the plotting ctxbar's channel row.
+_DATA_GATED_OBJECT_NAMES = ("TabCtrl", "PlottingActionRow")
+
+
 def refresh_plot_empty_states(app: Any) -> None:
     """Flip every registered plot-empty-state stack based on whether a
     dataset is currently loaded. Safe to call before any stacks have been
@@ -171,6 +179,16 @@ def refresh_plot_empty_states(app: Any) -> None:
                 stack.setCurrentIndex(target)
         except Exception:
             swallowed()  # was: pass (silent except)
+    # Grey out the per-tab control bars until a dataset is loaded. Disabling the
+    # container cascades to its children; re-enabling restores each child's own
+    # enabled state (so tab-local logic like smFISH's combo gating still wins).
+    if isinstance(app, QWidget):
+        for name in _DATA_GATED_OBJECT_NAMES:
+            for bar in app.findChildren(QWidget, name):
+                try:
+                    bar.setEnabled(has_data)
+                except Exception:
+                    swallowed()
 
 
 def build_section_header(

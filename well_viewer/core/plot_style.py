@@ -15,6 +15,31 @@ from __future__ import annotations
 from ui.theme import PLOT_BG, PLOT_GRD, PLOT_SPN, PLOT_TXT, TXT_PRI
 from well_viewer.core.safe import swallowed
 
+_PLOT_FONT_REGISTERED = False  # matplotlib font-manager registration runs once
+
+
+def _plot_font_family() -> str:
+    """Font family for matplotlib text — the **shared** UI font token
+    (``theme.Typography.family``, i.e. the bundled Inter), so plots always match
+    the Qt chrome from a single source of truth. The bundled ``.ttf`` is
+    registered with matplotlib's font manager on first use (keeps matplotlib out
+    of the startup path). Falls back to the legacy ``"Helvetica"`` request
+    (→ matplotlib's own default) when no token/font is available.
+    """
+    global _PLOT_FONT_REGISTERED
+    if not _PLOT_FONT_REGISTERED:
+        _PLOT_FONT_REGISTERED = True
+        try:
+            from well_viewer.core.app_fonts import register_mpl_ui_font
+            register_mpl_ui_font()  # make matplotlib aware of the bundled .ttf
+        except Exception:
+            swallowed()
+    try:
+        import theme as _theme
+        return _theme.Typography.family or "Helvetica"
+    except Exception:
+        return "Helvetica"
+
 
 def tokens_for(ax) -> tuple:
     """Return ``(bg, title_fg, muted_fg, grid, spine)`` for *ax*'s figure.
@@ -157,14 +182,15 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         ax.title.set_fontsize(int(prefs.get("title_size", 14)))
         ax.title.set_color(_title_fg)
 
+        _fam = _plot_font_family()
         for tick in [*ax.get_xticklabels(), *ax.get_yticklabels()]:
             tick.set_color(_muted_fg)
-            tick.set_fontfamily("Helvetica")
+            tick.set_fontfamily(_fam)
             tick.set_fontsize(int(prefs.get("tick_label_size", 10)))
 
-        ax.xaxis.label.set_fontfamily("Helvetica")
-        ax.yaxis.label.set_fontfamily("Helvetica")
-        ax.title.set_fontfamily("Helvetica")
+        ax.xaxis.label.set_fontfamily(_fam)
+        ax.yaxis.label.set_fontfamily(_fam)
+        ax.title.set_fontfamily(_fam)
 
         for tick in ax.get_xticklabels():
             tick.set_rotation(int(prefs.get("x_tick_angle", 0)))
@@ -352,7 +378,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             for txt in leg.get_texts():
                 txt.set_fontsize(float(prefs.get("legend_font_size", 9)))
                 txt.set_color(_title_fg)
-                txt.set_fontfamily("Helvetica")
+                txt.set_fontfamily(_plot_font_family())
 
         fixed_pos = getattr(ax, "_fixed_axes_position", None)
         if fixed_pos is not None:

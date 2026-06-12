@@ -983,23 +983,31 @@ def main() -> None:
     # ("qt.qpa.fonts: Populating font family aliases took NN ms. Replace
     # uses of missing font family ...").
     #
-    # ``Typography.family`` is the proportional UI face — use the
-    # platform's default-app family. ``Typography.family_mono`` is the
-    # mono face — use the platform's fixed-pitch family. The CSS-style
-    # generics ``sans-serif`` / ``monospace`` are NOT in Qt's font
-    # registry, so leaving them there triggers the alias walk on every
-    # widget that uses QSS.
+    # ``Typography.family`` is the proportional UI face, ``family_mono`` the
+    # fixed-pitch face. Prefer the bundled Inter / JetBrains Mono (consistent
+    # across platforms) and fall back to the OS default-app / fixed-pitch
+    # families when the bundled files are unavailable. The CSS-style generics
+    # ``sans-serif`` / ``monospace`` are NOT in Qt's font registry, so leaving
+    # them there triggers the alias walk on every widget that uses QSS.
+    from well_viewer.core.app_fonts import register_qt_fonts as _register_qt_fonts
+    _ui_family, _mono_family = _register_qt_fonts()
     try:
-        theme_v2.Typography.family = app.font().family()
+        theme_v2.Typography.family = _ui_family or app.font().family()
     except Exception:
-        theme_v2.Typography.family = ""
+        theme_v2.Typography.family = _ui_family or ""
+    # Widgets that read the app default font directly (not just via QSS) should
+    # use the bundled face too — re-family the existing app font (keeps size).
+    if _ui_family:
+        _appfont = app.font()
+        _appfont.setFamily(_ui_family)
+        app.setFont(_appfont)
     try:
         from PySide6.QtGui import QFontDatabase as _QFontDatabase
-        theme_v2.Typography.family_mono = _QFontDatabase.systemFont(
+        theme_v2.Typography.family_mono = _mono_family or _QFontDatabase.systemFont(
             _QFontDatabase.SystemFont.FixedFont
         ).family()
     except Exception:
-        theme_v2.Typography.family_mono = ""
+        theme_v2.Typography.family_mono = _mono_family or ""
     app.setStyleSheet(theme_v2.qss())
     win = AllWellApp(data_path=args.data_dir)
     win.show()

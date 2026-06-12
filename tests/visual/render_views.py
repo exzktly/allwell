@@ -44,9 +44,15 @@ _manifest: list[tuple[str, str]] = []
 def setup_app() -> QApplication:
     app = QApplication.instance() or QApplication(sys.argv)
     import theme as th
+    from well_viewer.core.app_fonts import register_qt_fonts
 
-    th.Typography.family = app.font().family()
-    th.Typography.family_mono = QFontDatabase.systemFont(
+    # Mirror all_well.main(): prefer the bundled Inter / JetBrains Mono so the
+    # rendered screenshots match what ships, falling back to platform faces.
+    ui_family, mono_family = register_qt_fonts()
+    th.Typography.family = ui_family or app.font().family()
+    if ui_family:
+        f = app.font(); f.setFamily(ui_family); app.setFont(f)
+    th.Typography.family_mono = mono_family or QFontDatabase.systemFont(
         QFontDatabase.SystemFont.FixedFont
     ).family()
     app.setStyleSheet(th.qss())

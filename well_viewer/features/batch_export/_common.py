@@ -29,6 +29,23 @@ from well_viewer.domain.viewer_state import groups_with_loaded_wells as _groups_
 
 _logger = logging.getLogger("well_viewer")
 
+
+def unique_export_stem(stem: str, used: set) -> str:
+    """Return *stem* made unique against *used*, recording it.
+
+    Group names are sanitised to ``[A-Za-z0-9_-]`` for filenames, so two groups
+    that differ only in punctuation (e.g. ``"Drug A/B"`` and ``"Drug A B"``)
+    collapse to the same stem and the second export would silently overwrite the
+    first. Appending ``_2``, ``_3``, … on collision keeps every group's output.
+    """
+    candidate = stem
+    n = 2
+    while candidate in used:
+        candidate = f"{stem}_{n}"
+        n += 1
+    used.add(candidate)
+    return candidate
+
 _CLR_DANGER = "#d2453d"
 _CLR_SUCCESS_DARK = "#2e7d32"
 _CLR_PLACEHOLDER = "#9aa0a6"
@@ -45,7 +62,7 @@ __all__ = [
     "apply_ax_style",
     "ask_name_dialog", "btn_card", "btn_danger", "btn_primary", "btn_secondary",
     "_clear_layout_helper",
-    "_groups_with_loaded_wells", "_logger",
+    "_groups_with_loaded_wells", "_logger", "unique_export_stem",
     "_CLR_DANGER", "_CLR_SUCCESS_DARK", "_CLR_PLACEHOLDER",
     "_CLR_DISABLED_WELL", "_CLR_ERR_BAR", "_CLR_WHITE",
 ]

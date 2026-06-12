@@ -47,6 +47,7 @@ from well_viewer.features.batch_export._common import (
     btn_secondary,
     _clear_layout_helper,
     _logger,
+    unique_export_stem,
     _CLR_DANGER,
     _CLR_SUCCESS_DARK,
     _CLR_WHITE,
@@ -1310,11 +1311,15 @@ class BatchExportPanel(QWidget):
 
         fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()
         fc_active = fc_vs_ctrl or fc_vs_t0
+        used_stems: set = set()
 
         def _run_group(grp: BarGroup) -> Optional[str]:
             safe = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
-            csv_path = out_dir / f"batch_{safe}.csv"
-            fig_path = out_dir / f"batch_{safe}.{fmt}"
+            # Uniquify so two groups whose names sanitise to the same stem don't
+            # silently overwrite each other's CSV + figure.
+            safe = unique_export_stem(f"batch_{safe}", used_stems)
+            csv_path = out_dir / f"{safe}.csv"
+            fig_path = out_dir / f"{safe}.{fmt}"
 
             try:
                 from well_viewer.features.batch_export._line_series_runner import (

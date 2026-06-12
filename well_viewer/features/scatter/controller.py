@@ -232,7 +232,7 @@ def _finite_positive(v) -> bool:
         f = float(v)
     except (TypeError, ValueError):
         return False
-    return math.isfinite(f) and f > 0.0
+    return 0.0 < f < float("inf")  # finite & positive (NaN/inf compare False)
 
 
 def redraw_scatter_agg(

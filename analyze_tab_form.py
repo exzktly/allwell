@@ -59,13 +59,7 @@ class AnalyzeTabFormMixin:
             title_lbl.setObjectName("SectionTitle")
             title_lbl.setContentsMargins(12, 6, 0, 2)
             hl.addWidget(title_lbl)
-            info_lbl = QLabel("ⓘ", header)
-            info_lbl.setObjectName("InfoHint")
-            info_lbl.setToolTip(info)
-            # A non-empty WhatsThis also surfaces the note via the ?-cursor and
-            # keeps the tooltip readable (Qt wraps long tooltips on its own).
-            info_lbl.setWhatsThis(info)
-            hl.addWidget(info_lbl)
+            hl.addWidget(self._info_icon(header, info))
             hl.addStretch(1)
             cl.addWidget(header)
         else:
@@ -88,6 +82,19 @@ class AnalyzeTabFormMixin:
 
         parent.layout().addWidget(container)
         return body
+
+    def _info_icon(self, parent: QWidget, info: str) -> QLabel:
+        """A small ``ⓘ`` marker whose hover tooltip carries *info*.
+
+        Keeps long explanatory notes available on demand instead of cluttering
+        the form with inline paragraphs. A non-empty WhatsThis also surfaces the
+        note via the ?-cursor; Qt wraps long tooltips on its own.
+        """
+        lbl = QLabel("ⓘ", parent)
+        lbl.setObjectName("InfoHint")
+        lbl.setToolTip(info)
+        lbl.setWhatsThis(info)
+        return lbl
 
     def _row(self, parent: QWidget, label: str) -> QWidget:
         """Append a two-column label+widget row to *parent*; return the right cell."""
@@ -188,15 +195,19 @@ class AnalyzeTabFormMixin:
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_schema_preview())
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
 
-        fl_title = QLabel("Fluorescent channels", sec)
-        fl_title.setContentsMargins(0, 6, 0, 2)
-        fl_title.setWordWrap(True)
-        sec.layout().addWidget(fl_title)
-        fl_hint = QLabel("Mark smFISH channels, or one channel as Phase for "
-                         "label-free segmentation, with the checkboxes on each row.", sec)
-        fl_hint.setObjectName("Muted")
-        fl_hint.setWordWrap(True)
-        sec.layout().addWidget(fl_hint)
+        fl_header = QWidget(sec)
+        fl_hl = QHBoxLayout(fl_header)
+        fl_hl.setContentsMargins(0, 6, 0, 2)
+        fl_hl.setSpacing(4)
+        fl_title = QLabel("Fluorescent channels", fl_header)
+        fl_hl.addWidget(fl_title)
+        fl_hl.addWidget(self._info_icon(
+            fl_header,
+            "Mark smFISH channels, or one channel as Phase for label-free "
+            "segmentation, with the checkboxes on each row.",
+        ))
+        fl_hl.addStretch(1)
+        sec.layout().addWidget(fl_header)
 
         self._fluor_frame = QWidget(sec)
         self._fluor_frame
@@ -451,21 +462,18 @@ class AnalyzeTabFormMixin:
         self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
         self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
         fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
+        fluor_row.layout().addWidget(self._info_icon(
+            fluor_row,
+            "Radius = background scale (px); Fluor radius applies to all "
+            "fluorescent channels. For fft_bandpass it is the large-structure "
+            "(low-frequency) cutoff; for robust_mesh it is the tile size.",
+        ))
         fluor_row.layout().addStretch(1)
-        radius_hint = QLabel("Radius = background scale (px); Fluor radius "
-                             "applies to all fluorescent channels. For "
-                             "fft_bandpass it is the large-structure (low-"
-                             "frequency) cutoff; for robust_mesh it is the tile "
-                             "size.", sec)
-        radius_hint.setObjectName("Muted")
-        radius_hint.setWordWrap(True)
-        sec.layout().addWidget(radius_hint)
         # _row() returns the right-hand cell, not the full row — the "Nuclear
         # radius" / "Fluor radius" label lives in the cell's parent. Toggle
         # visibility on the *parent* rows so the labels hide with their entries
         # (hiding only the cell left the labels stranded).
-        self._bg_radius_rows = (nir_row.parentWidget(), fluor_row.parentWidget(),
-                                radius_hint)
+        self._bg_radius_rows = (nir_row.parentWidget(), fluor_row.parentWidget())
 
         # fft_bandpass-only small-structure (high-frequency) cutoffs — the
         # optional low-pass that denoises for a true band-pass. 0 = high-pass
@@ -569,10 +577,16 @@ class AnalyzeTabFormMixin:
         _sync_debris()
 
     def _build_output_options_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Output Options")
+        sec = self._section(
+            parent, "Output Options",
+            info="Compression toggles apply only to folder-mode datasets "
+                 "(per-well subfolders); 'Move source TIFs' applies only to "
+                 "loose-TIF mode. Moving sources saves ~2× peak disk but loses "
+                 "the clean-retry path if the zipper crashes mid-run.",
+        )
 
         self._compress_input_cb = WrapCheckBox(
-            "Folder mode only: Compress input well folders to .zip", sec)
+            "Compress input well folders to .zip", sec)
         self._compress_input_cb.setChecked(True)
         sec.layout().addWidget(self._compress_input_cb)
 
@@ -584,15 +598,12 @@ class AnalyzeTabFormMixin:
         # peak usage stays close to the input footprint, at the cost
         # of losing a clean-retry path on a mid-zipper crash.
         self._move_source_tifs_cb = WrapCheckBox(
-            "Loose-TIF mode only: Move source TIFs into well folders "
-            "(saves ~2× peak disk; sources gone if zipper crashes mid-run)",
-            sec,
-        )
+            "Move source TIFs into well folders", sec)
         self._move_source_tifs_cb.setChecked(False)
         sec.layout().addWidget(self._move_source_tifs_cb)
 
         self._compress_output_cb = WrapCheckBox(
-            "Folder mode only: Compress output well folders to .zip", sec)
+            "Compress output well folders to .zip", sec)
         self._compress_output_cb.setChecked(True)
         sec.layout().addWidget(self._compress_output_cb)
 

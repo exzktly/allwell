@@ -206,6 +206,9 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctx.app._smfish_ax_img = ctx.app._smfish_fig_img.add_subplot(111)
     ctx.app._smfish_canvas_img = FigureCanvas(ctx.app._smfish_fig_img)
     root.addWidget(ctx.app._smfish_canvas_img, 1)
+    # Theme the canvas immediately so it's never a bare white figure before the
+    # first refresh paints data or an empty-state message.
+    _smfish_paint_empty(ctx.app, "Select a well to view smFISH images.")
 
     from widgets.mpl_toolbar import MplToolbar
     ctx.app._smfish_toolbar = MplToolbar(ctx.app._smfish_canvas_img, parent)
@@ -243,6 +246,9 @@ def smfish_sync_from_app(app) -> None:
     out_dir = app._app_state.dataset.data_dir or app._smfish_out_dir
     if out_dir is None:
         _smfish_set_status(app, "No output loaded.")
+        _smfish_paint_empty(
+            app, "No dataset loaded.\nOpen a results folder to view smFISH images."
+        )
         return
     info_path = out_dir / "pipeline_info.json"
     if not info_path.exists():
@@ -475,6 +481,36 @@ def _smfish_set_controls_enabled(app, enabled: bool) -> None:
             swallowed()  # was: pass (silent except)
 
 
+def _smfish_paint_empty(app, message: str) -> None:
+    """Paint *message* centred on the image axes over the theme background.
+
+    Matches every other plot's empty/no-selection warning so the smFISH tab
+    never shows a bare white matplotlib canvas (the default figure colour) when
+    there's no dataset, no smFISH channel, or no image for the selection.
+    """
+    if getattr(app, "_smfish_ax_img", None) is None:
+        return
+    try:
+        bg_panel = get_color("BG_PANEL")
+        txt_mut = get_color("TXT_MUT")
+        app._smfish_ax_img.clear()
+        app._smfish_ax_img.set_facecolor(bg_panel)
+        if app._smfish_fig_img is not None:
+            app._smfish_fig_img.patch.set_facecolor(bg_panel)
+        app._smfish_ax_img.set_axis_off()
+        app._smfish_ax_img.text(
+            0.5, 0.5, message,
+            transform=app._smfish_ax_img.transAxes,
+            ha="center", va="center",
+            color=txt_mut,
+            fontsize=11, wrap=True,
+        )
+        if app._smfish_canvas_img is not None:
+            app._smfish_canvas_img.draw_idle()
+    except Exception:
+        swallowed()
+
+
 def _smfish_show_no_smfish_state(app) -> None:
     # The full guidance is drawn once, centered on the canvas below; keep the
     # status line concise so the same paragraph is not shown twice.
@@ -488,28 +524,7 @@ def _smfish_show_no_smfish_state(app) -> None:
     app._smfish_current_log_img = None
     app._smfish_current_labels = None
     app._smfish_current_sorted_vals = None
-    try:
-        # Paint the empty-state message on the theme background like every
-        # other plot's empty/no-selection warning (was a bare white axes on a
-        # dark app + a hardcoded grey).
-        bg_panel = get_color("BG_PANEL")
-        txt_mut = get_color("TXT_MUT")
-        app._smfish_ax_img.clear()
-        app._smfish_ax_img.set_facecolor(bg_panel)
-        if app._smfish_fig_img is not None:
-            app._smfish_fig_img.patch.set_facecolor(bg_panel)
-        app._smfish_ax_img.set_axis_off()
-        app._smfish_ax_img.text(
-            0.5, 0.5, _NO_SMFISH_MESSAGE,
-            transform=app._smfish_ax_img.transAxes,
-            ha="center", va="center",
-            color=txt_mut,
-            fontsize=11, wrap=True,
-        )
-        if app._smfish_canvas_img is not None:
-            app._smfish_canvas_img.draw_idle()
-    except Exception:
-        swallowed()  # was: pass (silent except)
+    _smfish_paint_empty(app, _NO_SMFISH_MESSAGE)
 
 
 def _smfish_selected_well_token(app) -> str | None:
@@ -571,10 +586,14 @@ def _smfish_load_selected_images(app) -> None:
     )
     if sm_ref is None or mk_ref is None:
         _smfish_set_status(app, "No smFISH/mask pair found for current selection.")
+        _smfish_paint_empty(
+            app, "No smFISH/mask pair found for the current well / FOV / timepoint."
+        )
         return
     result = read_image_arrays(sm_ref, mk_ref)
     if result is None:
         _smfish_set_status(app, "Failed to load selected image data.")
+        _smfish_paint_empty(app, "Failed to load the selected image data.")
         return
     (app._smfish_current_log_img, app._smfish_current_labels,
      app._smfish_current_sorted_vals) = result

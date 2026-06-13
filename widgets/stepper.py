@@ -1,4 +1,4 @@
-"""Stepper — a numeric input with a stacked ▲/▼ column and an accent focus ring.
+"""Stepper — a numeric input with a stacked ▴/▾ column and an accent focus ring.
 
 A token-styled alternative to ``QSpinBox`` / ``QDoubleSpinBox`` (whose
 sub-controls render natively on some platforms). Built from a ``QLineEdit`` plus
@@ -69,10 +69,10 @@ class Stepper(QFrame):
         btn_col.setSpacing(0)
         self._up = QToolButton(self)
         self._up.setObjectName("StepperUp")
-        self._up.setText("▲")
+        self._up.setText("▴")
         self._down = QToolButton(self)
         self._down.setObjectName("StepperDown")
-        self._down.setText("▼")
+        self._down.setText("▾")
         for b in (self._up, self._down):
             b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)

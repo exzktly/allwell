@@ -117,13 +117,13 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     if root is None:
         root = QVBoxLayout(parent)
         parent.setLayout(root)
-    root.setContentsMargins(0, 0, 0, 0)
+    root.setContentsMargins(12, 12, 12, 12)
 
     # Row 1: channel/fov/tp/threshold/LUT
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
     cl = QHBoxLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
+    cl.setContentsMargins(0, 6, 0, 6)
 
     cl.addWidget(QLabel("Channel:", ctrl))
     ctx.app._smfish_channel_cb = QComboBox(ctrl)
@@ -170,7 +170,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     btn_row = QWidget(parent)
     btn_row.setObjectName("TabCtrl")
     bl = QHBoxLayout(btn_row)
-    bl.setContentsMargins(10, 2, 10, 2)
+    bl.setContentsMargins(0, 2, 0, 2)
 
     apply_btn = QPushButton("Apply Global Threshold", btn_row)
     apply_btn.setProperty("variant", "secondary")

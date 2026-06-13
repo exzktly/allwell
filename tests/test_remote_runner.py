@@ -1585,12 +1585,14 @@ def test_required_files_list_is_what_we_promised():
         "well_token.py",
         "shape_features_core.py",
         "flatfield_core.py",
-        # Pipeline clusters extracted from process_microscopy (P4) — re-imported
-        # at module top level, so the remote needs each one.
-        "microscopy_background.py",
-        "microscopy_cellpose.py",
-        "microscopy_stardist.py",
-        "microscopy_io.py",
+        # Pipeline clusters extracted from process_microscopy (P4), now the
+        # Qt-free ``pipeline`` package — re-imported at module top level, so the
+        # remote needs the whole package.
+        "pipeline/__init__.py",
+        "pipeline/background.py",
+        "pipeline/cellpose.py",
+        "pipeline/stardist.py",
+        "pipeline/io.py",
         # Qt-free observable-suppression helper (P2.7).
         "aw_safe.py",
         "_Docs/requirements-remote.txt",

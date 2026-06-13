@@ -1,11 +1,11 @@
-"""Unit tests for microscopy_io.py (output writers extracted from the pipeline in P4)."""
+"""Unit tests for pipeline.io.py (output writers extracted from the pipeline in P4)."""
 
 import csv
 
 import numpy as np
 import pytest
 
-import microscopy_io as mio
+from pipeline import io as mio
 
 
 def test_safe_imwrite_tif_roundtrip(tmp_path):

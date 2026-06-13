@@ -101,24 +101,16 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # top level (the empty-well / gaussian / basic correction), so the remote
     # needs it too or the import aborts the run with ModuleNotFoundError.
     "flatfield_core.py",
-    # Background-subtraction math: process_microscopy re-imports
-    # microscopy_background at module top level (subtract_background plus the
-    # empty-well / robust-mesh / fft-bandpass methods), so the remote needs it
-    # too or the import aborts the run with ModuleNotFoundError.
-    "microscopy_background.py",
-    # Cellpose segmenters: process_microscopy re-imports microscopy_cellpose at
-    # module top level (Torch/cellpose itself stays lazily imported), so the
-    # remote needs this file too or the import aborts with ModuleNotFoundError.
-    "microscopy_cellpose.py",
-    # StarDist segmenters + per-worker model state: process_microscopy re-imports
-    # microscopy_stardist at module top level (TensorFlow/csbdeep stay lazily
-    # imported), so the remote needs this file too or the import aborts with
-    # ModuleNotFoundError.
-    "microscopy_stardist.py",
-    # Atomic output writers (images / CSVs / overlay): process_microscopy
-    # re-imports microscopy_io at module top level, so the remote needs this file
-    # too or the import aborts with ModuleNotFoundError.
-    "microscopy_io.py",
+    # Pipeline components: process_microscopy re-imports the Qt-free ``pipeline``
+    # package at module top level (background-subtraction math, Cellpose +
+    # StarDist segmenters, and the atomic output writers; the Torch / TensorFlow
+    # runtimes themselves stay lazily imported), so the remote needs the whole
+    # package or the import aborts the run with ModuleNotFoundError.
+    "pipeline/__init__.py",
+    "pipeline/background.py",
+    "pipeline/cellpose.py",
+    "pipeline/stardist.py",
+    "pipeline/io.py",
     # Qt-free observable-suppression helper (logged swallow): process_microscopy
     # imports aw_safe at module top level, so the remote needs it too or the
     # import aborts with ModuleNotFoundError.

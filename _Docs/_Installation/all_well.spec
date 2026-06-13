@@ -49,7 +49,7 @@ sibling_scripts = [
 
 # Bundle every first-party package so module imports resolve at runtime
 # inside the PyInstaller _MEIPASS root.
-for _pkg in ("well_viewer", "widgets", "ui", "services"):
+for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline"):
     _pkg_path = _parent / _pkg
     if _pkg_path.is_dir():
         sibling_scripts.append((str(_pkg_path), _pkg))

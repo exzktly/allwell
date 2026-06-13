@@ -23,10 +23,10 @@ WELL_VIEWER = REPO_ROOT / "well_viewer"
 PIPELINE_DIRS = [REPO_ROOT / "services"]
 PIPELINE_FILES = [
     REPO_ROOT / "process_microscopy.py",
-    REPO_ROOT / "microscopy_background.py",
-    REPO_ROOT / "microscopy_cellpose.py",
-    REPO_ROOT / "microscopy_stardist.py",
-    REPO_ROOT / "microscopy_io.py",
+    REPO_ROOT / "pipeline/background.py",
+    REPO_ROOT / "pipeline/cellpose.py",
+    REPO_ROOT / "pipeline/stardist.py",
+    REPO_ROOT / "pipeline/io.py",
 ]
 
 

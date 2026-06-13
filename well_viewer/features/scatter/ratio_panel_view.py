@@ -77,6 +77,10 @@ class RatioMetricsPanel(QWidget):
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.Stretch)
         self._table.verticalHeader().setVisible(False)
+        # The cell widgets (QLineEdit / QComboBox / QDoubleSpinBox) carry the
+        # global QSS padding, which overflows the default ~30px row and clipped
+        # the text descenders ("gfp" → "qfp"). Give rows headroom to fit them.
+        self._table.verticalHeader().setDefaultSectionSize(36)
         self._table.setMinimumHeight(140)
         layout.addWidget(self._table)
 

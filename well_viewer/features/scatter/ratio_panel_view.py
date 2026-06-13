@@ -43,12 +43,8 @@ class RatioMetricsPanel(QWidget):
         self._app = app
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(6)
-
-        title = QLabel("RATIO METRICS", self)
-        title.setProperty("role", "section")
-        layout.addWidget(title)
 
         intro = QLabel(
             "Define ratio metrics computed at read time as "

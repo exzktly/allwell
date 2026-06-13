@@ -130,16 +130,6 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
-    app._stats_hdr = QWidget(parent)
-    app._stats_hdr.setObjectName("Sidebar")
-    hl = QHBoxLayout(app._stats_hdr)
-    hl.setContentsMargins(12, 4, 12, 4)
-    app._stats_hdr_label = QLabel("STATISTICAL TEST", app._stats_hdr)
-    app._stats_hdr_label.setProperty("role", "section")
-    hl.addWidget(app._stats_hdr_label)
-    hl.addStretch(1)
-    layout.addWidget(app._stats_hdr)
-
     app._stats_ctrl = QWidget(parent)
     app._stats_ctrl.setObjectName("TabCtrl")  # data-gated until a dataset loads
     cl = QGridLayout(app._stats_ctrl)

@@ -135,9 +135,6 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     hdr_l = QHBoxLayout(hdr)
     hdr_l.setContentsMargins(10, 8, 10, 4)
     layout.addWidget(hdr)
-    hdr_lbl = QLabel("GROUPS", hdr)
-    hdr_lbl.setProperty("role", "section")
-    hdr_l.addWidget(hdr_lbl)
     hdr_l.addStretch(1)
     hdr_l.addWidget(btn_secondary(hdr, "Clear All", app._rep_clear_all))
     hdr_l.addWidget(btn_primary(hdr, "+ Add", app._rep_add))
@@ -350,7 +347,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     # sample_definitions.json's "notes" field.
     notes_tab = _QWidget(sub_tabs)
     nl = _QVBoxLayout(notes_tab)
-    nl.setContentsMargins(6, 6, 6, 6)
+    nl.setContentsMargins(12, 12, 12, 12)
     # Commit on focus-out (not per keystroke): a freeform notes box shouldn't
     # rewrite pipeline_info.json on every letter typed.
     app._notes_edit = _NotesEdit(notes_tab, app._notes_schedule_save)

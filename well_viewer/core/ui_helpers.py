@@ -868,10 +868,10 @@ def toggle_log(app) -> None:
     app._log_visible = not app._log_visible
     if app._log_visible:
         app._log_frame.setVisible(True)
-        app._log_btn.setText("Log ▼")
+        app._log_btn.setText("Log ▾")
     else:
         app._log_frame.setVisible(False)
-        app._log_btn.setText("Log ▲")
+        app._log_btn.setText("Log ▴")
 
 
 

@@ -82,7 +82,7 @@ def build_bottom(app) -> None:
     app._progress_bar.hide()
     sr_l.addWidget(app._progress_bar)
 
-    app._log_btn = QPushButton("Log \u25b2", status_row)
+    app._log_btn = QPushButton("Log \u25b4", status_row)
     app._log_btn.setProperty("variant", "secondary")
     app._log_btn.clicked.connect(lambda _=False: app._toggle_log())
     sr_l.addWidget(app._log_btn)

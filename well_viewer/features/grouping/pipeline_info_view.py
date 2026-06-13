@@ -53,7 +53,7 @@ def _fmt(value) -> str:
 
 def build_pipeline_info_subtab(app, parent: QWidget) -> None:
     layout = parent.layout() or QVBoxLayout(parent)
-    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(6)
 
     hdr = QHBoxLayout(); hdr.setSpacing(8)

@@ -96,7 +96,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     inner = QWidget()
     il = QVBoxLayout(inner)
-    il.setContentsMargins(8, 8, 8, 8)
+    il.setContentsMargins(12, 12, 12, 12)
     il.setSpacing(6)
     scroll.setWidget(inner)
     layout.addWidget(scroll, 1)

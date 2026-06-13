@@ -14,7 +14,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
-    layout.setContentsMargins(10, 10, 10, 10)
+    layout.setContentsMargins(12, 12, 12, 12)
 
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")

@@ -147,10 +147,6 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(12, 12, 12, 12)
 
-    title = QLabel("Batch Export", parent)
-    title.setProperty("role", "section")
-    layout.addWidget(title)
-
     subtitle = QLabel(
         "Configure and run inline line / bar / scatter batch-export workflows "
         "from this tab.",

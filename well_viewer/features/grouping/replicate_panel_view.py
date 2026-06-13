@@ -133,11 +133,8 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
 
     hdr = QWidget(parent)
     hdr_l = QHBoxLayout(hdr)
-    hdr_l.setContentsMargins(10, 8, 10, 4)
+    hdr_l.setContentsMargins(0, 8, 0, 4)
     layout.addWidget(hdr)
-    hdr_lbl = QLabel("GROUPS", hdr)
-    hdr_lbl.setProperty("role", "section")
-    hdr_l.addWidget(hdr_lbl)
     hdr_l.addStretch(1)
     hdr_l.addWidget(btn_secondary(hdr, "Clear All", app._rep_clear_all))
     hdr_l.addWidget(btn_primary(hdr, "+ Add", app._rep_add))
@@ -145,7 +142,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     # Quick Replicates dropdowns
     hdr2r = QWidget(parent)
     hdr2r_l = QHBoxLayout(hdr2r)
-    hdr2r_l.setContentsMargins(10, 4, 10, 4)
+    hdr2r_l.setContentsMargins(0, 4, 0, 4)
     layout.addWidget(hdr2r)
 
     pair_lbl = QLabel("Pair:", hdr2r)
@@ -180,7 +177,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     active_row = QWidget(parent)
     active_row.setObjectName("ActiveGroupBanner")
     active_l = QHBoxLayout(active_row)
-    active_l.setContentsMargins(10, 6, 10, 6)
+    active_l.setContentsMargins(0, 6, 0, 6)
     active_l.setSpacing(6)
     active_caption = QLabel("ACTIVE GROUP", active_row)
     active_caption.setStyleSheet(
@@ -219,7 +216,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     )
     hint.setObjectName("Muted")
     hint.setWordWrap(True)
-    hint.setContentsMargins(10, 6, 10, 8)
+    hint.setContentsMargins(0, 6, 0, 8)
     layout.addWidget(hint)
 
 
@@ -318,13 +315,13 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     # SavedSelectionsList has full vertical room and the sidebar plate
     # can stay full-aspect.
     groups_tab = _QWidget(sub_tabs)
-    _QVBoxLayout(groups_tab).setContentsMargins(0, 0, 0, 0)
+    _QVBoxLayout(groups_tab).setContentsMargins(12, 12, 12, 12)
     build_replicate_groups_centre(app, groups_tab)
     sub_tabs.addTab(groups_tab, "Groups")
 
     # Sub-tab 1: Well Labels only
     labels_tab = _QWidget(sub_tabs)
-    _QVBoxLayout(labels_tab).setContentsMargins(0, 0, 0, 0)
+    _QVBoxLayout(labels_tab).setContentsMargins(12, 12, 12, 12)
     build_label_grid(app, labels_tab)
     sub_tabs.addTab(labels_tab, "Well Labels")
 
@@ -350,7 +347,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     # sample_definitions.json's "notes" field.
     notes_tab = _QWidget(sub_tabs)
     nl = _QVBoxLayout(notes_tab)
-    nl.setContentsMargins(6, 6, 6, 6)
+    nl.setContentsMargins(12, 12, 12, 12)
     # Commit on focus-out (not per keystroke): a freeform notes box shouldn't
     # rewrite pipeline_info.json on every letter typed.
     app._notes_edit = _NotesEdit(notes_tab, app._notes_schedule_save)

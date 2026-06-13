@@ -378,7 +378,7 @@ def build_label_grid(app, parent: QWidget) -> None:
     # ── top help + affix toolbar ─────────────────────────────────────
     head = QWidget(parent)
     hl = QHBoxLayout(head)
-    hl.setContentsMargins(10, 8, 10, 6)
+    hl.setContentsMargins(0, 8, 0, 6)
     hl.setSpacing(theme.Spacing.sm)
     help_lbl = QLabel(
         "Custom names used in legends + axis labels. Type into a cell to "

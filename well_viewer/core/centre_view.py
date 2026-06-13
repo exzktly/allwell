@@ -149,7 +149,7 @@ def build_centre(app, parent: QWidget) -> None:
     # container and the five sub-tab frames so builder closures (and the
     # drain) can reference them before the nested QTabWidget exists.
     plotting_container = QWidget(app._notebook)
-    QVBoxLayout(plotting_container).setContentsMargins(0, 0, 0, 0)
+    QVBoxLayout(plotting_container).setContentsMargins(12, 12, 12, 12)
 
     _PLOT_SUBTABS = [
         "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map",
@@ -237,7 +237,7 @@ def build_centre(app, parent: QWidget) -> None:
             f"border-bottom: 1px solid {_C.border_subtle}; }}"
         )
         cbl = QHBoxLayout(ctxbar)
-        cbl.setContentsMargins(_S.md, 6, _S.md, 6)
+        cbl.setContentsMargins(0, 6, 0, 6)
         cbl.setSpacing(_S.sm)
 
         # A standalone QTabBar with the SampleDefinitionsSubTabs object
@@ -264,7 +264,7 @@ def build_centre(app, parent: QWidget) -> None:
             f"border-bottom: 1px solid {_C.border_subtle}; }}"
         )
         arl = QHBoxLayout(action_row)
-        arl.setContentsMargins(_S.md, 4, _S.md, 4)
+        arl.setContentsMargins(0, 4, 0, 4)
         arl.setSpacing(_S.sm)
 
         # Phase 11b (A4): the channel selector is now a single global combo
@@ -647,12 +647,12 @@ def build_centre(app, parent: QWidget) -> None:
         app._segmentation_subtabs = sub_tabs
 
         review_tab = QWidget(sub_tabs)
-        QVBoxLayout(review_tab).setContentsMargins(0, 0, 0, 0)
+        QVBoxLayout(review_tab).setContentsMargins(12, 12, 12, 12)
         build_review_image_panel(app, review_tab)
         sub_tabs.addTab(review_tab, "Review Image")
 
         playground_tab = QWidget(sub_tabs)
-        QHBoxLayout(playground_tab).setContentsMargins(0, 0, 0, 0)
+        QHBoxLayout(playground_tab).setContentsMargins(12, 12, 12, 12)
         sub_tabs.addTab(playground_tab, "Playground")
         app._playground_subtab_frame = playground_tab
         app._playground_subtab_built = False

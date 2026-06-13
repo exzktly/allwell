@@ -185,7 +185,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     if root is None:
         root = QVBoxLayout(parent)
         parent.setLayout(root)
-    root.setContentsMargins(8, 8, 8, 8)
+    root.setContentsMargins(12, 12, 12, 12)
 
     control_frame = QWidget(parent)
     control_frame.setObjectName("TabCtrl")

@@ -127,23 +127,13 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
-    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(0)
-
-    app._stats_hdr = QWidget(parent)
-    app._stats_hdr.setObjectName("Sidebar")
-    hl = QHBoxLayout(app._stats_hdr)
-    hl.setContentsMargins(12, 4, 12, 4)
-    app._stats_hdr_label = QLabel("STATISTICAL TEST", app._stats_hdr)
-    app._stats_hdr_label.setProperty("role", "section")
-    hl.addWidget(app._stats_hdr_label)
-    hl.addStretch(1)
-    layout.addWidget(app._stats_hdr)
 
     app._stats_ctrl = QWidget(parent)
     app._stats_ctrl.setObjectName("TabCtrl")  # data-gated until a dataset loads
     cl = QGridLayout(app._stats_ctrl)
-    cl.setContentsMargins(12, 6, 12, 6)
+    cl.setContentsMargins(0, 6, 0, 6)
 
     app._stats_test_label = QLabel("Test:", app._stats_ctrl)
     cl.addWidget(app._stats_test_label, 0, 0, Qt.AlignLeft)
@@ -219,7 +209,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     run_row = QWidget(parent)
     run_row.setObjectName("TabCtrl")  # data-gated with the stats form above
     rrl = QHBoxLayout(run_row)
-    rrl.setContentsMargins(12, 0, 12, 6)
+    rrl.setContentsMargins(0, 0, 0, 6)
     run_btn = btn_primary(run_row, "Run test", app._stats_run)
     rrl.addWidget(run_btn)
     rrl.addStretch(1)
@@ -250,7 +240,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
 
     app._stats_res_frame = QWidget(parent)
     rl = QVBoxLayout(app._stats_res_frame)
-    rl.setContentsMargins(12, 6, 12, 6)
+    rl.setContentsMargins(0, 6, 0, 6)
     app._stats_result_text = QTextEdit(app._stats_res_frame)
     app._stats_result_text.setReadOnly(True)
     app._stats_result_text.setLineWrapMode(QTextEdit.WidgetWidth)

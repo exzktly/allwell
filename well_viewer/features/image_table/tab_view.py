@@ -109,9 +109,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # to render.
     builder = QFrame(inner)
     builder.setObjectName("ImageTableSelector")
-    builder.setFrameShape(QFrame.StyledPanel)
+    builder.setFrameShape(QFrame.NoFrame)
     bv = QVBoxLayout(builder)
-    bv.setContentsMargins(8, 6, 8, 8)
+    bv.setContentsMargins(0, 6, 0, 8)
     bv.setSpacing(6)
 
     build_title = QLabel("Build Layout", builder)
@@ -261,9 +261,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # the global-options strip above and the LUT row below.
     selector_box = QFrame(inner)
     selector_box.setObjectName("ImageTableSelector")
-    selector_box.setFrameShape(QFrame.StyledPanel)
+    selector_box.setFrameShape(QFrame.NoFrame)
     sb_layout = QVBoxLayout(selector_box)
-    sb_layout.setContentsMargins(8, 6, 8, 8)
+    sb_layout.setContentsMargins(0, 6, 0, 8)
     sb_layout.setSpacing(4)
 
     selector_lbl = QLabel("Selector", selector_box)
@@ -284,8 +284,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # min/max + Fit, and the Top-hat / Boundaries / Binary display toggles.
     lut_outer = QFrame(inner)
     lut_outer.setObjectName("Panel")
+    lut_outer.setFrameShape(QFrame.NoFrame)
     lut_outer_layout = QVBoxLayout(lut_outer)
-    lut_outer_layout.setContentsMargins(10, 8, 10, 8)
+    lut_outer_layout.setContentsMargins(0, 8, 0, 8)
     lut_outer_layout.setSpacing(6)
 
     lut_lbl = QLabel("Per-row levels & display", lut_outer)

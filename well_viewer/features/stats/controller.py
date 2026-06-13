@@ -587,7 +587,14 @@ def stats_update_tp_menu(app) -> None:
         ch_options.append(ch)
         if ch in app._app_state.channel.smfish_channels:
             ch_options.append(f"{ch} (spots)")
+    # Ratio "channels" (computed per-cell values) and shape-class features are
+    # selectable too — they resolve via _label_to_channel_key in
+    # col_for_scatter_entry, and the Property combo collapses to a single
+    # Calculated Val for them (see populate_metric_combo).
     ch_options.extend(app._ratio_dropdown_labels())
+    from shape_features_core import label_for as _shape_label_for
+    for _col in (app._app_state.channel.shape_features or []):
+        ch_options.append(_shape_label_for(_col) or _col)
     if not ch_options:
         ch_options = ["—"]
     if hasattr(app, "_stats_channel_cb") and app._stats_channel_cb is not None:

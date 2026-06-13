@@ -207,19 +207,19 @@ class Radii:
     pill = 999   # --r-pill : status dot rings, count badges
 
 
-def _chevron_down_path() -> str:
-    """Absolute forward-slash path to the dropdown chevron SVG (dev + frozen).
+def _icon_path(name: str) -> str:
+    """Absolute forward-slash path to a bundled UI icon (dev + frozen).
 
-    Used by :func:`qss` for every native dropdown caret — combo boxes and
-    menu-backed tool buttons — so they all share one glyph at one size instead
-    of Qt's inconsistent native arrows (the small ``menu-indicator`` on
-    instant-popup buttons vs the large ``menu-button`` arrow on split buttons).
+    Used by :func:`qss` for native subcontrol glyphs — the dropdown chevron on
+    combo boxes / menu-backed tool buttons and the spin-box up/down arrows — so
+    they paint a consistent shipped SVG instead of Qt's inconsistent (and on the
+    dark theme, invisible) native arrows.
     """
     import os
     import sys
 
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "assets", "icons", "chevron-down.svg").replace(os.sep, "/")
+    return os.path.join(base, "assets", "icons", name).replace(os.sep, "/")
 
 
 def qss() -> str:
@@ -230,7 +230,8 @@ def qss() -> str:
     the returned string.
     """
     c, t, r, s = Colors, Typography, Radii, Spacing
-    _chev = _chevron_down_path()
+    _chev = _icon_path("chevron-down.svg")
+    _chev_up = _icon_path("chevron-up.svg")
     return f"""
 * {{
     font-family: {t.family};
@@ -442,6 +443,19 @@ QSpinBox::down-button, QDoubleSpinBox::down-button {{
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
 QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
     background-color: {c.hover};
+}}
+/* Paint the spin arrows with the shipped chevrons — Qt's native arrows are
+   invisible on the dark theme (e.g. the Image Table grid-size boxes looked
+   like they had no buttons even though they worked). */
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url({_chev_up});
+    width: 8px;
+    height: 8px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url({_chev});
+    width: 8px;
+    height: 8px;
 }}
 
 /* ── Combo box ───────────────────────────────────────────────────────── */

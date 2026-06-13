@@ -1,9 +1,10 @@
 """MplToolbar — a styled matplotlib navigation toolbar.
 
 A slim ``QWidget`` row of :class:`~widgets.icon_button.IconButton`s grouped the
-matplotlib way (home · back/forward · pan/zoom · save) plus a right-aligned mono
-``x = … · y = …`` coordinate readout. It drives a hidden ``NavigationToolbar2QT``
-so we get matplotlib's real handlers behind our own UI.
+matplotlib way (home · back/forward · pan/zoom · save). Coordinates are surfaced
+only as a discreet chip beside the cursor on hover (the persistent bottom-right
+``x = … · y = …`` readout was removed). It drives a hidden
+``NavigationToolbar2QT`` so we get matplotlib's real handlers behind our own UI.
 
 Use it standalone over any ``FigureCanvasQTAgg`` (e.g. inside a hover overlay), or
 let :class:`~widgets.plot_card.PlotCard` embed one for you.
@@ -14,7 +15,8 @@ API
   ``FigureCanvasQTAgg``; pass an existing ``NavigationToolbar2QT`` as ``nav`` (or
   one is created, hidden, parented to ``owner`` or ``parent``).
 * ``nav`` — the underlying ``NavigationToolbar2QT`` (read-only).
-* ``setCoordinatesVisible(bool)`` / ``coordinatesVisible()`` — the ``x = … · y = …`` label.
+* ``setCoordinatesVisible(bool)`` / ``coordinatesVisible()`` — retained as
+  no-ops (the bottom-right coordinate label was removed).
 * ``home()`` / ``back()`` / ``forward()`` / ``save()`` — proxy the handlers (so the
   toolbar can be driven externally too).
 
@@ -145,10 +147,6 @@ if _HAVE_MPL:
             lay.addWidget(self._save)
             lay.addStretch(1)
 
-            self._coords = QLabel("x = —   ·   y = —", self)
-            self._coords.setObjectName("MplToolbarCoords")
-            lay.addWidget(self._coords)
-
             # Floating chip beside the cursor — lazily created on first show
             # so headless / pre-paint construction doesn't allocate it.
             self._chip: _HoverChip | None = None
@@ -231,21 +229,22 @@ if _HAVE_MPL:
                 self._nav.zoom()
 
         # ── coordinate readout ──────────────────────────────────────────────
+        # The persistent bottom-right ``x = … · y = …`` label was removed; the
+        # cursor-following hover chip below is the only coordinate readout. These
+        # remain as no-ops so the documented API doesn't break for any caller.
         def setCoordinatesVisible(self, visible: bool) -> None:
-            self._coords.setVisible(bool(visible))
+            pass
 
         def coordinatesVisible(self) -> bool:
-            return self._coords.isVisible()
+            return False
 
         def _on_mouse_move(self, event) -> None:
             ax = event.inaxes
             if ax is None or event.xdata is None or event.ydata is None:
-                self._coords.setText("x = —   ·   y = —")
                 self._hide_chip()
                 return
 
             text = f"x = {event.xdata:.3g}   ·   y = {event.ydata:.3g}"
-            self._coords.setText(text)
 
             # Don't pop a hover chip on an empty axis — before data is
             # loaded the canvas is blank and a caption on bare grid lines

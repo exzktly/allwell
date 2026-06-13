@@ -116,9 +116,14 @@ class _Segment(QToolButton):
                 x += iw + spacing
 
             if has_text:
-                col = self.palette().color(
-                    QPalette.ButtonText if self.isEnabled() else QPalette.Disabled
-                )
+                # ``QPalette.Disabled`` is a colour *group*, not a *role* —
+                # pass it as the group argument (with the ButtonText role), not
+                # as the sole role (which raised "called with wrong argument
+                # type" and crashed the paint when a segment was disabled).
+                if self.isEnabled():
+                    col = self.palette().color(QPalette.ButtonText)
+                else:
+                    col = self.palette().color(QPalette.Disabled, QPalette.ButtonText)
                 # Honour QSS-resolved text colour by querying the palette via
                 # the current style option (the platform style filled it in).
                 if opt.palette is not None:

@@ -211,7 +211,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     _wire(app, app._rep_list)
 
     hint = QLabel(
-        "Click a group below to make it the ACTIVE group — its row "
+        "Click a group above to make it the ACTIVE group — its row "
         "highlights with an accent stripe. Then click wells on the plate "
         "map (left sidebar) to add or remove them. Expand a group to edit "
         "its replicate structure.",

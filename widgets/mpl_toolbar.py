@@ -270,7 +270,6 @@ if _HAVE_MPL:
 
         def _on_figure_leave(self, _event) -> None:
             """Hide the hover chip when the cursor leaves the canvas."""
-            self._coords.setText("x = —   ·   y = —")
             self._hide_chip()
 
         def _hide_chip(self) -> None:

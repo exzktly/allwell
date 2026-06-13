@@ -29,7 +29,7 @@ def build_reference_fields(app, well: str, chan_lower: str, *,
     modes don't need it. Returns ``(None, None)`` when no frames are found.
     """
     import process_microscopy as pm
-    from flatfield_core import estimate_basic_flatfield, normalize_flatfield
+    from core.flatfield import estimate_basic_flatfield, normalize_flatfield
     from well_viewer.data.image_discovery import open_imgref_as_array
     from well_viewer.features.image_table.controller import _load_well_channel
 

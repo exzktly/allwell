@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
-from aw_safe import swallowed
+from core.aw_safe import swallowed
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
@@ -27,7 +27,7 @@ def tif_files_in(folder: Path) -> list[Path]:
 
 def _is_well_named(p: Path) -> bool:
     """Match `A1` / `A01` … `H12` against the well-token canonicaliser."""
-    from well_token import is_valid_well_name
+    from core.well_token import is_valid_well_name
     return is_valid_well_name(p.stem)
 
 
@@ -62,7 +62,7 @@ def well_present_in_input(input_dir: Path, well: str, *,
     to block a run when ``--flatfield empty_well`` / ``--background empty_well``
     name a background well that doesn't exist.
     """
-    from well_token import canonical_well_label
+    from core.well_token import canonical_well_label
     target = canonical_well_label(well or "")
     if target is None:
         return False
@@ -102,7 +102,7 @@ def iter_well_tokens(input_dir: Path) -> "list[str]":
     emits no per-well progress of its own, leaving the Group stage stuck at 0 and
     the wells jumping straight from empty to processing.
     """
-    from well_token import canonical_well_label
+    from core.well_token import canonical_well_label
     seen: set[str] = set()
     out: list[str] = []
     try:

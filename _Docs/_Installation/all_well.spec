@@ -41,15 +41,13 @@ sibling_scripts = [
     (str(_parent / "all_well.py"),              "."),
     (str(_parent / "analyze_tab.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
-    (str(_parent / "shape_features_core.py"),   "."),
-    (str(_parent / "flatfield_core.py"),        "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "theme.py"),                 "."),
 ]
 
 # Bundle every first-party package so module imports resolve at runtime
 # inside the PyInstaller _MEIPASS root.
-for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline"):
+for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "core"):
     _pkg_path = _parent / _pkg
     if _pkg_path.is_dir():
         sibling_scripts.append((str(_pkg_path), _pkg))
@@ -98,11 +96,11 @@ hiddenimports = [
     # First-party repo-root pipeline module imported lazily inside
     # process_microscopy.compute_shape_features (function-level imports are
     # missed by PyInstaller's static analysis, unlike the top-level
-    # auto_threshold_core / well_token).
-    "shape_features_core",
+    # core.auto_threshold / core.well_token).
+    "core.shape_features",
     # Qt-free flat-field estimators shared by pipeline + viewer (imported lazily
     # inside the review-image controller, so static analysis can miss it).
-    "flatfield_core",
+    "core.flatfield",
     # numpy internals
     "numpy.core._multiarray_umath",
     "numpy.core._multiarray_tests",

@@ -35,7 +35,7 @@ from well_viewer.data.data_loading import (
 )
 from well_viewer.domain.ratio_models import build_ratio_index, is_ratio_key, ratio_name_from_key
 from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
-from shape_features_core import is_shape_column, label_for as shape_label_for
+from core.shape_features import is_shape_column, label_for as shape_label_for
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")

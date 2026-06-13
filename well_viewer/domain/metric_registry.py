@@ -96,5 +96,5 @@ def column_gating_exempt(col: str) -> bool:
             return True
     # Shape/morphology columns aren't metrics in the combo sense, but share the
     # same "not an intensity → don't fluor-gate" property.
-    from shape_features_core import is_shape_column
+    from core.shape_features import is_shape_column
     return is_shape_column(col)

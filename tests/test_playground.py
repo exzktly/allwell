@@ -46,7 +46,7 @@ def test_correct_single_frame_parity_per_image():
 
 def test_correct_single_frame_parity_combined_empty_well():
     img = _frame(1)
-    from flatfield_core import normalize_flatfield
+    from core.flatfield import normalize_flatfield
     B = pm.estimate_background_field([img, img * 0.9 + 5, img * 1.1])
     normB = normalize_flatfield(B)
     got = pm.correct_single_frame(img, flatfield_mode="empty_well",

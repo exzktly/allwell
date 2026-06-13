@@ -57,7 +57,7 @@ from services.remote_config import (
     to_rsync_path,
     update_bandwidth,
 )
-from aw_safe import swallowed
+from core.aw_safe import swallowed
 
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
@@ -92,15 +92,15 @@ _CSV_ONLY_GLOBS: tuple[str, ...] = ("*.csv", "pipeline_info.json")
 # stat-pass when nothing changed.
 _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "process_microscopy.py",
-    "auto_threshold_core.py",
-    "well_token.py",
-    # §C shape features: process_microscopy.compute_shape_features imports
-    # this on every run, so the remote needs it too (else ModuleNotFoundError).
-    "shape_features_core.py",
-    # Flat-field estimators: process_microscopy imports flatfield_core at module
-    # top level (the empty-well / gaussian / basic correction), so the remote
-    # needs it too or the import aborts the run with ModuleNotFoundError.
-    "flatfield_core.py",
+    # Shared Qt-free core package — both the pipeline and the GUI import these,
+    # and process_microscopy re-imports them at module top level, so the remote
+    # needs the whole package or the run aborts with ModuleNotFoundError.
+    "core/__init__.py",
+    "core/auto_threshold.py",
+    "core/aw_safe.py",
+    "core/flatfield.py",
+    "core/shape_features.py",
+    "core/well_token.py",
     # Pipeline components: process_microscopy re-imports the Qt-free ``pipeline``
     # package at module top level (background-subtraction math, Cellpose +
     # StarDist segmenters, and the atomic output writers; the Torch / TensorFlow
@@ -109,12 +109,8 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/__init__.py",
     "pipeline/background.py",
     "pipeline/cellpose.py",
-    "pipeline/stardist.py",
     "pipeline/io.py",
-    # Qt-free observable-suppression helper (logged swallow): process_microscopy
-    # imports aw_safe at module top level, so the remote needs it too or the
-    # import aborts with ModuleNotFoundError.
-    "aw_safe.py",
+    "pipeline/stardist.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.
@@ -589,7 +585,7 @@ def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
 def _canonical_well_from_path(stem: str) -> str | None:
     """Normalize a path stem like ``A1`` or ``A01`` to canonical
     ``A01``. Returns None if the stem isn't a 96-well token."""
-    from well_token import canonical_well_label
+    from core.well_token import canonical_well_label
     return canonical_well_label(stem)
 
 

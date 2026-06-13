@@ -39,8 +39,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # that constant moves, this list must follow.
 REQUIRED_FILES: tuple[str, ...] = (
     "process_microscopy.py",
-    "auto_threshold_core.py",
-    "well_token.py",
+    "core/auto_threshold.py",
+    "core/well_token.py",
     # v5.2.1: headless-only requirements file (no PySide6/pyobjc/
     # pyinstaller). See _Docs/requirements.txt for the GUI superset.
     "_Docs/requirements-remote.txt",

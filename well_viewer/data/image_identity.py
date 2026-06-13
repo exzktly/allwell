@@ -34,7 +34,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
-from well_token import canonical_well_label
+from core.well_token import canonical_well_label
 
 # pandas is imported lazily inside the Series-level helpers so the
 # pipeline (process_microscopy.py) can import this module without

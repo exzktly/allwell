@@ -20,7 +20,7 @@ from services.remote_config import load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.run_dashboard import RunDashboard
 from widgets.wrap_checkbox import WrapCheckBox
-import shape_features_core as _sfc
+import core.shape_features as _sfc
 
 # ---------------------------------------------------------------------------
 # Schema vocabulary — kept in sync with process_microscopy.py

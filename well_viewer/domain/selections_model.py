@@ -28,7 +28,7 @@ import re
 import uuid
 from typing import Any, Callable, Iterable, Optional, Sequence
 
-from well_token import canonical_well_label
+from core.well_token import canonical_well_label
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer.domain.selections_model")

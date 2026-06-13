@@ -56,7 +56,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 import theme  # noqa: E402
-from well_token import canonical_well_label  # noqa: E402
+from core.well_token import canonical_well_label  # noqa: E402
 
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"

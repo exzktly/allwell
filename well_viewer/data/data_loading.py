@@ -129,7 +129,7 @@ def detect_shape_features(df: pd.DataFrame) -> List[str]:
     """
     if df is None or df.empty:
         return []
-    import shape_features_core as sfc
+    import core.shape_features as sfc
     present = set(df.columns)
     return [c for c in sfc.ALL_COLUMNS if c in present]
 

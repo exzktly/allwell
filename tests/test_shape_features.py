@@ -15,7 +15,7 @@ import pytest
 
 from PySide6.QtWidgets import QApplication, QComboBox
 
-import shape_features_core as sfc
+import core.shape_features as sfc
 from well_viewer.core.channel_state import ChannelState
 from well_viewer.core.ui_helpers import set_combo_values_sectioned
 

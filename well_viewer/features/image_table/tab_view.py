@@ -229,7 +229,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     rows_spin = QSpinBox(opts_row)
     rows_spin.setRange(1, 12)
     rows_spin.setValue(int(ctx.app._app_state.image_table.rows))
-    rows_spin.setFixedWidth(56)
+    # Wide enough that a two-digit value (up to 12) clears the up/down arrows
+    # instead of being clipped against them.
+    rows_spin.setFixedWidth(70)
     rows_spin.setToolTip("Grid rows (Build sets this automatically).")
     rows_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
     orow.addWidget(rows_spin)
@@ -238,7 +240,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     cols_spin = QSpinBox(opts_row)
     cols_spin.setRange(1, 12)
     cols_spin.setValue(int(ctx.app._app_state.image_table.cols))
-    cols_spin.setFixedWidth(56)
+    cols_spin.setFixedWidth(70)
     cols_spin.setToolTip("Grid columns (Build sets this automatically).")
     cols_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
     orow.addWidget(cols_spin)

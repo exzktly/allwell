@@ -21,7 +21,7 @@ import pytest
 import process_microscopy as pm
 # The StarDist segmenters + per-worker model state moved here (pm re-exports the
 # functions); the model global must be patched where it actually lives.
-import microscopy_stardist as _stardist
+import pipeline.stardist as _stardist
 
 
 @pytest.fixture(autouse=True)

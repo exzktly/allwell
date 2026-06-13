@@ -2,7 +2,7 @@
 
 Exercises the *core* of the analysis pipeline — ``process_image_group`` —
 through the real path: flat-field -> background subtraction
-(``microscopy_background``) -> StarDist nuclear segmentation -> per-cell
+(``pipeline.background``) -> StarDist nuclear segmentation -> per-cell
 quantification -> record assembly + output-image writing.
 
 Requires the ML stack (TensorFlow + StarDist); skipped automatically where it's

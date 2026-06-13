@@ -1,4 +1,4 @@
-"""Unit tests for microscopy_background.py (extracted from process_microscopy in P4).
+"""Unit tests for pipeline.background.py (extracted from process_microscopy in P4).
 
 These exercise the module *directly* (not via the ``process_microscopy``
 re-export) so the extracted correction math is covered as a standalone unit.
@@ -8,7 +8,7 @@ Pure numpy/scipy — no ML stack required.
 import numpy as np
 import pytest
 
-import microscopy_background as mb
+from pipeline import background as mb
 
 
 def _rng(seed=0):

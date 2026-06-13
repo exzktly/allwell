@@ -4,7 +4,7 @@
 The remote worker only receives the files listed in
 ``services.remote_runner._REQUIRED_REMOTE_FILES``. If the pipeline grows a new
 repo-root dependency (as happened with ``flatfield_core`` and now
-``microscopy_background``) and it's not added to the manifest, the remote run
+``pipeline.background``) and it's not added to the manifest, the remote run
 aborts with ``ModuleNotFoundError`` — a class of bug this test prevents.
 
 It scans *all* imports in ``process_microscopy.py`` (module-level and

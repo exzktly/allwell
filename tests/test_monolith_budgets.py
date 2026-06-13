@@ -21,8 +21,8 @@ Baselines (set when P4 began the decomposition):
   decomposition into ``_load_/_correct_/_segment_/_write_processed_/_quantify_
   image_group`` phase helpers (was 4441 inline; +101 scaffolding, behaviour
   byte-identical). The P4 module extractions — background-correction
-  (``microscopy_background.py``), Cellpose (``microscopy_cellpose.py``), StarDist
-  (``microscopy_stardist.py``), output-writer (``microscopy_io.py``) — had taken
+  (``pipeline.background.py``), Cellpose (``pipeline.cellpose.py``), StarDist
+  (``pipeline.stardist.py``), output-writer (``pipeline.io.py``) — had taken
   it 5129 → ~4470.
 - image_table/controller.py: 1494 lines, after extracting the image_compose /
   export / grid_layout layers — was 2486.

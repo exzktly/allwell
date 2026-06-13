@@ -39,10 +39,10 @@ def _walk_py(root: Path):
 
 PIPELINE_FILES = [
     "process_microscopy.py",
-    "microscopy_background.py",
-    "microscopy_cellpose.py",
-    "microscopy_stardist.py",
-    "microscopy_io.py",
+    "pipeline/background.py",
+    "pipeline/cellpose.py",
+    "pipeline/stardist.py",
+    "pipeline/io.py",
     "auto_threshold_core.py",
     "flatfield_core.py",
     "shape_features_core.py",

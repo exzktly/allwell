@@ -125,9 +125,9 @@ def test_build_pipeline_args_general_cellpose():
 def test_segment_cellpose_honors_params(monkeypatch):
     pytest.importorskip("scipy")
     import process_microscopy as pm
-    # The Cellpose segmenters + model cache live in microscopy_cellpose now
+    # The Cellpose segmenters + model cache live in pipeline.cellpose now
     # (pm re-exports them). Patch the cache where it actually lives.
-    import microscopy_cellpose as mc
+    import pipeline.cellpose as mc
 
     calls: dict = {}
 

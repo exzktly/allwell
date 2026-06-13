@@ -74,10 +74,11 @@ allwell/
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
-├── microscopy_background.py     ← Qt-free background/illumination-correction math (re-exported by pm)
-├── microscopy_cellpose.py       ← Qt-free Cellpose segmenters (Torch imported lazily)
-├── microscopy_stardist.py       ← Qt-free StarDist segmenters + per-worker model state (TF lazy)
-├── microscopy_io.py             ← Qt-free atomic output writers (images / CSVs / overlay)
+├── pipeline/                    ← Qt-free pipeline components extracted from pm (re-exported by it)
+│   ├── background.py            ← background/illumination-correction math
+│   ├── cellpose.py              ← Cellpose segmenters (Torch imported lazily)
+│   ├── stardist.py              ← StarDist segmenters + per-worker model state (TF lazy)
+│   └── io.py                    ← atomic output writers (images / CSVs / overlay)
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── auto_threshold_core.py       ← Otsu helpers shared by pipeline + GUI (stdlib + numpy only)
 ├── well_token.py                ← canonical 96-well token parser (single source of truth, stdlib only)
@@ -97,7 +98,7 @@ allwell/
 ```
 
 The repo-root helpers `auto_threshold_core.py`, `well_token.py`,
-`shape_features_core.py`, `flatfield_core.py`, the `microscopy_*` modules, and
+`shape_features_core.py`, `flatfield_core.py`, the `pipeline/` package, and
 `aw_safe.py` are *deliberately at repo root* (not under `well_viewer/`): the
 pipeline contract forbids `well_viewer` / `widgets` / Qt imports, so anything
 both the pipeline and the GUI need to agree on has to live in a Qt-free module
@@ -796,16 +797,17 @@ must run in environments that don't have the GUI installed (CI workers, headless
 boxes).
 
 **Decomposition.** `process_microscopy.py` is the orchestrator + CLI; the heavy
-cohesive clusters were extracted into sibling Qt-free repo-root modules and
-**re-exported** so `pm.<name>` call sites (and the remote worker) are unchanged:
-`microscopy_background` (background/illumination math), `microscopy_cellpose`
-(Cellpose segmenters; Torch lazy), `microscopy_stardist` (StarDist segmenters +
+cohesive clusters were extracted into the Qt-free **`pipeline/` package** (at
+repo root, so the pipeline can import it without the GUI) and **re-exported** so
+`pm.<name>` call sites (and the remote worker) are unchanged:
+`pipeline.background` (background/illumination math), `pipeline.cellpose`
+(Cellpose segmenters; Torch lazy), `pipeline.stardist` (StarDist segmenters +
 per-worker model state behind `set_model`/`set_fov_label`; TensorFlow lazy), and
-`microscopy_io` (atomic image/CSV/overlay writers). The two ML runtimes stay
+`pipeline.io` (atomic image/CSV/overlay writers). The two ML runtimes stay
 behind lazy imports, so importing `process_microscopy` pulls in **neither TF nor
-Torch** — they load only when a worker actually segments. Each extracted module
-is in the remote manifest (`test_remote_manifest.py`) and the file sizes are
-ratcheted by `test_monolith_budgets.py`.
+Torch** — they load only when a worker actually segments. Each `pipeline`
+module is in the remote manifest (`test_remote_manifest.py`) and the file sizes
+are ratcheted by `test_monolith_budgets.py`.
 
 That is also why the auto-threshold estimator was inlined into
 `process_microscopy.py` (`_estimate_thresholds_standalone`,

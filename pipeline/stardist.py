@@ -26,7 +26,7 @@ from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
 
-from microscopy_background import _isotropic_disk_tophat
+from pipeline.background import _isotropic_disk_tophat
 
 # Log under the pipeline's logger name so diagnostic lines (e.g. the per-FOV
 # ``seg-input`` line, the last thing printed before a ClipperLib abort) are

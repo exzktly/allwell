@@ -75,20 +75,20 @@ from skimage.segmentation import watershed
 # ---------------------------------------------------------------------------
 
 # Per-worker Cellpose model cache + the Cellpose segmenters live in the Qt-free
-# ``microscopy_cellpose`` module (Torch is imported lazily there, so importing it
+# ``pipeline.cellpose`` module (Torch is imported lazily there, so importing it
 # does not load Torch). Re-exported below so ``_CELLPOSE_MODELS`` /
 # ``_segment_cellpose`` / ``_cellpose_model`` resolve under this module too.
-from microscopy_cellpose import (  # noqa: E402,F401
+from pipeline.cellpose import (  # noqa: E402,F401
     _CELLPOSE_MODELS,
     _cellpose_model,
     _segment_cellpose,
 )
 # The StarDist segmenters + their per-worker model/FOV state live in the Qt-free
-# ``microscopy_stardist`` module (TensorFlow is imported lazily there; the model
+# ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
 # segmentation dispatch resolves them under this module too.
-import microscopy_stardist as _stardist  # noqa: E402
-from microscopy_stardist import (  # noqa: E402,F401
+import pipeline.stardist as _stardist  # noqa: E402
+from pipeline.stardist import (  # noqa: E402,F401
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
 )
@@ -129,10 +129,10 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 
 
 # Atomic output writers (images / CSVs / overlay) moved to the Qt-free
-# ``microscopy_io`` module. Re-exported so the many call sites here (and the
+# ``pipeline.io`` module. Re-exported so the many call sites here (and the
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
-from microscopy_io import (  # noqa: E402,F401
+from pipeline.io import (  # noqa: E402,F401
     _AtomicTextHandle,
     _fsync_path,
     _safe_atomic_text_write,
@@ -864,10 +864,10 @@ def load_2d_gray(path: Path) -> np.ndarray:
     return img.astype(np.float32)
 
 
-# Background-correction math moved to ``microscopy_background.py`` (a Qt-free
+# Background-correction math moved to ``pipeline.background.py`` (a Qt-free
 # cohesive module). Re-exported here so ``pm.<name>`` call sites and the remote
 # worker are unchanged. See that module for the implementations.
-from microscopy_background import (  # noqa: E402,F401
+from pipeline.background import (  # noqa: E402,F401
     BACKGROUND_METHODS,
     apply_tophat,
     combined_empty_well_correct,
@@ -1677,7 +1677,7 @@ def build_processed_output_path(
 # process_image_group() is a thin orchestrator over these five phases (T4). Each
 # is a verbatim lift of the corresponding block from the original monolith — the
 # leaf work (background subtraction, segmentation, shape/region features, atomic
-# image writes) still lives in microscopy_background / _stardist / _cellpose /
+# image writes) still lives in pipeline.background / _stardist / _cellpose /
 # _io and the shape_features helpers; these just group the per-FOV sequencing so
 # the orchestrator reads as correct -> segment -> write -> quantify.
 

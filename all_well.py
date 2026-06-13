@@ -991,11 +991,6 @@ def main() -> None:
     # them there triggers the alias walk on every widget that uses QSS.
     from well_viewer.core.app_fonts import register_qt_fonts as _register_qt_fonts
     _ui_family, _mono_family = _register_qt_fonts()
-    # TEMP DIAGNOSTIC (revert after confirming): swap the UI and mono faces so
-    # the whole app chrome renders in JetBrains Mono — an unmistakable visual
-    # confirmation that the bundled fonts are actually loading. If the app looks
-    # monospaced, font bundling works; revert this one line to restore Inter.
-    _ui_family, _mono_family = _mono_family, _ui_family
     try:
         theme_v2.Typography.family = _ui_family or app.font().family()
     except Exception:

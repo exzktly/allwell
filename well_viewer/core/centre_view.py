@@ -149,7 +149,7 @@ def build_centre(app, parent: QWidget) -> None:
     # container and the five sub-tab frames so builder closures (and the
     # drain) can reference them before the nested QTabWidget exists.
     plotting_container = QWidget(app._notebook)
-    QVBoxLayout(plotting_container).setContentsMargins(12, 12, 12, 12)
+    QVBoxLayout(plotting_container).setContentsMargins(0, 0, 0, 0)
 
     _PLOT_SUBTABS = [
         "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map",
@@ -170,7 +170,7 @@ def build_centre(app, parent: QWidget) -> None:
     tab_frames: Dict[str, QWidget] = {}
     for _t in _PLOT_SUBTABS:
         _f = QWidget()
-        QVBoxLayout(_f).setContentsMargins(0, 0, 0, 0)
+        QVBoxLayout(_f).setContentsMargins(12, 0, 12, 12)
         tab_frames[_t] = _f
 
     # Group definitions: ordered list of (title, builder, eager_flag).
@@ -264,7 +264,7 @@ def build_centre(app, parent: QWidget) -> None:
             f"border-bottom: 1px solid {_C.border_subtle}; }}"
         )
         arl = QHBoxLayout(action_row)
-        arl.setContentsMargins(0, 4, 0, 4)
+        arl.setContentsMargins(12, 4, 12, 4)
         arl.setSpacing(_S.sm)
 
         # Phase 11b (A4): the channel selector is now a single global combo

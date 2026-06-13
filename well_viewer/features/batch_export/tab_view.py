@@ -147,15 +147,6 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(12, 12, 12, 12)
 
-    subtitle = QLabel(
-        "Configure and run inline line / bar / scatter batch-export workflows "
-        "from this tab.",
-        parent,
-    )
-    subtitle.setObjectName("Muted")
-    subtitle.setWordWrap(True)
-    layout.addWidget(subtitle)
-
     # v2: pick-one mode via SegmentedControl instead of a row of toggle
     # QPushButtons. Each segment carries the mode key in data; currentChanged
     # routes to the appropriate _open_*_batch_export entrypoint. The chart-type

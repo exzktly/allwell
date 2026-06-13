@@ -207,6 +207,21 @@ class Radii:
     pill = 999   # --r-pill : status dot rings, count badges
 
 
+def _chevron_down_path() -> str:
+    """Absolute forward-slash path to the dropdown chevron SVG (dev + frozen).
+
+    Used by :func:`qss` for every native dropdown caret — combo boxes and
+    menu-backed tool buttons — so they all share one glyph at one size instead
+    of Qt's inconsistent native arrows (the small ``menu-indicator`` on
+    instant-popup buttons vs the large ``menu-button`` arrow on split buttons).
+    """
+    import os
+    import sys
+
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "assets", "icons", "chevron-down.svg").replace(os.sep, "/")
+
+
 def qss() -> str:
     """Return the application-wide base stylesheet.
 
@@ -215,6 +230,7 @@ def qss() -> str:
     the returned string.
     """
     c, t, r, s = Colors, Typography, Radii, Spacing
+    _chev = _chevron_down_path()
     return f"""
 * {{
     font-family: {t.family};
@@ -313,19 +329,22 @@ QPushButton:disabled, QToolButton:disabled {{
 }}
 
 /* Dropdown-caret tool buttons (those marked ``hasMenu``). Reserve room on the
-   right so the caret sits in its own space instead of being painted on top of
-   the centred label ("Channels: al▾"). Split buttons (MenuButtonPopup) get
-   Qt's native arrow in the dedicated menu-button section; we just give that
-   section a clean borderless look. (Instant-popup buttons can't render a
-   styled caret under Qt's stylesheet style, so their affordance is the label
-   itself — e.g. "More" — with the reserved padding keeping the layout tidy.) */
+   right and paint one shared chevron so every menu caret is the same size.
+   Qt's native arrows are inconsistent — the small ``menu-indicator`` on
+   instant-popup buttons (Channels / More / Crop) vs the large ``menu-button``
+   arrow on split buttons (Build table / Export) — so we override both (and the
+   combo ``down-arrow`` below) with the same 10x10 SVG glyph. */
 QToolButton[hasMenu="true"] {{
     padding-right: 20px;
 }}
-QToolButton[hasMenu="true"]::menu-button {{
+QToolButton[hasMenu="true"]::menu-button,
+QToolButton[hasMenu="true"]::menu-indicator {{
+    image: url({_chev});
+    width: 10px;
+    height: 10px;
     subcontrol-origin: padding;
     subcontrol-position: center right;
-    width: 18px;
+    right: 6px;
     border: none;
     background: transparent;
 }}
@@ -442,6 +461,11 @@ QComboBox:focus, QComboBox:on {{
 QComboBox::drop-down {{
     border: none;
     width: 18px;
+}}
+QComboBox::down-arrow {{
+    image: url({_chev});
+    width: 10px;
+    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {c.panel};

@@ -81,6 +81,12 @@ _fonts_dir = _parent / "assets" / "fonts"
 if _fonts_dir.is_dir():
     extra_data.append((str(_fonts_dir), "assets/fonts"))
 
+# Bundled UI icons (the dropdown chevron referenced by theme.qss()'s combo /
+# menu-button caret rules, resolved via ``_MEIPASS/assets/icons`` when frozen).
+_icons_dir = _parent / "assets" / "icons"
+if _icons_dir.is_dir():
+    extra_data.append((str(_icons_dir), "assets/icons"))
+
 datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 
 

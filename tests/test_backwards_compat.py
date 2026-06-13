@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-import shape_features_core as sfc
+import core.shape_features as sfc
 from well_viewer.domain.viewer_state import read_pipeline_info
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

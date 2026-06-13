@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import flatfield_core as fc
+import core.flatfield as fc
 
 
 def test_normalize_is_mean_one_and_floored():

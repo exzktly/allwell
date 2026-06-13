@@ -491,7 +491,7 @@ def build_centre(app, parent: QWidget) -> None:
             # fluor+ratio list (as this did before) dropped the section every
             # time the user changed plot sub-tabs, so shape metrics only
             # reappeared after a channel "wiggle" forced ``_update_channel_selector``.
-            from shape_features_core import label_for as _shape_label_for
+            from core.shape_features import label_for as _shape_label_for
             from well_viewer.core.ui_helpers import (
                 set_combo_values as _scv,
                 set_combo_values_sectioned as _scv_sectioned,

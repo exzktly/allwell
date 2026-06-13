@@ -80,11 +80,12 @@ allwell/
 │   ├── stardist.py              ← StarDist segmenters + per-worker model state (TF lazy)
 │   └── io.py                    ← atomic output writers (images / CSVs / overlay)
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
-├── auto_threshold_core.py       ← Otsu helpers shared by pipeline + GUI (stdlib + numpy only)
-├── well_token.py                ← canonical 96-well token parser (single source of truth, stdlib only)
-├── shape_features_core.py       ← Qt-free per-cell shape-feature catalog shared by pipeline + GUI
-├── flatfield_core.py            ← Qt-free flat-field illumination estimators shared by pipeline + GUI
-├── aw_safe.py                   ← Qt-free swallow()/swallowed() (logged exception suppression, pipeline side)
+├── core/                       ← shared Qt-free modules used by BOTH pipeline + GUI
+│   ├── auto_threshold.py       ← Otsu helpers (stdlib + numpy only)
+│   ├── well_token.py           ← canonical 96-well token parser (single source of truth)
+│   ├── shape_features.py       ← per-cell shape-feature catalog
+│   ├── flatfield.py            ← flat-field illumination estimators
+│   └── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
@@ -97,19 +98,21 @@ allwell/
 └── design/                      ← HTML mockups + screenshots — visual reference only
 ```
 
-The repo-root helpers `auto_threshold_core.py`, `well_token.py`,
-`shape_features_core.py`, `flatfield_core.py`, the `pipeline/` package, and
-`aw_safe.py` are *deliberately at repo root* (not under `well_viewer/`): the
+The shared `core/` package (`core.auto_threshold`, `core.well_token`,
+`core.shape_features`, `core.flatfield`, `core.aw_safe`) and the `pipeline/`
+package are *deliberately at repo root* (not under `well_viewer/`): the
 pipeline contract forbids `well_viewer` / `widgets` / Qt imports, so anything
 both the pipeline and the GUI need to agree on has to live in a Qt-free module
-the pipeline can import. **This contract is enforced** by
+the pipeline can import. `core/` holds the modules *both* sides import;
+`pipeline/` holds the components only the pipeline uses. **This contract is
+enforced** by
 `tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient`
 (no `well_viewer`/`widgets`/Qt import at any nesting) and
 `tests/test_remote_manifest.py` (every repo-root module the pipeline imports is
-in the remote upload manifest). `shape_features_core.py`
+in the remote upload manifest). `core.shape_features`
 (added with the shape-features work) is the single source of truth for the
 per-cell `shape_*` morphology columns — the pipeline emits them, the GUI
-detects/labels them. `flatfield_core.py` holds the flat-field illumination
+detects/labels them. `core.flatfield` holds the flat-field illumination
 estimators (`estimate_gaussian_flatfield` / `estimate_basic_flatfield` /
 `apply_flatfield`, mean-1 normalized): the pipeline applies them at run time, and
 the Segmentation tab's "Flat-field" validation view recomputes them on demand.
@@ -522,7 +525,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The legacy Movie Montage popout — its tab builder (`build_right_panel`), `montage.py` renderer, and `callbacks.py` — was folded into Image Table and then removed entirely (v6.0.x); its one live helper, the image pixel-value hover tooltip, now lives in `review_image/controller.py` next to its only caller. |
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` and `role_output_filename` both consume it. (As of the §6.2 self-sufficiency fix this catalog is **reader-side only** — the pipeline writer, `process_microscopy.build_processed_output_path`, uses explicit `suffix=` strings rather than importing `well_viewer`. If catalog-driven *writing* is revived, move `ROLE_CATALOG` into a Qt-free `*_core` module first so the pipeline can import it without breaking the contract.) The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
-| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `flatfield_core` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
+| `features/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `core.flatfield` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. |
 | `features/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods on a single raw frame chosen by well/channel/timepoint/FOV. Loads the raw frame + precomputed mask via the Image Table loaders (`_load_array` / `_load_mask_array`) and applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern). Display reuses the LUT/colormap (`ui_helpers.lut_colormap_to_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
@@ -539,7 +542,7 @@ Data-layer helpers (under `well_viewer/data/`):
 
 | Module | Role |
 |--------|------|
-| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `auto_threshold_core.py` so the pipeline and the GUI agree exactly. |
+| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `core.auto_threshold` so the pipeline and the GUI agree exactly. |
 | `data/zipfile_cache.py` | Process-wide LRU of open `ZipFile` handles, lock-guarded so `read_member_bytes` / `scan_zip_members` share one open file across the thousands of per-member reads the Image Table / heatmap / smFISH-worker paths issue. Invalidated on dataset swap. |
 
 ### 5.6 The data layer
@@ -838,7 +841,7 @@ Output dir
 `shape_centroid_row/col` that cell tracking links across timepoints) into each
 cell record; the selection comes from `--shape_features` and is recorded in
 `pipeline_info.json`. The feature catalog lives in the Qt-free repo-root
-`shape_features_core.py` so the pipeline (emit) and the GUI (detect/label) can't
+`core.shape_features` so the pipeline (emit) and the GUI (detect/label) can't
 drift. On the Review side `data_loading.detect_shape_features` finds the columns
 and the channel dropdown surfaces them as **sectioned virtual channels** (a
 "Shape Features" group via `ui_helpers.set_combo_values_sectioned`), with the
@@ -1690,4 +1693,4 @@ line. Newest first:
 
 - **5.5.1 (PR2).** Shape features flow pipeline→CSV→Review as sectioned virtual channels. Analyze's selector is now a compact `widgets/checkable_dropdown.CheckableDropdown` (replacing the wide chip grid); the Review channel combo builds sectioned entries via `set_combo_values_sectioned`, fixing shape metrics dropping out on plot sub-tab switches.
 
-- **5.5.0 (PR1).** `shape_features_core` added as the shared feature catalogue; the PyInstaller spec `collect_all`s torch/cellpose/btrack/trackastra; viewer read paths gained backwards-compat defaults (see the bw-compat test harness).
+- **5.5.0 (PR1).** `core.shape_features` added as the shared feature catalogue; the PyInstaller spec `collect_all`s torch/cellpose/btrack/trackastra; viewer read paths gained backwards-compat defaults (see the bw-compat test harness).

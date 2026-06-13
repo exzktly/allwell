@@ -19,7 +19,7 @@ from well_viewer.domain.ratio_models import (
     is_ratio_key,
     ratio_name_from_key,
 )
-from shape_features_core import is_shape_column
+from core.shape_features import is_shape_column
 
 
 @dataclass

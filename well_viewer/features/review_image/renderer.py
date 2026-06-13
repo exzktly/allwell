@@ -276,7 +276,7 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
         # raw frame (recomputed on the fly), before any background/top-hat. A
         # no-op when the mode resolves to no field (e.g. flatfield="none").
         if image_source == "flatfield":
-            import flatfield_core as _ffc
+            import core.flatfield as _ffc
             from well_viewer.features.review_image.controller import flatfield_field_for
             field = flatfield_field_for(
                 app, str(app._app_state.channel.active_image_channel or ""), fluor_arr,

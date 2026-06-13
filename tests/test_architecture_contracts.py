@@ -43,11 +43,11 @@ PIPELINE_FILES = [
     "pipeline/cellpose.py",
     "pipeline/stardist.py",
     "pipeline/io.py",
-    "auto_threshold_core.py",
-    "flatfield_core.py",
-    "shape_features_core.py",
-    "well_token.py",
-    "aw_safe.py",
+    "core/auto_threshold.py",
+    "core/flatfield.py",
+    "core/shape_features.py",
+    "core/well_token.py",
+    "core/aw_safe.py",
 ]
 
 

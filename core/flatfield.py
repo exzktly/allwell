@@ -2,10 +2,10 @@
 
 The pipeline (``process_microscopy.py``) applies these at run time; the Review
 viewer recomputes them on demand for the Segmentation tab's "Flat-field only"
-validation view. Kept at the repo root — like ``auto_threshold_core.py`` and
-``shape_features_core.py`` — so the pipeline can import it without pulling in
-``well_viewer`` / Qt, and the viewer can import it without pulling in the heavy
-pipeline ML stack. Dependencies: numpy + scipy only.
+validation view. Lives in the shared ``core`` package — like
+``core.auto_threshold`` and ``core.shape_features`` — so the pipeline can import
+it without pulling in ``well_viewer`` / Qt, and the viewer can import it without
+pulling in the heavy pipeline ML stack. Dependencies: numpy + scipy only.
 
 A "flat-field" here is a **mean-1 multiplicative illumination field**: dividing
 an image by it flattens slow illumination gradients (vignetting / uneven

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from services.input_resolution_service import resolve_input_output, tif_files_in
-from well_token import is_valid_well_name
+from core.well_token import is_valid_well_name
 from services.pipeline_runner import (
     PipelineRunner,
     ProgressTracker,
@@ -41,7 +41,7 @@ from ui.theme import (
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.run_dashboard import RunDashboard
 from widgets.wrap_checkbox import WrapCheckBox
-import shape_features_core as _sfc
+import core.shape_features as _sfc
 from well_viewer.core.safe import swallowed
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,

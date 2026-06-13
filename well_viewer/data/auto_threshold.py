@@ -46,7 +46,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
-from auto_threshold_core import (
+from core.auto_threshold import (
     DEFAULT_CELLS_PER_IMAGE_CAP,
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,

@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import grey_opening
 
-from flatfield_core import _FLATFIELD_SIGMA, apply_flatfield
+from core.flatfield import _FLATFIELD_SIGMA, apply_flatfield
 
 
 def apply_tophat(image: np.ndarray, radius: int) -> np.ndarray:

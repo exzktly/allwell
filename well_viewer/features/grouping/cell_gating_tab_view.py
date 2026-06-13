@@ -266,6 +266,10 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_status_label.setObjectName("Muted")
     root.addWidget(ctx.app._cell_gating_status_label)
 
+    # Paint the themed empty state now so the canvas is never a bare white
+    # block before a dataset loads (it only gets painted on data otherwise).
+    _cell_gating_plot_cdf(ctx.app)
+
 
 # ── public API ────────────────────────────────────────────────────────────
 
@@ -831,6 +835,24 @@ def _cell_gating_plot_cdf(app) -> None:
     if (not app._cell_gating_cell_areas
             and not app._cell_gating_fluor_data
             and not ratio_data):
+        # No data — paint a themed empty state instead of leaving the default
+        # white matplotlib canvas (a giant white block against the dark app).
+        fig = getattr(app, "_cell_gating_figure", None)
+        if fig is not None:
+            fig.clf()
+            fig.set_facecolor(get_color("BG_APP"))
+            ax = fig.add_subplot(111, facecolor=get_color("BG_PANEL"))
+            ax.set_axis_off()
+            ax.text(
+                0.5, 0.5,
+                "No dataset loaded.\nOpen a results folder to view cell-gating "
+                "distributions.",
+                transform=ax.transAxes, ha="center", va="center",
+                color=get_color("TXT_MUT"), fontsize=11, wrap=True,
+            )
+            canvas = getattr(app, "_cell_gating_canvas", None)
+            if canvas is not None:
+                canvas.draw_idle()
         return
 
     bg_app = get_color("BG_APP")

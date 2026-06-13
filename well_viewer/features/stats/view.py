@@ -133,7 +133,7 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     app._stats_ctrl = QWidget(parent)
     app._stats_ctrl.setObjectName("TabCtrl")  # data-gated until a dataset loads
     cl = QGridLayout(app._stats_ctrl)
-    cl.setContentsMargins(0, 6, 0, 6)
+    cl.setContentsMargins(0, 0, 0, 6)
 
     app._stats_test_label = QLabel("Test:", app._stats_ctrl)
     cl.addWidget(app._stats_test_label, 0, 0, Qt.AlignLeft)

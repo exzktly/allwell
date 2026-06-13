@@ -123,7 +123,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
     cl = QHBoxLayout(ctrl)
-    cl.setContentsMargins(0, 6, 0, 6)
+    cl.setContentsMargins(0, 0, 0, 6)
 
     cl.addWidget(QLabel("Channel:", ctrl))
     ctx.app._smfish_channel_cb = QComboBox(ctrl)

@@ -19,7 +19,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
     cl = QHBoxLayout(ctrl)
-    cl.setContentsMargins(8, 6, 8, 6)
+    cl.setContentsMargins(0, 0, 0, 6)
 
     cl.addWidget(QLabel("Well:", ctrl))
     ctx.app._review_well_lbl = QLabel("(select one well)", ctrl)

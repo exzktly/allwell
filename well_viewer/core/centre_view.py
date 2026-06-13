@@ -237,7 +237,7 @@ def build_centre(app, parent: QWidget) -> None:
             f"border-bottom: 1px solid {_C.border_subtle}; }}"
         )
         cbl = QHBoxLayout(ctxbar)
-        cbl.setContentsMargins(0, 6, 0, 6)
+        cbl.setContentsMargins(0, 0, 0, 6)
         cbl.setSpacing(_S.sm)
 
         # A standalone QTabBar with the SampleDefinitionsSubTabs object

@@ -34,7 +34,7 @@ from services.remote_runner import (
     stage_local_zips,
 )
 from services.subprocess_kill import signal_subprocess
-from core.aw_safe import swallowed
+from util.aw_safe import swallowed
 
 
 def classify_log_line(line: str) -> str:

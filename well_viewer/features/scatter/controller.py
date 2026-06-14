@@ -16,7 +16,7 @@ _logger = logging.getLogger(__name__)
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.channel_state_controller import populate_metric_combo
 from well_viewer.domain.ratio_models import is_ratio_key
-from core.shape_features import is_shape_column
+from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
@@ -176,7 +176,7 @@ def redraw_scatter(
     def _col_label(col: str) -> str:
         from well_viewer.data.metric_labels import split_metric_col
         if is_shape_column(col):
-            from core.shape_features import label_for as _shape_label_for
+            from pipeline.shape_features import label_for as _shape_label_for
             return _shape_label_for(col) or col
         parts = split_metric_col(col)
         if parts is None:
@@ -616,7 +616,7 @@ def update_scatter_menus(app) -> None:
     # shape-feature path. ``_label_to_channel_key`` (built by
     # ``_update_channel_selector``) maps each label back to its ``shape_*``
     # column so ``_col_for_scatter_axis`` resolves it like a ratio.
-    from core.shape_features import label_for as _shape_label_for
+    from pipeline.shape_features import label_for as _shape_label_for
     from well_viewer.core.ui_helpers import set_combo_values_sectioned as _set_combo_values_sectioned
     shape_cols = list(app._app_state.channel.shape_features or [])
     shape_labels = [_shape_label_for(c) or c for c in shape_cols]

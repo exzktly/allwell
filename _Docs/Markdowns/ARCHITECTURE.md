@@ -74,18 +74,18 @@ allwell/
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
-├── pipeline/                    ← Qt-free pipeline components extracted from pm (re-exported by it)
+├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── background.py            ← background/illumination-correction math
-│   ├── cellpose.py              ← Cellpose segmenters (Torch imported lazily)
-│   ├── stardist.py              ← StarDist segmenters + per-worker model state (TF lazy)
-│   └── io.py                    ← atomic output writers (images / CSVs / overlay)
-├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
-├── core/                       ← shared Qt-free modules used by BOTH pipeline + GUI
-│   ├── auto_threshold.py       ← Otsu helpers (stdlib + numpy only)
+│   ├── auto_threshold.py       ← Otsu / threshold helpers (GUI Cell-Gating reads these too)
+│   ├── flatfield.py            ← flat-field illumination estimators (GUI validation view too)
+│   ├── shape_features.py       ← per-cell shape-feature catalog (pipeline emits, GUI labels)
+│   ├── cellpose.py             ← Cellpose segmenters (Torch imported lazily)
+│   ├── stardist.py             ← StarDist segmenters + per-worker model state (TF lazy)
+│   └── io.py                   ← atomic output writers (images / CSVs / overlay)
+├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth)
-│   ├── shape_features.py       ← per-cell shape-feature catalog
-│   ├── flatfield.py            ← flat-field illumination estimators
 │   └── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
+├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
@@ -98,21 +98,27 @@ allwell/
 └── design/                      ← HTML mockups + screenshots — visual reference only
 ```
 
-The shared `core/` package (`core.auto_threshold`, `core.well_token`,
-`core.shape_features`, `core.flatfield`, `core.aw_safe`) and the `pipeline/`
-package are *deliberately at repo root* (not under `well_viewer/`): the
-pipeline contract forbids `well_viewer` / `widgets` / Qt imports, so anything
-both the pipeline and the GUI need to agree on has to live in a Qt-free module
-the pipeline can import. `core/` holds the modules *both* sides import;
-`pipeline/` holds the components only the pipeline uses. **This contract is
+The `pipeline/` package (the Qt-free analysis-pipeline modules:
+`pipeline.auto_threshold`, `pipeline.background`, `pipeline.flatfield`,
+`pipeline.shape_features`, `pipeline.cellpose`, `pipeline.stardist`,
+`pipeline.io`) and the `util/` package (`util.well_token`, `util.aw_safe`)
+are *deliberately at repo root* (not under `well_viewer/`): the pipeline
+contract forbids `well_viewer` / `widgets` / Qt imports, so anything both the
+pipeline and the GUI need to agree on has to live in a Qt-free module the
+pipeline can import. `pipeline/` holds the analysis-domain modules — some used
+only by the pipeline (`background`, `cellpose`, `stardist`, `io`), others the
+GUI also reads (`auto_threshold` for Cell-Gating, `flatfield` /
+`shape_features` for validation/labelling); the GUI is free to import
+`pipeline.*`, only the reverse is forbidden. `util/` holds general Qt-free
+helpers with no pipeline- or GUI-specific knowledge. **This contract is
 enforced** by
 `tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient`
 (no `well_viewer`/`widgets`/Qt import at any nesting) and
 `tests/test_remote_manifest.py` (every repo-root module the pipeline imports is
-in the remote upload manifest). `core.shape_features`
+in the remote upload manifest). `pipeline.shape_features`
 (added with the shape-features work) is the single source of truth for the
 per-cell `shape_*` morphology columns — the pipeline emits them, the GUI
-detects/labels them. `core.flatfield` holds the flat-field illumination
+detects/labels them. `pipeline.flatfield` holds the flat-field illumination
 estimators (`estimate_gaussian_flatfield` / `estimate_basic_flatfield` /
 `apply_flatfield`, mean-1 normalized): the pipeline applies them at run time, and
 the Segmentation tab's "Flat-field" validation view recomputes them on demand.
@@ -542,7 +548,7 @@ Data-layer helpers (under `well_viewer/data/`):
 
 | Module | Role |
 |--------|------|
-| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `core.auto_threshold` so the pipeline and the GUI agree exactly. |
+| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `pipeline.auto_threshold` so the pipeline and the GUI agree exactly. |
 | `data/zipfile_cache.py` | Process-wide LRU of open `ZipFile` handles, lock-guarded so `read_member_bytes` / `scan_zip_members` share one open file across the thousands of per-member reads the Image Table / heatmap / smFISH-worker paths issue. Invalidated on dataset swap. |
 
 ### 5.6 The data layer
@@ -841,7 +847,7 @@ Output dir
 `shape_centroid_row/col` that cell tracking links across timepoints) into each
 cell record; the selection comes from `--shape_features` and is recorded in
 `pipeline_info.json`. The feature catalog lives in the Qt-free repo-root
-`core.shape_features` so the pipeline (emit) and the GUI (detect/label) can't
+`pipeline.shape_features` so the pipeline (emit) and the GUI (detect/label) can't
 drift. On the Review side `data_loading.detect_shape_features` finds the columns
 and the channel dropdown surfaces them as **sectioned virtual channels** (a
 "Shape Features" group via `ui_helpers.set_combo_values_sectioned`), with the
@@ -1660,6 +1666,8 @@ an allowlist before a guard could be clean.
 The 6.0 series adds the live run-status dashboard and hardens the run path
 (remote fetch, crash-safety, dead-code removal) on top of the 5.5 analysis
 line. Newest first:
+
+- **6.5.0 — File-organization reorg: `pipeline/` + `util/`.** Consolidated the Qt-free repo-root modules into two coherent packages. The analysis-domain modules — `auto_threshold`, `flatfield`, `shape_features` (formerly in the short-lived `core/` "shared" package) — moved into the existing **`pipeline/`** package alongside `background` / `cellpose` / `stardist` / `io`, since they belong to the analysis pipeline (the GUI is free to import `pipeline.*`; only the reverse is forbidden). The genuinely general helpers — `well_token` and `aw_safe` — moved to a new **`util/`** package. The over-abstracted `core/` package was dissolved. All imports were rewritten repo-wide and the remote-sync manifest (`services.remote_runner._REQUIRED_REMOTE_FILES`), the architecture-contract `PIPELINE_FILES` list, `scripts/_bootstrap_lib.REQUIRED_FILES`, and the PyInstaller spec's package loop + `hiddenimports` were updated to match. Earlier in the wave the redundant `microscopy_*` root modules were re-homed under `pipeline/` and the dead multi-theme system (`ui/theme/{light,beige,amber}.qss` + `theme_manager.py`) plus ~513 lines of unreferenced functions/classes were removed. Version pill → `v6.5.0`.
 
 - **6.4.1 — UI bug-fixes.** Fixed a `QPalette.color` crash entering the Segmentation tab (a disabled segmented-control segment passed the `QPalette.Disabled` *group* where a *role* was expected); fixed an `AttributeError` on the smFISH (and any) plot when the cursor left the canvas (`_on_figure_leave` still referenced the bottom-right coordinate label removed in 6.4.0); widened the Image Table grid-size spin boxes so two-digit values aren't clipped against the up/down arrows; and corrected the Groups tab's bottom hint ("Click a group below" → "above", since it sits below the list). Version pill → `v6.4.1`.
 

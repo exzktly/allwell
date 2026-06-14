@@ -592,7 +592,7 @@ def stats_update_tp_menu(app) -> None:
     # col_for_scatter_entry, and the Property combo collapses to a single
     # Calculated Val for them (see populate_metric_combo).
     ch_options.extend(app._ratio_dropdown_labels())
-    from core.shape_features import label_for as _shape_label_for
+    from pipeline.shape_features import label_for as _shape_label_for
     for _col in (app._app_state.channel.shape_features or []):
         ch_options.append(_shape_label_for(_col) or _col)
     if not ch_options:

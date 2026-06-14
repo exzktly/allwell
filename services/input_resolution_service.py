@@ -122,6 +122,44 @@ def iter_well_tokens(input_dir: Path) -> "list[str]":
     return out
 
 
+def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) -> int:
+    """Best-effort count of distinct wells the run will produce, for the Analyze
+    progress denominator.
+
+    Mirrors :func:`resolve_input_output`'s layout detection so the dashboard's
+    "x / N wells" matches what actually gets processed — including loose TIFs
+    that sit inside an ``in/`` folder (previously mis-counted as 1). Counts
+    grouped wells (per-well zips / folders) when present, else distinct well
+    tokens parsed from loose TIFs at the selected root or inside ``in/``.
+    """
+    from util.well_token import canonical_well_label
+
+    in_sub = raw / "in"
+    fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
+    well_idx = fields.index("well") if "well" in fields else -1
+
+    def _loose(folder: Path) -> int:
+        if well_idx < 0:
+            return 0
+        toks: set[str] = set()
+        for p in tif_files_in(folder):
+            parts = p.stem.split(filename_sep)
+            tok = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
+            if tok:
+                toks.add(tok)
+        return len(toks)
+
+    if raw.name.lower() == "in" and _has_well_content(raw):
+        return len(iter_well_tokens(raw)) or 1
+    if in_sub.is_dir() and _has_well_content(in_sub):
+        return len(iter_well_tokens(in_sub)) or 1
+    for folder in (raw, in_sub):
+        n = _loose(folder)
+        if n:
+            return n
+    return len(tif_files_in(raw)) or 1
+
+
 def append_loose_images_to_zips(
     grouped_dir: Path,
     *,
@@ -392,6 +430,71 @@ def run_zipper(
                 swallowed()  # was: pass (silent except)
 
 
+def _group_loose_tifs_in_place(
+    folder: Path,
+    output_dir: Path,
+    *,
+    log_fn: Callable[[str], None] | None,
+    progress_fn: Callable[[str], None] | None,
+    filename_schema: str,
+    filename_sep: str,
+    proc_hook: Callable[[subprocess.Popen | None], None] | None,
+    move_source_tifs: bool,
+) -> tuple[Path, Path, Callable[[], None] | None]:
+    """Group loose TIFs that live *directly inside* ``folder`` into per-well
+    subfolders within ``folder`` itself.
+
+    This covers the case where a user puts ungrouped TIFs inside an ``in/``
+    folder (or selects an ``in/`` folder full of loose TIFs). Such a folder used
+    to be mistaken for already-grouped input — the grouper never ran, the run
+    counted "1 well", and the pipeline stalled trying to flat-scan everything.
+    Here we run WellPlateZipper with ``search == output == folder`` so the loose
+    TIFs become ``folder/<well>/`` folders the pipeline reads in folder mode.
+
+    Returns ``(folder, output_dir, on_success)``.
+    """
+    source_tifs = tuple(tif_files_in(folder))
+    if log_fn:
+        log_fn(
+            f"[zipper] Found {len(source_tifs)} loose TIF(s) inside "
+            f"{folder.name}/ — grouping into per-well folders in place.\n"
+        )
+    run_zipper(
+        folder,
+        folder,
+        log_fn=log_fn,
+        progress_fn=progress_fn,
+        filename_schema=filename_schema,
+        filename_sep=filename_sep,
+        proc_hook=proc_hook,
+        move_source_tifs=move_source_tifs,
+    )
+    if not _has_well_content(folder):
+        raise ValueError(
+            "WellPlateZipper ran but produced no well folders.\n\n"
+            "Common causes:\n"
+            "  • The 'well' position in the Filename Schema does not match the actual well token in your filenames.\n"
+            "  • The separator character does not match your filenames.\n"
+            "  • The well token is not a valid 96-well plate position (A01–H12).\n\n"
+            f"Schema used: {filename_schema}  |  Separator: '{filename_sep}'"
+        )
+
+    if move_source_tifs:
+        # Sources were moved into the well folders; nothing left to clean up.
+        return folder, output_dir, None
+
+    def _on_success() -> None:
+        """Delete the now-redundant loose TIFs once the pipeline completes
+        cleanly (their grouped copies live under folder/<well>/)."""
+        for tif in source_tifs:
+            try:
+                tif.unlink()
+            except OSError:
+                pass
+
+    return folder, output_dir, _on_success
+
+
 def resolve_input_output(
     raw: Path,
     *,
@@ -426,9 +529,39 @@ def resolve_input_output(
         raise ValueError(f"Not a directory:\n{raw}")
 
     if raw.name.lower() == "in":
+        # A folder named "in" is normally already-grouped input — but if it
+        # actually holds loose, ungrouped TIFs, group them in place rather than
+        # mis-treating them as grouped (which stalled the run at "1 well").
+        if not _has_well_content(raw) and len(tif_files_in(raw)) > 3:
+            return _group_loose_tifs_in_place(
+                raw,
+                raw.parent / "out",
+                log_fn=log_fn,
+                progress_fn=progress_fn,
+                filename_schema=filename_schema,
+                filename_sep=filename_sep,
+                proc_hook=proc_hook,
+                move_source_tifs=move_source_tifs,
+            )
         return raw, raw.parent / "out", None
 
     in_sub = raw / "in"
+    # A pre-existing ``in/`` subfolder full of loose, ungrouped TIFs (the user
+    # dropped raw images into in/ themselves) is grouped in place too. Checked
+    # before the ``_has_well_content`` resume branch only matters for the
+    # already-grouped case, so this sits alongside it.
+    if (in_sub.is_dir() and not _has_well_content(in_sub)
+            and len(tif_files_in(in_sub)) > 3):
+        return _group_loose_tifs_in_place(
+            in_sub,
+            raw / "out",
+            log_fn=log_fn,
+            progress_fn=progress_fn,
+            filename_schema=filename_schema,
+            filename_sep=filename_sep,
+            proc_hook=proc_hook,
+            move_source_tifs=move_source_tifs,
+        )
     if in_sub.is_dir() and _has_well_content(in_sub):
         # v5.x.x resume support: ``raw/in/`` already has well content,
         # but a prior ``--move-source-tifs`` run may have crashed

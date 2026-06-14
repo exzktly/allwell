@@ -1093,11 +1093,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                         self._pipeline_workers = 1
                     self._log_line(f"[info] Workers: {payload} parallel well(s).\n", "INFO")
                 elif kind == "remote_xfer":
-                    # Remote upload / download progress in [0, 1]. The
-                    # well-progress bar isn't accurate yet (no wells have
-                    # finished on the remote), so surface the transfer
-                    # progress on the status label instead of clobbering
-                    # the well bar.
+                    # Remote upload/download progress in [0,1] — show on the
+                    # status label, not the (not-yet-accurate) well bar.
                     try:
                         pct = float(payload)
                     except (TypeError, ValueError):
@@ -1139,6 +1136,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                         self._status_signal_pushed = False
         except queue.Empty:
             pass
+        except Exception:  # noqa: BLE001 — a bad event must not kill the poller
+            swallowed()    # (would freeze the live log/dashboard permanently)
         QTimer.singleShot(80, self._poll_log)
 
     def closeEvent(self, event) -> None:

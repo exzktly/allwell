@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import queue
 import re
@@ -1181,6 +1182,133 @@ def _filter_new_fovs_in_staging(
                 f"{len(keep)}/{len(members)} new-FOV file(s)\n"
             )
     return tuple(survivors), tuple(up_to_date)
+
+
+def _scan_output_fov_tps(
+    output_dir: Path, *, schema: str, sep: str,
+) -> "tuple[set[str], set[str]]":
+    """``(timepoints, fovs)`` token sets recovered from the merged outputs in
+    *output_dir* — the ``<well>_out.zip`` members (and any loose images / output
+    well folders). Output member names keep the input stem, so the schema-indexed
+    timepoint/FOV tokens come straight off them. Stdlib-only."""
+    fields = [f.strip().lower() for f in str(schema or "").split(":")]
+    ti = fields.index("timepoint") if "timepoint" in fields else -1
+    fi = fields.index("fov") if "fov" in fields else -1
+    tps: "set[str]" = set()
+    fovs: "set[str]" = set()
+
+    def _add(name: str) -> None:
+        stem = Path(name).stem
+        if not stem or Path(name).suffix.lower() not in (".tif", ".tiff", ".png"):
+            return
+        parts = stem.split(sep)
+        if 0 <= ti < len(parts) and parts[ti].strip():
+            tps.add(parts[ti].strip())
+        if 0 <= fi < len(parts) and parts[fi].strip():
+            fovs.add(parts[fi].strip())
+
+    try:
+        entries = list(output_dir.iterdir())
+    except OSError:
+        return tps, fovs
+    for p in entries:
+        if p.is_file() and p.suffix.lower() == ".zip":
+            try:
+                with zipfile.ZipFile(p, "r") as zf:
+                    for member in zf.namelist():
+                        _add(Path(member).name)
+            except (OSError, zipfile.BadZipFile):
+                continue
+        elif p.is_file() and p.suffix.lower() in (".tif", ".tiff", ".png"):
+            _add(p.name)
+        elif p.is_dir():
+            try:
+                for child in p.iterdir():
+                    if child.is_file():
+                        _add(child.name)
+            except OSError:
+                continue
+    return tps, fovs
+
+
+def _tp_sort_key(tok: str):
+    """Best-effort hours value for ordering a timepoint token (DDdHHhMMm / unit /
+    bare number / trailing number); unparseable tokens sort last. Mirrors
+    process_microscopy._parse_timepoint_hours closely enough for dropdown order."""
+    s = str(tok or "").strip()
+    h: "float | None" = None
+    m = re.fullmatch(r"(?:(\d{1,4})d)?(?:(\d{1,2})h)?(?:(\d{1,2})m)?", s, re.IGNORECASE)
+    if m and any(m.groups()):
+        h = int(m.group(1) or 0) * 24.0 + int(m.group(2) or 0) + int(m.group(3) or 0) / 60.0
+    if h is None:
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([hdm])\w*", s, re.IGNORECASE)
+        if m:
+            v, u = float(m.group(1)), m.group(2).lower()
+            h = v if u == "h" else v * 24.0 if u == "d" else v / 60.0
+    if h is None:
+        try:
+            h = float(s)
+        except ValueError:
+            m = re.search(r"(\d+(?:\.\d+)?)$", s)
+            h = float(m.group(1)) if m else None
+    return (h is None, h if h is not None else 0.0, s)
+
+
+def _fov_sort_key(tok: str):
+    s = str(tok or "").strip()
+    try:
+        return (False, float(s), s)
+    except ValueError:
+        return (True, 0.0, s)
+
+
+def refresh_pipeline_info_available_from_outputs(
+    local_output_dir: Path, *, log_fn: Callable[[str], None] | None = None,
+) -> bool:
+    """Recompute ``available_timepoints`` / ``available_fovs`` in the local
+    ``pipeline_info.json`` from the merged outputs in *local_output_dir*.
+
+    After an incremental remote run the fetched sidecar only knows the
+    timepoints/FOVs the remote processed (the uploaded new-FOV split), so the
+    Review dropdowns built from it miss the rest of the dataset. The merged
+    ``<well>_out.zip`` members carry the full input stem, so scanning the output
+    dir recovers every ``(fov, timepoint)``. Union with whatever the sidecar
+    already lists (never drop a known value) and write back, preserving every
+    other key. Stdlib-only, best-effort: returns True iff the file was rewritten.
+    """
+    log = log_fn or (lambda _m: None)
+    p = Path(local_output_dir) / "pipeline_info.json"
+    if not p.exists():
+        return False
+    try:
+        info = json.loads(p.read_text())
+        if not isinstance(info, dict):
+            return False
+        schema = str(info.get("schema") or "")
+        sep = str(info.get("separator") or "_")
+        if not schema:
+            return False
+        tps, fovs = _scan_output_fov_tps(Path(local_output_dir), schema=schema, sep=sep)
+        tp_union = sorted(set(tps) | set(info.get("available_timepoints") or []),
+                          key=_tp_sort_key)
+        fov_union = sorted(set(fovs) | set(info.get("available_fovs") or []),
+                           key=_fov_sort_key)
+        if tp_union == list(info.get("available_timepoints") or []) \
+                and fov_union == list(info.get("available_fovs") or []):
+            return False  # already complete
+        info["available_timepoints"] = tp_union
+        info["available_fovs"] = fov_union
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps(info, indent=2))
+        os.replace(str(tmp), str(p))
+        log(
+            f"[remote] refreshed pipeline_info from merged outputs: "
+            f"{len(tp_union)} timepoint(s), {len(fov_union)} FOV(s)\n"
+        )
+        return True
+    except (OSError, json.JSONDecodeError) as exc:
+        log(f"[remote] warn: pipeline_info refresh failed: {exc}\n")
+        return False
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -3603,6 +3731,14 @@ class RemoteRunner:
                 run.local_output_dir / top,
                 log_fn=log,
             )
+
+        # The fetched pipeline_info.json reflects only the (partial) input the
+        # remote saw — for an incremental run that's just the uploaded new-FOV
+        # members, so its available_timepoints/available_fovs miss the rest of
+        # the dataset and any dropdown built from them goes stale. Recompute both
+        # from the *merged* local outputs (the <well>_out.zip members keep the
+        # input stem), which hold the complete picture after the fetch.
+        refresh_pipeline_info_available_from_outputs(run.local_output_dir, log_fn=log)
 
         if not ok:
             log("[remote] pipeline returned non-zero — skipping cleanup, leaving remote state.\n")

@@ -59,6 +59,63 @@ from services.remote_config import (
 )
 from util.aw_safe import swallowed
 
+
+def _scratch_dir() -> Path:
+    """Base directory for AllWell's local scratch — input staging, transit
+    output zips, and incremental merge temps.
+
+    Honors ``$ALLWELL_SCRATCH_DIR`` so a user whose data lives on a NAS but
+    whose OS temp is a small system drive (Windows ``%TEMP%`` on ``C:``) can
+    redirect the potentially-GB-sized remote-staging copy onto a roomy volume.
+    Falls back to the OS temp dir; if the override can't be created we degrade
+    to the OS temp dir rather than fail the run.
+    """
+    override = os.environ.get("ALLWELL_SCRATCH_DIR", "").strip()
+    if override:
+        try:
+            p = Path(override).expanduser()
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except OSError:
+            pass
+    return Path(tempfile.gettempdir())
+
+
+def _new_scratch_dir(prefix: str) -> Path:
+    """``mkdtemp`` rooted at :func:`_scratch_dir` (honours ALLWELL_SCRATCH_DIR)."""
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=str(_scratch_dir())))
+
+
+def sweep_stale_scratch(*, max_age_h: float = 6.0,
+                        log_fn: Callable[[str], None] | None = None) -> int:
+    """Best-effort removal of leftover ``allwell-*`` scratch from runs killed
+    before their cleanup ran (a hard quit skips the ``finally`` that deletes the
+    staging dir, leaking a full input copy onto the scratch volume). Only
+    removes entries older than *max_age_h* so a concurrent run's live staging is
+    never touched. Returns the number removed."""
+    base = _scratch_dir()
+    cutoff = time.time() - max_age_h * 3600.0
+    removed = 0
+    try:
+        entries = list(base.glob("allwell-*"))
+    except OSError:
+        return 0
+    for p in entries:
+        try:
+            if p.stat().st_mtime > cutoff:
+                continue
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                p.unlink()
+            removed += 1
+        except OSError:
+            continue
+    if removed and log_fn:
+        log_fn(f"[remote] cleaned {removed} stale scratch item(s) from {base}\n")
+    return removed
+
+
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
 #
@@ -287,6 +344,10 @@ def stage_local_zips(
     """
     from services.input_resolution_service import run_zipper
 
+    # Reclaim local scratch leaked by a previously-killed run before we stage a
+    # fresh (potentially multi-GB) copy of the input.
+    sweep_stale_scratch(log_fn=log_fn)
+
     input_dir = input_dir.resolve()
     mode = _detect_local_input_mode(input_dir)
 
@@ -306,7 +367,7 @@ def stage_local_zips(
         # the user's original dataset on disk. The user's input dir
         # must be treated as read-only. The incremental split rewrites
         # zips too, so it likewise requires staging.
-        staging = Path(tempfile.mkdtemp(prefix="allwell-stage-"))
+        staging = _new_scratch_dir("allwell-stage-")
         try:
             staged: list[Path] = []
             for wz in well_zips:
@@ -812,7 +873,7 @@ def _stage_mixed_mode(
         # user's input dir. Copy ALL zips (existing + new) into a
         # temp staging dir and filter there. The originals in
         # input_dir stay pristine.
-        staging = Path(tempfile.mkdtemp(prefix="allwell-stage-"))
+        staging = _new_scratch_dir("allwell-stage-")
         try:
             staged: list[Path] = []
             for z in all_zips:
@@ -2839,7 +2900,7 @@ class Fetcher:
         """
         if self._stop.is_set():
             return
-        tmp_zip = Path(tempfile.gettempdir()) / f"allwell-{self.run.run_id}-{well}_out.zip"
+        tmp_zip = _scratch_dir() / f"allwell-{self.run.run_id}-{well}_out.zip"
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
         csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
 
@@ -2895,7 +2956,7 @@ class Fetcher:
         if self.run.incremental:
             # Partial CSV (new FOV rows only) — merge into the local full CSV
             # rather than overwriting it.
-            tmp_csv_dir = Path(tempfile.mkdtemp(prefix=f"allwell-csv-{well}-"))
+            tmp_csv_dir = _new_scratch_dir(f"allwell-csv-{well}-")
             try:
                 csv_count = self._rsync_glob(csv_glob_src, tmp_csv_dir)
                 if csv_count:
@@ -3051,7 +3112,7 @@ class Fetcher:
         """Merge a partial fetched well zip into the existing local output."""
         from pipeline.io import merge_images_into_zip
 
-        tmp_dir = Path(tempfile.mkdtemp(prefix=f"allwell-merge-{well}-"))
+        tmp_dir = _new_scratch_dir(f"allwell-merge-{well}-")
         try:
             try:
                 with zipfile.ZipFile(well_zip, "r") as zf:

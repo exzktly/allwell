@@ -2764,3 +2764,41 @@ def test_flush_and_join_waits_for_worker_not_a_fixed_cap(host, tmp_path):
     assert not fetcher._worker.is_alive()     # did not return while worker alive
     assert "A01" in run.fetched_wells         # worker's work completed first
     assert elapsed >= 0.4                     # blocked past the 0.1s interval
+
+
+def test_scratch_dir_honors_env_override(tmp_path, monkeypatch):
+    """Local scratch (input staging, transit zips) must be redirectable off the
+    OS temp drive — Windows %TEMP% on C: filled up when staging a NAS dataset
+    for a remote run."""
+    from services import remote_runner as rr
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
+    base = rr._scratch_dir()  # noqa: SLF001
+    assert base == tmp_path / "scratch"
+    assert base.is_dir()
+    d = rr._new_scratch_dir("allwell-stage-")  # noqa: SLF001
+    assert d.parent == base and d.name.startswith("allwell-stage-")
+
+
+def test_scratch_dir_falls_back_when_override_unusable(tmp_path, monkeypatch):
+    import tempfile as _t
+    from services import remote_runner as rr
+    # A path that can't be created (a file in the way) → fall back to OS temp.
+    bad = tmp_path / "afile"
+    bad.write_text("x")
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad / "nope"))
+    assert rr._scratch_dir() == Path(_t.gettempdir())  # noqa: SLF001
+
+
+def test_sweep_stale_scratch_removes_old_only(tmp_path, monkeypatch):
+    import time as _time
+    from services import remote_runner as rr
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path))
+    old = tmp_path / "allwell-stage-OLD"; old.mkdir()
+    os.utime(old, (_time.time() - 7 * 3600, _time.time() - 7 * 3600))
+    fresh = tmp_path / "allwell-stage-NEW"; fresh.mkdir()
+    other = tmp_path / "not-ours"; other.mkdir()
+    n = rr.sweep_stale_scratch(max_age_h=6.0)
+    assert n == 1
+    assert not old.exists()      # stale leftover removed
+    assert fresh.exists()        # a concurrent run's live staging is kept
+    assert other.exists()        # unrelated dirs untouched

@@ -1350,10 +1350,12 @@ nuclear file plus its fluor channels for that field+time. "New" = a
    brand-new well), then deletes the loose source. Duplicate member names keep
    the existing member (the loose copy is skipped, not overwritten).
 3. **Scope decision** — `select_incremental_scope` sets `opts["incremental"]`
-   when anything was appended, *unless* the run uses a cross-well model that an
-   incremental pass can't keep consistent — a `basic` flat-field/background
-   (sampled across all wells) or an `empty_well` model whose background well
-   gained files — in which case it falls back to a full `--force` reprocess.
+   when anything was appended, *unless* the run uses a **whole-plate** model:
+   a `basic` flat-field/background is sampled across all images, so adding any
+   data changes it for every well → it falls back to a full `--force` reprocess.
+   `empty_well` stays incremental — its model is per-(channel, timepoint), so
+   adding new timepoints leaves the existing timepoints' corrections (and the
+   already-processed FOVs) unchanged.
 4. **Args** — `build_pipeline_args` emits `--incremental` and
    `--incremental_prior_dir <output_dir>` (where the prior per-well CSVs live).
 5. **Diff + process** — for each well, `process_well_zip_task` reads the prior

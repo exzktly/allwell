@@ -11,7 +11,12 @@ import csv
 import zipfile
 from pathlib import Path
 
-from services.remote_runner import _filter_new_fovs_in_staging
+import json
+
+from services.remote_runner import (
+    _filter_new_fovs_in_staging,
+    refresh_pipeline_info_available_from_outputs,
+)
 
 SCHEMA = "experiment:channel:well:fov:timepoint"
 SEP = "_"
@@ -111,3 +116,50 @@ def test_split_no_prior_outputs_is_passthrough(tmp_path):
     assert {p.name for p in survivors} == {"A01.zip"}
     assert up_to_date == ()
     assert set(zipfile.ZipFile(staging / "A01.zip").namelist()) == {"e_w1_A01_1_T01.tif"}
+
+
+def _out_zip(path, members):
+    with zipfile.ZipFile(path, "w") as zf:
+        for name in members:
+            zf.writestr(name, b"x")
+
+
+def test_refresh_pipeline_info_adds_missing_timepoints_from_outputs(tmp_path):
+    # The fetched sidecar from a remote incremental run only lists the timepoints
+    # the remote saw (the uploaded new-FOV split). The merged local out-zips hold
+    # the complete picture; the refresh must union them into available_timepoints
+    # / available_fovs so dropdowns aren't stale.
+    out = tmp_path / "out"
+    out.mkdir()
+    # Sidecar knows only the first-half timepoints / one FOV.
+    (out / "pipeline_info.json").write_text(json.dumps({
+        "schema": SCHEMA, "separator": SEP,
+        "available_timepoints": ["00d00h00m", "00d08h00m"],
+        "available_fovs": ["1"],
+        "cell_gating": {"thresh_frac_on": {"gfp": 0.25}},   # must be preserved
+    }))
+    # Merged outputs carry old + the new 48h timepoint, and a second FOV.
+    _out_zip(out / "A01_out.zip", [
+        "exp_NIR_A01_1_00d00h00m_labels.tif",
+        "exp_NIR_A01_1_00d08h00m_labels.tif",
+        "exp_NIR_A01_2_02d00h00m_overlay.png",
+    ])
+
+    changed = refresh_pipeline_info_available_from_outputs(out)
+    assert changed is True
+
+    info = json.loads((out / "pipeline_info.json").read_text())
+    # New 48h timepoint + new FOV are now present, sorted by real hours.
+    assert info["available_timepoints"] == ["00d00h00m", "00d08h00m", "02d00h00m"]
+    assert info["available_fovs"] == ["1", "2"]
+    # Curation untouched.
+    assert info["cell_gating"] == {"thresh_frac_on": {"gfp": 0.25}}
+
+    # Idempotent: a second pass finds nothing to add.
+    assert refresh_pipeline_info_available_from_outputs(out) is False
+
+
+def test_refresh_pipeline_info_noop_without_sidecar(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    assert refresh_pipeline_info_available_from_outputs(out) is False

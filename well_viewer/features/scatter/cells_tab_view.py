@@ -86,6 +86,17 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_tp_cb.hide()
     ctx.app._scatter_tp_var = ctx.app._scatter_tp_cb
     ctx.app._scatter_tp_selections: dict[str, bool] = {}
+
+    # Layout: overlay every group on one axis (default, interactive) or stack
+    # one group per axis below the other (view-only comparison) — mirrors the
+    # Distribution tab's Overlay / Faceted choice.
+    cl.addWidget(QLabel("Layout:", ctrl))
+    ctx.app._scatter_layout_cb = QComboBox(ctrl)
+    ctx.app._scatter_layout_cb.addItems(["Overlay", "Separate axes"])
+    ctx.app._scatter_layout_cb.currentIndexChanged.connect(
+        lambda _i: redraw_scatter_orchestrate(ctx.app))
+    cl.addWidget(ctx.app._scatter_layout_cb)
+    ctx.app._scatter_layout_var = ctx.app._scatter_layout_cb
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).

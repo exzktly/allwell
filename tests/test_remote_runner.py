@@ -1290,6 +1290,26 @@ def test_fetcher_observes_well_done_with_logging_prefix(host, tmp_path):
     assert run.well_count_total == 24
 
 
+def test_fetcher_triggers_on_mangled_em_dash(host, tmp_path):
+    """A UTF-8 remote stream decoded with a cp1252 Windows locale arrives with
+    the em-dash mojibake'd ("Well A01 â€" done."). The Fetcher must still fire
+    per-well — otherwise no download progress shows and the out dir only fills
+    from the end-of-run backstop."""
+    from services.remote_runner import _RemoteRun
+
+    run = _RemoteRun(
+        run_id="x", cache_key="k", remote_input_dir="/r/in",
+        remote_output_dir="/r/out", remote_pidfile="/r/pid",
+        local_output_dir=tmp_path, local_input_mode=LocalInputMode.ZIP,
+    )
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL)
+        fetcher.observe('2026-05-27 10:30:45  INFO      Well A01 â€" done.\n')
+        fetcher.observe("2026-05-27 10:31:02  INFO      Well B02 � done.\n")
+        fetcher.cancel()
+    assert run.expected_wells == {"A01", "B02"}
+
+
 def test_fetcher_ignores_unrelated_lines(host, tmp_path):
     from services.remote_runner import _RemoteRun
 

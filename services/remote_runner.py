@@ -72,7 +72,14 @@ from util.aw_safe import swallowed
 # saw "rsync never completes". Match with ``.search()`` against the
 # "Well A01 — done." substring instead. Also support the legacy bare
 # ``A01 — done.`` form just in case anything still emits it.
-_RE_WELL_DONE = re.compile(r"(?:\bWell\s+)?(?P<well>[A-Ha-h]\d{2})\s+—\s+done\.")
+#
+# The separator is matched as a generic ``\s+\S+\s+`` token rather than the
+# literal " — " so a per-well download still triggers if the em-dash is mangled
+# in transit (a UTF-8 remote stream decoded with a cp1252 Windows locale arrives
+# as "Well A01 â€" done."). Without this the Fetcher never fired per-well during
+# the run — no download progress, and the out dir only filled from the
+# end-of-run backstop.
+_RE_WELL_DONE = re.compile(r"(?:\bWell\s+)?(?P<well>[A-Ha-h]\d{2})\s+\S+\s+done\.")
 _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well")
 
 # Default output-filter glob set: just CSVs and the top-level metadata
@@ -2469,6 +2476,13 @@ class _BatchedRemoteProcess:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    # The remote (Linux) pipeline logs UTF-8 — including the
+                    # em-dash in "Well X — done." Decode the ssh stream as UTF-8
+                    # so those markers survive on a Windows client (whose locale
+                    # is cp1252); otherwise they arrive mojibake'd and the
+                    # dashboard's per-well Process tracking never matches.
+                    encoding="utf-8",
+                    errors="replace",
                     bufsize=1,
                     env={**os.environ, "PYTHONUNBUFFERED": "1"},
                     start_new_session=(os.name == "posix"),
@@ -3456,6 +3470,12 @@ class RemoteRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so the
+            # em-dash in per-well markers ("Well X — done.") isn't mojibake'd on
+            # a cp1252 Windows client — otherwise the dashboard's Process stage
+            # stays stuck at 0/N while ASCII-only markers (threshold) reach N/N.
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
             start_new_session=(os.name == "posix"),

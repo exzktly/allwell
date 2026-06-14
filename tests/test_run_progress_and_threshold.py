@@ -137,6 +137,24 @@ def test_incremental_progress_markers():
     assert ("well_stage", ("D04", "download")) in kinds("[remote] ✓ D04: up to date (local)")
 
 
+def test_per_well_markers_tolerate_mangled_separator():
+    """Remote (UTF-8) per-well markers decoded with a cp1252 Windows locale
+    arrive with the em-dash mojibake'd. The Process stage must still track —
+    previously it stuck at 0/N while ASCII-only threshold markers reached N/N."""
+    from services.pipeline_runner import ProgressTracker
+
+    for sep in ("—", "â€”", "�", "-"):  # em-dash, mojibake, replacement, hyphen
+        pt = ProgressTracker()
+        pt.parse("Zip mode: 20 well zip(s) detected.")
+        ev = pt.parse(f"Well A01 {sep} starting (pid 1)")
+        assert ("well_stage", ("A01", "active")) in ev, sep
+        ev = pt.parse(f"Well A01 {sep} 3 FOV-group(s)")
+        assert any(k == "well_fov" for k, _ in ev), sep
+        ev = pt.parse(f"Well A01 {sep} done.")
+        assert ("well_done", (1, 20)) in ev, sep
+        assert ("well_stage", ("A01", "process")) in ev, sep
+
+
 def test_standalone_auto_threshold_is_rounded_to_integer(tmp_path):
     pytest.importorskip("skimage")
     import logging

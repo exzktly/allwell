@@ -605,18 +605,6 @@ def draw_bar_empty_state(app, ax_mean, ax_frac, message: str, *, ax_n=None) -> N
     app._bar_canvas.draw_idle()
 
 
-def resolve_bar_timepoint(app) -> Optional[tuple]:
-    """Legacy single-tp resolver — returns the first selected tp or None.
-
-    Kept for callers that still expect a single ``(float, str)`` (e.g. the
-    on-tab CSV exporter via the hidden ``_bar_tp_cb``).
-    """
-    tps = resolve_bar_timepoints(app)
-    if not tps:
-        return None
-    return tps[0]
-
-
 def resolve_bar_timepoints(app) -> List[tuple]:
     """Return the list of ``(float, str)`` timepoints currently selected.
 

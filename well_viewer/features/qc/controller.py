@@ -30,13 +30,6 @@ def get_qc_params(app) -> QCParams:
     return params
 
 
-def seed_qc_from_pipeline_info(app) -> None:
-    """Reset the live params from ``pipeline_info`` (used on dataset load when no
-    persisted ``qc_params.json`` exists)."""
-    info = getattr(app._app_state.dataset, "pipeline_info", None)
-    app._qc_params = QCParams.from_pipeline_info(info)
-
-
 def apply_qc_to_cache(app, label: Optional[str] = None) -> None:
     """Write the ``QC_Pass`` column onto cached well frame(s).
 

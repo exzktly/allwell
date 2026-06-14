@@ -43,13 +43,6 @@ from well_viewer.core.safe import swallowed
 _WELL_DISAMBIG_SUFFIX = " (well)"
 
 
-def _strip_well_suffix(label: str) -> str:
-    """Remove the well-disambiguation suffix if present."""
-    if label.endswith(_WELL_DISAMBIG_SUFFIX):
-        return label[: -len(_WELL_DISAMBIG_SUFFIX)]
-    return label
-
-
 def _all_member_labels(app) -> list[str]:
     """Replicate-set names + selected well tokens currently plotted.
 

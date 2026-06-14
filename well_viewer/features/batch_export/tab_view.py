@@ -133,13 +133,6 @@ def _show_batch_mode(app, mode: str) -> None:
     _refresh_mode_buttons(app, mode)
 
 
-def _mode_button(parent: QWidget, text: str, command) -> QPushButton:
-    b = QPushButton(text, parent)
-    b.setProperty("variant", "toggle")
-    b.clicked.connect(lambda _=False: command())
-    return b
-
-
 def build_batch_export_tab(ctx, parent: QWidget) -> None:
     layout = parent.layout()
     if layout is None:

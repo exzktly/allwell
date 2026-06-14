@@ -41,6 +41,58 @@ def _has_well_zip(folder: Path) -> bool:
         return False
 
 
+def _schema_field_index(schema: str, field: str) -> int:
+    fields = [f.strip().lower() for f in str(schema or "").split(":")]
+    return fields.index(field) if field in fields else -1
+
+
+def _loose_timepoints_for_wells(
+    folder: Path, wells: "set[str]", *, schema: str, sep: str,
+) -> "set[str]":
+    """Raw timepoint tokens of loose TIFs in *folder* belonging to *wells*.
+
+    Tokens are compared verbatim (a dataset names its timepoints consistently),
+    which is enough to tell a brand-new timepoint from one already on disk.
+    """
+    from util.well_token import canonical_well_label
+    wi = _schema_field_index(schema, "well")
+    ti = _schema_field_index(schema, "timepoint")
+    if wi < 0 or ti < 0:
+        return set()
+    targets = {canonical_well_label(w) for w in wells if w}
+    out: "set[str]" = set()
+    for p in tif_files_in(folder):
+        parts = p.stem.split(sep)
+        if wi < len(parts) and ti < len(parts) \
+                and canonical_well_label(parts[wi]) in targets:
+            tok = parts[ti].strip()
+            if tok:
+                out.add(tok)
+    return out
+
+
+def _zip_timepoints(zip_path: Path, *, schema: str, sep: str) -> "set[str]":
+    """Raw timepoint tokens already present in a ``<WELL>.zip``'s members."""
+    ti = _schema_field_index(schema, "timepoint")
+    if ti < 0 or not zip_path.exists():
+        return set()
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = zf.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return set()
+    out: "set[str]" = set()
+    for name in names:
+        if name.endswith("/"):
+            continue
+        parts = Path(name).stem.split(sep)
+        if ti < len(parts):
+            tok = parts[ti].strip()
+            if tok:
+                out.add(tok)
+    return out
+
+
 def _has_well_content(folder: Path) -> bool:
     """Return True iff *folder* contains *well-named* zip files OR
     well-named subdirectories.
@@ -318,6 +370,35 @@ def select_incremental_scope(
         if log_fn:
             log_fn(msg)
 
+    flatfield = str(opts.get("flatfield", "none") or "none")
+    background = str(opts.get("background", "") or "")
+    bg_tokens = {
+        canonical_well_label(w)
+        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
+        if w
+    }
+    empty_well_in_use = flatfield == "empty_well" or background == "empty_well"
+
+    # Snapshot the background well's timepoints BEFORE the append consumes the
+    # loose files. The empty-well field is per-timepoint, so newly-added blanks
+    # only make ALREADY-PROCESSED wells stale when they land on a timepoint that
+    # already had a blank (that timepoint's field changes). Blanks for a
+    # brand-new timepoint only affect that timepoint's own wells, which the
+    # incremental run processes fresh — no full reprocess needed. (A pre-existing
+    # timepoint that had no blank of its own used the pooled fallback; that rare
+    # case isn't tracked here.)
+    existing_bg_tps: "set[str]" = set()
+    new_bg_tps: "set[str]" = set()
+    if empty_well_in_use and bg_tokens:
+        new_bg_tps = _loose_timepoints_for_wells(
+            input_dir, bg_tokens,
+            schema=opts["filename_schema"], sep=opts["filename_sep"])
+        for w in bg_tokens:
+            if w:
+                existing_bg_tps |= _zip_timepoints(
+                    input_dir / f"{w}.zip",
+                    schema=opts["filename_schema"], sep=opts["filename_sep"])
+
     try:
         appended, wells_touched = append_loose_images_to_zips(
             input_dir,
@@ -331,25 +412,20 @@ def select_incremental_scope(
     if not appended:
         return
 
-    flatfield = str(opts.get("flatfield", "none") or "none")
-    background = str(opts.get("background", "") or "")
-    bg_tokens = {
-        canonical_well_label(w)
-        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
-        if w
-    }
     bg_touched = bool(bg_tokens & wells_touched)
+    stale_existing_tp = bool(new_bg_tps & existing_bg_tps)
     needs_full = (
         flatfield == "basic"
         or background == "basic"
-        or ((flatfield == "empty_well" or background == "empty_well") and bg_touched)
+        or (empty_well_in_use and bg_touched and stale_existing_tp)
     )
     if needs_full:
         opts["force"] = True
         opts["incremental"] = False
         reason = ("basic flat-field/background is sampled across all wells"
                   if (flatfield == "basic" or background == "basic")
-                  else "the empty-well background well gained new files")
+                  else "the empty-well background well gained blanks at an "
+                       "already-processed timepoint")
         _log(
             f"[append] Appended {appended} loose image(s) into "
             f"{len(wells_touched)} well(s); forcing a full reprocess ({reason}).\n"

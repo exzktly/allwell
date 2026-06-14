@@ -126,11 +126,27 @@ def test_scope_forces_full_for_basic_flatfield(tmp_path):
 
 
 def test_scope_forces_full_when_empty_well_background_touched(tmp_path):
-    # Append lands on the configured empty-well background well → models stale.
-    _stage_with_new_loose(tmp_path, well="A01")
+    # New blank lands on the empty-well background well at a timepoint that
+    # already had a blank (T01) → that timepoint's per-timepoint field changes,
+    # so already-processed wells at T01 are stale → force a full reprocess.
+    _stage_with_new_loose(tmp_path, well="A01")   # existing T01 + new FOV at T01
     opts = _opts(tmp_path, background="empty_well", background_well="A01")
     select_incremental_scope(opts, tmp_path)
     assert opts.get("force") is True
+
+
+def test_scope_incremental_when_empty_well_background_new_timepoint(tmp_path):
+    # Empty-well background, and the appended blanks are for a NEW timepoint
+    # (T02, not yet in the well). The empty-well field is per-timepoint, so
+    # existing timepoints can't go stale → stay incremental, don't force a full
+    # reprocess. Regression for: adding a new timepoint to the background well
+    # needlessly triggered a full re-analysis.
+    _make_zip(tmp_path / "A01.zip", {"exp_w1_A01_1_T01.tif": b"old"})
+    (tmp_path / "exp_w1_A01_1_T02.tif").write_bytes(b"new-tp")
+    opts = _opts(tmp_path, background="empty_well", background_well="A01")
+    select_incremental_scope(opts, tmp_path)
+    assert opts.get("incremental") is True
+    assert not opts.get("force")
 
 
 def test_scope_incremental_when_empty_well_background_untouched(tmp_path):

@@ -127,11 +127,8 @@ def build_pipeline_args(
     # this to the uploaded sidecar (the remote output dir starts empty).
     if opts.get("incremental"):
         args += ["--incremental_prior_dir", str(output_dir)]
-    for flag in (
-        "compress_input_well_folders",
-        "compress_output_well_folders",
-    ):
-        args.append(f"--{flag}" if opts.get(flag) else f"--no-{flag}")
+    # Input/output well compression is always on (no longer a flag) — the
+    # pipeline always produces per-well .zip files.
     smfish = opts.get("smfish_tokens", [])
     if smfish:
         args += ["--smfish_tokens"] + list(smfish)

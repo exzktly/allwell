@@ -4205,25 +4205,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--no_save_tophat",   action="store_true",
                    help="Do not save top-hat/smFISH intermediate TIFFs")
-    p.add_argument(
-        "--compress_input_well_folders",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Folder mode only: after each well finishes, compress "
-            "<input_dir>/<well>/ to <input_dir>/<well>.zip and remove "
-            "the source folder."
-        ),
-    )
-    p.add_argument(
-        "--compress_output_well_folders",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Folder mode only: compress each output well folder to "
-            "<output_dir>/<well>_out.zip and remove the folder."
-        ),
-    )
+    # Input/output well compression is mandatory: folder-mode runs always
+    # compress <input_dir>/<well>/ → <input_dir>/<well>.zip and each output well
+    # folder → <output_dir>/<well>_out.zip. The pipeline only ever emits per-well
+    # .zip files, so there is no flag to disable this.
 
     p.add_argument("--tf_threads", type=int, default=0,
                    help=(
@@ -4590,8 +4575,8 @@ def main() -> None:
             fluor_tokens=fluor_tokens_for_quant,
             workers=workers,
             csv_prefix=args.csv_prefix,
-            compress_input_well_folders=args.compress_input_well_folders,
-            compress_output_well_folders=args.compress_output_well_folders,
+            compress_input_well_folders=True,   # mandatory: always emit .zip inputs
+            compress_output_well_folders=True,  # mandatory: always emit .zip outputs
             force=args.force,
             incremental=args.incremental,
             incremental_prior_dir=(

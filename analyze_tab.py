@@ -768,9 +768,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             mesh_sigma=self._mesh_sigma_edit.text(),
             no_tophat_nir=self._no_tophat_nir_cb.isChecked(),
             no_tophat_fluor=self._no_tophat_fluor_cb.isChecked(),
-            compress_input_well_folders=self._compress_input_cb.isChecked(),
-            compress_output_well_folders=self._compress_output_cb.isChecked(),
-            move_source_tifs=self._move_source_tifs_cb.isChecked(),
+            # Always-on (no longer user options): zip in/out + move loose TIFs.
+            compress_input_well_folders=True,
+            compress_output_well_folders=True,
+            move_source_tifs=True,
             remote_batch_size=self._remote_batch_size_edit.text(),
             force=self._force_cb.isChecked(),
             cpu_only=self._cpu_only_cb.isChecked(),
@@ -821,8 +822,11 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             log_q.put(("zipper_start", self._expected_well_count(opts)))
             grouped = {"n": 0}
 
+            emitted: set[str] = set()
+
             def _on_group(tok: str) -> None:
                 grouped["n"] += 1
+                emitted.add(tok)
                 log_q.put(("zipper_well", tok))
 
             input_dir, output_dir, on_success = resolve_input_output(
@@ -834,18 +838,14 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                 proc_hook=proc_hook,
                 move_source_tifs=bool(opts.get("move_source_tifs", False)),
             )
-            # Fold loose images sitting next to grouped well zips into them, then
-            # pick the run scope (incremental-merge vs full --force). Mutates opts.
+            # Fold loose images into well zips, then pick run scope (mutates opts).
             select_incremental_scope(opts, input_dir,
                                      log_fn=lambda m: log_q.put(("line", m)))
-            # When the inputs are already grouped/zipped the zipper is skipped
-            # and fires no per-well progress — surface the existing wells so the
-            # Group stage still shows progress and the plate marks each well
-            # queued (pending) instead of jumping from empty straight to
-            # processing.
-            if grouped["n"] == 0:
-                from services.input_resolution_service import iter_well_tokens
-                for tok in iter_well_tokens(input_dir):
+            # Surface every resolved well in the Group stage (pre-grouped wells
+            # emit no zipper progress) so none are missing from the plate/rail.
+            from services.input_resolution_service import iter_well_tokens
+            for tok in iter_well_tokens(input_dir):
+                if tok not in emitted:
                     log_q.put(("zipper_well", tok))
             log_q.put(("zipper_done", None))
             # v5.x.x: forward the optional success callback as a

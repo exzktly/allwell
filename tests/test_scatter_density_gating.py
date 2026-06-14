@@ -1,0 +1,257 @@
+"""Unit tests for the scatter density + gating helpers (pure numpy)."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from well_viewer.features.scatter.gating import (
+    compute_gate_stats,
+    compute_point_density,
+)
+
+
+# ── compute_point_density ────────────────────────────────────────────────────
+
+def test_density_empty_returns_empty():
+    out = compute_point_density([], [])
+    assert isinstance(out, np.ndarray)
+    assert out.size == 0
+
+
+def test_density_few_points_uniform():
+    out = compute_point_density([1.0, 2.0], [1.0, 2.0])
+    assert out.shape == (2,)
+    assert np.allclose(out, 0.5)
+
+
+def test_density_normalized_range_and_length():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=500)
+    y = rng.normal(size=500)
+    out = compute_point_density(x, y)
+    assert out.shape == (500,)
+    assert out.min() >= 0.0 and out.max() <= 1.0
+    # A normal cloud must have a spread of densities (not all equal).
+    assert out.max() > out.min()
+
+
+def test_density_center_denser_than_edge():
+    # Tight central blob + a few far-flung outliers: center density > outliers.
+    rng = np.random.default_rng(1)
+    core = rng.normal(scale=0.2, size=(800, 2))
+    outliers = np.array([[10.0, 10.0], [-10.0, -10.0], [10.0, -10.0]])
+    pts = np.vstack([core, outliers])
+    out = compute_point_density(pts[:, 0], pts[:, 1])
+    assert out[:800].mean() > out[800:].mean()
+
+
+def test_density_zero_variance_does_not_raise():
+    # All x identical → singular KDE covariance; must fall back gracefully.
+    out = compute_point_density([5.0] * 10, np.linspace(0, 1, 10))
+    assert out.shape == (10,)
+    assert np.all(np.isfinite(out))
+
+
+def test_density_histogram_fallback_path():
+    # max_kde_n=0 forces the O(N) histogram path regardless of scipy.
+    rng = np.random.default_rng(2)
+    x = rng.normal(size=300)
+    y = rng.normal(size=300)
+    out = compute_point_density(x, y, max_kde_n=0)
+    assert out.shape == (300,)
+    assert out.min() >= 0.0 and out.max() <= 1.0
+
+
+def test_density_log_masks_nonpositive():
+    # Non-positive x under x_log get the minimum (0.0) density, no crash.
+    x = np.array([-1.0, 0.0, 1.0, 10.0, 100.0, 1000.0])
+    y = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    out = compute_point_density(x, y, x_log=True)
+    assert out.shape == x.shape
+    assert out[0] == 0.0 and out[1] == 0.0  # masked-out non-positive points
+
+
+# ── compute_gate_stats ───────────────────────────────────────────────────────
+
+def _gate(x0, y0, x1, y1):
+    return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+
+
+def test_gate_single_group_single_tp():
+    # 4 points, 2 inside the unit box → 50.0%.
+    data = {"A1": {"x": [0.5, 0.5, 5.0, 5.0], "y": [0.5, 0.5, 5.0, 5.0],
+                   "tp": [0.0, 0.0, 0.0, 0.0], "color": "#111111"}}
+    rows = compute_gate_stats(data, _gate(0, 0, 1, 1), [0.0])
+    assert rows == [("50.0%", None, 0)]
+
+
+def test_gate_multiple_groups_per_group_pct():
+    data = {
+        "A1": {"x": [0.5, 0.5], "y": [0.5, 0.5], "tp": [0.0, 0.0], "color": "#aa0000"},
+        "B2": {"x": [0.5, 9.0, 9.0, 9.0], "y": [0.5, 9.0, 9.0, 9.0],
+               "tp": [0.0, 0.0, 0.0, 0.0], "color": "#0000aa"},
+    }
+    rows = compute_gate_stats(data, _gate(0, 0, 1, 1), [0.0])
+    # A1: 2/2 = 100%, B2: 1/4 = 25%.
+    assert ("A1: 100.0%", "#aa0000", 0) in rows
+    assert ("B2: 25.0%", "#0000aa", 0) in rows
+
+
+def test_gate_single_group_multi_tp():
+    data = {"A1": {
+        "x": [0.5, 0.5, 9.0, 0.5],
+        "y": [0.5, 0.5, 9.0, 0.5],
+        "tp": [0.0, 0.0, 0.0, 24.0],
+        "color": "#123456",
+    }}
+    rows = compute_gate_stats(data, _gate(0, 0, 1, 1), [0.0, 24.0])
+    # t=0h: 2/3 inside → 66.7%; t=24h: 1/1 → 100%.
+    assert ("t=0h: 66.7%", "#123456", 0) in rows
+    assert ("t=24h: 100.0%", "#123456", 0) in rows
+
+
+def test_gate_multi_group_multi_tp_indented():
+    data = {
+        "A1": {"x": [0.5, 9.0], "y": [0.5, 9.0], "tp": [0.0, 24.0], "color": "#aa0000"},
+        "B2": {"x": [0.5, 0.5], "y": [0.5, 0.5], "tp": [0.0, 24.0], "color": "#0000aa"},
+    }
+    rows = compute_gate_stats(data, _gate(0, 0, 1, 1), [0.0, 24.0])
+    # Group lines at indent 0, per-tp sub-lines at indent 1.
+    assert ("A1: 50.0%", "#aa0000", 0) in rows
+    assert ("t=0h: 100.0%", "#aa0000", 1) in rows
+    assert ("t=24h: 0.0%", "#aa0000", 1) in rows
+    assert ("B2: 100.0%", "#0000aa", 0) in rows
+
+
+def test_gate_empty_group_no_rows():
+    data = {"A1": {"x": [], "y": [], "tp": [], "color": "#111111"}}
+    rows = compute_gate_stats(data, _gate(0, 0, 1, 1), [0.0])
+    assert rows == []
+
+
+# ── redraw_scatter integration (headless Agg) ────────────────────────────────
+
+def _render_app(*, density: bool, gates):
+    """Stub app wired for ``redraw_scatter`` against a bare Agg figure."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+
+    n = 60
+    rng = np.random.default_rng(7)
+    df = pd.DataFrame({
+        "Included": [1] * n,
+        "area_px": [200.0] * n,
+        "timepoint_hours": [24.0] * n,
+        "timepoint": ["24h"] * n,
+        "filename": [f"img_{i}.tif" for i in range(n)],
+        "nucleus_id": [str(i) for i in range(n)],
+        "w3cy5_mean_intensity": rng.normal(1000, 100, n).tolist(),
+        "w4gfp_mean_intensity": rng.normal(1000, 100, n).tolist(),
+    })
+
+    fig = Figure(figsize=(6, 4))
+    ax = fig.add_subplot(1, 1, 1)
+    prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    prefs["scatter_density"] = bool(density)
+
+    app = SimpleNamespace()
+    app._app_state = SimpleNamespace(
+        dataset=SimpleNamespace(well_paths={"A01": None}),
+        channel=SimpleNamespace(ratio_index={}),
+        selection=SimpleNamespace(selected_wells=["A01"]),
+        plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
+    )
+    app._rep_sets_active = lambda: []
+    app._get_rows = lambda label: df
+    app._rank_color_well = lambda label: "#3366cc"
+    app._parse_rc = lambda label: (label, 0, 0)
+    app._ax_scatter = ax
+    app._scatter_fig = fig
+    app._scatter_canvas = FigureCanvasAgg(fig)
+    app._export_style_prefs = prefs
+    app._scatter_gates = list(gates)
+    app._scatter_gate_draw_mode = False
+    app._scatter_gate_selector = None
+    return app, ax
+
+
+def test_redraw_density_creates_density_collection_and_gate():
+    from matplotlib.patches import Rectangle
+
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    gate = {"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}
+    app, ax = _render_app(density=True, gates=[gate])
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+
+    # Density mode → a PathCollection tagged for the export-style guard.
+    assert any(getattr(c, "_aw_density_collection", False) for c in ax.collections)
+    # Gate rectangle + label present.
+    assert any(isinstance(p, Rectangle) and getattr(p, "_scatter_gate_artist", False)
+               for p in ax.patches)
+    assert any(getattr(t, "_scatter_gate_artist", False) for t in ax.texts)
+
+
+def test_redraw_solid_mode_uses_lines_no_density():
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    app, ax = _render_app(density=False, gates=[])
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+
+    assert len(ax.lines) >= 1  # solid Line2D markers
+    assert not any(getattr(c, "_aw_density_collection", False) for c in ax.collections)
+
+
+# ── sidebar builds the scatter-only Density + Gates sections ──────────────────
+
+def _sidebar_stub_app(fig):
+    from types import SimpleNamespace
+    app = SimpleNamespace()
+    app._app_state = SimpleNamespace(
+        dataset=SimpleNamespace(data_dir=None),
+        plot=SimpleNamespace(line_order_rsets=[], line_order_wells=[], use_sem=True),
+        selection=SimpleNamespace(selected_wells=["A01"]),
+    )
+    app._scatter_fig = fig  # makes _is_scatter_cells_fig / _supports_well_order true
+    app._rep_sets_active = lambda: []
+    app._parse_rc = lambda lbl: (lbl, 0, 0)
+    app._well_display_label = lambda w: w
+    app._replicate_display_label = lambda rs: getattr(rs, "name", "")
+    app._use_fov_spread_active = lambda: False
+    app._toggle_sem = lambda: None
+    app._toggle_fov_replicates = lambda: None
+    # gate state the new section reads
+    app._scatter_gates = []
+    app._scatter_gate_draw_mode = False
+    app._scatter_gate_selector = None
+    return app
+
+
+def test_sidebar_builds_scatter_density_and_gate_sections(qtbot):
+    from matplotlib.figure import Figure
+
+    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+
+    fig = Figure(figsize=(4, 3))
+    fig.add_subplot(1, 1, 1)
+    app = _sidebar_stub_app(fig)
+
+    sb = ExportStyleSidebar(app, None, fig, None, default_name="scatter")
+    qtbot.addWidget(sb)
+
+    # Scatter-only helpers wired and the density pref registered for persistence.
+    assert sb._is_scatter_cells_fig() is True
+    assert "scatter_density" in sb._getters
+    assert sb._gate_count_text() == "0 gate(s)"
+    # Clearing gates through the sidebar updates the count label without raising.
+    app._scatter_gates = [{"x0": 0, "y0": 0, "x1": 1, "y1": 1}]
+    sb._on_clear_gates()
+    assert app._scatter_gates == []

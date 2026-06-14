@@ -221,6 +221,42 @@ class ExportStyleSidebar(QWidget):
         self._profile_combo.setCurrentText(str(self._prefs.get("export_profile", "Custom")))
         self._profile_combo.currentTextChanged.connect(lambda _t: self._on_profile_selected())
         add_row(s_profile, "Profile", self._profile_combo, "export_profile")
+
+        # ── Scatter: Density + Gates (per-cell scatter only) ─────────────────
+        if self._is_scatter_cells_fig():
+            from well_viewer.features.scatter.gating import set_gate_draw_mode
+
+            s_density = section("Density", expanded=True)
+            dens_tog = ToggleSwitch("Color by density")
+            dens_tog.setChecked(bool(self._prefs.get("scatter_density", False)))
+            add_row(s_density, "", dens_tog)
+            # Manual getter/setter (no key= auto-wire): density changes which
+            # artists exist, not just their style, so a single handler must both
+            # persist and trigger a real redraw (the auto-wire only restyles).
+            self._getters["scatter_density"] = dens_tog.isChecked
+            self._setters["scatter_density"] = (
+                lambda v, w=dens_tog: w.setChecked(bool(v))
+            )
+            dens_tog.toggled.connect(lambda _c: self._on_density_toggled())
+            _dens_preview = QLabel("On" if dens_tog.isChecked() else "Off")
+            _dens_preview.setObjectName("Muted")
+            s_density.setValueWidget(_dens_preview)
+            dens_tog.toggled.connect(
+                lambda on, _l=_dens_preview: _l.setText("On" if on else "Off")
+            )
+
+            s_gates = section("Gates", expanded=True)
+            draw_tog = ToggleSwitch("Draw gate")
+            draw_tog.setChecked(bool(getattr(self._app, "_scatter_gate_draw_mode", False)))
+            draw_tog.toggled.connect(lambda on: set_gate_draw_mode(self._app, on))
+            add_row(s_gates, "", draw_tog)
+            clear_btn = QPushButton("Clear gates")
+            clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())
+            add_full(s_gates, clear_btn)
+            self._gate_count_label = QLabel(self._gate_count_text())
+            self._gate_count_label.setObjectName("Muted")
+            add_full(s_gates, self._gate_count_label)
+
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
         # format up front was redundant. The "format" pref (read by
@@ -914,6 +950,32 @@ class ExportStyleSidebar(QWidget):
 
     def _is_line_fig(self) -> bool:
         return getattr(self._app, "_line_fig", None) is self._fig
+
+    def _is_scatter_cells_fig(self) -> bool:
+        """True only for the per-cell scatter figure (density + gates apply there)."""
+        return getattr(self._app, "_scatter_fig", None) is self._fig
+
+    def _gate_count_text(self) -> str:
+        n = len(getattr(self._app, "_scatter_gates", None) or [])
+        return f"{n} gate(s)"
+
+    def _on_density_toggled(self) -> None:
+        """Persist the density pref then redraw (a restyle alone can't switch
+        between solid Line2D markers and the per-point density PathCollection)."""
+        if self._updating:
+            return
+        try:
+            self._persist()
+            self._redraw_bound_figure()
+        except Exception:
+            swallowed()  # was: pass (silent except)
+
+    def _on_clear_gates(self) -> None:
+        from well_viewer.features.scatter.gating import clear_gates
+        clear_gates(self._app)
+        lbl = getattr(self, "_gate_count_label", None)
+        if lbl is not None:
+            lbl.setText(self._gate_count_text())
 
     def _supports_well_order(self) -> bool:
         """Return True for plot figs whose color order can be reorderable."""

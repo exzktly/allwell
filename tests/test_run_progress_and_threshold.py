@@ -102,6 +102,41 @@ def _make_out_zip(path: Path) -> None:
         zf.writestr(f"{schema_stem}_tophat.tif", _write_tif_bytes(fluor))
 
 
+# ── 4) ProgressTracker: incremental markers reach a terminal well state ───────
+
+def test_incremental_progress_markers():
+    """Skipped (up-to-date), merged, and new wells must all advance to a
+    terminal dashboard state — and the per-well bar must reach total/total —
+    on both local and remote runs."""
+    from services.pipeline_runner import ProgressTracker
+
+    pt = ProgressTracker()
+    pt.parse("Zip mode: 4 well(s) to process, 2 worker(s).")  # well_total = 4
+
+    def kinds(line):
+        return pt.parse(line)
+
+    # merged well: starting → FOV sub-progress → done.
+    assert ("well_stage", ("A01", "active")) in kinds("Well A01 — starting (pid 9)")
+    kinds("Well A01 — merging 2 new FOV(s).")
+    assert ("well_fov", ("A01", 0, 2)) in kinds("Well A01 — 2 FOV-group(s)")
+    ev = kinds("Well A01 — done.")
+    assert ("well_done", (1, 4)) in ev
+    assert ("well_stage", ("A01", "process")) in ev
+
+    # up-to-date well: no "done." line, but its own marker counts + advances it.
+    ev = kinds("Well B02 — up to date (no new FOVs).")
+    assert ("well_done", (2, 4)) in ev
+    assert ("well_stage", ("B02", "process")) in ev
+
+    # new well: ordinary lifecycle.
+    kinds("Well C03 — starting (pid 9)")
+    assert ("well_done", (3, 4)) in kinds("Well C03 — done.")
+
+    # remote up-to-date marker turns a never-fetched well green (download stage).
+    assert ("well_stage", ("D04", "download")) in kinds("[remote] ✓ D04: up to date (local)")
+
+
 def test_standalone_auto_threshold_is_rounded_to_integer(tmp_path):
     pytest.importorskip("skimage")
     import logging

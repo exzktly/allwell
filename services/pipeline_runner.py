@@ -510,7 +510,16 @@ class PipelineRunner:
                 nuclear_token=opts["nuclear_token"] if self._selective_channels else None,
                 log_fn=lambda m: self._enqueue(("line", m)),
                 move_source_tifs=bool(opts.get("move_source_tifs", False)),
+                incremental=bool(opts.get("incremental", False)),
+                prior_output_dir=output_dir,
+                csv_prefix=opts.get("csv_prefix", "measurements"),
             )
+            # Incremental: wells whose local output already covers every input
+            # FOV were dropped from the upload. Surface a synthetic per-well
+            # marker so the dashboard shows them complete (they're already
+            # current locally) rather than stuck pending.
+            for tok in zipped.up_to_date_wells:
+                self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
             self._enqueue((
                 "line",
                 f"[remote] {len(zipped.well_zips)} well-zip(s) staged "

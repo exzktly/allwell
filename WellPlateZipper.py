@@ -97,7 +97,7 @@ def _extract_well_from_filename(
     Returns the normalised well label (e.g. "A01") if the filename contains a
     valid 96-well plate position at the schema's "well" slot, otherwise None.
     """
-    from core.well_token import canonical_well_label
+    from util.well_token import canonical_well_label
     stem = os.path.splitext(fname)[0]
     well_idx = _well_index_from_schema(schema)
     if well_idx is None:

@@ -141,7 +141,7 @@ def flatfield_field_for(app, channel: str, fluor_arr, tp=None):
     all-timepoint pooled estimate when that timepoint is absent. The estimate is
     capped at a few frames and cached so the UI thread isn't blocked on repeats.
     """
-    import core.flatfield as _ffc
+    import pipeline.flatfield as _ffc
 
     mode = _flatfield_qc(app, "flatfield", "none").lower()
     if mode in ("", "none"):

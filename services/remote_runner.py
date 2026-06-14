@@ -57,7 +57,7 @@ from services.remote_config import (
     to_rsync_path,
     update_bandwidth,
 )
-from core.aw_safe import swallowed
+from util.aw_safe import swallowed
 
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
@@ -92,24 +92,23 @@ _CSV_ONLY_GLOBS: tuple[str, ...] = ("*.csv", "pipeline_info.json")
 # stat-pass when nothing changed.
 _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "process_microscopy.py",
-    # Shared Qt-free core package — both the pipeline and the GUI import these,
-    # and process_microscopy re-imports them at module top level, so the remote
-    # needs the whole package or the run aborts with ModuleNotFoundError.
-    "core/__init__.py",
-    "core/auto_threshold.py",
-    "core/aw_safe.py",
-    "core/flatfield.py",
-    "core/shape_features.py",
-    "core/well_token.py",
-    # Pipeline components: process_microscopy re-imports the Qt-free ``pipeline``
-    # package at module top level (background-subtraction math, Cellpose +
-    # StarDist segmenters, and the atomic output writers; the Torch / TensorFlow
-    # runtimes themselves stay lazily imported), so the remote needs the whole
-    # package or the import aborts the run with ModuleNotFoundError.
+    # General Qt-free utilities (well-token parsing, logged-swallow) imported by
+    # process_microscopy at module top level, so the remote needs the package.
+    "util/__init__.py",
+    "util/aw_safe.py",
+    "util/well_token.py",
+    # The Qt-free ``pipeline`` package: analysis-domain modules (background math,
+    # auto-threshold, flat-field, shape-feature catalog) + the Cellpose/StarDist
+    # segmenters and atomic writers. process_microscopy re-imports it at module
+    # top level (Torch/TensorFlow stay lazy), so the remote needs the whole
+    # package or the run aborts with ModuleNotFoundError.
     "pipeline/__init__.py",
+    "pipeline/auto_threshold.py",
     "pipeline/background.py",
     "pipeline/cellpose.py",
+    "pipeline/flatfield.py",
     "pipeline/io.py",
+    "pipeline/shape_features.py",
     "pipeline/stardist.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
@@ -585,7 +584,7 @@ def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
 def _canonical_well_from_path(stem: str) -> str | None:
     """Normalize a path stem like ``A1`` or ``A01`` to canonical
     ``A01``. Returns None if the stem isn't a 96-well token."""
-    from core.well_token import canonical_well_label
+    from util.well_token import canonical_well_label
     return canonical_well_label(stem)
 
 

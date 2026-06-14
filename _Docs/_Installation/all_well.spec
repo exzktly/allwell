@@ -47,7 +47,7 @@ sibling_scripts = [
 
 # Bundle every first-party package so module imports resolve at runtime
 # inside the PyInstaller _MEIPASS root.
-for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "core"):
+for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util"):
     _pkg_path = _parent / _pkg
     if _pkg_path.is_dir():
         sibling_scripts.append((str(_pkg_path), _pkg))
@@ -96,11 +96,11 @@ hiddenimports = [
     # First-party repo-root pipeline module imported lazily inside
     # process_microscopy.compute_shape_features (function-level imports are
     # missed by PyInstaller's static analysis, unlike the top-level
-    # core.auto_threshold / core.well_token).
-    "core.shape_features",
+    # pipeline.auto_threshold / util.well_token).
+    "pipeline.shape_features",
     # Qt-free flat-field estimators shared by pipeline + viewer (imported lazily
     # inside the review-image controller, so static analysis can miss it).
-    "core.flatfield",
+    "pipeline.flatfield",
     # numpy internals
     "numpy.core._multiarray_umath",
     "numpy.core._multiarray_tests",
@@ -561,7 +561,7 @@ app = BUNDLE(   # noqa: F821
     name="AllWell.app",
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
-    version="6.4.1",
+    version="6.5.0",
     info_plist={
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription":

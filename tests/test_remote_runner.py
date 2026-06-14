@@ -1581,19 +1581,19 @@ def test_required_files_list_is_what_we_promised():
     """
     assert _REQUIRED_REMOTE_FILES == (
         "process_microscopy.py",
-        # Shared Qt-free core package (pipeline + GUI).
-        "core/__init__.py",
-        "core/auto_threshold.py",
-        "core/aw_safe.py",
-        "core/flatfield.py",
-        "core/shape_features.py",
-        "core/well_token.py",
-        # Pipeline components extracted from process_microscopy — the Qt-free
-        # ``pipeline`` package, re-imported at module top level.
+        # General Qt-free utilities (well-token parsing, logged-swallow).
+        "util/__init__.py",
+        "util/aw_safe.py",
+        "util/well_token.py",
+        # The Qt-free ``pipeline`` package (analysis-domain modules +
+        # segmenters/writers), re-imported at module top level.
         "pipeline/__init__.py",
+        "pipeline/auto_threshold.py",
         "pipeline/background.py",
         "pipeline/cellpose.py",
+        "pipeline/flatfield.py",
         "pipeline/io.py",
+        "pipeline/shape_features.py",
         "pipeline/stardist.py",
         "_Docs/requirements-remote.txt",
     )

@@ -1,10 +1,10 @@
-"""core.shape_features — shared, Qt-free catalog of per-cell shape features.
+"""pipeline.shape_features — shared, Qt-free catalog of per-cell shape features.
 
 Single source of truth for the optional morphology features the pipeline can
 emit per cell and that the Review GUI surfaces in the channel dropdowns.
 Imported by BOTH ``process_microscopy.py`` (to compute / emit) and
 ``well_viewer`` (to detect / label) so the two sides cannot drift — the same
-role ``core.auto_threshold`` and ``core.well_token`` play (shared Qt-free
+role ``pipeline.auto_threshold`` and ``util.well_token`` play (shared Qt-free
 ``core`` modules importable by the headless pipeline).
 
 Design notes

@@ -399,11 +399,11 @@ def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
 def _canonical_well_label(token: str) -> str | None:
     """Return canonical 96-well label (e.g. B03) for *token*, or None if invalid.
 
-    Thin wrapper over :func:`core.well_token.canonical_well_label` so the
+    Thin wrapper over :func:`util.well_token.canonical_well_label` so the
     pipeline and the GUI tools (WellPlateZipper, analyze_tab,
     services/input_resolution_service) all share one parser.
     """
-    from core.well_token import canonical_well_label as _cwl
+    from util.well_token import canonical_well_label as _cwl
     return _cwl(token)
 
 
@@ -1163,11 +1163,11 @@ def compute_shape_features(
     always-on centroids (needed by cell tracking) in a single
     ``skimage.measure.regionprops_table`` pass over the label image — the same
     pass QC debris-removal will reuse. Returns ``{label_id: {shape_col: value}}``
-    using the ``shape_`` column names from :mod:`core.shape_features` (the
+    using the ``shape_`` column names from :mod:`pipeline.shape_features` (the
     Qt-free catalog shared with the viewer). Returns ``{}`` when there are no
     labels. Channel-independent: no intensity image is needed.
     """
-    import core.shape_features as sfc
+    import pipeline.shape_features as sfc
     from skimage.measure import regionprops_table
 
     props = sfc.regionprops_properties(selected_keys)  # base regionprop names (incl. centroid)
@@ -1202,11 +1202,11 @@ def compute_shape_features(
 
 FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
 # Flat-field (illumination) estimators live in the Qt-free repo-root
-# ``core.flatfield`` module so the pipeline and the GUI share one implementation
+# ``pipeline.flatfield`` module so the pipeline and the GUI share one implementation
 # (the GUI recomputes them for the Segmentation tab's flat-field validation
 # view). Imported under the original names so the rest of this module is
 # unchanged.
-from core.flatfield import (  # noqa: E402,F401
+from pipeline.flatfield import (  # noqa: E402,F401
     _FLATFIELD_FLOOR,
     _FLATFIELD_SIGMA,
     _normalize_flatfield,
@@ -1431,17 +1431,17 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 # (preserving any user-set values).
 #
 # The per-image sampler and timepoint helpers live in
-# ``core.auto_threshold`` so the GUI's Cell Gating tab and this pipeline
-# run produce identical defaults on the same dataset. ``core.auto_threshold``
+# ``pipeline.auto_threshold`` so the GUI's Cell Gating tab and this pipeline
+# run produce identical defaults on the same dataset. ``pipeline.auto_threshold``
 # depends only on ``numpy`` + ``random`` so the pipeline-only deployment
 # story is preserved.
 
-from core.auto_threshold import (
+from pipeline.auto_threshold import (
     DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,
 )
-from core.aw_safe import swallowed
+from util.aw_safe import swallowed
 
 
 def _estimate_thresholds_standalone(

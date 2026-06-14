@@ -92,6 +92,9 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_gates = []
     ctx.app._scatter_gate_draw_mode = False
     ctx.app._scatter_gate_selector = None
+    # gating.py triggers redraws through this callback so it never has to import
+    # the controller (avoids a scatter-internal import cycle).
+    ctx.app._scatter_gate_redraw_cb = redraw_scatter_orchestrate
     cl.addStretch(1)
 
     from widgets.icon_button import IconButton as _IconButton

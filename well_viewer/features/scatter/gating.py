@@ -412,5 +412,12 @@ def refresh_gate_selector(app) -> None:
 
 
 def _redraw(app) -> None:
-    from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
-    redraw_scatter_orchestrate(app)
+    """Trigger a scatter redraw via the callback the tab wires at build time.
+
+    The callback (``redraw_scatter_orchestrate``) is stashed on the app by
+    ``build_scatter_cells_tab`` so this module never imports the controller —
+    keeping the scatter package free of an internal import cycle.
+    """
+    cb = getattr(app, "_scatter_gate_redraw_cb", None)
+    if callable(cb):
+        cb(app)

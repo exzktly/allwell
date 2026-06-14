@@ -38,6 +38,7 @@ from widgets.toggle_switch import ToggleSwitch
 from well_viewer.features.barplot.renderer import redraw_bars
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
+from well_viewer.features.scatter.gating import clear_gates, set_gate_draw_mode
 from well_viewer.core.safe import swallowed
 
 
@@ -224,8 +225,6 @@ class ExportStyleSidebar(QWidget):
 
         # ── Scatter: Density + Gates (per-cell scatter only) ─────────────────
         if self._is_scatter_cells_fig():
-            from well_viewer.features.scatter.gating import set_gate_draw_mode
-
             s_density = section("Density", expanded=True)
             dens_tog = ToggleSwitch("Color by density")
             dens_tog.setChecked(bool(self._prefs.get("scatter_density", False)))
@@ -971,7 +970,6 @@ class ExportStyleSidebar(QWidget):
             swallowed()  # was: pass (silent except)
 
     def _on_clear_gates(self) -> None:
-        from well_viewer.features.scatter.gating import clear_gates
         clear_gates(self._app)
         lbl = getattr(self, "_gate_count_label", None)
         if lbl is not None:

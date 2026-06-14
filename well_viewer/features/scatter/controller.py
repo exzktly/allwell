@@ -24,6 +24,11 @@ from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
     collect_scatter_data,
     get_all_timepoints,
 )
+from well_viewer.features.scatter.gating import (
+    draw_gates,
+    refresh_gate_selector,
+    render_scatter_points,
+)
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -126,7 +131,6 @@ def redraw_scatter(
     # restyle.
     prefs = getattr(app, "_export_style_prefs", None) or {}
     density_on = bool(prefs.get("scatter_density", False))
-    from well_viewer.features.scatter.gating import render_scatter_points
     interaction_points, density_proxies = render_scatter_points(
         app, app._ax_scatter, scatter_data,
         density_on=density_on,
@@ -178,7 +182,6 @@ def redraw_scatter(
 
     # Draw stored rectangular gates + their percentage labels on top of the
     # points. Gate coords are data-space, so they track log scale / limits.
-    from well_viewer.features.scatter.gating import draw_gates
     draw_gates(app, app._ax_scatter, scatter_data, tps_list, _muted_fg)
 
     # Redraw canvas
@@ -201,7 +204,6 @@ def redraw_scatter(
         swallowed()  # was: pass (silent except)
     # ax.clear() at the top of this redraw voids any live RectangleSelector;
     # rebuild it against the fresh axes when gate-draw mode is armed.
-    from well_viewer.features.scatter.gating import refresh_gate_selector
     refresh_gate_selector(app)
     app._scatter_canvas.draw()
 

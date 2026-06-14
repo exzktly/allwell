@@ -16,7 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from services.input_resolution_service import resolve_input_output
+from services.input_resolution_service import (
+    append_loose_images_to_zips,
+    resolve_input_output,
+)
 
 SCHEMA = "experiment:channel:well:fov:timepoint"
 SEP = "_"
@@ -148,12 +151,21 @@ def test_mixed_with_leftover_loose_consolidates_everything(tmp_path):
     input_dir, _, on_success = resolve_input_output(
         in_dir, filename_schema=SCHEMA, filename_sep=SEP)
 
-    # all four wells end up as zips
+    # Two-phase contract: a well zip already present means ``resolve`` defers
+    # loose-file handling to ``append_loose_images_to_zips`` (so the append can
+    # report which wells gained data and drive FOV-level incremental). ``resolve``
+    # alone consolidates the bare folder; the loose files are folded by append.
+    assert on_success is None
+    assert not (in_dir / "B02").exists()           # folder consolidated to a zip
+    for w in ("A01", "B02"):
+        assert (in_dir / f"{w}.zip").exists()
+    assert sorted(p.name for p in in_dir.glob("*.tif"))  # C03/D04 still loose
+
+    append_loose_images_to_zips(in_dir, filename_schema=SCHEMA, filename_sep=SEP)
+
+    # After the append, all four wells are zips and the loose originals are gone.
     for w in ("A01", "B02", "C03", "D04"):
         assert (in_dir / f"{w}.zip").exists()
-    assert not (in_dir / "B02").exists()
-    # loose originals cleaned on success (their wells exist as zips)
-    on_success()
     assert not list(in_dir.glob("*.tif"))
 
 

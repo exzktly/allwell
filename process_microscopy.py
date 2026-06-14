@@ -140,9 +140,9 @@ from pipeline.io import (  # noqa: E402,F401
     _safe_well,
     _verify_files_complete,
     _write_single_csv,
+    incremental_done_fov_keys,
     merge_images_into_zip,
     merge_records_into_csv,
-    read_done_fov_keys,
     save_overlay,
     write_csvs_per_well,
 )
@@ -3029,7 +3029,15 @@ def process_well_zip_task(
 
             if incremental:
                 prior = incremental_prior_dir or output_dir
-                done = read_done_fov_keys(prior / f"{csv_prefix}_{safe_well}.csv")
+                # CSV is the primary done-set; a processed well can have its
+                # <well>_out.zip without a sibling CSV (remote-only materialise /
+                # lost CSV) → recover done keys from the outputs too.
+                done, csv_done = incremental_done_fov_keys(
+                    prior, well_label, csv_prefix=csv_prefix,
+                    safe_well=safe_well, schema=schema, sep=sep)
+                if done and not csv_done:
+                    log.info("Well %s — no prior CSV; recovered %d done FOV-group(s) "
+                             "from processed outputs.", well_label, len(done))
                 if done:
                     new_groups = []
                     for nuc, fl in groups:
@@ -3046,7 +3054,7 @@ def process_well_zip_task(
                         needed_members.add(nuc.name)
                         for f in fl:
                             needed_members.add(f.name)
-                # else: no prior CSV → new well → process all groups (full).
+                # else: no prior CSV or out.zip → new well → process all (full).
 
             n_extracted = extract_zip(zip_path, tmp_extract, members_to_extract=needed_members)
             log.info(
@@ -3181,7 +3189,14 @@ def process_well_folder_task(
 
             if incremental:
                 prior = incremental_prior_dir or output_dir
-                done = read_done_fov_keys(prior / f"{csv_prefix}_{safe_well}.csv")
+                # CSV is primary; recover done FOV-groups from the processed
+                # outputs (zip or folder) so a missing CSV never re-segments.
+                done, csv_done = incremental_done_fov_keys(
+                    prior, well_label, csv_prefix=csv_prefix,
+                    safe_well=safe_well, schema=schema, sep=sep)
+                if done and not csv_done:
+                    log.info("Well %s — no prior CSV; recovered %d done FOV-group(s) "
+                             "from processed outputs.", well_label, len(done))
                 if done:
                     new_groups = []
                     for nuc, fl in groups:
@@ -3193,7 +3208,7 @@ def process_well_folder_task(
                         return [], []
                     log.info("Well %s — merging %d new FOV(s).", well_label, len(new_groups))
                     groups = new_groups
-                # else: no prior CSV → new well → process all groups (full).
+                # else: no prior CSV or outputs → new well → process all (full).
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed = _process_groups_in_worker(groups, kwargs, well_label)

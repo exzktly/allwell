@@ -21,7 +21,12 @@ from pipeline.io import (  # noqa: E402
     merge_images_into_zip,
     merge_records_into_csv,
     read_done_fov_keys,
+    read_done_fov_keys_from_folder,
+    read_done_fov_keys_from_zip,
 )
+
+SCHEMA = "experiment:channel:well:fov:timepoint"
+SEP = "_"
 
 
 def _rows(csv_path):
@@ -37,6 +42,34 @@ def test_read_done_fov_keys(tmp_path):
     ])
     assert read_done_fov_keys(p) == {("1", "T01"), ("1", "T02")}
     assert read_done_fov_keys(tmp_path / "missing.csv") == set()
+
+
+def test_read_done_fov_keys_from_zip(tmp_path):
+    # A processed <well>_out.zip's members keep the input stem + role suffix, so
+    # (fov, timepoint) is recoverable even when the sibling CSV is gone — the
+    # fallback that stops an incremental run re-segmenting already-done FOVs.
+    z = tmp_path / "A01_out.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("exp_NIR_A01_1_00d00h00m_overlay.png", b"x")
+        zf.writestr("exp_NIR_A01_1_00d00h00m_labels.tif", b"x")
+        zf.writestr("exp_GFP_A01_1_00d00h00m_tophat.tif", b"x")
+        zf.writestr("exp_NIR_A01_2_01d16h00m_overlay.png", b"x")
+    assert read_done_fov_keys_from_zip(z, schema=SCHEMA, sep=SEP) == {
+        ("1", "00d00h00m"), ("2", "01d16h00m")}
+    assert read_done_fov_keys_from_zip(
+        tmp_path / "missing_out.zip", schema=SCHEMA, sep=SEP) == set()
+
+
+def test_read_done_fov_keys_from_folder(tmp_path):
+    d = tmp_path / "A01"
+    d.mkdir()
+    (d / "exp_NIR_A01_1_00d00h00m_overlay.png").write_bytes(b"x")
+    (d / "exp_NIR_A01_3_02d00h00m_labels.tif").write_bytes(b"x")
+    (d / ".fov_1.done").write_bytes(b"")        # hidden checkpoint → ignored
+    assert read_done_fov_keys_from_folder(d, schema=SCHEMA, sep=SEP) == {
+        ("1", "00d00h00m"), ("3", "02d00h00m")}
+    assert read_done_fov_keys_from_folder(
+        tmp_path / "nope", schema=SCHEMA, sep=SEP) == set()
 
 
 def test_merge_records_appends_only_new_keys(tmp_path):

@@ -244,6 +244,77 @@ def append_loose_images_to_zips(
     return appended, wells_touched
 
 
+def select_incremental_scope(
+    opts: dict,
+    input_dir: Path,
+    *,
+    log_fn: Callable[[str], None] | None = None,
+) -> None:
+    """Append loose images next to grouped well zips, then choose the run scope.
+
+    Mutates *opts* in place: if loose files were folded into existing/new well
+    zips, switch the run to FOV-level **incremental** mode (process only the new
+    FOVs, merge into the existing per-well CSV + out-zip). Falls back to a full
+    ``--force`` reprocess when the run uses cross-well models the incremental
+    path can't keep consistent — a ``basic`` flat-field / background (sampled
+    across all wells) or an ``empty_well`` model whose designated background well
+    just received new files.
+
+    Qt-free so it stays testable and reusable; the GUI passes a ``log_fn`` that
+    forwards to its run-log queue.
+    """
+    import re
+
+    from util.well_token import canonical_well_label
+
+    def _log(msg: str) -> None:
+        if log_fn:
+            log_fn(msg)
+
+    try:
+        appended, wells_touched = append_loose_images_to_zips(
+            input_dir,
+            filename_schema=opts["filename_schema"],
+            filename_sep=opts["filename_sep"],
+            log_fn=log_fn,
+        )
+    except OSError as exc:
+        _log(f"[append] Skipped loose-file append ({exc}).\n")
+        return
+    if not appended:
+        return
+
+    flatfield = str(opts.get("flatfield", "none") or "none")
+    background = str(opts.get("background", "") or "")
+    bg_tokens = {
+        canonical_well_label(w)
+        for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
+        if w
+    }
+    bg_touched = bool(bg_tokens & wells_touched)
+    needs_full = (
+        flatfield == "basic"
+        or background == "basic"
+        or ((flatfield == "empty_well" or background == "empty_well") and bg_touched)
+    )
+    if needs_full:
+        opts["force"] = True
+        opts["incremental"] = False
+        reason = ("basic flat-field/background is sampled across all wells"
+                  if (flatfield == "basic" or background == "basic")
+                  else "the empty-well background well gained new files")
+        _log(
+            f"[append] Appended {appended} loose image(s) into "
+            f"{len(wells_touched)} well(s); forcing a full reprocess ({reason}).\n"
+        )
+    else:
+        opts["incremental"] = True
+        _log(
+            f"[append] Appended {appended} loose image(s) into "
+            f"{len(wells_touched)} well(s); processing only new FOVs (incremental).\n"
+        )
+
+
 def run_zipper(
     tif_folder: Path,
     out_folder: Path,

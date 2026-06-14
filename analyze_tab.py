@@ -26,7 +26,11 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from services.input_resolution_service import resolve_input_output, tif_files_in
+from services.input_resolution_service import (
+    resolve_input_output,
+    select_incremental_scope,
+    tif_files_in,
+)
 from util.well_token import is_valid_well_name
 from services.pipeline_runner import (
     PipelineRunner,
@@ -812,71 +816,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                 wells.add(token.upper())
         return len(wells) or len(tifs) or 1
 
-    def _apply_loose_append(self, opts: dict, input_dir: "Path", output_dir: "Path",
-                            log_q: queue.Queue) -> None:
-        """Append loose images next to grouped well zips, then choose the
-        reprocessing scope.
-
-        If any loose files were folded into existing/new well zips, switch the
-        run to FOV-level **incremental** mode (process only the new FOVs, merge
-        into the existing per-well CSV + out-zip). Falls back to a full
-        ``--force`` reprocess when the run uses cross-well models that the
-        incremental path can't keep consistent: a ``basic`` flat-field /
-        background (sampled across all wells) or an ``empty_well`` model whose
-        designated background well just received new files.
-        """
-        import re
-
-        from services.input_resolution_service import append_loose_images_to_zips
-        from util.well_token import canonical_well_label
-
-        try:
-            appended, wells_touched = append_loose_images_to_zips(
-                input_dir,
-                filename_schema=opts["filename_schema"],
-                filename_sep=opts["filename_sep"],
-                log_fn=lambda msg: log_q.put(("line", msg)),
-            )
-        except OSError as exc:
-            log_q.put(("line", f"[append] Skipped loose-file append ({exc}).\n"))
-            return
-        if not appended:
-            return
-
-        flatfield = str(opts.get("flatfield", "none") or "none")
-        background = str(opts.get("background", "") or "")
-        bg_tokens = {
-            canonical_well_label(w)
-            for w in re.split(r"[,\s]+", str(opts.get("background_well", "") or ""))
-            if w
-        }
-        bg_touched = bool(bg_tokens & wells_touched)
-        needs_full = (
-            flatfield == "basic"
-            or background == "basic"
-            or ((flatfield == "empty_well" or background == "empty_well") and bg_touched)
-        )
-        if needs_full:
-            opts["force"] = True
-            opts["incremental"] = False
-            reason = ("basic flat-field/background is sampled across all wells"
-                      if (flatfield == "basic" or background == "basic")
-                      else "the empty-well background well gained new files")
-            log_q.put((
-                "line",
-                f"[append] Appended {appended} loose image(s) into "
-                f"{len(wells_touched)} well(s); forcing a full reprocess "
-                f"({reason}).\n",
-            ))
-        else:
-            opts["incremental"] = True
-            log_q.put((
-                "line",
-                f"[append] Appended {appended} loose image(s) into "
-                f"{len(wells_touched)} well(s); processing only new FOVs "
-                f"(incremental).\n",
-            ))
-
     def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,
                                      *, proc_hook=None):
         """Adapter passed to ``PipelineRunner.start``.
@@ -903,11 +842,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                 proc_hook=proc_hook,
                 move_source_tifs=bool(opts.get("move_source_tifs", False)),
             )
-            # Fold any loose image files sitting next to already-grouped well
-            # zips into those zips, then process only the new FOVs incrementally
-            # (merging into the existing CSVs / out-zips) rather than redoing
-            # every well. See input_resolution_service.append_loose_images_to_zips.
-            self._apply_loose_append(opts, input_dir, output_dir, log_q)
+            # Fold loose images sitting next to grouped well zips into them, then
+            # pick the run scope (incremental-merge vs full --force). Mutates opts.
+            select_incremental_scope(opts, input_dir,
+                                     log_fn=lambda m: log_q.put(("line", m)))
             # When the inputs are already grouped/zipped the zipper is skipped
             # and fires no per-well progress — surface the existing wells so the
             # Group stage still shows progress and the plate marks each well

@@ -2999,26 +2999,16 @@ class Fetcher:
 
         if self.run.incremental:
             # The fetched zip holds only the new FOVs' images. Merge them into
-            # the existing local output (out-zip, or per-well folder) instead of
-            # overwriting — see pipeline.io.merge_images_into_zip.
+            # the existing local <well>_out.zip instead of overwriting.
             self._materialize_incremental(well, well_zip, dest)
             return
 
-        if self.run.local_input_mode is LocalInputMode.FOLDER:
-            # Local folder-mode runs produce loose QC files (the pipeline
-            # decompresses on its own when --compress_output_well_folders
-            # is off). For the remote case we always run in
-            # compress-output mode (it's the simplest fetch unit), so
-            # extract here to match.
-            try:
-                with zipfile.ZipFile(well_zip, "r") as zf:
-                    zf.extractall(dest)
-            except (OSError, zipfile.BadZipFile) as exc:
-                self._log(f"[remote] warn: extracting {well}_out.zip failed: {exc}\n")
-            return
-
-        # Zip- or flat-mode local run: the zip itself IS the expected
-        # output unit. Drop it in place.
+        # Output is always a per-well .zip now (compression is mandatory), so
+        # the fetched zip IS the expected local artifact for every input mode.
+        # Drop it in place — previously FOLDER-mode inputs extracted it loose,
+        # which left no <well>_out.zip and no <well>/ dir, so the verify step
+        # failed and the post-run cleanup (delete local well folders) was
+        # skipped.
         try:
             shutil.copyfile(well_zip, dest / f"{well}_out.zip")
         except OSError as exc:
@@ -3036,19 +3026,8 @@ class Fetcher:
             except (OSError, zipfile.BadZipFile) as exc:
                 self._log(f"[remote] warn: extracting partial {well}_out.zip failed: {exc}\n")
                 return
-            if self.run.local_input_mode is LocalInputMode.FOLDER:
-                out_folder = dest / well
-                out_folder.mkdir(parents=True, exist_ok=True)
-                for img in sorted(tmp_dir.iterdir()):
-                    if not img.is_file() or img.name.startswith("."):
-                        continue
-                    target = out_folder / img.name
-                    if target.exists():
-                        continue  # keep existing
-                    shutil.move(str(img), str(target))
-            else:
-                n = merge_images_into_zip(dest / f"{well}_out.zip", tmp_dir)
-                self._log(f"[remote] merge: {well}_out.zip → +{n} new image(s)\n")
+            n = merge_images_into_zip(dest / f"{well}_out.zip", tmp_dir)
+            self._log(f"[remote] merge: {well}_out.zip → +{n} new image(s)\n")
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -3767,15 +3746,12 @@ class RemoteRunner:
         for w in self._list_remote_completed_wells():
             all_wells.add(w)
         missing: list[str] = []
-        want_zip_artifact = (
-            run.output_filter is OutputFilter.FULL
-            and run.local_input_mode in (LocalInputMode.ZIP, LocalInputMode.FLAT,
-                                          LocalInputMode.MIXED)
-        )
-        want_folder_artifact = (
-            run.output_filter is OutputFilter.FULL
-            and run.local_input_mode is LocalInputMode.FOLDER
-        )
+        # Output is always materialised as <well>_out.zip now (compression is
+        # mandatory and the Fetcher keeps the zip for every input mode), so the
+        # FULL filter expects that zip regardless of input mode. (Pre-always-zip
+        # this branched on FOLDER mode and expected a <well>/ dir, which no
+        # longer exists — that mismatch failed verify and skipped cleanup.)
+        want_zip_artifact = run.output_filter is OutputFilter.FULL
         for well in sorted(all_wells):
             csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
             if not csvs:
@@ -3792,10 +3768,6 @@ class RemoteRunner:
                 out_zip = run.local_output_dir / f"{well}_out.zip"
                 if not out_zip.exists() or out_zip.stat().st_size == 0:
                     missing.append(f"missing {well}_out.zip locally")
-            elif want_folder_artifact:
-                out_folder = run.local_output_dir / well
-                if not out_folder.is_dir() or not any(out_folder.iterdir()):
-                    missing.append(f"missing {well}/ output folder locally")
         if missing:
             for m in missing[:10]:
                 log(f"[remote] verify: {m}\n")

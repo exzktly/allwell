@@ -1510,10 +1510,12 @@ def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
     assert missing == []
 
 
-def test_verify_flags_missing_folder_in_folder_mode(host, tmp_path):
-    """In FOLDER mode (local input was per-well subfolders) the
-    Fetcher extracts the remote out_zip into ``local_output_dir/<well>/``.
-    Verify must check for that extracted folder, not the zip."""
+def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
+    """Output is always materialised as <well>_out.zip now (compression is
+    mandatory and the Fetcher keeps the zip for every input mode), so verify
+    must expect the zip even when the local input was per-well folders. (The
+    old behaviour expected an extracted <well>/ dir, which no longer exists —
+    that mismatch failed verify and skipped the post-run local-folder cleanup.)"""
     from services.remote_runner import _RemoteRun
 
     runner = RemoteRunner(host)
@@ -1531,13 +1533,12 @@ def test_verify_flags_missing_folder_in_folder_mode(host, tmp_path):
 
     (tmp_path / "measurements_A01.csv").write_text("ok\n")
     (tmp_path / "measurements_B02.csv").write_text("ok\n")
-    # A01 has its extracted folder, B02 doesn't.
-    (tmp_path / "A01").mkdir()
-    (tmp_path / "A01" / "img.tif").write_bytes(b"\0")
+    # A01 has its out-zip, B02 doesn't.
+    (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
     missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
-    assert any("B02" in m and "output folder" in m for m in missing)
+    assert any("B02" in m and "_out.zip" in m for m in missing)
     assert not any("A01" in m for m in missing)
 
 

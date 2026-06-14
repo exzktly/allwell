@@ -2469,6 +2469,13 @@ class _BatchedRemoteProcess:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    # The remote (Linux) pipeline logs UTF-8 — including the
+                    # em-dash in "Well X — done." Decode the ssh stream as UTF-8
+                    # so those markers survive on a Windows client (whose locale
+                    # is cp1252); otherwise they arrive mojibake'd and the
+                    # dashboard's per-well Process tracking never matches.
+                    encoding="utf-8",
+                    errors="replace",
                     bufsize=1,
                     env={**os.environ, "PYTHONUNBUFFERED": "1"},
                     start_new_session=(os.name == "posix"),
@@ -3456,6 +3463,12 @@ class RemoteRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # Decode the remote (Linux, UTF-8) pipeline output as UTF-8 so the
+            # em-dash in per-well markers ("Well X — done.") isn't mojibake'd on
+            # a cp1252 Windows client — otherwise the dashboard's Process stage
+            # stays stuck at 0/N while ASCII-only markers (threshold) reach N/N.
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
             start_new_session=(os.name == "posix"),

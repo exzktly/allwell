@@ -51,15 +51,20 @@ _RE_TF_WORKERS = re.compile(r"TF threads/worker\s*:\s*\d+\s+\(workers:\s*(\d+)\s
 _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well")
 # Per-well lifecycle markers emitted by the worker (process_microscopy):
 #   "Well A01 — starting (pid …)"  /  "Well A01 — done."  /  "FAILED well A01: …"
-_RE_WELL_START = re.compile(r"Well (\S+) — starting")
-_RE_WELL_DONE_ID = re.compile(r"Well (\S+) — done\.")
+# The separator is matched as a generic ``\s+\S+\s+`` token rather than the
+# literal " — " so the markers still parse if the em-dash is mangled in transit
+# (e.g. a UTF-8 remote stream decoded with a cp1252 Windows locale arrives as
+# "Well A01 â€" done."). Without this the Process stage stuck at 0/N while the
+# ASCII-only threshold markers reached N/N.
+_RE_WELL_START = re.compile(r"Well (\S+)\s+\S+\s+starting")
+_RE_WELL_DONE_ID = re.compile(r"Well (\S+)\s+\S+\s+done\.")
 _RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
 # Incremental mode: a well with no new FOVs is a cheap no-op — it never emits
 # "— done.", so it needs its own terminal marker to count + colour on the plate.
-_RE_WELL_UPTODATE = re.compile(r"Well (\S+) — up to date")
+_RE_WELL_UPTODATE = re.compile(r"Well (\S+)\s+\S+\s+up to date")
 # A well skipped because its output already exists (re-run without --force) —
 # it's complete, so the dashboard must count it as done, not leave it pending.
-_RE_WELL_SKIP = re.compile(r"SKIP well (\S+) — output already exists")
+_RE_WELL_SKIP = re.compile(r"SKIP well (\S+)\s+\S+\s+output already exists")
 # Remote incremental: the runner emits this for wells it didn't need to upload /
 # re-fetch because their local output is already current — marks them complete.
 _RE_REMOTE_UPTODATE = re.compile(r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): up to date")
@@ -77,8 +82,8 @@ _RE_THRESH_WELL = re.compile(r"Auto-threshold: completed well \d+/\d+ \(([A-Ha-h
 # it's attributable even when wells process in parallel:
 #   "Well A01 — 12 FOV-group(s)"  (the total, at well start)
 #   "Well A01 — FOV 3/12 done"    (each group as it completes)
-_RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+) — (\d+) FOV-group")
-_RE_WELL_FOV_DONE = re.compile(r"Well (\S+) — FOV (\d+)/(\d+) done")
+_RE_WELL_FOV_TOTAL = re.compile(r"Well (\S+)\s+\S+\s+(\d+) FOV-group")
+_RE_WELL_FOV_DONE = re.compile(r"Well (\S+)\s+\S+\s+FOV (\d+)/(\d+) done")
 # Finalize-phase status lines. After the last well the run is still busy
 # (auto-threshold scans every well's zip; a remote run then drains downloads
 # and cleans up) — surface what it's doing so "Finalizing…" doesn't look hung.
@@ -215,12 +220,11 @@ class ProgressTracker:
             # removed" as the only completion log; keep matching it
             # too as a fallback for users running mismatched
             # client/server versions.
-            if "— done." in line:
+            md = _RE_WELL_DONE_ID.search(line)
+            if md:
                 self.well_done += 1
                 events.append(("well_done", (self.well_done, self.well_total)))
-                md = _RE_WELL_DONE_ID.search(line)
-                if md:
-                    events.append(("well_stage", (md.group(1), "process")))
+                events.append(("well_stage", (md.group(1), "process")))
             else:
                 # Incremental up-to-date well: counts toward completion and
                 # advances to the processed stage (the auto-threshold pass then

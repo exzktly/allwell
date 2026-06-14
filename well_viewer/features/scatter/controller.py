@@ -634,15 +634,16 @@ def update_scatter_menus(app) -> None:
     if tp_strs and app._scatter_tp_var.currentText() not in tp_strs:
         app._scatter_tp_var.setCurrentText(tp_strs[0])
 
-    # Repopulate the multi-tp picker. Mirrors the aggregate scatter's
-    # behaviour: every refresh resets every tp to checked, so a fresh
-    # dataset load lands in the same "everything visible" state.
-    if hasattr(app, "_scatter_tp_selections"):
-        app._scatter_tp_selections.clear()
-    else:
-        app._scatter_tp_selections = {}
-    for tp_str in tp_strs:
-        app._scatter_tp_selections[tp_str] = True
+    # Repopulate the multi-tp picker. PRESERVE the user's per-timepoint checks
+    # across refreshes: the available timepoints are dataset-wide and don't
+    # change when wells are added/removed, so a selection refresh (e.g. adding a
+    # well to the plot) must not reset the timepoint filter. New timepoints
+    # default to checked; ones no longer present are dropped; a fresh dataset
+    # (no prior selections) lands in the "everything visible" state.
+    prior_tp = getattr(app, "_scatter_tp_selections", None) or {}
+    app._scatter_tp_selections = {
+        tp_str: bool(prior_tp.get(tp_str, True)) for tp_str in tp_strs
+    }
     app._update_scatter_tp_selection_display()
 
     # Aggregate scatter — propagate the same channel list to its own
@@ -680,14 +681,14 @@ def update_scatter_menus(app) -> None:
     # express right now.
     app._sync_scatter_agg_stat_combos()
 
-    # Update timepoint selections for aggregate scatter; all default checked.
-    if hasattr(app, '_scatter_agg_tp_selections'):
-        app._scatter_agg_tp_selections.clear()
-    else:
-        app._scatter_agg_tp_selections = {}
-
-    for tp_str in tp_strs:
-        app._scatter_agg_tp_selections[tp_str] = True
+    # Update timepoint selections for aggregate scatter — preserve the user's
+    # checks across refreshes (same rationale as the per-cell picker above): a
+    # well add/remove must not reset the timepoint filter. New tps default
+    # checked; missing ones dropped; a fresh dataset checks all.
+    prior_agg_tp = getattr(app, "_scatter_agg_tp_selections", None) or {}
+    app._scatter_agg_tp_selections = {
+        tp_str: bool(prior_agg_tp.get(tp_str, True)) for tp_str in tp_strs
+    }
 
     app._update_tp_selection_display()
 

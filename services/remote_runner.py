@@ -72,7 +72,14 @@ from util.aw_safe import swallowed
 # saw "rsync never completes". Match with ``.search()`` against the
 # "Well A01 — done." substring instead. Also support the legacy bare
 # ``A01 — done.`` form just in case anything still emits it.
-_RE_WELL_DONE = re.compile(r"(?:\bWell\s+)?(?P<well>[A-Ha-h]\d{2})\s+—\s+done\.")
+#
+# The separator is matched as a generic ``\s+\S+\s+`` token rather than the
+# literal " — " so a per-well download still triggers if the em-dash is mangled
+# in transit (a UTF-8 remote stream decoded with a cp1252 Windows locale arrives
+# as "Well A01 â€" done."). Without this the Fetcher never fired per-well during
+# the run — no download progress, and the out dir only filled from the
+# end-of-run backstop.
+_RE_WELL_DONE = re.compile(r"(?:\bWell\s+)?(?P<well>[A-Ha-h]\d{2})\s+\S+\s+done\.")
 _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well")
 
 # Default output-filter glob set: just CSVs and the top-level metadata

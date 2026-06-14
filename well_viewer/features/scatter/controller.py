@@ -30,6 +30,8 @@ from well_viewer.features.scatter.gating import (
     render_scatter_points,
 )
 
+from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes  # noqa: E501
+
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
 
@@ -65,6 +67,10 @@ def redraw_scatter(
         for attr in ("_ax_scatter", "_scatter_fig", "_scatter_canvas")
     ):
         return
+
+    # Collapse any prior "Separate axes" panels back to the single overlay axis.
+    if len(getattr(app._scatter_fig, "axes", []) or []) > 1:
+        _setup_scatter_axes(app, 1)
 
     active_rsets = app._rep_sets_active()
     selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths]
@@ -122,6 +128,12 @@ def redraw_scatter(
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )
+
+    # "Separate axes" layout (view-only): stack one group per panel, >1 group.
+    _lay = getattr(app, "_scatter_layout_var", None)
+    if _lay is not None and len(scatter_data) > 1 and str(_lay.currentText()).startswith("Separate"):  # noqa: E501
+        _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list)
+        return
 
     # Plot one artist per well. ``render_scatter_points`` owns the solid-vs-
     # density branch (one Line2D per well, or a per-point density PathCollection

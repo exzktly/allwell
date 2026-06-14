@@ -249,6 +249,64 @@ def test_drawing_a_gate_notifies_count_callback():
     assert calls == [1]
 
 
+def test_separate_axes_layout_stacks_one_panel_per_group():
+    """'Separate axes' layout renders one stacked panel per group (view-only),
+    and switching back to Overlay collapses to a single axis."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    n = 30
+    rng = np.random.default_rng(3)
+
+    def _df():
+        return pd.DataFrame({
+            "Included": [1] * n, "area_px": [200.0] * n,
+            "timepoint_hours": [24.0] * n, "timepoint": ["24h"] * n,
+            "filename": [f"f{i}.tif" for i in range(n)],
+            "nucleus_id": [str(i) for i in range(n)],
+            "w3cy5_mean_intensity": rng.normal(1000, 100, n).tolist(),
+            "w4gfp_mean_intensity": rng.normal(1000, 100, n).tolist(),
+        })
+
+    fig = Figure(figsize=(6, 6))
+    fig.add_subplot(1, 1, 1)
+    app = SimpleNamespace()
+    app._app_state = SimpleNamespace(
+        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}),
+        channel=SimpleNamespace(ratio_index={}),
+        selection=SimpleNamespace(selected_wells=["A01", "B02"]),
+        plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
+    )
+    app._rep_sets_active = lambda: []
+    app._get_rows = lambda label: _df()
+    app._rank_color_well = lambda label: "#3366cc"
+    app._parse_rc = lambda label: (label, 0, 0)
+    app._scatter_fig = fig
+    app._ax_scatter = fig.axes[0]
+    app._scatter_canvas = FigureCanvasAgg(fig)
+    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._scatter_gates = []
+    app._scatter_gate_draw_mode = False
+    app._scatter_gate_selector = None
+    app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
+
+    cols = ("w3cy5_mean_intensity", "w4gfp_mean_intensity")
+    redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
+    assert len(app._scatter_fig.axes) == 2                     # one panel per group
+    assert app._scatter_interaction_cache == {"points": []}    # view-only
+
+    # Back to Overlay → collapses to one axis.
+    app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Overlay")
+    redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
+    assert len(app._scatter_fig.axes) == 1
+
+
 # ── sidebar builds the scatter-only Density + Gates sections ──────────────────
 
 def _sidebar_stub_app(fig):

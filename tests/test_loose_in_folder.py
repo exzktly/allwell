@@ -72,6 +72,102 @@ def test_loose_tifs_in_in_subfolder_grouped_via_parent(tmp_path):
     assert (in_dir / "A01").is_dir() and (in_dir / "B02").is_dir()
 
 
+def test_partial_grouped_in_folder_consumes_remaining_loose(tmp_path):
+    # Interrupted prior run: some wells already grouped into in/<well>/, the
+    # rest still loose inside in/. The remaining loose must get grouped too
+    # (this used to stall at "0/5" with the leftovers ignored).
+    in_dir = tmp_path / "in"
+    for w in ("A01", "A02"):                      # 2 wells already grouped
+        (in_dir / w).mkdir(parents=True)
+        (in_dir / w / f"exp_NIR_{w}_1_T01.tif").write_bytes(b"x")
+    _make_loose(in_dir, ("B03", "C04", "D05"))    # 3 wells still loose in in/
+
+    input_dir, output_dir, on_success = resolve_input_output(
+        in_dir, filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert input_dir == in_dir
+    for w in ("A01", "A02", "B03", "C04", "D05"):  # all 5 now grouped
+        assert (in_dir / w).is_dir() and any((in_dir / w).glob("*.tif"))
+    on_success()
+    assert not list(in_dir.glob("*.tif"))          # leftovers consumed + cleaned
+
+
+def test_expected_well_count_unions_grouped_and_loose(tmp_path):
+    from services.input_resolution_service import count_expected_wells
+    in_dir = tmp_path / "in"
+    for w in ("A01", "A02"):                       # 2 grouped
+        (in_dir / w).mkdir(parents=True)
+        (in_dir / w / f"exp_NIR_{w}_1_T01.tif").write_bytes(b"x")
+    _make_loose(in_dir, ("B03", "C04", "D05"))     # 3 loose
+    # Selecting the parent of in/
+    assert count_expected_wells(
+        tmp_path, filename_schema=SCHEMA, filename_sep=SEP) == 5
+    # Selecting the in/ folder directly
+    assert count_expected_wells(
+        in_dir, filename_schema=SCHEMA, filename_sep=SEP) == 5
+
+
+def _zip_well(path: Path, well: str) -> None:
+    import zipfile
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr(f"exp_NIR_{well}_1_T01.tif", b"x")
+
+
+def test_mixed_in_folder_is_consolidated_to_zips(tmp_path):
+    # Hard-killed run left some wells as <well>.zip and others as bare folders.
+    # The folder-only wells must be zipped so the zip-preferring pipeline reads
+    # them (instead of silently dropping them).
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    _zip_well(in_dir / "A01.zip", "A01")
+    _zip_well(in_dir / "A02.zip", "A02")
+    for w in ("B03", "C04"):                       # bare folders, no zip yet
+        (in_dir / w).mkdir()
+        (in_dir / w / f"exp_NIR_{w}_1_T01.tif").write_bytes(b"x")
+
+    input_dir, output_dir, on_success = resolve_input_output(
+        in_dir, filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert input_dir == in_dir
+    # every well is now a zip; the bare folders were consolidated + removed
+    for w in ("A01", "A02", "B03", "C04"):
+        assert (in_dir / f"{w}.zip").exists()
+    assert not (in_dir / "B03").exists()
+    assert not (in_dir / "C04").exists()
+
+
+def test_mixed_with_leftover_loose_consolidates_everything(tmp_path):
+    # The nastiest state: some zips, some folders, AND loose TIFs — all in in/.
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    _zip_well(in_dir / "A01.zip", "A01")           # already a zip
+    (in_dir / "B02").mkdir()                        # a bare folder
+    (in_dir / "B02" / "exp_NIR_B02_1_T01.tif").write_bytes(b"x")
+    _make_loose(in_dir, ("C03", "D04"))            # loose for 2 more wells
+
+    input_dir, _, on_success = resolve_input_output(
+        in_dir, filename_schema=SCHEMA, filename_sep=SEP)
+
+    # all four wells end up as zips
+    for w in ("A01", "B02", "C03", "D04"):
+        assert (in_dir / f"{w}.zip").exists()
+    assert not (in_dir / "B02").exists()
+    # loose originals cleaned on success (their wells exist as zips)
+    on_success()
+    assert not list(in_dir.glob("*.tif"))
+
+
+def test_pure_folders_are_left_as_folders(tmp_path):
+    # No zips present → not mixed → keep folder mode (don't needlessly zip).
+    in_dir = tmp_path / "in"
+    for w in ("A01", "B02"):
+        (in_dir / w).mkdir(parents=True)
+        (in_dir / w / f"exp_NIR_{w}_1_T01.tif").write_bytes(b"x")
+    resolve_input_output(in_dir, filename_schema=SCHEMA, filename_sep=SEP)
+    assert (in_dir / "A01").is_dir() and (in_dir / "B02").is_dir()
+    assert not list(in_dir.glob("*.zip"))
+
+
 def test_already_grouped_in_folder_is_not_regrouped(tmp_path):
     # Pre-grouped well folders inside in/ must be used as-is (no on_success,
     # no re-run of the grouper).

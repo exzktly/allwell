@@ -72,6 +72,41 @@ def test_loose_tifs_in_in_subfolder_grouped_via_parent(tmp_path):
     assert (in_dir / "A01").is_dir() and (in_dir / "B02").is_dir()
 
 
+def test_partial_grouped_in_folder_consumes_remaining_loose(tmp_path):
+    # Interrupted prior run: some wells already grouped into in/<well>/, the
+    # rest still loose inside in/. The remaining loose must get grouped too
+    # (this used to stall at "0/5" with the leftovers ignored).
+    in_dir = tmp_path / "in"
+    for w in ("A01", "A02"):                      # 2 wells already grouped
+        (in_dir / w).mkdir(parents=True)
+        (in_dir / w / f"exp_NIR_{w}_1_T01.tif").write_bytes(b"x")
+    _make_loose(in_dir, ("B03", "C04", "D05"))    # 3 wells still loose in in/
+
+    input_dir, output_dir, on_success = resolve_input_output(
+        in_dir, filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert input_dir == in_dir
+    for w in ("A01", "A02", "B03", "C04", "D05"):  # all 5 now grouped
+        assert (in_dir / w).is_dir() and any((in_dir / w).glob("*.tif"))
+    on_success()
+    assert not list(in_dir.glob("*.tif"))          # leftovers consumed + cleaned
+
+
+def test_expected_well_count_unions_grouped_and_loose(tmp_path):
+    from services.input_resolution_service import count_expected_wells
+    in_dir = tmp_path / "in"
+    for w in ("A01", "A02"):                       # 2 grouped
+        (in_dir / w).mkdir(parents=True)
+        (in_dir / w / f"exp_NIR_{w}_1_T01.tif").write_bytes(b"x")
+    _make_loose(in_dir, ("B03", "C04", "D05"))     # 3 loose
+    # Selecting the parent of in/
+    assert count_expected_wells(
+        tmp_path, filename_schema=SCHEMA, filename_sep=SEP) == 5
+    # Selecting the in/ folder directly
+    assert count_expected_wells(
+        in_dir, filename_schema=SCHEMA, filename_sep=SEP) == 5
+
+
 def test_already_grouped_in_folder_is_not_regrouped(tmp_path):
     # Pre-grouped well folders inside in/ must be used as-is (no on_success,
     # no re-run of the grouper).

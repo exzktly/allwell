@@ -127,10 +127,10 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
     progress denominator.
 
     Mirrors :func:`resolve_input_output`'s layout detection so the dashboard's
-    "x / N wells" matches what actually gets processed — including loose TIFs
-    that sit inside an ``in/`` folder (previously mis-counted as 1). Counts
-    grouped wells (per-well zips / folders) when present, else distinct well
-    tokens parsed from loose TIFs at the selected root or inside ``in/``.
+    "x / N wells" matches what actually gets processed. Counts the UNION of
+    already-grouped wells (per-well zips / folders) and distinct well tokens
+    parsed from loose TIFs — so a partially-grouped ``in/`` (some well folders
+    plus leftover loose TIFs) reports the full plate, not just the grouped few.
     """
     from util.well_token import canonical_well_label
 
@@ -138,25 +138,25 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
     fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
     well_idx = fields.index("well") if "well" in fields else -1
 
-    def _loose(folder: Path) -> int:
+    def _loose_toks(folder: Path) -> set[str]:
         if well_idx < 0:
-            return 0
+            return set()
         toks: set[str] = set()
         for p in tif_files_in(folder):
             parts = p.stem.split(filename_sep)
             tok = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
             if tok:
                 toks.add(tok)
-        return len(toks)
+        return toks
 
-    if raw.name.lower() == "in" and _has_well_content(raw):
-        return len(iter_well_tokens(raw)) or 1
-    if in_sub.is_dir() and _has_well_content(in_sub):
-        return len(iter_well_tokens(in_sub)) or 1
-    for folder in (raw, in_sub):
-        n = _loose(folder)
-        if n:
-            return n
+    toks: set[str] = set()
+    if raw.name.lower() == "in":
+        toks |= set(iter_well_tokens(raw)) | _loose_toks(raw)
+    else:
+        toks |= set(iter_well_tokens(in_sub)) | _loose_toks(in_sub)
+        toks |= _loose_toks(raw)  # loose TIFs at the selected root
+    if toks:
+        return len(toks)
     return len(tif_files_in(raw)) or 1
 
 
@@ -445,11 +445,14 @@ def _group_loose_tifs_in_place(
     subfolders within ``folder`` itself.
 
     This covers the case where a user puts ungrouped TIFs inside an ``in/``
-    folder (or selects an ``in/`` folder full of loose TIFs). Such a folder used
-    to be mistaken for already-grouped input — the grouper never ran, the run
-    counted "1 well", and the pipeline stalled trying to flat-scan everything.
-    Here we run WellPlateZipper with ``search == output == folder`` so the loose
-    TIFs become ``folder/<well>/`` folders the pipeline reads in folder mode.
+    folder (or selects an ``in/`` folder full of loose TIFs) — including a
+    *partially-grouped* ``in/`` left by an interrupted prior run (some
+    ``in/<well>/`` folders already exist, the rest of the wells still loose).
+    Such a folder used to be mistaken for already-grouped input, so the grouper
+    never ran on the leftovers. Here we run WellPlateZipper with
+    ``search == output == folder`` so the loose TIFs become ``folder/<well>/``
+    folders the pipeline reads in folder mode; existing well folders are left
+    untouched (the walk is non-recursive) and added to where wells overlap.
 
     Returns ``(folder, output_dir, on_success)``.
     """
@@ -484,13 +487,27 @@ def _group_loose_tifs_in_place(
         return folder, output_dir, None
 
     def _on_success() -> None:
-        """Delete the now-redundant loose TIFs once the pipeline completes
-        cleanly (their grouped copies live under folder/<well>/)."""
+        """Delete only the loose TIFs whose well actually got grouped — i.e. the
+        well now exists as a ``folder/<well>/`` directory OR a ``folder/<well>.zip``
+        (the pipeline may compress the input folders into zips during the run).
+        Keying on the well token (not on a file living inside a folder) keeps the
+        cleanup correct across that compression, and a name that doesn't parse to
+        a grouped well is kept — so a schema mismatch never silently deletes data."""
+        from util.well_token import canonical_well_label
+
+        grouped_wells = set(iter_well_tokens(folder))
+        fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
+        well_idx = fields.index("well") if "well" in fields else -1
+        if well_idx < 0:
+            return
         for tif in source_tifs:
-            try:
-                tif.unlink()
-            except OSError:
-                pass
+            parts = tif.stem.split(filename_sep)
+            tok = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
+            if tok and tok in grouped_wells:
+                try:
+                    tif.unlink()
+                except OSError:
+                    pass
 
     return folder, output_dir, _on_success
 
@@ -530,9 +547,10 @@ def resolve_input_output(
 
     if raw.name.lower() == "in":
         # A folder named "in" is normally already-grouped input — but if it
-        # actually holds loose, ungrouped TIFs, group them in place rather than
-        # mis-treating them as grouped (which stalled the run at "1 well").
-        if not _has_well_content(raw) and len(tif_files_in(raw)) > 3:
+        # holds loose, ungrouped TIFs (a fresh drop, OR the leftovers of an
+        # interrupted grouping run that already made some well folders), group
+        # them in place rather than mis-treating them as fully grouped.
+        if len(tif_files_in(raw)) > 0:
             return _group_loose_tifs_in_place(
                 raw,
                 raw.parent / "out",
@@ -546,12 +564,11 @@ def resolve_input_output(
         return raw, raw.parent / "out", None
 
     in_sub = raw / "in"
-    # A pre-existing ``in/`` subfolder full of loose, ungrouped TIFs (the user
-    # dropped raw images into in/ themselves) is grouped in place too. Checked
-    # before the ``_has_well_content`` resume branch only matters for the
-    # already-grouped case, so this sits alongside it.
-    if (in_sub.is_dir() and not _has_well_content(in_sub)
-            and len(tif_files_in(in_sub)) > 3):
+    # A pre-existing ``in/`` subfolder that still holds loose, ungrouped TIFs —
+    # whether brand-new or the leftovers of a partial prior run (some
+    # ``in/<well>/`` folders already present) — is grouped in place so every
+    # well gets consumed, not just the ones a prior run reached.
+    if in_sub.is_dir() and len(tif_files_in(in_sub)) > 0:
         return _group_loose_tifs_in_place(
             in_sub,
             raw / "out",

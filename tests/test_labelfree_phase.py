@@ -40,8 +40,7 @@ def test_analyze_form_fits_narrow_sidebar(qapp):
     # The form must be able to shrink to (≤) the scroll area's 438 px minimum.
     assert form.minimumSizeHint().width() <= 440, form.minimumSizeHint().width()
     # the long-label checkboxes wrap rather than pinning the panel wide
-    for cb in (tab._qc_remove_debris_cb, tab._compress_input_cb,
-               tab._compress_output_cb, tab._move_source_tifs_cb,
+    for cb in (tab._qc_remove_debris_cb,
                tab._dry_run_cleanup_cb):
         assert isinstance(cb, WrapCheckBox)
         # API still behaves like a checkbox

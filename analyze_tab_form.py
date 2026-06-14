@@ -579,33 +579,9 @@ class AnalyzeTabFormMixin:
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(
             parent, "Output Options",
-            info="Compression toggles apply only to folder-mode datasets "
-                 "(per-well subfolders); 'Move source TIFs' applies only to "
-                 "loose-TIF mode. Moving sources saves ~2× peak disk but loses "
-                 "the clean-retry path if the zipper crashes mid-run.",
+            info="Inputs are always grouped into per-well .zip files and outputs "
+                 "are always written as per-well .zip files.",
         )
-
-        self._compress_input_cb = WrapCheckBox(
-            "Compress input well folders to .zip", sec)
-        self._compress_input_cb.setChecked(True)
-        sec.layout().addWidget(self._compress_input_cb)
-
-        # v5.x.x: opt-in MOVE semantics for the WellPlateZipper. When
-        # off (default) the zipper copies loose TIFs into per-well
-        # subfolders and leaves the originals at raw/, then PR #336's
-        # on_success hook deletes them after a clean run — disk usage
-        # peaks at ~2x. When on, ``--move-source-tifs`` is passed and
-        # peak usage stays close to the input footprint, at the cost
-        # of losing a clean-retry path on a mid-zipper crash.
-        self._move_source_tifs_cb = WrapCheckBox(
-            "Move source TIFs into well folders", sec)
-        self._move_source_tifs_cb.setChecked(False)
-        sec.layout().addWidget(self._move_source_tifs_cb)
-
-        self._compress_output_cb = WrapCheckBox(
-            "Compress output well folders to .zip", sec)
-        self._compress_output_cb.setChecked(True)
-        sec.layout().addWidget(self._compress_output_cb)
 
         r = self._row(sec, "CSV prefix")
         self._csv_prefix_edit = self._entry(r, "measurements", width=160)

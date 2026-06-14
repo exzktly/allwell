@@ -219,8 +219,7 @@ def _args_to_opts(args: argparse.Namespace) -> dict:
         "tophat_radius_fluor": args.tophat_radius_fluor,
         "no_tophat_nir": args.no_tophat_nir,
         "no_tophat_fluor": args.no_tophat_fluor,
-        "compress_input_well_folders": args.compress_input_well_folders,
-        "compress_output_well_folders": args.compress_output_well_folders,
+        # Input/output compression is always on (no longer a flag).
         "force": args.force,
         "cpu_only": args.cpu_only,
         "tf_threads": str(args.tf_threads),

@@ -57,6 +57,9 @@ _RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
 # Incremental mode: a well with no new FOVs is a cheap no-op — it never emits
 # "— done.", so it needs its own terminal marker to count + colour on the plate.
 _RE_WELL_UPTODATE = re.compile(r"Well (\S+) — up to date")
+# A well skipped because its output already exists (re-run without --force) —
+# it's complete, so the dashboard must count it as done, not leave it pending.
+_RE_WELL_SKIP = re.compile(r"SKIP well (\S+) — output already exists")
 # Remote incremental: the runner emits this for wells it didn't need to upload /
 # re-fetch because their local output is already current — marks them complete.
 _RE_REMOTE_UPTODATE = re.compile(r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): up to date")
@@ -227,6 +230,14 @@ class ProgressTracker:
                     self.well_done += 1
                     events.append(("well_done", (self.well_done, self.well_total)))
                     events.append(("well_stage", (mu.group(1), "process")))
+                # Already-complete well skipped on a re-run: it's done, so count
+                # it and advance it to the processed stage (the auto-threshold
+                # pass over its existing _out.zip then turns it green).
+                ms = _RE_WELL_SKIP.search(line)
+                if ms:
+                    self.well_done += 1
+                    events.append(("well_done", (self.well_done, self.well_total)))
+                    events.append(("well_stage", (ms.group(1), "process")))
         return events
 
 

@@ -1350,17 +1350,30 @@ nuclear file plus its fluor channels for that field+time. "New" = a
    brand-new well), then deletes the loose source. Duplicate member names keep
    the existing member (the loose copy is skipped, not overwritten).
 3. **Scope decision** — `select_incremental_scope` sets `opts["incremental"]`
-   when anything was appended, *unless* the run uses a **whole-plate** model:
-   a `basic` flat-field/background is sampled across all images, so adding any
-   data changes it for every well → it falls back to a full `--force` reprocess.
-   `empty_well` stays incremental — its model is per-(channel, timepoint), so
-   adding new timepoints leaves the existing timepoints' corrections (and the
-   already-processed FOVs) unchanged.
+   when anything was appended, *unless* adding the new data would invalidate a
+   model for already-processed work, in which case it falls back to a full
+   `--force` reprocess:
+   - a `basic` flat-field/background is sampled across **all** images, so adding
+     any data changes it for every well → always force;
+   - an `empty_well` model is per-(channel, timepoint). Adding a blank for a
+     **new** timepoint leaves every existing timepoint's correction (and its
+     already-processed FOVs) unchanged → stays incremental. But adding a blank
+     at a timepoint the background well **already had a blank for** changes that
+     timepoint's field, so the already-processed wells at it would be stale →
+     force. The decision is self-contained in the input: it compares the
+     appended blanks' timepoints against the background well's existing zip
+     timepoints (`_loose_timepoints_for_wells` / `_zip_timepoints`).
 4. **Args** — `build_pipeline_args` emits `--incremental` and
    `--incremental_prior_dir <output_dir>` (where the prior per-well CSVs live).
-5. **Diff + process** — for each well, `process_well_zip_task` reads the prior
-   CSV's done-set (`pipeline.io.read_done_fov_keys` → the `(fov, timepoint)`
-   pairs), processes only the groups whose `(fov, timepoint)` isn't in it, and:
+5. **Diff + process** — for each well, `process_well_zip_task` builds the
+   done-set (`pipeline.io.incremental_done_fov_keys`): the `(fov, timepoint)`
+   pairs from the prior per-well CSV, **unioned** with those recovered from the
+   processed-output artefacts — `<well>_out.zip` members and the uncompressed
+   output folder, whose names keep the input stem. The output fallback matters
+   when a well has its `<well>_out.zip` but no sibling CSV (a remote-only
+   materialise, or a CSV that was moved/lost): without it the done-set would be
+   empty and every already-processed FOV would be needlessly re-segmented. It
+   processes only the groups whose `(fov, timepoint)` isn't in the done-set, and:
    - a well with **no** new groups → logs `Well X — up to date (no new FOVs).`
      and returns (no rewrite);
    - a well with new groups → segments just those, then **merges**:
@@ -1379,11 +1392,12 @@ nuclear file plus its fluor channels for that field+time. "New" = a
 **Remote** keeps the client smart and the remote a dumb compute engine, so only
 genuinely-new bytes cross the wire (see §6.4 / `services/remote_runner.py`):
 `stage_local_zips` **splits** before upload — for each touched well it keeps
-only the new-FOV members (`_filter_new_fovs_in_staging`) and drops wells whose
-local output already covers every input FOV (emitting `[remote] ✓ X: up to
-date (local)`); the remote argv has `--incremental` stripped (it just processes
-what it received); and on fetch the partial outputs are **merged** into the
-local full CSV / `<well>_out.zip` with the same `pipeline.io` helpers.
+only the new-FOV members (`_filter_new_fovs_in_staging`, done-set from the local
+CSV **unioned** with the local `<well>_out.zip`) and drops wells whose local
+output already covers every input FOV (emitting `[remote] ✓ X: up to date
+(local)`); the remote argv has `--incremental` stripped (it just processes what
+it received); and on fetch the partial outputs are **merged** into the local
+full CSV / `<well>_out.zip` with the same `pipeline.io` helpers.
 
 **Dashboard:** up-to-date, merged, and new wells each reach a correct terminal
 state — `ProgressTracker` maps the `up to date` / `merging N new FOV(s)` /
@@ -1724,7 +1738,7 @@ The 6.0 series adds the live run-status dashboard and hardens the run path
 (remote fetch, crash-safety, dead-code removal) on top of the 5.5 analysis
 line. Newest first:
 
-- **6.6.0 — Incremental add + always-zip + remote-progress fixes (PRs #435, #437–#442).** A wave centred on growing an existing dataset and on remote reliability. **Incremental processing (#435):** loose images dropped next to grouped well zips are folded in (`input_resolution_service.append_loose_images_to_zips`) and only the new `(fov, timepoint)` FOV-groups are processed and merged into the existing per-well CSV + `<well>_out.zip` (`pipeline.io.read_done_fov_keys` / `merge_records_into_csv` / `merge_images_into_zip`; `process_microscopy --incremental`), with remote doing a client-side split + merge — see §9.7 for the end-to-end flow. **Loose-in-`in/` + mixed-mode + discovery progress (#437):** ungrouped TIFs placed inside an `in/` folder (incl. a partially-grouped resume) are grouped in place, a hard-killed `in/` with some `<well>.zip` + some `<well>/` folders is consolidated to all-zips (`_consolidate_mixed_to_zips`), the well-count uses one shared `count_expected_wells`, and WellPlateZipper streams scanning progress so a big plate no longer looks hung. **Always-zip + skipped-well counting (#438):** input/output compression and moving source TIFs are now mandatory (the three Output-Options checkboxes and the `--compress_*` CLI flags were removed — the pipeline only ever emits per-well `.zip`); already-complete (skipped) wells now register as done on the dashboard. **UNC + relabel (#439):** `to_rsync_path` converts a Windows UNC share `\\server\share\…` to the Cygwin/cwrsync `//server/share/…` form instead of refusing it; the post-grouping headline was reworded. **Remote per-well progress (#440):** the remote ssh stream is decoded as UTF-8 and the per-well markers are parsed with a separator-tolerant pattern, so a cp1252 Windows client no longer mojibake's the em-dash in `Well X — done.` (which had left Process stuck at 0/N and downloads invisible). **Segmentation→CSV highlight (#441):** the Review CSV navigation index is keyed by `(well, fov, timepoint, nucleus_id)` so a multi-well selection highlights the correct row. **Remote output cleanup (#442):** output is always materialised as `<well>_out.zip` and verify expects it for every input mode, so a folder-input remote run's verify passes and the post-run cleanup removes the local well folders.
+- **6.6.0 — Incremental add + always-zip + remote-progress fixes (PRs #435, #437–#445).** A wave centred on growing an existing dataset and on remote reliability. **Incremental processing (#435):** loose images dropped next to grouped well zips are folded in (`input_resolution_service.append_loose_images_to_zips`) and only the new `(fov, timepoint)` FOV-groups are processed and merged into the existing per-well CSV + `<well>_out.zip` (`pipeline.io.read_done_fov_keys` / `merge_records_into_csv` / `merge_images_into_zip`; `process_microscopy --incremental`), with remote doing a client-side split + merge — see §9.7 for the end-to-end flow. **Loose-next-to-zip routing + done-set recovery (#443):** loose TIFs added next to existing well zips (a new timepoint on a grouped dataset) are routed to the append/incremental path instead of being grouped into folders the zip-preferring pipeline drops; and the incremental done-set is recovered from the `<well>_out.zip` members (and output folder) when the per-well CSV is missing — `pipeline.io.incremental_done_fov_keys` — so a well that has its output archive but no sibling CSV (remote-only materialise / lost CSV) no longer re-segments every already-processed FOV. **Empty-well new-timepoint gate (#444):** adding a new timepoint's blanks to the configured empty-well background well stays incremental (the field is per-timepoint); a full reprocess is forced only when the blank lands on a timepoint the well already had a blank for. **Redirectable local scratch (#445):** remote-run local staging/transit/merge temps route through `ALLWELL_SCRATCH_DIR` (default OS temp) with a stale-scratch sweep, so a NAS-sourced remote run no longer fills the Windows C: drive and killed runs don't leak staging copies. **Loose-in-`in/` + mixed-mode + discovery progress (#437):** ungrouped TIFs placed inside an `in/` folder (incl. a partially-grouped resume) are grouped in place, a hard-killed `in/` with some `<well>.zip` + some `<well>/` folders is consolidated to all-zips (`_consolidate_mixed_to_zips`), the well-count uses one shared `count_expected_wells`, and WellPlateZipper streams scanning progress so a big plate no longer looks hung. **Always-zip + skipped-well counting (#438):** input/output compression and moving source TIFs are now mandatory (the three Output-Options checkboxes and the `--compress_*` CLI flags were removed — the pipeline only ever emits per-well `.zip`); already-complete (skipped) wells now register as done on the dashboard. **UNC + relabel (#439):** `to_rsync_path` converts a Windows UNC share `\\server\share\…` to the Cygwin/cwrsync `//server/share/…` form instead of refusing it; the post-grouping headline was reworded. **Remote per-well progress (#440):** the remote ssh stream is decoded as UTF-8 and the per-well markers are parsed with a separator-tolerant pattern, so a cp1252 Windows client no longer mojibake's the em-dash in `Well X — done.` (which had left Process stuck at 0/N and downloads invisible). **Segmentation→CSV highlight (#441):** the Review CSV navigation index is keyed by `(well, fov, timepoint, nucleus_id)` so a multi-well selection highlights the correct row. **Remote output cleanup (#442):** output is always materialised as `<well>_out.zip` and verify expects it for every input mode, so a folder-input remote run's verify passes and the post-run cleanup removes the local well folders.
 
 - **6.5.0 — File-organization reorg: `pipeline/` + `util/`.** Consolidated the Qt-free repo-root modules into two coherent packages. The analysis-domain modules — `auto_threshold`, `flatfield`, `shape_features` (formerly in the short-lived `core/` "shared" package) — moved into the existing **`pipeline/`** package alongside `background` / `cellpose` / `stardist` / `io`, since they belong to the analysis pipeline (the GUI is free to import `pipeline.*`; only the reverse is forbidden). The genuinely general helpers — `well_token` and `aw_safe` — moved to a new **`util/`** package. The over-abstracted `core/` package was dissolved. All imports were rewritten repo-wide and the remote-sync manifest (`services.remote_runner._REQUIRED_REMOTE_FILES`), the architecture-contract `PIPELINE_FILES` list, `scripts/_bootstrap_lib.REQUIRED_FILES`, and the PyInstaller spec's package loop + `hiddenimports` were updated to match. Earlier in the wave the redundant `microscopy_*` root modules were re-homed under `pipeline/` and the dead multi-theme system (`ui/theme/{light,beige,amber}.qss` + `theme_manager.py`) plus ~513 lines of unreferenced functions/classes were removed. Version pill → `v6.5.0`.
 

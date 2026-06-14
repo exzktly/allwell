@@ -225,9 +225,13 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
             app._refresh_review_csv_rows()
 
         table = app._review_csv_table
-        row_idx = (getattr(app, "_review_csv_row_index", None) or {}).get(
-            (fov_n, tp_n, nucleus_n)
-        )
+        # Match the clicked well first (the index spans all selected wells); fall
+        # back to the well-agnostic key for older single-well behaviour.
+        index = getattr(app, "_review_csv_row_index", None) or {}
+        well_n = str(app._app_state.preview.selected_well or "").strip().upper()
+        row_idx = index.get((well_n, fov_n, tp_n, nucleus_n))
+        if row_idx is None:
+            row_idx = index.get((fov_n, tp_n, nucleus_n))
         if row_idx is not None:
             table.selectRow(row_idx)
             item = table.item(row_idx, 0)
@@ -919,7 +923,13 @@ def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
                     value = row.get(c, "")
                 table.setItem(r, ci, QTableWidgetItem(str(value)))
             rf, rt, rn = app._review_row_keys(row)
-            row_index.setdefault((rf, rt, rn), r)
+            # Key the navigation index by WELL too: the CSV table can span
+            # several selected wells, and the same (fov, timepoint, nucleus_id)
+            # exists in each — without the well a click resolved to whichever
+            # well happened to be inserted first (wrong row / missed highlight).
+            rw = str(row.get("well", "") or "").strip().upper()
+            row_index.setdefault((rw, rf, rt, rn), r)
+            row_index.setdefault((rf, rt, rn), r)  # well-agnostic fallback
     finally:
         table.setUpdatesEnabled(True)
     app._review_csv_row_index = row_index

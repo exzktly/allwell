@@ -1008,6 +1008,34 @@ def _read_done_fov_keys_csv(csv_path: Path) -> "set[tuple[str, str]]":
     return keys
 
 
+def _read_done_fov_keys_zip(
+    out_zip: Path, fields: "list[str]", sep: str,
+) -> "set[tuple[str, str]]":
+    """``(fov, timepoint)`` pairs recoverable from a local ``<well>_out.zip``.
+
+    Stdlib-only twin of ``pipeline.io.read_done_fov_keys_from_zip`` (keeps the
+    client-side split imaging-stack-free). The archive's image members keep the
+    input stem, so their tokens recover which FOV-groups are already processed —
+    used as a fallback when the per-well CSV is absent but the well's output zip
+    is present, so the split doesn't re-upload already-done FOVs for a full
+    remote re-segmentation. Missing / unreadable archive ⇒ empty set.
+    """
+    if not out_zip.exists():
+        return set()
+    keys: "set[tuple[str, str]]" = set()
+    try:
+        with zipfile.ZipFile(out_zip, "r") as zf:
+            names = zf.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return set()
+    for name in names:
+        if name.endswith("/"):
+            continue
+        keys.add(_member_fov_tp(name, fields, sep))
+    keys.discard(("", ""))
+    return keys
+
+
 def _member_fov_tp(member: str, fields: "list[str]", sep: str) -> "tuple[str, str]":
     """Extract the ``(fov, timepoint)`` tokens from a zip member's basename,
     using the same schema-index discipline ``parse_filename`` applies (so the
@@ -1049,9 +1077,14 @@ def _filter_new_fovs_in_staging(
         if well is None:
             survivors.append(wz)
             continue
+        # CSV is the primary done-set; fall back to the well's local output zip
+        # so a missing/lost CSV doesn't make us re-upload already-done FOVs for a
+        # full remote re-segmentation ("reanalyzed previously processed images").
         done = _read_done_fov_keys_csv(prior_output_dir / f"{csv_prefix}_{well}.csv")
+        done |= _read_done_fov_keys_zip(
+            prior_output_dir / f"{well}_out.zip", fields, filename_sep)
         if not done:
-            survivors.append(wz)  # new well → upload in full
+            survivors.append(wz)  # genuinely new well → upload in full
             continue
         try:
             with zipfile.ZipFile(wz, "r") as zf:

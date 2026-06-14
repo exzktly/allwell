@@ -70,6 +70,32 @@ def test_split_keeps_only_new_fovs_and_drops_uptodate(tmp_path):
         "e_w1_C03_1_T01.tif", "e_w1_C03_2_T01.tif"}
 
 
+def test_split_recovers_done_set_from_out_zip_when_csv_missing(tmp_path):
+    # "out-zips but no CSV": the well's local output archive exists (members keep
+    # the input stem), but the sibling CSV is gone. The split must recover the
+    # done FOV-groups from the archive so it uploads only the new FOV — never the
+    # whole well for a full remote re-segmentation.
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    out = tmp_path / "out"
+    out.mkdir()
+
+    _zip(staging / "A01.zip", ["e_w1_A01_1_T01.tif", "e_w1_A01_2_T01.tif"])
+    # No measurements_A01.csv — only the processed output archive.
+    _zip(out / "A01_out.zip", [
+        "e_w1_A01_1_T01_overlay.png", "e_w1_A01_1_T01_labels.tif"])
+
+    survivors, up_to_date = _filter_new_fovs_in_staging(
+        tuple(staging.glob("*.zip")),
+        prior_output_dir=out, csv_prefix="measurements",
+        filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert {p.name for p in survivors} == {"A01.zip"}
+    assert up_to_date == ()
+    # Only the genuinely-new FOV-2 member survives the upload split.
+    assert set(zipfile.ZipFile(staging / "A01.zip").namelist()) == {"e_w1_A01_2_T01.tif"}
+
+
 def test_split_no_prior_outputs_is_passthrough(tmp_path):
     staging = tmp_path / "stage"
     staging.mkdir()

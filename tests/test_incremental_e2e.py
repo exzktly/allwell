@@ -119,3 +119,44 @@ def test_incremental_merges_only_new_fov(tmp_path):
     assert r.returncode == 0, (r.stdout + r.stderr)[-3000:]
     assert "Well A01 — up to date (no new FOVs)." in (r.stdout + r.stderr)
     assert _rows(out_dir) == rows2
+
+
+def test_incremental_recovers_done_set_from_out_zip_when_csv_missing(tmp_path):
+    """A processed well can have its ``<well>_out.zip`` without a sibling CSV
+    (e.g. a remote run that materialised only the archive, or a lost CSV). The
+    incremental diff must recover the already-done FOV-groups from the archive so
+    it processes ONLY the genuinely-new FOV — never re-segmenting the originals.
+
+    Regression for: "it literally reanalyzed previously processed images" when
+    in/ has zips + loose TIFs and out/ has out-zips but no CSV.
+    """
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    with zipfile.ZipFile(in_dir / "A01.zip", "w") as z:
+        for name, data in _group("A01", "1").items():
+            z.writestr(name, data)
+
+    # Initial full run → A01_out.zip + measurements_A01.csv.
+    r = _run(in_dir, out_dir)
+    assert r.returncode == 0, (r.stdout + r.stderr)[-3000:]
+    fov1_zip_members = _zip_names(out_dir)
+
+    # Simulate the "out-zip but no CSV" state.
+    (out_dir / "measurements_A01.csv").unlink()
+
+    # Append FOV 2 and re-run incrementally.
+    with zipfile.ZipFile(in_dir / "A01.zip", "a") as z:
+        for name, data in _group("A01", "2").items():
+            z.writestr(name, data)
+    r = _run(in_dir, out_dir, "--incremental", "--incremental_prior_dir", str(out_dir))
+    assert r.returncode == 0, (r.stdout + r.stderr)[-3000:]
+    combined = r.stdout + r.stderr
+    # FOV 1 was recovered from the out-zip and skipped; only FOV 2 reprocessed.
+    assert "recovered" in combined and "_out.zip" in combined
+    assert "Well A01 — merging 1 new FOV(s)." in combined
+
+    # The out-zip keeps every original FOV-1 member and gains the FOV-2 images.
+    names = _zip_names(out_dir)
+    assert fov1_zip_members <= names
+    assert "exp_NIR_A01_2_T01_labels.tif" in names

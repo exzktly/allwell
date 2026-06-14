@@ -11,6 +11,7 @@ from pathlib import Path
 
 from services.input_resolution_service import (
     append_loose_images_to_zips,
+    resolve_input_output,
     select_incremental_scope,
 )
 
@@ -147,6 +148,60 @@ def test_scope_noop_when_nothing_appended(tmp_path):
     select_incremental_scope(opts, tmp_path)
     assert not opts.get("incremental")
     assert not opts.get("force")
+
+
+def test_resolve_routes_loose_next_to_zip_to_append_not_folder_grouping(tmp_path):
+    """Loose TIFs dropped into an ``in/`` that already holds well zips (a new
+    timepoint added to a grouped dataset) must NOT be grouped into per-well
+    folders — those folders are silently dropped by the zip-preferring pipeline,
+    so the new images would never be processed. ``resolve_input_output`` must
+    leave them in place for ``append_loose_images_to_zips`` to fold into the
+    matching zip and then ``select_incremental_scope`` flips on incremental.
+
+    Regression for: "the new timepoint that was added does not show up in
+    Review even after rerunning the whole pipeline."
+    """
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    _make_zip(in_dir / "A01.zip", {"exp_w1_A01_1_T01.tif": b"old"})
+    loose = in_dir / "exp_w1_A01_1_T02.tif"   # SAME well, NEW timepoint
+    loose.write_bytes(b"new-timepoint")
+
+    input_dir, output_dir, on_success = resolve_input_output(
+        in_dir, filename_schema=SCHEMA, filename_sep=SEP)
+
+    # Routed to the append path: returns the in/ dir untouched, no folder made.
+    assert input_dir == in_dir
+    assert not (in_dir / "A01").exists()        # the bug: a dropped A01/ folder
+    assert loose.exists()                        # still loose, awaiting append
+    assert zipfile.ZipFile(in_dir / "A01.zip").namelist() == ["exp_w1_A01_1_T01.tif"]
+
+    # Now the scope step folds it in and selects incremental.
+    opts = _opts(in_dir)
+    select_incremental_scope(opts, input_dir, log_fn=None)
+    assert opts.get("incremental") is True
+    assert not opts.get("force")
+    assert not loose.exists()                     # consumed into the zip
+    names = set(zipfile.ZipFile(in_dir / "A01.zip").namelist())
+    assert names == {"exp_w1_A01_1_T01.tif", "exp_w1_A01_1_T02.tif"}
+
+
+def test_resolve_routes_loose_in_subfolder_next_to_zip_to_append(tmp_path):
+    """Same as above but the user selected the parent dir (raw) whose ``in/``
+    subfolder holds the zips + the new loose TIFs."""
+    in_dir = tmp_path / "in"
+    in_dir.mkdir()
+    _make_zip(in_dir / "A01.zip", {"exp_w1_A01_1_T01.tif": b"old"})
+    loose = in_dir / "exp_w1_A01_1_T02.tif"
+    loose.write_bytes(b"new-timepoint")
+
+    input_dir, output_dir, on_success = resolve_input_output(
+        tmp_path, filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert input_dir == in_dir
+    assert not (in_dir / "A01").exists()
+    assert loose.exists()
+    assert output_dir == tmp_path / "out"
 
 
 def test_result_zip_is_valid_and_short_well_token_canonicalised(tmp_path):

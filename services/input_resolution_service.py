@@ -33,6 +33,14 @@ def _is_well_named(p: Path) -> bool:
     return is_valid_well_name(p.stem)
 
 
+def _has_well_zip(folder: Path) -> bool:
+    """True iff *folder* contains at least one well-named ``<WELL>.zip``."""
+    try:
+        return any(_is_well_named(p) for p in folder.glob("*.zip"))
+    except OSError:
+        return False
+
+
 def _has_well_content(folder: Path) -> bool:
     """Return True iff *folder* contains *well-named* zip files OR
     well-named subdirectories.
@@ -626,6 +634,24 @@ def resolve_input_output(
         # interrupted grouping run that already made some well folders), group
         # them in place rather than mis-treating them as fully grouped.
         if len(tif_files_in(raw)) > 0:
+            if _has_well_zip(raw):
+                # Loose TIFs dropped next to existing well zips — e.g. a new
+                # timepoint/FOV added to an already-grouped dataset. Do NOT
+                # group these into per-well folders: a folder for a well that
+                # already has a <WELL>.zip is silently ignored by the
+                # zip-preferring pipeline (see _consolidate_mixed_to_zips), so
+                # the new images would never be processed. Leave them for
+                # append_loose_images_to_zips (run by select_incremental_scope)
+                # to fold into the matching zips / create new ones and drive
+                # FOV-level incremental reprocessing.
+                if log_fn:
+                    log_fn(
+                        f"[zipper] Found {len(tif_files_in(raw))} loose TIF(s) "
+                        f"alongside existing well zip(s) — folding them into the "
+                        f"matching zips for incremental reprocessing.\n"
+                    )
+                _consolidate_mixed_to_zips(raw, log_fn=log_fn)
+                return raw, raw.parent / "out", None
             return _group_loose_tifs_in_place(
                 raw,
                 raw.parent / "out",
@@ -645,6 +671,19 @@ def resolve_input_output(
     # ``in/<well>/`` folders already present) — is grouped in place so every
     # well gets consumed, not just the ones a prior run reached.
     if in_sub.is_dir() and len(tif_files_in(in_sub)) > 0:
+        if _has_well_zip(in_sub):
+            # Loose TIFs dropped into raw/in/ next to existing well zips (a new
+            # timepoint/FOV added to an already-grouped dataset). Don't group
+            # them into folders — they'd be dropped by the zip-preferring
+            # pipeline. Hand off to append_loose_images_to_zips (incremental).
+            if log_fn:
+                log_fn(
+                    f"[zipper] Found {len(tif_files_in(in_sub))} loose TIF(s) "
+                    f"alongside existing well zip(s) in {in_sub.name}/ — folding "
+                    f"them into the matching zips for incremental reprocessing.\n"
+                )
+            _consolidate_mixed_to_zips(in_sub, log_fn=log_fn)
+            return in_sub, raw / "out", None
         return _group_loose_tifs_in_place(
             in_sub,
             raw / "out",

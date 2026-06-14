@@ -135,21 +135,6 @@ def role_for_kind(kind: str) -> Optional[Role]:
     return aliases.get(str(kind).strip().lower())
 
 
-def role_suffixes(role: Role, *, channel: str = "") -> tuple[str, ...]:
-    """All on-disk suffix+ext combinations for *role*. When the role is
-    channel-scoped both the bare and channel-suffixed forms are returned
-    (so a smFISH file can be named ``..._smfish.tif`` *or*
-    ``..._smfish_w3cy5.tif``)."""
-    spec = ROLE_CATALOG[role]
-    out: list[str] = []
-    channel_norm = str(channel or "").strip().lower()
-    for ext in spec.all_exts:
-        out.append(f"{spec.suffix}{ext}")
-        if spec.is_channel_scoped and channel_norm:
-            out.append(f"{spec.suffix}_{channel_norm}{ext}")
-    return tuple(out)
-
-
 def role_output_filename(
     base_stem: str, role: Role, *, channel: str = "", ext: str = "",
 ) -> str:

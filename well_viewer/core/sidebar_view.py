@@ -16,25 +16,6 @@ from well_viewer.core.selection_controller import on_sidebar_plate_well_activate
 from well_viewer.core.selection_controller import on_sidebar_plate_well_dropped
 
 
-def _drag_info(tok, pos):
-    return SimpleNamespace(tok=tok, pos=pos, x=pos.x(), y=pos.y())
-
-
-def _row_col_select_disabled(app) -> bool:
-    """Tabs that don't support multi-well selection (smFISH) suppress the
-    row/column header click handlers. smFISH lives as a sub-tab inside
-    the Segmentation parent now, so we descend via ``_current_centre_tab`` to
-    recover the leaf name rather than reading the top-level notebook
-    directly."""
-    cur = getattr(app, "_current_centre_tab", None)
-    if cur is None:
-        return False
-    try:
-        return cur() == "smFISH"
-    except Exception:
-        return False
-
-
 def build_sidebar(app, parent: QWidget) -> None:
     """Build the 8x12 plate-map well selector in the sidebar.
 

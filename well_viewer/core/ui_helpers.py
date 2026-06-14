@@ -281,25 +281,6 @@ def btn_danger(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> 
     return _btn(parent, text, command, "danger")
 
 
-def tok_at_event(event: Any, btn_dict: dict) -> Optional[str]:
-    """Return the well-token whose QPushButton lies under the pointer, or None.
-
-    Accepts a pre-computed ``event.tok`` shim (fast path), a QMouseEvent, or
-    a tk-style event with ``.widget`` / ``.x`` / ``.y`` attributes.
-    """
-    tok_attr = getattr(event, "tok", None)
-    if tok_attr is not None and tok_attr in btn_dict:
-        return tok_attr
-    for tok, btn in btn_dict.items():
-        try:
-            if btn is not None and btn.isVisible() and btn.underMouse():
-                return tok
-        except Exception:
-            swallowed()  # silent except
-            continue
-    return None
-
-
 def make_scrollable_canvas(parent: QWidget, **_kw) -> Tuple[QScrollArea, QWidget]:
     """Return (scroll_area, inner_widget). Caller lays widgets inside inner."""
     sa = QScrollArea(parent)
@@ -375,11 +356,6 @@ def make_plot_with_right_dock(parent: QWidget) -> Tuple[QWidget, QVBoxLayout, QW
 
     root.addWidget(host, 1)
     return plot_area, plot_layout, right_dock
-
-
-def bind_mousewheel_scroll(_scroll_area) -> None:
-    """No-op: QScrollArea handles wheel events natively."""
-    return
 
 
 def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
@@ -742,15 +718,6 @@ def safe_int_or_none(value: object) -> Optional[int]:
         return int(float(str(value).strip()))
     except (TypeError, ValueError):
         return None
-
-
-def bind_drag(frame, btn_store, on_press, on_drag, on_release, *,
-              button: int = 1) -> None:
-    """Bind press/drag/release events — stub retained for API compat under Qt."""
-    # Qt: wire mousePressEvent/mouseMoveEvent/mouseReleaseEvent overrides instead.
-    frame.mousePressEvent = on_press
-    frame.mouseMoveEvent = on_drag
-    frame.mouseReleaseEvent = on_release
 
 
 def wells_multiselect_listbox(parent, available, preselect=None) -> QListWidget:

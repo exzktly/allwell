@@ -131,10 +131,6 @@ PLOTTING_TABS = frozenset({
 })
 
 
-def _is_plotting_tab(app) -> bool:
-    return _active_tab(app) in PLOTTING_TABS
-
-
 def select_row(app, row: str) -> None:
     if app._app_state.selection.selections:  # rep-mode
         crossing = [

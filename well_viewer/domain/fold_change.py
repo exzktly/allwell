@@ -71,12 +71,6 @@ CONTROL_NONE = ""
 _TP_REL_TOL = 1e-3
 
 
-def _safe_div(numer: float, denom: float) -> float:
-    if denom == 0 or not math.isfinite(denom):
-        return float("nan")
-    return numer / denom
-
-
 def _rel_err_sq(value: float, spread: float) -> float:
     """``(spread / value)²``, falling back to 0 for non-finite or zero values."""
     if (not isinstance(value, (int, float)) or value == 0
@@ -357,26 +351,6 @@ def control_pts_for_line(app, control_label: str, *, threshold: float,
         val_col=val_col,
         fluor_gates=fluor_gates,
     )
-
-
-def control_mean_at(app, control_label: str, target_t: float, *,
-                    threshold: float, val_col: str,
-                    fluor_gates) -> Optional[float]:
-    """Return the control's pooled mean at *target_t* (or None).
-
-    .. deprecated:: Use :func:`control_mean_at_for_bar` /
-       :func:`member_mean_series` instead — they compute the control
-       denominator using the SAME stat the displayed bar/curve uses
-       (mean-of-per-well-means for rep-sets), so the resulting ratio is
-       a clean fold-change rather than a mix of two different averaging
-       methods. Kept temporarily for callers not yet migrated.
-    """
-    pts = control_pts_for_line(
-        app, control_label, threshold=threshold, val_col=val_col,
-        fluor_gates=fluor_gates,
-    )
-    means = pts_to_mean_by_t(pts)
-    return _match_control_mean(target_t, means)
 
 
 def _label_to_replicate_set(app, label: str):

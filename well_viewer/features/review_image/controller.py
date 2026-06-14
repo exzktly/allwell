@@ -324,16 +324,6 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
     zoom_review_image_to_selected_nucleus(app)
 
 
-def on_review_image_wheel(app, event) -> None:
-    try:
-        dy = int(event.angleDelta().y())
-    except Exception:
-        dy = 0
-    direction = +1 if dy > 0 else -1 if dy < 0 else 0
-    if direction:
-        app._review_image_zoom_step(direction)
-
-
 @_guard_event
 def on_review_image_press(app, event) -> None:
     # In include-edit (delete) or crop-edit mode, LMB drag draws a rubber-band

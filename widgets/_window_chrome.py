@@ -37,10 +37,6 @@ def set_frameless_preference(value: bool | None) -> None:
     _pref = None if value is None else bool(value)
 
 
-def frameless_preference() -> bool | None:
-    return _pref
-
-
 def _env_choice() -> bool | None:
     raw = _os.environ.get("ALLWELL_FRAMELESS")
     if raw is None:

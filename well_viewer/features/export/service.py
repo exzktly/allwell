@@ -223,45 +223,6 @@ def attach_bar_fold_change_columns(
     row["fold_change_control"] = control_label if vs_control else ""
 
 
-def aggpoint_at(pts, target_t: float, tol: float = 1e-6):
-    """Return the AggPoint whose time matches *target_t* within tol, or None."""
-    for pt in pts or ():
-        if abs(pt[0] - target_t) < tol:
-            return pt
-    return None
-
-
-def aggpoint_bar_fields(pt, *, use_fov_spread: bool):
-    """Decompose an AggPoint into the per-bar fields used for bar exports.
-
-    Returns a dict with keys ``mean, spread, frac, frac_spread, has, n_above,
-    n_above_spread`` matching the kwargs of ``bar_metric_row``. Mirrors the
-    n_above selection logic used by the on-screen bar renderer: total
-    n_above by default, mean ± SD/SEM per FOV when the Aggregate-FOVs toggle
-    is on.
-    """
-    if pt is None:
-        return dict(mean=float("nan"), spread=0.0, frac=float("nan"),
-                    frac_spread=0.0, has=False, n_above=0.0, n_above_spread=0.0)
-    _t = pt[0]
-    mean = float(pt[1])
-    spread = float(pt[2])
-    frac = float(pt[3])
-    n_above_total = int(pt[4]) if len(pt) >= 5 else 0
-    frac_spread = float(pt[6]) if len(pt) >= 7 else 0.0
-    n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
-    n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
-    if use_fov_spread:
-        n_above = n_above_pf_mean
-        n_above_spread = n_above_pf_spread
-    else:
-        n_above = float(n_above_total)
-        n_above_spread = 0.0
-    has = not math.isnan(mean)
-    return dict(mean=mean, spread=spread, frac=frac, frac_spread=frac_spread,
-                has=has, n_above=n_above, n_above_spread=n_above_spread)
-
-
 def _warn(app, title: str, msg: str) -> None:
     QMessageBox.warning(app, title, msg)
 
@@ -469,62 +430,6 @@ def export_bar_plot_data(app) -> None:
             writer.writeheader()
             writer.writerows(rows_out)
         app._set_status(f"Exported {len(rows_out)} row(s) → {Path(out_path).name}")
-    except OSError as exc:
-        _error(app, "Export failed", str(exc))
-
-
-def export_raw_data_csv(app) -> None:
-    if not app._app_state.dataset.well_paths:
-        _warn(app, "Export", "Load data before exporting raw CSV.")
-        return
-
-    import numpy as np
-    import pandas as pd
-    from well_viewer.data.data_loading import df_included_mask
-
-    fluor_gate_threshold = app._get_fluor_gate(app._app_state.channel.active_channel)
-    well_labels = _well_labels_map(app)
-    # Gating semantics stay on mean fluorescence intensity even when the
-    # global Property selector points at a different column — the gate
-    # values entered in the Cell Gating tab are MFI thresholds. The raw
-    # dump itself still includes every column from the source CSV, so the
-    # selected property is preserved in the output.
-    gate_col = f"{app._app_state.channel.active_channel}_mean_intensity"
-
-    frames = []
-    for label in sorted(app._app_state.dataset.well_paths):
-        df = app._get_rows(label)
-        if df is None or df.empty or "area_px" not in df.columns or gate_col not in df.columns:
-            continue
-        mask = df_included_mask(df).to_numpy(copy=True)
-        area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
-        with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(area)
-        fluor = pd.to_numeric(df[gate_col], errors="coerce").to_numpy()
-        with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(fluor) & (fluor > fluor_gate_threshold)
-        if not mask.any():
-            continue
-        sub = df.loc[mask].copy()
-        sub.insert(0, "well_name", well_name_for(label, well_labels))
-        sub.insert(0, "well", label)
-        frames.append(sub)
-
-    if not frames:
-        _warn(app, "Export", "No raw rows available to export.")
-        return
-
-    combined = pd.concat(frames, ignore_index=True, sort=False)
-    other_cols = sorted(c for c in combined.columns if c not in ("well", "well_name"))
-    combined = combined[["well", "well_name"] + other_cols]
-
-    out_path = _ask_save_csv(app, "Export raw data", "raw_data_export.csv")
-    if not out_path:
-        return
-
-    try:
-        combined.to_csv(out_path, index=False)
-        app._set_status(f"Exported {len(combined)} raw row(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(app, "Export failed", str(exc))
 

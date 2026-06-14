@@ -142,29 +142,10 @@ def read_pipeline_info(
 
 # ── Batch export utilities (merged from batch_export.py) ─────────────────────
 
-def ensure_unique_name(base: str, existing: set) -> str:
-    if base not in existing:
-        return base
-    i = 2
-    while f"{base} ({i})" in existing:
-        i += 1
-    return f"{base} ({i})"
-
-
 def groups_with_loaded_wells(groups, well_paths: dict) -> list:
     """Return groups that contain at least one loaded well label."""
     return [g for g in groups if any(w in well_paths for w in g.wells)]
 
 
-def selected_listbox_values(listbox: Any) -> List[str]:
-    """Return selected string values from a Qt QListWidget."""
-    return [it.text() for it in listbox.selectedItems()]
-
-
 # ── App-level state container (merged from app_state.py) ─────────────────────
 
-@dataclass
-class ViewerAppState:
-    """Minimal package-level runtime state for app composition."""
-
-    data_path: Path | None = None

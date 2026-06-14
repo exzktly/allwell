@@ -141,6 +141,9 @@ DEFAULT_EXPORT_STYLE_PREFS = {
     "layout_tight": False,
     "layout_constrained": False,
     "export_profile": "Custom",
+    # Per-cell scatter: color points by local 2D density (FACS-style) instead
+    # of solid per-well colors.
+    "scatter_density": False,
 }
 
 
@@ -272,7 +275,8 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         marker_size = float(prefs.get("marker_size", 5.0))
         marker_edge_width = float(prefs.get("marker_edge_width", 0.8))
         for coll in ax.collections:
-            if not getattr(coll, "_aw_marker_collection", False):
+            is_density = getattr(coll, "_aw_density_collection", False)
+            if not (getattr(coll, "_aw_marker_collection", False) or is_density):
                 continue
             # PathCollection ``sizes`` are in points^2 (area), unlike
             # Line2D ``markersize`` which is points (diameter). Square
@@ -286,6 +290,12 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 coll.set_linewidths([marker_edge_width])
             except Exception:
                 swallowed()  # was: pass (silent except)
+            # Density collections carry a per-point colormap (the whole point of
+            # the mode). The face/edge/marker-path override below reads the first
+            # color and stamps it on every point, collapsing the gradient — so
+            # honor size only for them and leave their colors / paths alone.
+            if is_density:
+                continue
             if marker_style and marker_style != "keep":
                 # Per-point face/edge: read the FIRST currently-set
                 # face colour so we preserve the renderer's per-well

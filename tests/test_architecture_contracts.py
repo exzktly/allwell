@@ -184,6 +184,10 @@ FEATURE_NAME_EXCEPTIONS = {
     "view.py", "models.py", "params.py", "region.py", "service.py", "style.py",
     "box_select.py", "well_grid_button.py",
     "export.py", "grid_layout.py", "image_compose.py",
+    # scatter density-coloring + rectangular-gating helpers (point rendering,
+    # density math, gate stats, RectangleSelector wiring) — a draw-mode of the
+    # scatter canvas, paired with scatter/controller.py.
+    "gating.py",
 }
 
 

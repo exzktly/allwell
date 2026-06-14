@@ -24,6 +24,11 @@ from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
     collect_scatter_data,
     get_all_timepoints,
 )
+from well_viewer.features.scatter.gating import (
+    draw_gates,
+    refresh_gate_selector,
+    render_scatter_points,
+)
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -118,59 +123,21 @@ def redraw_scatter(
         fluor_gate_y=fluor_gate_y,
     )
 
-    # Plot one Line2D per well (even inside a rep-set) so the SVG / PDF
-    # exporter emits one <g> group per well — re-colouring an individual
-    # well in Illustrator is then a single-click. ``plot`` over
-    # ``scatter`` so the artists sit in ax.lines and pick up the
-    # Properties sidebar's marker / size / line-style overrides.
-    interaction_points: List[Tuple[float, float, Tuple[str, str, str, int]]] = []
-    for label, data in scatter_data.items():
-        wells_breakdown = data.get('wells') or {label: {
-            'x': data['x'], 'y': data['y'],
-            'metadata': data.get('metadata', []),
-        }}
-        first_well_in_group = True
-        for well_label, well_data in wells_breakdown.items():
-            # Suppress the legend for every well after the first one in
-            # the group so a rep-set still shows as a single legend entry
-            # but each well is independently styleable in the SVG output.
-            (line,) = app._ax_scatter.plot(
-                well_data['x'],
-                well_data['y'],
-                marker='o',
-                linestyle='none',
-                label=label if first_well_in_group else "_nolegend_",
-                color=data['color'],
-                alpha=0.6,
-                markersize=6,
-                markeredgecolor='none',
-            )
-            # Tag as scatter-only so the export-style hook never overrides
-            # the markers-only linestyle with a connecting line.
-            line._scatter_only_artist = True
-            # matplotlib forwards ``gid`` to the SVG ``id`` attribute on
-            # the artist's enclosing <g>. Tag every well's <g> with a
-            # stable, human-readable id so Illustrator's layer / selection
-            # tools can target it directly. The rep-set name is folded in
-            # too when applicable, since two rep-sets can both contain a
-            # well that the user pruned to one well per set in editing.
-            gid = (
-                f"well_{well_label}__{label}"
-                if label != well_label else f"well_{well_label}"
-            )
-            try:
-                line.set_gid(gid)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            first_well_in_group = False
-
-        # Store metadata for click tracking
-        if not hasattr(app, '_scatter_metadata'):
-            app._scatter_metadata = {}
-        app._scatter_metadata[label] = data['metadata']
-        interaction_points.extend(
-            (x, y, meta) for x, y, meta in zip(data['x'], data['y'], data['metadata'])
-        )
+    # Plot one artist per well. ``render_scatter_points`` owns the solid-vs-
+    # density branch (one Line2D per well, or a per-point density PathCollection
+    # shaded by each well's own local density), returning the click-interaction
+    # points and the legend handles. Density mode + log state come from the
+    # shared export-style prefs, re-read each redraw so the mode survives a
+    # restyle.
+    prefs = getattr(app, "_export_style_prefs", None) or {}
+    density_on = bool(prefs.get("scatter_density", False))
+    interaction_points, density_proxies = render_scatter_points(
+        app, app._ax_scatter, scatter_data,
+        density_on=density_on,
+        x_log=bool(prefs.get("x_log", False)),
+        y_log=bool(prefs.get("y_log", False)),
+        marker_size=float(prefs.get("marker_size", 5.0) or 5.0),
+    )
 
     # Format axes — derive readable label from column name
     def _col_label(col: str) -> str:
@@ -202,8 +169,20 @@ def redraw_scatter(
     app._ax_scatter.grid(True, alpha=0.3, color=_grid)
     if scatter_data:
         # Transparent frame keeps the legend from masking the plot
-        # background with the wrong theme color.
-        app._ax_scatter.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+        # background with the wrong theme color. In density mode the per-point
+        # colors are a gradient, so legend handles come from per-group proxies
+        # carrying each well's identity color.
+        if density_on and density_proxies:
+            app._ax_scatter.legend(
+                handles=density_proxies, loc='best', fontsize=8,
+                framealpha=0.0, facecolor="none",
+            )
+        else:
+            app._ax_scatter.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+
+    # Draw stored rectangular gates + their percentage labels on top of the
+    # points. Gate coords are data-space, so they track log scale / limits.
+    draw_gates(app, app._ax_scatter, scatter_data, tps_list, _muted_fg)
 
     # Redraw canvas
     app._scatter_interaction_cache = {
@@ -223,6 +202,9 @@ def redraw_scatter(
                                       getattr(app, "_scatter_canvas", None))
     except Exception:  # pragma: no cover
         swallowed()  # was: pass (silent except)
+    # ax.clear() at the top of this redraw voids any live RectangleSelector;
+    # rebuild it against the fresh axes when gate-draw mode is armed.
+    refresh_gate_selector(app)
     app._scatter_canvas.draw()
 
 
@@ -457,6 +439,11 @@ def on_scatter_click(app, event) -> None:
         return
 
     if event.button != 1:
+        return
+
+    # While gate-draw mode is armed, a left-drag draws a gate — don't also
+    # open the single-cell viewer for the press that started the drag.
+    if getattr(app, "_scatter_gate_draw_mode", False):
         return
 
     try:

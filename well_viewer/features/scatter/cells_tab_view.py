@@ -86,6 +86,15 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_tp_cb.hide()
     ctx.app._scatter_tp_var = ctx.app._scatter_tp_cb
     ctx.app._scatter_tp_selections: dict[str, bool] = {}
+    # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
+    # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
+    # matplotlib RectangleSelector (rebuilt after each redraw).
+    ctx.app._scatter_gates = []
+    ctx.app._scatter_gate_draw_mode = False
+    ctx.app._scatter_gate_selector = None
+    # gating.py triggers redraws through this callback so it never has to import
+    # the controller (avoids a scatter-internal import cycle).
+    ctx.app._scatter_gate_redraw_cb = redraw_scatter_orchestrate
     cl.addStretch(1)
 
     from widgets.icon_button import IconButton as _IconButton

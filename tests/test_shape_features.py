@@ -244,6 +244,33 @@ def test_scatter_draw_with_shape_axis(loaded_app_shape):
     assert app._ax_scatter.get_xlabel() == "Eccentricity"
 
 
+def test_scatter_menus_preserve_timepoint_selection(loaded_app_shape):
+    """A selection refresh (adding/removing wells) must NOT reset the scatter
+    timepoint filter. Available timepoints are dataset-wide, so a well change
+    can't change them — update_scatter_menus used to re-check every timepoint,
+    silently pulling all timepoints back into the plot whenever a well was added.
+    """
+    from well_viewer.features.scatter.controller import update_scatter_menus
+    from tests.fixtures.mini_dataset import WELLS
+
+    app = loaded_app_shape
+    wells = list(WELLS)
+    app._set_selected_wells({wells[0]})
+    update_scatter_menus(app)
+
+    tp = next(iter(app._scatter_tp_selections))
+    app._scatter_tp_selections[tp] = False                 # user unchecks one tp
+    agg_tp = next(iter(app._scatter_agg_tp_selections))
+    app._scatter_agg_tp_selections[agg_tp] = False
+
+    # Add another well → selection_controller fires update_scatter_menus again.
+    app._set_selected_wells(set(wells))
+    update_scatter_menus(app)
+
+    assert app._scatter_tp_selections[tp] is False         # stays unchecked
+    assert app._scatter_agg_tp_selections[agg_tp] is False
+
+
 # ── End-to-end: label → key → active state → value resolution ────────────────
 
 def test_label_key_value_roundtrip():

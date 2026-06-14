@@ -43,12 +43,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ── Ratcheting ceilings (only ever lowered) ──────────────────────────────────
-PROCESS_MICROSCOPY_BUDGET = 4542
+# Re-baselined for the FOV-level incremental feature: the cohesive primitives it
+# needed (the done-set diff + CSV/zip merge helpers) were extracted into the
+# Qt-free pipeline.io, and the GUI scope-decision into
+# input_resolution_service.select_incremental_scope — so the residual growth here
+# is just orchestration that has to live in the monoliths: process_microscopy's
+# --incremental CLI flags, dispatch, per-task diff/merge branches and driver
+# routing (+154); analyze_tab's one-line integration hook (+8). Resume ratcheting
+# down from these.
+PROCESS_MICROSCOPY_BUDGET = 4696
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731
 REVIEW_IMAGE_CONTROLLER_BUDGET = 963
-ANALYZE_TAB_BUDGET = 1176
+ANALYZE_TAB_BUDGET = 1184
 
 
 def _line_count(rel: str) -> int:

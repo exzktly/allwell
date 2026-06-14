@@ -241,6 +241,16 @@ class ZippedInput:
     fires on failure / cancel / partial completion — loose sources
     stay intact so the user can re-run from scratch."""
 
+    incremental: bool = False
+    """True when this is an incremental remote run: the staged zips carry only
+    the new-FOV members (client-side split), so the Fetcher must MERGE the
+    partial outputs into the existing local CSV / out-zip rather than overwrite."""
+
+    up_to_date_wells: tuple[str, ...] = ()
+    """Wells dropped from the upload because their local output already covers
+    every input FOV. The runner emits a synthetic ``[remote] ✓ X: up to date``
+    for each so the dashboard marks them complete."""
+
 
 def stage_local_zips(
     input_dir: Path,
@@ -252,6 +262,9 @@ def stage_local_zips(
     log_fn: Callable[[str], None] | None = None,
     proc_hook: Callable[[subprocess.Popen | None], None] | None = None,
     move_source_tifs: bool = False,
+    incremental: bool = False,
+    prior_output_dir: Path | None = None,
+    csv_prefix: str = "measurements",
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
@@ -276,7 +289,7 @@ def stage_local_zips(
             raise RuntimeError(
                 f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
             )
-        if fluor_tokens is None:
+        if fluor_tokens is None and not incremental:
             # No filtering — use the user's zips directly (read-only).
             return ZippedInput(zip_dir=input_dir, mode=mode, well_zips=well_zips, cleanup=None)
         # v5.2.18: copy the user's zips into a staging dir BEFORE
@@ -284,7 +297,8 @@ def stage_local_zips(
         # ``input_dir`` — if the user mis-typed a fluor channel name
         # (e.g. "GP" for "GFP"), every fluor image got dropped from
         # the user's original dataset on disk. The user's input dir
-        # must be treated as read-only.
+        # must be treated as read-only. The incremental split rewrites
+        # zips too, so it likewise requires staging.
         staging = Path(tempfile.mkdtemp(prefix="allwell-stage-"))
         try:
             staged: list[Path] = []
@@ -293,13 +307,33 @@ def stage_local_zips(
                 shutil.copy2(wz, dest)
                 staged.append(dest)
             staged_zips = tuple(staged)
-            zin = _filter_channels_in_staging(
-                staging, staged_zips, mode,
-                keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
-                log_fn=log_fn,
+            up_to_date: tuple[str, ...] = ()
+            if fluor_tokens is not None:
+                zin = _filter_channels_in_staging(
+                    staging, staged_zips, mode,
+                    keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
+                    log_fn=log_fn,
+                )
+                staged_zips = zin.well_zips
+            # Incremental: keep only new-FOV members and drop up-to-date wells,
+            # so the remote uploads / processes only the genuinely-new files.
+            if incremental and prior_output_dir is not None:
+                staged_zips, up_to_date = _filter_new_fovs_in_staging(
+                    staged_zips,
+                    prior_output_dir=prior_output_dir,
+                    csv_prefix=csv_prefix,
+                    filename_schema=filename_schema,
+                    filename_sep=filename_sep,
+                    log_fn=log_fn,
+                )
+            return ZippedInput(
+                zip_dir=staging,
+                mode=mode,
+                well_zips=staged_zips,
+                cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
+                incremental=incremental,
+                up_to_date_wells=up_to_date,
             )
-            zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
-            return zin
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
             raise
@@ -940,6 +974,112 @@ def _member_matches(member: str, keep_tokens: set[str]) -> bool:
     uses when grouping channels)."""
     base = Path(member).name
     return any(tok in base for tok in keep_tokens)
+
+
+def _read_done_fov_keys_csv(csv_path: Path) -> "set[tuple[str, str]]":
+    """``(fov, timepoint)`` pairs already present in a per-well CSV.
+
+    A stdlib-only twin of ``pipeline.io.read_done_fov_keys`` — kept here so the
+    client-side split needs no imaging-stack import. Missing / column-less /
+    unreadable CSVs yield an empty set (process everything).
+    """
+    import csv
+
+    if not csv_path.exists():
+        return set()
+    keys: "set[tuple[str, str]]" = set()
+    try:
+        with open(csv_path, newline="") as fh:
+            reader = csv.DictReader(fh)
+            if not reader.fieldnames or "fov" not in reader.fieldnames \
+                    or "timepoint" not in reader.fieldnames:
+                return set()
+            for row in reader:
+                keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
+    except OSError:
+        return set()
+    return keys
+
+
+def _member_fov_tp(member: str, fields: "list[str]", sep: str) -> "tuple[str, str]":
+    """Extract the ``(fov, timepoint)`` tokens from a zip member's basename,
+    using the same schema-index discipline ``parse_filename`` applies (so the
+    key compares equal to what's stored in the per-well CSV)."""
+    base = Path(member).stem
+    parts = base.split(sep)
+    fi = fields.index("fov") if "fov" in fields else -1
+    ti = fields.index("timepoint") if "timepoint" in fields else -1
+    fov = parts[fi] if 0 <= fi < len(parts) else ""
+    tp = parts[ti] if 0 <= ti < len(parts) else ""
+    return (fov, tp)
+
+
+def _filter_new_fovs_in_staging(
+    well_zips: tuple[Path, ...],
+    *,
+    prior_output_dir: Path,
+    csv_prefix: str,
+    filename_schema: str,
+    filename_sep: str,
+    log_fn: Callable[[str], None] | None = None,
+) -> "tuple[tuple[Path, ...], tuple[str, ...]]":
+    """Client-side incremental split: rewrite each staged well zip to keep only
+    members whose ``(fov, timepoint)`` is NOT already in the well's local CSV,
+    and drop wells whose every input FOV is already done.
+
+    The remote then processes only genuinely-new FOVs (no remote-side diff), and
+    the partial outputs are merged back locally on fetch. Operates on the staged
+    copies only — never the user's originals. Returns
+    ``(surviving_well_zips, up_to_date_wells)``.
+    """
+    fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
+    survivors: list[Path] = []
+    up_to_date: list[str] = []
+    n_total = len(well_zips)
+
+    for idx, wz in enumerate(well_zips, start=1):
+        well = _canonical_well_from_path(wz.stem)
+        if well is None:
+            survivors.append(wz)
+            continue
+        done = _read_done_fov_keys_csv(prior_output_dir / f"{csv_prefix}_{well}.csv")
+        if not done:
+            survivors.append(wz)  # new well → upload in full
+            continue
+        try:
+            with zipfile.ZipFile(wz, "r") as zf:
+                members = zf.namelist()
+        except (OSError, zipfile.BadZipFile):
+            survivors.append(wz)
+            continue
+        keep = [m for m in members if _member_fov_tp(m, fields, filename_sep) not in done]
+        if not keep:
+            # Every input FOV already processed locally — skip the upload.
+            try:
+                wz.unlink()
+            except OSError:
+                pass
+            up_to_date.append(well)
+            if log_fn:
+                log_fn(f"[remote] ✓ {well}: up to date (local) — not uploaded\n")
+            continue
+        if len(keep) == len(members):
+            survivors.append(wz)  # nothing of this well's input is done yet
+            continue
+        tmp = wz.with_suffix(".zip.tmp")
+        with zipfile.ZipFile(wz, "r") as src, zipfile.ZipFile(
+            tmp, "w", compression=zipfile.ZIP_DEFLATED
+        ) as dst:
+            for m in keep:
+                dst.writestr(src.getinfo(m), src.read(m))
+        tmp.replace(wz)
+        survivors.append(wz)
+        if log_fn:
+            log_fn(
+                f"[remote] split ({idx}/{n_total}): {well} → uploading "
+                f"{len(keep)}/{len(members)} new-FOV file(s)\n"
+            )
+    return tuple(survivors), tuple(up_to_date)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1896,6 +2036,10 @@ class _RemoteRun:
     expected_wells: set[str] = field(default_factory=set)
     fetched_wells: set[str] = field(default_factory=set)
     well_count_total: int = 0
+    # Incremental remote run: fetched outputs are PARTIAL (new FOVs only), so the
+    # Fetcher merges them into the existing local CSV / out-zip instead of
+    # overwriting.
+    incremental: bool = False
 
 
 class _RemoteProcess:
@@ -2065,6 +2209,7 @@ class _BatchedRemoteProcess:
             local_output_dir=local_output_dir,
             local_input_mode=zipped.mode,
             output_filter=output_filter,
+            incremental=zipped.incremental,
         )
 
         # One Fetcher persisting across batches. Pre-set the total well
@@ -2169,7 +2314,12 @@ class _BatchedRemoteProcess:
                 if arg == "--csv_prefix":
                     csv_prefix = next(it, csv_prefix)
                     break
-            if not force:
+            # Incremental already split client-side: the staged set holds only
+            # wells with genuinely-new FOVs (up-to-date wells were dropped during
+            # staging), and each kept zip carries only its new-FOV members. The
+            # local-CSV "already complete" skip would wrongly drop these touched
+            # wells (they DO have a local CSV), so bypass it for incremental.
+            if not force and not self._zipped.incremental:
                 skipped: list[Path] = []
                 kept: list[Path] = []
                 for p in all_zips:
@@ -2695,7 +2845,18 @@ class Fetcher:
         # the per-well CSV is the most important file and any retry can
         # re-pull it.
         t1 = time.monotonic()
-        csv_count = self._rsync_glob(csv_glob_src, self.run.local_output_dir)
+        if self.run.incremental:
+            # Partial CSV (new FOV rows only) — merge into the local full CSV
+            # rather than overwriting it.
+            tmp_csv_dir = Path(tempfile.mkdtemp(prefix=f"allwell-csv-{well}-"))
+            try:
+                csv_count = self._rsync_glob(csv_glob_src, tmp_csv_dir)
+                if csv_count:
+                    self._merge_fetched_csvs(tmp_csv_dir)
+            finally:
+                shutil.rmtree(tmp_csv_dir, ignore_errors=True)
+        else:
+            csv_count = self._rsync_glob(csv_glob_src, self.run.local_output_dir)
         csv_elapsed = time.monotonic() - t1
         if csv_count > 0:
             self._log(
@@ -2787,6 +2948,30 @@ class Fetcher:
                 f"failed: {exc}\n"
             )
 
+    def _merge_fetched_csvs(self, tmp_csv_dir: Path) -> None:
+        """Merge each partial per-well CSV pulled into *tmp_csv_dir* into the
+        matching full CSV under ``local_output_dir`` (incremental remote runs).
+        New rows are appended, duplicates skipped — see
+        ``pipeline.io.merge_records_into_csv``."""
+        import csv as _csv
+
+        from pipeline.io import merge_records_into_csv
+
+        for partial in sorted(tmp_csv_dir.glob("*.csv")):
+            try:
+                with open(partial, newline="") as fh:
+                    rows = list(_csv.DictReader(fh))
+            except OSError as exc:
+                self._log(f"[remote] warn: reading fetched CSV {partial.name} failed: {exc}\n")
+                continue
+            if not rows:
+                continue
+            added = merge_records_into_csv(self.run.local_output_dir / partial.name, rows)
+            self._log(
+                f"[remote] merge: {partial.name} → +{added} new row(s) "
+                f"into {self.run.local_output_dir.name}/\n"
+            )
+
     def _materialize(self, well: str, well_zip: Path) -> None:
         """Place the well's outputs in ``local_output_dir`` so the result
         matches what a local run would have produced."""
@@ -2796,6 +2981,13 @@ class Fetcher:
         if self.output_filter is OutputFilter.CSV_ONLY:
             # Nothing to extract — the CSV was pulled separately. Drop
             # the well zip on the floor.
+            return
+
+        if self.run.incremental:
+            # The fetched zip holds only the new FOVs' images. Merge them into
+            # the existing local output (out-zip, or per-well folder) instead of
+            # overwriting — see pipeline.io.merge_images_into_zip.
+            self._materialize_incremental(well, well_zip, dest)
             return
 
         if self.run.local_input_mode is LocalInputMode.FOLDER:
@@ -2817,6 +3009,34 @@ class Fetcher:
             shutil.copyfile(well_zip, dest / f"{well}_out.zip")
         except OSError as exc:
             self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
+
+    def _materialize_incremental(self, well: str, well_zip: Path, dest: Path) -> None:
+        """Merge a partial fetched well zip into the existing local output."""
+        from pipeline.io import merge_images_into_zip
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"allwell-merge-{well}-"))
+        try:
+            try:
+                with zipfile.ZipFile(well_zip, "r") as zf:
+                    zf.extractall(tmp_dir)
+            except (OSError, zipfile.BadZipFile) as exc:
+                self._log(f"[remote] warn: extracting partial {well}_out.zip failed: {exc}\n")
+                return
+            if self.run.local_input_mode is LocalInputMode.FOLDER:
+                out_folder = dest / well
+                out_folder.mkdir(parents=True, exist_ok=True)
+                for img in sorted(tmp_dir.iterdir()):
+                    if not img.is_file() or img.name.startswith("."):
+                        continue
+                    target = out_folder / img.name
+                    if target.exists():
+                        continue  # keep existing
+                    shutil.move(str(img), str(target))
+            else:
+                n = merge_images_into_zip(dest / f"{well}_out.zip", tmp_dir)
+                self._log(f"[remote] merge: {well}_out.zip → +{n} new image(s)\n")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _rsync(self, argv: list[str]) -> bool:
         # Routed through the shared retry helper (v5.1.1) so transient
@@ -3144,6 +3364,7 @@ class RemoteRunner:
             local_output_dir=local_output_dir,
             local_input_mode=zipped.mode,
             output_filter=output_filter,
+            incremental=zipped.incremental,
         )
 
         # v5.2.27: pre-flight cache-hit check. Before launching the
@@ -3668,6 +3889,14 @@ class RemoteRunner:
                 i += 2
             elif arg == "--output_dir":
                 out.extend([arg, remote_output])
+                i += 2
+            elif arg == "--incremental":
+                # Incremental is a client-side concern on remote runs: the
+                # client uploads only the new-FOV files and merges the partial
+                # outputs back on fetch. The remote just processes what it
+                # received, so the flag (and its prior-dir) are dropped here.
+                i += 1
+            elif arg == "--incremental_prior_dir":
                 i += 2
             else:
                 out.append(arg)

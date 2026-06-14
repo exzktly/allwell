@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -197,6 +198,172 @@ def write_csvs_per_well(
         out_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
         _write_single_csv(records, out_path)
         log.info("Well %-12s -> %s  (%d rows)", well, out_path.name, len(records))
+
+
+# ---------------------------------------------------------------------------
+# Incremental (FOV-level) merge helpers
+#
+# These let an ``--incremental`` run absorb only newly-added FOV-groups into an
+# already-processed well without re-segmenting the FOVs already on disk: the
+# done-set is read from the prior per-well CSV, the new rows are merged into that
+# CSV, and the new output images are merged into the existing ``<well>_out.zip``.
+# All three are atomic (tmp → fsync → rename) and de-dup so a re-run is a no-op.
+# ---------------------------------------------------------------------------
+
+# Image extensions packed into an output well-zip (mirrors compress_images_to_zip
+# in process_microscopy). Kept here so merge_images_into_zip is self-contained
+# and pipeline.io carries no process_microscopy import (no cycle).
+_OUTPUT_IMAGE_EXTS = {".tif", ".tiff", ".png"}
+
+
+def read_done_fov_keys(csv_path: "Path | str") -> "set[tuple[str, str]]":
+    """Return the ``(fov, timepoint)`` pairs already present in a per-well CSV.
+
+    These are the FOV-groups an incremental run must NOT reprocess. The values
+    are read straight from the CSV's ``fov`` / ``timepoint`` columns — the exact
+    strings ``parse_filename`` produced when the rows were first written — so a
+    freshly-parsed group's ``(fov, timepoint)`` compares equal without any
+    re-normalisation. A missing / unreadable / column-less CSV yields an empty
+    set (treated as "nothing done yet", i.e. process everything).
+    """
+    import csv
+
+    path = Path(csv_path)
+    if not path.exists():
+        return set()
+    keys: "set[tuple[str, str]]" = set()
+    try:
+        with open(path, newline="") as fh:
+            reader = csv.DictReader(fh)
+            if not reader.fieldnames or "fov" not in reader.fieldnames \
+                    or "timepoint" not in reader.fieldnames:
+                return set()
+            for row in reader:
+                keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
+    except OSError:
+        return set()
+    return keys
+
+
+def merge_records_into_csv(
+    out_path: "Path | str",
+    new_records: "list[dict]",
+    *,
+    key_fields: "tuple[str, ...]" = ("well", "fov", "timepoint", "nucleus_id"),
+) -> int:
+    """Append *new_records* to an existing per-well CSV, skipping duplicate keys.
+
+    Existing rows are preserved verbatim (and their column order kept); records
+    whose ``key_fields`` tuple already appears — in the file or earlier in
+    *new_records* — are dropped, so a re-run that re-processes the same FOV is
+    idempotent. New columns absent from the old header are appended to the
+    field order. The write is atomic (tmp → fsync → rename). When the target
+    doesn't exist this is a plain fresh write. Returns the number of rows added.
+    """
+    import csv
+
+    path = Path(out_path)
+    if not new_records:
+        return 0
+
+    def _key(row: "dict") -> tuple:
+        return tuple(str(row.get(f, "")) for f in key_fields)
+
+    existing_rows: "list[dict]" = []
+    fieldnames: "list[str]" = []
+    if path.exists():
+        try:
+            with open(path, newline="") as fh:
+                reader = csv.DictReader(fh)
+                fieldnames = list(reader.fieldnames or [])
+                existing_rows = list(reader)
+        except OSError:
+            existing_rows = []
+            fieldnames = []
+
+    seen = {_key(r) for r in existing_rows}
+    to_add: "list[dict]" = []
+    for rec in new_records:
+        k = _key(rec)
+        if k in seen:
+            continue
+        seen.add(k)
+        to_add.append(rec)
+
+    if not to_add and path.exists():
+        return 0
+
+    # Union the field order: existing header first, then any new columns.
+    if not fieldnames:
+        fieldnames = list(new_records[0].keys())
+    for rec in to_add:
+        for col in rec.keys():
+            if col not in fieldnames:
+                fieldnames.append(col)
+
+    with _safe_atomic_text_write(path) as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, restval="",
+                                extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(existing_rows)
+        writer.writerows(to_add)
+    return len(to_add)
+
+
+def merge_images_into_zip(out_zip: "Path | str", image_dir: "Path | str") -> int:
+    """Add the new images in *image_dir* to *out_zip*, keeping existing members.
+
+    Members already present in the zip win on an arcname collision (matches the
+    "keep existing, skip incoming" rule used elsewhere), so re-running is a
+    no-op. Existing members are copied across into a fresh archive and the write
+    is atomic (tmp → fsync → rename) — the same crash-safety contract as
+    ``compress_images_to_zip``, since zip append-mode is not crash-safe. When the
+    target doesn't exist this is a plain fresh compress. Returns images added.
+    """
+    out_zip = Path(out_zip)
+    image_dir = Path(image_dir)
+
+    candidates = sorted(
+        p for p in image_dir.iterdir()
+        if p.is_file()
+        and p.suffix.lower() in _OUTPUT_IMAGE_EXTS
+        and not p.name.endswith(".tmp")
+        and not p.name.startswith("__aw_tmp_")
+    ) if image_dir.is_dir() else []
+    images = _verify_files_complete(candidates)
+
+    existing_names: "set[str]" = set()
+    if out_zip.exists():
+        try:
+            with zipfile.ZipFile(out_zip, "r") as zf:
+                existing_names = set(zf.namelist())
+        except (OSError, zipfile.BadZipFile):
+            existing_names = set()
+
+    to_add = [p for p in images if p.name not in existing_names]
+    if not to_add and out_zip.exists():
+        return 0
+
+    out_zip.parent.mkdir(parents=True, exist_ok=True)
+    tmp_zip = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
+    try:
+        with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            if out_zip.exists():
+                with zipfile.ZipFile(out_zip, "r") as src:
+                    for name in src.namelist():
+                        zf.writestr(src.getinfo(name), src.read(name))
+            for p in to_add:
+                zf.write(p, arcname=p.name)
+        _fsync_path(tmp_zip)
+        os.replace(str(tmp_zip), str(out_zip))
+    except BaseException:
+        try:
+            if tmp_zip.exists():
+                tmp_zip.unlink()
+        except OSError:
+            pass
+        raise
+    return len(to_add)
 
 
 def save_overlay(nir_raw: np.ndarray, labels: np.ndarray, out_path: Path) -> None:

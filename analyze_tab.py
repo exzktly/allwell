@@ -26,7 +26,11 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from services.input_resolution_service import resolve_input_output, tif_files_in
+from services.input_resolution_service import (
+    resolve_input_output,
+    select_incremental_scope,
+    tif_files_in,
+)
 from util.well_token import is_valid_well_name
 from services.pipeline_runner import (
     PipelineRunner,
@@ -838,6 +842,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                 proc_hook=proc_hook,
                 move_source_tifs=bool(opts.get("move_source_tifs", False)),
             )
+            # Fold loose images sitting next to grouped well zips into them, then
+            # pick the run scope (incremental-merge vs full --force). Mutates opts.
+            select_incremental_scope(opts, input_dir,
+                                     log_fn=lambda m: log_q.put(("line", m)))
             # When the inputs are already grouped/zipped the zipper is skipped
             # and fires no per-well progress — surface the existing wells so the
             # Group stage still shows progress and the plate marks each well

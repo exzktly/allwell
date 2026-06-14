@@ -117,10 +117,16 @@ def build_pipeline_args(
         "no_tophat_nir",
         "no_tophat_fluor",
         "force",
+        "incremental",
         "cpu_only",
     ):
         if opts.get(flag):
             args.append(f"--{flag}")
+    # Incremental reads the prior per-well CSVs to skip already-done FOVs. Local
+    # runs read them straight from the output dir; the remote runner rewrites
+    # this to the uploaded sidecar (the remote output dir starts empty).
+    if opts.get("incremental"):
+        args += ["--incremental_prior_dir", str(output_dir)]
     for flag in (
         "compress_input_well_folders",
         "compress_output_well_folders",

@@ -140,6 +140,9 @@ from pipeline.io import (  # noqa: E402,F401
     _safe_well,
     _verify_files_complete,
     _write_single_csv,
+    merge_images_into_zip,
+    merge_records_into_csv,
+    read_done_fov_keys,
     save_overlay,
     write_csvs_per_well,
 )
@@ -2950,6 +2953,8 @@ def process_well_zip_task(
     csv_prefix: str,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
+    incremental: bool = False,
+    incremental_prior_dir: "Path | None" = None,
 ) -> "tuple[list[dict], list[str]]":
     """
     Top-level picklable task: full lifecycle for one zipped well.
@@ -2961,6 +2966,13 @@ def process_well_zip_task(
     3. Write the per-well CSV.
     4. Compress output images to <output_dir>/<well>_out.zip.
     5. Remove temporary directories.
+
+    When *incremental* is set and a prior per-well CSV exists, only the
+    FOV-groups whose ``(fov, timepoint)`` is not already in that CSV are
+    processed, and the new rows / images are merged into the existing CSV and
+    ``<well>_out.zip`` (rather than overwritten). A new well — no prior CSV —
+    processes fully. *incremental_prior_dir* is where the prior CSV is read from
+    (defaults to *output_dir*; remote runs point it at the uploaded sidecar).
 
     Returns (records, failed_names).
     """
@@ -3011,6 +3023,31 @@ def process_well_zip_task(
                 log.warning("Well %s: no image groups found in %s.", well_label, zip_path.name)
                 return [], []
 
+            safe_well = _safe_well(well_label)
+            csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
+            out_zip   = output_dir / f"{well_label}_out.zip"
+
+            if incremental:
+                prior = incremental_prior_dir or output_dir
+                done = read_done_fov_keys(prior / f"{csv_prefix}_{safe_well}.csv")
+                if done:
+                    new_groups = []
+                    for nuc, fl in groups:
+                        meta = parse_filename(nuc, schema=schema, sep=sep)
+                        if (meta["fov"], meta["timepoint"]) not in done:
+                            new_groups.append((nuc, fl))
+                    if not new_groups:
+                        log.info("Well %s — up to date (no new FOVs).", well_label)
+                        return [], []
+                    log.info("Well %s — merging %d new FOV(s).", well_label, len(new_groups))
+                    groups = new_groups
+                    needed_members = set()
+                    for nuc, fl in groups:
+                        needed_members.add(nuc.name)
+                        for f in fl:
+                            needed_members.add(f.name)
+                # else: no prior CSV → new well → process all groups (full).
+
             n_extracted = extract_zip(zip_path, tmp_extract, members_to_extract=needed_members)
             log.info(
                 "Well %s: extracted %d/%d required image file(s).",
@@ -3022,17 +3059,25 @@ def process_well_zip_task(
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed = _process_groups_in_worker(groups, kwargs, well_label)
 
-            if records:
-                safe_well = _safe_well(well_label)
-                csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
-                _write_single_csv(records, csv_path)
-                log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
+            if incremental:
+                if records:
+                    added = merge_records_into_csv(csv_path, records)
+                    log.info("Well %-12s -> %s  (+%d row(s), merged)",
+                             well_label, csv_path.name, added)
+                else:
+                    log.warning("Well %s: no records produced; CSV not updated.", well_label)
+                n_compressed = merge_images_into_zip(out_zip, tmp_images)
+                log.info("Well %s: merged %d new image(s) -> %s",
+                         well_label, n_compressed, out_zip.name)
             else:
-                log.warning("Well %s: no records produced; CSV not written.", well_label)
+                if records:
+                    _write_single_csv(records, csv_path)
+                    log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
+                else:
+                    log.warning("Well %s: no records produced; CSV not written.", well_label)
 
-            out_zip = output_dir / f"{well_label}_out.zip"
-            n_compressed = compress_images_to_zip(tmp_images, out_zip)
-            log.info("Well %s: %d image(s) -> %s", well_label, n_compressed, out_zip.name)
+                n_compressed = compress_images_to_zip(tmp_images, out_zip)
+                log.info("Well %s: %d image(s) -> %s", well_label, n_compressed, out_zip.name)
 
             # Mark the well as functionally complete *before* the
             # finally-block cleanup. On slow / unreliable storage (NAS,
@@ -3078,6 +3123,8 @@ def process_well_folder_task(
     compress_output_well_folders: bool = False,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
+    incremental: bool = False,
+    incremental_prior_dir: "Path | None" = None,
 ) -> "tuple[list[dict], list[str]]":
     """
     Top-level picklable task: full lifecycle for one uncompressed well folder.
@@ -3088,6 +3135,10 @@ def process_well_folder_task(
     3. Write per-well CSV to <output_dir>/<csv_prefix>_<well>.csv.
     4. Rename staging directory to <output_dir>/<well_label>/.
     5. Optionally compress input/output well folders to per-well zip files.
+
+    When *incremental* is set and a prior per-well CSV exists, only the new
+    FOV-groups are processed and merged into the existing CSV and output folder /
+    ``<well>_out.zip`` (see :func:`process_well_zip_task` for the contract).
 
     Returns (records, failed_names).
     """
@@ -3123,34 +3174,80 @@ def process_well_folder_task(
                 log.warning("Well %s: no image groups found in %s.", well_label, well_folder)
                 return [], []
 
+            safe_well = _safe_well(well_label)
+            csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
+            out_zip   = output_dir / f"{well_label}_out.zip"
+            final_out = output_dir / well_label
+
+            if incremental:
+                prior = incremental_prior_dir or output_dir
+                done = read_done_fov_keys(prior / f"{csv_prefix}_{safe_well}.csv")
+                if done:
+                    new_groups = []
+                    for nuc, fl in groups:
+                        meta = parse_filename(nuc, schema=schema, sep=sep)
+                        if (meta["fov"], meta["timepoint"]) not in done:
+                            new_groups.append((nuc, fl))
+                    if not new_groups:
+                        log.info("Well %s — up to date (no new FOVs).", well_label)
+                        return [], []
+                    log.info("Well %s — merging %d new FOV(s).", well_label, len(new_groups))
+                    groups = new_groups
+                # else: no prior CSV → new well → process all groups (full).
+
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
             records, failed = _process_groups_in_worker(groups, kwargs, well_label)
 
-            if records:
-                safe_well = _safe_well(well_label)
-                csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
-                _write_single_csv(records, csv_path)
-                log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
+            if incremental:
+                # Merge new rows / images into the existing well outputs.
+                if records:
+                    added = merge_records_into_csv(csv_path, records)
+                    log.info("Well %-12s -> %s  (+%d row(s), merged)",
+                             well_label, csv_path.name, added)
+                else:
+                    log.warning("Well %s: no records produced; CSV not updated.", well_label)
+                if compress_output_well_folders:
+                    n_out = merge_images_into_zip(out_zip, tmp_images)
+                    log.info("Well %s: merged %d new image(s) -> %s",
+                             well_label, n_out, out_zip.name)
+                else:
+                    final_out.mkdir(parents=True, exist_ok=True)
+                    moved = 0
+                    for img in sorted(tmp_images.iterdir()):
+                        if not img.is_file() or img.name.startswith("."):
+                            continue
+                        dest = final_out / img.name
+                        if dest.exists():
+                            continue  # keep existing
+                        os.replace(str(img), str(dest))
+                        moved += 1
+                    log.info("Well %s: merged %d new image(s) -> %s/",
+                             well_label, moved, final_out.name)
+                # Incremental consumed only the new images; drop the staging dir
+                # (the non-incremental path consumes it via rename/compress).
+                remove_directory(tmp_images)
             else:
-                log.warning("Well %s: no records produced; CSV not written.", well_label)
+                if records:
+                    _write_single_csv(records, csv_path)
+                    log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
+                else:
+                    log.warning("Well %s: no records produced; CSV not written.", well_label)
 
-            # Atomically rename staging dir to final output folder.
-            final_out = output_dir / well_label
-            if final_out.exists():
-                remove_directory(final_out)
-            tmp_images.rename(final_out)
-            log.info("Well %s: output folder -> %s", well_label, final_out.name)
+                # Atomically rename staging dir to final output folder.
+                if final_out.exists():
+                    remove_directory(final_out)
+                tmp_images.rename(final_out)
+                log.info("Well %s: output folder -> %s", well_label, final_out.name)
 
-            if compress_output_well_folders:
-                out_zip = output_dir / f"{well_label}_out.zip"
-                n_out = compress_folder_images_to_zip_and_remove(final_out, out_zip)
-                if n_out > 0:
-                    log.info(
-                        "Well %s: compressed output folder -> %s (%d image(s))",
-                        well_label,
-                        out_zip.name,
-                        n_out,
-                    )
+                if compress_output_well_folders:
+                    n_out = compress_folder_images_to_zip_and_remove(final_out, out_zip)
+                    if n_out > 0:
+                        log.info(
+                            "Well %s: compressed output folder -> %s (%d image(s))",
+                            well_label,
+                            out_zip.name,
+                            n_out,
+                        )
 
             if compress_input_well_folders:
                 in_zip = well_folder.parent / f"{well_label}.zip"
@@ -3422,6 +3519,8 @@ def process_well_zips(
     workers: int,
     csv_prefix: str,
     force: bool = False,
+    incremental: bool = False,
+    incremental_prior_dir: "Path | None" = None,
     force_cpu: bool = False,
     threads_per_worker: int = 0,
     schema: "list[str] | None" = None,
@@ -3433,6 +3532,11 @@ def process_well_zips(
     Each worker: extracts its zip, processes all image pairs sequentially
     (StarDist loaded once), writes the CSV, compresses QC images, and cleans up.
     Up to *workers* wells are processed in parallel.
+
+    With *incremental* (and not *force*), wells that already have output are NOT
+    skipped — they are routed to the task, which processes only their new
+    FOV-groups and merges the result. New wells process fully; truly-unchanged
+    wells return a cheap "up to date" no-op.
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
@@ -3460,11 +3564,14 @@ def process_well_zips(
         log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
         remove_directory(_stale)
 
-    # Skip already-complete wells unless --force
+    # Skip already-complete wells unless --force. In --incremental mode nothing
+    # is skipped up front: every well is routed to the task, which decides
+    # new-well / merge-new-FOVs / up-to-date per well.
     n_skipped = 0
     to_process: list[tuple[str, Path]] = []
     for well_label, zip_path in well_zips:
-        if not force and output_exists_for_well(output_dir, well_label, csv_prefix):
+        if (not force and not incremental
+                and output_exists_for_well(output_dir, well_label, csv_prefix)):
             log.info(
                 "SKIP well %s — output already exists. Use --force to reprocess.",
                 well_label,
@@ -3480,6 +3587,9 @@ def process_well_zips(
 
     _ensure_stardist_runtime_deps()
 
+    if incremental:
+        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
+                 len(to_process))
     log.info("Zip mode: %d well(s) to process, %d worker(s).", len(to_process), workers)
 
     # Submit one worker per well zip directly.
@@ -3506,6 +3616,8 @@ def process_well_zips(
                 csv_prefix,
                 schema,
                 sep,
+                incremental,
+                incremental_prior_dir,
             ): well_label
             for well_label, zip_path in to_process
         }
@@ -3545,6 +3657,8 @@ def process_well_folders(
     compress_input_well_folders: bool = False,
     compress_output_well_folders: bool = False,
     force: bool = False,
+    incremental: bool = False,
+    incremental_prior_dir: "Path | None" = None,
     force_cpu: bool = False,
     threads_per_worker: int = 0,
     schema: "list[str] | None" = None,
@@ -3556,6 +3670,10 @@ def process_well_folders(
     Each worker: discovers image groups in its well subfolder, processes them,
     writes the CSV, and saves output images to <output_dir>/<well>/.
     Up to *workers* wells are processed in parallel.
+
+    With *incremental* (and not *force*), wells with existing output are routed
+    to the task to merge only their new FOV-groups (see
+    :func:`process_well_zips`).
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
@@ -3577,16 +3695,18 @@ def process_well_folders(
         log.warning("Removing stale staging directory from previous run: %s", _stale.name)
         remove_directory(_stale)
 
-    # Skip already-complete wells unless --force
+    # Skip already-complete wells unless --force. In --incremental mode the
+    # task decides per well (new / merge-new-FOVs / up-to-date), so nothing is
+    # skipped up front.
     n_skipped = 0
     to_process: list[tuple[str, Path]] = []
     for well_label, folder_path in well_folders:
-        if not force and output_exists_for_well_folder(
+        if (not force and not incremental and output_exists_for_well_folder(
             output_dir,
             well_label,
             csv_prefix,
             compressed_output=compress_output_well_folders,
-        ):
+        )):
             log.info(
                 "SKIP well %s — output already exists. Use --force to reprocess.",
                 well_label,
@@ -3602,6 +3722,9 @@ def process_well_folders(
 
     _ensure_stardist_runtime_deps()
 
+    if incremental:
+        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
+                 len(to_process))
     log.info("Folder mode: %d well(s) to process, %d worker(s).", len(to_process), workers)
 
     all_records: list[dict] = []
@@ -3629,6 +3752,8 @@ def process_well_folders(
                 compress_output_well_folders,
                 schema,
                 sep,
+                incremental,
+                incremental_prior_dir,
             ): well_label
             for well_label, folder_path in to_process
         }
@@ -4133,6 +4258,25 @@ def build_parser() -> argparse.ArgumentParser:
                        "<csv_prefix>_<well>.csv are both present is skipped."
                    ))
 
+    p.add_argument("--incremental", action="store_true",
+                   help=(
+                       "FOV-level incremental update. Instead of skipping a "
+                       "well that already has output, process only the "
+                       "FOV-groups not already present in its CSV and merge the "
+                       "new rows / images into the existing <csv>_<well>.csv and "
+                       "<well>_out.zip. New wells process fully; unchanged wells "
+                       "are left as-is. Ignored when --force is given."
+                   ))
+
+    p.add_argument("--incremental_prior_dir", default=None,
+                   help=(
+                       "Directory holding the prior per-well CSVs used to build "
+                       "the already-done (fov, timepoint) set for --incremental. "
+                       "Defaults to the output directory (local runs). Remote "
+                       "runs point this at the uploaded prior-CSV sidecar, since "
+                       "the remote output dir starts empty."
+                   ))
+
     p.add_argument("--cpu_only", action="store_true",
                    help=(
                        "Force StarDist to run on CPU even if a GPU is available. "
@@ -4425,6 +4569,11 @@ def main() -> None:
             workers=workers,
             csv_prefix=args.csv_prefix,
             force=args.force,
+            incremental=args.incremental,
+            incremental_prior_dir=(
+                Path(args.incremental_prior_dir)
+                if args.incremental_prior_dir else None
+            ),
             force_cpu=args.cpu_only,
             threads_per_worker=threads_per_worker,
             schema=schema,
@@ -4444,6 +4593,11 @@ def main() -> None:
             compress_input_well_folders=args.compress_input_well_folders,
             compress_output_well_folders=args.compress_output_well_folders,
             force=args.force,
+            incremental=args.incremental,
+            incremental_prior_dir=(
+                Path(args.incremental_prior_dir)
+                if args.incremental_prior_dir else None
+            ),
             force_cpu=args.cpu_only,
             threads_per_worker=threads_per_worker,
             schema=schema,

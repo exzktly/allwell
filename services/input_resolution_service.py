@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 from typing import Callable
 from util.aw_safe import swallowed
@@ -119,6 +120,128 @@ def iter_well_tokens(input_dir: Path) -> "list[str]":
             seen.add(tok)
             out.append(tok)
     return out
+
+
+def append_loose_images_to_zips(
+    grouped_dir: Path,
+    *,
+    filename_schema: str,
+    filename_sep: str,
+    log_fn: Callable[[str], None] | None = None,
+) -> "tuple[int, set[str]]":
+    """Fold loose image files sitting next to grouped well zips into those zips.
+
+    When a directory already holds per-well ``<WELL>.zip`` archives and the user
+    drops additional loose TIFFs alongside them, those files would otherwise be
+    ignored (``_has_well_content`` short-circuits the zipper). This parses each
+    loose file's well token, appends it into the matching ``<WELL>.zip`` (or
+    creates a new ``<WELL>.zip`` for a well that doesn't have one yet), and
+    deletes the loose source once it is durably in the zip.
+
+    Rules:
+      * Only acts when *grouped_dir* already contains ≥1 well-named zip (i.e. a
+        zip-grouped layout). Folder-only / loose-only layouts are left to the
+        normal zipper path.
+      * Duplicate member name (the loose file's basename already inside the zip)
+        → keep the existing member, skip the loose file (left in place).
+      * Each appended loose file is unlinked right after the verified atomic
+        rewrite; skipped duplicates are not deleted.
+
+    Returns ``(files_appended, wells_touched)`` where *wells_touched* are the
+    canonical well tokens whose zip gained at least one member (used by the
+    caller to drive incremental reprocessing).
+    """
+    from util.well_token import canonical_well_label
+
+    appended = 0
+    wells_touched: set[str] = set()
+
+    # Gate: only a zip-grouped layout qualifies.
+    try:
+        has_well_zip = any(_is_well_named(p) for p in grouped_dir.glob("*.zip"))
+    except OSError:
+        return 0, wells_touched
+    if not has_well_zip:
+        return 0, wells_touched
+
+    fields = [str(f).strip().lower() for f in str(filename_schema or "").split(":")]
+    if "well" not in fields:
+        return 0, wells_touched
+    well_idx = fields.index("well")
+
+    # Collect loose top-level image files (not zips, not dirs) grouped by well.
+    by_well: dict[str, list[Path]] = {}
+    try:
+        entries = sorted(grouped_dir.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return 0, wells_touched
+    for p in entries:
+        if not p.is_file() or p.suffix.lower() not in (".tif", ".tiff"):
+            continue
+        parts = p.stem.split(filename_sep)
+        token = canonical_well_label(parts[well_idx]) if well_idx < len(parts) else None
+        if token is None:
+            if log_fn:
+                log_fn(f"[append] Skipping loose file (no valid well token): {p.name}\n")
+            continue
+        by_well.setdefault(token, []).append(p)
+
+    if not by_well:
+        return 0, wells_touched
+
+    for well, files in sorted(by_well.items()):
+        target = grouped_dir / f"{well}.zip"
+        existing: set[str] = set()
+        if target.exists():
+            try:
+                with zipfile.ZipFile(target, "r") as zf:
+                    existing = set(zf.namelist())
+            except (OSError, zipfile.BadZipFile):
+                existing = set()
+        new_files = [f for f in files if f.name not in existing]
+        skipped = len(files) - len(new_files)
+        if skipped and log_fn:
+            log_fn(
+                f"[append] {well}: skipped {skipped} loose file(s) already in "
+                f"{target.name} (kept existing).\n"
+            )
+        if not new_files:
+            continue
+
+        tmp = target.with_name(f"__aw_tmp_{well}.zip.pid{os.getpid()}")
+        try:
+            with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                if target.exists():
+                    with zipfile.ZipFile(target, "r") as src:
+                        for name in src.namelist():
+                            zf.writestr(src.getinfo(name), src.read(name))
+                for f in new_files:
+                    zf.write(f, arcname=f.name)
+            os.replace(str(tmp), str(target))
+        except BaseException:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            raise
+
+        created = "created" if not existing else "updated"
+        # Durable in the zip now — remove the loose sources.
+        for f in new_files:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        appended += len(new_files)
+        wells_touched.add(well)
+        if log_fn:
+            log_fn(
+                f"[append] {well}: appended {len(new_files)} loose image(s) into "
+                f"{target.name} ({created}).\n"
+            )
+
+    return appended, wells_touched
 
 
 def run_zipper(

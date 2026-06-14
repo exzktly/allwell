@@ -54,6 +54,12 @@ _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well
 _RE_WELL_START = re.compile(r"Well (\S+) — starting")
 _RE_WELL_DONE_ID = re.compile(r"Well (\S+) — done\.")
 _RE_WELL_FAIL = re.compile(r"FAILED well (\S+?)[:\s]")
+# Incremental mode: a well with no new FOVs is a cheap no-op — it never emits
+# "— done.", so it needs its own terminal marker to count + colour on the plate.
+_RE_WELL_UPTODATE = re.compile(r"Well (\S+) — up to date")
+# Remote incremental: the runner emits this for wells it didn't need to upload /
+# re-fetch because their local output is already current — marks them complete.
+_RE_REMOTE_UPTODATE = re.compile(r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): up to date")
 # Remote per-well lifecycle: input zip uploaded, then the output is fetched as
 # TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
@@ -156,6 +162,11 @@ class ProgressTracker:
         mt = _RE_THRESH_WELL.search(line)
         if mt:
             events.append(("well_stage", (mt.group(1), "threshold")))
+        # Remote: a well skipped because its local output is already current —
+        # mark it fetched/complete (green) on the plate.
+        mru = _RE_REMOTE_UPTODATE.search(line)
+        if mru:
+            events.append(("well_stage", (mru.group(1), "download")))
         # Finalize-phase status — replace the generic "Finalizing…" with what
         # the run is actually doing so it doesn't read as a hang.
         if _RE_TF_SCAN.search(line):
@@ -207,6 +218,15 @@ class ProgressTracker:
                 md = _RE_WELL_DONE_ID.search(line)
                 if md:
                     events.append(("well_stage", (md.group(1), "process")))
+            else:
+                # Incremental up-to-date well: counts toward completion and
+                # advances to the processed stage (the auto-threshold pass then
+                # turns it green locally; the remote ✓ marker does so remotely).
+                mu = _RE_WELL_UPTODATE.search(line)
+                if mu:
+                    self.well_done += 1
+                    events.append(("well_done", (self.well_done, self.well_total)))
+                    events.append(("well_stage", (mu.group(1), "process")))
         return events
 
 

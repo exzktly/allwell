@@ -293,8 +293,22 @@ def compute_gate_stats(
 
 # ── gate rendering ───────────────────────────────────────────────────────────
 
+def _notify_gates_changed(app) -> None:
+    """Tell the Properties sidebar (if present) that the gate set changed, so its
+    gate-count label stays accurate after a gate is drawn/cleared."""
+    cb = getattr(app, "_scatter_gate_count_cb", None)
+    if callable(cb):
+        try:
+            cb()
+        except Exception:
+            swallowed()
+
+
 def draw_gates(app, ax, scatter_data, tps_list, ink_color: str) -> None:
     """Draw every stored gate as a dashed rectangle + its percentage label."""
+    # "Show gates" toggle off → keep the gates in memory but don't render them.
+    if getattr(app, "_scatter_gates_hidden", False):
+        return
     from matplotlib.patches import Rectangle
     gates = getattr(app, "_scatter_gates", None) or []
     for gate in gates:
@@ -394,12 +408,14 @@ def _on_gate_drawn(app, eclick, erelease) -> None:
     if not getattr(app, "_scatter_gates", None):
         app._scatter_gates = []
     app._scatter_gates.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
+    _notify_gates_changed(app)
     _redraw(app)
 
 
 def clear_gates(app) -> None:
     """Drop every gate and redraw."""
     app._scatter_gates = []
+    _notify_gates_changed(app)
     _redraw(app)
 
 

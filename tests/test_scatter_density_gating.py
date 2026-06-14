@@ -210,6 +210,45 @@ def test_redraw_solid_mode_uses_lines_no_density():
     assert not any(getattr(c, "_aw_density_collection", False) for c in ax.collections)
 
 
+def test_hidden_gates_are_not_drawn():
+    """The 'Show gates' toggle (``_scatter_gates_hidden``) suppresses rendering
+    without discarding the stored gates."""
+    from matplotlib.patches import Rectangle
+
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    gate = {"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}
+    app, ax = _render_app(density=False, gates=[gate])
+    app._scatter_gates_hidden = True
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+
+    assert app._scatter_gates == [gate]   # gate kept in memory
+    assert not any(isinstance(p, Rectangle) and getattr(p, "_scatter_gate_artist", False)
+                   for p in ax.patches)
+    assert not any(getattr(t, "_scatter_gate_artist", False) for t in ax.texts)
+
+
+def test_drawing_a_gate_notifies_count_callback():
+    """Drawing a gate fires the sidebar's gate-count refresh callback so the
+    'N gate(s)' label stays accurate (was only updated at build / on clear)."""
+    from types import SimpleNamespace
+
+    from well_viewer.features.scatter.gating import _on_gate_drawn
+
+    calls: list[int] = []
+    app = SimpleNamespace(
+        _scatter_gates=[],
+        _scatter_gate_count_cb=lambda: calls.append(1),
+        _scatter_gate_redraw_cb=lambda _a: None,
+    )
+    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+                   SimpleNamespace(xdata=10.0, ydata=10.0))
+
+    assert len(app._scatter_gates) == 1
+    assert calls == [1]
+
+
 # ── sidebar builds the scatter-only Density + Gates sections ──────────────────
 
 def _sidebar_stub_app(fig):

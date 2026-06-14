@@ -245,6 +245,10 @@ class ExportStyleSidebar(QWidget):
             )
 
             s_gates = section("Gates", expanded=True)
+            show_tog = ToggleSwitch("Show gates")
+            show_tog.setChecked(not bool(getattr(self._app, "_scatter_gates_hidden", False)))
+            show_tog.toggled.connect(lambda on: self._on_show_gates_toggled(on))
+            add_row(s_gates, "", show_tog)
             draw_tog = ToggleSwitch("Draw gate")
             draw_tog.setChecked(bool(getattr(self._app, "_scatter_gate_draw_mode", False)))
             draw_tog.toggled.connect(lambda on: set_gate_draw_mode(self._app, on))
@@ -255,6 +259,9 @@ class ExportStyleSidebar(QWidget):
             self._gate_count_label = QLabel(self._gate_count_text())
             self._gate_count_label.setObjectName("Muted")
             add_full(s_gates, self._gate_count_label)
+            # Keep the gate-count label live when a gate is drawn on the plot
+            # (gating.py calls this after appending/clearing a gate).
+            self._app._scatter_gate_count_cb = self._refresh_gate_count
 
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
@@ -960,20 +967,48 @@ class ExportStyleSidebar(QWidget):
 
     def _on_density_toggled(self) -> None:
         """Persist the density pref then redraw (a restyle alone can't switch
-        between solid Line2D markers and the per-point density PathCollection)."""
+        between solid Line2D markers and the per-point density PathCollection).
+
+        Toggling density is the same data on the same axes, so preserve the
+        user's current zoom/pan instead of snapping back to autoscale on redraw.
+        """
         if self._updating:
             return
         try:
+            ax = getattr(self._app, "_ax_scatter", None)
+            xlim = ax.get_xlim() if ax is not None else None
+            ylim = ax.get_ylim() if ax is not None else None
             self._persist()
             self._redraw_bound_figure()
+            if ax is not None and xlim is not None and ylim is not None:
+                ax.set_xlim(xlim)
+                ax.set_ylim(ylim)
+                canvas = getattr(self._app, "_scatter_canvas", None)
+                if canvas is not None:
+                    canvas.draw_idle()
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    def _on_clear_gates(self) -> None:
-        clear_gates(self._app)
+    def _on_show_gates_toggled(self, on: bool) -> None:
+        """Show/hide stored gates without discarding them."""
+        self._app._scatter_gates_hidden = not bool(on)
+        try:
+            self._redraw_bound_figure()
+        except Exception:
+            swallowed()
+
+    def _refresh_gate_count(self) -> None:
+        """Update the 'N gate(s)' label — called when a gate is drawn/cleared."""
         lbl = getattr(self, "_gate_count_label", None)
         if lbl is not None:
-            lbl.setText(self._gate_count_text())
+            try:
+                lbl.setText(self._gate_count_text())
+            except Exception:
+                swallowed()
+
+    def _on_clear_gates(self) -> None:
+        clear_gates(self._app)
+        self._refresh_gate_count()
 
     def _supports_well_order(self) -> bool:
         """Return True for plot figs whose color order can be reorderable."""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -430,6 +431,76 @@ def run_zipper(
                 swallowed()  # was: pass (silent except)
 
 
+def _consolidate_mixed_to_zips(
+    folder: Path,
+    *,
+    log_fn: Callable[[str], None] | None = None,
+) -> bool:
+    """Normalise a *mixed* grouped dir (some ``<well>.zip`` + some ``<well>/``
+    folders) to all-zips, so the pipeline reads every well.
+
+    A hard-killed run can leave ``in/`` with zips for the wells it finished
+    compressing and bare folders for the rest. ``process_microscopy`` prefers
+    zips — ``well_folders`` is ignored whenever ANY zip is present — so the
+    folder-only wells would be silently dropped. This zips each well folder that
+    has no matching zip yet (atomic tmp→rename) and removes the now-redundant
+    folder, mirroring the remote ``_stage_mixed_mode`` behaviour. Folders for
+    wells that already have a zip are left untouched (the zip wins). No-op unless
+    the dir is genuinely mixed. Returns True iff it zipped at least one folder.
+    """
+    from util.well_token import canonical_well_label
+
+    try:
+        entries = list(folder.iterdir())
+    except OSError:
+        return False
+    zip_wells = {
+        canonical_well_label(p.stem)
+        for p in entries
+        if p.is_file() and p.suffix.lower() == ".zip" and canonical_well_label(p.stem)
+    }
+    if not zip_wells:
+        return False  # pure folders / pure loose — folder mode handles it
+    leftover: dict[str, Path] = {}
+    for p in entries:
+        if p.is_dir():
+            tok = canonical_well_label(p.name)
+            if tok and tok not in zip_wells:
+                leftover[tok] = p
+    if not leftover:
+        return False
+
+    if log_fn:
+        log_fn(
+            f"[zipper] Mixed input ({len(zip_wells)} zip(s) + "
+            f"{len(leftover)} bare well folder(s)) — zipping the leftover "
+            f"folder(s) so every well is processed.\n"
+        )
+    for well, well_dir in sorted(leftover.items()):
+        target = folder / f"{well}.zip"
+        tifs = sorted(
+            p for p in well_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in (".tif", ".tiff")
+        )
+        tmp = target.with_name(f"__aw_tmp_{well}.zip.pid{os.getpid()}")
+        try:
+            with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for t in tifs:
+                    zf.write(t, arcname=t.name)
+            os.replace(str(tmp), str(target))
+        except BaseException:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            raise
+        shutil.rmtree(well_dir, ignore_errors=True)
+        if log_fn:
+            log_fn(f"[zipper]   {well}: folder → {well}.zip ({len(tifs)} file(s))\n")
+    return True
+
+
 def _group_loose_tifs_in_place(
     folder: Path,
     output_dir: Path,
@@ -481,6 +552,10 @@ def _group_loose_tifs_in_place(
             "  • The well token is not a valid 96-well plate position (A01–H12).\n\n"
             f"Schema used: {filename_schema}  |  Separator: '{filename_sep}'"
         )
+
+    # If grouping produced folders alongside pre-existing well zips, normalise to
+    # all-zips so the pipeline (which prefers zips) doesn't drop the new wells.
+    _consolidate_mixed_to_zips(folder, log_fn=log_fn)
 
     if move_source_tifs:
         # Sources were moved into the well folders; nothing left to clean up.
@@ -561,6 +636,7 @@ def resolve_input_output(
                 proc_hook=proc_hook,
                 move_source_tifs=move_source_tifs,
             )
+        _consolidate_mixed_to_zips(raw, log_fn=log_fn)
         return raw, raw.parent / "out", None
 
     in_sub = raw / "in"
@@ -580,6 +656,10 @@ def resolve_input_output(
             move_source_tifs=move_source_tifs,
         )
     if in_sub.is_dir() and _has_well_content(in_sub):
+        # Normalise a mixed (zips + bare folders) in/ left by a hard-killed run
+        # to all-zips, so no folder-only well is dropped by the zip-preferring
+        # pipeline.
+        _consolidate_mixed_to_zips(in_sub, log_fn=log_fn)
         # v5.x.x resume support: ``raw/in/`` already has well content,
         # but a prior ``--move-source-tifs`` run may have crashed
         # mid-way and left some TIFs at ``raw/`` (only some were

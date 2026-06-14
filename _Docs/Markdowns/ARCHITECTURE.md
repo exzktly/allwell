@@ -89,7 +89,7 @@ allwell/
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
-├── ui/theme/                    ← QSS themes + Template-string driver (palette + plot tokens)
+├── ui/theme/                    ← dark colour tokens (get_color + plot/well constants)
 ├── services/                    ← Analyze-side service modules
 ├── scripts/                     ← build_executable.sh, dev helpers
 ├── _Docs/                       ← installer / requirements / icon SVGs + this Planning.md
@@ -236,8 +236,9 @@ A few rules of thumb so you know where to put something new:
   in `well_viewer/core/`. Persistence stays in `well_viewer/persistence/`.
 - **It's a reusable Qt widget with no All-Well-specific knowledge →**
   `widgets/`.
-- **It's a design token / colour / size →** `theme.py` (for code) and
-  `ui/theme/*.qss` (for QSS); never hardcode hex values in code.
+- **It's a design token / colour / size →** `theme.py` (chrome QSS + tokens)
+  or `ui/theme/styles.py` (plot/`get_color` colours); never hardcode hex
+  values in code.
 
 ---
 
@@ -953,41 +954,32 @@ that opens a small demo window so you can iterate visually with
 
 ## 8. Theming
 
-The app has two complementary theme surfaces. The previous version of this
-doc claimed `ui/theme/` was "dormant scaffolding"; that was wrong — both
-systems are load-bearing, and they cover different concerns:
+The app has two complementary theme surfaces:
 
 1. **`theme.py`** (repo root) — Python-side design tokens for the v2
    redesign. `Colors`, `Typography`, `Spacing`, `Radii`, plus a `qss()`
-   builder that produces the full application stylesheet by
-   string-templating the tokens into `theme.qss`'s inline template. The
-   `widgets/` package and most of the app shell read from
-   `theme.Colors.*`; the v2 dark palette is hardcoded here.
-2. **`ui/theme/`** — a separate palette + QSS-template system used by
-   matplotlib-side plot styling, the Analyze tab, a handful of
-   batch-export panels, and the per-theme `.qss` files for an
-   in-progress theme switcher (`dark.qss` / `light.qss` / `amber.qss` /
-   `beige.qss`). Plot tokens live here (`PLOT_BG`, `TXT_PRI`, `TXT_MUT`,
-   `FM_UI`, `WELL_COLOR_1..48`); call `get_color("ACCENT")` for the
-   active theme's value. The well palette is sourced from
-   `theme.WELL_COLORS_TUPLE` so both systems hand out identical
-   per-well colours.
+   builder that produces the full application stylesheet. The `widgets/`
+   package and most of the app shell read from `theme.Colors.*`; the v2 dark
+   palette is hardcoded here. This is the single source of the app chrome QSS.
+2. **`ui/theme/`** — a small dark-palette colour-token module read by
+   matplotlib-side plot styling, the Analyze tab, and a few batch-export
+   panels. `ui/theme/styles.py` defines `_DARK_THEME` (named colours) +
+   `_WELL_COLORS` and exposes them as `get_color("ACCENT")` and as import-time
+   constants (`PLOT_BG`, `TXT_PRI`, `TXT_MUT`, `WELL_COLOR_1..48`). The well
+   palette is sourced from `theme.WELL_COLORS_TUPLE` so both surfaces hand out
+   identical per-well colours.
 
-**Why two:** the v2 design (theme.py) was added on top of an existing
-palette system (ui/theme). The two stabilised side-by-side rather than
-being merged — overlapping conceptual tokens (panel / text-primary /
-accent) have *different* hex values in each system, picked
-independently for each palette's aesthetic. They are not currently
-reconciled.
+The earlier multi-theme machinery in `ui/theme/` (a `set_theme` switcher, the
+`build_stylesheet` Template driver, `ThemeManager`, the `FM_*` font tuples, and
+the `dark/light/amber/beige.qss` files) was unused dead code — the app only
+ever rendered the dark palette via `theme.qss()` — and has been removed.
 
 When you add a colour or size:
 
 - For widgets in `widgets/`, the app shell, or the v2-styled chrome:
   add to `theme.Colors` / `theme.Spacing` / etc.
 - For plot styling, the Analyze tab, or anything reading via
-  `get_color()`: add to `ui/theme/styles._DARK_THEME` (and the other
-  palettes when relevant) and reference it from QSS via
-  `${TOKEN_NAME}` in the `.qss` template.
+  `get_color()`: add to `ui/theme/styles._DARK_THEME`.
 - **Do not** hardcode hex / px values inline.
 
 The publication-export plot surface uses `theme.CPub` and feeds the

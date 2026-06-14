@@ -56,7 +56,10 @@ IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731
 REVIEW_IMAGE_CONTROLLER_BUDGET = 963
-ANALYZE_TAB_BUDGET = 1184
+# Ratcheted back to 1176: the loose-TIFs-in-``in/`` work centralized the
+# well-count + layout detection into input_resolution_service.count_expected_wells,
+# removing the duplicated counter from the tab.
+ANALYZE_TAB_BUDGET = 1176
 
 
 def _line_count(rel: str) -> int:

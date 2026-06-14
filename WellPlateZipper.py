@@ -122,17 +122,33 @@ def group_by_well(
     TIFs the old code did ~10⁷ filename inspections — the "Grouping"
     phase the user stares at took minutes when it should be seconds.
     """
+    # Stream discovery progress so the Analyze log shows activity during the
+    # potentially-long directory walk (datasets can hold 10⁴–10⁵ files). These
+    # lines aren't the per-well "A01: N files" markers the GUI parses for
+    # progress — they just surface that the scan is alive, so a big plate no
+    # longer looks like a hang before processing begins.
+    print(f"Scanning {search_dir} for image files…", flush=True)
     out: dict[str, list[str]] = {}
+    examined = 0
+    matched = 0
     for root, _, files in os.walk(search_dir):
         for fname in files:
+            examined += 1
+            if examined % 5000 == 0:
+                print(f"…discovery: examined {examined} files "
+                      f"({matched} image(s) matched a well so far)", flush=True)
             if not fname.lower().endswith((".tif", ".tiff")):
                 continue
             extracted = _extract_well_from_filename(fname, schema, sep)
             if extracted is None:
                 continue
+            matched += 1
             out.setdefault(extracted, []).append(os.path.join(root, fname))
         if not recursive:
             break
+    print(f"Discovery complete: examined {examined} file(s); {matched} image(s) "
+          f"matched a well token across {len(out)} well(s). Grouping now…",
+          flush=True)
     return out
 
 

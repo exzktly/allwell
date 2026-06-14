@@ -99,12 +99,6 @@ def _has_well_content(folder: Path) -> bool:
         return False
 
 
-def _count_well_content(folder: Path) -> int:
-    zips = list(folder.glob("*.zip"))
-    folders = [p for p in folder.iterdir() if p.is_dir() and is_valid_well_name(p.name)]
-    return len(zips) or len(folders)
-
-
 def _safe_seg_float(text: str, default: float) -> float:
     """Parse a segmentation-parameter field; *default* on empty/invalid."""
     try:
@@ -631,8 +625,20 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             self._output_lbl.setText("—"); self._layout_lbl.setText("Not a directory."); return
         if raw.name.lower() == "in":
             self._output_lbl.setText(str(raw.parent / "out"))
-            self._layout_lbl.setText("✓ Using selected folder as input"); return
+            loose = _tif_files_in(raw)
+            if not _has_well_content(raw) and len(loose) > 3:
+                self._layout_lbl.setText(
+                    f"✓ Will group {len(loose)} loose TIFs inside this in/ folder")
+            else:
+                self._layout_lbl.setText("✓ Using selected folder as input")
+            return
         in_sub = raw / "in"
+        if (in_sub.is_dir() and not _has_well_content(in_sub)
+                and len(_tif_files_in(in_sub)) > 3):
+            self._output_lbl.setText(str(raw / "out"))
+            self._layout_lbl.setText(
+                f"✓ Will group {len(_tif_files_in(in_sub))} loose TIFs in in/")
+            return
         if in_sub.is_dir() and _has_well_content(in_sub):
             self._output_lbl.setText(str(raw / "out"))
             self._layout_lbl.setText("✓ Found in/ subfolder — using as input"); return
@@ -793,28 +799,14 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         )
 
     def _expected_well_count(self, opts: dict) -> int:
-        import re as _re2
-        raw = opts["raw"]
-        in_sub = raw / "in"
-        if raw.name.lower() == "in":
-            return _count_well_content(raw) or 1
-        if in_sub.is_dir() and _has_well_content(in_sub):
-            return _count_well_content(in_sub) or 1
-        well_re = _re2.compile(r"[A-Ha-h]\d{1,2}", _re2.I)
-        tifs = _tif_files_in(raw)
-        sep = opts["filename_sep"]
-        fields = [f.strip() for f in opts["filename_schema"].split(":")]
-        try:
-            well_idx = fields.index("well")
-        except ValueError:
-            well_idx = -1
-        wells: set[str] = set()
-        for tif_path in tifs:
-            parts = tif_path.stem.split(sep)
-            token = parts[well_idx] if 0 <= well_idx < len(parts) else ""
-            if token and well_re.fullmatch(token):
-                wells.add(token.upper())
-        return len(wells) or len(tifs) or 1
+        # Delegate to the service so the progress denominator uses the same
+        # layout detection as resolve_input_output (no GUI/service drift).
+        from services.input_resolution_service import count_expected_wells
+        return count_expected_wells(
+            opts["raw"],
+            filename_schema=opts["filename_schema"],
+            filename_sep=opts["filename_sep"],
+        )
 
     def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,
                                      *, proc_hook=None):

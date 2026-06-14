@@ -306,10 +306,13 @@ def test_to_rsync_path_windows_drive_letter(monkeypatch):
     assert to_rsync_path("Z:\\projects\\x") == "/z/projects/x"
 
 
-def test_to_rsync_path_windows_unc_raises(monkeypatch):
+def test_to_rsync_path_windows_unc_converts_to_cygwin_network_form(monkeypatch):
     _force_windows(monkeypatch)
-    with pytest.raises(NotImplementedError, match="UNC paths"):
-        to_rsync_path(r"\\fileserver\share\plate")
+    # UNC paths are supported via the Cygwin/cwrsync //server/share form.
+    assert to_rsync_path(r"\\fileserver\share\plate") == "//fileserver/share/plate"
+    assert to_rsync_path(r"\\nas\data\run1\in") == "//nas/data/run1/in"
+    # An already-forward-slashed UNC path is normalised the same way.
+    assert to_rsync_path("//fileserver/share/plate") == "//fileserver/share/plate"
 
 
 def test_resolve_ssh_binary_posix(monkeypatch):

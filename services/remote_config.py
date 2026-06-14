@@ -340,25 +340,19 @@ def to_rsync_path(p: Path | str) -> str:
 
     POSIX: ``str(p)`` unchanged. Windows: drive-letter rewritten to
     Cygwin form, e.g. ``C:\\Users\\foo\\plate`` → ``/c/Users/foo/plate``.
-    UNC paths (``\\\\server\\share``) raise ``NotImplementedError`` —
-    rsync over Cygwin can't address them directly and the workaround
-    (map a drive letter first) is the user's problem.
+    UNC paths (``\\\\server\\share\\dir``) are rewritten to the Cygwin/cwrsync
+    network form ``//server/share/dir`` — Cygwin (which cwrsync is built on)
+    resolves ``//server/share`` to the UNC resource, so a network share can be
+    used directly without first mapping it to a drive letter.
     """
     if not _is_windows():
         return str(p)
     s = str(p)
+    # UNC path (``\\server\share\…`` or already ``//server/share/…``) → the
+    # Cygwin network form ``//server/share/…`` that cwrsync understands.
     if s.startswith("\\\\") or s.startswith("//"):
-        raise NotImplementedError(
-            "UNC paths aren't supported by rsync on Windows. "
-            "Map the share to a drive letter first "
-            "(e.g. ``net use Z: \\\\server\\share``), then pick "
-            "the directory via that drive letter. Note: pre-v5.4.4 "
-            "of AllWell, Qt's file dialog could silently rewrite a "
-            "mapped-drive selection back to its underlying UNC path "
-            "— if you're on a pre-v5.4.5 build, upgrade or type the "
-            "drive-letter path directly into the input field instead "
-            "of using the Browse button."
-        )
+        rest = s.lstrip("\\/").replace("\\", "/")
+        return "//" + rest
     # On a non-Windows test runner with _is_windows monkeypatched True,
     # Path(s).resolve() would try to construct WindowsPath which can't
     # be instantiated on POSIX. Bypass it: split the drive textually,

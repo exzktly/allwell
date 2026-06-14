@@ -1080,7 +1080,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     self._dashboard.set_overall(0)
                     self._well_total = 0
                     self._well_done  = 0
-                    self._dashboard.set_headline("Grouping complete — starting pipeline…")
+                    self._dashboard.set_headline("Grouped — pipeline (segmentation + zipping)…")
                     self._stop_eta_timer()
                     self._dashboard.set_eta("ETA")
                     # Reset the per-phase clock so the pipeline-phase ETA

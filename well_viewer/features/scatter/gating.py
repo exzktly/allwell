@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from well_viewer.core.safe import swallowed
+from well_viewer.features.scatter.collect import timepoint_color_map
 
 # Accent used for gate outlines / selector rubber-band (matches the app accent).
 GATE_COLOR = "#e24a4a"
@@ -188,7 +189,6 @@ def render_scatter_points(
     # the map once from every tp present so all wells/panels share one scale.
     tp_color: Dict[float, Any] = {}
     if color_by_tp:
-        from well_viewer.features.scatter.collect import timepoint_color_map
         all_tps: List[float] = []
         for _d in scatter_data.values():
             all_tps.extend(_d.get("tp", []) or [])

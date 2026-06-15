@@ -263,6 +263,36 @@ def _pct(xs: np.ndarray, ys: np.ndarray, gate: Dict[str, float]):
     return 100.0 * nin / tot, nin, tot
 
 
+def compute_gate_inclusion(df, gates, ratios=None) -> np.ndarray:
+    """Boolean array over *df*'s rows: ``True`` for any cell inside ANY gate.
+
+    The Cell Gating tab uses this to turn the interactive scatter gates into the
+    ``Included`` mask (the union — a cell in *any* gated population is kept).
+    Each gate carries the metric columns it was drawn on (``x_col`` / ``y_col``,
+    stamped in :func:`_on_gate_drawn`); values are resolved through
+    :func:`resolve_value_series` so ratio / shape columns work exactly as on the
+    plot. A gate missing its columns, or whose columns are absent from *df*,
+    resolves to all-NaN and so contributes nothing (NaN comparisons are False).
+
+    With no usable gates the mask is all-``False`` — the caller decides what an
+    empty gate set means (the worker treats "mode on, no gates" as no
+    restriction before reaching here).
+    """
+    from well_viewer.data.data_loading import resolve_value_series
+
+    n = len(df)
+    inside = np.zeros(n, dtype=bool)
+    for gate in gates or []:
+        x_col = gate.get("x_col")
+        y_col = gate.get("y_col")
+        if not x_col or not y_col:
+            continue
+        xs = resolve_value_series(df, x_col, ratios).to_numpy()
+        ys = resolve_value_series(df, y_col, ratios).to_numpy()
+        inside |= _in_gate(xs, ys, _norm_gate(gate))
+    return inside
+
+
 def compute_gate_stats(
     scatter_data: Dict[str, Dict[str, Any]],
     gate: Dict[str, float],
@@ -458,7 +488,15 @@ def _on_gate_drawn(app, eclick, erelease) -> None:
         return
     if not getattr(app, "_scatter_gates", None):
         app._scatter_gates = []
-    app._scatter_gates.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
+    # Stamp the gate with the metric columns of the axes it was drawn on so it
+    # can be re-applied to a dataframe out of context (the Cell Gating tab uses
+    # this to turn a gate into an inclusion mask). The active columns are already
+    # cached on the last redraw — see scatter.controller.redraw_scatter.
+    cache = getattr(app, "_scatter_interaction_cache", None) or {}
+    app._scatter_gates.append({
+        "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+        "x_col": cache.get("col_x"), "y_col": cache.get("col_y"),
+    })
     _notify_gates_changed(app)
     # One gate per arming: exit create mode so the next press edits/clicks
     # rather than drawing another box. Sync the sidebar's "Draw gate" toggle.

@@ -9,11 +9,17 @@ at its default), and writes the file back.
 Schema written under the ``cell_gating`` key:
 
     {
-        "fluor_gates":     {"gfp": 50.0, "mcherry": 0.0},
-        "thresh_frac_on":  {"gfp": 60.0, "mcherry": 50.0},
+        "fluor_gates":      {"gfp": 50.0, "mcherry": 0.0},
+        "thresh_frac_on":   {"gfp": 60.0, "mcherry": 50.0},
+        "use_scatter_gates": true,
+        "scatter_gates":    [{"x0": .., "y0": .., "x1": .., "y1": ..,
+                              "x_col": "gfp_mean_intensity",
+                              "y_col": "mcherry_mean_intensity"}],
     }
 
-Only non-default values are persisted; channels at default are omitted.
+Only non-default values are persisted; channels at default are omitted. The
+``scatter_gates`` / ``use_scatter_gates`` pair is written only when the
+scatter-gate inclusion mode is on and at least one gate exists.
 When every parameter is at default, the block is removed entirely so the
 sidecar stays tidy.
 """
@@ -66,11 +72,19 @@ def _is_default(value: float, default: float) -> bool:
 def build_gating_block(
     fluor_gates: Dict[str, float],
     thresh_frac_on: Dict[str, float],
+    scatter_gates: Optional[list] = None,
+    use_scatter_gates: bool = False,
 ) -> Dict[str, Any]:
     """Snapshot non-default gating values as a JSON-friendly dict.
 
     Returns an empty dict when every value is at its default; callers can
     use that to decide whether to remove the block from the sidecar.
+
+    ``scatter_gates`` (the rectangular gates drawn on the Scatter Plot, each a
+    ``{x0,y0,x1,y1,x_col,y_col}`` dict) and ``use_scatter_gates`` are persisted
+    only when the inclusion mode is on *and* gates exist — unlike the scalar
+    thresholds there is no "default" value to diff against, so the on-mode flag
+    is the gate that keeps default state out of the sidecar.
     """
     block: Dict[str, Any] = {}
     fg_out: Dict[str, float] = {}
@@ -86,6 +100,10 @@ def build_gating_block(
             tfo_out[str(ch)] = float(val)
     if tfo_out:
         block["thresh_frac_on"] = tfo_out
+
+    if use_scatter_gates and scatter_gates:
+        block["use_scatter_gates"] = True
+        block["scatter_gates"] = [dict(g) for g in scatter_gates]
 
     return block
 

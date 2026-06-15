@@ -349,6 +349,10 @@ def apply_auto_thresholds_to_pipeline_info(
     existing = read_gating_params(out_dir) or {}
     existing_fluor = dict(existing.get("fluor_gates") or {})
     existing_tfo = dict(existing.get("thresh_frac_on") or {})
+    # Preserve any persisted scatter-gate inclusion state — this rebuild only
+    # touches ThreshFracOn, so it must not drop the gates the user drew.
+    existing_scatter = existing.get("scatter_gates")
+    existing_use_scatter = bool(existing.get("use_scatter_gates", False))
 
     written: Dict[str, float] = {}
     for ch, thr in computed.items():
@@ -360,6 +364,10 @@ def apply_auto_thresholds_to_pipeline_info(
     if not written:
         return {}
 
-    block = build_gating_block(existing_fluor, existing_tfo)
+    block = build_gating_block(
+        existing_fluor, existing_tfo,
+        scatter_gates=existing_scatter,
+        use_scatter_gates=existing_use_scatter,
+    )
     save_gating_to_pipeline_info(out_dir, block)
     return written

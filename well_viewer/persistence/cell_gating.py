@@ -32,6 +32,8 @@ def save_to_pipeline_info(app) -> None:
     }
     block = build_gating_block(
         fluor_gates, thresh_frac_on,
+        scatter_gates=getattr(app, "_scatter_gates", None),
+        use_scatter_gates=getattr(app, "_cell_gating_use_scatter_gates", False),
     )
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
 
@@ -89,6 +91,28 @@ def load_from_pipeline_info(app) -> bool:
             if edit is not None:
                 edit.setText(str(fval))
                 applied = True
+
+    # Restore the scatter-gate inclusion mode. The gates already carry their
+    # axis columns, so they are usable straight from the sidecar. Sync the
+    # checkbox + FluorGating-edit enablement + summary label to match.
+    scatter_gates = block.get("scatter_gates")
+    if isinstance(scatter_gates, list) and scatter_gates:
+        app._scatter_gates = [dict(g) for g in scatter_gates if isinstance(g, dict)]
+        applied = True
+    app._cell_gating_use_scatter_gates = bool(block.get("use_scatter_gates", False))
+    cb = getattr(app, "_cell_gating_use_scatter_gates_cb", None)
+    if cb is not None:
+        blocked = cb.blockSignals(True)
+        try:
+            cb.setChecked(app._cell_gating_use_scatter_gates)
+        finally:
+            cb.blockSignals(blocked)
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        _cell_gating_apply_scatter_gate_mode,
+        _cell_gating_refresh_gate_summary,
+    )
+    _cell_gating_apply_scatter_gate_mode(app)
+    _cell_gating_refresh_gate_summary(app)
 
     # Mirror the just-loaded value into the plotting ctxbar quick-edit so it
     # shows the persisted threshold on load (guarded; no-op before it's built).

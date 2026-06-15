@@ -142,3 +142,66 @@ def test_qc_excluded_count_preview_params():
     app = _fake_app(cache, params=QCParams())  # committed: disabled
     n_excl, n_tot = qc.qc_excluded_count(app, params=QCParams(enabled=True, min_area=10, max_area=200))
     assert (n_excl, n_tot) == (2, 3)
+
+
+# ── circularity gate (shape_circularity, always emitted by the pipeline) ───────
+def test_min_circularity_gate_flags_jagged_cells():
+    df = pd.DataFrame({"area_px": [100, 100, 100],
+                       "shape_circularity": [0.95, 0.40, 0.10]})
+    res = compute_qc_pass(df, QCParams(enabled=True, min_circularity=0.5))
+    assert list(res) == [1, 0, 0]   # round passes; jagged/blobby fail
+
+
+def test_max_circularity_gate():
+    df = pd.DataFrame({"area_px": [100, 100], "shape_circularity": [0.99, 0.50]})
+    res = compute_qc_pass(df, QCParams(enabled=True, max_circularity=0.8))
+    assert list(res) == [0, 1]
+
+
+def test_circularity_gate_missing_column_passes():
+    df = pd.DataFrame({"area_px": [100, 100]})   # legacy data, no shape_circularity
+    res = compute_qc_pass(df, QCParams(enabled=True, min_circularity=0.5))
+    assert list(res) == [1, 1]
+
+
+def test_circularity_nan_passes():
+    df = pd.DataFrame({"area_px": [100, 100], "shape_circularity": [float("nan"), 0.2]})
+    res = compute_qc_pass(df, QCParams(enabled=True, min_circularity=0.5))
+    assert list(res) == [1, 0]   # unmeasured passes; measured-low fails
+
+
+def test_circularity_round_trips_through_dict():
+    p = QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)
+    q = QCParams.from_dict(p.to_dict())
+    assert q.min_circularity == 0.5 and q.max_circularity == 0.95
+    assert q.is_active
+
+
+def test_qc_gate_row_exposes_circularity_inputs(qtbot):
+    """The Segmentation-tab QC gate row has min/max circularity inputs that
+    seed from params and refresh on external change."""
+    from PySide6.QtWidgets import QWidget
+
+    from well_viewer.features.qc.tab_view import (
+        build_qc_gate_controls, qc_gate_refresh_widgets,
+    )
+
+    app = SimpleNamespace()
+    app._app_state = SimpleNamespace(
+        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}))
+    app._qc_params = QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    row = build_qc_gate_controls(app, parent)
+    qtbot.addWidget(row)
+
+    w = app._qc_gate_widgets
+    assert "min_circularity" in w and "max_circularity" in w
+    assert w["min_circularity"].text() == "0.5"
+    assert w["max_circularity"].text() == "0.95"
+
+    app._qc_params = QCParams(enabled=True, min_circularity=0.7)
+    qc_gate_refresh_widgets(app)
+    assert w["min_circularity"].text() == "0.7"
+    assert w["max_circularity"].text() == ""   # unset → blank

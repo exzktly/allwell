@@ -52,9 +52,9 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
     enable_cb = QCheckBox("QC debris gate", row)
     enable_cb.setChecked(bool(params.enabled))
     enable_cb.setToolTip(
-        "Flag cells outside the size / solidity bounds as debris (non-"
-        "destructive). Applies to the whole dataset; excluded cells show here "
-        "and drop out of every plot/stat. Composes with manual deletes.")
+        "Flag cells outside the size / solidity / circularity bounds as debris "
+        "(non-destructive). Applies to the whole dataset; excluded cells show "
+        "here and drop out of every plot/stat. Composes with manual deletes.")
     hl.addWidget(enable_cb)
 
     hl.addWidget(QLabel("min area", row))
@@ -73,7 +73,18 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
         "debris StarDist shattered into many small cells that per-cell size "
         "can't, since each fragment is individually small.")
     hl.addWidget(max_region_edit)
-    for w in (min_area_edit, max_area_edit, min_sol_edit, max_region_edit):
+    hl.addWidget(QLabel("min circ", row))
+    min_circ_edit = QLineEdit(_fmt(params.min_circularity), row)
+    min_circ_edit.setToolTip(
+        "Reject cells below this circularity (4π·area/perimeter², 1.0 = perfect "
+        "circle) — catches jagged / non-round debris.")
+    hl.addWidget(min_circ_edit)
+    hl.addWidget(QLabel("max circ", row))
+    max_circ_edit = QLineEdit(_fmt(params.max_circularity), row)
+    hl.addWidget(max_circ_edit)
+    _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
+              min_circ_edit, max_circ_edit)
+    for w in _edits:
         w.setFixedWidth(70)
         w.setPlaceholderText("none")
 
@@ -86,7 +97,9 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
     app._qc_gate_widgets = {
         "enable": enable_cb, "min_area": min_area_edit,
         "max_area": max_area_edit, "min_solidity": min_sol_edit,
-        "max_region_area": max_region_edit, "status": status,
+        "max_region_area": max_region_edit,
+        "min_circularity": min_circ_edit, "max_circularity": max_circ_edit,
+        "status": status,
     }
 
     def _fields_params() -> QCParams:
@@ -96,11 +109,13 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
             max_area=_num(max_area_edit.text()) or None,
             min_solidity=_num(min_sol_edit.text()) or None,
             max_region_area=_num(max_region_edit.text()) or None,
+            min_circularity=_num(min_circ_edit.text()) or None,
+            max_circularity=_num(max_circ_edit.text()) or None,
         ).with_updates()
 
     def _sync_enabled() -> None:
         on = enable_cb.isChecked()
-        for w in (min_area_edit, max_area_edit, min_sol_edit, max_region_edit):
+        for w in _edits:
             w.setEnabled(on)
 
     def _update_status() -> None:
@@ -122,7 +137,7 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
         _update_status()
 
     enable_cb.toggled.connect(lambda _=None: _apply())
-    for w in (min_area_edit, max_area_edit, min_sol_edit, max_region_edit):
+    for w in _edits:
         w.editingFinished.connect(_apply)
 
     _sync_enabled()
@@ -142,3 +157,5 @@ def qc_gate_refresh_widgets(app) -> None:
     w["max_area"].setText(_fmt(p.max_area))
     w["min_solidity"].setText(_fmt(p.min_solidity))
     w["max_region_area"].setText(_fmt(p.max_region_area))
+    w["min_circularity"].setText(_fmt(p.min_circularity))
+    w["max_circularity"].setText(_fmt(p.max_circularity))

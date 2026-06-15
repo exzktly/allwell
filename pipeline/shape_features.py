@@ -53,8 +53,11 @@ class ShapeFeature:
     derived: bool = False
 
 
-# Emitted unconditionally (not user-selectable) — required by cell tracking.
-ALWAYS_ON_KEYS: tuple[str, ...] = ("centroid_row", "centroid_col")
+# Emitted unconditionally (not user-selectable).
+#   centroids — required by cell tracking (cross-timepoint linking);
+#   circularity — always available so the Segmentation tab's QC debris gate can
+#                 filter on it without depending on a per-run feature selection.
+ALWAYS_ON_KEYS: tuple[str, ...] = ("centroid_row", "centroid_col", "circularity")
 
 
 _FEATURES: tuple[ShapeFeature, ...] = (

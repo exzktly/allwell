@@ -295,3 +295,15 @@ def test_label_key_value_roundtrip():
     df = pd.DataFrame({"shape_eccentricity": [0.1, 0.9, float("nan")]})
     series = resolve_value_series(df, key)
     assert list(series.fillna(-1)) == [0.1, 0.9, -1]
+
+
+def test_circularity_is_always_emitted_not_selectable():
+    """Circularity is always collected (QC gate depends on it), so it's in the
+    emitted columns even with no selection, and absent from the Analyze picker."""
+    assert "circularity" in sfc.ALWAYS_ON_KEYS
+    assert "circularity" not in sfc.SELECTABLE_KEYS
+    assert "shape_circularity" in sfc.ALL_COLUMNS
+    assert "shape_circularity" in sfc.emitted_columns([])      # no selection
+    # Its area+perimeter inputs are always measured.
+    props = sfc.regionprops_properties([])
+    assert "area" in props and "perimeter" in props

@@ -43,6 +43,7 @@ from ui.theme import get_color
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.ui_helpers import install_canvas_wheel_scroll
 from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
+from well_viewer.features.scatter.gating import compute_gate_inclusion
 from well_viewer.core.safe import swallowed
 
 
@@ -124,9 +125,6 @@ class GatingWorker(QThread):
                 # consistent with "replace": there is no intensity floor to fall
                 # back on. With gates, inclusion is the union of the gate boxes.
                 if scatter_gates:
-                    from well_viewer.features.scatter.gating import (
-                        compute_gate_inclusion,
-                    )
                     mask = pd.Series(
                         compute_gate_inclusion(df, scatter_gates, ratios),
                         index=df.index,

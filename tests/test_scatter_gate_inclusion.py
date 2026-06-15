@@ -88,7 +88,7 @@ def test_inclusion_nan_rows_excluded():
     gate = {"x0": 0.0, "x1": 1e9, "y0": 0.0, "y1": 1e9,
             "x_col": "gfp_mean_intensity", "y_col": "mcherry_mean_intensity"}
     mask = compute_gate_inclusion(df, [gate])
-    assert mask[4] == False  # NaN gfp never falls inside
+    assert not mask[4]  # NaN gfp never falls inside
 
 
 def test_inclusion_gate_missing_columns_contributes_nothing():

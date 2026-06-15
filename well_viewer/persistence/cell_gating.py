@@ -52,11 +52,18 @@ def load_from_pipeline_info(app) -> bool:
     if not block:
         return False
 
+    # One deferred feature import for the whole function (the tab is built lazily
+    # so persistence can't import it at module scope without a cycle).
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        _cell_gating_apply_scatter_gate_mode,
+        _cell_gating_refresh_gate_summary,
+        build_cell_gating_subtab,
+    )
+
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         build = getattr(app, "_centre_build_pending", None)
         if callable(build):
             build("Sample Definitions")
-        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(app)
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return False
@@ -107,10 +114,6 @@ def load_from_pipeline_info(app) -> bool:
             cb.setChecked(app._cell_gating_use_scatter_gates)
         finally:
             cb.blockSignals(blocked)
-    from well_viewer.features.grouping.cell_gating_tab_view import (
-        _cell_gating_apply_scatter_gate_mode,
-        _cell_gating_refresh_gate_summary,
-    )
     _cell_gating_apply_scatter_gate_mode(app)
     _cell_gating_refresh_gate_summary(app)
 

@@ -25,8 +25,8 @@ from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
     get_all_timepoints,
 )
 from well_viewer.features.scatter.gating import (
-    draw_gates,
     gate_edge_at,
+    paint_gates,
     refresh_gate_selector,
     render_scatter_points,
 )
@@ -147,8 +147,8 @@ def redraw_scatter(
     interaction_points, density_proxies = render_scatter_points(
         app, app._ax_scatter, scatter_data,
         density_on=density_on,
-        x_log=bool(prefs.get("x_log", False)),
-        y_log=bool(prefs.get("y_log", False)),
+        x_log=bool(prefs.get("scatter_x_log", True)),
+        y_log=bool(prefs.get("scatter_y_log", True)),
         marker_size=float(prefs.get("marker_size", 5.0) or 5.0),
     )
 
@@ -195,7 +195,7 @@ def redraw_scatter(
 
     # Draw stored rectangular gates + their percentage labels on top of the
     # points. Gate coords are data-space, so they track log scale / limits.
-    draw_gates(app, app._ax_scatter, scatter_data, tps_list, _muted_fg)
+    paint_gates(app, [(app._ax_scatter, scatter_data, tps_list, _muted_fg, True)])
 
     # Redraw canvas
     app._scatter_interaction_cache = {

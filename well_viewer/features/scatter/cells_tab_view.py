@@ -110,7 +110,9 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Edge/corner editing of existing gates: the in-progress edit ({idx,handle})
     # and the cached render context for repainting just the gates while dragging.
     ctx.app._scatter_gate_edit = None
-    ctx.app._scatter_gate_ctx = None
+    # Per-panel gate render entries (overlay = 1, separate-axes = N), used to
+    # repaint every panel's gate during an edit drag.
+    ctx.app._scatter_gate_render = None
     # gating.py triggers redraws through this callback so it never has to import
     # the controller (avoids a scatter-internal import cycle).
     ctx.app._scatter_gate_redraw_cb = redraw_scatter_orchestrate
@@ -150,9 +152,18 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_orchestrate(ctx.app))
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
-    layout.addWidget(wrap_with_empty_state(
-        ctx.app, card, icon="scatter-chart",
-    ), 1)
+    # Wrap the card in a vertical scroll area: in "Separate axes" mode the card
+    # is given a per-panel minimum height (see _setup_scatter_axes) so stacked
+    # panels keep a readable size and scroll instead of squishing. Overlay mode
+    # leaves the card minimum at 0, so it just fills the viewport (no scroll).
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtWidgets import QFrame as _QFrame, QScrollArea as _QScrollArea
+    _scroll = _QScrollArea(parent)
+    _scroll.setWidgetResizable(True)
+    _scroll.setFrameShape(_QFrame.NoFrame)
+    _scroll.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff)
+    _scroll.setWidget(wrap_with_empty_state(ctx.app, card, icon="scatter-chart"))
+    layout.addWidget(_scroll, 1)
 
     ctx.app._scatter_canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx.app))
     ctx.app._scatter_canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx.app))

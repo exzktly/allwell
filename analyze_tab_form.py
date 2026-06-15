@@ -130,6 +130,7 @@ class AnalyzeTabFormMixin:
         return e
 
     def _build_form(self, parent: QWidget) -> None:
+        self._build_open_pinfo_row(parent)
         self._build_schema_section(parent)
         self._build_channel_tokens_section(parent)
         self._build_folders_section(parent)
@@ -308,15 +309,23 @@ class AnalyzeTabFormMixin:
         sec.layout().addWidget(self._segmentation_hint_lbl)
         self._refresh_segmentation_hints()
 
-    def _build_folders_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Folders")
-
-        # Restore a prior run's settings (incl. input/output paths) from its
-        # pipeline_info.json sidecar — to re-run a failed run or append new data.
-        self._open_pinfo_btn = QPushButton("Open previous run (pipeline_info.json)…", sec)
+    def _build_open_pinfo_row(self, parent: QWidget) -> None:
+        """Top-of-tab button: restore a prior run's settings (incl. input/output
+        paths) from its pipeline_info.json sidecar — to re-run a failed run or
+        append new data."""
+        row = QWidget(parent)
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(12, 8, 12, 0)
+        rl.setSpacing(4)
+        self._open_pinfo_btn = QPushButton("Open previous run (pipeline_info.json)…", row)
         self._open_pinfo_btn.setProperty("variant", "secondary")
         self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
-        sec.layout().addWidget(self._open_pinfo_btn)
+        rl.addWidget(self._open_pinfo_btn)
+        rl.addStretch(1)
+        parent.layout().addWidget(row)
+
+    def _build_folders_section(self, parent: QWidget) -> None:
+        sec = self._section(parent, "Folders")
 
         in_lbl = QLabel("Input folder", sec)
         in_lbl.setWordWrap(True)

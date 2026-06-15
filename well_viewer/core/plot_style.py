@@ -144,6 +144,10 @@ DEFAULT_EXPORT_STYLE_PREFS = {
     # Per-cell scatter: color points by local 2D density (FACS-style) instead
     # of solid per-well colors.
     "scatter_density": False,
+    # Per-cell scatter defaults to log/log (fluorescence spans decades). These
+    # are scatter-specific so other plot types' linear default can't reset them.
+    "scatter_x_log": True,
+    "scatter_y_log": True,
 }
 
 
@@ -353,10 +357,18 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             if ylo is not None or yhi is not None:
                 cur = ax.get_ylim()
                 ax.set_ylim(ylo if ylo is not None else cur[0], yhi if yhi is not None else cur[1])
+            # ``_aw_force_xlog``/``_aw_force_ylog`` let an axis pin its own log
+            # state (the scatter plot defaults to log/log via a scatter-specific
+            # pref) so the shared x_log/y_log — which other plot types reset —
+            # can't clobber it on a later restyle.
             if not getattr(ax, "_categorical_xaxis", False):
-                ax.set_xscale("log" if bool(prefs.get("x_log", False)) else "linear")
+                _fx = getattr(ax, "_aw_force_xlog", None)
+                _xlog = bool(prefs.get("x_log", False)) if _fx is None else bool(_fx)
+                ax.set_xscale("log" if _xlog else "linear")
             if not getattr(ax, "_categorical_yaxis", False):
-                ax.set_yscale("log" if bool(prefs.get("y_log", False)) else "linear")
+                _fy = getattr(ax, "_aw_force_ylog", None)
+                _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
+                ax.set_yscale("log" if _ylog else "linear")
 
         if bool(prefs.get("tick_minor", False)):
             ax.minorticks_on()

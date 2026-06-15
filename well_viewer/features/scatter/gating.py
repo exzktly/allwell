@@ -162,6 +162,16 @@ def render_scatter_points(
     """
     from matplotlib.lines import Line2D
 
+    # Scatter axes default to log/log and must stay that way regardless of the
+    # shared x_log/y_log export pref (which other plot types reset). Tag the
+    # axis with the scatter-specific choice; apply_export_style_prefs honors
+    # ``_aw_force_xlog`` / ``_aw_force_ylog`` over the shared pref.
+    try:
+        ax._aw_force_xlog = bool(x_log)
+        ax._aw_force_ylog = bool(y_log)
+    except Exception:
+        swallowed()
+
     interaction_points: List[Tuple[float, float, Tuple[str, str, str, int]]] = []
     density_proxies: List[Any] = []
 
@@ -323,19 +333,13 @@ def _notify_gates_changed(app) -> None:
 
 
 def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
-               *, handles: bool = True, cache_ctx: bool = True) -> None:
-    """Draw every stored gate as a dashed rectangle + its percentage label.
+               *, handles: bool = True) -> None:
+    """Draw every stored gate on *ax* as a dashed rectangle + its percentage label.
 
-    ``handles`` draws the draggable corner squares (suppressed on the
-    non-interactive panels of the "Separate axes" layout). ``cache_ctx``
-    records the render context for ``redraw_gates_only`` during an edit drag —
-    only the interactive overlay/top panel should do that so a faceted panel's
-    single-group data can't clobber the drag context.
+    ``handles`` draws the draggable corner squares (shown only on the
+    interactive panel — the overlay axis, or the top panel of the
+    "Separate axes" layout).
     """
-    # Cache the render context so a gate drag can repaint just the gates via
-    # ``redraw_gates_only`` (no re-collecting / re-plotting of every point).
-    if cache_ctx:
-        app._scatter_gate_ctx = (scatter_data, tps_list, ink_color)
     # "Show gates" toggle off → keep the gates in memory but don't render them.
     if getattr(app, "_scatter_gates_hidden", False):
         return
@@ -456,6 +460,12 @@ def _on_gate_drawn(app, eclick, erelease) -> None:
         app._scatter_gates = []
     app._scatter_gates.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
     _notify_gates_changed(app)
+    # One gate per arming: exit create mode so the next press edits/clicks
+    # rather than drawing another box. Sync the sidebar's "Draw gate" toggle.
+    set_gate_draw_mode(app, False)
+    sync = getattr(app, "_scatter_gate_draw_sync", None)
+    if callable(sync):
+        sync(False)
     _redraw(app)
 
 
@@ -597,27 +607,42 @@ def on_gate_edit_release(app, event) -> None:
     redraw_gates_only(app)
 
 
-def redraw_gates_only(app) -> None:
-    """Repaint just the gate artists from the cached render context.
+def paint_gates(app, entries) -> None:
+    """Draw gates across one or more panels and remember how, so an edit drag
+    can repaint them all.
 
-    Avoids re-collecting + re-plotting every point on each drag step — the
-    points don't move, only the gate does. Falls back to a full redraw when no
-    cached context is available (e.g. the first paint).
+    *entries* is a list of ``(ax, scatter_data, tps_list, ink, handles)`` — one
+    per panel. The overlay layout passes a single entry; "Separate axes" passes
+    one per stacked panel (handles only on the interactive top panel). Stored on
+    ``app._scatter_gate_render`` so :func:`redraw_gates_only` repaints every
+    panel during a drag — fixing the case where resizing on the top panel left
+    the panels below stale.
     """
-    ax = getattr(app, "_ax_scatter", None)
-    ctx = getattr(app, "_scatter_gate_ctx", None)
-    if ax is None or ctx is None:
+    app._scatter_gate_render = list(entries)
+    for ax, scatter_data, tps_list, ink, handles in app._scatter_gate_render:
+        draw_gates(app, ax, scatter_data, tps_list, ink, handles=handles)
+
+
+def redraw_gates_only(app) -> None:
+    """Repaint just the gate artists on every recorded panel (no point re-plot).
+
+    Points don't move during an edit drag — only the gate does — so this clears
+    and redraws the gate artists on each panel from the stored render entries.
+    Falls back to a full redraw when nothing has been recorded yet.
+    """
+    entries = getattr(app, "_scatter_gate_render", None)
+    if not entries:
         _redraw(app)
         return
-    scatter_data, tps_list, ink = ctx
-    for group in (list(ax.collections), list(ax.patches), list(ax.texts)):
-        for artist in group:
-            if getattr(artist, "_scatter_gate_artist", False):
-                try:
-                    artist.remove()
-                except Exception:
-                    swallowed()
-    draw_gates(app, ax, scatter_data, tps_list, ink)
+    for ax, scatter_data, tps_list, ink, handles in entries:
+        for group in (list(ax.collections), list(ax.patches), list(ax.texts)):
+            for artist in group:
+                if getattr(artist, "_scatter_gate_artist", False):
+                    try:
+                        artist.remove()
+                    except Exception:
+                        swallowed()
+        draw_gates(app, ax, scatter_data, tps_list, ink, handles=handles)
     canvas = getattr(app, "_scatter_canvas", None)
     if canvas is not None:
         canvas.draw_idle()

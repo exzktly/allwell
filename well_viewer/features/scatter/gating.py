@@ -322,19 +322,28 @@ def _notify_gates_changed(app) -> None:
             swallowed()
 
 
-def draw_gates(app, ax, scatter_data, tps_list, ink_color: str) -> None:
-    """Draw every stored gate as a dashed rectangle + its percentage label."""
+def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
+               *, handles: bool = True, cache_ctx: bool = True) -> None:
+    """Draw every stored gate as a dashed rectangle + its percentage label.
+
+    ``handles`` draws the draggable corner squares (suppressed on the
+    non-interactive panels of the "Separate axes" layout). ``cache_ctx``
+    records the render context for ``redraw_gates_only`` during an edit drag —
+    only the interactive overlay/top panel should do that so a faceted panel's
+    single-group data can't clobber the drag context.
+    """
     # Cache the render context so a gate drag can repaint just the gates via
     # ``redraw_gates_only`` (no re-collecting / re-plotting of every point).
-    app._scatter_gate_ctx = (scatter_data, tps_list, ink_color)
+    if cache_ctx:
+        app._scatter_gate_ctx = (scatter_data, tps_list, ink_color)
     # "Show gates" toggle off → keep the gates in memory but don't render them.
     if getattr(app, "_scatter_gates_hidden", False):
         return
     from matplotlib.patches import Rectangle
     gates = getattr(app, "_scatter_gates", None) or []
     # Edit handles are only meaningful when not drawing a new gate (the
-    # RectangleSelector owns the drag in draw mode).
-    editable = not getattr(app, "_scatter_gate_draw_mode", False)
+    # RectangleSelector owns the drag in draw mode) and on an interactive panel.
+    editable = handles and not getattr(app, "_scatter_gate_draw_mode", False)
     for gate in gates:
         gn = _norm_gate(gate)  # drag may transiently flip a corner past another
         w = gn["x1"] - gn["x0"]

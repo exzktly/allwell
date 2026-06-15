@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
-from well_viewer.features.scatter.gating import render_scatter_points
+from well_viewer.features.scatter.gating import draw_gates, render_scatter_points
 
 
 def _scatter_col_label(col: str) -> str:
@@ -107,6 +107,11 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
         ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3, color=_grid)
         ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
+        # Gates appear on every panel, each labelled with that group's own
+        # in-gate %. Handles/edit-context are suppressed here — faceting is
+        # view-only, so editing stays on the Overlay layout.
+        draw_gates(app, ax, {label: data}, tps_list, _muted_fg,
+                   handles=False, cache_ctx=False)
     axes[-1].set_xlabel(xlabel)
 
     # View-only: clear the click cache and don't arm the gate selector.

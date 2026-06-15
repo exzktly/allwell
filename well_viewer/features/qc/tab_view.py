@@ -75,12 +75,17 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
     hl.addWidget(max_region_edit)
     hl.addWidget(QLabel("min circ", row))
     min_circ_edit = QLineEdit(_fmt(params.min_circularity), row)
-    min_circ_edit.setToolTip(
-        "Reject cells below this circularity (4π·area/perimeter², 1.0 = perfect "
-        "circle) — catches jagged / non-round debris.")
+    _circ_tip = (
+        "Circularity = 4π·area/perimeter² (1.0 = perfect circle). Min rejects "
+        "jagged / non-round debris. Needs circularity in the data — collected "
+        "automatically by the current pipeline; datasets processed before that "
+        "must be reprocessed (or have shape perimeter present so it can be "
+        "derived on load).")
+    min_circ_edit.setToolTip(_circ_tip)
     hl.addWidget(min_circ_edit)
     hl.addWidget(QLabel("max circ", row))
     max_circ_edit = QLineEdit(_fmt(params.max_circularity), row)
+    max_circ_edit.setToolTip(_circ_tip)
     hl.addWidget(max_circ_edit)
     _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
               min_circ_edit, max_circ_edit)

@@ -97,6 +97,21 @@ def load_well_csv(path: Path) -> pd.DataFrame:
             continue
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # Backfill circularity for datasets processed before it became always-on,
+    # when its inputs are present (perimeter + an area column). 4π·area/perimeter²
+    # (1.0 = perfect circle). Lets the Segmentation QC circularity gate + the
+    # plot dropdowns work without a full reprocess; datasets processed with the
+    # current pipeline already carry ``shape_circularity`` directly.
+    if "shape_circularity" not in df.columns and "shape_perimeter" in df.columns:
+        area_col = ("shape_area" if "shape_area" in df.columns
+                    else "area_px" if "area_px" in df.columns else None)
+        if area_col is not None:
+            from math import pi
+            per = pd.to_numeric(df["shape_perimeter"], errors="coerce")
+            area = pd.to_numeric(df[area_col], errors="coerce")
+            circ = (4.0 * pi * area) / (per * per)
+            df["shape_circularity"] = circ.where(per > 0)
+
     return df
 
 

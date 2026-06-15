@@ -295,10 +295,36 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             except Exception:
                 swallowed()  # was: pass (silent except)
             # Density collections carry a per-point colormap (the whole point of
-            # the mode). The face/edge/marker-path override below reads the first
-            # color and stamps it on every point, collapsing the gradient — so
-            # honor size only for them and leave their colors / paths alone.
+            # the mode). The single-colour override below would collapse the
+            # gradient, so density gets its own handling: honor the marker shape
+            # and the open/filled (hollow-circle) choice while keeping the
+            # per-point colours — recomputed from the scalar array each time so
+            # repeated restyles never lose the gradient or get stuck "open".
             if is_density:
+                if marker_style and marker_style != "keep":
+                    try:
+                        _arr = coll.get_array()
+                    except Exception:
+                        _arr = None
+                    if _arr is not None:
+                        try:
+                            coll.norm.autoscale_None(_arr)
+                            _rgba = coll.cmap(coll.norm(_arr))
+                            if marker_open:
+                                coll.set_facecolors("none")
+                                coll.set_edgecolors(_rgba)
+                            else:
+                                coll.set_facecolors(_rgba)
+                                coll.set_edgecolors("none")
+                        except Exception:
+                            swallowed()  # leave the gradient untouched on error
+                    if marker_style.lower() != "none":
+                        try:
+                            from matplotlib.markers import MarkerStyle
+                            ms = MarkerStyle(marker_style)
+                            coll.set_paths([ms.get_path().transformed(ms.get_transform())])
+                        except Exception:
+                            swallowed()  # was: pass (silent except)
                 continue
             if marker_style and marker_style != "keep":
                 # Per-point face/edge: read the FIRST currently-set

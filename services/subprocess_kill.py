@@ -22,6 +22,8 @@ import subprocess
 import threading
 from typing import Optional
 
+from util.aw_safe import swallowed
+
 
 def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
     """Terminate ``proc`` and its whole process group.
@@ -65,7 +67,7 @@ def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
         try:
             proc.terminate()
         except Exception:
-            pass  # best-effort: the process may already be gone
+            swallowed()  # best-effort: the process may already be gone
 
     def _force_kill_if_alive() -> None:
         # Re-check the live process handle, not just the cached pgid —
@@ -82,10 +84,10 @@ def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
             else:
                 proc.kill()
         except Exception:
-            pass
+            swallowed()
 
     try:
         threading.Timer(5.0, _force_kill_if_alive).start()
     except Exception:
-        pass
+        swallowed()
 

@@ -119,15 +119,25 @@ def compute_point_density(
 
 
 def density_cmap_for(base_color):
-    """Sequential colormap from a light tint of *base_color* to the full color.
+    """Sequential colormap for a well's density, keyed on its identity color.
 
-    Encodes density by lightness/saturation while keeping each well's identity
-    hue, so overlapping wells stay distinguishable under per-well density mode.
+    Runs from a clearly-tinted low end (≈45% toward white — saturated enough to
+    read, not the near-white that made the old ramp look faint), through the
+    full identity color at mid density, to a darkened core at the top. Keeping
+    each well's hue lets overlapping wells stay distinguishable while the
+    light→saturated→dark span gives the cloud real visible contrast.
     """
     from matplotlib.colors import LinearSegmentedColormap, to_rgb
     rgb = np.asarray(to_rgb(base_color), dtype=float)
-    light = rgb + (1.0 - rgb) * 0.82  # blend ~82% toward white
-    return LinearSegmentedColormap.from_list("aw_density", [light, rgb])
+    light = rgb + (1.0 - rgb) * 0.45  # low density: visible tint, not near-white
+    dark = rgb * 0.55                 # high density: darkened, saturated core
+    return LinearSegmentedColormap.from_list("aw_density", [light, rgb, dark])
+
+
+# Perceptual stretch applied to normalized density before colormapping. KDE
+# density is right-skewed (most points low), so a <1 gamma lifts the bulk into
+# the visible part of the ramp instead of leaving it pinned near the light end.
+DENSITY_GAMMA = 0.6
 
 
 # ── point rendering ──────────────────────────────────────────────────────────
@@ -174,10 +184,11 @@ def render_scatter_points(
                     dens = compute_point_density(wx, wy, x_log=x_log, y_log=y_log)
                     order = np.argsort(dens)  # dense points drawn on top
                     coll = ax.scatter(
-                        wx[order], wy[order], c=dens[order],
+                        wx[order], wy[order],
+                        c=np.power(dens[order], DENSITY_GAMMA),
                         cmap=density_cmap_for(data["color"]),
                         s=marker_size * marker_size, edgecolors="none",
-                        alpha=0.6, zorder=5,
+                        alpha=0.85, zorder=5,
                     )
                     # Tagged so apply_export_style sizes it but never collapses
                     # the per-point colormap to one color (see plot_style).

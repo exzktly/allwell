@@ -249,19 +249,23 @@ class ExportStyleSidebar(QWidget):
             show_tog.setChecked(not bool(getattr(self._app, "_scatter_gates_hidden", False)))
             show_tog.toggled.connect(lambda on: self._on_show_gates_toggled(on))
             add_row(s_gates, "", show_tog)
-            draw_tog = ToggleSwitch("Draw gate")
-            draw_tog.setChecked(bool(getattr(self._app, "_scatter_gate_draw_mode", False)))
-            draw_tog.toggled.connect(lambda on: set_gate_draw_mode(self._app, on))
-            add_row(s_gates, "", draw_tog)
+            # One-shot "Draw gate" button (not a toggle): clicking arms a
+            # single drag-to-draw on the plot; gating.py disarms after the gate
+            # is drawn and calls _scatter_gate_draw_sync(False) to restore the
+            # button label.
+            draw_btn = QPushButton("Draw gate")
 
-            # Drawing one gate auto-exits create mode (gating.py); let it flip
-            # this toggle back off without re-firing the handler.
-            def _sync_draw_toggle(on: bool, _t=draw_tog) -> None:
-                blocked = _t.blockSignals(True)
-                try:
-                    _t.setChecked(bool(on))
-                finally:
-                    _t.blockSignals(blocked)
+            def _arm_draw(_=False, _b=draw_btn) -> None:
+                set_gate_draw_mode(self._app, True)
+                _b.setText("Drag on the plot…")
+            draw_btn.clicked.connect(_arm_draw)
+            add_full(s_gates, draw_btn)
+            self._gate_draw_btn = draw_btn
+
+            def _sync_draw_toggle(on: bool, _b=draw_btn) -> None:
+                # Restore the button once the one-shot draw completes.
+                if not on:
+                    _b.setText("Draw gate")
             self._app._scatter_gate_draw_sync = _sync_draw_toggle
             clear_btn = QPushButton("Clear gates")
             clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())

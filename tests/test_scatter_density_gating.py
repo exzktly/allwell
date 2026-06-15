@@ -414,6 +414,36 @@ def test_sidebar_builds_scatter_density_and_gate_sections(qtbot):
     assert app._scatter_gates == []
 
 
+def test_draw_gate_is_one_shot_button(qtbot):
+    """'Draw gate' is a push button (not a toggle): clicking arms a single
+    drag, and the one-shot disarm restores the label."""
+    from PySide6.QtWidgets import QPushButton
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from well_viewer.features.export.sidebar_view import ExportStyleSidebar
+
+    fig = Figure(figsize=(4, 3))
+    fig.add_subplot(1, 1, 1)
+    canvas = FigureCanvasAgg(fig)
+    app = _sidebar_stub_app(fig)
+    app._ax_scatter = fig.axes[0]
+    app._scatter_canvas = canvas
+    app._scatter_gate_selector = None
+
+    sb = ExportStyleSidebar(app, None, fig, None, default_name="scatter")
+    qtbot.addWidget(sb)
+
+    btn = sb._gate_draw_btn
+    assert isinstance(btn, QPushButton)   # a button, not a ToggleSwitch
+    btn.click()
+    assert app._scatter_gate_draw_mode is True       # armed for one drag
+    assert btn.text() != "Draw gate"                 # shows the armed hint
+    # gating.py disarms after the gate is drawn → restore the label.
+    app._scatter_gate_draw_sync(False)
+    assert btn.text() == "Draw gate"
+
+
 # ── gate editing (drag edges / corners) ──────────────────────────────────────
 
 def _edit_app_with_gate(gate, xlim=(0.0, 10.0), ylim=(0.0, 10.0)):

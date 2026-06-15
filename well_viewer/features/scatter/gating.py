@@ -151,6 +151,7 @@ def render_scatter_points(
     x_log: bool,
     y_log: bool,
     marker_size: float,
+    color_by_tp: bool = False,
 ):
     """Plot one artist per well and return ``(interaction_points, legend_handles)``.
 
@@ -159,6 +160,14 @@ def render_scatter_points(
     Density mode draws a per-point ``PathCollection`` shaded by each well's own
     local 2D density via a colormap derived from the well's identity color, plus
     one proxy ``Line2D`` per group so the legend still maps group → color.
+
+    ``color_by_tp`` (the "Color by time" toggle) colours each point by its
+    timepoint instead of by well identity, so a well's cloud shows its evolution
+    over time on one axis. It draws one markers-only ``Line2D`` per
+    ``(well, timepoint)`` in a shared viridis colour (see
+    ``collect.timepoint_color_map``) and returns one legend proxy per timepoint.
+    It takes precedence over density shading, whose colormap is keyed to well
+    identity and would be meaningless per-timepoint.
     """
     from matplotlib.lines import Line2D
 
@@ -173,11 +182,27 @@ def render_scatter_points(
         swallowed()
 
     interaction_points: List[Tuple[float, float, Tuple[str, str, str, int]]] = []
-    density_proxies: List[Any] = []
+    legend_handles: List[Any] = []
+
+    # decision: colour by timepoint (viridis), overrides identity colour. Build
+    # the map once from every tp present so all wells/panels share one scale.
+    tp_color: Dict[float, Any] = {}
+    if color_by_tp:
+        from well_viewer.features.scatter.collect import timepoint_color_map
+        all_tps: List[float] = []
+        for _d in scatter_data.values():
+            all_tps.extend(_d.get("tp", []) or [])
+        tp_color = timepoint_color_map(all_tps)
+        legend_handles = [
+            Line2D([], [], marker="o", linestyle="none", color=tp_color[tp],
+                   label=f"t={tp:g}h")
+            for tp in sorted(tp_color)
+        ]
 
     for label, data in scatter_data.items():
         wells_breakdown = data.get("wells") or {label: {
             "x": data["x"], "y": data["y"],
+            "tp": data.get("tp", []),
             "metadata": data.get("metadata", []),
         }}
         first_well_in_group = True
@@ -187,7 +212,27 @@ def render_scatter_points(
                 f"well_{well_label}__{label}"
                 if label != well_label else f"well_{well_label}"
             )
-            if density_on:
+            if color_by_tp:
+                wx = np.asarray(well_data["x"], dtype=float)
+                wy = np.asarray(well_data["y"], dtype=float)
+                wtp = np.asarray(well_data.get("tp", []), dtype=float)
+                if wx.size and wtp.size == wx.size:
+                    for tp in sorted(tp_color):
+                        m = np.abs(wtp - tp) <= 1e-6
+                        if not m.any():
+                            continue
+                        (line,) = ax.plot(
+                            wx[m], wy[m], marker="o", linestyle="none",
+                            label="_nolegend_", color=tp_color[tp],
+                            alpha=0.6, markersize=6, markeredgecolor="none",
+                        )
+                        # Tag scatter-only so export-style never adds a line.
+                        line._scatter_only_artist = True
+                        try:
+                            line.set_gid(f"{gid}__t{tp:g}")
+                        except Exception:
+                            swallowed()
+            elif density_on:
                 wx = np.asarray(well_data["x"], dtype=float)
                 wy = np.asarray(well_data["y"], dtype=float)
                 if wx.size:
@@ -208,7 +253,7 @@ def render_scatter_points(
                     except Exception:
                         swallowed()
                 if first_well_in_group:
-                    density_proxies.append(Line2D(
+                    legend_handles.append(Line2D(
                         [], [], marker="o", linestyle="none",
                         color=data["color"], label=label,
                     ))
@@ -235,7 +280,7 @@ def render_scatter_points(
             for x, y, meta in zip(data["x"], data["y"], data["metadata"])
         )
 
-    return interaction_points, density_proxies
+    return interaction_points, legend_handles
 
 
 # ── gate statistics ──────────────────────────────────────────────────────────

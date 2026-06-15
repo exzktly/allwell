@@ -26,6 +26,7 @@ from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
 )
 from well_viewer.features.scatter.gating import (
     draw_gates,
+    gate_edge_at,
     refresh_gate_selector,
     render_scatter_points,
 )
@@ -453,9 +454,8 @@ def on_scatter_click(app, event) -> None:
     if event.button != 1:
         return
 
-    # While gate-draw mode is armed, a left-drag draws a gate — don't also
-    # open the single-cell viewer for the press that started the drag.
-    if getattr(app, "_scatter_gate_draw_mode", False):
+    # Drawing/editing a gate owns its own press — skip the cell viewer for those.
+    if getattr(app, "_scatter_gate_draw_mode", False) or gate_edge_at(app, event) is not None:
         return
 
     try:

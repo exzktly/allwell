@@ -43,6 +43,7 @@ from ui.theme import get_color
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.ui_helpers import install_canvas_wheel_scroll
 from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
+from well_viewer.features.scatter.gating import compute_gate_inclusion
 from well_viewer.core.safe import swallowed
 
 
@@ -88,6 +89,12 @@ class GatingWorker(QThread):
         # (QC_Pass at the df_included_mask chokepoint). This worker gates on
         # fluorescence only; QC composes with its Included result downstream.
         fluor_gates = self._app._get_all_fluor_gates()
+        # "Use scatter gates" mode replaces the per-channel FluorGating: the
+        # union of the rectangular gates drawn on the Scatter Plot defines the
+        # Included population instead of the intensity floors.
+        use_scatter = getattr(self._app, "_cell_gating_use_scatter_gates", False)
+        scatter_gates = getattr(self._app, "_scatter_gates", None) or []
+        ratios = self._app._app_state.channel.ratio_index or {}
         labels = list(self._app._app_state.dataset.well_paths)
         total = len(labels)
 
@@ -113,6 +120,19 @@ class GatingWorker(QThread):
             row_count = 0 if df is None else len(df)
             if df is None or df.empty:
                 well_included = 0
+            elif use_scatter:
+                # Mode on but no gates ⇒ no restriction (every cell included),
+                # consistent with "replace": there is no intensity floor to fall
+                # back on. With gates, inclusion is the union of the gate boxes.
+                if scatter_gates:
+                    mask = pd.Series(
+                        compute_gate_inclusion(df, scatter_gates, ratios),
+                        index=df.index,
+                    )
+                else:
+                    mask = pd.Series(True, index=df.index)
+                df["Included"] = mask.astype(int)
+                well_included = int(mask.sum())
             else:
                 mask = pd.Series(True, index=df.index)
                 for channel, gate_threshold in fluor_gates.items():
@@ -180,6 +200,11 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_ax = None
     ctx.app._cell_gating_axes_stack = []
     ctx.app._cell_gating_worker = None
+    # Scatter-gate inclusion mode: when on, the union of the Scatter Plot's
+    # rectangular gates defines Included instead of the per-channel FluorGating.
+    ctx.app._cell_gating_use_scatter_gates = getattr(
+        ctx.app, "_cell_gating_use_scatter_gates", False
+    )
 
     root = parent.layout()
     if root is None:
@@ -236,6 +261,38 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     mfi_note.setObjectName("Muted")
     mfi_note.setWordWrap(True)
     cf_layout.addWidget(mfi_note)
+
+    # Scatter-gate inclusion. The user draws rectangular gates on the Scatter
+    # Plot tab; ticking this makes the union of those gates define which cells
+    # are Included, replacing the FluorGating intensity floors above.
+    from PySide6.QtWidgets import QCheckBox as _QCheckBox
+    sg_row = QWidget(control_frame)
+    sg_layout = QHBoxLayout(sg_row)
+    sg_layout.setContentsMargins(0, 0, 0, 0)
+    use_sg_cb = _QCheckBox(
+        "Use scatter-plot gates for cell inclusion (replaces FluorGating)",
+        sg_row,
+    )
+    use_sg_cb.setChecked(bool(ctx.app._cell_gating_use_scatter_gates))
+    use_sg_cb.setToolTip(
+        "Define the Included population from the rectangular gates drawn on the "
+        "Scatter Plot tab (union of all gates) instead of the per-channel "
+        "intensity thresholds. Gates are saved with the dataset."
+    )
+    use_sg_cb.toggled.connect(
+        lambda _on, _app=ctx.app: cell_gating_on_use_scatter_gates_change(_app)
+    )
+    ctx.app._cell_gating_use_scatter_gates_cb = use_sg_cb
+    sg_layout.addWidget(use_sg_cb)
+    sg_layout.addStretch(1)
+    cf_layout.addWidget(sg_row)
+
+    ctx.app._cell_gating_gate_summary = QLabel("", control_frame)
+    ctx.app._cell_gating_gate_summary.setObjectName("Muted")
+    ctx.app._cell_gating_gate_summary.setWordWrap(True)
+    cf_layout.addWidget(ctx.app._cell_gating_gate_summary)
+    _cell_gating_refresh_gate_summary(ctx.app)
+    _cell_gating_apply_scatter_gate_mode(ctx.app)
 
     ctx.app._cell_gating_scroll = QScrollArea(control_frame)
     ctx.app._cell_gating_scroll.setWidgetResizable(True)
@@ -443,6 +500,54 @@ def cell_gating_on_gating_change(app) -> None:
     _cell_gating_plot_cdf(app)
     _cell_gating_persist_params(app)
     cell_gating_start_gating_worker(app)
+
+
+def cell_gating_on_use_scatter_gates_change(app) -> None:
+    """Toggle scatter-gate inclusion: persist, restyle, and recompute Included.
+
+    Mirrors :func:`cell_gating_on_gating_change` — reads the checkbox into the
+    flag, greys the now-inactive FluorGating edits, saves the cell_gating block,
+    and kicks the background gating pass so every plot/stat/export picks up the
+    new population through the ``Included`` chokepoint.
+    """
+    cb = getattr(app, "_cell_gating_use_scatter_gates_cb", None)
+    app._cell_gating_use_scatter_gates = bool(cb.isChecked()) if cb is not None else False
+    _cell_gating_apply_scatter_gate_mode(app)
+    _cell_gating_refresh_gate_summary(app)
+    _cell_gating_persist_params(app)
+    cell_gating_start_gating_worker(app)
+
+
+def _cell_gating_apply_scatter_gate_mode(app) -> None:
+    """Grey out the FluorGating edits while scatter-gate inclusion is active —
+    they no longer drive Included, so an editable field would mislead."""
+    on = bool(getattr(app, "_cell_gating_use_scatter_gates", False))
+    for edit in (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).values():
+        edit.setEnabled(not on)
+
+
+def _cell_gating_refresh_gate_summary(app) -> None:
+    """Update the gate-count label from ``app._scatter_gates`` (no live signal
+    from the Scatter tab; refreshed on build, toggle, and load)."""
+    lbl = getattr(app, "_cell_gating_gate_summary", None)
+    if lbl is None:
+        return
+    gates = getattr(app, "_scatter_gates", None) or []
+    if not getattr(app, "_cell_gating_use_scatter_gates", False):
+        lbl.setText("")
+        return
+    if not gates:
+        lbl.setText(
+            "No scatter gates drawn yet — every cell is included until you draw "
+            "one on the Scatter Plot tab."
+        )
+        return
+    axes = sorted({
+        f"{g.get('x_col')} × {g.get('y_col')}"
+        for g in gates if g.get("x_col") and g.get("y_col")
+    })
+    detail = f" on {', '.join(axes)}" if axes else ""
+    lbl.setText(f"{len(gates)} scatter gate(s){detail} — drawn on the Scatter Plot tab.")
 
 
 def cell_gating_on_threshold_frac_on_change(app) -> None:

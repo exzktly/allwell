@@ -19,6 +19,7 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
 
 from __future__ import annotations
 
+import os
 import queue
 import re
 import subprocess
@@ -405,6 +406,16 @@ class PipelineRunner:
     ) -> None:
         # Each run starts with a fresh "not cancelled" state.
         self._stop_requested.clear()
+        # The Analyze "Scratch disk" field routes per-well working files via
+        # ALLWELL_SCRATCH_DIR. Set it on this process's env so the local
+        # pipeline subprocess (inherits os.environ) and the in-process remote
+        # staging both honor it; clear it when empty so a prior run's value
+        # can't leak into this one.
+        _scratch = opts.get("scratch_dir")
+        if _scratch:
+            os.environ["ALLWELL_SCRATCH_DIR"] = str(_scratch)
+        else:
+            os.environ.pop("ALLWELL_SCRATCH_DIR", None)
         try:
             # Try the new signature first (with proc_hook); fall back for
             # callers that haven't been updated yet.

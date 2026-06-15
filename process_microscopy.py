@@ -133,8 +133,7 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
 from pipeline.io import (  # noqa: E402,F401
-    _AtomicTextHandle,
-    _fsync_path,
+    _AtomicTextHandle, _fsync_path,
     _safe_atomic_text_write,
     _safe_imwrite,
     _safe_well,
@@ -144,6 +143,7 @@ from pipeline.io import (  # noqa: E402,F401
     merge_images_into_zip,
     merge_records_into_csv,
     save_overlay,
+    scratch_base_for,
     write_csvs_per_well,
 )
 
@@ -2979,8 +2979,8 @@ def process_well_zip_task(
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
     log.info("Well %s — starting (pid %d)", well_label, os.getpid())
-    tmp_extract = output_dir / f"_tmp_extract_{well_label}"
-    tmp_images  = output_dir / f"_tmp_images_{well_label}"
+    tmp_extract = scratch_base_for(output_dir) / f"_tmp_extract_{well_label}"
+    tmp_images  = scratch_base_for(output_dir) / f"_tmp_images_{well_label}"
 
     # tmp_extract is always per-run scratch: extraction can re-derive
     # itself from the source zip in seconds, no checkpoint value.
@@ -3562,11 +3562,11 @@ def process_well_zips(
     # as per-FOV checkpoint state (not garbage) and survives the sweep —
     # the worker will pick up where the previous attempt left off.
     # _tmp_extract_* dirs are always per-run scratch.
-    for _stale in sorted(output_dir.glob("_tmp_extract_*")):
+    for _stale in sorted(scratch_base_for(output_dir).glob("_tmp_extract_*")):
         if _stale.is_dir():
             log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
             remove_directory(_stale)
-    for _stale in sorted(output_dir.glob("_tmp_images_*")):
+    for _stale in sorted(scratch_base_for(output_dir).glob("_tmp_images_*")):
         if not _stale.is_dir():
             continue
         if any(_stale.glob(".fov_*.done")):

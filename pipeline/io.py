@@ -27,6 +27,30 @@ from skimage.segmentation import find_boundaries
 log = logging.getLogger("process_microscopy")
 
 
+def scratch_base_for(output_dir: Path) -> Path:
+    """Directory that holds per-well working files (zip extraction + temp images).
+
+    Honors ``$ALLWELL_SCRATCH_DIR`` (the same redirectable-scratch env the GUI
+    sets from its "Scratch disk" field and the remote runner already uses) so
+    the temporary, GB-scale I/O can land on a roomy/fast volume instead of the
+    output drive. The override is created on demand; if it can't be created we
+    degrade to *output_dir* rather than failing the run. Unset → *output_dir*
+    (the historical location). Zip-mode temps are pure scratch — extracted /
+    written then deleted, never renamed — so a separate filesystem is safe.
+    """
+    override = os.environ.get("ALLWELL_SCRATCH_DIR", "").strip()
+    if not override:
+        return output_dir
+    try:
+        p = Path(override).expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    except OSError as exc:
+        log.warning("Scratch dir %s unusable (%s); using output dir %s",
+                    override, exc, output_dir)
+        return output_dir
+
+
 def _fsync_path(path: Path) -> None:
     """Open *path* read-only and fsync; ignore filesystems that don't support it."""
     try:

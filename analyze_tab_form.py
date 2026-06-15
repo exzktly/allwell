@@ -10,9 +10,10 @@ live here too (the form reads them) and are re-exported by ``analyze_tab``.
 from __future__ import annotations
 
 import sys as _sys
+from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -134,6 +135,7 @@ class AnalyzeTabFormMixin:
         self._build_qc_section(parent)
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
+        self._build_scratch_section(parent)
         self._build_run_controls(parent)
         parent.layout().addStretch(1)
 
@@ -608,6 +610,66 @@ class AnalyzeTabFormMixin:
         sec.layout().addWidget(self._cpu_only_cb)
         self._force_cb = QCheckBox("Force reprocess all wells", sec)
         sec.layout().addWidget(self._force_cb)
+
+    def _build_scratch_section(self, parent: QWidget) -> None:
+        """Scratch-disk picker — the very last option before the Run controls.
+
+        Per-well working files (zip extraction + intermediate images) are
+        written here; pointing it at a roomy/fast volume keeps the temporary,
+        GB-scale I/O off the output drive. Defaults to ``<input>/Temp`` and
+        tracks the input folder until the user overrides it.
+        """
+        sec = self._section(
+            parent, "Scratch Disk",
+            info="Where per-well working files (zip extraction + intermediate "
+                 "images) are written during a run. Defaults to <input>/Temp. "
+                 "Point it at a roomy/fast volume to keep temporary I/O off the "
+                 "output drive. Leave blank to use the output folder.",
+        )
+        pick = QWidget(sec)
+        pl = QHBoxLayout(pick)
+        pl.setContentsMargins(0, 0, 0, 4)
+        pl.setSpacing(4)
+        self._scratch_edit = QLineEdit(pick)
+        self._scratch_edit.setPlaceholderText("(defaults to <input>/Temp)")
+        self._scratch_edit.setMinimumWidth(0)
+        self._scratch_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        pl.addWidget(self._scratch_edit, 1)
+        self._scratch_browse_btn = QPushButton("Browse…", pick)
+        self._scratch_browse_btn.setProperty("variant", "secondary")
+        self._scratch_browse_btn.clicked.connect(self._browse_scratch)
+        pl.addWidget(self._scratch_browse_btn)
+        pl.addStretch(1)
+        sec.layout().addWidget(pick)
+        # Typing / browsing pins the value; until then it follows the input dir.
+        self._scratch_user_set = False
+        self._scratch_edit.textEdited.connect(self._on_scratch_edited)
+        self._input_edit.textChanged.connect(lambda _=None: self._refresh_scratch_default())
+        self._refresh_scratch_default()
+
+    def _on_scratch_edited(self, _text: str = "") -> None:
+        self._scratch_user_set = True
+
+    def _browse_scratch(self) -> None:
+        d = QFileDialog.getExistingDirectory(
+            self, "Select scratch folder", "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
+        )
+        if d:
+            self._scratch_edit.setText(d)
+            self._scratch_user_set = True
+
+    def _refresh_scratch_default(self) -> None:
+        """Seed the scratch field with ``<input>/Temp`` until the user pins it."""
+        if not hasattr(self, "_scratch_edit") or self._scratch_user_set:
+            return
+        raw = self._input_edit.text().strip()
+        text = str(Path(raw) / "Temp") if raw else ""
+        blocked = self._scratch_edit.blockSignals(True)
+        try:
+            self._scratch_edit.setText(text)
+        finally:
+            self._scratch_edit.blockSignals(blocked)
 
     def _build_run_controls(self, parent: QWidget) -> None:
         # Remote-execution selector. Populated from ~/.config/allwell/remotes.toml

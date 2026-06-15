@@ -757,6 +757,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             cyto = ""
         return dict(
             raw=Path(self._input_edit.text().strip()),
+            scratch_dir=self._scratch_edit.text().strip() or None,
             nuclear_token=self._nuclear_token_edit.text().strip() or "NIR",
             fluor_tokens=self._fluor_tokens_list(),
             csv_prefix=self._csv_prefix_edit.text().strip() or "measurements",
@@ -858,23 +859,12 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             return None
 
     def _stop(self) -> None:
-        # Stop is meaningful whenever the runner has *any* in-flight work
-        # — including the grouping phase, when self._runner._proc is
-        # still None. Calling stop() unconditionally is safe (it no-ops
-        # when nothing is alive) and lets it reach the zipper.
-        #
-        # Belt-and-braces: an exception escaping this Qt slot would abort
-        # the whole app (PySide6 ≥ 6.5 → qFatal). stop()'s kill path is
-        # already exception-proof, but guard here too so a Stop click can
-        # never crash the GUI.
+        # Never let an exception escape this Qt slot (PySide6≥6.5 aborts the app).
         try:
             self._runner.stop()
             self._log_line("\n[User stopped the pipeline]\n", "WARNING")
-        except Exception as exc:  # noqa: BLE001
-            try:
-                self._log_line(f"\n[Stop failed: {exc}]\n", "ERROR")
-            except Exception:
-                swallowed()
+        except Exception:  # noqa: BLE001
+            swallowed()
 
     # ------------------------------------------------------------------
     # Log helpers

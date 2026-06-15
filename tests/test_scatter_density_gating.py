@@ -352,3 +352,109 @@ def test_sidebar_builds_scatter_density_and_gate_sections(qtbot):
     app._scatter_gates = [{"x0": 0, "y0": 0, "x1": 1, "y1": 1}]
     sb._on_clear_gates()
     assert app._scatter_gates == []
+
+
+# ── gate editing (drag edges / corners) ──────────────────────────────────────
+
+def _edit_app_with_gate(gate, xlim=(0.0, 10.0), ylim=(0.0, 10.0)):
+    """Headless Agg app with one gate, ready for hit-test / drag handlers."""
+    from types import SimpleNamespace
+
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(6, 4))
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    canvas = FigureCanvasAgg(fig)
+    canvas.draw()  # populate transData
+
+    app = SimpleNamespace()
+    app._ax_scatter = ax
+    app._scatter_canvas = canvas
+    app._scatter_gates = [dict(gate)]
+    app._scatter_gates_hidden = False
+    app._scatter_gate_draw_mode = False
+    app._scatter_gate_edit = None
+    app._scatter_gate_ctx = ({}, [], "#888888")
+    return app, ax
+
+
+def _ev(ax, xdata, ydata, button=1):
+    from types import SimpleNamespace
+    px, py = ax.transData.transform((xdata, ydata))
+    return SimpleNamespace(inaxes=ax, x=float(px), y=float(py),
+                           xdata=xdata, ydata=ydata, button=button)
+
+
+def test_gate_edge_at_detects_right_edge():
+    from well_viewer.features.scatter.gating import gate_edge_at
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    hit = gate_edge_at(app, _ev(ax, 8, 5))
+    assert hit == (0, "r")
+
+
+def test_gate_edge_at_detects_top_right_corner():
+    from well_viewer.features.scatter.gating import gate_edge_at
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    hit = gate_edge_at(app, _ev(ax, 8, 8))
+    assert hit == (0, "tr")
+
+
+def test_gate_edge_at_interior_returns_none():
+    from well_viewer.features.scatter.gating import gate_edge_at
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    assert gate_edge_at(app, _ev(ax, 5, 5)) is None
+
+
+def test_gate_edge_at_hidden_returns_none():
+    from well_viewer.features.scatter.gating import gate_edge_at
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    app._scatter_gates_hidden = True
+    assert gate_edge_at(app, _ev(ax, 8, 5)) is None
+
+
+def test_gate_edit_resize_right_edge():
+    from well_viewer.features.scatter.gating import (
+        on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
+    )
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    on_gate_edit_press(app, _ev(ax, 8, 5))
+    assert app._scatter_gate_edit == {"idx": 0, "handle": "r"}
+    on_gate_edit_motion(app, _ev(ax, 9, 5))
+    on_gate_edit_release(app, _ev(ax, 9, 5))
+    assert app._scatter_gate_edit is None
+    g = app._scatter_gates[0]
+    assert g["x1"] == 9 and g["x0"] == 2  # right edge moved, left unchanged
+
+
+def test_gate_edit_corner_moves_both_axes():
+    from well_viewer.features.scatter.gating import (
+        on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
+    )
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    on_gate_edit_press(app, _ev(ax, 8, 8))  # top-right corner
+    on_gate_edit_motion(app, _ev(ax, 6, 7))
+    on_gate_edit_release(app, _ev(ax, 6, 7))
+    g = app._scatter_gates[0]
+    assert g["x1"] == 6 and g["y1"] == 7 and g["x0"] == 2 and g["y0"] == 2
+
+
+def test_gate_edit_collapse_removes_gate():
+    from well_viewer.features.scatter.gating import (
+        on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
+    )
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    on_gate_edit_press(app, _ev(ax, 8, 5))     # grab right edge
+    on_gate_edit_motion(app, _ev(ax, 2, 5))    # drag onto the left edge → zero width
+    on_gate_edit_release(app, _ev(ax, 2, 5))
+    assert app._scatter_gates == []  # collapsed gate dropped
+
+
+def test_gate_edit_press_ignored_in_draw_mode():
+    from well_viewer.features.scatter.gating import on_gate_edit_press
+    app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
+    app._scatter_gate_draw_mode = True
+    on_gate_edit_press(app, _ev(ax, 8, 5))
+    assert app._scatter_gate_edit is None  # draw mode owns the drag

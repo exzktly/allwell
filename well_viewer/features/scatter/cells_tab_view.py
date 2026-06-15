@@ -16,6 +16,9 @@ from functools import partial
 from well_viewer.features.export.service import export_scatter_data
 from well_viewer.features.scatter.controller import on_scatter_click
 from well_viewer.features.scatter.controller import on_scatter_motion
+from well_viewer.features.scatter.gating import (
+    on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
+)
 
 
 def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
@@ -104,6 +107,10 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_gate_draw_mode = False
     ctx.app._scatter_gate_selector = None
     ctx.app._scatter_gates_hidden = False   # "Show gates" toggle (sidebar)
+    # Edge/corner editing of existing gates: the in-progress edit ({idx,handle})
+    # and the cached render context for repainting just the gates while dragging.
+    ctx.app._scatter_gate_edit = None
+    ctx.app._scatter_gate_ctx = None
     # gating.py triggers redraws through this callback so it never has to import
     # the controller (avoids a scatter-internal import cycle).
     ctx.app._scatter_gate_redraw_cb = redraw_scatter_orchestrate
@@ -149,6 +156,10 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
 
     ctx.app._scatter_canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx.app))
     ctx.app._scatter_canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx.app))
+    # Gate edge/corner editing: drag handles of existing gates to resize them.
+    ctx.app._scatter_canvas.mpl_connect("button_press_event", partial(on_gate_edit_press, ctx.app))
+    ctx.app._scatter_canvas.mpl_connect("motion_notify_event", partial(on_gate_edit_motion, ctx.app))
+    ctx.app._scatter_canvas.mpl_connect("button_release_event", partial(on_gate_edit_release, ctx.app))
 
 
 def _open_timepoint_selector(app) -> None:

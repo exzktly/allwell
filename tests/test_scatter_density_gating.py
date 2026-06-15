@@ -518,3 +518,142 @@ def test_gate_edit_press_ignored_in_draw_mode():
     app._scatter_gate_draw_mode = True
     on_gate_edit_press(app, _ev(ax, 8, 5))
     assert app._scatter_gate_edit is None  # draw mode owns the drag
+
+
+# ── log defaults + faceted gate sync + stacked min-height ─────────────────────
+
+def test_scatter_defaults_to_log_and_survives_restyle():
+    """Scatter axes default to log/log and stay log even when the shared
+    x_log/y_log pref (used by other plot types) is False."""
+    from well_viewer.core.plot_style import apply_export_style_to_current
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    app, ax = _render_app(density=False, gates=[])
+    # Shared keys are linear (their default) — scatter must ignore them.
+    app._export_style_prefs["x_log"] = False
+    app._export_style_prefs["y_log"] = False
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+    assert ax.get_xscale() == "log"
+    assert ax.get_yscale() == "log"
+    # A later restyle (e.g. sidebar field change) must not revert to linear.
+    apply_export_style_to_current(app, app._scatter_fig, app._scatter_canvas)
+    assert ax.get_xscale() == "log" and ax.get_yscale() == "log"
+
+
+def test_scatter_log_off_via_scatter_pref():
+    from well_viewer.features.scatter.controller import redraw_scatter
+    app, ax = _render_app(density=False, gates=[])
+    app._export_style_prefs["scatter_x_log"] = False
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+    assert ax.get_xscale() == "linear"
+    assert ax.get_yscale() == "log"
+
+
+def test_drawing_a_gate_exits_create_mode():
+    from types import SimpleNamespace
+
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from well_viewer.features.scatter.gating import _on_gate_drawn
+
+    fig = Figure(); ax = fig.add_subplot(1, 1, 1)
+    synced = []
+    app = SimpleNamespace(
+        _scatter_gates=[], _ax_scatter=ax,
+        _scatter_canvas=FigureCanvasAgg(fig),
+        _scatter_gate_draw_mode=True,
+        _scatter_gate_selector=None,
+        _scatter_gate_count_cb=lambda: None,
+        _scatter_gate_redraw_cb=lambda _a: None,
+        _scatter_gate_draw_sync=lambda on: synced.append(on),
+    )
+    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+                   SimpleNamespace(xdata=5.0, ydata=5.0))
+    assert len(app._scatter_gates) == 1
+    assert app._scatter_gate_draw_mode is False   # auto-exited create mode
+    assert synced == [False]                       # toggle synced off
+
+
+def test_edit_drag_repaints_gate_on_all_separate_panels():
+    """Resizing the gate (top panel) must update the gate on the panels below."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from matplotlib.patches import Rectangle
+
+    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    from well_viewer.features.scatter.controller import redraw_scatter
+    from well_viewer.features.scatter.gating import redraw_gates_only
+
+    n = 30
+    rng = np.random.default_rng(11)
+
+    def _df():
+        return pd.DataFrame({
+            "Included": [1] * n, "area_px": [200.0] * n,
+            "timepoint_hours": [24.0] * n, "timepoint": ["24h"] * n,
+            "filename": [f"f{i}.tif" for i in range(n)],
+            "nucleus_id": [str(i) for i in range(n)],
+            "w3cy5_mean_intensity": rng.normal(1000, 100, n).tolist(),
+            "w4gfp_mean_intensity": rng.normal(1000, 100, n).tolist(),
+        })
+
+    fig = Figure(figsize=(6, 6)); fig.add_subplot(1, 1, 1)
+    app = SimpleNamespace()
+    app._app_state = SimpleNamespace(
+        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}),
+        channel=SimpleNamespace(ratio_index={}),
+        selection=SimpleNamespace(selected_wells=["A01", "B02"]),
+        plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
+    )
+    app._rep_sets_active = lambda: []
+    app._get_rows = lambda label: _df()
+    app._rank_color_well = lambda label: "#3366cc"
+    app._parse_rc = lambda label: (label, 0, 0)
+    app._scatter_fig = fig
+    app._ax_scatter = fig.axes[0]
+    app._scatter_canvas = FigureCanvasAgg(fig)
+    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
+    app._scatter_gate_draw_mode = False
+    app._scatter_gate_selector = None
+    app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
+
+    cols = ("w3cy5_mean_intensity", "w4gfp_mean_intensity")
+    redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
+    assert len(app._scatter_gate_render) == 2     # one render entry per panel
+
+    # Simulate a resize: move the gate's left edge, then repaint gates only.
+    app._scatter_gates[0]["x0"] = 800.0
+    redraw_gates_only(app)
+    for ax in app._scatter_fig.axes:
+        rects = [p for p in ax.patches
+                 if isinstance(p, Rectangle) and getattr(p, "_scatter_gate_artist", False)]
+        assert rects, "panel lost its gate after edit"
+        assert any(abs(r.get_x() - 800.0) < 1e-6 for r in rects), \
+            "panel below did not follow the top-panel resize"
+
+
+def test_setup_axes_sets_per_panel_min_height():
+    from types import SimpleNamespace
+
+    from matplotlib.figure import Figure
+
+    from well_viewer.features.scatter._layout import (
+        SCATTER_PANEL_MIN_PX, _setup_scatter_axes,
+    )
+
+    heights = []
+    app = SimpleNamespace(
+        _scatter_fig=Figure(),
+        _scatter_card=SimpleNamespace(setMinimumHeight=lambda h: heights.append(h)),
+    )
+    _setup_scatter_axes(app, 3)
+    assert heights[-1] == 3 * SCATTER_PANEL_MIN_PX   # stacked → grows + scrolls
+    _setup_scatter_axes(app, 1)
+    assert heights[-1] == 0                           # overlay → fills viewport

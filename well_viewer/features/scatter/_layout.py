@@ -12,7 +12,12 @@ from __future__ import annotations
 
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
-from well_viewer.features.scatter.gating import draw_gates, render_scatter_points
+from well_viewer.features.scatter.gating import paint_gates, render_scatter_points
+
+#: Minimum on-screen height (px) per stacked panel in "Separate axes" mode.
+#: Below this, panels squish to unreadable slivers; instead the card grows
+#: taller than its viewport and the surrounding scroll area scrolls.
+SCATTER_PANEL_MIN_PX = 260
 
 
 def _scatter_col_label(col: str) -> str:
@@ -79,6 +84,14 @@ def _setup_scatter_axes(app, n_axes: int):
             fig.subplots_adjust(top=0.95, bottom=0.10, left=0.12, right=0.97, hspace=0.08)
     app._ax_scatter = axes[0]
     app._scatter_axes = axes
+    # Keep a reasonable minimum height per panel so stacked panels don't squish:
+    # the card grows downward and the scroll area scrolls (overlay = no minimum).
+    card = getattr(app, "_scatter_card", None)
+    if card is not None:
+        try:
+            card.setMinimumHeight(n_axes * SCATTER_PANEL_MIN_PX if n_axes > 1 else 0)
+        except Exception:
+            swallowed()
     return axes
 
 
@@ -92,12 +105,13 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     axes = _setup_scatter_axes(app, len(items))
     prefs = getattr(app, "_export_style_prefs", None) or {}
     density_on = bool(prefs.get("scatter_density", False))
-    x_log = bool(prefs.get("x_log", False))
-    y_log = bool(prefs.get("y_log", False))
+    x_log = bool(prefs.get("scatter_x_log", True))
+    y_log = bool(prefs.get("scatter_y_log", True))
     marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
     xlabel = _scatter_col_label(col_x)
     ylabel = _scatter_col_label(col_y)
 
+    gate_entries = []
     for ax, (label, data) in zip(axes, items):
         _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(app, ax)
         render_scatter_points(
@@ -108,13 +122,14 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
         ax.grid(True, alpha=0.3, color=_grid)
         ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
         # Gates appear on every panel, each labelled with that group's own
-        # in-gate %. Handles/edit-context are suppressed here — faceting is
-        # view-only, so editing stays on the Overlay layout.
-        draw_gates(app, ax, {label: data}, tps_list, _muted_fg,
-                   handles=False, cache_ctx=False)
+        # in-gate %. Handles only on the top panel — the one the edge-drag
+        # editor is bound to (app._ax_scatter); a drag there repaints them all.
+        gate_entries.append((ax, {label: data}, tps_list, _muted_fg, ax is axes[0]))
     axes[-1].set_xlabel(xlabel)
+    paint_gates(app, gate_entries)
 
-    # View-only: clear the click cache and don't arm the gate selector.
+    # Editing the gate on the top panel mirrors to the panels below; the
+    # click-to-view-cell cache stays overlay-only.
     app._scatter_interaction_cache = {"points": []}
     try:
         apply_export_style_to_current(

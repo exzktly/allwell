@@ -253,6 +253,16 @@ class ExportStyleSidebar(QWidget):
             draw_tog.setChecked(bool(getattr(self._app, "_scatter_gate_draw_mode", False)))
             draw_tog.toggled.connect(lambda on: set_gate_draw_mode(self._app, on))
             add_row(s_gates, "", draw_tog)
+
+            # Drawing one gate auto-exits create mode (gating.py); let it flip
+            # this toggle back off without re-firing the handler.
+            def _sync_draw_toggle(on: bool, _t=draw_tog) -> None:
+                blocked = _t.blockSignals(True)
+                try:
+                    _t.setChecked(bool(on))
+                finally:
+                    _t.blockSignals(blocked)
+            self._app._scatter_gate_draw_sync = _sync_draw_toggle
             clear_btn = QPushButton("Clear gates")
             clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())
             add_full(s_gates, clear_btn)
@@ -574,12 +584,23 @@ class ExportStyleSidebar(QWidget):
             self._bind_getter_setter(f"{lim_key}_min", lo_edit)
             self._bind_getter_setter(f"{lim_key}_max", hi_edit)
             add_row(s_lim, label, hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
+        # The per-cell scatter pins its log state to scatter-specific prefs
+        # (default on) so the shared x_log/y_log — which other plot types reset
+        # to linear — can't silently turn it off. Toggling triggers a redraw so
+        # the axis re-tags itself; other figures keep the shared keys.
+        _is_scatter = self._is_scatter_cells_fig()
+        _xkey = "scatter_x_log" if _is_scatter else "x_log"
+        _ykey = "scatter_y_log" if _is_scatter else "y_log"
+        _xdef = True if _is_scatter else False
         xlog_cb = ToggleSwitch("X log")
-        xlog_cb.setChecked(bool(self._prefs["x_log"]))
+        xlog_cb.setChecked(bool(self._prefs.get(_xkey, _xdef)))
         ylog_cb = ToggleSwitch("Y log")
-        ylog_cb.setChecked(bool(self._prefs["y_log"]))
-        self._bind_getter_setter("x_log", xlog_cb)
-        self._bind_getter_setter("y_log", ylog_cb)
+        ylog_cb.setChecked(bool(self._prefs.get(_ykey, _xdef)))
+        self._bind_getter_setter(_xkey, xlog_cb)
+        self._bind_getter_setter(_ykey, ylog_cb)
+        if _is_scatter:
+            xlog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
+            ylog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
         add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
 
         def _lim_preview_text() -> str:

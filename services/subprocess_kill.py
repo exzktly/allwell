@@ -31,15 +31,26 @@ def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
     subprocess ignores SIGTERM (rare in practice, but
     multiprocessing-spawned workers occasionally do this during
     shutdown).
+
+    This is a **best-effort** kill and must never raise: it runs from the
+    GUI's Stop handler, and an unhandled exception escaping a Qt slot
+    aborts the whole application (PySide6 ≥ 6.5 calls ``qFatal``). Inputs
+    can be a real ``Popen`` or a Popen-compatible remote wrapper whose
+    ``poll()`` / ``pid`` may behave unexpectedly (network I/O, non-int
+    pid), so every step is guarded.
     """
-    if proc is None or proc.poll() is not None:
+    try:
+        if proc is None or proc.poll() is not None:
+            return
+    except Exception:
+        # A wrapper whose poll() itself fails → nothing we can safely signal.
         return
 
     pgid: Optional[int] = None
     if os.name == "posix":
         try:
             pgid = os.getpgid(proc.pid)
-        except (ProcessLookupError, OSError):
+        except Exception:
             pgid = None
 
     try:
@@ -50,23 +61,31 @@ def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
                 proc.terminate()
         else:
             proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
-    except (ProcessLookupError, OSError, AttributeError):
-        proc.terminate()
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass  # best-effort: the process may already be gone
 
     def _force_kill_if_alive() -> None:
         # Re-check the live process handle, not just the cached pgid —
         # if the process exited cleanly within the 5 s window, the OS
         # may have re-used the PID for an unrelated process.
-        if proc.poll() is not None:
+        try:
+            if proc.poll() is not None:
+                return
+        except Exception:
             return
         try:
             if os.name == "posix" and pgid is not None:
                 os.killpg(pgid, signal.SIGKILL)
-            elif os.name == "posix":
-                proc.kill()
             else:
                 proc.kill()
-        except (ProcessLookupError, OSError):
+        except Exception:
             pass
 
-    threading.Timer(5.0, _force_kill_if_alive).start()
+    try:
+        threading.Timer(5.0, _force_kill_if_alive).start()
+    except Exception:
+        pass
+

@@ -862,8 +862,19 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         # — including the grouping phase, when self._runner._proc is
         # still None. Calling stop() unconditionally is safe (it no-ops
         # when nothing is alive) and lets it reach the zipper.
-        self._runner.stop()
-        self._log_line("\n[User stopped the pipeline]\n", "WARNING")
+        #
+        # Belt-and-braces: an exception escaping this Qt slot would abort
+        # the whole app (PySide6 ≥ 6.5 → qFatal). stop()'s kill path is
+        # already exception-proof, but guard here too so a Stop click can
+        # never crash the GUI.
+        try:
+            self._runner.stop()
+            self._log_line("\n[User stopped the pipeline]\n", "WARNING")
+        except Exception as exc:  # noqa: BLE001
+            try:
+                self._log_line(f"\n[Stop failed: {exc}]\n", "ERROR")
+            except Exception:
+                swallowed()
 
     # ------------------------------------------------------------------
     # Log helpers

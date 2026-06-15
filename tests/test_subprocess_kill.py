@@ -82,6 +82,30 @@ def test_signal_subprocess_windows_uses_ctrl_break(monkeypatch):
     proc.send_signal.assert_called_once_with(1)
 
 
+def test_signal_subprocess_poll_raising_does_not_propagate(monkeypatch):
+    """A Popen-compatible remote wrapper whose ``poll()`` raises (e.g. a
+    network blip) must not crash the GUI's Stop handler — an exception
+    escaping the Qt slot aborts the whole app (PySide6 ≥ 6.5)."""
+    proc = MagicMock()
+    proc.poll.side_effect = RuntimeError("ssh channel closed")
+    monkeypatch.setattr(sk.threading, "Timer", MagicMock())
+    signal_subprocess(proc)  # must return cleanly
+    proc.terminate.assert_not_called()
+
+
+def test_signal_subprocess_non_int_pid_does_not_propagate(monkeypatch):
+    """A wrapper whose ``pid`` is None makes ``os.getpgid(None)`` raise
+    TypeError on POSIX — previously this escaped through stop() into the
+    Stop slot and aborted the app. It must now fall back to terminate()."""
+    proc = MagicMock()
+    proc.pid = None
+    proc.poll.return_value = None  # alive
+    monkeypatch.setattr(sk.os, "name", "posix")
+    monkeypatch.setattr(sk.threading, "Timer", MagicMock())
+    signal_subprocess(proc)  # must not raise
+    proc.terminate.assert_called_once()
+
+
 def test_escalation_timer_skips_killpg_if_proc_exited(monkeypatch):
     """Captured pgid stays bound for the 5-second window. If the
     process exited cleanly in the meantime, the SIGKILL escalation

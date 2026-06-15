@@ -657,3 +657,35 @@ def test_setup_axes_sets_per_panel_min_height():
     assert heights[-1] == 3 * SCATTER_PANEL_MIN_PX   # stacked → grows + scrolls
     _setup_scatter_axes(app, 1)
     assert heights[-1] == 0                           # overlay → fills viewport
+
+
+# ── density mode respects the open-circle / marker-shape style ────────────────
+
+def test_density_respects_open_circle_marker():
+    """In density mode the open-circle ('o_open') style must produce hollow
+    rings coloured by density — not stay filled (the reported regression)."""
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    app, ax = _render_app(density=True, gates=[])
+    app._export_style_prefs["marker_style"] = "o_open"
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+    coll = [c for c in ax.collections if getattr(c, "_aw_density_collection", False)][0]
+    faces = coll.get_facecolors()
+    edges = coll.get_edgecolors()
+    # Open → no fill, and the ring colours vary per point (density gradient).
+    assert len(faces) == 0 or bool(np.all(faces[:, 3] == 0))
+    assert len(edges) > 1 and len(np.unique(edges[:, :3], axis=0)) > 1
+
+
+def test_density_filled_keeps_per_point_gradient():
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    app, ax = _render_app(density=True, gates=[])
+    app._export_style_prefs["marker_style"] = "o"
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+    coll = [c for c in ax.collections if getattr(c, "_aw_density_collection", False)][0]
+    faces = coll.get_facecolors()
+    # Filled → per-point face colours preserved (gradient not collapsed).
+    assert len(faces) > 1 and len(np.unique(faces[:, :3], axis=0)) > 1

@@ -130,26 +130,28 @@ def redraw_scatter(
         fluor_gate_y=fluor_gate_y,
     )
 
-    # "Separate axes" layout (view-only): stack one group per panel, >1 group.
+    # Stack one group per panel (>1 group) when Layout is "Separate axes", or
+    # whenever "Color by time" is on — overlaid time-coloured clouds are noise,
+    # so each well gets its own time-coloured panel via _render_scatter_faceted.
+    color_by_tp = bool(getattr(app, "_scatter_color_by_tp", False))
     _lay = getattr(app, "_scatter_layout_var", None)
-    if _lay is not None and len(scatter_data) > 1 and str(_lay.currentText()).startswith("Separate"):  # noqa: E501
+    _separate = _lay is not None and str(_lay.currentText()).startswith("Separate")
+    if len(scatter_data) > 1 and (color_by_tp or _separate):
         _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list)
         return
 
-    # Plot one artist per well. ``render_scatter_points`` owns the solid-vs-
-    # density branch (one Line2D per well, or a per-point density PathCollection
-    # shaded by each well's own local density), returning the click-interaction
-    # points and the legend handles. Density mode + log state come from the
-    # shared export-style prefs, re-read each redraw so the mode survives a
-    # restyle.
+    # ``render_scatter_points`` owns the solid / density / color-by-time branch,
+    # returning the click-interaction points and the legend handles. Density mode
+    # + log state come from the shared export-style prefs, re-read each redraw.
     prefs = getattr(app, "_export_style_prefs", None) or {}
     density_on = bool(prefs.get("scatter_density", False))
-    interaction_points, density_proxies = render_scatter_points(
+    interaction_points, legend_handles = render_scatter_points(
         app, app._ax_scatter, scatter_data,
         density_on=density_on,
         x_log=bool(prefs.get("scatter_x_log", True)),
         y_log=bool(prefs.get("scatter_y_log", True)),
         marker_size=float(prefs.get("marker_size", 5.0) or 5.0),
+        color_by_tp=color_by_tp,
     )
 
     # Format axes — derive readable label from column name
@@ -181,13 +183,11 @@ def redraw_scatter(
     )
     app._ax_scatter.grid(True, alpha=0.3, color=_grid)
     if scatter_data:
-        # Transparent frame keeps the legend from masking the plot
-        # background with the wrong theme color. In density mode the per-point
-        # colors are a gradient, so legend handles come from per-group proxies
-        # carrying each well's identity color.
-        if density_on and density_proxies:
+        # Transparent frame keeps the legend off the plot background. Density and
+        # color-by-time supply explicit handles; plain solid mode uses labels.
+        if legend_handles:
             app._ax_scatter.legend(
-                handles=density_proxies, loc='best', fontsize=8,
+                handles=legend_handles, loc='best', fontsize=8,
                 framealpha=0.0, facecolor="none",
             )
         else:

@@ -100,6 +100,25 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
         lambda _i: redraw_scatter_orchestrate(ctx.app))
     cl.addWidget(ctx.app._scatter_layout_cb)
     ctx.app._scatter_layout_var = ctx.app._scatter_layout_cb
+
+    # "Color by time": colour each point by its timepoint instead of by well
+    # identity, so a well's cloud shows its evolution over time. With more than
+    # one well selected the view auto-stacks into one panel per well (overlaying
+    # several time-coloured clouds on one axis would be unreadable).
+    ctx.app._scatter_color_by_tp = False
+    ctx.app._scatter_color_by_tp_btn = QPushButton("Color by time", ctrl)
+    ctx.app._scatter_color_by_tp_btn.setProperty("variant", "toggle")
+    ctx.app._scatter_color_by_tp_btn.setCheckable(True)
+    ctx.app._scatter_color_by_tp_btn.setToolTip(
+        "Colour each point by its timepoint. With multiple wells selected, "
+        "wells are shown as stacked panels.")
+
+    def _toggle_color_by_tp(checked: bool) -> None:
+        ctx.app._scatter_color_by_tp = bool(checked)
+        redraw_scatter_orchestrate(ctx.app)
+
+    ctx.app._scatter_color_by_tp_btn.clicked.connect(_toggle_color_by_tp)
+    cl.addWidget(ctx.app._scatter_color_by_tp_btn)
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).

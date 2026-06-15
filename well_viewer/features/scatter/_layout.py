@@ -108,19 +108,27 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     x_log = bool(prefs.get("scatter_x_log", True))
     y_log = bool(prefs.get("scatter_y_log", True))
     marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
+    # "Color by time" colours each panel's points by timepoint (see
+    # render_scatter_points); each panel then legends the timepoints it shows.
+    color_by_tp = bool(getattr(app, "_scatter_color_by_tp", False))
     xlabel = _scatter_col_label(col_x)
     ylabel = _scatter_col_label(col_y)
 
     gate_entries = []
     for ax, (label, data) in zip(axes, items):
         _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(app, ax)
-        render_scatter_points(
+        _ipts, legend_handles = render_scatter_points(
             app, ax, {label: data}, density_on=density_on,
             x_log=x_log, y_log=y_log, marker_size=marker_size,
+            color_by_tp=color_by_tp,
         )
         ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3, color=_grid)
-        ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
+        if legend_handles:
+            ax.legend(handles=legend_handles, loc="best", fontsize=8,
+                      framealpha=0.0, facecolor="none")
+        else:
+            ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
         # Gates appear on every panel, each labelled with that group's own
         # in-gate %. Handles only on the top panel — the one the edge-drag
         # editor is bound to (app._ax_scatter); a drag there repaints them all.

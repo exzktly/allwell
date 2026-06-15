@@ -30,6 +30,20 @@ from well_viewer.domain.metric_registry import column_gating_exempt
 _logger = logging.getLogger(__name__)
 
 
+def timepoint_color_map(timepoints) -> Dict[float, Any]:
+    """Map sorted timepoints → viridis RGBA — the per-cell + aggregate convention.
+
+    Shared by ``collect_scatter_agg_data`` (one marker per well/timepoint) and
+    the per-cell "Color by time" render path so the two scatter views assign the
+    same colour to the same timepoint. Returns ``{}`` for an empty list.
+    """
+    tps = sorted({float(t) for t in (timepoints or [])})
+    if not tps:
+        return {}
+    cmap = matplotlib.colormaps['viridis']
+    return {tp: cmap(v) for tp, v in zip(tps, np.linspace(0, 1, len(tps)))}
+
+
 def get_all_timepoints(app) -> List[float]:
     """Extract all unique included timepoints across loaded wells."""
     timepoints: set = set()
@@ -331,13 +345,9 @@ def collect_scatter_agg_data(
     # Define markers for each well/group
     markers = ['o', 's', '^', 'D', 'v', 'p', '*', 'h', '+', 'x']  # circle, square, triangle, diamond, etc.
 
-    # Create color gradient for timepoints using a colormap
-    if timepoints_h:
-        cmap = matplotlib.colormaps['viridis']
-        normalized_tps = np.linspace(0, 1, len(timepoints_h))
-        tp_to_color = {tp: cmap(norm_val) for tp, norm_val in zip(sorted(timepoints_h), normalized_tps)}
-    else:
-        tp_to_color = {}
+    # Create color gradient for timepoints using a colormap (shared with the
+    # per-cell "Color by time" path via timepoint_color_map).
+    tp_to_color = timepoint_color_map(timepoints_h)
 
     # Derive column names based on metric type. The per-axis Property combo
     # supplies ``intensity_x`` / ``intensity_y`` (which CSV column) and

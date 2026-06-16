@@ -28,6 +28,31 @@ def test_cell_browser_tab_builds_and_registers(loaded_app):
     assert set(chips) == set(app._app_state.channel.fluor_channels or [])
 
 
+def test_cell_browser_bar_survives_empty_refresh(loaded_app):
+    """Regression: a built channel bar must NOT be wiped by a later refresh that
+    transiently resolves no channels (channel state not ready / rows uncached).
+    This is the "bar showed once then disappeared" bug."""
+    app = loaded_app
+    app._notebook.setCurrentByName("Cell Browser")
+
+    from well_viewer.features.cell_browser.tab_view import cell_browser_refresh
+
+    built = set(getattr(app, "_cell_browser_channel_chips", {}))
+    assert built, "expected the bar to build from the dataset's channels"
+
+    # Force the next resolve to come back empty (fluor list AND data both empty).
+    app._app_state.channel.fluor_channels = []
+    real_get_rows = app._get_rows
+    app._get_rows = lambda _label: None
+    try:
+        cell_browser_refresh(app)
+    finally:
+        app._get_rows = real_get_rows
+
+    # The bar must still be intact — not blanked.
+    assert set(getattr(app, "_cell_browser_channel_chips", {})) == built
+
+
 def test_cell_browser_section_icon_registered(viewer_app):
     assert viewer_app._SECTION_ICONS.get("Cell Browser") == "grid-3x3"
     # Heavy worker deps → lazy-only (builds on first click, not in the drain).
@@ -42,7 +67,9 @@ def test_cell_browser_click_navigates_to_segmentation(loaded_app):
     from well_viewer.features.cell_browser import controller as ctl
     from well_viewer.features.cell_browser.collect import collect_cells
 
-    cells = collect_cells(app, [], [], [])
+    # None timepoints/FOVs → no tp/fov restriction (strict-list semantics: [] would
+    # mean "0 selected → 0 cells"). We just need a cell to click.
+    cells = collect_cells(app, [], None, None)
     assert cells, "expected the mini dataset to yield cells"
 
     # Clicking a cell must switch to Segmentation and select that nucleus —

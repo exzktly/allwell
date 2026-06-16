@@ -71,6 +71,14 @@ def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
         nid = int(float(desc.nucleus_id))
     except (TypeError, ValueError):
         return None
+    # Load the channel arrays FIRST: _load_array (→ _load_well_channel) populates
+    # the (well, "__mask__", "raw") cache entry as a side effect, and
+    # _load_mask_array depends on it. Calling _load_mask_array before any
+    # _load_array always missed → every cell rendered as "—".
+    chan_arrays = [
+        _load_array(app, cache, desc.well, ch, desc.tp_token, desc.fov)
+        for ch in channels
+    ]
     mask_full = _load_mask_array(app, cache, desc.well, desc.tp_token, desc.fov)
     if mask_full is None:
         return None
@@ -83,8 +91,7 @@ def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
 
     rgb = np.zeros((r1 - r0, c1 - c0, 3), dtype=np.float32)
     painted = False
-    for i, ch in enumerate(channels):
-        arr = _load_array(app, cache, desc.well, ch, desc.tp_token, desc.fov)
+    for i, arr in enumerate(chan_arrays):
         if arr is None:
             continue
         arr = np.asarray(arr)

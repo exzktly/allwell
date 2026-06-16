@@ -47,3 +47,36 @@ def test_cell_browser_apply_filters_no_criteria(loaded_app):
     assert isinstance(st.cells, list)
     # loaded advances by at most one page; never exceeds the total.
     assert 0 <= st.loaded <= len(st.cells)
+
+
+def test_compose_loads_channels_before_mask(monkeypatch):
+    """Regression: _load_mask_array only resolves after a prior _load_array has
+    populated the (well,'__mask__','raw') cache, so compose must load the
+    channels first — otherwise every cell renders as the "—" placeholder."""
+    import numpy as np
+    from types import SimpleNamespace
+
+    import well_viewer.features.cell_browser.worker as w
+    from well_viewer.features.cell_browser.collect import CellDescriptor
+
+    mask_key = ("A1", "__mask__", "raw")
+    mask = np.zeros((10, 10), dtype=np.int32)
+    mask[3:6, 3:6] = 7  # nucleus 7
+
+    def fake_load_array(app, cache, well, ch, tp, fov, **kw):
+        cache.setdefault(mask_key, True)        # the real side effect
+        return np.ones((10, 10), dtype=np.float32)
+
+    def fake_load_mask(app, cache, well, tp, fov):
+        if mask_key not in cache:               # mirrors the real dependency
+            return None
+        return mask
+
+    monkeypatch.setattr(w, "_load_array", fake_load_array)
+    monkeypatch.setattr(w, "_load_mask_array", fake_load_mask)
+
+    desc = CellDescriptor(well="A1", fov="1", tp_token="1", timepoint_h=0.0,
+                          filename="f", nucleus_id="7", row_idx=0,
+                          centroid_row=None, centroid_col=None)
+    out = w.compose_cell_rgb(SimpleNamespace(), desc, ["gfp"], False, {})
+    assert out is not None and out.shape[2] == 3

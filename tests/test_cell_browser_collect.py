@@ -113,7 +113,10 @@ def test_empty_criteria_returns_all():
     assert len(cells) == 4
 
 
-def test_no_selection_returns_empty():
+def test_no_selection_falls_back_to_all_loaded_wells():
+    # With no explicit well selection the Cell Browser draws from every loaded
+    # well (mirrors Cell Gating) so the gallery populates on first open.
     app = _app(_df())
     app._app_state.selection.selected_wells = []
-    assert collect_cells(app, [Criterion("gfp_mean_intensity", lo=0.0)]) == []
+    cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=0.0)])
+    assert len(cells) == 4  # all rows of the one loaded well (A01)

@@ -21,6 +21,7 @@ from well_viewer.features.cell_browser.criteria_view import (  # re-export
     build_cell_browser_sidebar,
     cell_browser_sidebar_refresh,
 )
+from well_viewer.features.cell_browser.collect import cell_browser_channels
 from well_viewer.features.cell_browser.state import CellBrowserState
 from well_viewer.features.cell_browser.worker import CellImageLoader
 
@@ -125,7 +126,7 @@ def cell_browser_refresh(app) -> None:
     host = getattr(app, "_cell_browser_channel_host", None)
     if host is None:
         return
-    channels = list(app._app_state.channel.fluor_channels or [])
+    channels = cell_browser_channels(app)
     prev = {tok: cb.isChecked() for tok, cb in
             (getattr(app, "_cell_browser_channel_chips", {}) or {}).items()}
     lay = host.layout()

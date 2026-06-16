@@ -72,6 +72,22 @@ def _sample_df(app):
     return None
 
 
+def cell_browser_channels(app) -> List[str]:
+    """Fluorescence channels for the Cell Browser chips.
+
+    Prefers ``app._app_state.channel.fluor_channels`` (the app-wide detected
+    list), but falls back to detecting channels from a loaded well's columns so
+    the chips still appear if that list isn't populated when the tab builds /
+    refreshes."""
+    chans = list(getattr(app._app_state.channel, "fluor_channels", None) or [])
+    if chans:
+        return [str(c) for c in chans]
+    df = _sample_df(app)
+    if df is not None:
+        return [str(c) for c in detect_fluor_channels(df)]
+    return []
+
+
 def enumerate_properties(app) -> List[Tuple[str, str]]:
     """Ordered ``[(column_or_ratiokey, label)]`` of every measured per-cell
     property available in the current dataset, for the criteria-property picker.

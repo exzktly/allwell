@@ -123,6 +123,11 @@ def on_tab_change(app, _e=None) -> None:
             cell_gating_sync_scatter_gates(app)
 
     elif tab == "Cell Browser":
+        # Show the canonical well selector (plate) above the Cell Browser's own
+        # filter sidebar — its gallery is scoped to the selected wells, so it
+        # needs the same well picker every other tab has.
+        app._sidebar_main_frame.setVisible(True)
+        app._refresh_sidebar_map()
         if hasattr(app, "_sidebar_cell_browser_frame"):
             app._sidebar_cell_browser_frame.setVisible(True)
         for _refresh in getattr(app, "_cell_browser_refreshers", ()):

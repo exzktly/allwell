@@ -36,6 +36,8 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **6.12.0 — Separate gate selections + axis-correct gates.** Cell inclusion (gating) and fraction-on (thresholding) now have **independent** gate pickers — each its own multi-select *Gates* checkbox menu — so you can gate on one set of gates and compute fraction-on from a different set. Also fixes a bug where gates drawn on one X/Y axis pair stayed visible (and editable) after switching the Scatter Plot to different axes; gates now only show on the axes they were drawn on.
+
 - **6.11.0 — Multi-select filtering gates.** The Cell Gating "filtering gate" picker is now a **multi-select checkbox menu** (the *Filtering gates* button) instead of a single-choice dropdown — tick any combination of named gates and they're combined as a union, applied to both inclusion and fraction-on. Defaults to all gates (new gates auto-included).
 
 - **6.10.0 — Scatter gate as a fraction-on threshold.** On the **Cell Gating** tab the scatter gate can now be applied two independent ways: **inclusion** (the existing checkbox — cells outside the gate drop out) and/or **thresholding** (a new checkbox — cells *inside* the gate count as "on" for fraction-on stats, replacing the per-channel ThreshFracOn cutoff; no cells are removed). Both use the same filtering-gate dropdown and can be on at once. Also fixes a bug where a persisted QC debris gate (e.g. min/max circularity) loaded its values into the fields on reload but didn't re-apply to the dataset.

@@ -285,6 +285,22 @@ def render_scatter_points(
 
 # ── gate statistics ──────────────────────────────────────────────────────────
 
+def _gate_on_current_axes(app, gate) -> bool:
+    """True when *gate* was drawn on the axes currently displayed.
+
+    A gate's box is in the data space of its own ``x_col``/``y_col``; on any
+    other axis pair those coordinates are meaningless, so the gate must not be
+    drawn or hit-tested there. ``app._scatter_axes_cols`` is set each redraw
+    (scatter.controller). Absent (no redraw yet) ⇒ don't hide."""
+    cols = getattr(app, "_scatter_axes_cols", None)
+    if not cols:
+        return True
+    gx, gy = gate.get("x_col"), gate.get("y_col")
+    if gx is None or gy is None:
+        return True  # unstamped gate (no recorded axes) — can't match, don't hide
+    return gx == cols[0] and gy == cols[1]
+
+
 def _norm_gate(g: Dict[str, float]) -> Dict[str, float]:
     """Return a copy of *g* with ``x0<=x1`` and ``y0<=y1`` (drag may flip them)."""
     x0, x1 = sorted((g["x0"], g["x1"]))
@@ -430,6 +446,9 @@ def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
     # RectangleSelector owns the drag in draw mode) and on an interactive panel.
     editable = handles and not getattr(app, "_scatter_gate_draw_mode", False)
     for gate in gates:
+        # Only draw gates belonging to the axes currently on screen.
+        if not _gate_on_current_axes(app, gate):
+            continue
         gn = _norm_gate(gate)  # drag may transiently flip a corner past another
         w = gn["x1"] - gn["x0"]
         h = gn["y1"] - gn["y0"]
@@ -562,12 +581,13 @@ def rename_gate(app, idx: int, name: str) -> bool:
     if any(i != idx and str(g.get("name") or "") == new for i, g in enumerate(gates)):
         return False  # name already taken by another gate
     gates[idx]["name"] = new
-    # If this gate is in the Cell Gating filtering selection, follow the rename
-    # so the selection isn't lost (None means "all", nothing to update).
-    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
-    if isinstance(choices, set) and old in choices:
-        choices.discard(old)
-        choices.add(new)
+    # Follow the rename in both Cell Gating selection sets (gating + thresh) so
+    # the selection isn't lost (None means "all", nothing to update).
+    for attr in ("_cell_gating_gating_choices", "_cell_gating_thresh_choices"):
+        choices = getattr(app, attr, None)
+        if isinstance(choices, set) and old in choices:
+            choices.discard(old)
+            choices.add(new)
     _notify_gates_changed(app)
     _redraw(app)
     return True
@@ -651,6 +671,9 @@ def gate_edge_at(app, event, tol_px: float = 8.0):
     gates = getattr(app, "_scatter_gates", None) or []
     # Iterate top-most (last drawn) first so the gate visually on top wins.
     for idx in range(len(gates) - 1, -1, -1):
+        # Gates from other axes aren't drawn here, so they're not hittable.
+        if not _gate_on_current_axes(app, gates[idx]):
+            continue
         gn = _norm_gate(gates[idx])
         x0d, y0d = ax.transData.transform((gn["x0"], gn["y0"]))
         x1d, y1d = ax.transData.transform((gn["x1"], gn["y1"]))
@@ -745,7 +768,7 @@ def on_gate_edit_release(app, event) -> None:
     redraw_gates_only(app)
 
 
-def paint_gates(app, entries) -> None:
+def paint_gates(app, entries, cols=None) -> None:
     """Draw gates across one or more panels and remember how, so an edit drag
     can repaint them all.
 
@@ -755,7 +778,12 @@ def paint_gates(app, entries) -> None:
     ``app._scatter_gate_render`` so :func:`redraw_gates_only` repaints every
     panel during a drag — fixing the case where resizing on the top panel left
     the panels below stale.
+
+    *cols* is the ``(col_x, col_y)`` pair currently on the axes; stored so gate
+    rendering / hit-testing can hide gates drawn on a different X/Y pair.
     """
+    if cols is not None:
+        app._scatter_axes_cols = cols
     app._scatter_gate_render = list(entries)
     for ax, scatter_data, tps_list, ink, handles in app._scatter_gate_render:
         draw_gates(app, ax, scatter_data, tps_list, ink, handles=handles)

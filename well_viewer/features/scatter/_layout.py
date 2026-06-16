@@ -134,7 +134,7 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
         # editor is bound to (app._ax_scatter); a drag there repaints them all.
         gate_entries.append((ax, {label: data}, tps_list, _muted_fg, ax is axes[0]))
     axes[-1].set_xlabel(xlabel)
-    paint_gates(app, gate_entries)
+    paint_gates(app, gate_entries, cols=(col_x, col_y))
 
     # Editing the gate on the top panel mirrors to the panels below; the
     # click-to-view-cell cache stays overlay-only.

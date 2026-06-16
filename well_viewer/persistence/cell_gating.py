@@ -30,12 +30,16 @@ def save_to_pipeline_info(app) -> None:
         key: cell_gating_get_thresh_frac_on(app, key)
         for key in (app._cell_gating_thresh_frac_edits or {}).keys()
     }
-    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
+    def _sorted_or_none(s):
+        return None if s is None else sorted(s)
     block = build_gating_block(
         fluor_gates, thresh_frac_on,
         scatter_gates=getattr(app, "_scatter_gates", None),
         use_scatter_gates=getattr(app, "_cell_gating_use_scatter_gates", False),
-        scatter_gate_choices=(None if choices is None else sorted(choices)),
+        scatter_gate_choices_gating=_sorted_or_none(
+            getattr(app, "_cell_gating_gating_choices", None)),
+        scatter_gate_choices_thresh=_sorted_or_none(
+            getattr(app, "_cell_gating_thresh_choices", None)),
         use_scatter_thresh=getattr(app, "_cell_gating_use_scatter_thresh", False),
     )
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
@@ -112,16 +116,23 @@ def load_from_pipeline_info(app) -> bool:
         applied = True
     app._cell_gating_use_scatter_gates = bool(block.get("use_scatter_gates", False))
     app._cell_gating_use_scatter_thresh = bool(block.get("use_scatter_thresh", False))
-    # Filtering-gate selection: a list of names, or absent ⇒ None (all). Migrate
-    # the legacy single ``scatter_gate_choice`` (one name, or absent = all).
-    if "scatter_gate_choices" in block:
-        sel = block.get("scatter_gate_choices")
-        app._cell_gating_scatter_gate_choices = (
-            set(str(n) for n in sel) if isinstance(sel, list) else None
-        )
-    else:
+    # Per-layer gate selections: a list of names, or absent ⇒ None (all).
+    # Migration of older single-selection schemas: ``scatter_gate_choices`` (one
+    # combined list) and ``scatter_gate_choice`` (one name) both seed BOTH layers.
+    def _legacy_selection():
+        if "scatter_gate_choices" in block and isinstance(block["scatter_gate_choices"], list):
+            return set(str(n) for n in block["scatter_gate_choices"])
         legacy = block.get("scatter_gate_choice")
-        app._cell_gating_scatter_gate_choices = {str(legacy)} if legacy else None
+        return {str(legacy)} if legacy else None
+    for key, attr in (
+        ("scatter_gate_choices_gating", "_cell_gating_gating_choices"),
+        ("scatter_gate_choices_thresh", "_cell_gating_thresh_choices"),
+    ):
+        if key in block:
+            sel = block.get(key)
+            setattr(app, attr, set(str(n) for n in sel) if isinstance(sel, list) else None)
+        else:
+            setattr(app, attr, _legacy_selection())
     for attr, flag in (
         ("_cell_gating_use_scatter_gates_cb", app._cell_gating_use_scatter_gates),
         ("_cell_gating_use_scatter_thresh_cb", app._cell_gating_use_scatter_thresh),

@@ -195,7 +195,7 @@ def redraw_scatter(
 
     # Draw stored rectangular gates + their percentage labels on top of the
     # points. Gate coords are data-space, so they track log scale / limits.
-    paint_gates(app, [(app._ax_scatter, scatter_data, tps_list, _muted_fg, True)])
+    paint_gates(app, [(app._ax_scatter, scatter_data, tps_list, _muted_fg, True)], cols=(col_x, col_y))
 
     # Redraw canvas
     app._scatter_interaction_cache = {

@@ -353,10 +353,13 @@ def apply_auto_thresholds_to_pipeline_info(
     # touches ThreshFracOn, so it must not drop the gates the user drew.
     existing_scatter = existing.get("scatter_gates")
     existing_use_scatter = bool(existing.get("use_scatter_gates", False))
-    existing_choices = existing.get("scatter_gate_choices")
-    if existing_choices is None and existing.get("scatter_gate_choice"):
-        existing_choices = [existing["scatter_gate_choice"]]  # migrate legacy single
     existing_use_thresh = bool(existing.get("use_scatter_thresh", False))
+    # Per-layer gate selections, migrating older single-selection schemas.
+    _legacy_sel = existing.get("scatter_gate_choices")
+    if _legacy_sel is None and existing.get("scatter_gate_choice"):
+        _legacy_sel = [existing["scatter_gate_choice"]]
+    existing_choices_gating = existing.get("scatter_gate_choices_gating", _legacy_sel)
+    existing_choices_thresh = existing.get("scatter_gate_choices_thresh", _legacy_sel)
 
     written: Dict[str, float] = {}
     for ch, thr in computed.items():
@@ -372,7 +375,8 @@ def apply_auto_thresholds_to_pipeline_info(
         existing_fluor, existing_tfo,
         scatter_gates=existing_scatter,
         use_scatter_gates=existing_use_scatter,
-        scatter_gate_choices=existing_choices,
+        scatter_gate_choices_gating=existing_choices_gating,
+        scatter_gate_choices_thresh=existing_choices_thresh,
         use_scatter_thresh=existing_use_thresh,
     )
     save_gating_to_pipeline_info(out_dir, block)

@@ -74,6 +74,7 @@ def build_gating_block(
     thresh_frac_on: Dict[str, float],
     scatter_gates: Optional[list] = None,
     use_scatter_gates: bool = False,
+    scatter_gate_choice: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Snapshot non-default gating values as a JSON-friendly dict.
 
@@ -104,6 +105,9 @@ def build_gating_block(
     if use_scatter_gates and scatter_gates:
         block["use_scatter_gates"] = True
         block["scatter_gates"] = [dict(g) for g in scatter_gates]
+        # The chosen single filtering gate (by name); omitted ⇒ union of all.
+        if scatter_gate_choice:
+            block["scatter_gate_choice"] = str(scatter_gate_choice)
 
     return block
 

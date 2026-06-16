@@ -397,14 +397,20 @@ def compute_gate_stats(
 # ── gate rendering ───────────────────────────────────────────────────────────
 
 def _notify_gates_changed(app) -> None:
-    """Tell the Properties sidebar (if present) that the gate set changed, so its
-    gate-count label stays accurate after a gate is drawn/cleared."""
-    cb = getattr(app, "_scatter_gate_count_cb", None)
-    if callable(cb):
-        try:
-            cb()
-        except Exception:
-            swallowed()
+    """Tell listeners the gate set changed so their gate-count UI stays accurate
+    after a gate is drawn / cleared / deleted.
+
+    Two independent listeners may register: the Properties sidebar's
+    ``_scatter_gate_count_cb`` (the "N gate(s)" label) and the Cell Gating tab's
+    ``_scatter_gates_changed_cb`` (its scatter-gate summary). Both are optional.
+    """
+    for attr in ("_scatter_gate_count_cb", "_scatter_gates_changed_cb"):
+        cb = getattr(app, attr, None)
+        if callable(cb):
+            try:
+                cb()
+            except Exception:
+                swallowed()
 
 
 def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
@@ -449,6 +455,11 @@ def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
             handles._scatter_gate_artist = True  # noqa: SLF001
 
         rows = compute_gate_stats(scatter_data, gn, tps_list)
+        # Lead the label with the gate's name so it matches the Cell Gating
+        # filtering-gate dropdown.
+        gname = str(gate.get("name") or "")
+        if gname:
+            rows = [(gname, ink_color, 0), *rows]
         if not rows:
             continue
         # Stack the label lines from the gate's top-left corner downward, using
@@ -522,6 +533,44 @@ def set_gate_draw_mode(app, on: bool) -> None:
             swallowed()
 
 
+def _next_gate_name(app) -> str:
+    """Default ``Gate N`` name, N = first integer not already taken."""
+    existing = {
+        str(g.get("name") or "")
+        for g in (getattr(app, "_scatter_gates", None) or [])
+    }
+    n = 1
+    while f"Gate {n}" in existing:
+        n += 1
+    return f"Gate {n}"
+
+
+def rename_gate(app, idx: int, name: str) -> bool:
+    """Rename gate *idx* to *name*, keeping names non-empty and unique.
+
+    Returns ``True`` when the rename took effect (and notifies listeners so the
+    Cell Gating dropdown + inclusion recompute follow). A blank or duplicate
+    name is rejected (returns ``False``) so the caller can revert its field.
+    """
+    gates = getattr(app, "_scatter_gates", None) or []
+    if not (0 <= idx < len(gates)):
+        return False
+    new = str(name).strip()
+    old = str(gates[idx].get("name") or "")
+    if not new or new == old:
+        return False
+    if any(i != idx and str(g.get("name") or "") == new for i, g in enumerate(gates)):
+        return False  # name already taken by another gate
+    gates[idx]["name"] = new
+    # If this gate is the Cell Gating filtering choice, follow the rename so the
+    # selection isn't lost.
+    if getattr(app, "_cell_gating_scatter_gate_choice", None) == old:
+        app._cell_gating_scatter_gate_choice = new
+    _notify_gates_changed(app)
+    _redraw(app)
+    return True
+
+
 def _on_gate_drawn(app, eclick, erelease) -> None:
     """RectangleSelector callback: store the dragged box and redraw."""
     coords = (eclick.xdata, eclick.ydata, erelease.xdata, erelease.ydata)
@@ -538,9 +587,11 @@ def _on_gate_drawn(app, eclick, erelease) -> None:
     # this to turn a gate into an inclusion mask). The active columns are already
     # cached on the last redraw — see scatter.controller.redraw_scatter.
     cache = getattr(app, "_scatter_interaction_cache", None) or {}
+    # Auto-name silently (Gate 1, Gate 2, …); rename via the sidebar gate list.
     app._scatter_gates.append({
         "x0": x0, "y0": y0, "x1": x1, "y1": y1,
         "x_col": cache.get("col_x"), "y_col": cache.get("col_y"),
+        "name": _next_gate_name(app),
     })
     _notify_gates_changed(app)
     # One gate per arming: exit create mode so the next press edits/clicks
@@ -684,9 +735,11 @@ def on_gate_edit_release(app, event) -> None:
     ny0, ny1 = sorted((g["y0"], g["y1"]))
     if nx1 - nx0 <= 0 or ny1 - ny0 <= 0:
         del gates[ed["idx"]]
-        _notify_gates_changed(app)
     else:
         g["x0"], g["x1"], g["y0"], g["y1"] = nx0, nx1, ny0, ny1
+    # A resize changes gate membership too, so notify on every finalised edit
+    # (not just deletes) — listeners recompute the gated inclusion.
+    _notify_gates_changed(app)
     redraw_gates_only(app)
 
 

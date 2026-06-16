@@ -353,6 +353,7 @@ def apply_auto_thresholds_to_pipeline_info(
     # touches ThreshFracOn, so it must not drop the gates the user drew.
     existing_scatter = existing.get("scatter_gates")
     existing_use_scatter = bool(existing.get("use_scatter_gates", False))
+    existing_choice = existing.get("scatter_gate_choice")
 
     written: Dict[str, float] = {}
     for ch, thr in computed.items():
@@ -368,6 +369,7 @@ def apply_auto_thresholds_to_pipeline_info(
         existing_fluor, existing_tfo,
         scatter_gates=existing_scatter,
         use_scatter_gates=existing_use_scatter,
+        scatter_gate_choice=existing_choice,
     )
     save_gating_to_pipeline_info(out_dir, block)
     return written

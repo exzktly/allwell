@@ -236,7 +236,10 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
         QVBoxLayout as _QVBoxLayout,
         QWidget as _QWidget,
     )
-    from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        build_cell_gating_subtab,
+        cell_gating_sync_scatter_gates,
+    )
     from well_viewer.features.scatter.ratio_panel_view import build_ratios_inline_panel
     from widgets.icon_button import IconButton as _IconButton
 
@@ -360,6 +363,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
         name = sub_tabs.tabText(idx)
         if name == "Cell Gating":
             build_cell_gating_subtab(app)
+            cell_gating_sync_scatter_gates(app)
         if name == "Pipeline Info" and hasattr(app, "_pipeline_info_refresh"):
             app._pipeline_info_refresh()      # re-read in case the dataset changed
         # Entering the Groups sub-tab deselects any previously-active

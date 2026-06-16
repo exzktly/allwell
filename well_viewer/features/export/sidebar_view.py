@@ -38,7 +38,7 @@ from widgets.toggle_switch import ToggleSwitch
 from well_viewer.features.barplot.renderer import redraw_bars
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
-from well_viewer.features.scatter.gating import clear_gates, set_gate_draw_mode
+from well_viewer.features.scatter.gating import clear_gates, rename_gate, set_gate_draw_mode
 from well_viewer.core.safe import swallowed
 
 
@@ -273,8 +273,15 @@ class ExportStyleSidebar(QWidget):
             self._gate_count_label = QLabel(self._gate_count_text())
             self._gate_count_label.setObjectName("Muted")
             add_full(s_gates, self._gate_count_label)
-            # Keep the gate-count label live when a gate is drawn on the plot
-            # (gating.py calls this after appending/clearing a gate).
+            # Editable per-gate name list (auto-named Gate N on draw; rename here).
+            self._gate_list_box = QWidget()
+            self._gate_list_layout = QVBoxLayout(self._gate_list_box)
+            self._gate_list_layout.setContentsMargins(0, 0, 0, 0)
+            self._gate_list_layout.setSpacing(2)
+            add_full(s_gates, self._gate_list_box)
+            self._rebuild_gate_list()
+            # Keep the gate-count label + name list live when a gate is drawn on
+            # the plot (gating.py calls this after appending/clearing a gate).
             self._app._scatter_gate_count_cb = self._refresh_gate_count
 
         # File format selector intentionally omitted — the Save As… dialog
@@ -1023,13 +1030,48 @@ class ExportStyleSidebar(QWidget):
             swallowed()
 
     def _refresh_gate_count(self) -> None:
-        """Update the 'N gate(s)' label — called when a gate is drawn/cleared."""
+        """Update the 'N gate(s)' label + name list — called when a gate is
+        drawn / cleared / renamed."""
         lbl = getattr(self, "_gate_count_label", None)
         if lbl is not None:
             try:
                 lbl.setText(self._gate_count_text())
             except Exception:
                 swallowed()
+        self._rebuild_gate_list()
+
+    def _rebuild_gate_list(self) -> None:
+        """Rebuild the editable per-gate name rows from ``app._scatter_gates``."""
+        layout = getattr(self, "_gate_list_layout", None)
+        if layout is None:
+            return
+        # A rename notifies gate-changed, which re-enters here — don't tear down
+        # the very field being edited (the name is already committed to it).
+        if getattr(self, "_gate_rename_in_progress", False):
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        gates = getattr(self._app, "_scatter_gates", None) or []
+        for idx, gate in enumerate(gates):
+            edit = QLineEdit(str(gate.get("name") or ""))
+            edit.setToolTip("Rename this gate (used by the Cell Gating filter).")
+            # editingFinished can fire twice (focus-out + Enter); commit once and
+            # revert the field on a rejected (blank/duplicate) name.
+            def _commit(_i=idx, _e=edit) -> None:
+                self._gate_rename_in_progress = True
+                try:
+                    ok = rename_gate(self._app, _i, _e.text())
+                finally:
+                    self._gate_rename_in_progress = False
+                if not ok:
+                    cur = (getattr(self._app, "_scatter_gates", None) or [])
+                    if 0 <= _i < len(cur):
+                        _e.setText(str(cur[_i].get("name") or ""))
+            edit.editingFinished.connect(_commit)
+            layout.addWidget(edit)
 
     def _on_clear_gates(self) -> None:
         clear_gates(self._app)

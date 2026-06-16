@@ -34,6 +34,7 @@ def save_to_pipeline_info(app) -> None:
         fluor_gates, thresh_frac_on,
         scatter_gates=getattr(app, "_scatter_gates", None),
         use_scatter_gates=getattr(app, "_cell_gating_use_scatter_gates", False),
+        scatter_gate_choice=getattr(app, "_cell_gating_scatter_gate_choice", None),
     )
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
 
@@ -56,6 +57,7 @@ def load_from_pipeline_info(app) -> bool:
     # so persistence can't import it at module scope without a cycle).
     from well_viewer.features.grouping.cell_gating_tab_view import (
         _cell_gating_apply_scatter_gate_mode,
+        _cell_gating_refresh_gate_choices,
         _cell_gating_refresh_gate_summary,
         build_cell_gating_subtab,
     )
@@ -107,6 +109,8 @@ def load_from_pipeline_info(app) -> bool:
         app._scatter_gates = [dict(g) for g in scatter_gates if isinstance(g, dict)]
         applied = True
     app._cell_gating_use_scatter_gates = bool(block.get("use_scatter_gates", False))
+    choice = block.get("scatter_gate_choice")
+    app._cell_gating_scatter_gate_choice = str(choice) if choice else None
     cb = getattr(app, "_cell_gating_use_scatter_gates_cb", None)
     if cb is not None:
         blocked = cb.blockSignals(True)
@@ -114,6 +118,7 @@ def load_from_pipeline_info(app) -> bool:
             cb.setChecked(app._cell_gating_use_scatter_gates)
         finally:
             cb.blockSignals(blocked)
+    _cell_gating_refresh_gate_choices(app)
     _cell_gating_apply_scatter_gate_mode(app)
     _cell_gating_refresh_gate_summary(app)
 

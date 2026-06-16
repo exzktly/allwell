@@ -30,7 +30,10 @@ ROOT = Path(__file__).resolve().parent.parent / "well_viewer"
 FEATURE_PREFIX = "well_viewer.features"
 
 # Ceiling. Seeded at the post-T2 count. ONLY EVER LOWER THIS NUMBER.
-MAX_DEFERRED_FEATURE_IMPORTS = 137
+# Lowered to 136 when the QC debris-gate controls moved to the Cell Gating tab:
+# the Segmentation panel's deferred ``build_qc_gate_controls`` import was dropped
+# and the new home imports it at module scope.
+MAX_DEFERRED_FEATURE_IMPORTS = 136
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

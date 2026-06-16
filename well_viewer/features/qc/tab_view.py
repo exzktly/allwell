@@ -1,15 +1,16 @@
-"""QC debris-gate controls, embedded in the Segmentation tab.
+"""QC debris-gate controls, embedded in the Sample Definitions → Cell Gating tab.
 
-The Segmentation panel is the QC editing home: it already renders a reference
-image with a per-cell include/exclude overlay, so tuning the debris gate here
-shows live which cells it removes (they render excluded, same as a manual
-delete) and applies to the whole dataset at once. Editing is live — each change
-recomputes the per-cell ``QC_Pass`` verdict, re-flags every plot/stat/the Review
-table, and redraws the image.
+The Cell Gating tab is the QC editing home: the QC debris gate is a *fundamental*
+inclusion layer that is always applied (``QC_Pass`` at the ``df_included_mask``
+chokepoint), composing with the FluorGating thresholds and the scatter gates that
+also live on this tab. Editing is live — each change recomputes the per-cell
+``QC_Pass`` verdict, re-flags every plot/stat/the Review table, and refreshes the
+Segmentation overlay (which still *renders* the verdict so excluded cells show
+there).
 
 The verdict is non-destructive and composes with manual curation (effective =
-manual-keep AND passes-QC). Flat-field correction is a run-time step, not part of
-this gate.
+manual-keep AND passes-QC AND inside-gate). Flat-field correction is a run-time
+step, not part of this gate.
 """
 
 from __future__ import annotations
@@ -37,10 +38,11 @@ def _fmt(v: Optional[float]) -> str:
 
 
 def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
-    """A compact QC debris-gate row for the Segmentation panel sidebar.
+    """A compact QC debris-gate row for the Cell Gating tab.
 
     Returns the row widget (already laid out). Edits apply live to the whole
-    dataset and refresh the review image so excluded cells show immediately.
+    dataset and refresh the Segmentation overlay so excluded cells show there
+    immediately.
     """
     row = QWidget(parent)
     hl = QHBoxLayout(row)
@@ -152,7 +154,7 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
 
 def qc_gate_refresh_widgets(app) -> None:
     """Re-fill the embedded gate row from the current params (after a load /
-    external change). No-op when the Segmentation panel hasn't been built."""
+    external change). No-op when the Cell Gating tab hasn't been built."""
     w = getattr(app, "_qc_gate_widgets", None)
     if not w:
         return

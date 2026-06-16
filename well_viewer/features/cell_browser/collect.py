@@ -154,13 +154,20 @@ def collect_cells(
     """Ordered list of cells (across selected wells) matching *criteria* within
     the selected *timepoints* and *fovs*.
 
-    ``timepoints`` empty/None → all timepoints; ``fovs`` empty/None → all FOVs.
-    Criteria-only filtering per the feature spec (the app-wide
-    Included/QC/Crop inclusion is intentionally NOT applied here).
+    ``timepoints`` / ``fovs`` are a strict include-list (tri-state):
+
+    * ``None`` → that dimension isn't filtered (e.g. a dataset with no timepoint
+      column, so there's nothing to choose);
+    * ``[]`` → options exist but none are selected → **no cells** match;
+    * non-empty → only cells in those timepoints / FOVs.
+
+    Criteria-only filtering per the feature spec (the app-wide Included/QC/Crop
+    inclusion is intentionally NOT applied here).
     """
     ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
-    target = np.asarray([float(t) for t in (timepoints or [])], dtype=float)
-    fov_set = {str(f) for f in (fovs or [])}
+    target = (None if timepoints is None
+              else np.asarray([float(t) for t in timepoints], dtype=float))
+    fov_set = None if fovs is None else {str(f) for f in fovs}
 
     out: List[CellDescriptor] = []
     selected = cell_browser_source_wells(app)
@@ -169,14 +176,20 @@ def collect_cells(
         if df is None or df.empty:
             continue
         mask = _passes_criteria(df, criteria, ratios)
-        if "timepoint_hours" in df.columns and target.size:
-            tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-            tp_match = np.zeros(len(df), dtype=bool)
-            for t in target:
-                tp_match |= np.abs(tp - t) <= 1e-6
-            mask &= tp_match
-        if fov_set and "fov" in df.columns:
-            mask &= df["fov"].astype(str).isin(fov_set).to_numpy()
+        if target is not None and "timepoint_hours" in df.columns:
+            if target.size == 0:
+                mask &= False  # options exist, none selected → no cells
+            else:
+                tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+                tp_match = np.zeros(len(df), dtype=bool)
+                for t in target:
+                    tp_match |= np.abs(tp - t) <= 1e-6
+                mask &= tp_match
+        if fov_set is not None and "fov" in df.columns:
+            if not fov_set:
+                mask &= False  # options exist, none selected → no cells
+            else:
+                mask &= df["fov"].astype(str).isin(fov_set).to_numpy()
         if not mask.any():
             continue
         sel = df.loc[mask]

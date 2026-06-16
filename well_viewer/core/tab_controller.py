@@ -48,6 +48,8 @@ def on_tab_change(app, _e=None) -> None:
         app._sidebar_image_table_frame.setVisible(False)
     app._sidebar_sample_frame.setVisible(False)
     app._sidebar_stats_frame.setVisible(False)
+    if hasattr(app, "_sidebar_cell_browser_frame"):
+        app._sidebar_cell_browser_frame.setVisible(False)
     # Heat-map layout configurator lives inside the standard sidebar but is
     # only relevant on the Heat Map tab.
     if hasattr(app, "_heatmap_sidebar_frame"):
@@ -119,6 +121,12 @@ def on_tab_change(app, _e=None) -> None:
         if hasattr(app, "_cell_gating_fluor_gate_edits"):
             cell_gating_load_cell_areas(app)
             cell_gating_sync_scatter_gates(app)
+
+    elif tab == "Cell Browser":
+        if hasattr(app, "_sidebar_cell_browser_frame"):
+            app._sidebar_cell_browser_frame.setVisible(True)
+        for _refresh in getattr(app, "_cell_browser_refreshers", ()):
+            _refresh(app)
 
     else:
         # Line Graphs, Bar Plots, or Scatter -- unified picker always shown

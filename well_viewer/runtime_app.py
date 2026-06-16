@@ -409,6 +409,7 @@ class WellViewerApp(QWidget):
         "Review CSV":         "file-spreadsheet",
         "Sample Definitions": "tag",
         "Batch Export":       "boxes",
+        "Cell Browser":       "grid-3x3",
     }
 
     def _sync_section_nav_from_notebook(self) -> None: return sync_section_nav_from_notebook(self)

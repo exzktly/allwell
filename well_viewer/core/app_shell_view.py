@@ -104,9 +104,11 @@ def build_ui(app) -> None:
     app._sidebar_image_table_frame = QWidget()
     app._sidebar_sample_frame = QWidget()
     app._sidebar_stats_frame = QWidget()
+    app._sidebar_cell_browser_frame = QWidget()
     for w in (app._sidebar_preview_frame, app._sidebar_image_table_frame,
               app._sidebar_sample_frame,
-              app._sidebar_stats_frame):
+              app._sidebar_stats_frame,
+              app._sidebar_cell_browser_frame):
         QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
         sidebar_layout.addWidget(w, 1)
         w.hide()

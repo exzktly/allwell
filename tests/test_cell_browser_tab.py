@@ -34,6 +34,25 @@ def test_cell_browser_section_icon_registered(viewer_app):
     assert "Cell Browser" in viewer_app._centre_lazy_only_titles
 
 
+def test_cell_browser_click_navigates_to_segmentation(loaded_app):
+    app = loaded_app
+    app._notebook.setCurrentByName("Cell Browser")
+    app._set_selected_wells(set(app._app_state.dataset.well_paths))
+
+    from well_viewer.features.cell_browser import controller as ctl
+    from well_viewer.features.cell_browser.collect import collect_cells
+
+    cells = collect_cells(app, [], [], [])
+    assert cells, "expected the mini dataset to yield cells"
+
+    # Clicking a cell must switch to Segmentation and select that nucleus —
+    # the navigation path must not raise even when image arrays are absent.
+    ctl.on_cell_clicked(app, cells[0])
+    assert app._current_centre_tab() == "Segmentation"
+    assert app._app_state.review_image.selected_nucleus == int(float(cells[0].nucleus_id))
+    assert app._app_state.preview.selected_well == cells[0].well
+
+
 def test_cell_browser_apply_filters_no_criteria(loaded_app):
     app = loaded_app
     app._notebook.setCurrentByName("Cell Browser")

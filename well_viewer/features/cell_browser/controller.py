@@ -17,7 +17,10 @@ from PySide6.QtWidgets import QLabel, QWidget
 from well_viewer.core.safe import swallowed
 from well_viewer.features.cell_browser.collect import Criterion, collect_cells
 from well_viewer.features.cell_browser.state import MAX_TOTAL, THUMB_PX
-from well_viewer.features.review_image.renderer import refresh_review_image
+from well_viewer.features.review_image.controller import (
+    zoom_review_image_to_selected_nucleus,
+)
+from well_viewer.features.review_image.renderer import refresh_review_image, update_preview
 
 _logger = logging.getLogger("well_viewer")
 
@@ -185,21 +188,31 @@ def on_cell_clicked(app, desc) -> None:
     """Highlight the clicked cell in the Segmentation view (mirrors the
     Review-CSV jump-to-image navigation)."""
     try:
+        if hasattr(app, "_notebook"):
+            app._notebook.setCurrentByName("Segmentation")
+        # Target nucleus before any refresh so intermediate renders already
+        # draw the highlight (mirrors review_image.controller's jump-to-cell).
         if desc.nucleus_id:
             try:
                 app._app_state.review_image.selected_nucleus = int(float(desc.nucleus_id))
             except (TypeError, ValueError):
                 app._app_state.review_image.selected_nucleus = None
+        # Switch wells *through* update_preview so the target well's image maps
+        # are decoded and the FOV menu is repopulated — otherwise jumping to a
+        # cell in a different well leaves the FOV combo (and image) stale.
         app._app_state.preview.selected_well = desc.well
-        if hasattr(app, "_notebook"):
-            app._notebook.setCurrentByName("Segmentation")
+        update_preview(app, desc.well)
         fov_cb = getattr(app, "_preview_fov_cb", None)
         if fov_cb is not None and desc.fov:
             fov_cb.setCurrentText(desc.fov)
         refresh_review_image(app)
+        # The TP menu now holds the target FOV's timepoints; setting it fires
+        # currentIndexChanged → refresh, rendering the correct frame.
         tp_cb = getattr(app, "_review_image_tp_cb", None)
         if tp_cb is not None and desc.tp_token:
             tp_cb.setCurrentText(desc.tp_token)
+        # Centre + zoom on the highlighted cell so it's actually visible.
+        zoom_review_image_to_selected_nucleus(app)
     except Exception as exc:  # noqa: BLE001
         _logger.exception("cell_browser: navigate-to-segmentation failed")
         _set_status(app, f"Could not open cell in Segmentation: {exc}")

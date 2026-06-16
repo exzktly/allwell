@@ -127,6 +127,12 @@ def cell_browser_refresh(app) -> None:
     if host is None:
         return
     channels = cell_browser_channels(app)
+    if not channels:
+        # A transient empty resolve (channel state not populated yet, rows not
+        # cached on this pass) must NOT wipe a channel row that already built —
+        # clearing then adding nothing is exactly how the bar "vanished after it
+        # showed once". Leave any existing chips intact and try again next refresh.
+        return
     prev = {tok: cb.isChecked() for tok, cb in
             (getattr(app, "_cell_browser_channel_chips", {}) or {}).items()}
     lay = host.layout()

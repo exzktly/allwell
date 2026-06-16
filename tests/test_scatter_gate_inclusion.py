@@ -71,19 +71,20 @@ def test_on_gate_drawn_assigns_default_name():
 
 
 def test_selected_scatter_gates_honours_choice():
-    """The filtering-gate dropdown choice picks one named gate; None = union."""
+    """The multi-select filter picks a set of named gates; None = all (union)."""
     from well_viewer.features.grouping.cell_gating_tab_view import (
         cell_gating_selected_scatter_gates,
     )
     g1 = {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "name": "Gate 1"}
     g2 = {"x0": 2, "y0": 2, "x1": 3, "y1": 3, "name": "Gate 2"}
-    app = SimpleNamespace(_scatter_gates=[g1, g2])
+    g3 = {"x0": 4, "y0": 4, "x1": 5, "y1": 5, "name": "Gate 3"}
+    app = SimpleNamespace(_scatter_gates=[g1, g2, g3])
 
-    app._cell_gating_scatter_gate_choice = None          # union
-    assert cell_gating_selected_scatter_gates(app) == [g1, g2]
-    app._cell_gating_scatter_gate_choice = "Gate 2"       # single gate
-    assert cell_gating_selected_scatter_gates(app) == [g2]
-    app._cell_gating_scatter_gate_choice = "Gone"         # deleted gate
+    app._cell_gating_scatter_gate_choices = None              # all (union)
+    assert cell_gating_selected_scatter_gates(app) == [g1, g2, g3]
+    app._cell_gating_scatter_gate_choices = {"Gate 1", "Gate 3"}  # multi-select
+    assert cell_gating_selected_scatter_gates(app) == [g1, g3]
+    app._cell_gating_scatter_gate_choices = set()             # none selected
     assert cell_gating_selected_scatter_gates(app) == []
 
 
@@ -94,7 +95,7 @@ def test_rename_gate_rejects_blank_and_duplicate_keeps_choice():
     g2 = {"x0": 2, "y0": 2, "x1": 3, "y1": 3, "name": "Gate 2"}
     app = SimpleNamespace(
         _scatter_gates=[g1, g2],
-        _cell_gating_scatter_gate_choice="Gate 1",
+        _cell_gating_scatter_gate_choices={"Gate 1"},
         _scatter_gate_redraw_cb=lambda _a: None,
     )
     assert rename_gate(app, 0, "") is False           # blank rejected
@@ -102,8 +103,8 @@ def test_rename_gate_rejects_blank_and_duplicate_keeps_choice():
     assert g1["name"] == "Gate 1"                       # unchanged
     assert rename_gate(app, 0, "Live") is True          # valid rename
     assert g1["name"] == "Live"
-    # The filtering choice follows the rename so the selection isn't lost.
-    assert app._cell_gating_scatter_gate_choice == "Live"
+    # The selection set follows the rename so the gate stays selected.
+    assert app._cell_gating_scatter_gate_choices == {"Live"}
 
 
 def test_on_gate_drawn_without_cache_leaves_columns_none():

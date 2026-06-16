@@ -562,10 +562,12 @@ def rename_gate(app, idx: int, name: str) -> bool:
     if any(i != idx and str(g.get("name") or "") == new for i, g in enumerate(gates)):
         return False  # name already taken by another gate
     gates[idx]["name"] = new
-    # If this gate is the Cell Gating filtering choice, follow the rename so the
-    # selection isn't lost.
-    if getattr(app, "_cell_gating_scatter_gate_choice", None) == old:
-        app._cell_gating_scatter_gate_choice = new
+    # If this gate is in the Cell Gating filtering selection, follow the rename
+    # so the selection isn't lost (None means "all", nothing to update).
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
+    if isinstance(choices, set) and old in choices:
+        choices.discard(old)
+        choices.add(new)
     _notify_gates_changed(app)
     _redraw(app)
     return True

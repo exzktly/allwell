@@ -627,6 +627,7 @@ def cell_gating_on_use_scatter_gates_change(app) -> None:
     cb = getattr(app, "_cell_gating_use_scatter_gates_cb", None)
     app._cell_gating_use_scatter_gates = bool(cb.isChecked()) if cb is not None else False
     _cell_gating_apply_scatter_gate_mode(app)
+    _cell_gating_refresh_gate_filter(app)  # enable/disable this layer's Gates button
     _cell_gating_refresh_gate_summary(app)
     _cell_gating_persist_params(app)
     app._cell_gating_last_gate_sig = _scatter_gate_signature(app)
@@ -643,6 +644,7 @@ def cell_gating_on_use_scatter_thresh_change(app) -> None:
     cb = getattr(app, "_cell_gating_use_scatter_thresh_cb", None)
     app._cell_gating_use_scatter_thresh = bool(cb.isChecked()) if cb is not None else False
     _cell_gating_apply_scatter_gate_mode(app)
+    _cell_gating_refresh_gate_filter(app)  # enable/disable this layer's Gates button
     _cell_gating_refresh_gate_summary(app)
     _cell_gating_persist_params(app)
     app._cell_gating_last_gate_sig = _scatter_gate_signature(app)

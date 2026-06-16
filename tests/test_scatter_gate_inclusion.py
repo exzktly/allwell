@@ -214,6 +214,40 @@ def test_gate_pass_absent_is_all_pass():
     assert df_included_mask(df).tolist() == [True, True]
 
 
+def test_toggling_a_layer_enables_its_gates_button(qtbot, monkeypatch):
+    """Ticking a mode's checkbox must enable that layer's Gates button live (not
+    only after a tab re-entry) — regression for the button staying inactive."""
+    import well_viewer.features.grouping.cell_gating_tab_view as cg
+    from PySide6.QtWidgets import QCheckBox, QPushButton
+
+    monkeypatch.setattr(cg, "cell_gating_start_gating_worker", lambda app: None)
+    app = SimpleNamespace(
+        _scatter_gates=[{"name": "Gate 1", "x_col": "a", "y_col": "b",
+                         "x0": 0, "y0": 0, "x1": 1, "y1": 1}],
+        _cell_gating_fluor_gate_edits={},
+        _cell_gating_gate_summary=None,
+        _cell_gating_gating_choices=None,
+        _cell_gating_thresh_choices=None,
+        _cell_gating_use_scatter_gates=False,
+        _cell_gating_use_scatter_thresh=False,
+        _cell_gating_use_scatter_gates_cb=QCheckBox(),
+        _cell_gating_use_scatter_thresh_cb=QCheckBox(),
+        _cell_gating_gating_gate_btn=QPushButton(),
+        _cell_gating_thresh_gate_btn=QPushButton(),
+    )
+    cg._cell_gating_refresh_gate_filter(app)
+    assert not app._cell_gating_gating_gate_btn.isEnabled()  # off → disabled
+
+    app._cell_gating_use_scatter_gates_cb.setChecked(True)
+    cg.cell_gating_on_use_scatter_gates_change(app)
+    assert app._cell_gating_gating_gate_btn.isEnabled()       # now active
+    assert not app._cell_gating_thresh_gate_btn.isEnabled()   # thresh still off
+
+    app._cell_gating_use_scatter_thresh_cb.setChecked(True)
+    cg.cell_gating_on_use_scatter_thresh_change(app)
+    assert app._cell_gating_thresh_gate_btn.isEnabled()
+
+
 # ── thresholding: fraction-on by gate (on_col) ────────────────────────────────
 
 def test_aggregate_on_col_defines_fraction_on_by_gate():

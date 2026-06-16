@@ -345,6 +345,7 @@ def aggregate_with_threshold_df(
     fluor_gates: Optional[Dict[str, float]] = None,
     per_fov_spread: bool = False,
     ratios: Optional[Dict[str, RatioMetric]] = None,
+    on_col: Optional[str] = None,
 ) -> List[AggPoint]:
     """Group rows by timepoint; compute stats for cells above threshold.
 
@@ -440,6 +441,13 @@ def aggregate_with_threshold_df(
     tp_arr = tp_num[final]
     val_arr = val[final]
 
+    # Scatter-gate "thresholding" mode: a per-row boolean column defines the
+    # on-population (fraction-on by gate) instead of ``value > threshold``.
+    on_arr = None
+    if on_col and on_col in df.columns:
+        on_full = pd.to_numeric(df[on_col], errors="coerce").fillna(0).to_numpy() > 0.5
+        on_arr = on_full[final]
+
     if per_fov_spread:
         if "fov" in df.columns:
             fov_series = (df["fov"].fillna("1").astype(str).str.strip()
@@ -451,7 +459,7 @@ def aggregate_with_threshold_df(
         fov_arr = None
 
     return _aggregate_arrays(tp_arr, val_arr, fov_arr, threshold, use_sem,
-                             per_fov_spread)
+                             per_fov_spread, on_arr=on_arr)
 
 
 def _aggregate_arrays(
@@ -461,13 +469,22 @@ def _aggregate_arrays(
     threshold: float,
     use_sem: bool,
     per_fov_spread: bool,
+    on_arr: Optional[np.ndarray] = None,
 ) -> List[AggPoint]:
+    """Per-timepoint mean / fraction of the "on" population.
+
+    "On" is normally ``value > threshold``; when ``on_arr`` is given (a per-row
+    boolean aligned to ``val_arr``) it defines the on-population instead — the
+    scatter-gate "thresholding" mode passes gate membership here so fraction-on
+    (and the mean of the on-population) reflect the gate rather than the
+    per-channel ThreshFracOn cutoff.
+    """
     result: List[AggPoint] = []
     for t in np.unique(tp_arr):
         idx = tp_arr == t
         v = val_arr[idx]
         n_total = int(v.size)
-        above_mask = v > threshold
+        above_mask = on_arr[idx] if on_arr is not None else (v > threshold)
         above = v[above_mask]
         n_above = int(above.size)
         mean = float(above.sum() / n_above) if n_above else float("nan")

@@ -149,8 +149,13 @@ def load_directory(app, d: Path, label=None) -> None:
     # when neither file exists.
     try:
         app._persistence.load("qc_params")
-        from well_viewer.features.qc.controller import apply_qc_to_cache
-        apply_qc_to_cache(app)
+        # recompute_qc_all (not bare apply_qc_to_cache): project QC_Pass AND
+        # invalidate the stats/aggregation cache + bump override_version, so the
+        # post-load redraw actually reflects the just-hydrated thresholds. Bare
+        # apply only wrote the column, leaving any cache built earlier in the
+        # load sequence stale — the gate loaded into the fields but didn't take.
+        from well_viewer.features.qc.controller import recompute_qc_all
+        recompute_qc_all(app)
         from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
         qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
     except Exception:
@@ -280,10 +285,12 @@ def _kick_off_gating_after_load(app) -> None:
                 break
         except ValueError:
             pass
-    # Scatter-gate inclusion mode also needs the pass so Gate_Pass is computed
-    # from the persisted gates on load (it has no per-channel edit to inspect).
+    # Scatter-gate inclusion / thresholding modes also need the pass so
+    # Gate_Pass / Gate_On are computed from the persisted gates on load (neither
+    # has a per-channel edit to inspect).
     use_scatter = getattr(app, "_cell_gating_use_scatter_gates", False)
-    if has_non_default_gate or use_scatter:
+    use_thresh = getattr(app, "_cell_gating_use_scatter_thresh", False)
+    if has_non_default_gate or use_scatter or use_thresh:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(app)
 

@@ -190,6 +190,31 @@ def test_gate_pass_absent_is_all_pass():
     assert df_included_mask(df).tolist() == [True, True]
 
 
+# ── thresholding: fraction-on by gate (on_col) ────────────────────────────────
+
+def test_aggregate_on_col_defines_fraction_on_by_gate():
+    from well_viewer.data.data_loading import aggregate_with_threshold_df
+
+    df = pd.DataFrame({
+        "timepoint_hours": [0.0, 0.0, 0.0, 0.0],
+        "area_px":         [1, 1, 1, 1],
+        "gfp_mean_intensity": [10.0, 20.0, 30.0, 40.0],
+        "Gate_On":         [1, 0, 1, 0],
+    })
+    # threshold=100 → nothing is above by value; the gate defines "on".
+    by_value = aggregate_with_threshold_df(df, threshold=100.0,
+                                           val_col="gfp_mean_intensity")
+    assert by_value[0][3] == 0.0  # fraction_above by value → 0
+
+    by_gate = aggregate_with_threshold_df(df, threshold=100.0,
+                                          val_col="gfp_mean_intensity",
+                                          on_col="Gate_On")
+    pt = by_gate[0]
+    assert pt[3] == 0.5            # fraction-on = 2/4 inside the gate
+    assert pt[4] == 2             # n_above = gate members
+    assert pt[1] == 20.0          # mean of the on (in-gate) population: (10+30)/2
+
+
 # ── persistence round-trip ────────────────────────────────────────────────────
 
 def test_gating_block_round_trips_scatter_gates(tmp_path):

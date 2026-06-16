@@ -120,3 +120,20 @@ def test_no_selection_falls_back_to_all_loaded_wells():
     app._app_state.selection.selected_wells = []
     cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=0.0)])
     assert len(cells) == 4  # all rows of the one loaded well (A01)
+
+
+def test_timepoint_filter_is_strict_include_list():
+    # None → not filtered (all 4 rows); [] → options exist but none chosen → 0;
+    # a value → only that timepoint's cells (tps are [0,0,24,24]).
+    app = _app(_df())
+    assert len(collect_cells(app, [], timepoints=None)) == 4
+    assert collect_cells(app, [], timepoints=[]) == []
+    assert len(collect_cells(app, [], timepoints=[0.0])) == 2
+
+
+def test_fov_filter_is_strict_include_list():
+    # None → not filtered; [] → 0; a value → only that FOV (fovs are [1,2,1,2]).
+    app = _app(_df())
+    assert len(collect_cells(app, [], fovs=None)) == 4
+    assert collect_cells(app, [], fovs=[]) == []
+    assert len(collect_cells(app, [], fovs=["1"])) == 2

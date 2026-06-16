@@ -72,8 +72,13 @@ def read_criteria(app) -> List[Criterion]:
     return out
 
 
-def read_timepoints(app) -> List[float]:
+def read_timepoints(app):
+    """Checked timepoints (strict include-list). Returns ``None`` when the
+    dataset has no timepoint dimension (nothing to filter), else the list of
+    checked timepoints — possibly ``[]`` (none checked → no cells)."""
     sel = getattr(app, "_cell_browser_tp_selections", {}) or {}
+    if not sel:
+        return None  # no timepoint dimension → don't filter on it
     out: List[float] = []
     for tp_str, on in sel.items():
         if on:
@@ -84,8 +89,12 @@ def read_timepoints(app) -> List[float]:
     return out
 
 
-def read_fovs(app) -> List[str]:
+def read_fovs(app):
+    """Checked FOVs (strict include-list); ``None`` when there's no FOV
+    dimension, else the checked list (possibly ``[]`` → no cells)."""
     sel = getattr(app, "_cell_browser_fov_selections", {}) or {}
+    if not sel:
+        return None
     return [f for f, on in sel.items() if on]
 
 

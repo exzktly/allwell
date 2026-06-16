@@ -223,14 +223,14 @@ def cell_browser_sidebar_refresh(app) -> None:
 
 def _sync_selection_dict(sel: dict, keys) -> None:
     """Keep *sel* (key→bool) in step with the available *keys*; new keys default
-    to **deselected**, vanished keys are dropped, existing choices preserved.
+    to **selected**, vanished keys are dropped, existing choices preserved.
 
-    Nothing selected means "no timepoint/FOV restriction" (collect_cells treats
-    an empty selection as all), so the filters start unchecked and the user
-    opts into specific timepoints / FOVs."""
+    The timepoint/FOV pickers are a strict include-list (collect_cells shows no
+    cells when options exist but none are checked), so they start all-checked —
+    the full gallery on open — and unchecking narrows it."""
     keyset = set(keys)
     for k in list(sel.keys()):
         if k not in keyset:
             del sel[k]
     for k in keys:
-        sel.setdefault(k, False)
+        sel.setdefault(k, True)

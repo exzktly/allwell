@@ -138,6 +138,10 @@ def cell_browser_refresh(app) -> None:
     for tok in channels:
         cb = QCheckBox(tok.upper(), host)
         cb.setChecked(prev.get(tok, True))
+        # Toggling a channel re-composes the gallery so the choice takes effect
+        # immediately (connected after setChecked so the programmatic state
+        # above doesn't fire a reload).
+        cb.toggled.connect(lambda _on, _app=app: ctl.apply_filters(_app))
         lay.addWidget(cb)
         chips[tok] = cb
     app._cell_browser_channel_chips = chips

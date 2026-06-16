@@ -130,6 +130,21 @@ def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
     return mask
 
 
+def cell_browser_source_wells(app) -> List[str]:
+    """Wells the Cell Browser draws from: the explicit selection, else *every*
+    loaded well.
+
+    Mirrors the Cell Gating tab's ``_cell_gating_source_wells`` fallback so the
+    gallery (and the FOV picker) populate on first open, before the user has
+    picked wells on the plate — otherwise an empty selection silently yields no
+    candidates."""
+    paths = app._app_state.dataset.well_paths
+    selected = [lbl for lbl in app._app_state.selection.selected_wells if lbl in paths]
+    wells = selected or list(paths.keys())
+    key = getattr(app, "_parse_rc", None) or (lambda s: s)
+    return sorted(wells, key=key)
+
+
 def collect_cells(
     app,
     criteria: List[Criterion],
@@ -148,11 +163,7 @@ def collect_cells(
     fov_set = {str(f) for f in (fovs or [])}
 
     out: List[CellDescriptor] = []
-    selected = sorted(
-        (lbl for lbl in app._app_state.selection.selected_wells
-         if lbl in app._app_state.dataset.well_paths),
-        key=getattr(app, "_parse_rc", None) or (lambda s: s),
-    )
+    selected = cell_browser_source_wells(app)
     for well in selected:
         df = app._get_rows(well)
         if df is None or df.empty:

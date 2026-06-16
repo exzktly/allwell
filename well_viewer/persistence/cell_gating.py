@@ -30,11 +30,12 @@ def save_to_pipeline_info(app) -> None:
         key: cell_gating_get_thresh_frac_on(app, key)
         for key in (app._cell_gating_thresh_frac_edits or {}).keys()
     }
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
     block = build_gating_block(
         fluor_gates, thresh_frac_on,
         scatter_gates=getattr(app, "_scatter_gates", None),
         use_scatter_gates=getattr(app, "_cell_gating_use_scatter_gates", False),
-        scatter_gate_choice=getattr(app, "_cell_gating_scatter_gate_choice", None),
+        scatter_gate_choices=(None if choices is None else sorted(choices)),
         use_scatter_thresh=getattr(app, "_cell_gating_use_scatter_thresh", False),
     )
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
@@ -58,7 +59,7 @@ def load_from_pipeline_info(app) -> bool:
     # so persistence can't import it at module scope without a cycle).
     from well_viewer.features.grouping.cell_gating_tab_view import (
         _cell_gating_apply_scatter_gate_mode,
-        _cell_gating_refresh_gate_choices,
+        _cell_gating_refresh_gate_filter,
         _cell_gating_refresh_gate_summary,
         build_cell_gating_subtab,
     )
@@ -111,8 +112,16 @@ def load_from_pipeline_info(app) -> bool:
         applied = True
     app._cell_gating_use_scatter_gates = bool(block.get("use_scatter_gates", False))
     app._cell_gating_use_scatter_thresh = bool(block.get("use_scatter_thresh", False))
-    choice = block.get("scatter_gate_choice")
-    app._cell_gating_scatter_gate_choice = str(choice) if choice else None
+    # Filtering-gate selection: a list of names, or absent ⇒ None (all). Migrate
+    # the legacy single ``scatter_gate_choice`` (one name, or absent = all).
+    if "scatter_gate_choices" in block:
+        sel = block.get("scatter_gate_choices")
+        app._cell_gating_scatter_gate_choices = (
+            set(str(n) for n in sel) if isinstance(sel, list) else None
+        )
+    else:
+        legacy = block.get("scatter_gate_choice")
+        app._cell_gating_scatter_gate_choices = {str(legacy)} if legacy else None
     for attr, flag in (
         ("_cell_gating_use_scatter_gates_cb", app._cell_gating_use_scatter_gates),
         ("_cell_gating_use_scatter_thresh_cb", app._cell_gating_use_scatter_thresh),
@@ -124,7 +133,7 @@ def load_from_pipeline_info(app) -> bool:
                 cb.setChecked(flag)
             finally:
                 cb.blockSignals(blocked)
-    _cell_gating_refresh_gate_choices(app)
+    _cell_gating_refresh_gate_filter(app)
     _cell_gating_apply_scatter_gate_mode(app)
     _cell_gating_refresh_gate_summary(app)
 

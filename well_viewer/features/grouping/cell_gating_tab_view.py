@@ -231,8 +231,8 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_use_scatter_gates = getattr(
         ctx.app, "_cell_gating_use_scatter_gates", False
     )
-    ctx.app._cell_gating_scatter_gate_choice = getattr(
-        ctx.app, "_cell_gating_scatter_gate_choice", None
+    ctx.app._cell_gating_scatter_gate_choices = getattr(
+        ctx.app, "_cell_gating_scatter_gate_choices", None
     )
     # Thresholding mode (independent of gating): cells inside the selected
     # gate(s) count as "on" for fraction-on stats, replacing the ThreshFracOn
@@ -317,7 +317,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # Scatter-gate inclusion. The user draws named rectangular gates on the
     # Scatter Plot tab; ticking this replaces the FluorGating intensity floors,
     # and the dropdown picks which gate filters (or all of them, unioned).
-    from PySide6.QtWidgets import QCheckBox as _QCheckBox, QComboBox as _QComboBox
+    from PySide6.QtWidgets import QCheckBox as _QCheckBox, QPushButton as _QPushButton
     sg_row = QWidget(control_frame)
     sg_layout = QHBoxLayout(sg_row)
     sg_layout.setContentsMargins(0, 0, 0, 0)
@@ -338,18 +338,19 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_use_scatter_gates_cb = use_sg_cb
     sg_layout.addWidget(use_sg_cb)
     sg_layout.addSpacing(8)
-    sg_layout.addWidget(QLabel("Filtering gate:", sg_row))
-    gate_combo = _QComboBox(sg_row)
-    gate_combo.setMinimumWidth(160)
-    gate_combo.setToolTip(
-        "Which scatter gate defines inclusion: a single named gate, or the "
-        "union of all gates."
+    sg_layout.addWidget(QLabel("Filtering gates:", sg_row))
+    gate_btn = _QPushButton("All gates", sg_row)
+    gate_btn.setMinimumWidth(160)
+    gate_btn.setToolTip(
+        "Which scatter gates define the population (union of the checked gates). "
+        "Tick multiple to combine them; applies to both inclusion and "
+        "fraction-on. Defaults to all gates."
     )
-    gate_combo.currentIndexChanged.connect(
-        lambda _i, _app=ctx.app: cell_gating_on_scatter_gate_choice_change(_app)
+    gate_btn.clicked.connect(
+        lambda _=False, _app=ctx.app: _open_gate_filter_menu(_app)
     )
-    ctx.app._cell_gating_scatter_gate_combo = gate_combo
-    sg_layout.addWidget(gate_combo)
+    ctx.app._cell_gating_gate_button = gate_btn
+    sg_layout.addWidget(gate_btn)
     sg_layout.addStretch(1)
     cf_layout.addWidget(sg_row)
 
@@ -387,7 +388,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # switch. (Safe now that the per-cell scatter never filters itself by the
     # gates — see df_included_mask(include_gate=False).)
     ctx.app._scatter_gates_changed_cb = lambda _app=ctx.app: cell_gating_sync_scatter_gates(_app)
-    _cell_gating_refresh_gate_choices(ctx.app)
+    _cell_gating_refresh_gate_filter(ctx.app)
     _cell_gating_refresh_gate_summary(ctx.app)
     _cell_gating_apply_scatter_gate_mode(ctx.app)
 
@@ -633,59 +634,119 @@ def cell_gating_on_use_scatter_thresh_change(app) -> None:
 
 
 # Sentinel display label for "use the union of every gate" (first combo entry).
-_ALL_GATES_LABEL = "All gates (union)"
+def cell_gating_selected_scatter_gates(app) -> list:
+    """The gates the filter currently selects (union).
+
+    The selection is a set of gate names in ``_cell_gating_scatter_gate_choices``;
+    ``None`` means "all gates" (the default, which also auto-includes gates drawn
+    later). An explicit (possibly empty) set selects exactly those names."""
+    gates = getattr(app, "_scatter_gates", None) or []
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
+    if choices is None:
+        return list(gates)
+    chosen = set(choices)
+    return [g for g in gates if str(g.get("name") or "") in chosen]
 
 
-def cell_gating_on_scatter_gate_choice_change(app) -> None:
-    """Pick which scatter gate filters: a single named gate, or all (union)."""
-    combo = getattr(app, "_cell_gating_scatter_gate_combo", None)
-    if combo is None:
-        return
-    data = combo.currentData()
-    app._cell_gating_scatter_gate_choice = data  # None ⇒ all gates (union)
+def _cell_gating_gate_names(app) -> list:
+    return [str(g.get("name") or "")
+            for g in (getattr(app, "_scatter_gates", None) or [])
+            if str(g.get("name") or "")]
+
+
+def _cell_gating_set_gate_choices(app, choices) -> None:
+    """Commit a new filter selection (``None`` = all), then persist + recompute.
+
+    Collapses a full explicit set back to ``None`` so newly drawn gates keep
+    being auto-included while the user is effectively at "all"."""
+    if choices is not None and set(choices) == set(_cell_gating_gate_names(app)):
+        choices = None
+    app._cell_gating_scatter_gate_choices = (None if choices is None else set(choices))
+    _cell_gating_refresh_gate_filter(app)
     _cell_gating_refresh_gate_summary(app)
     _cell_gating_persist_params(app)
-    if (getattr(app, "_cell_gating_use_scatter_gates", False)
-            or getattr(app, "_cell_gating_use_scatter_thresh", False)):
+    if _cell_gating_scatter_mode_on(app):
         app._cell_gating_last_gate_sig = _scatter_gate_signature(app)
         cell_gating_start_gating_worker(app)
 
 
-def cell_gating_selected_scatter_gates(app) -> list:
-    """The gates the current choice selects — a single named gate, or all of
-    them (union) when the choice is None / missing."""
-    gates = getattr(app, "_scatter_gates", None) or []
-    choice = getattr(app, "_cell_gating_scatter_gate_choice", None)
-    if not choice:
-        return list(gates)
-    return [g for g in gates if str(g.get("name") or "") == str(choice)]
+def _open_gate_filter_menu(app) -> None:
+    """Pop up a checkbox menu under the Filtering-gates button (multi-select).
 
+    Mirrors the scatter timepoint picker: one checkbox per named gate plus
+    All / None actions. Checking several combines them (union)."""
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
 
-def _cell_gating_refresh_gate_choices(app) -> None:
-    """Repopulate the filtering-gate dropdown from the current gate names.
-
-    Keeps the user's selection when its gate still exists; falls back to the
-    union entry otherwise (and clears a now-dangling choice)."""
-    combo = getattr(app, "_cell_gating_scatter_gate_combo", None)
-    if combo is None:
+    btn = getattr(app, "_cell_gating_gate_button", None)
+    if btn is None:
         return
-    gates = getattr(app, "_scatter_gates", None) or []
-    names = [str(g.get("name") or "") for g in gates if str(g.get("name") or "")]
-    choice = getattr(app, "_cell_gating_scatter_gate_choice", None)
-    if choice is not None and choice not in names:
-        choice = None  # the selected gate was deleted/renamed
-        app._cell_gating_scatter_gate_choice = None
-    blocked = combo.blockSignals(True)
-    try:
-        combo.clear()
-        combo.addItem(_ALL_GATES_LABEL, None)
-        for nm in names:
-            combo.addItem(nm, nm)
-        idx = combo.findData(choice) if choice is not None else 0
-        combo.setCurrentIndex(idx if idx >= 0 else 0)
-    finally:
-        combo.blockSignals(blocked)
-    combo.setEnabled(_cell_gating_scatter_mode_on(app))
+    names = _cell_gating_gate_names(app)
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
+    selected = set(names) if choices is None else set(choices)
+
+    menu = QMenu(btn)
+    if not names:
+        empty = QAction("No gates drawn yet", menu)
+        empty.setEnabled(False)
+        menu.addAction(empty)
+    for nm in names:
+        cb = QCheckBox(nm, menu)
+        cb.setChecked(nm in selected)
+
+        def _make(name=nm, checkbox=cb):
+            def _on(checked: bool) -> None:
+                cur = set(names) if app._cell_gating_scatter_gate_choices is None \
+                    else set(app._cell_gating_scatter_gate_choices)
+                cur.add(name) if checked else cur.discard(name)
+                _cell_gating_set_gate_choices(app, cur)
+            return _on
+
+        cb.toggled.connect(_make())
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(cb)
+        menu.addAction(wa)
+    if names:
+        menu.addSeparator()
+        all_a = QAction("All", menu)
+        all_a.triggered.connect(lambda _=False: _cell_gating_set_gate_choices(app, None))
+        menu.addAction(all_a)
+        none_a = QAction("None", menu)
+        none_a.triggered.connect(lambda _=False: _cell_gating_set_gate_choices(app, set()))
+        menu.addAction(none_a)
+    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+
+def _cell_gating_gate_button_text(app) -> str:
+    names = _cell_gating_gate_names(app)
+    if not names:
+        return "No gates"
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
+    if choices is None:
+        return "All gates"
+    chosen = [n for n in names if n in set(choices)]
+    if not chosen:
+        return "None"
+    if len(chosen) == 1:
+        return chosen[0]
+    return f"{len(chosen)} of {len(names)} gates"
+
+
+def _cell_gating_refresh_gate_filter(app) -> None:
+    """Sync the Filtering-gates button (text + enabled) to the current gates and
+    prune any explicitly-selected names that no longer exist."""
+    btn = getattr(app, "_cell_gating_gate_button", None)
+    if btn is None:
+        return
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
+    if choices is not None:
+        names = set(_cell_gating_gate_names(app))
+        pruned = set(choices) & names
+        app._cell_gating_scatter_gate_choices = (
+            None if pruned == names and names else pruned
+        )
+    btn.setText(_cell_gating_gate_button_text(app))
+    btn.setEnabled(_cell_gating_scatter_mode_on(app))
 
 
 def _cell_gating_scatter_mode_on(app) -> bool:
@@ -703,10 +764,11 @@ def _scatter_gate_signature(app):
     Used to skip a redundant gating pass when re-entering the tab with nothing
     changed — see :func:`cell_gating_sync_scatter_gates`."""
     gates = cell_gating_selected_scatter_gates(app)
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
     return (
         bool(getattr(app, "_cell_gating_use_scatter_gates", False)),
         bool(getattr(app, "_cell_gating_use_scatter_thresh", False)),
-        getattr(app, "_cell_gating_scatter_gate_choice", None),
+        None if choices is None else tuple(sorted(choices)),
         tuple(
             (g.get("x_col"), g.get("y_col"),
              round(float(g.get("x0", 0.0)), 6), round(float(g.get("y0", 0.0)), 6),
@@ -730,7 +792,7 @@ def cell_gating_sync_scatter_gates(app) -> None:
     """
     if not hasattr(app, "_cell_gating_use_scatter_gates_cb"):
         return  # tab not built yet
-    _cell_gating_refresh_gate_choices(app)
+    _cell_gating_refresh_gate_filter(app)
     _cell_gating_apply_scatter_gate_mode(app)
     _cell_gating_refresh_gate_summary(app)
     if not _cell_gating_scatter_mode_on(app):
@@ -745,13 +807,13 @@ def _cell_gating_apply_scatter_gate_mode(app) -> None:
     """Grey out the FluorGating edits while scatter-gate *inclusion* is active —
     they no longer drive Included, so an editable field would mislead.
     Thresholding doesn't replace FluorGating, so it doesn't grey them. The
-    filtering-gate dropdown is relevant to either layer, so enable it for both."""
+    filtering-gates button is relevant to either layer, so enable it for both."""
     gating_on = bool(getattr(app, "_cell_gating_use_scatter_gates", False))
     for edit in (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).values():
         edit.setEnabled(not gating_on)
-    combo = getattr(app, "_cell_gating_scatter_gate_combo", None)
-    if combo is not None:
-        combo.setEnabled(_cell_gating_scatter_mode_on(app))
+    btn = getattr(app, "_cell_gating_gate_button", None)
+    if btn is not None:
+        btn.setEnabled(_cell_gating_scatter_mode_on(app))
 
 
 def _cell_gating_refresh_gate_summary(app) -> None:
@@ -771,17 +833,22 @@ def _cell_gating_refresh_gate_summary(app) -> None:
         )
         return
     gates = cell_gating_selected_scatter_gates(app)
-    choice = getattr(app, "_cell_gating_scatter_gate_choice", None)
-    if choice and not gates:
-        lbl.setText(f"Gate “{choice}” no longer exists.")
+    if not gates:
+        lbl.setText("No gates selected — tick one under “Filtering gates”.")
         return
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
     axes = sorted({
         f"{g.get('x_col')} × {g.get('y_col')}"
         for g in gates if g.get("x_col") and g.get("y_col")
     })
     detail = f" on {', '.join(axes)}" if axes else ""
-    target = (f"gate “{choice}”" if choice
-              else f"all {len(gates)} gate(s) (union)")
+    if choices is None:
+        target = f"all {len(gates)} gate(s) (union)"
+    elif len(gates) == 1:
+        target = f"gate “{gates[0].get('name')}”"
+    else:
+        names = ", ".join(str(g.get("name")) for g in gates)
+        target = f"{len(gates)} gates (union: {names})"
     modes = []
     if getattr(app, "_cell_gating_use_scatter_gates", False):
         modes.append("inclusion")

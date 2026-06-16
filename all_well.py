@@ -96,7 +96,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v6.10.0")
+        self._version_pill = QLabel("v6.11.0")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "

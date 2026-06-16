@@ -35,9 +35,13 @@ def _thresh_on_col(app) -> Optional[str]:
     gates = getattr(app, "_scatter_gates", None) or []
     if not gates:
         return None
-    choice = getattr(app, "_cell_gating_scatter_gate_choice", None)
-    if choice and not any(str(g.get("name") or "") == str(choice) for g in gates):
-        return None
+    # Selection is a set of gate names; None ⇒ all. Fall back to the ThreshFracOn
+    # cutoff (return None) when the user has explicitly selected no existing gate.
+    choices = getattr(app, "_cell_gating_scatter_gate_choices", None)
+    if choices is not None:
+        chosen = set(choices)
+        if not any(str(g.get("name") or "") in chosen for g in gates):
+            return None
     return "Gate_On"
 
 

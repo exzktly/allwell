@@ -36,6 +36,8 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **6.11.0 — Multi-select filtering gates.** The Cell Gating "filtering gate" picker is now a **multi-select checkbox menu** (the *Filtering gates* button) instead of a single-choice dropdown — tick any combination of named gates and they're combined as a union, applied to both inclusion and fraction-on. Defaults to all gates (new gates auto-included).
+
 - **6.10.0 — Scatter gate as a fraction-on threshold.** On the **Cell Gating** tab the scatter gate can now be applied two independent ways: **inclusion** (the existing checkbox — cells outside the gate drop out) and/or **thresholding** (a new checkbox — cells *inside* the gate count as "on" for fraction-on stats, replacing the per-channel ThreshFracOn cutoff; no cells are removed). Both use the same filtering-gate dropdown and can be on at once. Also fixes a bug where a persisted QC debris gate (e.g. min/max circularity) loaded its values into the fields on reload but didn't re-apply to the dataset.
 
 - **6.9.0 — Scatter "Color by time".** The per-cell **Scatter Plot** has a new **Color by time** toggle (beside the Layout control). Turn it on to colour each point by its timepoint instead of by well — so a well's cell cloud shows how it moves through the X/Y feature space over time (early timepoints purple, late timepoints yellow), with a per-timepoint legend. Select a single well to read one cloud's evolution on one set of axes; with several wells selected the view automatically stacks into one panel per well so the time-coloured clouds don't overlap into noise.

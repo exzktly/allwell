@@ -133,7 +133,7 @@ def build_centre(app, parent: QWidget) -> None:
     # skimage, tifffile) that aren't worth amortising at startup. smFISH
     # used to live here; it is now a sub-tab inside the Segmentation
     # parent, and its builder defers itself via the segmentation sub-stack.
-    lazy_only: Set[str] = {"smFISH"}
+    lazy_only: Set[str] = {"smFISH", "Cell Browser"}
     app._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
@@ -710,6 +710,14 @@ def build_centre(app, parent: QWidget) -> None:
         from well_viewer.features.batch_export.tab_view import build_batch_export_tab
         build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
+    def _build_cell_browser() -> None:
+        from well_viewer.features.cell_browser.tab_view import (
+            build_cell_browser_sidebar,
+            build_cell_browser_tab,
+        )
+        build_cell_browser_tab(app._ctx, tab_frames["Cell Browser"])
+        build_cell_browser_sidebar(app, app._sidebar_cell_browser_frame)
+
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         ("Analysis", [
             # "Plotting" is a single top-level tab that contains Line Graphs,
@@ -728,6 +736,10 @@ def build_centre(app, parent: QWidget) -> None:
             # smFISH has its own rail entry (it briefly lived as a sub-tab of
             # Segmentation). Lazy-only — heavy deps build on first click.
             ("smFISH", _build_smfish),
+            # Cell Browser: a filterable, paged library of single-cell images.
+            # Lazy-only — its worker pulls the image-table loaders (tifffile /
+            # zipfile cache), so it builds on first click rather than at startup.
+            ("Cell Browser", _build_cell_browser),
         ]),
         ("Data", [
             ("Review CSV", _build_review_csv),

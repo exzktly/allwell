@@ -20,6 +20,27 @@ import pandas as pd
 from well_viewer.data.data_loading import aggregate_with_threshold_df
 
 
+def _thresh_on_col(app) -> Optional[str]:
+    """Return ``"Gate_On"`` when scatter-gate *thresholding* is active (mode on
+    and a gate selected), else ``None``.
+
+    Picks the fraction-on definition for :func:`aggregate_with_threshold_df`:
+    with ``"Gate_On"`` the on-population is gate membership (fraction-on by
+    gate) instead of ``value > ThreshFracOn``. Inlined here (no
+    ``well_viewer.features`` import) to keep the domain layer acyclic — see
+    ``tests/test_layering.py``.
+    """
+    if not getattr(app, "_cell_gating_use_scatter_thresh", False):
+        return None
+    gates = getattr(app, "_scatter_gates", None) or []
+    if not gates:
+        return None
+    choice = getattr(app, "_cell_gating_scatter_gate_choice", None)
+    if choice and not any(str(g.get("name") or "") == str(choice) for g in gates):
+        return None
+    return "Gate_On"
+
+
 def well_aggregate_stats(
     app,
     wells,
@@ -196,6 +217,7 @@ def compute_rep_per_fov_stats(
         fluor_gates=fluor_gates,
         per_fov_spread=True,
         ratios=app._app_state.channel.ratio_index,
+        on_col=_thresh_on_col(app),
     )
     matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
     if matched:
@@ -285,6 +307,7 @@ def aggregate_well(
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
         ratios=app._app_state.channel.ratio_index,
+        on_col=_thresh_on_col(app),
     )
 
 
@@ -344,6 +367,7 @@ def aggregate_group(
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
         ratios=app._app_state.channel.ratio_index,
+        on_col=_thresh_on_col(app),
     )
 
 

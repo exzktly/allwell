@@ -95,6 +95,9 @@ class GatingWorker(QThread):
         # or the union of all gates — defines the Included population instead of
         # the intensity floors.
         use_scatter = getattr(self._app, "_cell_gating_use_scatter_gates", False)
+        # Thresholding: the same selected gate(s) define the "on" population for
+        # fraction-on (Gate_On column), independent of the gating/Included layer.
+        use_thresh = getattr(self._app, "_cell_gating_use_scatter_thresh", False)
         scatter_gates = cell_gating_selected_scatter_gates(self._app)
         ratios = self._app._app_state.channel.ratio_index or {}
         labels = list(self._app._app_state.dataset.well_paths)
@@ -122,37 +125,50 @@ class GatingWorker(QThread):
             row_count = 0 if df is None else len(df)
             if df is None or df.empty:
                 well_included = 0
-            elif use_scatter:
-                # Scatter-gate mode REPLACES the per-channel FluorGating: the
-                # intensity floors no longer apply (Included = all-pass for this
-                # layer), and the gate membership lives in its own ``Gate_Pass``
-                # layer so the per-cell scatter can keep showing the full cloud
-                # while every other view filters via df_included_mask. Mode on +
-                # no gates ⇒ no restriction.
-                if scatter_gates:
-                    gate_mask = pd.Series(
+            else:
+                # Membership of the selected gate(s), computed once and shared by
+                # the gating (Gate_Pass) and thresholding (Gate_On) layers.
+                membership = None
+                if scatter_gates and (use_scatter or use_thresh):
+                    membership = pd.Series(
                         compute_gate_inclusion(df, scatter_gates, ratios),
                         index=df.index,
                     )
+
+                # Gating layer → Included / Gate_Pass.
+                if use_scatter:
+                    # Scatter-gate inclusion REPLACES the per-channel FluorGating:
+                    # Included is all-pass for this layer and the gate membership
+                    # lives in Gate_Pass, so the per-cell scatter keeps the full
+                    # cloud while every other view filters via df_included_mask.
+                    # Mode on + no gates ⇒ no restriction.
+                    gate_mask = membership if membership is not None else pd.Series(True, index=df.index)
+                    df["Included"] = 1
+                    df["Gate_Pass"] = gate_mask.astype(int)
+                    well_included = int(gate_mask.sum())
                 else:
-                    gate_mask = pd.Series(True, index=df.index)
-                df["Included"] = 1
-                df["Gate_Pass"] = gate_mask.astype(int)
-                well_included = int(gate_mask.sum())
-            else:
-                mask = pd.Series(True, index=df.index)
-                for channel, gate_threshold in fluor_gates.items():
-                    col = f"{channel}_mean_intensity"
-                    if col not in df.columns:
-                        mask = pd.Series(False, index=df.index)
-                        break
-                    v = pd.to_numeric(df[col], errors="coerce")
-                    mask &= v.notna() & (v > gate_threshold)
-                df["Included"] = mask.astype(int)
-                # Neutralise any Gate_Pass left over from a previous scatter-gate
-                # pass so the intensity gating isn't silently still filtered.
-                df["Gate_Pass"] = 1
-                well_included = int(mask.sum())
+                    mask = pd.Series(True, index=df.index)
+                    for channel, gate_threshold in fluor_gates.items():
+                        col = f"{channel}_mean_intensity"
+                        if col not in df.columns:
+                            mask = pd.Series(False, index=df.index)
+                            break
+                        v = pd.to_numeric(df[col], errors="coerce")
+                        mask &= v.notna() & (v > gate_threshold)
+                    df["Included"] = mask.astype(int)
+                    # Neutralise any Gate_Pass left over from a previous
+                    # scatter-gate pass so intensity gating isn't still filtered.
+                    df["Gate_Pass"] = 1
+                    well_included = int(mask.sum())
+
+                # Thresholding layer → Gate_On (fraction-on by gate). Independent
+                # of gating; only read by the aggregation when thresholding mode
+                # is active (see stats_compute._thresh_on_col). Neutral (1)
+                # otherwise so a stale membership can't leak in.
+                if use_thresh and membership is not None:
+                    df["Gate_On"] = membership.astype(int)
+                else:
+                    df["Gate_On"] = 1
 
             included_total += well_included
             excluded_total += row_count - well_included
@@ -217,6 +233,12 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     )
     ctx.app._cell_gating_scatter_gate_choice = getattr(
         ctx.app, "_cell_gating_scatter_gate_choice", None
+    )
+    # Thresholding mode (independent of gating): cells inside the selected
+    # gate(s) count as "on" for fraction-on stats, replacing the ThreshFracOn
+    # cutoff. Cells are not removed.
+    ctx.app._cell_gating_use_scatter_thresh = getattr(
+        ctx.app, "_cell_gating_use_scatter_thresh", False
     )
 
     root = parent.layout()
@@ -330,6 +352,30 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     sg_layout.addWidget(gate_combo)
     sg_layout.addStretch(1)
     cf_layout.addWidget(sg_row)
+
+    # Thresholding mode — independent of the gating checkbox above. Uses the same
+    # filtering-gate selection but, instead of removing cells, counts cells
+    # inside the gate as "on" for fraction-on stats (replaces ThreshFracOn).
+    th_row = QWidget(control_frame)
+    th_layout = QHBoxLayout(th_row)
+    th_layout.setContentsMargins(0, 0, 0, 0)
+    use_th_cb = _QCheckBox(
+        "Use scatter gate for fraction-on (thresholding, replaces ThreshFracOn)",
+        th_row,
+    )
+    use_th_cb.setChecked(bool(ctx.app._cell_gating_use_scatter_thresh))
+    use_th_cb.setToolTip(
+        "Define the 'on' population for fraction-on stats as the cells inside "
+        "the selected gate, instead of cells above the per-channel ThreshFracOn "
+        "cutoff. Independent of cell inclusion — no cells are removed."
+    )
+    use_th_cb.toggled.connect(
+        lambda _on, _app=ctx.app: cell_gating_on_use_scatter_thresh_change(_app)
+    )
+    ctx.app._cell_gating_use_scatter_thresh_cb = use_th_cb
+    th_layout.addWidget(use_th_cb)
+    th_layout.addStretch(1)
+    cf_layout.addWidget(th_row)
 
     ctx.app._cell_gating_gate_summary = QLabel("", control_frame)
     ctx.app._cell_gating_gate_summary.setObjectName("Muted")
@@ -570,6 +616,22 @@ def cell_gating_on_use_scatter_gates_change(app) -> None:
     cell_gating_start_gating_worker(app)
 
 
+def cell_gating_on_use_scatter_thresh_change(app) -> None:
+    """Toggle scatter-gate thresholding (fraction-on by gate).
+
+    Independent of the gating/inclusion toggle: it only changes how fraction-on
+    is computed (Gate_On column vs the ThreshFracOn cutoff). Persist the flag and
+    re-run the gating pass so the Gate_On column + the stats cache refresh.
+    """
+    cb = getattr(app, "_cell_gating_use_scatter_thresh_cb", None)
+    app._cell_gating_use_scatter_thresh = bool(cb.isChecked()) if cb is not None else False
+    _cell_gating_apply_scatter_gate_mode(app)
+    _cell_gating_refresh_gate_summary(app)
+    _cell_gating_persist_params(app)
+    app._cell_gating_last_gate_sig = _scatter_gate_signature(app)
+    cell_gating_start_gating_worker(app)
+
+
 # Sentinel display label for "use the union of every gate" (first combo entry).
 _ALL_GATES_LABEL = "All gates (union)"
 
@@ -583,7 +645,8 @@ def cell_gating_on_scatter_gate_choice_change(app) -> None:
     app._cell_gating_scatter_gate_choice = data  # None ⇒ all gates (union)
     _cell_gating_refresh_gate_summary(app)
     _cell_gating_persist_params(app)
-    if getattr(app, "_cell_gating_use_scatter_gates", False):
+    if (getattr(app, "_cell_gating_use_scatter_gates", False)
+            or getattr(app, "_cell_gating_use_scatter_thresh", False)):
         app._cell_gating_last_gate_sig = _scatter_gate_signature(app)
         cell_gating_start_gating_worker(app)
 
@@ -622,17 +685,27 @@ def _cell_gating_refresh_gate_choices(app) -> None:
         combo.setCurrentIndex(idx if idx >= 0 else 0)
     finally:
         combo.blockSignals(blocked)
-    combo.setEnabled(bool(getattr(app, "_cell_gating_use_scatter_gates", False)))
+    combo.setEnabled(_cell_gating_scatter_mode_on(app))
+
+
+def _cell_gating_scatter_mode_on(app) -> bool:
+    """True when either scatter-gate layer (gating or thresholding) is active —
+    both consume the selected gate, so the dropdown is relevant for either."""
+    return bool(getattr(app, "_cell_gating_use_scatter_gates", False)
+                or getattr(app, "_cell_gating_use_scatter_thresh", False))
 
 
 def _scatter_gate_signature(app):
-    """A hashable snapshot of the gates that currently drive inclusion (the
-    selected gate or all of them) — geometry + axis cols + the choice.
+    """A hashable snapshot of what drives the gating pass — the selected gate
+    geometry + axis cols + choice, plus the two mode flags so toggling either
+    gating or thresholding re-runs.
 
     Used to skip a redundant gating pass when re-entering the tab with nothing
     changed — see :func:`cell_gating_sync_scatter_gates`."""
     gates = cell_gating_selected_scatter_gates(app)
     return (
+        bool(getattr(app, "_cell_gating_use_scatter_gates", False)),
+        bool(getattr(app, "_cell_gating_use_scatter_thresh", False)),
         getattr(app, "_cell_gating_scatter_gate_choice", None),
         tuple(
             (g.get("x_col"), g.get("y_col"),
@@ -660,7 +733,7 @@ def cell_gating_sync_scatter_gates(app) -> None:
     _cell_gating_refresh_gate_choices(app)
     _cell_gating_apply_scatter_gate_mode(app)
     _cell_gating_refresh_gate_summary(app)
-    if not getattr(app, "_cell_gating_use_scatter_gates", False):
+    if not _cell_gating_scatter_mode_on(app):
         return
     sig = _scatter_gate_signature(app)
     if sig != getattr(app, "_cell_gating_last_gate_sig", None):
@@ -669,47 +742,52 @@ def cell_gating_sync_scatter_gates(app) -> None:
 
 
 def _cell_gating_apply_scatter_gate_mode(app) -> None:
-    """Grey out the FluorGating edits while scatter-gate inclusion is active —
-    they no longer drive Included, so an editable field would mislead. The
-    filtering-gate dropdown is only meaningful in that mode, so gate it too."""
-    on = bool(getattr(app, "_cell_gating_use_scatter_gates", False))
+    """Grey out the FluorGating edits while scatter-gate *inclusion* is active —
+    they no longer drive Included, so an editable field would mislead.
+    Thresholding doesn't replace FluorGating, so it doesn't grey them. The
+    filtering-gate dropdown is relevant to either layer, so enable it for both."""
+    gating_on = bool(getattr(app, "_cell_gating_use_scatter_gates", False))
     for edit in (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).values():
-        edit.setEnabled(not on)
+        edit.setEnabled(not gating_on)
     combo = getattr(app, "_cell_gating_scatter_gate_combo", None)
     if combo is not None:
-        combo.setEnabled(on)
+        combo.setEnabled(_cell_gating_scatter_mode_on(app))
 
 
 def _cell_gating_refresh_gate_summary(app) -> None:
-    """Update the gate-count label from ``app._scatter_gates`` (no live signal
-    from the Scatter tab; refreshed on build, toggle, and load)."""
+    """Update the gate summary label describing how the selected scatter gate(s)
+    are applied (gating / thresholding). Refreshed on build, toggle, gate
+    change, and load."""
     lbl = getattr(app, "_cell_gating_gate_summary", None)
     if lbl is None:
         return
-    if not getattr(app, "_cell_gating_use_scatter_gates", False):
+    if not _cell_gating_scatter_mode_on(app):
         lbl.setText("")
         return
     all_gates = getattr(app, "_scatter_gates", None) or []
     if not all_gates:
         lbl.setText(
-            "No scatter gates drawn yet — every cell is included until you draw "
-            "one on the Scatter Plot tab."
+            "No scatter gates drawn yet — draw one on the Scatter Plot tab."
         )
         return
     gates = cell_gating_selected_scatter_gates(app)
     choice = getattr(app, "_cell_gating_scatter_gate_choice", None)
     if choice and not gates:
-        lbl.setText(f"Gate “{choice}” no longer exists — every cell is included.")
+        lbl.setText(f"Gate “{choice}” no longer exists.")
         return
     axes = sorted({
         f"{g.get('x_col')} × {g.get('y_col')}"
         for g in gates if g.get("x_col") and g.get("y_col")
     })
     detail = f" on {', '.join(axes)}" if axes else ""
-    if choice:
-        lbl.setText(f"Filtering by gate “{choice}”{detail}.")
-    else:
-        lbl.setText(f"Filtering by all {len(gates)} gate(s) (union){detail}.")
+    target = (f"gate “{choice}”" if choice
+              else f"all {len(gates)} gate(s) (union)")
+    modes = []
+    if getattr(app, "_cell_gating_use_scatter_gates", False):
+        modes.append("inclusion")
+    if getattr(app, "_cell_gating_use_scatter_thresh", False):
+        modes.append("fraction-on")
+    lbl.setText(f"Using {target}{detail} for {' + '.join(modes)}.")
 
 
 def cell_gating_on_threshold_frac_on_change(app) -> None:

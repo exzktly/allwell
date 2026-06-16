@@ -285,10 +285,12 @@ def _kick_off_gating_after_load(app) -> None:
                 break
         except ValueError:
             pass
-    # Scatter-gate inclusion mode also needs the pass so Gate_Pass is computed
-    # from the persisted gates on load (it has no per-channel edit to inspect).
+    # Scatter-gate inclusion / thresholding modes also need the pass so
+    # Gate_Pass / Gate_On are computed from the persisted gates on load (neither
+    # has a per-channel edit to inspect).
     use_scatter = getattr(app, "_cell_gating_use_scatter_gates", False)
-    if has_non_default_gate or use_scatter:
+    use_thresh = getattr(app, "_cell_gating_use_scatter_thresh", False)
+    if has_non_default_gate or use_scatter or use_thresh:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(app)
 

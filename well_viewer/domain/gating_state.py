@@ -75,6 +75,7 @@ def build_gating_block(
     scatter_gates: Optional[list] = None,
     use_scatter_gates: bool = False,
     scatter_gate_choice: Optional[str] = None,
+    use_scatter_thresh: bool = False,
 ) -> Dict[str, Any]:
     """Snapshot non-default gating values as a JSON-friendly dict.
 
@@ -102,12 +103,17 @@ def build_gating_block(
     if tfo_out:
         block["thresh_frac_on"] = tfo_out
 
-    if use_scatter_gates and scatter_gates:
-        block["use_scatter_gates"] = True
+    # Persist the gates when EITHER scatter-gate layer (inclusion / fraction-on
+    # thresholding) is on — both consume the same selected gate(s).
+    if (use_scatter_gates or use_scatter_thresh) and scatter_gates:
         block["scatter_gates"] = [dict(g) for g in scatter_gates]
         # The chosen single filtering gate (by name); omitted ⇒ union of all.
         if scatter_gate_choice:
             block["scatter_gate_choice"] = str(scatter_gate_choice)
+        if use_scatter_gates:
+            block["use_scatter_gates"] = True
+        if use_scatter_thresh:
+            block["use_scatter_thresh"] = True
 
     return block
 

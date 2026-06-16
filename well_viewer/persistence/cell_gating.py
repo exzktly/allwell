@@ -35,6 +35,7 @@ def save_to_pipeline_info(app) -> None:
         scatter_gates=getattr(app, "_scatter_gates", None),
         use_scatter_gates=getattr(app, "_cell_gating_use_scatter_gates", False),
         scatter_gate_choice=getattr(app, "_cell_gating_scatter_gate_choice", None),
+        use_scatter_thresh=getattr(app, "_cell_gating_use_scatter_thresh", False),
     )
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
 
@@ -109,15 +110,20 @@ def load_from_pipeline_info(app) -> bool:
         app._scatter_gates = [dict(g) for g in scatter_gates if isinstance(g, dict)]
         applied = True
     app._cell_gating_use_scatter_gates = bool(block.get("use_scatter_gates", False))
+    app._cell_gating_use_scatter_thresh = bool(block.get("use_scatter_thresh", False))
     choice = block.get("scatter_gate_choice")
     app._cell_gating_scatter_gate_choice = str(choice) if choice else None
-    cb = getattr(app, "_cell_gating_use_scatter_gates_cb", None)
-    if cb is not None:
-        blocked = cb.blockSignals(True)
-        try:
-            cb.setChecked(app._cell_gating_use_scatter_gates)
-        finally:
-            cb.blockSignals(blocked)
+    for attr, flag in (
+        ("_cell_gating_use_scatter_gates_cb", app._cell_gating_use_scatter_gates),
+        ("_cell_gating_use_scatter_thresh_cb", app._cell_gating_use_scatter_thresh),
+    ):
+        cb = getattr(app, attr, None)
+        if cb is not None:
+            blocked = cb.blockSignals(True)
+            try:
+                cb.setChecked(flag)
+            finally:
+                cb.blockSignals(blocked)
     _cell_gating_refresh_gate_choices(app)
     _cell_gating_apply_scatter_gate_mode(app)
     _cell_gating_refresh_gate_summary(app)

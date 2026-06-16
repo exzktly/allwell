@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QToolTip, QVBoxLayout, QWidget,
 )
 
@@ -142,21 +142,10 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     cl.addWidget(btn_card(ctrl, "+", lambda: self._review_image_zoom_step(+1)))
     il.addWidget(ctrl)
 
-    sep = QFrame(inner)
-    sep.setObjectName("Separator")
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
-    il.addWidget(sep)
-
-    # Quality-control debris gate — the Segmentation tab is the QC editing
-    # home: tuning the size/solidity bounds here re-flags cells live (they
-    # render excluded in the overlay below) and applies to the whole dataset.
-    try:
-        from well_viewer.features.qc.tab_view import build_qc_gate_controls
-        il.addWidget(build_qc_gate_controls(self, inner))
-    except Exception:
-        swallowed()  # was: pass (silent except)
-
+    # The QC debris-gate controls now live on the Sample Definitions → Cell
+    # Gating tab (a fundamental inclusion layer alongside FluorGating / scatter
+    # gates). This overlay still *renders* the QC verdict — excluded cells show
+    # here — it just no longer hosts the threshold editor.
     self._review_image_status = QLabel("", inner)
     self._review_image_status.setObjectName("Muted")
     il.addWidget(self._review_image_status)

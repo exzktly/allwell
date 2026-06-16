@@ -43,6 +43,69 @@ def test_on_gate_drawn_stamps_axis_columns_from_interaction_cache():
     assert (g["x0"], g["x1"], g["y0"], g["y1"]) == (1.0, 5.0, 2.0, 8.0)
 
 
+def test_on_gate_drawn_notifies_both_gate_changed_listeners():
+    """Drawing a gate fires *both* the sidebar count callback and the Cell
+    Gating summary callback, so the Cell Gating tab's gate summary stays live
+    even though the gate was drawn on the Scatter tab."""
+    calls: list[str] = []
+    app = SimpleNamespace(
+        _scatter_gates=[],
+        _scatter_gate_count_cb=lambda: calls.append("count"),
+        _scatter_gates_changed_cb=lambda: calls.append("summary"),
+        _scatter_gate_redraw_cb=lambda _a: None,
+    )
+    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+                   SimpleNamespace(xdata=1.0, ydata=1.0))
+    assert calls == ["count", "summary"]
+
+
+def test_on_gate_drawn_assigns_default_name():
+    """Gates are nameable: with no Qt canvas (headless), each gets the next
+    default ``Gate N`` name so the Cell Gating dropdown always has a label."""
+    app = SimpleNamespace(_scatter_gates=[], _scatter_gate_redraw_cb=lambda _a: None)
+    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+                   SimpleNamespace(xdata=1.0, ydata=1.0))
+    _on_gate_drawn(app, SimpleNamespace(xdata=2.0, ydata=2.0),
+                   SimpleNamespace(xdata=3.0, ydata=3.0))
+    assert [g["name"] for g in app._scatter_gates] == ["Gate 1", "Gate 2"]
+
+
+def test_selected_scatter_gates_honours_choice():
+    """The filtering-gate dropdown choice picks one named gate; None = union."""
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        cell_gating_selected_scatter_gates,
+    )
+    g1 = {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "name": "Gate 1"}
+    g2 = {"x0": 2, "y0": 2, "x1": 3, "y1": 3, "name": "Gate 2"}
+    app = SimpleNamespace(_scatter_gates=[g1, g2])
+
+    app._cell_gating_scatter_gate_choice = None          # union
+    assert cell_gating_selected_scatter_gates(app) == [g1, g2]
+    app._cell_gating_scatter_gate_choice = "Gate 2"       # single gate
+    assert cell_gating_selected_scatter_gates(app) == [g2]
+    app._cell_gating_scatter_gate_choice = "Gone"         # deleted gate
+    assert cell_gating_selected_scatter_gates(app) == []
+
+
+def test_rename_gate_rejects_blank_and_duplicate_keeps_choice():
+    from well_viewer.features.scatter.gating import rename_gate
+
+    g1 = {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "name": "Gate 1"}
+    g2 = {"x0": 2, "y0": 2, "x1": 3, "y1": 3, "name": "Gate 2"}
+    app = SimpleNamespace(
+        _scatter_gates=[g1, g2],
+        _cell_gating_scatter_gate_choice="Gate 1",
+        _scatter_gate_redraw_cb=lambda _a: None,
+    )
+    assert rename_gate(app, 0, "") is False           # blank rejected
+    assert rename_gate(app, 0, "Gate 2") is False      # duplicate rejected
+    assert g1["name"] == "Gate 1"                       # unchanged
+    assert rename_gate(app, 0, "Live") is True          # valid rename
+    assert g1["name"] == "Live"
+    # The filtering choice follows the rename so the selection isn't lost.
+    assert app._cell_gating_scatter_gate_choice == "Live"
+
+
 def test_on_gate_drawn_without_cache_leaves_columns_none():
     """No prior redraw (no interaction cache) ⇒ the gate is still created but its
     columns are None, so the inclusion pass simply skips it."""
@@ -102,6 +165,29 @@ def test_inclusion_gate_missing_columns_contributes_nothing():
 
 def test_inclusion_no_gates_is_all_false():
     assert compute_gate_inclusion(_df(), []).tolist() == [False] * 5
+
+
+# ── Gate_Pass inclusion layer ─────────────────────────────────────────────────
+
+def test_gate_pass_layer_filters_by_default_but_not_for_scatter():
+    from well_viewer.data.data_loading import df_included_mask
+
+    df = pd.DataFrame({
+        "Included":  [1, 1, 1, 1],
+        "QC_Pass":   [1, 1, 1, 0],
+        "Gate_Pass": [1, 0, 1, 1],
+    })
+    # Default composes Gate_Pass: rows 0 and 2 (row 1 gated out, row 3 QC-out).
+    assert df_included_mask(df).tolist() == [True, False, True, False]
+    # The per-cell scatter opts out of Gate_Pass → full cloud (QC still applies).
+    assert df_included_mask(df, include_gate=False).tolist() == [True, True, True, False]
+
+
+def test_gate_pass_absent_is_all_pass():
+    from well_viewer.data.data_loading import df_included_mask
+
+    df = pd.DataFrame({"Included": [1, 1], "QC_Pass": [1, 1]})
+    assert df_included_mask(df).tolist() == [True, True]
 
 
 # ── persistence round-trip ────────────────────────────────────────────────────

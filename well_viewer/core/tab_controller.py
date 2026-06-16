@@ -27,6 +27,12 @@ def on_tab_change(app, _e=None) -> None:
     tab = app._current_centre_tab()
     prev_tab = getattr(app, "_last_tab_name", None)
     prev_selected = set(app._app_state.selection.selected_wells)
+    # Single deferred import for the cell-gating refreshes used below (the tab is
+    # built lazily, so this can't sit at module scope without a cycle).
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        cell_gating_load_cell_areas,
+        cell_gating_sync_scatter_gates,
+    )
 
     # Dismiss any open figure configurator on tab change -- the user can
     # re-open it on the new tab via the plot card's sliders IconButton.
@@ -67,6 +73,9 @@ def on_tab_change(app, _e=None) -> None:
     elif tab == "Sample Definitions":
         app._sidebar_sample_frame.setVisible(True)
         app._groups_centre_refresh()
+        # Cell Gating leads this tab; pick up any scatter gates drawn since the
+        # last visit (refresh the summary + recompute Included if they changed).
+        cell_gating_sync_scatter_gates(app)
 
     elif tab == "Statistics":
         app._sidebar_stats_frame.setVisible(True)
@@ -108,8 +117,8 @@ def on_tab_change(app, _e=None) -> None:
         app._sidebar_main_frame.setVisible(True)
         app._refresh_sidebar_map()
         if hasattr(app, "_cell_gating_fluor_gate_edits"):
-            from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(app)
+            cell_gating_sync_scatter_gates(app)
 
     else:
         # Line Graphs, Bar Plots, or Scatter -- unified picker always shown

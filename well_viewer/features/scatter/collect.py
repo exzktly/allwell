@@ -51,7 +51,10 @@ def get_all_timepoints(app) -> List[float]:
         df = app._get_rows(label)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             continue
-        mask = df_included_mask(df)
+        # include_gate=False: the per-cell scatter is where gates are drawn, so it
+        # must keep showing the full cloud (+ the gates) instead of filtering
+        # itself by Gate_Pass. Every other view applies the gate via the default.
+        mask = df_included_mask(df, include_gate=False)
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
         timepoints.update(float(t) for t in tp.dropna().unique())
     return sorted(timepoints)
@@ -119,7 +122,9 @@ def collect_scatter_data(
             return None
         if "timepoint_hours" not in df.columns or "area_px" not in df.columns:
             return None
-        mask = df_included_mask(df).to_numpy(copy=True)
+        # Full cloud + gates on the per-cell scatter: don't filter by the gates
+        # drawn here (Gate_Pass). All other views honour it via df_included_mask.
+        mask = df_included_mask(df, include_gate=False).to_numpy(copy=True)
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
             finite = np.isfinite(tp)

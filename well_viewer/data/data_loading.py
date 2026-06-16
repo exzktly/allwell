@@ -201,17 +201,22 @@ def detect_review_image_channels(df: pd.DataFrame, fluor_channels: List[str], se
 
 # ── DataFrame helpers ────────────────────────────────────────────────────────
 
-def df_included_mask(df: pd.DataFrame) -> pd.Series:
-    """Rows that count toward analysis: ``Included == 1`` composed with the QC
-    layer.
+def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Series:
+    """Rows that count toward analysis: ``Included == 1`` composed with the QC,
+    crop, and scatter-gate layers.
 
     Manual curation / cell-gating own the ``Included`` column; the QC layer owns
     a separate ``QC_Pass`` column (1 = passes debris gating); the crop layer owns
-    a ``Crop_Pass`` column (1 = centroid inside the crop region). The effective
-    inclusion is the AND of the three — ``manual-keep AND passes-QC AND
-    inside-crop`` — so QC re-gating and crop changes never clobber hand-curated
-    edits. ``QC_Pass`` / ``Crop_Pass`` are optional: when absent (no QC/crop
-    layer / older data) each is treated as all-pass.
+    a ``Crop_Pass`` column (1 = centroid inside the crop region); the scatter-gate
+    inclusion mode owns ``Gate_Pass`` (1 = inside the drawn scatter gates). The
+    effective inclusion is the AND of the four — ``manual-keep AND passes-QC AND
+    inside-crop AND inside-gate`` — so each layer re-gating never clobbers the
+    others. ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` are optional: when absent
+    (no such layer / older data) each is treated as all-pass.
+
+    ``include_gate=False`` drops the ``Gate_Pass`` layer so the per-cell scatter
+    plot — where the gates are drawn — keeps showing the full cloud (and the
+    gates over it) rather than filtering itself by its own gates.
     """
     if "Included" not in df.columns:
         mask = pd.Series(True, index=df.index)
@@ -224,6 +229,9 @@ def df_included_mask(df: pd.DataFrame) -> pd.Series:
     if "Crop_Pass" in df.columns:
         crop = pd.to_numeric(df["Crop_Pass"], errors="coerce").fillna(1)
         mask = mask & crop.eq(1)
+    if include_gate and "Gate_Pass" in df.columns:
+        gate = pd.to_numeric(df["Gate_Pass"], errors="coerce").fillna(1)
+        mask = mask & gate.eq(1)
     return mask
 
 

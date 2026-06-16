@@ -152,7 +152,7 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.features.qc.controller import apply_qc_to_cache
         apply_qc_to_cache(app)
         from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
-        qc_gate_refresh_widgets(app)  # sync the Segmentation gate row if built
+        qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate the dataset-wide crop region (persistence.json::crop_region) and
@@ -280,7 +280,10 @@ def _kick_off_gating_after_load(app) -> None:
                 break
         except ValueError:
             pass
-    if has_non_default_gate:
+    # Scatter-gate inclusion mode also needs the pass so Gate_Pass is computed
+    # from the persisted gates on load (it has no per-channel edit to inspect).
+    use_scatter = getattr(app, "_cell_gating_use_scatter_gates", False)
+    if has_non_default_gate or use_scatter:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(app)
 

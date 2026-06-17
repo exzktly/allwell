@@ -202,15 +202,25 @@ def on_cell_clicked(app, desc) -> None:
         # cell in a different well leaves the FOV combo (and image) stale.
         app._app_state.preview.selected_well = desc.well
         update_preview(app, desc.well)
+        # The FOV / timepoint combos hold *normalized* tokens — FOV as
+        # ``float:g`` (renderer ``_norm_fov``) and timepoint as parsed hours
+        # ``:g`` (``_norm_timepoint``). The descriptor carries the raw CSV
+        # tokens, so passing them straight to setCurrentText silently no-ops
+        # (no matching item) and the view stays on the previous FOV/timepoint.
+        # Normalize the same way the working Review-CSV jump does so they match.
+        fov_norm = app._review_row_keys(
+            {"fov": desc.fov, "timepoint": desc.tp_token,
+             "nucleus_id": desc.nucleus_id})[0]
+        tp_norm = app._norm_timepoint(desc.tp_token)
         fov_cb = getattr(app, "_preview_fov_cb", None)
-        if fov_cb is not None and desc.fov:
-            fov_cb.setCurrentText(desc.fov)
+        if fov_cb is not None and fov_norm:
+            fov_cb.setCurrentText(fov_norm)
         refresh_review_image(app)
         # The TP menu now holds the target FOV's timepoints; setting it fires
         # currentIndexChanged → refresh, rendering the correct frame.
         tp_cb = getattr(app, "_review_image_tp_cb", None)
-        if tp_cb is not None and desc.tp_token:
-            tp_cb.setCurrentText(desc.tp_token)
+        if tp_cb is not None and tp_norm:
+            tp_cb.setCurrentText(tp_norm)
         # Centre + zoom on the highlighted cell so it's actually visible.
         zoom_review_image_to_selected_nucleus(app)
     except Exception as exc:  # noqa: BLE001

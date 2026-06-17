@@ -584,9 +584,13 @@ def stats_update_tp_menu(app) -> None:
     channels = list(app._app_state.channel.fluor_channels) if app._app_state.channel.fluor_channels else []
     ch_options: List[str] = []
     for ch in channels:
-        ch_options.append(ch)
+        # Display fluor tokens upper-case (GFP) to match the rest of the app;
+        # col_for_scatter_entry resolves the column case-insensitively and the
+        # chart titles already upper-case (_channel_label_for_val_col). ``ch``
+        # stays lower-case for the smFISH-channel membership test.
+        ch_options.append(ch.upper())
         if ch in app._app_state.channel.smfish_channels:
-            ch_options.append(f"{ch} (spots)")
+            ch_options.append(f"{ch.upper()} (spots)")
     # Ratio "channels" (computed per-cell values) and shape-class features are
     # selectable too — they resolve via _label_to_channel_key in
     # col_for_scatter_entry, and the Property combo collapses to a single
@@ -604,8 +608,10 @@ def stats_update_tp_menu(app) -> None:
             app._stats_channel_cb.setCurrentText(current_ch)
         else:
             # Default to the active channel when possible to match the
-            # bar/line plots' current selection.
-            active = app._app_state.channel.active_channel if app._app_state.channel.active_channel in ch_options else ch_options[0]
+            # bar/line plots' current selection (compare upper-case since the
+            # options now display upper-case while the token is lower-case).
+            active_disp = (app._app_state.channel.active_channel or "").upper()
+            active = active_disp if active_disp in ch_options else ch_options[0]
             app._stats_channel_cb.setCurrentText(active)
     # Channel may now resolve to a ratio key -- refresh the Property
     # combo's item set accordingly.

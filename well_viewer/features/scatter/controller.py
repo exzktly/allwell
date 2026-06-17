@@ -605,7 +605,7 @@ def update_scatter_menus(app) -> None:
     # channel column with aggregation flavour.
     channels = list(app._app_state.channel.fluor_channels) if app._app_state.channel.fluor_channels else ["gfp"]
     ratio_labels = app._ratio_dropdown_labels()
-    scatter_ch_options = list(channels) + ratio_labels
+    scatter_ch_options = [str(c).upper() for c in channels] + ratio_labels
 
     # The per-cell scatter additionally offers the shape-feature virtual
     # channels: each point is a cell, so per-cell morphology (eccentricity,
@@ -744,14 +744,14 @@ def col_for_scatter_entry(app, entry: str) -> str:
         return mapped_key
     if entry.endswith(" (spots)"):
         ch = entry[:-8]  # Remove " (spots)"
-        return f"{ch}_smfish_count"
+        return f"{ch.lower()}_smfish_count"
     else:
         metric = app._app_state.channel.active_metric or "mean_intensity"
         if metric == "smfish_count":
             # The scatter dropdown uses the " (spots)" suffix for smfish;
             # fall back to mean intensity for the plain channel entry.
             metric = "mean_intensity"
-        return f"{entry}_{metric}"
+        return f"{entry.lower()}_{metric}"
 
 
 
@@ -773,11 +773,11 @@ def col_for_scatter_axis(app, channel_entry: str, metric_key: str) -> str:
         return mapped_key
     if metric_key in ("fraction_above_threshold", "smfish_count"):
         # Fraction-on uses MFI as the underlying value column; smFISH
-        # uses the dedicated count column.
+        # uses the dedicated count column. (.lower(): CSV cols are lower-case.)
         if metric_key == "smfish_count":
-            return f"{channel_entry}_smfish_count"
-        return f"{channel_entry}_mean_intensity"
-    return f"{channel_entry}_{metric_key}"
+            return f"{channel_entry.lower()}_smfish_count"
+        return f"{channel_entry.lower()}_mean_intensity"
+    return f"{channel_entry.lower()}_{metric_key}"
 
 
 

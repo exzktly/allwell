@@ -46,7 +46,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("X-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
     ctx.app._scatter_ch_x_cb = QComboBox(ctrl)
-    ctx.app._scatter_ch_x_cb.addItems(["gfp"])
+    ctx.app._scatter_ch_x_cb.addItems(["GFP"])
     ctx.app._scatter_ch_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("x"))
     cl.addWidget(ctx.app._scatter_ch_x_cb)
     ctx.app._scatter_ch_x_var = ctx.app._scatter_ch_x_cb
@@ -61,7 +61,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("Y-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
     ctx.app._scatter_ch_y_cb = QComboBox(ctrl)
-    ctx.app._scatter_ch_y_cb.addItems(["gfp"])
+    ctx.app._scatter_ch_y_cb.addItems(["GFP"])
     ctx.app._scatter_ch_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("y"))
     cl.addWidget(ctx.app._scatter_ch_y_cb)
     ctx.app._scatter_ch_y_var = ctx.app._scatter_ch_y_cb

@@ -71,7 +71,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **D4** | Cell Browser sensible default state | ◐ | S | ✅ |
 | **F1** | Clickable status context chips | ★ | S | ⬜ |
 | **F2** | Clear active-state for mode toggles | ★ | S | ✅ |
-| **F3** | Channel-name casing consistency (`gfp`→`GFP`) | ★ | M | ⬜ |
+| **F3** | Channel-name casing consistency (`gfp`→`GFP`) | ★ | M | ✅ |
 | **F4** | Pipeline progress legibility | ◐ | M | ⬜ |
 | **F5** | Table-header alignment + empty-state hints | ☆ | S | ✅ |
 
@@ -535,14 +535,25 @@ its editor; only one "ready/status" surface remains.
 
 ## F3 — Channel-name casing consistency (`gfp`→`GFP`)
 
-**Status:** ⬜ Held — **back-compat tradeoff, needs a decision.** Confirmed the risk:
-`scatter.controller._col_for_scatter_axis` builds columns from the combo *text* and
-`view_state` persists that text. A display-only uppercase works for live resolution
-(columns resolve case-insensitively) but **old saved view-state** holding `gfp`
-wouldn't match a new `GFP` item on reload (axis resets to the first channel). The
-clean fix routes everything through a display↔token map across ~8 sites. This is the
-one item the original audit deliberately left undone; needs a green-light on the
-back-compat behaviour (see end-of-turn question).
+**Status:** ✅ Done — robust approach (user chose "no old-state reset")
+
+Fluor channels now display upper-case (`GFP`) in the Scatter (per-cell + aggregate)
+and Statistics channel combos, matching the rest of the app. Done robustly so old
+saved state keeps working:
+- **Display:** `scatter.controller.update_scatter_plot_options` and
+  `stats.controller` build the channel-combo options upper-case (the canonical
+  lower-case token list is kept separately for the smFISH-channel test).
+- **Columns stay canonical:** `col_for_scatter_axis` / `col_for_scatter_entry`
+  lower-case the fluor token when composing the CSV column key, so columns remain
+  `gfp_mean_intensity` (exact match, not relying on case-folding). Ratio/shape labels
+  are unaffected (resolved via `_label_to_channel_key` before the fluor path).
+- **Persistence back-compat:** `view_state._set_combo_if_valid` gained a
+  case-insensitive fallback, so an old saved axis selection stored as `gfp` restores
+  onto the new `GFP` item instead of resetting to the first channel.
+- Chart titles already upper-cased (`stats._channel_label_for_val_col`); Pipeline
+  Info left showing the raw stored token (it's a raw-sidecar dump).
+- Tests: scatter+stats suites (79) green; updated `test_shape_features` (findText
+  "GFP") and `test_thresh_frac_quick_edit` (S2 dim-not-hide); budgets held.
 
 **Goal.** Display fluor tokens uppercase everywhere while leaving stored tokens
 untouched (CSV columns / persistence keep the raw token).

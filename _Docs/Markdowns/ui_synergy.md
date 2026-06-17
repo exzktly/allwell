@@ -114,12 +114,11 @@ density (C1, C3) → discoverability (D1, D2, D3) → synergy chain (S2 → S3 �
 
 ## S1 — Unify the three "group" models
 
-**Status:** ⬜ Held — **behaviour change, needs green-light.** Making Statistics +
-Batch Export write back to the shared `selection.selections` changes how those tabs
-behave today (ephemeral Stats groups become persistent shared selections; the
-standalone `export_groups.json` path is demoted). Worth doing, but it alters
-user-facing semantics and persistence, so it should land deliberately with review,
-not as an unattended change. Plan below is ready to execute on approval.
+**Status:** ✅ Done — **Statistics scope** (per the user's choice). Statistics
+auto-seeds its comparison groups from the shared Sample-Definition replicate sets,
+and a full-width "↻ Load groups from Sample Definitions" button re-syncs on demand
+(confirming before discarding existing groups). Batch Export's own group editor was
+left as-is — the broader cross-tab write-back was intentionally not pursued.
 
 **Goal.** One group model used everywhere. Sample-Definition selections become the
 single source of truth; Statistics "comparison groups" and Batch Export "export
@@ -261,9 +260,12 @@ the Heat Map tab's colours for the same metric.
 
 ## S4 — Link the three image views
 
-**Status:** ⬜ Held — **architectural (shared state).** Introduces a new cross-feature
-`ImageViewState` that Review Image / Image Table / Cell Browser all read; touches
-three features' render paths. Best done deliberately with review. Plan ready.
+**Status:** ✅ Done — **shared per-channel brightness** (per the user's chosen scope).
+A new `core/image_view_state.py::ImageViewState` holds the per-channel display LUT;
+Review Image writes it, an *auto* Image Table row inherits it as its default (per-row
+edits override), and the Cell Browser composites with it (else per-crop auto). The
+views' intentionally different models (single / per-row / multi-chip) ruled out
+forcing one shared channel+stage+LUT — see the scope note in the header.
 
 **Goal.** Segmentation Review Image, Image Table, and Cell Browser share one
 channel/LUT/stage(Raw·Flat-field·Corrected) state and cross-select, so they feel like
@@ -306,8 +308,10 @@ three views headlessly.
 
 ## S5 — "Add to batch" from every plot card
 
-**Status:** ⬜ Held — **depends on S1** (unified groups) for the spec's group field.
-S2 (its other dependency) is done. Build after S1 lands.
+**Status:** ✅ Done — an "Open in Batch Export" button on the line / bar / scatter
+(cells + aggregate) cards opens Batch Export in the matching chart-type. The batch
+panels already read the live plot spec (channel/property/threshold/SEM/fold-change)
+straight off app state, so navigating in the right mode IS the capture (no queue).
 
 **Goal.** An "+ Add to batch" action on each plot card pushes the current plot's full
 spec into the Batch Export queue, so Batch Export reviews figures you already dialed
@@ -344,10 +348,11 @@ matches; run export → output matches the on-screen figure.
 
 ## C1 — Collapse the 4-row Plotting control bar
 
-**Status:** ⬜ Held — **changes the plotting interaction model.** Moving fold-change +
-display controls behind popovers is a real UX shift (extra click to reach common
-controls) and risks the fold-change cross-tab sync (`_sync_widgets_to_state`) when
-its widgets move into a popover. Worth a deliberate review. Plan ready.
+**Status:** ✅ Done — Fold-change, the display toggles, and the error band now sit
+behind "Fold change ▾" / "Display ▾" popovers on the line and bar control rows (and
+the scatter rows), so the separate card error-band row is gone. The fold-change
+cross-tab sync is unaffected — `install_fold_change_controls` is layout-agnostic, so
+only the parent layout changed.
 
 **Goal.** Reduce Bar Plots' four stacked control rows to the primary context bar (S2)
 + popovers, freeing vertical room.
@@ -391,9 +396,10 @@ toggle still switches source; clusters visually grouped.
 
 ## C3 — Collapsible sections on the Analyze form
 
-**Status:** ⬜ Held — **reworks the shared `_section` builder** used by every Analyze
-section, interacting with the form's dependency-driven row show/hide and the
-QScrollArea. A core-surface restructure better landed with review. Plan ready.
+**Status:** ✅ Done — the shared `_section` builder gained collapsible/collapsed
+options; the optional/advanced sections (Shape Metrics, Quality Control, Output
+Options, Compute Options, Scratch Disk) start collapsed so the required fields lead
+the form. Localized to `analyze_tab_form.py` (off the `analyze_tab.py` line budget).
 
 **Steps.**
 - [ ] Wrap Schema / Channels / Folders / QC blocks in `CollapsibleSection`s
@@ -410,9 +416,9 @@ QScrollArea. A core-surface restructure better landed with review. Plan ready.
 
 ## C4 — Last-run summary in the idle Analyze pane
 
-**Status:** ⬜ Held — **low value.** The audit itself rated the idle right-pane gap
-"acceptable (fills during a run)". A proper summary card also needs last-run
-metadata plumbing (dataset/well-count/method/duration). Deferred as lowest-priority.
+**Status:** ✅ Done — a compact last-run summary card (output-dir name, segmentation
+method, channels, timepoint count) shows above the dashboard when idle with a prior
+run, read from its `pipeline_info.json`; hidden while a run is active.
 
 **Steps.**
 - [ ] In the idle Pipeline Output pane (`90-analyze.png` lower half), show a summary
@@ -516,12 +522,10 @@ shows progress.
 
 ## F1 — Clickable status context chips
 
-**Status:** ⬜ Held — **needs a restructure decision.** The `N well(s) | nuclei |
-threshold | band` metric line is composed ad-hoc and pushed to the shared
-general-purpose `_status_lbl` (e.g. `lineplot/controller.py:516`), which also shows
-transient messages. Decomposing it into clickable chips means either restructuring
-that shared label across several controller call sites, or adding a parallel chip
-strip (duplication). Which approach is a decision (see end-of-turn question).
+**Status:** ✅ Done — the threshold + error-band readout is now two clickable status
+chips: "Threshold N" opens the Cell Gating editor, "Band SEM/SD" toggles the error
+band (tracking toggles from anywhere via `_sem_observers`). The duplicate
+threshold/band text was dropped from the line-plot status string.
 
 **Goal.** Turn `4 well(s) | 72 nuclei | threshold=50.00 | band=SEM` + the redundant
 "Ready." into clickable `SelectionChip`s that jump to their editor; drop the duplicate
@@ -607,11 +611,11 @@ old dataset and confirm no key drift.
 
 ## F4 — Pipeline progress legibility
 
-**Status:** ⬜ Held — **touches the pipeline + runner.** A determinate "grouping"
-progress signal means emitting events from `WellPlateZipper.py` through
-`services/pipeline_runner.ProgressTracker` (must keep the pipeline GUI-free, §6.2).
-Moderate-risk plumbing better landed with review. The log "summary level" half is
-safer but pairs naturally with the grouping-progress work.
+**Status:** ✅ Done — the verbose per-image log is hidden by default behind a "Show
+raw log" toggle, leaving the RunDashboard as the summary view. The grouping phase
+already reports determinate progress via the dashboard's Group stage
+(`zipper_start` total + per-well `zipper_well` events), so no pipeline change was
+needed for the progress half.
 
 **Steps.**
 - [ ] Default the Analyze log to a "summary" level with a "show raw log" toggle

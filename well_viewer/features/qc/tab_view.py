@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QWidget,
 )
@@ -143,9 +144,22 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
             swallowed()  # was: pass (silent except)
         _update_status()
 
+    # Apply live while typing (debounced) as well as on focus-out / Enter, so a
+    # populated bound takes effect without the user having to tab out of the
+    # field first. The debounce only re-fires after a short typing pause to
+    # avoid recomputing the gate on every keystroke; the ``hasFocus`` guard
+    # keeps the programmatic ``refresh_qc_gate_row`` setText calls from
+    # triggering it (they run when the field isn't focused).
+    _debounce = QTimer(row)
+    _debounce.setSingleShot(True)
+    _debounce.setInterval(350)
+    _debounce.timeout.connect(_apply)
+
     enable_cb.toggled.connect(lambda _=None: _apply())
     for w in _edits:
         w.editingFinished.connect(_apply)
+        w.textChanged.connect(
+            lambda _t=None, _w=w: _debounce.start() if _w.hasFocus() else None)
 
     _sync_enabled()
     _update_status()

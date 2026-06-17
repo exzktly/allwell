@@ -51,7 +51,20 @@ def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
     pgid: Optional[int] = None
     if os.name == "posix":
         try:
-            pgid = os.getpgid(proc.pid)
+            pid = proc.pid
+            if isinstance(pid, int) and pid > 0:
+                pgid = os.getpgid(pid)
+        except Exception:
+            pgid = None
+        # CRITICAL: never signal our OWN process group. A subprocess that
+        # wasn't started in a new session (e.g. a local rsync/ssh sub-step of an
+        # incremental remote run) shares the GUI's process group, so os.killpg
+        # against it would SIGTERM/SIGKILL the GUI itself — the "Stop quit the
+        # whole app" bug. In that case fall back (pgid=None) to terminating just
+        # the single process below.
+        try:
+            if pgid is not None and pgid == os.getpgrp():
+                pgid = None
         except Exception:
             pgid = None
 

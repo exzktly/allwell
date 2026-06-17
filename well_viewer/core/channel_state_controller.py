@@ -164,6 +164,14 @@ def recalculate_threshold(app) -> None:
             cell_gating_load_threshold_frac_on,
         )
         cell_gating_load_cell_areas(app)
+        # cell_gating_load_cell_areas rebuilds the per-channel fluor-gate rows
+        # for the freshly-detected channels as fresh (default 0.0) edits, which
+        # discards the values the load above just wrote. Re-apply the persisted
+        # gating params onto the rebuilt rows — otherwise a cold open shows the
+        # saved gates/thresholds but never applies them until the user
+        # re-toggles a field. (The saved value is always current — every gate
+        # edit persists immediately — so re-applying never clobbers a live edit.)
+        app._load_gating_from_pipeline_info()
         cell_gating_load_threshold_frac_on(app)
 
 

@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal, QRectF
+from PySide6.QtCore import Qt, QObject, QTimer, Signal, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -35,6 +35,21 @@ REVIEW_TAB_DEBUG = False
 ANALYZE_TAB_DEBUG = False
 REVIEW_BAR_DEBUG = False
 REVIEW_SCATTER_DEBUG = False
+
+
+class _StatusDotBridge(QObject):
+    """Marshals status-dot updates onto the GUI thread.
+
+    ``status_signal`` is Qt-free and invokes its driver on whatever thread
+    calls ``refresh()`` — including background workers and the error-logging
+    handler (``signal_failed``). Poking the StatusDot widget (a ``QWidget``)
+    from a non-GUI thread schedules a repaint off-thread, which trips Qt's
+    timer machinery ("QObject::killTimer: timers cannot be stopped from another
+    thread") and can crash the app. Emitting this signal is thread-safe; the
+    connected slot runs on the GUI thread (queued for cross-thread emits).
+    """
+
+    statusChanged = Signal(str)
 
 
 class AllWellApp(QMainWindow):
@@ -237,8 +252,14 @@ class AllWellApp(QMainWindow):
         # operation in the package (workers, redraws, dataset loads) can
         # flip the colour without taking a hard dependency on this module.
         from well_viewer.core import status_signal as _status_signal
+        # Drive the dot through a signal so updates from background threads
+        # (workers, the error-logging handler's signal_failed) are marshalled
+        # onto the GUI thread — a direct widget poke off-thread trips Qt's timer
+        # machinery and can quit the app (see _StatusDotBridge).
+        self._status_dot_bridge = _StatusDotBridge()
+        self._status_dot_bridge.statusChanged.connect(self._status_dot.setStatus)
         _status_signal.register_driver(
-            lambda state: self._status_dot.setStatus(state),
+            self._status_dot_bridge.statusChanged.emit,
             initial_state="neutral",
         )
         # The danger pulse auto-clears after DANGER_HOLD_SECS seconds —

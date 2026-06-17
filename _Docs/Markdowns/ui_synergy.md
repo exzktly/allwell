@@ -43,6 +43,7 @@ while testing the branch. Logged here so the plan reflects *all* the work.
 | `send_plot_to_batch_export` moved to core (deferred-import budget) | `ee793ed` |
 | QC debris gate applies **live while typing** (debounce, not only on tab-out) | `1a27e35` |
 | Persisted QC debris gate **applies on reopen** (refresh no longer clobbers loaded bounds) | `83677c6` |
+| **Cell Browser** now inherits the shared per-channel LUT (S4) — uses the tuned `(lo, hi)` when set, else per-crop auto | _this commit_ |
 
 ## Context
 

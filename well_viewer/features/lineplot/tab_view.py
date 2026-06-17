@@ -80,6 +80,13 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="line")
     cl.addWidget(_fc_btn)
 
+    # Error band (SEM/SD + Spread) collapses into a "Display ▾" popover (C1)
+    # rather than a separate card-controls row beneath the figure.
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", line_ctrl)
+    _disp_btn.setToolTip("Error band (SEM/SD) and per-FOV spread")
+    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
+    cl.addWidget(_disp_btn)
+
     cl.addStretch(1)
 
     # IconButton (QToolButton subclass) matches the Sample Definitions
@@ -129,9 +136,8 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)   # + header / controls / toolbar rows
 
-    # The "Error Band: SEM/SD" + "Spread: FOV" toggles (formerly on the legacy
-    # plot toolbar) → the card's controls row beneath the header.
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=True))
+    # Error band now lives in the "Display ▾" popover on the control row (C1);
+    # no separate card-controls row beneath the header.
 
     # The Publication↔Screen toggle is wired through plot_style.apply_ax_style
     # (it consults card.plotTheme() via ax.figure._plot_card). The stats chip is

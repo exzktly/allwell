@@ -145,6 +145,14 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_tp_cb.hide()
     ctx.app._bar_tp_var = ctx.app._bar_tp_cb
 
+    # C1: the display toggles + error band collapse into a "Display ▾" popover so
+    # the bar control area is two compact rows. ``_disp_lay`` is the popover body;
+    # the widgets are added there instead of inline (addWidget reparents them).
+    from well_viewer.core.ui_helpers import make_popover_button as _make_popover_button
+    _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", shape_ctrl)
+    _disp_btn.setToolTip("Bar/point display options: grouping, pooling, beeswarm, violin, error band")
+    sl.addWidget(_disp_btn)
+
     # Layout toggle: cluster bars by well or by timepoint.
     ctx.app._bar_group_mode_btn = QPushButton("Group by Well", shape_ctrl)
     ctx.app._bar_group_mode_btn.setProperty("variant", "toggle")
@@ -154,7 +162,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_group_mode_btn.clicked.connect(
         lambda _=False: toggle_bar_group_mode(ctx.app)
     )
-    sl.addWidget(ctx.app._bar_group_mode_btn)
+    _disp_lay.addWidget(ctx.app._bar_group_mode_btn)
 
     # Replicate-pool toggle: collapse rset wells into one column or
     # expand them. Hidden when no replicate sets are active.
@@ -168,7 +176,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         lambda _=False: toggle_bar_pool_replicates(ctx.app)
     )
     ctx.app._bar_pool_reps_btn.setVisible(False)
-    sl.addWidget(ctx.app._bar_pool_reps_btn)
+    _disp_lay.addWidget(ctx.app._bar_pool_reps_btn)
 
     ctx.app._bar_pool_rset_cells_btn = QPushButton("Pool rset cells", shape_ctrl)
     ctx.app._bar_pool_rset_cells_btn.setProperty("variant", "toggle")
@@ -180,7 +188,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         lambda _=False: toggle_bar_pool_rset_cells(ctx.app)
     )
     ctx.app._bar_pool_rset_cells_btn.setVisible(False)
-    sl.addWidget(ctx.app._bar_pool_rset_cells_btn)
+    _disp_lay.addWidget(ctx.app._bar_pool_rset_cells_btn)
 
     ctx.app._swarm_btn = QPushButton("Beeswarm", shape_ctrl)
     ctx.app._swarm_btn.setProperty("variant", "toggle")
@@ -188,7 +196,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._swarm_btn.setToolTip(
         "Overlay the individual per-cell points on each bar.")
     ctx.app._swarm_btn.clicked.connect(lambda _=False: ctx.app._toggle_swarm())
-    sl.addWidget(ctx.app._swarm_btn)
+    _disp_lay.addWidget(ctx.app._swarm_btn)
     ctx.app._bar_swarm = False
 
     ctx.app._violin_btn = QPushButton("Violin", shape_ctrl)
@@ -198,10 +206,10 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Draw a violin (kernel-density) shape for each group. "
         "Enables the Smooth control.")
     ctx.app._violin_btn.clicked.connect(lambda _=False: ctx.app._toggle_violin())
-    sl.addWidget(ctx.app._violin_btn)
+    _disp_lay.addWidget(ctx.app._violin_btn)
     ctx.app._bar_violin = False
 
-    sl.addWidget(QLabel("Smooth:", shape_ctrl))
+    _disp_lay.addWidget(QLabel("Smooth:", shape_ctrl))
     from widgets.styled_slider import StyledSlider as _StyledSlider
     ctx.app._violin_slider = _StyledSlider(Qt.Horizontal, shape_ctrl)
     ctx.app._violin_slider.setRange(5, 200)
@@ -214,7 +222,15 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         lambda _v: (redraw_bars(ctx.app) if ctx.app._bar_violin else None)
     )
     ctx.app._violin_slider.setEnabled(False)
-    sl.addWidget(ctx.app._violin_slider)
+    _disp_lay.addWidget(ctx.app._violin_slider)
+
+    # Error band (SEM/SD + Spread) joins the same Display popover (C1) instead
+    # of a separate card-controls row.
+    _band_sep = QFrame(_disp_panel)
+    _band_sep.setFrameShape(QFrame.HLine)
+    _band_sep.setObjectName("HRule")
+    _disp_lay.addWidget(_band_sep)
+    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
 
     sl.addStretch(1)
     right_l.addWidget(shape_ctrl)
@@ -239,7 +255,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_canvas.setMinimumHeight(int(_FIG_H * _DPI))
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)
 
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=True))
+    # Error band now lives in the "Display ▾" popover above (C1); no card row.
     card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx.app))
     card.setStatsChipVisible(False)
 

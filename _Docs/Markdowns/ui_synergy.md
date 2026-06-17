@@ -1,64 +1,31 @@
 # UI Synergy — Living Implementation Plan
 
-> **Status:** 14 / 18 shipped, 1 partial, S3 parked (+ 1 follow-up) · **Last updated:** 2026-06-17
+> **Status:** 15 / 18 shipped, S3 parked, 2 remaining (+ 1 follow-up) · **Last updated:** 2026-06-17
 >
-> **Shipped:** F2, C2, S2, D4, D3, D1, D2, F5, F3, **S1, F1, C3, C4, F4** — each
-> verified by the render harness and/or targeted tests. **C1** partial (Fold-change
-> popover). Follow-up: scatter cell viewer → shared-dock slide-out.
+> **Shipped (branch `claude/ui-ux-design-review-8uktp9`), each verified by the
+> headless render harness and/or targeted tests:**
+> F2, C2, S2, D4, D3, D1, D2, F5, F3, **S1** (Statistics scope), **F1** (chips +
+> actions), **C1** (Fold-change + Display + error-band popovers, line & bar),
+> **C3** (collapsible Analyze form), **C4** (idle last-run card), **F4** (raw log
+> behind a toggle). Plus a follow-up: the **Scatter cell viewer** is now a
+> shared-dock **slide-out** (`mount_widget_in_plot_dock`), mutually exclusive with
+> the Properties sidebar.
 >
-> **Remaining (large, core-surface refactors — decisions recorded below):**
-> - **S4** — channel + stage + LUT sync across Review Image / Image Table / Cell
->   Browser. Largest item: three features with separate channel/stage/LUT state
->   (Image Table has per-row selectors) → needs a shared image-view state object +
->   rewiring all three. High regression risk; warrants its own session.
-> - **S5** — "Add to batch" from a plot card. No existing programmatic batch-entry
->   API; needs a plot-spec→batch-entry mapping + prefill wiring (a new feature).
-> - **C1 rest** — display/timepoints + error-band popovers (the display row has
->   conditional-visibility toggles; error-band lives on the card controls row).
+> **Parked:** **S3** (live-plate data overlay) — at the user's request; the design
+> question (which timepoint to colour by) is deferred.
 >
-> **Decisions locked in (2026-06-17), recorded here for clean pickup:**
-> - **S1** → Statistics-only scope ✅ (Batch Export left as-is).
-> - **C1** → popover buttons. 🟡 Fold-change collapsed into a popover; the
->   display/timepoints + error-band rows are the remaining popovers.
-> - **F1** → chips + actions ✅.
-> - **C3** → collapsible Analyze form, **QC / preprocessing collapsed by default**,
->   Schema/Channels/Folders/Run expanded. *Not yet built* — analyze_tab.py is at
->   its line budget + the form is a flat imperative builder, so this needs the
->   section-build extracted to a helper module first.
-> - **C4** → minimal last-run summary card (dataset, well count, method, duration,
->   "Open results") in the idle Analyze right pane. *Not yet built* (same
->   analyze_tab budget constraint as C3).
-> - **F4** → log defaults to a **summary level with a "show raw log" toggle** +
->   determinate progress for the WellPlateZipper grouping phase. *Not yet built*
->   (touches pipeline_runner / process_microscopy emit format).
+> **Remaining (2 large, core-surface refactors — decisions recorded):**
 > - **S4** → full sync of **channel + image stage (Raw/Flat-field/Corrected) + LUT**
 >   across Segmentation Review / Image Table / Cell Browser; per-row LUT becomes an
->   explicit override. *Not yet built* (largest item — shared image-view state).
-> - **S5** → "Add to batch" on plot cards capturing the current plot spec. *Not yet
->   built* (depends on the plotting surface; with S1 statistics-only, batch groups
->   stay as-is).
-> - **S3** → parked at the user's request.
+>   explicit override. Largest item: three features with separate channel/stage/LUT
+>   state (Image Table has per-row selectors) → needs a shared image-view state
+>   object + rewiring all three. High regression risk; warrants its own session.
+> - **S5** → "Add to batch" on plot cards capturing the current plot spec. No
+>   existing programmatic batch-entry API; needs a plot-spec→batch-entry mapping +
+>   prefill wiring (a new feature). With S1 statistics-only, batch groups stay as-is.
 >
 > This is a **living document**. As work proceeds, update each task's checkbox and
-> the per-recommendation **Status** line. Keep the summary table in sync. When a
-> recommendation ships, link its PR(s) and move it to ✅ Done.
->
-> **Shipped (branch `claude/ui-ux-design-review-8uktp9`):** F2, C2, S2, D4, D3, D1,
-> D2, F5, **F3** — each verified by the headless render harness and/or targeted
-> tests. Plus a follow-up requested mid-stream: the **Scatter cell viewer** is now a
-> shared-dock **slide-out** (not a modal pop-up), mutually exclusive with the
-> Properties sidebar (`mount_widget_in_plot_dock`).
->
-> **S3 — parked at the user's request** (skip for now; design Q on which timepoint
-> to colour by is deferred).
->
-> **Remaining (architectural / behaviour-changing / higher-risk):** S1, S4, S5, C1,
-> C3, C4, F1, F4 — approved by the user but each is a focused refactor of core
-> behaviour/persistence/structure. Being done deliberately (one at a time, with
-> tests) rather than rushed together. See each section's Status for specifics.
-> **F1 note:** the threshold/band readout is line-plot-only (set in
-> `lineplot/controller.py`), not a persistent global; clickable chips need cross-tab
-> refresh wiring to avoid stale values — scoped, not yet built.
+> the per-recommendation **Status** line. Keep the summary table in sync.
 
 ## Context
 
@@ -106,7 +73,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **S3** | Live-plate heatmap overlay (merge sidebar plate ↔ Heat Map) | ★ | M | ⬜ |
 | **S4** | Link the three image views (shared channel/LUT/stage) | ★ | M | ⬜ |
 | **S5** | "Add to batch" from every plot card | ★ | M | ⬜ |
-| **C1** | Collapse the 4-row Plotting control bar | ★ | M | 🟡 |
+| **C1** | Collapse the 4-row Plotting control bar | ★ | M | ✅ |
 | **C2** | Group the Segmentation toolbar | ◐ | S | ✅ |
 | **C3** | Collapsible sections on the Analyze form | ◐ | M | ✅ |
 | **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ✅ |

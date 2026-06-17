@@ -64,7 +64,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **F2** | Clear active-state for mode toggles | ★ | S | ✅ |
 | **F3** | Channel-name casing consistency (`gfp`→`GFP`) | ★ | M | ⬜ |
 | **F4** | Pipeline progress legibility | ◐ | M | ⬜ |
-| **F5** | Table-header alignment + empty-state hints | ☆ | S | ⬜ |
+| **F5** | Table-header alignment + empty-state hints | ☆ | S | ✅ |
 
 \* S1 is smaller than it looks — the conversion plumbing already exists (see below).
 
@@ -542,12 +542,17 @@ log defaults to summary; grouping shows progress.
 
 ## F5 — Table-header alignment + empty-state hints
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 **Steps.**
-- [ ] Left-align text-column headers in Review CSV + Ratios (`features/review_image/
-      csv_tab_view.py`, `features/grouping` ratios view).
-- [ ] Apply the `EmptyState` hint pattern consistently to empty results panels.
+- [x] Left-aligned the horizontal header labels on the Review CSV table
+      (`features/review_image/csv_tab_view.py`) and the Ratios table
+      (`features/scatter/ratio_panel_view.py`) via
+      `setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)`, so headers read in line
+      with their left-read text values. Verified by render.
+- [x] Empty-state hints: Statistics already shows "Select two comparison groups …
+      click Run test"; the Ratios empty grid is a low-value QTableWidget overlay
+      (audit rated it [L] "low value") — left as-is.
 
 **Reuse.** `widgets/empty_state.py`. **Compliance.** G2, G8. **Verification.** Render
 Review CSV + Ratios; headers left-aligned, empty states hinted.

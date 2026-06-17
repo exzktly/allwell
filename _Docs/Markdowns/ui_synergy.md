@@ -48,7 +48,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | ID | Recommendation | Impact | Effort | Status |
 |----|----------------|:------:|:------:|:------:|
 | **S1** | Unify the three "group" models | ★ | M* | ⬜ |
-| **S2** | One persistent Analysis-Context bar | ★ | M | ⬜ |
+| **S2** | One persistent Analysis-Context bar | ★ | M | ✅ |
 | **S3** | Live-plate heatmap overlay (merge sidebar plate ↔ Heat Map) | ★ | M | ⬜ |
 | **S4** | Link the three image views (shared channel/LUT/stage) | ★ | M | ⬜ |
 | **S5** | "Add to batch" from every plot card | ★ | M | ⬜ |
@@ -59,7 +59,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **D1** | Analyze first-run guidance (schema + method hints) | ★ | M | ⬜ |
 | **D2** | Self-describing fold-change / scatter-gate | ◐ | S | ⬜ |
 | **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ⬜ |
-| **D4** | Cell Browser sensible default state | ◐ | S | ⬜ |
+| **D4** | Cell Browser sensible default state | ◐ | S | ✅ |
 | **F1** | Clickable status context chips | ★ | S | ⬜ |
 | **F2** | Clear active-state for mode toggles | ★ | S | ✅ |
 | **F3** | Channel-name casing consistency (`gfp`→`GFP`) | ★ | M | ⬜ |
@@ -125,7 +125,12 @@ panel after reload. Run `tests/` selection/stats suites + the v1→v2 migration 
 
 ## S2 — One persistent Analysis-Context bar
 
-**Status:** ⬜ Not started · **(do this first in the synergy chain — S3/S5 build on it)**
+**Status:** ✅ Done (scatter behaviour) — the bar is already owned once at the Plotting
+container; the remaining issue was its disappearance on Scatter. Now the global
+Channel/Property/Threshold controls stay **visible but dimmed** on Scatter with an
+inline italic note "Scatter uses per-axis channels below" instead of vanishing
+(`core/centre_view.py` `_refresh_channel_chip` + new `_plotting_scatter_note`).
+Verified by rendering the Scatter tab.
 
 **Goal.** Hoist Channel · Property · Threshold into one persistent bar under the
 sub-tab strip, applied to every plotting tab. On Scatter, **dim** the global bar with
@@ -410,13 +415,22 @@ list complete.
 
 ## D4 — Cell Browser sensible default state
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done (aligned with the deliberate deselected-default)
+
+**Note:** the timepoint/FOV deselected-default is **intentional** (recent
+`cb-default-deselected` work + the explicit comment in `criteria_view._sync_selection_dict`).
+Flipping it would revert a maintainer decision, so instead of changing the default
+we made the empty state *instructive*.
 
 **Steps.**
-- [ ] Default timepoints/FOVs to "all selected" (or show a prominent `EmptyState` CTA
-      naming the exact next click) so the gallery isn't blank on open. Files:
-      `features/cell_browser/criteria_view.py` (defaults ~229-236), `tab_view.py`.
-- [ ] Show a spinner/disabled state on "Apply filters" while the async worker runs.
+- [x] When `apply_filters` produces an empty set, set a status that names the exact
+      next click — "No timepoints selected — click Timepoints to choose which to show."
+      / "No FOVs selected — …" / "No cells match … relax the criteria"
+      (`controller._empty_gallery_hint`).
+- [x] Show busy feedback on "Apply filters": the button disables + reads "Loading…"
+      while the worker composes a page, re-enabling on `on_page_finished`
+      (`controller._set_apply_busy`, button stored as `app._cell_browser_apply_btn`).
+      Tested: `tests/test_cell_browser_tab.py`, `test_cell_browser_collect.py` green.
 
 **Reuse.** `widgets/empty_state.py`, existing async worker signals (`cell_ready`,
 `page_finished`). **Compliance.** G1, G2, G3 (defaults on the feature state).

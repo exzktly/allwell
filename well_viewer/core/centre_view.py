@@ -378,6 +378,20 @@ def build_centre(app, parent: QWidget) -> None:
         )
         arl.addWidget(app._plotting_thresh_frac_stepper)
 
+        # Caption shown only on the Scatter sub-tabs, where the global
+        # Channel/Property/Threshold controls don't drive the plot (it has
+        # per-axis selectors). The controls stay visible-but-dimmed rather than
+        # vanishing — a disappearing control row read as a glitch — and this
+        # note says where the live channels are.
+        scatter_note = QLabel("Scatter uses per-axis channels below")
+        scatter_note.setStyleSheet(
+            f"color: {_C.text_muted}; font-size: {_T.caption_size}px; "
+            f"font-style: italic;"
+        )
+        scatter_note.setVisible(False)
+        arl.addWidget(scatter_note)
+        app._plotting_scatter_note = scatter_note
+
         arl.addStretch(1)
 
         # "+ Add panel" button retired — the underlying per-renderer
@@ -459,22 +473,24 @@ def build_centre(app, parent: QWidget) -> None:
             """
             global_cb = getattr(app, "_plotting_channel_cb", None)
             metric_cb = getattr(app, "_plotting_metric_cb", None)
-            # Hide the global Channel/Property combos and the ThreshFracOn
-            # quick-edit on scatter sub-tabs — those tabs own per-axis
-            # (channel, property) selectors, so a single active-channel control
-            # would be ambiguous.
+            # On scatter sub-tabs the global Channel/Property/Threshold controls
+            # don't drive the plot — those tabs own per-axis (channel, property)
+            # selectors. Rather than HIDE the controls (a row that vanishes reads
+            # as a glitch), keep them visible but DIMMED and show an inline note
+            # pointing at the per-axis selectors.
             is_scatter = title in ("Scatter Plot", "Scatter Cells", "Scatter Agg")
             for w in (global_cb, metric_cb,
                       getattr(app, "_plotting_thresh_frac_stepper", None)):
                 if w is not None:
-                    w.setVisible(not is_scatter)
-            # Also hide the "Channel" / "Property" / "Threshold" labels in the
-            # action row so the row looks intentional (not just empty boxes hidden).
+                    w.setEnabled(not is_scatter)
             for lbl_attr in ("_plotting_channel_lbl", "_plotting_metric_lbl",
                              "_plotting_thresh_frac_lbl"):
                 lbl = getattr(app, lbl_attr, None)
                 if lbl is not None:
-                    lbl.setVisible(not is_scatter)
+                    lbl.setEnabled(not is_scatter)
+            note = getattr(app, "_plotting_scatter_note", None)
+            if note is not None:
+                note.setVisible(is_scatter)
             # Keep the quick-edit showing the active channel's value on every
             # sub-tab switch (guarded; no-op before the stepper is built).
             app._refresh_thresh_frac_quick_edit()

@@ -358,6 +358,91 @@ def make_plot_with_right_dock(parent: QWidget) -> Tuple[QWidget, QVBoxLayout, QW
     return plot_area, plot_layout, right_dock
 
 
+def mount_widget_in_plot_dock(dock: QWidget, widget: QWidget, width: int = 0) -> None:
+    """Show *widget* in a plot tab's right *dock*, hiding any sibling panel
+    already docked there.
+
+    A plot tab's right dock (``make_plot_with_right_dock``) is a shared
+    slide-out: the Export-Style / Properties sidebar and the Scatter cell viewer
+    both live there. This keeps exactly one of them visible at a time, so the
+    two coexist without overlapping — open one and the other slides away.
+    """
+    if dock is None or widget is None:
+        return
+    lay = dock.layout()
+    if lay is None:
+        return
+    if lay.indexOf(widget) < 0:
+        lay.addWidget(widget)
+    for i in range(lay.count()):
+        sibling = lay.itemAt(i).widget()
+        if sibling is not None and sibling is not widget:
+            sibling.hide()
+    widget.show()
+    host = getattr(dock, "_dock_host", None)
+    if host is not None and hasattr(host, "set_overlay_dock"):
+        host.set_overlay_dock(dock, width)
+    dock.setVisible(True)
+
+
+def hide_plot_dock(dock: QWidget) -> None:
+    """Hide a plot tab's right dock (and whatever panel it currently holds)."""
+    if dock is not None:
+        dock.setVisible(False)
+
+
+def send_plot_to_batch_export(app, mode: str) -> None:
+    """S5: jump from a plot card to Batch Export with the matching chart-type.
+
+    The batch panels read the live plot spec (channel / property / threshold /
+    SEM / fold-change) straight off ``app._app_state``, so "capturing the
+    current plot" reduces to navigating to the Batch Export tab and selecting
+    the matching mode. Navigating builds the tab (so ``_batch_export_set_mode``
+    exists) before we set it. Lives in this core helper — not in the
+    batch_export feature — so the plot tab views can import it at module scope
+    without a feature-to-feature cycle; it touches only ``app`` attributes.
+    """
+    nb = getattr(app, "_notebook", None)
+    if nb is not None:
+        nb.setCurrentByName("Batch Export")
+    setter = getattr(app, "_batch_export_set_mode", None)
+    if callable(setter):
+        setter(mode)
+    label = {"line": "Line", "bar": "Bar", "scatter_cells": "Scatter (cells)",
+             "scatter_agg": "Scatter (aggregate)"}.get(mode, mode)
+    app._set_status(f"Batch Export → {label}: using the current plot settings.")
+
+
+def make_popover_button(text: str, parent: QWidget):
+    """A compact toolbar button that opens a small panel ("popover") on click.
+
+    Returns ``(button, content_widget, content_layout)`` — add controls to
+    ``content_layout`` and they appear in the popup. Used to collapse rarely-
+    changed plotting controls (e.g. Fold change) off the always-visible control
+    bar (C1), trading one row of vertical space for one click.
+    """
+    from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
+
+    btn = QToolButton(parent)
+    btn.setText(text)
+    btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    btn.setProperty("variant", "secondary")
+    # The label already carries a ▾ caret; hide QToolButton's native
+    # menu-indicator so the two don't render as overlapping double arrows.
+    btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+    menu = QMenu(btn)
+    content = QWidget(menu)
+    content_layout = QVBoxLayout(content)
+    content_layout.setContentsMargins(10, 8, 10, 8)
+    content_layout.setSpacing(4)
+    wa = QWidgetAction(menu)
+    wa.setDefaultWidget(content)
+    menu.addAction(wa)
+    btn.setMenu(menu)
+    return btn, content, content_layout
+
+
 def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
     """Forward wheel events from a matplotlib canvas to ``scroll_area``.
 

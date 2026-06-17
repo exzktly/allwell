@@ -550,6 +550,36 @@ def stats_sync_from_app(app) -> None:
     stats_refresh_group_list(app)
 
 
+def stats_resync_from_sample_defs(app) -> None:
+    """Re-pull the comparison groups from the shared Sample-Definition sets.
+
+    Statistics auto-seeds its groups from the Sample-Definition replicate sets
+    on first visit (tab_controller); this is the explicit "do it again" so a
+    user who edited Sample Definitions can refresh without rebuilding groups by
+    hand. Confirm first when existing groups would be discarded.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    rsets = app._groups_from_rep_sets()
+    if not rsets:
+        app._set_status("No Sample-Definition groups to load — define them on the Sample Definitions tab.")
+        return
+    existing = [g for g in app._app_state.stats.groups if g.wells]
+    if existing:
+        resp = QMessageBox.question(
+            app if hasattr(app, "window") else None,
+            "Load from Sample Definitions",
+            f"Replace the current {len(existing)} comparison group(s) with the "
+            f"{len(rsets)} Sample-Definition group(s)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if resp != QMessageBox.Yes:
+            return
+    stats_sync_from_app(app)
+    app._set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
+
+
 def stats_on_test_change(app) -> None:
     """Clear results when test changes; update UI hints."""
     app._stats_write_result("")
@@ -584,9 +614,13 @@ def stats_update_tp_menu(app) -> None:
     channels = list(app._app_state.channel.fluor_channels) if app._app_state.channel.fluor_channels else []
     ch_options: List[str] = []
     for ch in channels:
-        ch_options.append(ch)
+        # Display fluor tokens upper-case (GFP) to match the rest of the app;
+        # col_for_scatter_entry resolves the column case-insensitively and the
+        # chart titles already upper-case (_channel_label_for_val_col). ``ch``
+        # stays lower-case for the smFISH-channel membership test.
+        ch_options.append(ch.upper())
         if ch in app._app_state.channel.smfish_channels:
-            ch_options.append(f"{ch} (spots)")
+            ch_options.append(f"{ch.upper()} (spots)")
     # Ratio "channels" (computed per-cell values) and shape-class features are
     # selectable too — they resolve via _label_to_channel_key in
     # col_for_scatter_entry, and the Property combo collapses to a single
@@ -604,8 +638,10 @@ def stats_update_tp_menu(app) -> None:
             app._stats_channel_cb.setCurrentText(current_ch)
         else:
             # Default to the active channel when possible to match the
-            # bar/line plots' current selection.
-            active = app._app_state.channel.active_channel if app._app_state.channel.active_channel in ch_options else ch_options[0]
+            # bar/line plots' current selection (compare upper-case since the
+            # options now display upper-case while the token is lower-case).
+            active_disp = (app._app_state.channel.active_channel or "").upper()
+            active = active_disp if active_disp in ch_options else ch_options[0]
             app._stats_channel_cb.setCurrentText(active)
     # Channel may now resolve to a ratio key -- refresh the Property
     # combo's item set accordingly.

@@ -387,6 +387,27 @@ QPushButton#Ghost:hover, QToolButton#Ghost:hover {{
     background-color: {c.panel};
 }}
 
+/* ── Toggle buttons (checkable mode/option buttons) ───────────────────── */
+/* e.g. Delete Cell / Crop Region (Segmentation), Beeswarm / Violin / Group by
+   Well (plots), Outline / Binary. The default global :checked only darkens the
+   fill a touch — too subtle to read as "armed". Give the on-state an accent
+   ring + tinted fill so a mode toggle is unmistakably engaged. The
+   ``toggle_active`` dynamic property is the non-pseudo-state equivalent some
+   call sites set explicitly (synced via unpolish/polish). */
+QPushButton[variant="toggle"]:checked,
+QPushButton[variant="toggle_active"],
+QToolButton[variant="toggle"]:checked {{
+    background-color: {c.accent_dim};
+    border: 1px solid {c.accent};
+    color: {c.text_primary};
+}}
+QPushButton[variant="toggle"]:checked:hover,
+QToolButton[variant="toggle"]:checked:hover {{
+    background-color: {c.accent};
+    border-color: {c.accent};
+    color: {c.accent_fg};
+}}
+
 /* ── Plate-map well buttons (WellButton grid) ─────────────────────────── */
 /* Used by the picker grids that use ``WellButton`` / ``build_plate_grid``
    (Statistics / Image Table / Segmentation / Sample Definitions / Bar Plots).

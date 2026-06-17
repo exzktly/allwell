@@ -74,6 +74,25 @@ def build_bottom(app) -> None:
     app._status_lbl.setObjectName("Muted")
     sr_l.addWidget(app._status_lbl, 1)
 
+    # Actionable context chips (F1): the ON/OFF threshold and the error-band
+    # mode, fed live from state. Clicking jumps to / toggles their editor, so
+    # the always-visible readout doubles as a control. They replace the
+    # duplicate "threshold=… | band=…" text the line plot used to append.
+    app._status_threshold_chip = QPushButton("", status_row)
+    app._status_threshold_chip.setProperty("variant", "secondary")
+    app._status_threshold_chip.setCursor(Qt.PointingHandCursor)
+    app._status_threshold_chip.setToolTip(
+        "ON/OFF intensity threshold for the active channel — click to edit it in Cell Gating")
+    app._status_threshold_chip.clicked.connect(lambda _=False: _go_to_threshold_editor(app))
+    sr_l.addWidget(app._status_threshold_chip)
+
+    app._status_band_chip = QPushButton("", status_row)
+    app._status_band_chip.setProperty("variant", "secondary")
+    app._status_band_chip.setCursor(Qt.PointingHandCursor)
+    app._status_band_chip.setToolTip("Error band: SEM or SD — click to toggle")
+    app._status_band_chip.clicked.connect(lambda _=False: app._toggle_sem())
+    sr_l.addWidget(app._status_band_chip)
+
     app._progress_bar = QProgressBar(status_row)
     app._progress_bar.setOrientation(Qt.Horizontal)
     app._progress_bar.setFixedWidth(220)
@@ -122,3 +141,42 @@ def build_bottom(app) -> None:
     rt._logger.addHandler(handler)
     rt._logger.setLevel(logging.DEBUG)
     rt._logger.propagate = False
+
+    # Keep the band chip in lock-step with every SEM/SD toggle (from any
+    # toolbar), and seed both chips for the current state.
+    if not getattr(app, "_sem_observers", None):
+        app._sem_observers = []
+    app._sem_observers.append(lambda _is_sem: refresh_status_chips(app))
+    refresh_status_chips(app)
+
+
+def refresh_status_chips(app) -> None:
+    """Update the status-bar threshold / error-band chips from current state.
+
+    Hidden until a dataset is loaded (the values are meaningless otherwise).
+    Safe to call before the chips are built (no-op)."""
+    thr_chip = getattr(app, "_status_threshold_chip", None)
+    band_chip = getattr(app, "_status_band_chip", None)
+    if thr_chip is None or band_chip is None:
+        return
+    has_data = bool(getattr(app._app_state.dataset, "well_paths", None))
+    thr_chip.setVisible(has_data)
+    band_chip.setVisible(has_data)
+    if not has_data:
+        return
+    try:
+        thr = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
+        thr_chip.setText(f"Threshold {thr:g}")
+    except Exception:
+        thr_chip.setText("Threshold —")
+    use_sem = bool(app._app_state.plot.use_sem)
+    band_chip.setText(f"Band {'SEM' if use_sem else 'SD'}")
+
+
+def _go_to_threshold_editor(app) -> None:
+    """Jump to the Cell Gating editor (under Sample Definitions) for the
+    threshold chip."""
+    nb = getattr(app, "_notebook", None)
+    if nb is not None:
+        nb.setCurrentByName("Sample Definitions")
+    app._set_status("Edit the ON/OFF intensity threshold under Cell Gating.")

@@ -8,7 +8,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -16,6 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from well_viewer.data.image_resolver import (
@@ -28,11 +28,13 @@ if TYPE_CHECKING:
     from .runtime_app import WellViewerApp
 
 
-class ScatterCellViewer(QDialog):
-    """Modal dialog for viewing a single cell's fluorescence images.
+class ScatterCellViewer(QWidget):
+    """Slide-out panel for viewing a single cell's fluorescence images.
 
     Shows one channel at a time, cropped to the cell's boundaries from the mask.
-    Uses filename and nuclear_id from CSV to locate images.
+    Uses filename and nuclear_id from CSV to locate images. Mounted in the
+    Scatter tab's right dock (shared with the Export-Style sidebar — one panel
+    visible at a time) rather than a disruptive modal pop-up window.
     """
 
     def __init__(
@@ -45,9 +47,6 @@ class ScatterCellViewer(QDialog):
         row_idx: int,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Cell Viewer - Scatter Plot")
-        self.resize(600, 650)
-        self.setModal(True)
 
         self.app = app
         self.well_label = well_label
@@ -71,12 +70,21 @@ class ScatterCellViewer(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 5, 10, 10)
 
+        # Header row: title + close (✕) so the slide-out can be dismissed
+        # without a window chrome (it lives in the shared plot dock).
+        head_row = QHBoxLayout()
         self._title_label = QLabel(f"Cell Viewer: {self.well_label}")
         tfont = self._title_label.font()
         tfont.setBold(True)
         self._title_label.setFont(tfont)
-        self._title_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._title_label)
+        head_row.addWidget(self._title_label, 1)
+        close_btn = QPushButton("✕")
+        close_btn.setObjectName("Ghost")
+        close_btn.setFixedWidth(28)
+        close_btn.setToolTip("Close the cell viewer")
+        close_btn.clicked.connect(self._close_dock)
+        head_row.addWidget(close_btn, 0)
+        layout.addLayout(head_row)
 
         ctrl_row = QHBoxLayout()
         ctrl_row.addWidget(QLabel("Channel:"))
@@ -117,6 +125,11 @@ class ScatterCellViewer(QDialog):
         self._debug_text.setMinimumHeight(140)
         diag_layout.addWidget(self._debug_text)
         layout.addWidget(diag_group)
+
+    def _close_dock(self) -> None:
+        """Hide the shared plot dock this panel lives in."""
+        from well_viewer.core.ui_helpers import hide_plot_dock
+        hide_plot_dock(self.parentWidget())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -967,8 +980,14 @@ class ScatterCellViewer(QDialog):
         self.filename = normalize_row_filename(filename)
         self.nuclear_id = nuclear_id
         self.row_idx = row_idx
-        self.setWindowTitle(f"Cell Viewer - Scatter Plot: {well_label}")
+        if getattr(self, "_title_label", None) is not None:
+            self._title_label.setText(f"Cell Viewer: {well_label}")
         self._load_cell_data()
+
+
+# Width of the cell-viewer slide-out (matches the Export-Style sidebar's order
+# of magnitude so the shared dock doesn't jump when swapping panels).
+_CELL_VIEWER_WIDTH = 380
 
 
 def open_scatter_cell_viewer(
@@ -978,22 +997,23 @@ def open_scatter_cell_viewer(
     nuclear_id: str,
     row_idx: int,
 ) -> None:
-    """Open or update the scatter cell viewer window."""
+    """Open (or update) the cell viewer as a slide-out in the Scatter tab's
+    right dock — the same shared dock as the Export-Style sidebar, so only one
+    of them is visible at a time (no disruptive modal pop-up window)."""
     from well_viewer.features.scatter.callbacks import ScatterCellViewer
+    from well_viewer.core.ui_helpers import mount_widget_in_plot_dock
 
-    existing = getattr(app, "_scatter_cell_viewer", None)
-    if existing is None or not existing.isVisible():
-        app._scatter_cell_viewer = ScatterCellViewer(
-            app,
-            app,
-            well_label,
-            filename,
-            nuclear_id,
-            row_idx,
-        )
-        app._scatter_cell_viewer.show()
+    dock = getattr(app, "_scatter_export_dock", None)
+    viewer = getattr(app, "_scatter_cell_viewer", None)
+    if viewer is None:
+        viewer = ScatterCellViewer(dock, app, well_label, filename, nuclear_id, row_idx)
+        app._scatter_cell_viewer = viewer
     else:
-        existing.update_cell(well_label, filename, nuclear_id, row_idx)
-        existing.raise_()
-        existing.activateWindow()
+        viewer.update_cell(well_label, filename, nuclear_id, row_idx)
+
+    if dock is not None:
+        mount_widget_in_plot_dock(dock, viewer, _CELL_VIEWER_WIDTH)
+    else:  # pragma: no cover — the per-cell scatter tab always builds a dock
+        viewer.show()
+        viewer.raise_()
 

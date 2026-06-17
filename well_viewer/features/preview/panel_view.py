@@ -9,9 +9,22 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QToolTip, QVBoxLayout, QWidget,
 )
+
+
+def _toolbar_separator(parent: QWidget) -> QFrame:
+    """A thin vertical hairline that visually groups toolbar clusters.
+
+    Uses the shared ``vline`` QSS rule (theme.qss) so it tracks the border
+    token; no hardcoded colour.
+    """
+    sep = QFrame(parent)
+    sep.setProperty("vline", True)
+    sep.setFixedWidth(1)
+    sep.setFixedHeight(20)
+    return sep
 
 from well_viewer.core.ui_helpers import btn_card, btn_danger, btn_secondary
 from well_viewer.features.crop.controller import (
@@ -112,6 +125,10 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     cl.addWidget(btn_danger(
         ctrl, "Reset", lambda: reset_crop_and_overrides(self)))
 
+    # Separate the edit cluster (Delete / Crop / Clear / Reset) from the
+    # image-stage selector so they don't read as one undifferentiated row.
+    cl.addWidget(_toolbar_separator(ctrl))
+
     # Image-stage selector: Raw / Flat-field (recomputed) / Corrected (final).
     # Lets the user validate each correction stage in isolation. Defaults to
     # Corrected (the saved final image). Signal wired AFTER initial setup so
@@ -136,6 +153,9 @@ def build_review_image_panel(self, parent: QWidget) -> None:
             self._review_image_source_seg.currentData())
     )
     cl.addWidget(self._review_image_source_seg)
+
+    # Separate the zoom cluster (Fit / − / +) from the stage selector.
+    cl.addWidget(_toolbar_separator(ctrl))
 
     cl.addWidget(btn_secondary(ctrl, "Fit", self._review_image_zoom_fit))
     cl.addWidget(btn_card(ctrl, "−", lambda: self._review_image_zoom_step(-1)))

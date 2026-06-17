@@ -843,13 +843,22 @@ def cell_gating_sync_scatter_gates(app) -> None:
 
 
 def _cell_gating_apply_scatter_gate_mode(app) -> None:
-    """Grey out the FluorGating edits while scatter-gate *inclusion* is active —
-    they no longer drive Included, so an editable field would mislead.
-    Thresholding doesn't replace FluorGating, so it doesn't grey them. (Each
-    layer's Gates button is enabled per-layer in _cell_gating_refresh_gate_filter.)"""
+    """Grey out the edits each scatter-gate mode replaces, so an editable field
+    never misleads:
+
+    * scatter-gate *inclusion* on → the FluorGating edits no longer drive
+      Included, so disable them;
+    * scatter-gate *thresholding* (fraction-on) on → the gate(s) define the "on"
+      population instead of the per-channel ThreshFracOn cut, so disable those.
+
+    (Each layer's Gates button is enabled per-layer in
+    _cell_gating_refresh_gate_filter.)"""
     gating_on = bool(getattr(app, "_cell_gating_use_scatter_gates", False))
     for edit in (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).values():
         edit.setEnabled(not gating_on)
+    thresh_on = bool(getattr(app, "_cell_gating_use_scatter_thresh", False))
+    for edit in (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).values():
+        edit.setEnabled(not thresh_on)
 
 
 def _gate_target_phrase(app, mode: str) -> str:

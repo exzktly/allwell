@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from well_viewer.core.channel_state import ChannelState
 from well_viewer.core.dataset_state import DatasetState
+from well_viewer.core.image_view_state import ImageViewState
 from well_viewer.core.plot_state import PlotState
 from well_viewer.features.barplot.state import BarPlotState
 from well_viewer.features.image_table.state import ImageTableState
@@ -35,6 +36,7 @@ class AppState:
     plot: PlotState = field(default_factory=PlotState)
     stats: StatsState = field(default_factory=StatsState)
     review_image: ReviewImageState = field(default_factory=ReviewImageState)
+    image_view: ImageViewState = field(default_factory=ImageViewState)
     preview: PreviewState = field(default_factory=PreviewState)
     bar: BarPlotState = field(default_factory=BarPlotState)
     image_table: ImageTableState = field(default_factory=ImageTableState)

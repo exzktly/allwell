@@ -20,6 +20,7 @@ from well_viewer.features.stats.controller import stats_refresh_map
 from functools import partial
 from well_viewer.features.stats.controller import stats_grp_add
 from well_viewer.features.stats.controller import stats_grp_clear_all
+from well_viewer.features.stats.controller import stats_resync_from_sample_defs
 from well_viewer.core.channel_state_controller import refresh_stats_property_combo
 from well_viewer.core.safe import swallowed
 
@@ -69,6 +70,14 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
         ),
     )
     layout.addWidget(hdr)
+
+    # Pull the comparison groups straight from the shared Sample-Definition
+    # sets (S1) — own full-width row so the narrow sidebar doesn't truncate it.
+    from_defs_btn = btn_secondary(
+        parent, "↻ Load groups from Sample Definitions",
+        partial(stats_resync_from_sample_defs, app),
+    )
+    layout.addWidget(from_defs_btn)
 
     app._app_state.stats.drag_adding = True
     app._app_state.stats.drag_visited = set()

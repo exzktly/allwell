@@ -394,6 +394,17 @@ def _set_combo_if_valid(app, attr: str, value: str) -> None:
         items = [w.itemText(i) for i in range(w.count())]
         if value in items:
             w.setCurrentText(value)
+            return
+        # Case-insensitive fallback: tolerate casing drift between when the
+        # state was saved and the current item list (e.g. a channel token
+        # persisted as "gfp" before the combos switched to displaying "GFP").
+        # Without this an old saved scatter-axis selection would silently reset
+        # to the first channel on reload.
+        low = str(value).lower()
+        for it in items:
+            if it.lower() == low:
+                w.setCurrentText(it)
+                return
     except Exception:
         swallowed()  # was: pass (silent except)
 

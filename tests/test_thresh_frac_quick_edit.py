@@ -188,13 +188,22 @@ def test_stepper_follows_channel_switch(loaded_app):
     assert loaded_app._plotting_thresh_frac_stepper.value() == 123.0
 
 
-def test_stepper_hidden_on_scatter_subtab(loaded_app):
+def test_stepper_disabled_on_scatter_subtab(loaded_app):
+    # S2: on the Scatter sub-tabs the global Channel/Property/Threshold controls
+    # stay visible but DIMMED (disabled) — with an inline note pointing at the
+    # per-axis selectors — instead of vanishing (a row that disappeared read as
+    # a glitch). They re-enable on the other plot sub-tabs.
     assert loaded_app._notebook.setCurrentByName("Plotting")
     stepper = loaded_app._plotting_thresh_frac_stepper
     lbl = loaded_app._plotting_thresh_frac_lbl
 
     assert loaded_app._plotting_notebook.setCurrentByName("Scatter Plot")
-    assert stepper.isHidden() and lbl.isHidden()
+    assert not stepper.isHidden() and not lbl.isHidden()
+    assert not stepper.isEnabled() and not lbl.isEnabled()
+    # The explanatory note is shown on scatter (isHidden reflects the explicit
+    # visibility flag without needing the offscreen window to be shown).
+    assert not loaded_app._plotting_scatter_note.isHidden()
 
     assert loaded_app._plotting_notebook.setCurrentByName("Bar Plots")
-    assert not stepper.isHidden() and not lbl.isHidden()
+    assert stepper.isEnabled() and lbl.isEnabled()
+    assert loaded_app._plotting_scatter_note.isHidden()

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_plot_view_switcher)
+    make_plot_with_right_dock, make_plot_view_switcher, send_plot_to_batch_export)
 from functools import partial
 from well_viewer.features.export.service import export_plot_data
 from well_viewer.features.lineplot.controller import on_fig_click
@@ -71,12 +71,30 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(ctx.app._metric_selector_frame)
     ctx.app._metric_selector_frame.hide()
 
-    # Fold-change normalization sits on the main controls row, left-aligned;
-    # the stretch below pushes the action buttons to the right.
+    # Fold-change normalization collapses into a popover button (C1) so it no
+    # longer needs its own row; the stretch pushes the action buttons right.
     from well_viewer.domain.fold_change_controls import install_fold_change_controls
-    install_fold_change_controls(ctx.app, line_ctrl, cl, scope="line")
+    from well_viewer.core.ui_helpers import make_popover_button
+    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", line_ctrl)
+    _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
+    install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="line")
+    cl.addWidget(_fc_btn)
+
+    # Error band (SEM/SD + Spread) collapses into a "Display ▾" popover (C1)
+    # rather than a separate card-controls row beneath the figure.
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", line_ctrl)
+    _disp_btn.setToolTip("Error band (SEM/SD) and per-FOV spread")
+    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
+    cl.addWidget(_disp_btn)
 
     cl.addStretch(1)
+
+    # S5: send the current plot spec to Batch Export (matching chart-type).
+    _batch_btn = QPushButton("Open in Batch Export", line_ctrl)
+    _batch_btn.setProperty("variant", "secondary")
+    _batch_btn.setToolTip("Open Batch Export with these plot settings (Line)")
+    _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "line"))
+    cl.addWidget(_batch_btn)
 
     # IconButton (QToolButton subclass) matches the Sample Definitions
     # top toolbar style — compact, auto-raise icon-only buttons rather
@@ -125,9 +143,8 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)   # + header / controls / toolbar rows
 
-    # The "Error Band: SEM/SD" + "Spread: FOV" toggles (formerly on the legacy
-    # plot toolbar) → the card's controls row beneath the header.
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=True))
+    # Error band now lives in the "Display ▾" popover on the control row (C1);
+    # no separate card-controls row beneath the header.
 
     # The Publication↔Screen toggle is wired through plot_style.apply_ax_style
     # (it consults card.plotTheme() via ax.figure._plot_card). The stats chip is

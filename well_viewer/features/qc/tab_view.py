@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QWidget,
 )
@@ -143,9 +144,22 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
             swallowed()  # was: pass (silent except)
         _update_status()
 
+    # Apply live while typing (debounced) as well as on focus-out / Enter, so a
+    # populated bound takes effect without the user having to tab out of the
+    # field first. The debounce only re-fires after a short typing pause to
+    # avoid recomputing the gate on every keystroke; the ``hasFocus`` guard
+    # keeps the programmatic ``refresh_qc_gate_row`` setText calls from
+    # triggering it (they run when the field isn't focused).
+    _debounce = QTimer(row)
+    _debounce.setSingleShot(True)
+    _debounce.setInterval(350)
+    _debounce.timeout.connect(_apply)
+
     enable_cb.toggled.connect(lambda _=None: _apply())
     for w in _edits:
         w.editingFinished.connect(_apply)
+        w.textChanged.connect(
+            lambda _t=None, _w=w: _debounce.start() if _w.hasFocus() else None)
 
     _sync_enabled()
     _update_status()
@@ -154,15 +168,36 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
 
 def qc_gate_refresh_widgets(app) -> None:
     """Re-fill the embedded gate row from the current params (after a load /
-    external change). No-op when the Cell Gating tab hasn't been built."""
+    external change). No-op when the Cell Gating tab hasn't been built.
+
+    Signals are blocked throughout: these are programmatic updates that *mirror*
+    already-applied params, so they must not fire the gate's change handlers.
+    In particular ``setChecked`` fires the enable toggle → ``_apply``, which
+    would read the not-yet-populated min/max fields and clobber the freshly
+    loaded bounds back to ``None`` — the bug where a reopened set's QC filter
+    showed its values but didn't apply until a field was re-entered.
+    """
     w = getattr(app, "_qc_gate_widgets", None)
     if not w:
         return
     p = get_qc_params(app)
-    w["enable"].setChecked(bool(p.enabled))
-    w["min_area"].setText(_fmt(p.min_area))
-    w["max_area"].setText(_fmt(p.max_area))
-    w["min_solidity"].setText(_fmt(p.min_solidity))
-    w["max_region_area"].setText(_fmt(p.max_region_area))
-    w["min_circularity"].setText(_fmt(p.min_circularity))
-    w["max_circularity"].setText(_fmt(p.max_circularity))
+    edit_keys = ("min_area", "max_area", "min_solidity", "max_region_area",
+                 "min_circularity", "max_circularity")
+    fields = [w["enable"]] + [w[k] for k in edit_keys]
+    blocked = [f.blockSignals(True) for f in fields]
+    try:
+        w["enable"].setChecked(bool(p.enabled))
+        w["min_area"].setText(_fmt(p.min_area))
+        w["max_area"].setText(_fmt(p.max_area))
+        w["min_solidity"].setText(_fmt(p.min_solidity))
+        w["max_region_area"].setText(_fmt(p.max_region_area))
+        w["min_circularity"].setText(_fmt(p.min_circularity))
+        w["max_circularity"].setText(_fmt(p.max_circularity))
+    finally:
+        for f, b in zip(fields, blocked):
+            f.blockSignals(b)
+    # Re-sync the edit fields' enabled state by hand (the toggle handler that
+    # normally does this was just blocked).
+    on = bool(p.enabled)
+    for k in edit_keys:
+        w[k].setEnabled(on)

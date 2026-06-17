@@ -275,10 +275,11 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
             from well_viewer.features.export.sidebar_view import (
                 EXPORT_STYLE_PANEL_WIDTH as _PANEL_W,
             )
-            host = getattr(dock, "_dock_host", None)
-            if host is not None and hasattr(host, "set_overlay_dock"):
-                host.set_overlay_dock(dock, _PANEL_W)
-            dock.setVisible(True)
+            # Show the sidebar as the dock's sole visible panel — this also
+            # hides the Scatter cell viewer if it was sharing this dock, so the
+            # two slide-outs stay mutually exclusive (one at a time).
+            from well_viewer.core.ui_helpers import mount_widget_in_plot_dock
+            mount_widget_in_plot_dock(dock, sb, _PANEL_W)
         sb.show()
         sb.raise_()
         # Apply the (already-persisted) prefs to the figure once. Use the

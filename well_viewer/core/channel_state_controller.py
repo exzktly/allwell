@@ -463,7 +463,7 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
         app._review_image_chan_var.setCurrentText(ch_upper)
     if hasattr(app, "_review_lut_chan_lbl"):
         app._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
-    saved_review_lut = app._app_state.review_image.lut_by_channel.get(channel)
+    saved_review_lut = app._app_state.image_view.lut_by_channel.get(channel)
     if saved_review_lut and hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
         app._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
         app._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
@@ -897,6 +897,11 @@ def refresh_thresh_frac_quick_edit(app) -> None:
     ``set_thresh_frac_on`` (``Stepper.setValue`` emits ``valueChanged``). No-op
     when the stepper hasn't been built yet.
     """
+    # Keep the status-bar threshold chip (F1) in sync — runs on channel switch
+    # and every threshold edit, the same triggers as the ctxbar stepper.
+    refresh_chips = getattr(app, "_refresh_status_chips", None)
+    if callable(refresh_chips):
+        refresh_chips()
     stepper = getattr(app, "_plotting_thresh_frac_stepper", None)
     if stepper is None:
         return

@@ -48,9 +48,20 @@ def _bbox_for(mask_arr, nucleus_id: int, pad: int) -> Optional[tuple]:
     return r0, c0, r1, c1
 
 
-def _norm01(crop) -> np.ndarray:
-    """Robust 1–99 percentile scale of a 2-D float crop to 0..1."""
+def _norm01(crop, bounds: Optional[tuple] = None) -> np.ndarray:
+    """Scale a 2-D float crop to 0..1.
+
+    With *bounds* ``(lo, hi)`` — the shared per-channel display LUT (S4) — clip
+    to that fixed window so the Cell Browser matches the brightness tuned in the
+    other image viewers. Without it, fall back to a robust 1–99 percentile of
+    the crop (auto).
+    """
     a = np.asarray(crop, dtype=np.float32)
+    if bounds is not None:
+        lo, hi = float(bounds[0]), float(bounds[1])
+        if hi <= lo:
+            hi = lo + 1.0
+        return np.clip((a - lo) / (hi - lo), 0.0, 1.0)
     finite = a[np.isfinite(a)]
     if finite.size == 0:
         return np.zeros(a.shape, dtype=np.float32)
@@ -62,11 +73,16 @@ def _norm01(crop) -> np.ndarray:
 
 
 def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
-                     show_boundaries: bool, cache: Dict) -> Optional[np.ndarray]:
+                     show_boundaries: bool, cache: Dict,
+                     lut_by_channel: Optional[Dict[str, tuple]] = None) -> Optional[np.ndarray]:
     """Multi-channel composite RGB (uint8) of one cell, or None if unrenderable.
 
     *cache* is a per-page dict so each FOV's mask + channel arrays load once.
+    *lut_by_channel* maps a lower-cased channel token to its shared ``(lo, hi)``
+    display window (S4); a channel with an entry uses that fixed brightness,
+    others auto-scale per crop.
     """
+    lut_by_channel = lut_by_channel or {}
     try:
         nid = int(float(desc.nucleus_id))
     except (TypeError, ValueError):
@@ -97,7 +113,8 @@ def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
         arr = np.asarray(arr)
         if arr.ndim != 2 or arr.shape[:2] != mask_full.shape[:2]:
             continue
-        norm = _norm01(arr[r0:r1, c0:c1])
+        bounds = lut_by_channel.get(str(channels[i]).strip().lower())
+        norm = _norm01(arr[r0:r1, c0:c1], bounds=bounds)
         tint = _CHANNEL_TINTS[i % len(_CHANNEL_TINTS)]
         rgb = np.maximum(rgb, norm[..., None] * np.asarray(tint, dtype=np.float32))
         painted = True
@@ -135,13 +152,19 @@ class CellImageLoader(QObject):
     def load_page(self, descriptors: List[CellDescriptor], start_index: int,
                   channels: List[str], show_boundaries: bool, gen: int) -> None:
         """Spawn a daemon thread that composes *descriptors* and emits each."""
+        # Snapshot the shared per-channel LUT (S4) on the GUI thread so the
+        # daemon thread doesn't read app state concurrently; a copy is cheap and
+        # the page reloads whenever the LUT could matter.
+        _iv = getattr(self._app._app_state, "image_view", None)
+        lut_map = dict(_iv.lut_by_channel) if _iv is not None else {}
+
         def _run() -> None:
             cache: Dict[str, Any] = {}
             n = 0
             for offset, desc in enumerate(descriptors):
                 try:
                     rgb = compose_cell_rgb(self._app, desc, channels,
-                                           show_boundaries, cache)
+                                           show_boundaries, cache, lut_map)
                 except Exception:
                     _logger.debug("cell_browser: compose failed for %r",
                                   desc, exc_info=True)

@@ -72,6 +72,8 @@ class RatioMetricsPanel(QWidget):
         ])
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.Stretch)
+        # Left-align header labels to match the left-read text columns below.
+        hdr.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._table.verticalHeader().setVisible(False)
         # The cell widgets (QLineEdit / QComboBox / QDoubleSpinBox) carry the
         # global QSS padding, which overflows the default ~30px row and clipped

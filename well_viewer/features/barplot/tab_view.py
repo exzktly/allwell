@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_plot_view_switcher)
+    make_plot_with_right_dock, make_plot_view_switcher, send_plot_to_batch_export)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
     open_bar_timepoint_selector,
@@ -75,10 +75,14 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(ctx.app._metric_selector_frame_bar)
     ctx.app._metric_selector_frame_bar.hide()
 
-    # Fold-change normalization sits on the main controls row, left-aligned;
-    # the stretch below pushes the action buttons to the right.
+    # Fold-change normalization collapses into a popover button (C1) so it no
+    # longer needs its own row; the stretch pushes the action buttons right.
     from well_viewer.domain.fold_change_controls import install_fold_change_controls
-    install_fold_change_controls(ctx.app, bar_ctrl, cl, scope="bar")
+    from well_viewer.core.ui_helpers import make_popover_button
+    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", bar_ctrl)
+    _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
+    install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="bar")
+    cl.addWidget(_fc_btn)
 
     cl.addStretch(1)
 
@@ -86,6 +90,13 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_reset_order_btn.setProperty("variant", "toggle_muted")
     ctx.app._bar_reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx.app))
     cl.addWidget(ctx.app._bar_reset_order_btn)
+
+    # S5: send the current plot spec to Batch Export (matching chart-type).
+    _batch_btn = QPushButton("Open in Batch Export", bar_ctrl)
+    _batch_btn.setProperty("variant", "secondary")
+    _batch_btn.setToolTip("Open Batch Export with these plot settings (Bar)")
+    _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "bar"))
+    cl.addWidget(_batch_btn)
 
     # IconButton — matches Sample Definitions top toolbar style; see
     # equivalent block in features/lineplot/tab_view.py for rationale.
@@ -141,60 +152,92 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_tp_cb.hide()
     ctx.app._bar_tp_var = ctx.app._bar_tp_cb
 
+    # C1: the display toggles + error band collapse into a "Display ▾" popover so
+    # the bar control area is two compact rows. ``_disp_lay`` is the popover body;
+    # the widgets are added there instead of inline (addWidget reparents them).
+    from well_viewer.core.ui_helpers import make_popover_button as _make_popover_button
+    _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", shape_ctrl)
+    _disp_btn.setToolTip("Bar/point display options: grouping, pooling, beeswarm, violin, error band")
+    sl.addWidget(_disp_btn)
+
     # Layout toggle: cluster bars by well or by timepoint.
     ctx.app._bar_group_mode_btn = QPushButton("Group by Well", shape_ctrl)
     ctx.app._bar_group_mode_btn.setProperty("variant", "toggle")
     ctx.app._bar_group_mode_btn.setCheckable(True)
+    ctx.app._bar_group_mode_btn.setToolTip(
+        "Cluster the bars by well/group vs by timepoint.")
     ctx.app._bar_group_mode_btn.clicked.connect(
         lambda _=False: toggle_bar_group_mode(ctx.app)
     )
-    sl.addWidget(ctx.app._bar_group_mode_btn)
+    _disp_lay.addWidget(ctx.app._bar_group_mode_btn)
 
     # Replicate-pool toggle: collapse rset wells into one column or
     # expand them. Hidden when no replicate sets are active.
     ctx.app._bar_pool_reps_btn = QPushButton("Pool Replicates", shape_ctrl)
     ctx.app._bar_pool_reps_btn.setProperty("variant", "toggle")
     ctx.app._bar_pool_reps_btn.setCheckable(True)
+    ctx.app._bar_pool_reps_btn.setToolTip(
+        "Collapse each replicate set's wells into one pooled column "
+        "(off = one column per well).")
     ctx.app._bar_pool_reps_btn.clicked.connect(
         lambda _=False: toggle_bar_pool_replicates(ctx.app)
     )
     ctx.app._bar_pool_reps_btn.setVisible(False)
-    sl.addWidget(ctx.app._bar_pool_reps_btn)
+    _disp_lay.addWidget(ctx.app._bar_pool_reps_btn)
 
     ctx.app._bar_pool_rset_cells_btn = QPushButton("Pool rset cells", shape_ctrl)
     ctx.app._bar_pool_rset_cells_btn.setProperty("variant", "toggle")
     ctx.app._bar_pool_rset_cells_btn.setCheckable(True)
+    ctx.app._bar_pool_rset_cells_btn.setToolTip(
+        "Pool every cell across a replicate set before drawing its beeswarm / "
+        "violin distribution (off = keep per-well distributions).")
     ctx.app._bar_pool_rset_cells_btn.clicked.connect(
         lambda _=False: toggle_bar_pool_rset_cells(ctx.app)
     )
     ctx.app._bar_pool_rset_cells_btn.setVisible(False)
-    sl.addWidget(ctx.app._bar_pool_rset_cells_btn)
+    _disp_lay.addWidget(ctx.app._bar_pool_rset_cells_btn)
 
     ctx.app._swarm_btn = QPushButton("Beeswarm", shape_ctrl)
     ctx.app._swarm_btn.setProperty("variant", "toggle")
     ctx.app._swarm_btn.setCheckable(True)
+    ctx.app._swarm_btn.setToolTip(
+        "Overlay the individual per-cell points on each bar.")
     ctx.app._swarm_btn.clicked.connect(lambda _=False: ctx.app._toggle_swarm())
-    sl.addWidget(ctx.app._swarm_btn)
+    _disp_lay.addWidget(ctx.app._swarm_btn)
     ctx.app._bar_swarm = False
 
     ctx.app._violin_btn = QPushButton("Violin", shape_ctrl)
     ctx.app._violin_btn.setProperty("variant", "toggle")
     ctx.app._violin_btn.setCheckable(True)
+    ctx.app._violin_btn.setToolTip(
+        "Draw a violin (kernel-density) shape for each group. "
+        "Enables the Smooth control.")
     ctx.app._violin_btn.clicked.connect(lambda _=False: ctx.app._toggle_violin())
-    sl.addWidget(ctx.app._violin_btn)
+    _disp_lay.addWidget(ctx.app._violin_btn)
     ctx.app._bar_violin = False
 
-    sl.addWidget(QLabel("Smooth:", shape_ctrl))
+    _disp_lay.addWidget(QLabel("Smooth:", shape_ctrl))
     from widgets.styled_slider import StyledSlider as _StyledSlider
     ctx.app._violin_slider = _StyledSlider(Qt.Horizontal, shape_ctrl)
     ctx.app._violin_slider.setRange(5, 200)
     ctx.app._violin_slider.setValue(100)
     ctx.app._violin_slider.setFixedWidth(80)
+    ctx.app._violin_slider.setToolTip(
+        "Violin kernel bandwidth — higher is smoother. "
+        "Active only when Violin is on.")
     ctx.app._violin_slider.valueChanged.connect(
         lambda _v: (redraw_bars(ctx.app) if ctx.app._bar_violin else None)
     )
     ctx.app._violin_slider.setEnabled(False)
-    sl.addWidget(ctx.app._violin_slider)
+    _disp_lay.addWidget(ctx.app._violin_slider)
+
+    # Error band (SEM/SD + Spread) joins the same Display popover (C1) instead
+    # of a separate card-controls row.
+    _band_sep = QFrame(_disp_panel)
+    _band_sep.setFrameShape(QFrame.HLine)
+    _band_sep.setObjectName("HRule")
+    _disp_lay.addWidget(_band_sep)
+    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
 
     sl.addStretch(1)
     right_l.addWidget(shape_ctrl)
@@ -219,7 +262,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_canvas.setMinimumHeight(int(_FIG_H * _DPI))
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)
 
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=True))
+    # Error band now lives in the "Display ▾" popover above (C1); no card row.
     card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx.app))
     card.setStatsChipVisible(False)
 

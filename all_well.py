@@ -96,7 +96,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v6.12.0")
+        self._version_pill = QLabel("v7.0.0")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "
@@ -255,9 +255,10 @@ class AllWellApp(QMainWindow):
         )
         sb_layout.addWidget(self._status_lbl_app)
         sb_layout.addStretch(1)
-        # Kbd hints (B16 wires the actual QShortcuts in Phase 13; the
-        # statusbar already advertises them per the mockup).
-        for label, hint in (("Open", "⌘O"), ("Search", "⌘K"), ("Export", "⌘E")):
+        # Kbd hints — each one is a real shortcut wired in _install_shortcuts.
+        # ("Search ⌘K" used to sit here but no global search exists; replaced
+        #  with the help-drawer toggle, which is a real binding.)
+        for label, hint in (("Open", "⌘O"), ("Help", "⌘/"), ("Export", "⌘E")):
             l = QLabel(label)
             l.setStyleSheet(
                 f"color: {theme_v2.Colors.text_muted}; "
@@ -279,13 +280,19 @@ class AllWellApp(QMainWindow):
         self._log_ring: list[str] = []
 
     def _install_shortcuts(self) -> None:
-        """Global ⌘/Ctrl shortcuts the statusbar advertises.
+        """Global ⌘/Ctrl shortcuts the statusbar + help drawer advertise.
 
         - ⌘O / Ctrl+O — open dataset (matches the titlebar Open button).
         - ⌘E / Ctrl+E — export figure (drives the active plot card's
           ``save_figure`` toolbar action).
         - ⌘← / Ctrl+← — back through the section tab history.
         - ⌘→ / Ctrl+→ — forward through the section tab history.
+        - ⌘/ / Ctrl+/ — toggle the help drawer (matches the header ? button).
+        - ⌘W / Ctrl+W — close the window.
+
+        Every shortcut here is surfaced somewhere in the chrome (statusbar
+        key-hints or the help drawer's Keyboard-shortcuts list); keep the two
+        in sync so the UI never advertises a binding that isn't wired.
         """
         from PySide6.QtGui import QKeySequence, QShortcut
 
@@ -293,6 +300,8 @@ class AllWellApp(QMainWindow):
         QShortcut(QKeySequence("Ctrl+E"), self, activated=self._export_active_figure)
         QShortcut(QKeySequence("Ctrl+Left"), self, activated=self._tab_history_back)
         QShortcut(QKeySequence("Ctrl+Right"), self, activated=self._tab_history_forward)
+        QShortcut(QKeySequence("Ctrl+/"), self, activated=self._toggle_help_drawer)
+        QShortcut(QKeySequence("Ctrl+W"), self, activated=self.close)
 
     def _tab_history_back(self) -> None:
         review = getattr(self, "_review", None)
@@ -575,6 +584,7 @@ class AllWellApp(QMainWindow):
                 "viewed section tab<br>"
                 "<tt>⌘→</tt> / <tt>Ctrl+→</tt> — Forward to the next section "
                 "tab in history<br>"
+                "<tt>⌘/</tt> / <tt>Ctrl+/</tt> — Toggle this help drawer<br>"
                 "<tt>⌘W</tt> / <tt>Ctrl+W</tt> — Close window"
             )
             cl.addWidget(body)

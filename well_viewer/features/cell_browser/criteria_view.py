@@ -91,6 +91,7 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     apply_btn.setObjectName("Primary")
     apply_btn.clicked.connect(lambda _=False: ctl.apply_filters(app))
     lay.addWidget(apply_btn)
+    app._cell_browser_apply_btn = apply_btn
 
     cell_browser_sidebar_refresh(app)
 

@@ -887,6 +887,9 @@ quick-reference notes.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the developer-oriented
   architectural overview: what each module does, how the pieces fit
   together, where to add features, and how to debug.
+- [`ui_synergy.md`](ui_synergy.md) — the living implementation plan for the
+  UI/UX synergy + usability improvements (design-review follow-ups),
+  status-tracked with each item tied to the architecture guidelines.
 - [`process_microscopy.py`](../process_microscopy.py) — the pipeline. It's
   also a usable CLI (`python process_microscopy.py --help`).
 - [`_Docs/_Installation/`](../_Docs/_Installation/) — the PyInstaller spec

@@ -140,6 +140,15 @@ def apply_filters(app) -> None:
     if not st.channels_on:
         _set_status(app, "Select at least one channel to display.")
         return
+    if not cells:
+        # The timepoint/FOV pickers start fully deselected (a deliberate
+        # include-list default), so the commonest reason for an empty gallery is
+        # "nothing picked yet". Name the exact next click rather than leaving a
+        # blank grid with no explanation.
+        _set_status(app, _empty_gallery_hint(st))
+        _set_apply_busy(app, False)
+        return
+    _set_apply_busy(app, True)
     load_next_page(app)
 
 
@@ -182,6 +191,27 @@ def on_page_finished(app, payload: dict) -> None:
     btn = getattr(app, "_cell_browser_load_more_btn", None)
     if btn is not None:
         btn.setEnabled(app._cell_browser_state.remaining > 0)
+    _set_apply_busy(app, False)
+
+
+def _empty_gallery_hint(st) -> str:
+    """Name the most likely reason the filtered set is empty (and the fix)."""
+    if st.timepoints == []:
+        return "No timepoints selected — click Timepoints to choose which to show."
+    if st.fovs == []:
+        return "No FOVs selected — click FOVs to choose which to show."
+    return "No cells match the current filters — relax the criteria above."
+
+
+def _set_apply_busy(app, busy: bool) -> None:
+    """Disable the Apply button + signal progress while the worker composes a
+    page, so a click gives immediate feedback instead of a frozen-looking grid."""
+    btn = getattr(app, "_cell_browser_apply_btn", None)
+    if btn is not None:
+        btn.setEnabled(not busy)
+        btn.setText("Loading…" if busy else "Apply filters")
+    if busy:
+        _set_status(app, "Loading cells…")
 
 
 def on_cell_clicked(app, desc) -> None:

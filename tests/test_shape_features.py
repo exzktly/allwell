@@ -232,7 +232,9 @@ def test_scatter_draw_with_shape_axis(loaded_app_shape):
     app._set_selected_wells(set(WELLS))
     update_scatter_menus(app)
     app._scatter_ch_x_cb.setCurrentIndex(app._scatter_ch_x_cb.findText("Eccentricity"))
-    app._scatter_ch_y_cb.setCurrentIndex(app._scatter_ch_y_cb.findText("gfp"))
+    # Fluor channels display upper-case now (GFP, not gfp); the column still
+    # resolves to gfp_mean_intensity (case-insensitive).
+    app._scatter_ch_y_cb.setCurrentIndex(app._scatter_ch_y_cb.findText("GFP"))
     for tp in list(app._scatter_tp_selections):
         app._scatter_tp_selections[tp] = True
 

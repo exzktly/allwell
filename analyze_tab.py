@@ -485,18 +485,13 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         if errors:
             self._segmentation_hint_lbl.setText("  ".join(errors))
             return
+        # Each hint leads with *when to use this* so a first-time user can pick.
         hint = {
-            "stardist_seeded_watershed_cell":
-                "Watershed mode uses StarDist seeds + cytoplasm mask and also "
-                "quantifies the cytoplasm channel.",
-            "cellpose":
-                "Cellpose segments the 'Segmentation channel' above — works on a "
-                "fluorescent or brightfield channel.",
-            "cellpose_labelfree":
-                "Label-free preset: Cellpose (cyto3) on the channel marked 'Phase' "
-                "— no nuclear stain required.",
-            "classical_threshold":
-                "Otsu threshold + watershed on the 'Segmentation channel' above.",
+            "stardist_nuclei": "Best default for a nuclear stain (DAPI/Hoechst/NIR): StarDist segments the 'Segmentation channel' above into nuclei.",
+            "stardist_seeded_watershed_cell": "Use for whole-cell (cytoplasm) measurements: StarDist seeds + a cytoplasm mask; also quantifies the cytoplasm channel.",
+            "cellpose": "Use for non-nuclear or tricky morphologies: Cellpose on the 'Segmentation channel' above (fluorescent or brightfield).",
+            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free.",
+            "classical_threshold": "Fast model-free fallback for clean, separated objects: Otsu threshold + watershed on the 'Segmentation channel' above.",
         }.get(method, "")
         self._segmentation_hint_lbl.setText(hint)
 
@@ -731,6 +726,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         self._well_done  = 0
         self._progress_tracker.reset()
         self._dashboard.reset(remote=self._remote_cb.currentData() is not None)
+        if getattr(self, "_last_run_card", None) is not None:
+            self._last_run_card.setVisible(False)  # C4: hide stale summary while running
         self._eta_deadline = None
         self._dashboard.set_eta("ETA")
         self._pipeline_started_at = _time.monotonic()
@@ -1128,6 +1125,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
+                    self._refresh_last_run_summary()  # C4: show the just-finished run
                     if getattr(self, "_status_signal_pushed", False):
                         try:
                             from well_viewer import status_signal as _status_signal

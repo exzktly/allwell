@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
     QVBoxLayout, QWidget,
@@ -54,6 +55,10 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     ctx.app._review_csv_table = QTableWidget(0, 0, parent)
     ctx.app._review_csv_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
     ctx.app._review_csv_table.horizontalHeader().setHighlightSections(False)
+    # Left-align header labels so text columns (well, channel) read in line with
+    # their left-read values instead of looking right-/spread-aligned.
+    ctx.app._review_csv_table.horizontalHeader().setDefaultAlignment(
+        Qt.AlignLeft | Qt.AlignVCenter)
     ctx.app._review_csv_table.verticalHeader().setVisible(False)
     ctx.app._review_csv_table.setAlternatingRowColors(True)
     ctx.app._review_csv_table.setShowGrid(False)

@@ -56,6 +56,21 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_browser_channel_host = chan_host
     ctx.app._cell_browser_channel_chips = {}
 
+    # Per-channel LUT editor (min/max) in a popover. Edits the SHARED
+    # per-channel display LUT (AppState.image_view, S4), so brightness tuned
+    # here also applies in Review Image / Image Table; the rows are rebuilt to
+    # track the dataset's channels in ``cell_browser_refresh``.
+    from well_viewer.core.ui_helpers import make_popover_button
+    lut_btn, lut_panel, lut_lay = make_popover_button("LUT ▾", ctrl)
+    lut_btn.setToolTip(
+        "Per-channel display brightness (min/max). Blank / Auto = auto-scale each "
+        "cell. Shared with the other image viewers.")
+    cl.addWidget(lut_btn)
+    ctx.app._cell_browser_lut_btn = lut_btn
+    ctx.app._cell_browser_lut_panel = lut_panel
+    ctx.app._cell_browser_lut_layout = lut_lay
+    ctx.app._cell_browser_lut_rows = {}
+
     boundary_cb = QCheckBox("Boundaries", ctrl)
     boundary_cb.setChecked(True)
     cl.addWidget(boundary_cb)
@@ -152,3 +167,94 @@ def cell_browser_refresh(app) -> None:
         lay.addWidget(cb)
         chips[tok] = cb
     app._cell_browser_channel_chips = chips
+    cell_browser_refresh_lut_rows(app)
+
+
+def _cb_num(text):
+    """Parse a LUT field → float, or None for blank / 'auto' / unparseable."""
+    text = (text or "").strip().lower()
+    if not text or text == "auto":
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _cb_fmt(v) -> str:
+    """Format a LUT bound for a field; blank for None."""
+    if v is None:
+        return ""
+    return f"{v:g}"
+
+
+def _apply_cell_browser_lut(app, channel: str, lo_text: str, hi_text: str) -> None:
+    """Write a channel's bounds into the shared LUT (or clear → auto) and
+    re-composite the gallery so the change shows immediately."""
+    iv = getattr(app._app_state, "image_view", None)
+    if iv is None:
+        return
+    lo, hi = _cb_num(lo_text), _cb_num(hi_text)
+    if lo is not None and hi is not None and hi > lo:
+        iv.set_lut(channel, lo, hi)
+    else:
+        iv.lut_by_channel.pop(str(channel).strip().lower(), None)  # back to auto
+    ctl.apply_filters(app)
+
+
+def cell_browser_refresh_lut_rows(app) -> None:
+    """(Re)build the per-channel LUT editor rows from the dataset's channels.
+
+    Each row edits the SHARED per-channel LUT; fields are seeded from it (blank
+    when unset = auto). Called alongside the channel-chip refresh."""
+    lay = getattr(app, "_cell_browser_lut_layout", None)
+    panel = getattr(app, "_cell_browser_lut_panel", None)
+    if lay is None or panel is None:
+        return
+    channels = cell_browser_channels(app)
+    if not channels:
+        return
+    while lay.count():
+        item = lay.takeAt(0)
+        w = item.widget()
+        if w is not None:
+            w.deleteLater()
+    iv = getattr(app._app_state, "image_view", None)
+    rows = {}
+    for tok in channels:
+        row = QWidget(panel)
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(4)
+        name = QLabel(tok.upper(), row)
+        name.setFixedWidth(64)
+        rl.addWidget(name)
+        lut = iv.get_lut(tok) if iv is not None else None
+        rl.addWidget(QLabel("min", row))
+        lo_e = QLineEdit(_cb_fmt(None if lut is None else lut[0]), row)
+        lo_e.setFixedWidth(60)
+        lo_e.setPlaceholderText("auto")
+        rl.addWidget(lo_e)
+        rl.addWidget(QLabel("max", row))
+        hi_e = QLineEdit(_cb_fmt(None if lut is None else lut[1]), row)
+        hi_e.setFixedWidth(60)
+        hi_e.setPlaceholderText("auto")
+        rl.addWidget(hi_e)
+        auto_btn = QPushButton("Auto", row)
+        auto_btn.setProperty("variant", "secondary")
+        rl.addWidget(auto_btn)
+
+        def _commit(_=None, _t=tok, _lo=lo_e, _hi=hi_e):
+            _apply_cell_browser_lut(app, _t, _lo.text(), _hi.text())
+
+        def _auto(_=None, _t=tok, _lo=lo_e, _hi=hi_e):
+            _lo.clear()
+            _hi.clear()
+            _apply_cell_browser_lut(app, _t, "", "")
+
+        lo_e.editingFinished.connect(_commit)
+        hi_e.editingFinished.connect(_commit)
+        auto_btn.clicked.connect(_auto)
+        lay.addWidget(row)
+        rows[tok] = (lo_e, hi_e)
+    app._cell_browser_lut_rows = rows

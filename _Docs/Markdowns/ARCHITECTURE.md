@@ -1629,6 +1629,7 @@ than as live files. What remains:
 |------|---------------|
 | `ARCHITECTURE.md` | This document — the developer-oriented architectural overview. |
 | `README_WellViewer.md` | User-facing README — install, run, troubleshoot. |
+| `ui_synergy.md` | Living implementation plan for the UI/UX synergy + usability recommendations (from the design review). Status-tracked, each item constrained to this document's guidelines. Update it (and this table's referenced sections) as items land. |
 
 The on-disk shape of `pipeline_info.json::sample_definitions` (the saved
 selections schema) is described in the `well_viewer/domain/selections_model.py`

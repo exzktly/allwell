@@ -1,6 +1,20 @@
 # UI Synergy — Living Implementation Plan
 
-> **Status:** IN PROGRESS — 11 / 18 shipped, 1 partial (+ 1 follow-up) · **Last updated:** 2026-06-17
+> **Status:** 14 / 18 shipped, 1 partial, S3 parked (+ 1 follow-up) · **Last updated:** 2026-06-17
+>
+> **Shipped:** F2, C2, S2, D4, D3, D1, D2, F5, F3, **S1, F1, C3, C4, F4** — each
+> verified by the render harness and/or targeted tests. **C1** partial (Fold-change
+> popover). Follow-up: scatter cell viewer → shared-dock slide-out.
+>
+> **Remaining (large, core-surface refactors — decisions recorded below):**
+> - **S4** — channel + stage + LUT sync across Review Image / Image Table / Cell
+>   Browser. Largest item: three features with separate channel/stage/LUT state
+>   (Image Table has per-row selectors) → needs a shared image-view state object +
+>   rewiring all three. High regression risk; warrants its own session.
+> - **S5** — "Add to batch" from a plot card. No existing programmatic batch-entry
+>   API; needs a plot-spec→batch-entry mapping + prefill wiring (a new feature).
+> - **C1 rest** — display/timepoints + error-band popovers (the display row has
+>   conditional-visibility toggles; error-band lives on the card controls row).
 >
 > **Decisions locked in (2026-06-17), recorded here for clean pickup:**
 > - **S1** → Statistics-only scope ✅ (Batch Export left as-is).

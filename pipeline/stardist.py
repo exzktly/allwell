@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 import numpy as np
 from scipy import ndimage as ndi
@@ -129,7 +130,14 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
         except Exception as exc:                                # noqa: BLE001
             log.warning("  seg-debug %s: predict() trace failed: %s", fov, exc)
 
+    _t0 = time.perf_counter()
     labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
+    # Per-FOV inference timing: a slow per-call number points at CPU contention /
+    # thread starvation (vs the run merely doing more FOVs). Pairs with the
+    # ``seg-input`` line above so each FOV's input stats + predict cost sit
+    # together in the log.
+    log.info("  seg %s: predict_instances %.1fs (%d nuclei)",
+             fov, time.perf_counter() - _t0, int(labels.max()) if labels.size else 0)
     return labels.astype(np.int32)
 
 

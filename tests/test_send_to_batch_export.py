@@ -13,7 +13,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def test_send_to_batch_export_navigates_and_sets_mode(loaded_app):
-    from well_viewer.features.batch_export.tab_view import send_plot_to_batch_export
+    from well_viewer.core.ui_helpers import send_plot_to_batch_export
 
     for mode in ("bar", "scatter_cells", "scatter_agg", "line"):
         send_plot_to_batch_export(loaded_app, mode)
@@ -22,7 +22,7 @@ def test_send_to_batch_export_navigates_and_sets_mode(loaded_app):
 
 
 def test_unknown_mode_falls_back_to_line(loaded_app):
-    from well_viewer.features.batch_export.tab_view import send_plot_to_batch_export
+    from well_viewer.core.ui_helpers import send_plot_to_batch_export
 
     send_plot_to_batch_export(loaded_app, "nonsense")
     assert loaded_app._notebook.currentName() == "Batch Export"

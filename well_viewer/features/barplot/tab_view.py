@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_plot_view_switcher)
+    make_plot_with_right_dock, make_plot_view_switcher, send_plot_to_batch_export)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
     open_bar_timepoint_selector,
@@ -95,11 +95,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _batch_btn = QPushButton("Add to Batch", bar_ctrl)
     _batch_btn.setProperty("variant", "secondary")
     _batch_btn.setToolTip("Open Batch Export with these plot settings (Bar)")
-
-    def _to_batch(_=False):
-        from well_viewer.features.batch_export.tab_view import send_plot_to_batch_export
-        send_plot_to_batch_export(ctx.app, "bar")
-    _batch_btn.clicked.connect(_to_batch)
+    _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "bar"))
     cl.addWidget(_batch_btn)
 
     # IconButton — matches Sample Definitions top toolbar style; see

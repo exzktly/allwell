@@ -1,6 +1,29 @@
 # UI Synergy — Living Implementation Plan
 
-> **Status:** IN PROGRESS — 9 / 18 shipped (+ 1 follow-up) · **Last updated:** 2026-06-17
+> **Status:** IN PROGRESS — 11 / 18 shipped, 1 partial (+ 1 follow-up) · **Last updated:** 2026-06-17
+>
+> **Decisions locked in (2026-06-17), recorded here for clean pickup:**
+> - **S1** → Statistics-only scope ✅ (Batch Export left as-is).
+> - **C1** → popover buttons. 🟡 Fold-change collapsed into a popover; the
+>   display/timepoints + error-band rows are the remaining popovers.
+> - **F1** → chips + actions ✅.
+> - **C3** → collapsible Analyze form, **QC / preprocessing collapsed by default**,
+>   Schema/Channels/Folders/Run expanded. *Not yet built* — analyze_tab.py is at
+>   its line budget + the form is a flat imperative builder, so this needs the
+>   section-build extracted to a helper module first.
+> - **C4** → minimal last-run summary card (dataset, well count, method, duration,
+>   "Open results") in the idle Analyze right pane. *Not yet built* (same
+>   analyze_tab budget constraint as C3).
+> - **F4** → log defaults to a **summary level with a "show raw log" toggle** +
+>   determinate progress for the WellPlateZipper grouping phase. *Not yet built*
+>   (touches pipeline_runner / process_microscopy emit format).
+> - **S4** → full sync of **channel + image stage (Raw/Flat-field/Corrected) + LUT**
+>   across Segmentation Review / Image Table / Cell Browser; per-row LUT becomes an
+>   explicit override. *Not yet built* (largest item — shared image-view state).
+> - **S5** → "Add to batch" on plot cards capturing the current plot spec. *Not yet
+>   built* (depends on the plotting surface; with S1 statistics-only, batch groups
+>   stay as-is).
+> - **S3** → parked at the user's request.
 >
 > This is a **living document**. As work proceeds, update each task's checkbox and
 > the per-recommendation **Status** line. Keep the summary table in sync. When a

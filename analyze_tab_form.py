@@ -13,6 +13,7 @@ import json
 import sys as _sys
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
@@ -42,35 +43,42 @@ class AnalyzeTabFormMixin:
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
-    def _section(self, parent: QWidget, title: str, info: str = "") -> QWidget:
+    def _section(self, parent: QWidget, title: str, info: str = "",
+                 *, collapsible: bool = False, collapsed: bool = False) -> QWidget:
         """Add a labelled section to *parent* and return its body widget.
 
         When *info* is given, a small ``ⓘ`` marker is placed next to the title
         and the text is shown as its hover tooltip — keeping long explanatory
         notes available on demand instead of cluttering the form inline.
+
+        When *collapsible*, the header carries a ▾/▸ caret and clicking it
+        shows/hides the body; *collapsed* sets the initial state. Used (C3) to
+        fold the optional/advanced sections (QC, Shape, Output, Compute,
+        Scratch) by default so the required fields lead the form.
         """
         container = QWidget(parent)
         cl = QVBoxLayout(container)
         cl.setContentsMargins(0, 4, 0, 4)
         cl.setSpacing(2)
 
+        header = QWidget(container)
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(4)
+        caret = None
+        if collapsible:
+            caret = QLabel("▸" if collapsed else "▾", header)
+            caret.setObjectName("SectionTitle")
+            caret.setContentsMargins(12, 6, 0, 2)
+            hl.addWidget(caret)
+        title_lbl = QLabel(title, header)
+        title_lbl.setObjectName("SectionTitle")
+        title_lbl.setContentsMargins(2 if collapsible else 12, 6, 0, 2)
+        hl.addWidget(title_lbl)
         if info:
-            header = QWidget(container)
-            hl = QHBoxLayout(header)
-            hl.setContentsMargins(0, 0, 0, 0)
-            hl.setSpacing(4)
-            title_lbl = QLabel(title, header)
-            title_lbl.setObjectName("SectionTitle")
-            title_lbl.setContentsMargins(12, 6, 0, 2)
-            hl.addWidget(title_lbl)
             hl.addWidget(self._info_icon(header, info))
-            hl.addStretch(1)
-            cl.addWidget(header)
-        else:
-            title_lbl = QLabel(title, container)
-            title_lbl.setObjectName("SectionTitle")
-            title_lbl.setContentsMargins(12, 6, 12, 2)
-            cl.addWidget(title_lbl)
+        hl.addStretch(1)
+        cl.addWidget(header)
 
         rule = QFrame(container)
         rule.setFrameShape(QFrame.HLine)
@@ -78,11 +86,21 @@ class AnalyzeTabFormMixin:
         cl.addWidget(rule)
 
         body = QWidget(container)
-        body
         bl = QVBoxLayout(body)
         bl.setContentsMargins(12, 4, 12, 8)
         bl.setSpacing(3)
         cl.addWidget(body)
+
+        if collapsible:
+            body.setVisible(not collapsed)
+
+            def _toggle(_ev=None, _body=body, _caret=caret) -> None:
+                vis = not _body.isVisible()
+                _body.setVisible(vis)
+                _caret.setText("▾" if vis else "▸")
+
+            header.setCursor(Qt.PointingHandCursor)
+            header.mousePressEvent = _toggle  # type: ignore[assignment]
 
         parent.layout().addWidget(container)
         return body
@@ -375,6 +393,7 @@ class AnalyzeTabFormMixin:
     def _build_shape_features_section(self, parent: QWidget) -> None:
         sec = self._section(
             parent, "Shape Metrics",
+            collapsible=True, collapsed=True,
             info="Per-cell morphology features to measure (emitted as shape_… "
                  "columns; cell centroids are always recorded).",
         )
@@ -406,6 +425,7 @@ class AnalyzeTabFormMixin:
     def _build_qc_section(self, parent: QWidget) -> None:
         sec = self._section(
             parent, "Quality Control",
+            collapsible=True, collapsed=True,
             info="Optional pre-measurement clean-up, applied per channel at "
                  "quantification time. Two independent correction stages — "
                  "flat-field (divide out uneven illumination) then background "
@@ -600,6 +620,7 @@ class AnalyzeTabFormMixin:
     def _build_output_options_section(self, parent: QWidget) -> None:
         sec = self._section(
             parent, "Output Options",
+            collapsible=True, collapsed=True,
             info="Inputs are always grouped into per-well .zip files and outputs "
                  "are always written as per-well .zip files.",
         )
@@ -609,7 +630,7 @@ class AnalyzeTabFormMixin:
         r.layout().addStretch(1)
 
     def _build_compute_options_section(self, parent: QWidget) -> None:
-        sec = self._section(parent, "Compute Options")
+        sec = self._section(parent, "Compute Options", collapsible=True, collapsed=True)
 
         tf_row = self._row(sec, "TF threads (0=auto)")
         self._tf_threads_edit = self._entry(tf_row, "0", width=40)
@@ -640,6 +661,7 @@ class AnalyzeTabFormMixin:
         """
         sec = self._section(
             parent, "Scratch Disk",
+            collapsible=True, collapsed=True,
             info="Where per-well working files (zip extraction + intermediate "
                  "images) are written during a run. Defaults to <input>/Temp. "
                  "Point it at a roomy/fast volume to keep temporary I/O off the "

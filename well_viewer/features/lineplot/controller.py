@@ -510,10 +510,11 @@ def redraw_line_plots(
         )
     elif active_rsets:
         n_wells = sum(sum(1 for w in r.wells if w in app._app_state.dataset.well_paths) for r in active_rsets)
-        app._set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)  |  threshold={threshold:.2f}  |  band={band_lbl}")
+        # threshold + band now live in the always-visible status chips (F1).
+        app._set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)")
     else:
         n_total = sum(len(app._get_rows(l)) for l in selected)
-        app._set_status(f"{len(selected)} well(s)  |  {n_total:,} nuclei  |  threshold={threshold:.2f}  |  band={band_lbl}")
+        app._set_status(f"{len(selected)} well(s)  |  {n_total:,} nuclei")
 
     # Re-apply the Export Style sidebar's prefs so font sizes, axis
     # limits, log scale, etc. survive a redraw (matches what the bar,

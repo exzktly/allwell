@@ -357,6 +357,10 @@ class WellViewerApp(QWidget):
 
     def _refresh_thresh_frac_quick_edit(self) -> None: return refresh_thresh_frac_quick_edit(self)
 
+    def _refresh_status_chips(self) -> None:
+        from well_viewer.core.status_view import refresh_status_chips
+        return refresh_status_chips(self)
+
     # ── UI ────────────────────────────────────────────────────────────────────
 
 

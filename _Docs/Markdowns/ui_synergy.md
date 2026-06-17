@@ -77,7 +77,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **D2** | Self-describing fold-change / scatter-gate | ◐ | S | ✅ |
 | **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ✅ |
 | **D4** | Cell Browser sensible default state | ◐ | S | ✅ |
-| **F1** | Clickable status context chips | ★ | S | ⬜ |
+| **F1** | Clickable status context chips | ★ | S | ✅ |
 | **F2** | Clear active-state for mode toggles | ★ | S | ✅ |
 | **F3** | Channel-name casing consistency (`gfp`→`GFP`) | ★ | M | ✅ |
 | **F4** | Pipeline progress legibility | ◐ | M | ⬜ |

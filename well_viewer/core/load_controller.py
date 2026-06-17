@@ -333,4 +333,8 @@ def load_path_shim(app, path):
     finally:
         _status_signal.busy_pop()
     refresh_plot_empty_states(app)
+    # Surface the status-bar threshold / band chips now a dataset is loaded (F1).
+    refresh_chips = getattr(app, "_refresh_status_chips", None)
+    if callable(refresh_chips):
+        refresh_chips()
 

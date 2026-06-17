@@ -897,6 +897,11 @@ def refresh_thresh_frac_quick_edit(app) -> None:
     ``set_thresh_frac_on`` (``Stepper.setValue`` emits ``valueChanged``). No-op
     when the stepper hasn't been built yet.
     """
+    # Keep the status-bar threshold chip (F1) in sync — runs on channel switch
+    # and every threshold edit, the same triggers as the ctxbar stepper.
+    refresh_chips = getattr(app, "_refresh_status_chips", None)
+    if callable(refresh_chips):
+        refresh_chips()
     stepper = getattr(app, "_plotting_thresh_frac_stepper", None)
     if stepper is None:
         return

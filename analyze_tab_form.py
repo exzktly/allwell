@@ -1060,6 +1060,12 @@ class AnalyzeTabFormMixin:
         hl.setContentsMargins(12, 6, 12, 6)
         hl.addWidget(QLabel("Pipeline Output", hdr))
         hl.addStretch(1)
+        # F4: the dashboard above IS the summary view; the verbose text log is
+        # off by default and revealed on demand, so progress reads cleanly.
+        self._raw_log_cb = QCheckBox("Show raw log", hdr)
+        self._raw_log_cb.setToolTip("Show the full per-image pipeline log beneath the progress dashboard")
+        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
+        hl.addWidget(self._raw_log_cb)
         clear_btn = QPushButton("Clear", hdr)
         clear_btn.setProperty("variant", "secondary")
         clear_btn.clicked.connect(self._clear_log)
@@ -1086,8 +1092,10 @@ class AnalyzeTabFormMixin:
         self._dashboard = RunDashboard(parent)
         rl.addWidget(self._dashboard)
 
-        r2 = QFrame(parent); r2.setFrameShape(QFrame.HLine); r2.setObjectName("HRule")
-        rl.addWidget(r2)
+        self._log_sep = QFrame(parent)
+        self._log_sep.setFrameShape(QFrame.HLine)
+        self._log_sep.setObjectName("HRule")
+        rl.addWidget(self._log_sep)
 
         self._log = QTextEdit(parent)
         self._log.setReadOnly(True)
@@ -1102,4 +1110,14 @@ class AnalyzeTabFormMixin:
         font.setPointSize(9)
         self._log.setFont(font)
         rl.addWidget(self._log, 1)
+
+        # F4: raw log hidden until the user asks for it (dashboard is the summary).
+        self._on_toggle_raw_log(False)
+
+    def _on_toggle_raw_log(self, show: bool) -> None:
+        """Show/hide the verbose text log (F4). The progress dashboard stays
+        visible either way; this only toggles the raw per-image stream."""
+        for w in (getattr(self, "_log", None), getattr(self, "_log_sep", None)):
+            if w is not None:
+                w.setVisible(bool(show))
 

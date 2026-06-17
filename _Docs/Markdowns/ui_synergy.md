@@ -103,7 +103,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **F1** | Clickable status context chips | ★ | S | ✅ |
 | **F2** | Clear active-state for mode toggles | ★ | S | ✅ |
 | **F3** | Channel-name casing consistency (`gfp`→`GFP`) | ★ | M | ✅ |
-| **F4** | Pipeline progress legibility | ◐ | M | ⬜ |
+| **F4** | Pipeline progress legibility | ◐ | M | ✅ |
 | **F5** | Table-header alignment + empty-state hints | ☆ | S | ✅ |
 
 \* S1 is smaller than it looks — the conversion plumbing already exists (see below).

@@ -485,18 +485,25 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         if errors:
             self._segmentation_hint_lbl.setText("  ".join(errors))
             return
+        # Each hint leads with *when to use this* so a first-time user can pick a
+        # method without leaving the form, then names what it does.
         hint = {
+            "stardist_nuclei":
+                "Best default for a nuclear stain (DAPI/Hoechst/NIR). StarDist "
+                "segments the 'Segmentation channel' above into nuclei.",
             "stardist_seeded_watershed_cell":
-                "Watershed mode uses StarDist seeds + cytoplasm mask and also "
-                "quantifies the cytoplasm channel.",
+                "Use when you need whole-cell (cytoplasm) measurements, not just "
+                "nuclei: StarDist seeds + a cytoplasm mask, and it also quantifies "
+                "the cytoplasm channel.",
             "cellpose":
-                "Cellpose segments the 'Segmentation channel' above — works on a "
-                "fluorescent or brightfield channel.",
+                "Use for non-nuclear or tricky morphologies. Cellpose segments the "
+                "'Segmentation channel' above — fluorescent or brightfield.",
             "cellpose_labelfree":
-                "Label-free preset: Cellpose (cyto3) on the channel marked 'Phase' "
-                "— no nuclear stain required.",
+                "Use when you have no stain at all: a Cellpose (cyto3) preset on the "
+                "channel marked 'Phase' — label-free, no nuclear stain required.",
             "classical_threshold":
-                "Otsu threshold + watershed on the 'Segmentation channel' above.",
+                "Fast, model-free fallback for clean, well-separated objects: Otsu "
+                "threshold + watershed on the 'Segmentation channel' above.",
         }.get(method, "")
         self._segmentation_hint_lbl.setText(hint)
 

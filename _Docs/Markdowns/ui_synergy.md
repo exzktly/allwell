@@ -56,7 +56,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **C2** | Group the Segmentation toolbar | ◐ | S | ✅ |
 | **C3** | Collapsible sections on the Analyze form | ◐ | M | ⬜ |
 | **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ⬜ |
-| **D1** | Analyze first-run guidance (schema + method hints) | ★ | M | ⬜ |
+| **D1** | Analyze first-run guidance (schema + method hints) | ★ | M | ✅ |
 | **D2** | Self-describing fold-change / scatter-gate | ◐ | S | ⬜ |
 | **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ✅ |
 | **D4** | Cell Browser sensible default state | ◐ | S | ✅ |
@@ -368,15 +368,19 @@ loads the dataset into Review.
 
 ## D1 — Analyze first-run guidance
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done (core); minor extras noted
 
 **Steps.**
-- [ ] Schema helper: keep the live example filename; add an inline error icon on the
-      offending position combo (not just the red line) and a "infer from a filename"
-      affordance. Files: `analyze_tab_form.py` (schema grid ~146-183), `analyze_tab.py`.
-- [ ] Add one-line "when to use this" hints under the Segmentation-method dropdown via
-      the existing `_info_icon`/`_section(info=…)` pattern (StarDist vs Cellpose vs
-      classical vs label-free — see `ARCHITECTURE.md §6.2`).
+- [x] Segmentation-method hints: enriched the existing `_segmentation_hint_lbl`
+      (`analyze_tab._refresh_segmentation_hints`) so each method leads with *when to
+      use this* (and added the previously-missing `stardist_nuclei` default).
+- [x] Schema helper: already substantial — a **live example filename** preview
+      (`_refresh_schema_preview` → `_schema_preview_lbl`), a red error label
+      (`_schema_err_lbl`), Run/Browse disabled until the schema is valid, and a
+      "Define the filename schema above first." lock hint. No change needed.
+- [ ] *Optional extras (not done, low value):* a per-combo inline error icon on the
+      specific offending position, and a "drop a filename to infer the schema"
+      affordance. The existing red label + disabled controls already communicate.
 
 **Reuse.** `_info_icon`, `_refresh_segmentation_hints` (NamedPageStack per-method panel).
 **Compliance.** G2, G1. **Verification.** Invalid schema shows the inline icon; method

@@ -168,15 +168,36 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
 
 def qc_gate_refresh_widgets(app) -> None:
     """Re-fill the embedded gate row from the current params (after a load /
-    external change). No-op when the Cell Gating tab hasn't been built."""
+    external change). No-op when the Cell Gating tab hasn't been built.
+
+    Signals are blocked throughout: these are programmatic updates that *mirror*
+    already-applied params, so they must not fire the gate's change handlers.
+    In particular ``setChecked`` fires the enable toggle → ``_apply``, which
+    would read the not-yet-populated min/max fields and clobber the freshly
+    loaded bounds back to ``None`` — the bug where a reopened set's QC filter
+    showed its values but didn't apply until a field was re-entered.
+    """
     w = getattr(app, "_qc_gate_widgets", None)
     if not w:
         return
     p = get_qc_params(app)
-    w["enable"].setChecked(bool(p.enabled))
-    w["min_area"].setText(_fmt(p.min_area))
-    w["max_area"].setText(_fmt(p.max_area))
-    w["min_solidity"].setText(_fmt(p.min_solidity))
-    w["max_region_area"].setText(_fmt(p.max_region_area))
-    w["min_circularity"].setText(_fmt(p.min_circularity))
-    w["max_circularity"].setText(_fmt(p.max_circularity))
+    edit_keys = ("min_area", "max_area", "min_solidity", "max_region_area",
+                 "min_circularity", "max_circularity")
+    fields = [w["enable"]] + [w[k] for k in edit_keys]
+    blocked = [f.blockSignals(True) for f in fields]
+    try:
+        w["enable"].setChecked(bool(p.enabled))
+        w["min_area"].setText(_fmt(p.min_area))
+        w["max_area"].setText(_fmt(p.max_area))
+        w["min_solidity"].setText(_fmt(p.min_solidity))
+        w["max_region_area"].setText(_fmt(p.max_region_area))
+        w["min_circularity"].setText(_fmt(p.min_circularity))
+        w["max_circularity"].setText(_fmt(p.max_circularity))
+    finally:
+        for f, b in zip(fields, blocked):
+            f.blockSignals(b)
+    # Re-sync the edit fields' enabled state by hand (the toggle handler that
+    # normally does this was just blocked).
+    on = bool(p.enabled)
+    for k in edit_keys:
+        w[k].setEnabled(on)

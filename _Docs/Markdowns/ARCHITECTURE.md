@@ -688,6 +688,7 @@ owning its own invariants (behaviour lives *in* the type, not just data):
 | `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization | `core/plot_state.py` |
 | `StatsState` | Statistics-tab comparison groups + result cache | `features/stats/state.py` |
 | `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview image maps (`fluor` / `overlay` / `mask`) shared by the Segmentation review-image and Image Table | `features/review_image/state.py` |
+| `ImageViewState` | Cross-view image display shared by the image viewers — the per-channel display LUT (`lut_by_channel`), so a brightness tuned in Review Image is the default an *auto* Image Table row inherits (per-row edits override; Cell Browser auto-normalizes and doesn't participate) | `core/image_view_state.py` |
 | `PlaygroundState` | Playground frame selection + chosen correction method/params, per-source LUT memory, frame-local binary threshold, QC size cleanup, and zoom/pan + caches | `features/playground/state.py` |
 
 `AppState` (`core/app_state.py`) is a plain aggregate of all of the above —

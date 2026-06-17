@@ -52,7 +52,9 @@ class ReviewImageState:
     base_pil: object = None
     is_tif: bool = False
     last_fluor_arr: object = None
-    lut_by_channel: dict[str, tuple[float, float]] = field(default_factory=dict)
+    # Per-channel display LUT moved to the shared ``AppState.image_view``
+    # (core/image_view_state.py) so Review Image and the Image Table share one
+    # brightness-per-channel default (S4).
 
     # caches (hot path)
     frame_cache: dict | None = None

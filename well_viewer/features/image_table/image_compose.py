@@ -262,20 +262,54 @@ def _compose_image_table_rgb(
 
     return rgb
 
-def _parse_lut(app, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
-    """Read (lo, hi) for grid row *row_idx*; returns (None, None) when 'auto'.
+def _row_channel(app, row_idx: int) -> str:
+    """The representative channel token for grid row *row_idx* (its first cell)."""
+    cells = getattr(app, "_image_table_cells", None) or []
+    if not (0 <= row_idx < len(cells)) or not cells[row_idx]:
+        return ""
+    cb = cells[row_idx][0].get("chan_cb")
+    try:
+        return cb.currentText().strip() if cb is not None else ""
+    except Exception:
+        return ""
 
-    The LUT table is keyed per grid row (not per channel) so two rows showing
-    the same channel have independent ranges — see ``grid_view.build_lut_row``.
+
+def _shared_channel_lut(app, row_idx: int) -> Optional[Tuple[float, float]]:
+    """The shared per-channel display default for row *row_idx*'s channel (S4).
+
+    Returns ``None`` when there's no shared default (then the row auto-fits as
+    before). Lets a brightness tuned in Review Image flow in as the default."""
+    state = getattr(app, "_app_state", None)
+    image_view = getattr(state, "image_view", None)
+    if image_view is None or not hasattr(image_view, "get_lut"):
+        return None
+    return image_view.get_lut(_row_channel(app, row_idx))
+
+
+def _parse_lut(app, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
+    """Read (lo, hi) for grid row *row_idx*; falls back to the shared per-channel
+    default, else (None, None) for auto-fit.
+
+    The per-row LUT table is keyed per grid row (not per channel) so two rows
+    showing the same channel have independent ranges — see
+    ``grid_view.build_lut_row``. A manual per-row value overrides the shared
+    default; an "auto" row inherits the shared brightness-per-channel default
+    (S4) when one exists, otherwise auto-fits.
     """
     luts = getattr(app, "_image_table_lut", None) or {}
     entry = luts.get(row_idx)
-    if not entry:
-        return None, None
+    lo = hi = None
+    if entry:
+        from well_viewer.core.ui_helpers import parse_float_edit
+        lo = parse_float_edit(entry["min"], allow_auto=True)
+        hi = parse_float_edit(entry["max"], allow_auto=True)
 
-    from well_viewer.core.ui_helpers import parse_float_edit
-    return (parse_float_edit(entry["min"], allow_auto=True),
-            parse_float_edit(entry["max"], allow_auto=True))
+    # Row in auto mode (no manual override) → inherit the shared default.
+    if lo is None and hi is None:
+        shared = _shared_channel_lut(app, row_idx)
+        if shared is not None:
+            return shared
+    return lo, hi
 
 
 def _row_display_opts(app, row_idx: int) -> Tuple[bool, bool, str]:

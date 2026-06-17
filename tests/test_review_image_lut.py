@@ -20,7 +20,7 @@ def _app(min_text, max_text):
         _review_lmax_entry=QLineEdit(max_text),
         _app_state=SimpleNamespace(
             channel=SimpleNamespace(active_image_channel="gfp"),
-            review_image=SimpleNamespace(lut_by_channel={}),
+            image_view=SimpleNamespace(lut_by_channel={}),
         ),
     )
 
@@ -52,4 +52,4 @@ def test_only_max_edited_other_blank_still_applies(qtbot):
 def test_resolved_value_is_cached_per_channel(qtbot):
     app = _app("3", "27")
     review_image_resolve_lut(app, ARR)
-    assert app._app_state.review_image.lut_by_channel["gfp"] == (3.0, 27.0)
+    assert app._app_state.image_view.lut_by_channel["gfp"] == (3.0, 27.0)

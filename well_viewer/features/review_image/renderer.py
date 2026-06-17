@@ -360,7 +360,7 @@ def draw_review_image(
         lo, hi = float(arr.min()), float(arr.max())
         if hi <= lo:
             hi = lo + 1.0
-        app._app_state.review_image.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
+        app._app_state.image_view.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
     else:
         lo, hi = app._review_image_resolve_lut(arr)
     if hasattr(app, "_review_lut_chan_lbl"):
@@ -592,16 +592,16 @@ def review_image_resolve_lut(app, arr) -> Tuple[float, float]:
         lo = _num(app._review_lmin_entry.text(), float(arr.min()))
         hi = _num(app._review_lmax_entry.text(), float(arr.max()))
         if hi > lo:
-            app._app_state.review_image.lut_by_channel[chan] = (lo, hi)
+            app._app_state.image_view.lut_by_channel[chan] = (lo, hi)
             return lo, hi
-    saved = app._app_state.review_image.lut_by_channel.get(chan)
+    saved = app._app_state.image_view.lut_by_channel.get(chan)
     if saved is not None and saved[1] > saved[0]:
         return saved
     lo = float(arr.min())
     hi = float(arr.max())
     if hi <= lo:
         hi = lo + 1.0
-    app._app_state.review_image.lut_by_channel[chan] = (lo, hi)
+    app._app_state.image_view.lut_by_channel[chan] = (lo, hi)
     return lo, hi
 
 
@@ -670,7 +670,7 @@ def review_image_auto_lut(app) -> None:
     hi = float(arr_np.max())
     if hi <= lo:
         hi = lo + 1.0
-    app._app_state.review_image.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
+    app._app_state.image_view.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
     if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
         app._review_lmin_entry.setText(f"{lo:.0f}")
         app._review_lmax_entry.setText(f"{hi:.0f}")
@@ -711,7 +711,7 @@ def set_review_image_source(app, mode: str) -> None:
     # LUT ranges differ between stages, so drop the active channel's cached LUT
     # so the new stage gets a fresh auto-fit instead of a stale clip.
     chan = str(app._app_state.channel.active_image_channel or "").lower()
-    app._app_state.review_image.lut_by_channel.pop(chan, None)
+    app._app_state.image_view.lut_by_channel.pop(chan, None)
     app._refresh_review_image_source_btn()
     app._app_state.review_image.preserve_view_on_refresh = True
     refresh_review_image(app)

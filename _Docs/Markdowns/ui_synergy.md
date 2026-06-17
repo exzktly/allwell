@@ -1,6 +1,6 @@
 # UI Synergy — Living Implementation Plan
 
-> **Status:** 16 / 18 shipped, S3 parked, 1 remaining (+ 1 follow-up) · **Last updated:** 2026-06-17
+> **Status:** 17 / 18 shipped, S3 parked (+ 1 follow-up) · **Last updated:** 2026-06-17
 >
 > **Shipped (branch `claude/ui-ux-design-review-8uktp9`), each verified by the
 > headless render harness and/or targeted tests:**
@@ -8,19 +8,21 @@
 > actions), **C1** (Fold-change + Display + error-band popovers, line & bar),
 > **C3** (collapsible Analyze form), **C4** (idle last-run card), **F4** (raw log
 > behind a toggle), **S5** ("Add to Batch" on line/bar/scatter cards → Batch Export
-> with the matching mode). Plus a follow-up: the **Scatter cell viewer** is now a
-> shared-dock **slide-out** (`mount_widget_in_plot_dock`), mutually exclusive with
-> the Properties sidebar.
+> with the matching mode), **S4** (shared per-channel brightness). Plus a follow-up:
+> the **Scatter cell viewer** is now a shared-dock **slide-out**
+> (`mount_widget_in_plot_dock`), mutually exclusive with the Properties sidebar.
+>
+> **S4 scope note:** the three image viewers have intentionally different models —
+> Review Image is single-channel, Image Table is per-row multi-channel, Cell Browser
+> is multi-channel chips with auto-normalized crops. Forcing one shared
+> channel/stage/LUT would break the latter two, so (per the user's choice) S4 ships
+> the coherent, non-breaking win: a **shared per-channel display LUT**
+> (`core/image_view_state.py :: ImageViewState`). Review Image writes it; an *auto*
+> Image Table row inherits it as its default (per-row edits still override); Cell
+> Browser stays auto.
 >
 > **Parked:** **S3** (live-plate data overlay) — at the user's request; the design
 > question (which timepoint to colour by) is deferred.
->
-> **Remaining (1 large, core-surface refactor — decision recorded):**
-> - **S4** → full sync of **channel + image stage (Raw/Flat-field/Corrected) + LUT**
->   across Segmentation Review / Image Table / Cell Browser; per-row LUT becomes an
->   explicit override. Largest item: three features with separate channel/stage/LUT
->   state (Image Table has per-row selectors) → needs a shared image-view state
->   object + rewiring all three. High regression risk; warrants its own session.
 >
 > This is a **living document**. As work proceeds, update each task's checkbox and
 > the per-recommendation **Status** line. Keep the summary table in sync.
@@ -69,7 +71,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **S1** | Unify the three "group" models (Statistics scope) | ★ | M* | ✅ |
 | **S2** | One persistent Analysis-Context bar | ★ | M | ✅ |
 | **S3** | Live-plate heatmap overlay (merge sidebar plate ↔ Heat Map) | ★ | M | ⬜ |
-| **S4** | Link the three image views (shared channel/LUT/stage) | ★ | M | ⬜ |
+| **S4** | Link the three image views (shared per-channel brightness) | ★ | M | ✅ |
 | **S5** | "Add to batch" from every plot card | ★ | M | ✅ |
 | **C1** | Collapse the 4-row Plotting control bar | ★ | M | ✅ |
 | **C2** | Group the Segmentation toolbar | ◐ | S | ✅ |

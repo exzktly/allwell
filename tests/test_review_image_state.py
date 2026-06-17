@@ -29,9 +29,18 @@ def test_review_image_defaults():
 def test_review_image_mutable_defaults_are_per_instance():
     a, b = ReviewImageState(), ReviewImageState()
     a.include_cache["k"] = 1
-    a.lut_by_channel["gfp"] = (0.0, 1.0)
     assert b.include_cache == {}
-    assert b.lut_by_channel == {}
+
+
+def test_image_view_state_per_channel_lut():
+    # The per-channel display LUT now lives on the shared ImageViewState (S4).
+    from well_viewer.core.image_view_state import ImageViewState
+
+    a, b = ImageViewState(), ImageViewState()
+    a.set_lut("GFP", 3.0, 27.0)
+    assert a.get_lut("gfp") == (3.0, 27.0)      # case-insensitive
+    assert b.get_lut("gfp") is None             # per-instance default
+    assert a.get_lut("") is None
 
 
 def test_reset_view():

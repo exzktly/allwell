@@ -53,7 +53,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **S4** | Link the three image views (shared channel/LUT/stage) | ★ | M | ⬜ |
 | **S5** | "Add to batch" from every plot card | ★ | M | ⬜ |
 | **C1** | Collapse the 4-row Plotting control bar | ★ | M | ⬜ |
-| **C2** | Group the Segmentation toolbar | ◐ | S | ⬜ |
+| **C2** | Group the Segmentation toolbar | ◐ | S | ✅ |
 | **C3** | Collapsible sections on the Analyze form | ◐ | M | ⬜ |
 | **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ⬜ |
 | **D1** | Analyze first-run guidance (schema + method hints) | ★ | M | ⬜ |
@@ -61,7 +61,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ⬜ |
 | **D4** | Cell Browser sensible default state | ◐ | S | ⬜ |
 | **F1** | Clickable status context chips | ★ | S | ⬜ |
-| **F2** | Clear active-state for mode toggles | ★ | S | ⬜ |
+| **F2** | Clear active-state for mode toggles | ★ | S | ✅ |
 | **F3** | Channel-name casing consistency (`gfp`→`GFP`) | ★ | M | ⬜ |
 | **F4** | Pipeline progress legibility | ◐ | M | ⬜ |
 | **F5** | Table-header alignment + empty-state hints | ☆ | S | ⬜ |
@@ -313,13 +313,14 @@ mirrors across Bar↔Line; plot area is taller. Re-render headlessly.
 
 ## C2 — Group the Segmentation toolbar
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 **Steps.**
-- [ ] Make Raw·Flat-field·Corrected a real `SegmentedControl` (it already maps to
-      `ReviewImageState.image_source` — `features/review_image`).
-- [ ] Separate {Delete Cell · Crop · Clear · Reset} from {Fit · − · +} with a
-      `Separator`/spacer so edit vs zoom clusters read distinctly.
+- [x] Raw·Flat-field·Corrected is already a real `SegmentedControl` mapped to
+      `ReviewImageState.image_source` (`features/preview/panel_view.py`) — no change needed.
+- [x] Added thin `vline` separators (`_toolbar_separator`) splitting the row into three
+      clusters: {Delete Cell · Crop · Clear · Reset} | {Raw · Flat-field · Corrected} |
+      {Fit · − · +}. `features/preview/panel_view.py`.
 
 **Reuse.** `widgets/segmented_control.py`, existing `Separator` styling in `theme.qss()`.
 **Compliance.** G8, G2, G9. **Verification.** Render Segmentation → Review Image; stage
@@ -452,12 +453,16 @@ its editor; only one "ready/status" surface remains.
 
 ## F2 — Clear active-state for mode toggles
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 **Steps.**
-- [ ] For *mode* toggles (Delete Cell, Crop Region — `features/review_image/panel_view.py`)
-      adopt `ToggleSwitch` or add an explicit "armed" affordance (accent border + label)
-      beyond the subtle `[active="true"]`/`:checked` background.
+- [x] Added a shared QSS rule in `theme.qss()` for checkable toggle buttons: the
+      `:checked` / `variant="toggle_active"` state now gets an **accent ring + tinted
+      fill** (`accent_dim` bg, `accent` border), with an accent hover. This was the
+      high-leverage fix — it covers every `variant="toggle"` button at once (Delete
+      Cell, Crop Region, Outline, Binary, Beeswarm, Violin, Group-by-Well), not just
+      the two Segmentation toggles. Verified: "Outline: On" now reads clearly armed vs
+      "Binary: Off". Token-based (G2). File: `theme.py`.
 
 **Reuse.** `widgets/toggle_switch.py`, `theme.Colors.accent`. **Compliance.** G2, G8.
 **Verification.** "Delete mode" is unmistakably on; render Segmentation.

@@ -57,7 +57,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **C3** | Collapsible sections on the Analyze form | ◐ | M | ⬜ |
 | **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ⬜ |
 | **D1** | Analyze first-run guidance (schema + method hints) | ★ | M | ✅ |
-| **D2** | Self-describing fold-change / scatter-gate | ◐ | S | ⬜ |
+| **D2** | Self-describing fold-change / scatter-gate | ◐ | S | ✅ |
 | **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ✅ |
 | **D4** | Cell Browser sensible default state | ◐ | S | ✅ |
 | **F1** | Clickable status context chips | ★ | S | ⬜ |
@@ -390,12 +390,17 @@ hints render.
 
 ## D2 — Self-describing fold-change / scatter-gate
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done (controls); scatter on-plot gate hint left as optional
 
 **Steps.**
-- [ ] Attach info-icon/tooltip + a one-line caption to fold-change, "Pool replicates",
-      and scatter gates. On Scatter, show a hint when a gate is active ("Gate: cells
-      inside count as ON") — the gate naming/inclusion logic is in `scatter/gating.py`.
+- [x] Fold-change Control/Baseline combos already carry tooltips
+      (`domain/fold_change_controls.py`).
+- [x] Added explanatory tooltips to the previously-bare bar shape toggles —
+      Group by Well, **Pool Replicates**, Pool rset cells, Beeswarm, Violin, and the
+      Smooth slider (with its Violin-only dependency) — `features/barplot/tab_view.py`.
+- [ ] *Optional:* a persistent on-plot "Gate active" hint on Scatter
+      (`scatter/gating.py` already draws per-gate "% inside" labels). Lower value;
+      not done.
 
 **Reuse.** `_info_icon` pattern, `widgets/kbd_hint.py` styling. **Compliance.** G2.
 **Verification.** Hints visible; gate hint appears when a gate exists.

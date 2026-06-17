@@ -145,6 +145,8 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_group_mode_btn = QPushButton("Group by Well", shape_ctrl)
     ctx.app._bar_group_mode_btn.setProperty("variant", "toggle")
     ctx.app._bar_group_mode_btn.setCheckable(True)
+    ctx.app._bar_group_mode_btn.setToolTip(
+        "Cluster the bars by well/group vs by timepoint.")
     ctx.app._bar_group_mode_btn.clicked.connect(
         lambda _=False: toggle_bar_group_mode(ctx.app)
     )
@@ -155,6 +157,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_pool_reps_btn = QPushButton("Pool Replicates", shape_ctrl)
     ctx.app._bar_pool_reps_btn.setProperty("variant", "toggle")
     ctx.app._bar_pool_reps_btn.setCheckable(True)
+    ctx.app._bar_pool_reps_btn.setToolTip(
+        "Collapse each replicate set's wells into one pooled column "
+        "(off = one column per well).")
     ctx.app._bar_pool_reps_btn.clicked.connect(
         lambda _=False: toggle_bar_pool_replicates(ctx.app)
     )
@@ -164,6 +169,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_pool_rset_cells_btn = QPushButton("Pool rset cells", shape_ctrl)
     ctx.app._bar_pool_rset_cells_btn.setProperty("variant", "toggle")
     ctx.app._bar_pool_rset_cells_btn.setCheckable(True)
+    ctx.app._bar_pool_rset_cells_btn.setToolTip(
+        "Pool every cell across a replicate set before drawing its beeswarm / "
+        "violin distribution (off = keep per-well distributions).")
     ctx.app._bar_pool_rset_cells_btn.clicked.connect(
         lambda _=False: toggle_bar_pool_rset_cells(ctx.app)
     )
@@ -173,6 +181,8 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._swarm_btn = QPushButton("Beeswarm", shape_ctrl)
     ctx.app._swarm_btn.setProperty("variant", "toggle")
     ctx.app._swarm_btn.setCheckable(True)
+    ctx.app._swarm_btn.setToolTip(
+        "Overlay the individual per-cell points on each bar.")
     ctx.app._swarm_btn.clicked.connect(lambda _=False: ctx.app._toggle_swarm())
     sl.addWidget(ctx.app._swarm_btn)
     ctx.app._bar_swarm = False
@@ -180,6 +190,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._violin_btn = QPushButton("Violin", shape_ctrl)
     ctx.app._violin_btn.setProperty("variant", "toggle")
     ctx.app._violin_btn.setCheckable(True)
+    ctx.app._violin_btn.setToolTip(
+        "Draw a violin (kernel-density) shape for each group. "
+        "Enables the Smooth control.")
     ctx.app._violin_btn.clicked.connect(lambda _=False: ctx.app._toggle_violin())
     sl.addWidget(ctx.app._violin_btn)
     ctx.app._bar_violin = False
@@ -190,6 +203,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._violin_slider.setRange(5, 200)
     ctx.app._violin_slider.setValue(100)
     ctx.app._violin_slider.setFixedWidth(80)
+    ctx.app._violin_slider.setToolTip(
+        "Violin kernel bandwidth — higher is smoother. "
+        "Active only when Violin is on.")
     ctx.app._violin_slider.valueChanged.connect(
         lambda _v: (redraw_bars(ctx.app) if ctx.app._bar_violin else None)
     )

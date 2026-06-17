@@ -64,7 +64,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 
 | ID | Recommendation | Impact | Effort | Status |
 |----|----------------|:------:|:------:|:------:|
-| **S1** | Unify the three "group" models | ★ | M* | ⬜ |
+| **S1** | Unify the three "group" models (Statistics scope) | ★ | M* | ✅ |
 | **S2** | One persistent Analysis-Context bar | ★ | M | ✅ |
 | **S3** | Live-plate heatmap overlay (merge sidebar plate ↔ Heat Map) | ★ | M | ⬜ |
 | **S4** | Link the three image views (shared channel/LUT/stage) | ★ | M | ⬜ |

@@ -550,6 +550,36 @@ def stats_sync_from_app(app) -> None:
     stats_refresh_group_list(app)
 
 
+def stats_resync_from_sample_defs(app) -> None:
+    """Re-pull the comparison groups from the shared Sample-Definition sets.
+
+    Statistics auto-seeds its groups from the Sample-Definition replicate sets
+    on first visit (tab_controller); this is the explicit "do it again" so a
+    user who edited Sample Definitions can refresh without rebuilding groups by
+    hand. Confirm first when existing groups would be discarded.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    rsets = app._groups_from_rep_sets()
+    if not rsets:
+        app._set_status("No Sample-Definition groups to load — define them on the Sample Definitions tab.")
+        return
+    existing = [g for g in app._app_state.stats.groups if g.wells]
+    if existing:
+        resp = QMessageBox.question(
+            app if hasattr(app, "window") else None,
+            "Load from Sample Definitions",
+            f"Replace the current {len(existing)} comparison group(s) with the "
+            f"{len(rsets)} Sample-Definition group(s)?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if resp != QMessageBox.Yes:
+            return
+    stats_sync_from_app(app)
+    app._set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
+
+
 def stats_on_test_change(app) -> None:
     """Clear results when test changes; update UI hints."""
     app._stats_write_result("")

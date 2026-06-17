@@ -27,6 +27,23 @@
 > This is a **living document**. As work proceeds, update each task's checkbox and
 > the per-recommendation **Status** line. Keep the summary table in sync.
 
+## Post-review fixes (follow-ups from user testing — not part of the 18 items)
+
+These shipped after the synergy items above, in response to bugs/feedback found
+while testing the branch. Logged here so the plan reflects *all* the work.
+
+| Fix | Commit |
+|-----|--------|
+| Scatter cell viewer → shared-dock **slide-out** (not a modal pop-up) | `3a79e1a` |
+| **Distribution / Heat Map** now redraw on a channel change (registered as redraw scopes) | `2ba7611` |
+| **Double caret** on popover buttons (native menu-indicator hidden) | `2ba7611` |
+| "Add to Batch" → **"Open in Batch Export"** (it navigates + pre-fills) | `2ba7611` |
+| **Scatter options bar** decluttered (Layout/Colour-by-time → "Display ▾") | `2ba7611` |
+| Removed the **stray error-band toggle** from the per-cell scatter (kept on aggregate) | `2ba7611` |
+| `send_plot_to_batch_export` moved to core (deferred-import budget) | `ee793ed` |
+| QC debris gate applies **live while typing** (debounce, not only on tab-out) | `1a27e35` |
+| Persisted QC debris gate **applies on reopen** (refresh no longer clobbers loaded bounds) | `83677c6` |
+
 ## Context
 
 A design review of AllWell's Review pane found that several features which are

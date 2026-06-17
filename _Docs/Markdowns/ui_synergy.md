@@ -1,28 +1,26 @@
 # UI Synergy — Living Implementation Plan
 
-> **Status:** 15 / 18 shipped, S3 parked, 2 remaining (+ 1 follow-up) · **Last updated:** 2026-06-17
+> **Status:** 16 / 18 shipped, S3 parked, 1 remaining (+ 1 follow-up) · **Last updated:** 2026-06-17
 >
 > **Shipped (branch `claude/ui-ux-design-review-8uktp9`), each verified by the
 > headless render harness and/or targeted tests:**
 > F2, C2, S2, D4, D3, D1, D2, F5, F3, **S1** (Statistics scope), **F1** (chips +
 > actions), **C1** (Fold-change + Display + error-band popovers, line & bar),
 > **C3** (collapsible Analyze form), **C4** (idle last-run card), **F4** (raw log
-> behind a toggle). Plus a follow-up: the **Scatter cell viewer** is now a
+> behind a toggle), **S5** ("Add to Batch" on line/bar/scatter cards → Batch Export
+> with the matching mode). Plus a follow-up: the **Scatter cell viewer** is now a
 > shared-dock **slide-out** (`mount_widget_in_plot_dock`), mutually exclusive with
 > the Properties sidebar.
 >
 > **Parked:** **S3** (live-plate data overlay) — at the user's request; the design
 > question (which timepoint to colour by) is deferred.
 >
-> **Remaining (2 large, core-surface refactors — decisions recorded):**
+> **Remaining (1 large, core-surface refactor — decision recorded):**
 > - **S4** → full sync of **channel + image stage (Raw/Flat-field/Corrected) + LUT**
 >   across Segmentation Review / Image Table / Cell Browser; per-row LUT becomes an
 >   explicit override. Largest item: three features with separate channel/stage/LUT
 >   state (Image Table has per-row selectors) → needs a shared image-view state
 >   object + rewiring all three. High regression risk; warrants its own session.
-> - **S5** → "Add to batch" on plot cards capturing the current plot spec. No
->   existing programmatic batch-entry API; needs a plot-spec→batch-entry mapping +
->   prefill wiring (a new feature). With S1 statistics-only, batch groups stay as-is.
 >
 > This is a **living document**. As work proceeds, update each task's checkbox and
 > the per-recommendation **Status** line. Keep the summary table in sync.
@@ -72,7 +70,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **S2** | One persistent Analysis-Context bar | ★ | M | ✅ |
 | **S3** | Live-plate heatmap overlay (merge sidebar plate ↔ Heat Map) | ★ | M | ⬜ |
 | **S4** | Link the three image views (shared channel/LUT/stage) | ★ | M | ⬜ |
-| **S5** | "Add to batch" from every plot card | ★ | M | ⬜ |
+| **S5** | "Add to batch" from every plot card | ★ | M | ✅ |
 | **C1** | Collapse the 4-row Plotting control bar | ★ | M | ✅ |
 | **C2** | Group the Segmentation toolbar | ◐ | S | ✅ |
 | **C3** | Collapsible sections on the Analyze form | ◐ | M | ✅ |

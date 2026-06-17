@@ -137,6 +137,17 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_gate_redraw_cb = redraw_scatter_orchestrate
     cl.addStretch(1)
 
+    # S5: send the current scatter spec to Batch Export (cells mode).
+    _batch_btn = QPushButton("Add to Batch", ctrl)
+    _batch_btn.setProperty("variant", "secondary")
+    _batch_btn.setToolTip("Open Batch Export with these plot settings (Scatter cells)")
+
+    def _to_batch(_=False):
+        from well_viewer.features.batch_export.tab_view import send_plot_to_batch_export
+        send_plot_to_batch_export(ctx.app, "scatter_cells")
+    _batch_btn.clicked.connect(_to_batch)
+    cl.addWidget(_batch_btn)
+
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")
     _export_btn.clicked.connect(lambda _=False: export_scatter_data(ctx.app))

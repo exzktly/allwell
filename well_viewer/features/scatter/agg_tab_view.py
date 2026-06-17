@@ -88,6 +88,17 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     cl.addStretch(1)
 
+    # S5: send the current scatter spec to Batch Export (aggregate mode).
+    _batch_btn = QPushButton("Add to Batch", ctrl)
+    _batch_btn.setProperty("variant", "secondary")
+    _batch_btn.setToolTip("Open Batch Export with these plot settings (Scatter aggregate)")
+
+    def _to_batch(_=False):
+        from well_viewer.features.batch_export.tab_view import send_plot_to_batch_export
+        send_plot_to_batch_export(ctx.app, "scatter_agg")
+    _batch_btn.clicked.connect(_to_batch)
+    cl.addWidget(_batch_btn)
+
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")
     _export_btn.clicked.connect(lambda _=False: ctx.app._export_scatter_agg_data())

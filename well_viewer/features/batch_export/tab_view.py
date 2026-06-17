@@ -185,3 +185,23 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     }
     ctx.app._batch_export_set_mode = lambda mode="line": _show_batch_mode(ctx.app, mode)
     ctx.app._batch_export_set_mode("line")
+
+
+def send_plot_to_batch_export(app, mode: str) -> None:
+    """S5: jump from a plot card to Batch Export with the matching mode.
+
+    The batch panels read the live plot spec (channel / property / threshold /
+    SEM / fold-change) straight off ``app._app_state``, so "capturing the
+    current plot" reduces to navigating to the Batch Export tab and selecting
+    the chart-type that matches the card the user clicked from. Navigating
+    builds the tab (so ``_batch_export_set_mode`` exists) before we set it.
+    """
+    nb = getattr(app, "_notebook", None)
+    if nb is not None:
+        nb.setCurrentByName("Batch Export")
+    setter = getattr(app, "_batch_export_set_mode", None)
+    if callable(setter):
+        setter(mode)
+    label = {"line": "Line", "bar": "Bar", "scatter_cells": "Scatter (cells)",
+             "scatter_agg": "Scatter (aggregate)"}.get(mode, mode)
+    app._set_status(f"Batch Export → {label}: using the current plot settings.")

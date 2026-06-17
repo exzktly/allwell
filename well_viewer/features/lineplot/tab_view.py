@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
@@ -88,6 +88,17 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(_disp_btn)
 
     cl.addStretch(1)
+
+    # S5: send the current plot spec to Batch Export (matching chart-type).
+    _batch_btn = QPushButton("Add to Batch", line_ctrl)
+    _batch_btn.setProperty("variant", "secondary")
+    _batch_btn.setToolTip("Open Batch Export with these plot settings (Line)")
+
+    def _to_batch(_=False):
+        from well_viewer.features.batch_export.tab_view import send_plot_to_batch_export
+        send_plot_to_batch_export(ctx.app, "line")
+    _batch_btn.clicked.connect(_to_batch)
+    cl.addWidget(_batch_btn)
 
     # IconButton (QToolButton subclass) matches the Sample Definitions
     # top toolbar style — compact, auto-raise icon-only buttons rather

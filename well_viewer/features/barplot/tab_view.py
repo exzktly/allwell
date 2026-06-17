@@ -91,6 +91,17 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx.app))
     cl.addWidget(ctx.app._bar_reset_order_btn)
 
+    # S5: send the current plot spec to Batch Export (matching chart-type).
+    _batch_btn = QPushButton("Add to Batch", bar_ctrl)
+    _batch_btn.setProperty("variant", "secondary")
+    _batch_btn.setToolTip("Open Batch Export with these plot settings (Bar)")
+
+    def _to_batch(_=False):
+        from well_viewer.features.batch_export.tab_view import send_plot_to_batch_export
+        send_plot_to_batch_export(ctx.app, "bar")
+    _batch_btn.clicked.connect(_to_batch)
+    cl.addWidget(_batch_btn)
+
     # IconButton — matches Sample Definitions top toolbar style; see
     # equivalent block in features/lineplot/tab_view.py for rationale.
     from widgets.icon_button import IconButton as _IconButton

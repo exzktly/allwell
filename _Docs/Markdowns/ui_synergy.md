@@ -1,19 +1,27 @@
 # UI Synergy — Living Implementation Plan
 
-> **Status:** IN PROGRESS — 8 / 18 shipped · **Last updated:** 2026-06-17
+> **Status:** IN PROGRESS — 9 / 18 shipped (+ 1 follow-up) · **Last updated:** 2026-06-17
 >
 > This is a **living document**. As work proceeds, update each task's checkbox and
 > the per-recommendation **Status** line. Keep the summary table in sync. When a
 > recommendation ships, link its PR(s) and move it to ✅ Done.
 >
 > **Shipped (branch `claude/ui-ux-design-review-8uktp9`):** F2, C2, S2, D4, D3, D1,
-> D2, F5 — the safe, decision-free items, each verified by the headless render
-> harness and/or targeted tests.
+> D2, F5, **F3** — each verified by the headless render harness and/or targeted
+> tests. Plus a follow-up requested mid-stream: the **Scatter cell viewer** is now a
+> shared-dock **slide-out** (not a modal pop-up), mutually exclusive with the
+> Properties sidebar (`mount_widget_in_plot_dock`).
 >
-> **Remaining (need a decision or are architectural / higher-risk):** S1, S3, S4,
-> S5, C1, C3, C4, F1, F3, F4 — see each section's Status for why it's held and the
-> open question. These were intentionally **not** rushed: they change behaviour,
-> persistence, or core-surface structure and warrant a maintainer green-light.
+> **S3 — parked at the user's request** (skip for now; design Q on which timepoint
+> to colour by is deferred).
+>
+> **Remaining (architectural / behaviour-changing / higher-risk):** S1, S4, S5, C1,
+> C3, C4, F1, F4 — approved by the user but each is a focused refactor of core
+> behaviour/persistence/structure. Being done deliberately (one at a time, with
+> tests) rather than rushed together. See each section's Status for specifics.
+> **F1 note:** the threshold/band readout is line-plot-only (set in
+> `lineplot/controller.py`), not a persistent global; clickable chips need cross-tab
+> refresh wiring to avoid stale values — scoped, not yet built.
 
 ## Context
 

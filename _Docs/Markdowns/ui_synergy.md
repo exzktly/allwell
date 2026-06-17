@@ -58,7 +58,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ⬜ |
 | **D1** | Analyze first-run guidance (schema + method hints) | ★ | M | ⬜ |
 | **D2** | Self-describing fold-change / scatter-gate | ◐ | S | ⬜ |
-| **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ⬜ |
+| **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ✅ |
 | **D4** | Cell Browser sensible default state | ◐ | S | ✅ |
 | **F1** | Clickable status context chips | ★ | S | ⬜ |
 | **F2** | Clear active-state for mode toggles | ★ | S | ✅ |
@@ -400,12 +400,18 @@ hints render.
 
 ## D3 — Surface shortcuts + dim Help underlay
 
-**Status:** ⬜ Not started
+**Status:** ✅ Done
 
 **Steps.**
-- [ ] Audit the Help drawer Shortcuts section for completeness (`all_well.py` help
-      drawer; shortcuts installed in `_install_shortcuts`).
-- [ ] Dim the underlay when the `Drawer` opens (audit [L]) — `widgets/drawer.py`.
+- [x] Underlay dim: already resolved since the audit — the Help drawer now uses the
+      v2 `Drawer`, whose `_Backdrop` paints a 0.35-alpha scrim. Verified by rendering
+      `95-dialog-help.png` (left content clearly dimmed). No change needed.
+- [x] Shortcut consistency: the chrome advertised two shortcuts that weren't wired —
+      the status-bar "Search ⌘K" hint (no global search exists) and the help drawer's
+      "⌘W Close window". Fixed by making the claims true: wired `Ctrl+W` (close) and
+      `Ctrl+/` (toggle help) in `_install_shortcuts`, replaced the phantom "Search ⌘K"
+      status hint with a real "Help ⌘/", and listed ⌘/ in the help drawer. `all_well.py`.
+      Tested: `test_app_smoke.py` green.
 
 **Reuse.** `widgets/drawer.py`, `widgets/kbd_hint.py`. **Compliance.** G8, G2.
 **Verification.** Render Help drawer (`95-dialog-help.png`) — underlay dimmed; shortcuts

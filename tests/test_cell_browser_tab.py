@@ -80,6 +80,45 @@ def test_cell_browser_click_navigates_to_segmentation(loaded_app):
     assert app._app_state.preview.selected_well == cells[0].well
 
 
+def test_cell_browser_click_sets_normalized_timepoint(loaded_app):
+    """Regression: clicking a cell must select the FOV/timepoint that actually
+    matches the cell. The combos hold *normalized* tokens (timepoint as parsed
+    hours, e.g. '24'), but the descriptor carries the raw CSV token ('24h'), so
+    passing it straight to setCurrentText silently no-ops and the view stays on
+    the wrong timepoint."""
+    app = loaded_app
+    app._notebook.setCurrentByName("Cell Browser")
+
+    from well_viewer.features.cell_browser import controller as ctl
+    from well_viewer.features.cell_browser.collect import collect_cells
+
+    cells = collect_cells(app, [], None, None)
+    cell = next(c for c in cells if c.tp_token == "24h")
+    assert app._norm_timepoint("24h") == "24"  # normalization actually differs
+
+    class _Rec:
+        def __init__(self):
+            self.texts = []
+
+        def setCurrentText(self, t):
+            self.texts.append(str(t))
+
+        def currentText(self):
+            return self.texts[-1] if self.texts else ""
+
+    fov_rec, tp_rec = _Rec(), _Rec()
+    app._preview_fov_cb = fov_rec
+    app._review_image_tp_cb = tp_rec
+
+    ctl.on_cell_clicked(app, cell)
+
+    # The raw token must never be the value handed to the combo; the normalized
+    # hours value must be.
+    assert "24h" not in tp_rec.texts
+    assert "24" in tp_rec.texts
+    assert fov_rec.texts and fov_rec.texts[-1] == "1"
+
+
 def test_cell_browser_apply_filters_no_criteria(loaded_app):
     app = loaded_app
     app._notebook.setCurrentByName("Cell Browser")

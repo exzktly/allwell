@@ -95,7 +95,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **C1** | Collapse the 4-row Plotting control bar | ★ | M | 🟡 |
 | **C2** | Group the Segmentation toolbar | ◐ | S | ✅ |
 | **C3** | Collapsible sections on the Analyze form | ◐ | M | ✅ |
-| **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ⬜ |
+| **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ✅ |
 | **D1** | Analyze first-run guidance (schema + method hints) | ★ | M | ✅ |
 | **D2** | Self-describing fold-change / scatter-gate | ◐ | S | ✅ |
 | **D3** | Surface shortcuts + dim Help underlay | ◐ | S | ✅ |

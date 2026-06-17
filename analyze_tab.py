@@ -726,6 +726,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         self._well_done  = 0
         self._progress_tracker.reset()
         self._dashboard.reset(remote=self._remote_cb.currentData() is not None)
+        if getattr(self, "_last_run_card", None) is not None:
+            self._last_run_card.setVisible(False)  # C4: hide stale summary while running
         self._eta_deadline = None
         self._dashboard.set_eta("ETA")
         self._pipeline_started_at = _time.monotonic()
@@ -1123,6 +1125,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
+                    self._refresh_last_run_summary()  # C4: show the just-finished run
                     if getattr(self, "_status_signal_pushed", False):
                         try:
                             from well_viewer import status_signal as _status_signal

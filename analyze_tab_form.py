@@ -1023,6 +1023,32 @@ class AnalyzeTabFormMixin:
 
         parent.layout().addWidget(btn_widget)
 
+    def _refresh_last_run_summary(self) -> None:
+        """Populate the idle last-run card (C4) from the most recent run's
+        pipeline_info.json. Hidden when no previous run is available."""
+        card = getattr(self, "_last_run_card", None)
+        if card is None:
+            return
+        out = self._last_output_dir  # a @property (Path | None)
+        info_path = (out / "pipeline_info.json") if out else None
+        if not info_path or not info_path.exists():
+            card.setVisible(False)
+            return
+        try:
+            import json
+            info = json.loads(info_path.read_text())
+        except Exception:
+            card.setVisible(False)
+            return
+        method = str(info.get("segmentation_method", "—")).replace("_", " ")
+        fluors = ", ".join(info.get("fluor_tokens", []) or []) or "—"
+        n_tp = len(info.get("available_timepoints", []) or [])
+        card.setText(
+            f"Last run · {out.name}\n"
+            f"Method: {method}   ·   Channels: {fluors}   ·   {n_tp} timepoint(s)"
+        )
+        card.setVisible(True)
+
     def _build_log(self, parent: QWidget) -> None:
         rl = QVBoxLayout(parent)
         rl.setContentsMargins(0, 0, 0, 0)
@@ -1042,6 +1068,17 @@ class AnalyzeTabFormMixin:
 
         r1 = QFrame(parent); r1.setFrameShape(QFrame.HLine); r1.setObjectName("HRule")
         rl.addWidget(r1)
+
+        # Idle last-run summary (C4): a compact readout of the most recent run
+        # so the pane isn't blank when nothing's running. Hidden during a run
+        # and when there's no previous run to describe.
+        self._last_run_card = QLabel("", parent)
+        self._last_run_card.setObjectName("Muted")
+        self._last_run_card.setWordWrap(True)
+        self._last_run_card.setContentsMargins(12, 6, 12, 6)
+        self._last_run_card.setVisible(False)
+        rl.addWidget(self._last_run_card)
+        self._refresh_last_run_summary()
 
         # Visual run dashboard — the single place run progress is reported:
         # status + ETA (header), overall % (headline + bar), per-stage rail and

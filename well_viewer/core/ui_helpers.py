@@ -391,6 +391,33 @@ def hide_plot_dock(dock: QWidget) -> None:
         dock.setVisible(False)
 
 
+def make_popover_button(text: str, parent: QWidget):
+    """A compact toolbar button that opens a small panel ("popover") on click.
+
+    Returns ``(button, content_widget, content_layout)`` — add controls to
+    ``content_layout`` and they appear in the popup. Used to collapse rarely-
+    changed plotting controls (e.g. Fold change) off the always-visible control
+    bar (C1), trading one row of vertical space for one click.
+    """
+    from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
+
+    btn = QToolButton(parent)
+    btn.setText(text)
+    btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    btn.setProperty("variant", "secondary")
+    menu = QMenu(btn)
+    content = QWidget(menu)
+    content_layout = QVBoxLayout(content)
+    content_layout.setContentsMargins(10, 8, 10, 8)
+    content_layout.setSpacing(4)
+    wa = QWidgetAction(menu)
+    wa.setDefaultWidget(content)
+    menu.addAction(wa)
+    btn.setMenu(menu)
+    return btn, content, content_layout
+
+
 def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
     """Forward wheel events from a matplotlib canvas to ``scroll_area``.
 

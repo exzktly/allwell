@@ -75,10 +75,14 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(ctx.app._metric_selector_frame_bar)
     ctx.app._metric_selector_frame_bar.hide()
 
-    # Fold-change normalization sits on the main controls row, left-aligned;
-    # the stretch below pushes the action buttons to the right.
+    # Fold-change normalization collapses into a popover button (C1) so it no
+    # longer needs its own row; the stretch pushes the action buttons right.
     from well_viewer.domain.fold_change_controls import install_fold_change_controls
-    install_fold_change_controls(ctx.app, bar_ctrl, cl, scope="bar")
+    from well_viewer.core.ui_helpers import make_popover_button
+    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", bar_ctrl)
+    _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
+    install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="bar")
+    cl.addWidget(_fc_btn)
 
     cl.addStretch(1)
 

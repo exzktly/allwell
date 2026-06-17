@@ -69,7 +69,7 @@ Every recommendation below must satisfy these `ARCHITECTURE.md` rules. Each item
 | **S3** | Live-plate heatmap overlay (merge sidebar plate ↔ Heat Map) | ★ | M | ⬜ |
 | **S4** | Link the three image views (shared channel/LUT/stage) | ★ | M | ⬜ |
 | **S5** | "Add to batch" from every plot card | ★ | M | ⬜ |
-| **C1** | Collapse the 4-row Plotting control bar | ★ | M | ⬜ |
+| **C1** | Collapse the 4-row Plotting control bar | ★ | M | 🟡 |
 | **C2** | Group the Segmentation toolbar | ◐ | S | ✅ |
 | **C3** | Collapsible sections on the Analyze form | ◐ | M | ⬜ |
 | **C4** | Last-run summary in the idle Analyze pane | ☆ | S | ⬜ |

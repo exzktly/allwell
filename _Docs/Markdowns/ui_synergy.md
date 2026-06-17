@@ -1,10 +1,19 @@
 # UI Synergy — Living Implementation Plan
 
-> **Status:** PLANNING (no code changes yet) · **Owner:** _unassigned_ · **Last updated:** 2026-06-17
+> **Status:** IN PROGRESS — 8 / 18 shipped · **Last updated:** 2026-06-17
 >
 > This is a **living document**. As work proceeds, update each task's checkbox and
 > the per-recommendation **Status** line. Keep the summary table in sync. When a
 > recommendation ships, link its PR(s) and move it to ✅ Done.
+>
+> **Shipped (branch `claude/ui-ux-design-review-8uktp9`):** F2, C2, S2, D4, D3, D1,
+> D2, F5 — the safe, decision-free items, each verified by the headless render
+> harness and/or targeted tests.
+>
+> **Remaining (need a decision or are architectural / higher-risk):** S1, S3, S4,
+> S5, C1, C3, C4, F1, F3, F4 — see each section's Status for why it's held and the
+> open question. These were intentionally **not** rushed: they change behaviour,
+> persistence, or core-surface structure and warrant a maintainer green-light.
 
 ## Context
 
@@ -75,7 +84,12 @@ density (C1, C3) → discoverability (D1, D2, D3) → synergy chain (S2 → S3 �
 
 ## S1 — Unify the three "group" models
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **behaviour change, needs green-light.** Making Statistics +
+Batch Export write back to the shared `selection.selections` changes how those tabs
+behave today (ephemeral Stats groups become persistent shared selections; the
+standalone `export_groups.json` path is demoted). Worth doing, but it alters
+user-facing semantics and persistence, so it should land deliberately with review,
+not as an unattended change. Plan below is ready to execute on approval.
 
 **Goal.** One group model used everywhere. Sample-Definition selections become the
 single source of truth; Statistics "comparison groups" and Batch Export "export
@@ -168,7 +182,13 @@ tabs (`tests/test_redraw_fanout.py`).
 
 ## S3 — Live-plate heatmap overlay
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **open design question.** The reusable value function
+(`heatmap.controller._cell_value`) needs a **timepoint** (`target_t`) and a
+**colour-scale source**; for an always-on sidebar overlay it's ambiguous which
+timepoint to show when a dataset has several, and what range to normalise against.
+Needs a decision (see end-of-turn question) before building. Plan below otherwise
+ready; the plate-tinting API (`WellPlateSelector.set_well_colors` /
+`set_colored_wells_lit`) already exists.
 
 **Goal.** Let the sidebar plate optionally tint each well by the current
 (channel, property) value — a mini sequential heatmap — toggled by a small "data
@@ -211,7 +231,9 @@ the Heat Map tab's colours for the same metric.
 
 ## S4 — Link the three image views
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **architectural (shared state).** Introduces a new cross-feature
+`ImageViewState` that Review Image / Image Table / Cell Browser all read; touches
+three features' render paths. Best done deliberately with review. Plan ready.
 
 **Goal.** Segmentation Review Image, Image Table, and Cell Browser share one
 channel/LUT/stage(Raw·Flat-field·Corrected) state and cross-select, so they feel like
@@ -254,7 +276,8 @@ three views headlessly.
 
 ## S5 — "Add to batch" from every plot card
 
-**Status:** ⬜ Not started · **(depends on S1 groups + S2 context bar)**
+**Status:** ⬜ Held — **depends on S1** (unified groups) for the spec's group field.
+S2 (its other dependency) is done. Build after S1 lands.
 
 **Goal.** An "+ Add to batch" action on each plot card pushes the current plot's full
 spec into the Batch Export queue, so Batch Export reviews figures you already dialed
@@ -291,7 +314,10 @@ matches; run export → output matches the on-screen figure.
 
 ## C1 — Collapse the 4-row Plotting control bar
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **changes the plotting interaction model.** Moving fold-change +
+display controls behind popovers is a real UX shift (extra click to reach common
+controls) and risks the fold-change cross-tab sync (`_sync_widgets_to_state`) when
+its widgets move into a popover. Worth a deliberate review. Plan ready.
 
 **Goal.** Reduce Bar Plots' four stacked control rows to the primary context bar (S2)
 + popovers, freeing vertical room.
@@ -335,7 +361,9 @@ toggle still switches source; clusters visually grouped.
 
 ## C3 — Collapsible sections on the Analyze form
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **reworks the shared `_section` builder** used by every Analyze
+section, interacting with the form's dependency-driven row show/hide and the
+QScrollArea. A core-surface restructure better landed with review. Plan ready.
 
 **Steps.**
 - [ ] Wrap Schema / Channels / Folders / QC blocks in `CollapsibleSection`s
@@ -352,7 +380,9 @@ toggle still switches source; clusters visually grouped.
 
 ## C4 — Last-run summary in the idle Analyze pane
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **low value.** The audit itself rated the idle right-pane gap
+"acceptable (fills during a run)". A proper summary card also needs last-run
+metadata plumbing (dataset/well-count/method/duration). Deferred as lowest-priority.
 
 **Steps.**
 - [ ] In the idle Pipeline Output pane (`90-analyze.png` lower half), show a summary
@@ -456,7 +486,12 @@ shows progress.
 
 ## F1 — Clickable status context chips
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **needs a restructure decision.** The `N well(s) | nuclei |
+threshold | band` metric line is composed ad-hoc and pushed to the shared
+general-purpose `_status_lbl` (e.g. `lineplot/controller.py:516`), which also shows
+transient messages. Decomposing it into clickable chips means either restructuring
+that shared label across several controller call sites, or adding a parallel chip
+strip (duplication). Which approach is a decision (see end-of-turn question).
 
 **Goal.** Turn `4 well(s) | 72 nuclei | threshold=50.00 | band=SEM` + the redundant
 "Ready." into clickable `SelectionChip`s that jump to their editor; drop the duplicate
@@ -500,7 +535,14 @@ its editor; only one "ready/status" surface remains.
 
 ## F3 — Channel-name casing consistency (`gfp`→`GFP`)
 
-**Status:** ⬜ Not started · **(last open audit "High"; deferred because tokens build CSV column names)**
+**Status:** ⬜ Held — **back-compat tradeoff, needs a decision.** Confirmed the risk:
+`scatter.controller._col_for_scatter_axis` builds columns from the combo *text* and
+`view_state` persists that text. A display-only uppercase works for live resolution
+(columns resolve case-insensitively) but **old saved view-state** holding `gfp`
+wouldn't match a new `GFP` item on reload (axis resets to the first channel). The
+clean fix routes everything through a display↔token map across ~8 sites. This is the
+one item the original audit deliberately left undone; needs a green-light on the
+back-compat behaviour (see end-of-turn question).
 
 **Goal.** Display fluor tokens uppercase everywhere while leaving stored tokens
 untouched (CSV columns / persistence keep the raw token).
@@ -524,7 +566,11 @@ old dataset and confirm no key drift.
 
 ## F4 — Pipeline progress legibility
 
-**Status:** ⬜ Not started
+**Status:** ⬜ Held — **touches the pipeline + runner.** A determinate "grouping"
+progress signal means emitting events from `WellPlateZipper.py` through
+`services/pipeline_runner.ProgressTracker` (must keep the pipeline GUI-free, §6.2).
+Moderate-risk plumbing better landed with review. The log "summary level" half is
+safer but pairs naturally with the grouping-progress work.
 
 **Steps.**
 - [ ] Default the Analyze log to a "summary" level with a "show raw log" toggle

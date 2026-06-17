@@ -92,7 +92,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(ctx.app._bar_reset_order_btn)
 
     # S5: send the current plot spec to Batch Export (matching chart-type).
-    _batch_btn = QPushButton("Add to Batch", bar_ctrl)
+    _batch_btn = QPushButton("Open in Batch Export", bar_ctrl)
     _batch_btn.setProperty("variant", "secondary")
     _batch_btn.setToolTip("Open Batch Export with these plot settings (Bar)")
     _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "bar"))

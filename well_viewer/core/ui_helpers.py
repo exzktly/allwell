@@ -428,6 +428,9 @@ def make_popover_button(text: str, parent: QWidget):
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     btn.setProperty("variant", "secondary")
+    # The label already carries a ▾ caret; hide QToolButton's native
+    # menu-indicator so the two don't render as overlapping double arrows.
+    btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
     menu = QMenu(btn)
     content = QWidget(menu)
     content_layout = QVBoxLayout(content)

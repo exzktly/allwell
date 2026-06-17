@@ -38,3 +38,26 @@ def register_default_scopes() -> None:
         redraw=redraw_app,
         tab_names=("Line Graphs",),
     ))
+    # Distribution and Heat Map aren't fold-change-aware (no Control/Baseline
+    # combos — the attrs below resolve to None and the sync skips them), but
+    # they ARE redraw scopes: without a registration a channel change with one
+    # of these tabs visible would leave its data stale (the coalescer only
+    # redraws registered scopes). They use ``redraw_app`` — the same default
+    # redraw that already fans out across the line / distribution / heat-map
+    # tabs — so no feature-specific import is needed here (keeps the deferred-
+    # import budget intact). The dummy combo attrs keep them out of the
+    # fold-change sync while wiring up the channel-change / tab-flush redraw.
+    register_fold_change_scope(FoldChangeScope(
+        name="distribution",
+        ctrl_combo_attr="_fc_ctrl_combo_distribution",
+        baseline_combo_attr="_fc_baseline_combo_distribution",
+        redraw=redraw_app,
+        tab_names=("Distribution",),
+    ))
+    register_fold_change_scope(FoldChangeScope(
+        name="heatmap",
+        ctrl_combo_attr="_fc_ctrl_combo_heatmap",
+        baseline_combo_attr="_fc_baseline_combo_heatmap",
+        redraw=redraw_app,
+        tab_names=("Heat Map",),
+    ))

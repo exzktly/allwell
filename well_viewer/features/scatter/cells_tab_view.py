@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    make_band_controls, make_plot_with_right_dock,
+    make_plot_with_right_dock, make_popover_button,
     make_plot_view_switcher, send_plot_to_batch_export)
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from functools import partial
@@ -90,15 +90,22 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_tp_var = ctx.app._scatter_tp_cb
     ctx.app._scatter_tp_selections: dict[str, bool] = {}
 
+    # Secondary display options (Layout + Colour-by-time) collapse into a
+    # "Display ▾" popover so the per-cell scatter control row stays readable —
+    # the X/Y Channel & Property selectors are the controls that matter inline.
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
+    _disp_btn.setToolTip("Scatter display options: layout and colour-by-time")
+    cl.addWidget(_disp_btn)
+
     # Layout: overlay every group on one axis (default, interactive) or stack
     # one group per axis below the other (view-only comparison) — mirrors the
     # Distribution tab's Overlay / Faceted choice.
-    cl.addWidget(QLabel("Layout:", ctrl))
-    ctx.app._scatter_layout_cb = QComboBox(ctrl)
+    _disp_lay.addWidget(QLabel("Layout:", _disp_panel))
+    ctx.app._scatter_layout_cb = QComboBox(_disp_panel)
     ctx.app._scatter_layout_cb.addItems(["Overlay", "Separate axes"])
     ctx.app._scatter_layout_cb.currentIndexChanged.connect(
         lambda _i: redraw_scatter_orchestrate(ctx.app))
-    cl.addWidget(ctx.app._scatter_layout_cb)
+    _disp_lay.addWidget(ctx.app._scatter_layout_cb)
     ctx.app._scatter_layout_var = ctx.app._scatter_layout_cb
 
     # "Color by time": colour each point by its timepoint instead of by well
@@ -118,7 +125,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
         redraw_scatter_orchestrate(ctx.app)
 
     ctx.app._scatter_color_by_tp_btn.clicked.connect(_toggle_color_by_tp)
-    cl.addWidget(ctx.app._scatter_color_by_tp_btn)
+    _disp_lay.addWidget(ctx.app._scatter_color_by_tp_btn)
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).
@@ -138,7 +145,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     cl.addStretch(1)
 
     # S5: send the current scatter spec to Batch Export (cells mode).
-    _batch_btn = QPushButton("Add to Batch", ctrl)
+    _batch_btn = QPushButton("Open in Batch Export", ctrl)
     _batch_btn.setProperty("variant", "secondary")
     _batch_btn.setToolTip("Open Batch Export with these plot settings (Scatter cells)")
     _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "scatter_cells"))
@@ -174,7 +181,8 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._ax_scatter = ctx.app._scatter_fig.add_subplot(1, 1, 1)
     ctx.app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
     ctx.app._scatter_canvas = card.canvas
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
+    # No error-band controls here: the per-cell scatter draws individual points,
+    # so SEM/SD has no meaning (it belongs only on the aggregate scatter).
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_orchestrate(ctx.app))
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state

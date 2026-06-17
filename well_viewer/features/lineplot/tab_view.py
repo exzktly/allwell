@@ -90,7 +90,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     cl.addStretch(1)
 
     # S5: send the current plot spec to Batch Export (matching chart-type).
-    _batch_btn = QPushButton("Add to Batch", line_ctrl)
+    _batch_btn = QPushButton("Open in Batch Export", line_ctrl)
     _batch_btn.setProperty("variant", "secondary")
     _batch_btn.setToolTip("Open Batch Export with these plot settings (Line)")
     _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "line"))

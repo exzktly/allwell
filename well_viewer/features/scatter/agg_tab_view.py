@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    make_band_controls, make_plot_with_right_dock,
+    make_band_controls, make_plot_with_right_dock, make_popover_button,
     make_plot_view_switcher, send_plot_to_batch_export)
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 
@@ -86,10 +86,17 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(ctx.app._scatter_agg_tp_label)
     ctx.app._scatter_agg_tp_selections = {}
 
+    # Error band (SEM/SD) for the aggregate's mean±spread points collapses into
+    # a "Display ▾" popover (matches line/bar), instead of a card-controls row.
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
+    _disp_btn.setToolTip("Error band (SEM/SD) for the aggregate points")
+    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=False))
+    cl.addWidget(_disp_btn)
+
     cl.addStretch(1)
 
     # S5: send the current scatter spec to Batch Export (aggregate mode).
-    _batch_btn = QPushButton("Add to Batch", ctrl)
+    _batch_btn = QPushButton("Open in Batch Export", ctrl)
     _batch_btn.setProperty("variant", "secondary")
     _batch_btn.setToolTip("Open Batch Export with these plot settings (Scatter aggregate)")
     _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "scatter_agg"))
@@ -125,7 +132,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     ctx.app._ax_scatter_agg = ctx.app._scatter_agg_fig.add_subplot(1, 1, 1)
     ctx.app._scatter_agg_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
     ctx.app._scatter_agg_canvas = card.canvas
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
+    # Error band now lives in the "Display ▾" popover on the control row above.
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_agg_orchestrate(ctx.app))
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state

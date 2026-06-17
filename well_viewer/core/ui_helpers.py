@@ -358,6 +358,39 @@ def make_plot_with_right_dock(parent: QWidget) -> Tuple[QWidget, QVBoxLayout, QW
     return plot_area, plot_layout, right_dock
 
 
+def mount_widget_in_plot_dock(dock: QWidget, widget: QWidget, width: int = 0) -> None:
+    """Show *widget* in a plot tab's right *dock*, hiding any sibling panel
+    already docked there.
+
+    A plot tab's right dock (``make_plot_with_right_dock``) is a shared
+    slide-out: the Export-Style / Properties sidebar and the Scatter cell viewer
+    both live there. This keeps exactly one of them visible at a time, so the
+    two coexist without overlapping — open one and the other slides away.
+    """
+    if dock is None or widget is None:
+        return
+    lay = dock.layout()
+    if lay is None:
+        return
+    if lay.indexOf(widget) < 0:
+        lay.addWidget(widget)
+    for i in range(lay.count()):
+        sibling = lay.itemAt(i).widget()
+        if sibling is not None and sibling is not widget:
+            sibling.hide()
+    widget.show()
+    host = getattr(dock, "_dock_host", None)
+    if host is not None and hasattr(host, "set_overlay_dock"):
+        host.set_overlay_dock(dock, width)
+    dock.setVisible(True)
+
+
+def hide_plot_dock(dock: QWidget) -> None:
+    """Hide a plot tab's right dock (and whatever panel it currently holds)."""
+    if dock is not None:
+        dock.setVisible(False)
+
+
 def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
     """Forward wheel events from a matplotlib canvas to ``scroll_area``.
 

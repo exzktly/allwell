@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Tuple  # noqa: F401
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox  # noqa: F401
 
-from well_viewer.features.image_table.image_compose import (
+from well_viewer.features.image_browser.image_table.image_compose import (
     _compose_image_table_rgb,
     _export_binary_mask,
     _is_nuc_seg,

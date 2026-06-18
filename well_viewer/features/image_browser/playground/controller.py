@@ -17,14 +17,14 @@ from __future__ import annotations
 import numpy as np
 
 import process_microscopy as pm
-from well_viewer.features.image_table.controller import (
+from well_viewer.features.image_browser.image_table.controller import (
     _channel_options, _fov_options, _load_array, _load_mask_array,
     _timepoint_options, _well_options,
 )
-from well_viewer.features.playground.renderer import (
+from well_viewer.features.image_browser.playground.renderer import (
     build_playground_rgb, render_playground_display,
 )
-from well_viewer.features.playground.worker import request_reference_fields
+from well_viewer.features.image_browser.playground.worker import request_reference_fields
 
 
 def _st(app):

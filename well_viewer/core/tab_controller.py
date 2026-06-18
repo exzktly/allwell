@@ -8,10 +8,11 @@ from __future__ import annotations
 from well_viewer.features.stats.controller import stats_sync_from_app
 from well_viewer.features.stats.controller import stats_update_tp_menu
 from well_viewer.features.barplot.renderer import redraw_bars
-from well_viewer.features.image_table.controller import image_table_refresh_picker
-from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
-from well_viewer.features.review_image.renderer import refresh_review_image
-from well_viewer.features.review_image.renderer import update_preview
+from well_viewer.features.image_browser.image_table.controller import image_table_refresh_picker
+from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
+from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
+from well_viewer.features.image_browser.review_image.renderer import update_preview
+from well_viewer.features.image_browser.playground.controller import playground_repopulate_dropdowns
 from well_viewer.features.scatter.controller import update_scatter_menus
 import logging
 from functools import partial
@@ -132,6 +133,18 @@ def on_tab_change(app, _e=None) -> None:
             app._sidebar_cell_browser_frame.setVisible(True)
         for _refresh in getattr(app, "_cell_browser_refreshers", ()):
             _refresh(app)
+
+    elif tab == "Playground":
+        # Playground (Image Browser sub-tab) picks its own well/channel/tp/FOV
+        # via in-tab dropdowns; show the canonical plate selector for parity
+        # with the other image sub-tabs, then refresh its selectors for any
+        # dataset loaded since it last built.
+        app._sidebar_main_frame.setVisible(True)
+        app._refresh_sidebar_map()
+        try:
+            playground_repopulate_dropdowns(app)
+        except Exception:
+            swallowed()
 
     else:
         # Line Graphs, Bar Plots, or Scatter -- unified picker always shown
@@ -264,8 +277,11 @@ def current_centre_tab(app) -> str:
     When the "Plotting" top-level tab is active the real content lives in a
     nested QStackedWidget; this helper resolves that one level of indirection
     so callers can always compare against leaf names like "Bar Plots",
-    "Heat Map", etc. ("Segmentation" and "smFISH" are now plain top-level
-    tabs — smFISH was promoted out of the old Segmentation sub-stack.)
+    "Heat Map", etc. The "Image Browser" top-level tab is the same shape — its
+    body is a nested QTabWidget whose sub-tabs ("Segmentation" / "Image Table" /
+    "Cell Browser" / "Playground") are the real leaves the rest of the app
+    pattern-matches on; descend into it too. (smFISH stays a plain top-level
+    tab — it is not an image-review surface.)
     """
     nb = getattr(app, "_notebook", None)
     if nb is None:
@@ -279,6 +295,13 @@ def current_centre_tab(app) -> str:
         if plotting_nb is not None and plotting_nb.count() > 0:
             try:
                 return plotting_nb.currentName()
+            except Exception:
+                swallowed()  # was: pass (silent except)
+    elif tab == "Image Browser":
+        sub = getattr(app, "_image_browser_subtabs", None)
+        if sub is not None and sub.count() > 0:
+            try:
+                return sub.tabText(sub.currentIndex())
             except Exception:
                 swallowed()  # was: pass (silent except)
     return tab

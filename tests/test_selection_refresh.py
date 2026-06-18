@@ -110,8 +110,7 @@ def test_smfish_branch_syncs(loaded_app, monkeypatch):
         "well_viewer.features.smfish.tab_view.smfish_sync_from_app",
         lambda app: calls.append(app),
     )
-    assert loaded_app._notebook.setCurrentByName("Segmentation")
-    assert loaded_app._cell_segmentation_notebook.setCurrentByName("smFISH")
+    assert loaded_app._notebook.setCurrentByName("smFISH")
     assert loaded_app._current_centre_tab() == "smFISH"
     calls.clear()  # drop the sync the tab switch itself triggered
     select_all(loaded_app)

@@ -14,10 +14,14 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.safe import swallowed
-from well_viewer.features.cell_browser import controller as ctl
-from well_viewer.features.cell_browser.collect import (
+from well_viewer.features.image_browser.cell_browser import controller as ctl
+from well_viewer.features.image_browser.cell_browser.collect import (
     cell_browser_source_wells,
     enumerate_properties,
+)
+from well_viewer.features.image_browser.cell_browser.sort_view import (
+    build_cell_browser_sort_section,
+    cell_browser_sort_refresh,
 )
 
 
@@ -86,6 +90,9 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     lay.addWidget(fov_row)
     app._cell_browser_fov_button = fov_btn
     app._cell_browser_fov_label = fov_lbl
+
+    # ── sort builder (well / timepoint / metric, asc/desc) ───────────────────
+    build_cell_browser_sort_section(app, lay)
 
     apply_btn = QPushButton("Apply filters", parent)
     apply_btn.setObjectName("Primary")
@@ -198,6 +205,9 @@ def cell_browser_sidebar_refresh(app) -> None:
             if idx >= 0:
                 combo.setCurrentIndex(idx)
         combo.blockSignals(False)
+
+    # sort-key field combos (well / timepoint / fov / metrics)
+    cell_browser_sort_refresh(app)
 
     # timepoints (union across the dataset)
     tp_sel = app._cell_browser_tp_selections

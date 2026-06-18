@@ -33,7 +33,10 @@ FEATURE_PREFIX = "well_viewer.features"
 # Lowered to 136 when the QC debris-gate controls moved to the Cell Gating tab:
 # the Segmentation panel's deferred ``build_qc_gate_controls`` import was dropped
 # and the new home imports it at module scope.
-MAX_DEFERRED_FEATURE_IMPORTS = 136
+# Lowered to 134 in the Image Browser consolidation: the unified container's
+# sub-tab builders import at module scope (not a cycle — centre_view defers the
+# container import), and the Playground sidebar refresh promoted to module scope.
+MAX_DEFERRED_FEATURE_IMPORTS = 134
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

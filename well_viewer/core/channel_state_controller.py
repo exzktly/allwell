@@ -338,9 +338,13 @@ def update_channel_selector(app) -> None:
                 set_combo_values_sectioned(getattr(app, attr), plot_sections)
             else:
                 set_combo_values(getattr(app, attr), ["—"])
-    if hasattr(app, "_chan_cb_preview"):
+    if getattr(app, "_chan_cb_preview", None) is not None:
         set_combo_values(app._chan_cb_preview, montage_labels)
-    if hasattr(app, "_review_image_chan_cb"):
+    # The review-image channel combo builds lazily (Segmentation is an Image
+    # Browser sub-tab), so it can still be the None default at dataset-load time;
+    # it is (re)populated when the sub-tab first builds. See
+    # image_browser.controller.build_image_browser_subtab.
+    if getattr(app, "_review_image_chan_cb", None) is not None:
         set_combo_values(app._review_image_chan_cb, review_labels)
     active_label = app._active_channel_label()
 
@@ -455,7 +459,7 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
         if preserve_review_view:
             app._app_state.review_image.preserve_view_on_refresh = True
             if app._app_state.preview.selected_well:
-                from well_viewer.features.review_image.renderer import refresh_review_image
+                from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
                 refresh_review_image(app)
         if channel_switch_debug:
             _logger.debug(
@@ -483,7 +487,7 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
                 "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
                 app._app_state.preview.selected_well,
             )
-        from well_viewer.features.review_image.renderer import update_preview
+        from well_viewer.features.image_browser.review_image.renderer import update_preview
         update_preview(app, app._app_state.preview.selected_well)
     if channel_switch_debug:
         _logger.debug(

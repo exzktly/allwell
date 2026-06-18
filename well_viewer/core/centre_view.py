@@ -29,10 +29,9 @@ from typing import Callable, Dict, Set
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
-from well_viewer.features.preview.panel_view import build_review_image_panel
 from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
 from well_viewer.core.safe import swallowed
 
@@ -130,10 +129,11 @@ def build_centre(app, parent: QWidget) -> None:
     # Tabs whose construction we never want to run from the background
     # drain — they only build on first user access (tab click). The tabs
     # listed here pull in the heaviest dependencies (matplotlib QtAgg,
-    # skimage, tifffile) that aren't worth amortising at startup. smFISH
-    # used to live here; it is now a sub-tab inside the Segmentation
-    # parent, and its builder defers itself via the segmentation sub-stack.
-    lazy_only: Set[str] = {"smFISH", "Cell Browser"}
+    # skimage, tifffile) that aren't worth amortising at startup. "Image
+    # Browser" is the unified image-review rail entry (Segmentation / Image
+    # Table / Cell Browser / Playground sub-tabs) — its sub-tab bodies pull the
+    # image-table loaders, so it (and each sub-tab inside it) builds on demand.
+    lazy_only: Set[str] = {"smFISH", "Image Browser"}
     app._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
@@ -634,61 +634,15 @@ def build_centre(app, parent: QWidget) -> None:
 
         _refresh_channel_chip(_PLOT_SUBTABS[0])
 
-    def _build_image_table() -> None:
-        from well_viewer.features.image_table.tab_view import build_image_table_tab
-        from well_viewer.features.image_table.picker_view import build_image_table_picker
-        build_image_table_tab(app._ctx, tab_frames["Image Table"])
-        build_image_table_picker(app, app._sidebar_image_table_frame)
+    def _build_image_browser() -> None:
+        """Build the unified Image Browser page — a QTabWidget hosting the
+        Segmentation / Image Table / Cell Browser / Playground sub-tabs.
 
-    def _build_cell_segmentation() -> None:
-        """Build the Segmentation page — a QTabWidget hosting the Review Image
-        panel and the Playground (interactive single-frame correction testbed).
-
-        The Playground sub-tab is built lazily on first click (it pulls the
-        correction estimators), mirroring the Sample Definitions sub-tab pattern.
+        Each sub-tab body (and its sidebar) builds lazily on first show; see
+        ``features/image_browser/tab_view.py``.
         """
-        parent = tab_frames["Segmentation"]
-        if parent.layout() is None:
-            QVBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
-
-        sub_tabs = QTabWidget(parent)
-        # Reuse the SampleDefinitionsSubTabs QSS (rounded rectangular tabs with a
-        # min-width) so the bold selected-tab text isn't clipped — same pattern
-        # the plotting sub-tab bar uses to pick up that styling.
-        sub_tabs.setObjectName("SampleDefinitionsSubTabs")
-        sub_tabs.tabBar().setExpanding(False)
-        sub_tabs.tabBar().setElideMode(Qt.ElideNone)
-        sub_tabs.tabBar().setUsesScrollButtons(True)
-        parent.layout().addWidget(sub_tabs)
-        app._segmentation_subtabs = sub_tabs
-
-        review_tab = QWidget(sub_tabs)
-        QVBoxLayout(review_tab).setContentsMargins(12, 12, 12, 12)
-        build_review_image_panel(app, review_tab)
-        sub_tabs.addTab(review_tab, "Review Image")
-
-        playground_tab = QWidget(sub_tabs)
-        QHBoxLayout(playground_tab).setContentsMargins(12, 12, 12, 12)
-        sub_tabs.addTab(playground_tab, "Playground")
-        app._playground_subtab_frame = playground_tab
-        app._playground_subtab_built = False
-
-        def _on_seg_subtab(idx: int) -> None:
-            if sub_tabs.tabText(idx) != "Playground":
-                return
-            from well_viewer.features.playground.controller import (
-                playground_repopulate_dropdowns,
-            )
-            if not app._playground_subtab_built:
-                from well_viewer.features.playground.tab_view import (
-                    build_playground_tab,
-                )
-                build_playground_tab(app._ctx, app._playground_subtab_frame)
-                app._playground_subtab_built = True
-            else:
-                # Pick up a dataset loaded after the tab was first built.
-                playground_repopulate_dropdowns(app)
-        sub_tabs.currentChanged.connect(_on_seg_subtab)
+        from well_viewer.features.image_browser.tab_view import build_image_browser_tab
+        build_image_browser_tab(app._ctx, tab_frames["Image Browser"])
 
     def _build_smfish() -> None:
         """Build the smFISH tab (its own top-level rail entry).
@@ -726,14 +680,6 @@ def build_centre(app, parent: QWidget) -> None:
         from well_viewer.features.batch_export.tab_view import build_batch_export_tab
         build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
-    def _build_cell_browser() -> None:
-        from well_viewer.features.cell_browser.tab_view import (
-            build_cell_browser_sidebar,
-            build_cell_browser_tab,
-        )
-        build_cell_browser_tab(app._ctx, tab_frames["Cell Browser"])
-        build_cell_browser_sidebar(app, app._sidebar_cell_browser_frame)
-
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         ("Analysis", [
             # "Plotting" is a single top-level tab that contains Line Graphs,
@@ -744,18 +690,16 @@ def build_centre(app, parent: QWidget) -> None:
             ("Statistics", _build_stats),
         ]),
         ("Images", [
-            # Movie Montage was folded into Image Table — pick a well, set
-            # the channel to NUC+SEG (or any other), and click "Distribute
-            # Timepoints" to get the same per-timepoint grid.
-            ("Image Table", _build_image_table),
-            ("Segmentation", _build_cell_segmentation),
-            # smFISH has its own rail entry (it briefly lived as a sub-tab of
-            # Segmentation). Lazy-only — heavy deps build on first click.
+            # Image Browser unifies the disparate image-review surfaces under
+            # one rail entry: Segmentation (review-image canvas), Image Table
+            # (per-cell grid; Movie Montage was folded in here), Cell Browser
+            # (filterable single-cell gallery), and Playground (single-frame
+            # correction testbed) as sibling sub-tabs. Lazy-only — its sub-tab
+            # bodies pull the image-table loaders (tifffile / zipfile cache).
+            ("Image Browser", _build_image_browser),
+            # smFISH keeps its own rail entry (it is not an image-*review*
+            # surface). Lazy-only — heavy deps build on first click.
             ("smFISH", _build_smfish),
-            # Cell Browser: a filterable, paged library of single-cell images.
-            # Lazy-only — its worker pulls the image-table loaders (tifffile /
-            # zipfile cache), so it builds on first click rather than at startup.
-            ("Cell Browser", _build_cell_browser),
         ]),
         ("Data", [
             ("Review CSV", _build_review_csv),

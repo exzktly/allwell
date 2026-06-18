@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
 )
 
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
-from well_viewer.features.playground.controller import (
+from well_viewer.features.image_browser.playground.controller import (
     playground_on_change, playground_repopulate_dropdowns,
 )
-from well_viewer.features.playground.renderer import render_playground_display
+from well_viewer.features.image_browser.playground.renderer import render_playground_display
 
 
 def _row(parent, label_text: str) -> QWidget:
@@ -288,7 +288,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     canvas.resizeEvent = _on_canvas_resize
 
     # Click-drag to pan; hover (no button) shows the pixel intensity tooltip.
-    from well_viewer.features.playground.controller import (
+    from well_viewer.features.image_browser.playground.controller import (
         playground_hover, playground_pan_move, playground_pan_press,
     )
 

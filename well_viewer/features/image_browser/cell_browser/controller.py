@@ -15,12 +15,16 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
 from well_viewer.core.safe import swallowed
-from well_viewer.features.cell_browser.collect import Criterion, collect_cells
-from well_viewer.features.cell_browser.state import MAX_TOTAL, THUMB_PX
-from well_viewer.features.review_image.controller import (
+from well_viewer.features.image_browser.cell_browser.collect import (
+    Criterion,
+    SortKey,
+    collect_cells,
+)
+from well_viewer.features.image_browser.cell_browser.state import MAX_TOTAL, THUMB_PX
+from well_viewer.features.image_browser.review_image.controller import (
     zoom_review_image_to_selected_nucleus,
 )
-from well_viewer.features.review_image.renderer import refresh_review_image, update_preview
+from well_viewer.features.image_browser.review_image.renderer import refresh_review_image, update_preview
 
 _logger = logging.getLogger("well_viewer")
 
@@ -75,6 +79,18 @@ def read_criteria(app) -> List[Criterion]:
     return out
 
 
+def read_sort_keys(app) -> List[SortKey]:
+    """Ordered sort keys from the sidebar's sort rows (first row = primary)."""
+    out: List[SortKey] = []
+    for combo, dir_btn in getattr(app, "_cell_browser_sort_rows", []):
+        field = combo.currentData()
+        if not field:
+            continue
+        # dir_btn checked = descending.
+        out.append(SortKey(field, ascending=not dir_btn.isChecked()))
+    return out
+
+
 def read_timepoints(app):
     """Checked timepoints (strict include-list). Returns ``None`` when the
     dataset has no timepoint dimension (nothing to filter), else the list of
@@ -124,12 +140,15 @@ def apply_filters(app) -> None:
     st.criteria = read_criteria(app)
     st.timepoints = read_timepoints(app)
     st.fovs = read_fovs(app)
+    st.sort_keys = read_sort_keys(app)
     st.channels_on = read_channels(app)
     bcb = getattr(app, "_cell_browser_boundary_cb", None)
     st.show_boundaries = bool(bcb.isChecked()) if bcb is not None else True
     st.page_size = _page_size(app)
 
-    cells = collect_cells(app, st.criteria, st.timepoints, st.fovs)
+    # Sort happens inside collect_cells (before the MAX_TOTAL cap, so the cap
+    # keeps the top-ordered cells).
+    cells = collect_cells(app, st.criteria, st.timepoints, st.fovs, st.sort_keys)
     if len(cells) > MAX_TOTAL:
         cells = cells[:MAX_TOTAL]
     st.cells = cells
@@ -219,7 +238,10 @@ def on_cell_clicked(app, desc) -> None:
     Review-CSV jump-to-image navigation)."""
     try:
         if hasattr(app, "_notebook"):
-            app._notebook.setCurrentByName("Segmentation")
+            from well_viewer.features.image_browser.controller import (
+                show_image_browser_subtab,
+            )
+            show_image_browser_subtab(app, "Segmentation")
         # Target nucleus before any refresh so intermediate renders already
         # draw the highlight (mirrors review_image.controller's jump-to-cell).
         if desc.nucleus_id:

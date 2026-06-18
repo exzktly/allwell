@@ -8,9 +8,9 @@ import logging
 
 from PySide6.QtWidgets import QTableWidgetItem
 
-from well_viewer.features.review_image.renderer import refresh_review_image
-from well_viewer.features.review_image.renderer import update_preview
-from well_viewer.features.review_image.box_select import (
+from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
+from well_viewer.features.image_browser.review_image.renderer import update_preview
+from well_viewer.features.image_browser.review_image.box_select import (
     box_select_begin, box_select_finish, box_select_update,
 )
 from well_viewer.core.channel_state_controller import set_active_image_channel
@@ -28,7 +28,7 @@ from well_viewer.core.safe import swallowed
 # Pure data/query helpers live in review_image/collect.py (T4). The Qt event
 # handlers below + external callers (load_controller, the tab views) import
 # these from here, so re-export them.
-from well_viewer.features.review_image.collect import (  # noqa: E402,F401
+from well_viewer.features.image_browser.review_image.collect import (  # noqa: E402,F401
     _binary_gate_columns,
     _flatfield_qc,
     _load_arrays_from_refs,
@@ -292,9 +292,10 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
         return
 
     if hasattr(app, "_notebook"):
-        # Segmentation is a plain top-level tab (the review image); jumps from
-        # Review CSV land straight on it. (smFISH is its own rail entry now.)
-        _select_tab_by_text(app._notebook, "Segmentation")
+        # Segmentation is now a sub-tab of the unified Image Browser; route the
+        # Review-CSV jump through the rail entry + sub-tab selection.
+        from well_viewer.features.image_browser.controller import show_image_browser_subtab
+        show_image_browser_subtab(app, "Segmentation")
 
     # Set the target nucleus before any refresh so intermediate renders can
     # already draw the yellow highlight.

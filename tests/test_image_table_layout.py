@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_table import controller as C  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
 
 
 def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
@@ -17,7 +17,7 @@ def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
         "available_fovs": fovs or [],
         "nuclear_token": "",
     }
-    from well_viewer.features.image_table.state import ImageTableState
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(well_paths={w: w for w in wells}, pipeline_info=info,

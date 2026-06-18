@@ -493,11 +493,10 @@ def refresh_sidebar_map_now(app) -> None:
     nb = getattr(app, "_notebook", None)
     if nb is not None:
         try:
-            # smFISH is now a sub-tab inside the Segmentation parent,
-            # so the top-level current name reads as "Segmentation"
-            # whether the user is on the Segmentation or smFISH sub-
-            # tab. Descend via ``_current_centre_tab`` to recover the
-            # leaf name.
+            # smFISH is its own rail entry; the image-review surfaces are now
+            # sub-tabs of "Image Browser". Either way the top-level current name
+            # isn't the leaf, so descend via ``_current_centre_tab`` to recover
+            # the leaf name.
             smfish = app._current_centre_tab() == "smFISH"
         except Exception:
             smfish = False

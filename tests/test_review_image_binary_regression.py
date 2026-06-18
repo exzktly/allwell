@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from well_viewer.features.review_image.collect import (
+from well_viewer.features.image_browser.review_image.collect import (
     review_build_threshold_map,
     review_row_keys_series,
 )

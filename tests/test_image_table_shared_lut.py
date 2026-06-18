@@ -25,7 +25,7 @@ def _app(qtbot, *, min_text="auto", max_text="auto", channel="gfp"):
 
 
 def test_auto_row_inherits_shared_channel_lut(qtbot):
-    from well_viewer.features.image_table.image_compose import _parse_lut
+    from well_viewer.features.image_browser.image_table.image_compose import _parse_lut
 
     app = _app(qtbot)
     app._app_state.image_view.set_lut("gfp", 5.0, 200.0)
@@ -33,7 +33,7 @@ def test_auto_row_inherits_shared_channel_lut(qtbot):
 
 
 def test_manual_row_value_overrides_shared(qtbot):
-    from well_viewer.features.image_table.image_compose import _parse_lut
+    from well_viewer.features.image_browser.image_table.image_compose import _parse_lut
 
     app = _app(qtbot, min_text="10", max_text="90")
     app._app_state.image_view.set_lut("gfp", 5.0, 200.0)
@@ -41,7 +41,7 @@ def test_manual_row_value_overrides_shared(qtbot):
 
 
 def test_auto_row_without_shared_falls_back_to_autofit(qtbot):
-    from well_viewer.features.image_table.image_compose import _parse_lut
+    from well_viewer.features.image_browser.image_table.image_compose import _parse_lut
 
     app = _app(qtbot)  # no shared LUT set
     assert _parse_lut(app, 0) == (None, None)

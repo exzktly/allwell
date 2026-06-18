@@ -66,7 +66,7 @@ def test_correct_single_frame_none_is_passthrough_float32():
 # ── pure renderer ────────────────────────────────────────────────────────────
 
 def test_build_playground_rgb_shapes_and_overlay():
-    from well_viewer.features.playground.renderer import build_playground_rgb
+    from well_viewer.features.image_browser.playground.renderer import build_playground_rgb
     arr = np.zeros((10, 10), dtype=np.float32)
     arr[2:8, 2:8] = 500.0
     mask = np.zeros((10, 10), dtype=np.int32)
@@ -79,7 +79,7 @@ def test_build_playground_rgb_shapes_and_overlay():
 
 
 def test_build_playground_rgb_binary_whitens_cells():
-    from well_viewer.features.playground.renderer import build_playground_rgb
+    from well_viewer.features.image_browser.playground.renderer import build_playground_rgb
     arr = np.zeros((8, 8), dtype=np.float32)
     mask = np.zeros((8, 8), dtype=np.int32)
     mask[2:5, 2:5] = 7
@@ -91,8 +91,8 @@ def test_build_playground_rgb_binary_whitens_cells():
 # ── reference-field worker compute ───────────────────────────────────────────
 
 def test_build_reference_fields_estimates(monkeypatch):
-    from well_viewer.features.playground import worker
-    import well_viewer.features.image_table.controller as itc
+    from well_viewer.features.image_browser.playground import worker
+    import well_viewer.features.image_browser.image_table.controller as itc
     import well_viewer.data.image_discovery as disc
     frames = [_frame(i) for i in range(4)]
     # The worker imports these lazily from their source modules; patch there.
@@ -112,8 +112,8 @@ def test_build_reference_fields_estimates(monkeypatch):
 
 
 def test_build_reference_fields_empty_returns_none(monkeypatch):
-    from well_viewer.features.playground import worker
-    import well_viewer.features.image_table.controller as itc
+    from well_viewer.features.image_browser.playground import worker
+    import well_viewer.features.image_browser.image_table.controller as itc
     monkeypatch.setattr(itc, "_load_well_channel", lambda *a, **k: {})
     ff, bg = worker.build_reference_fields(
         None, "H12", "gfp", flatfield_mode="basic", background_method="empty_well")
@@ -125,7 +125,7 @@ def test_build_reference_fields_empty_returns_none(monkeypatch):
 @pytest.fixture
 def playground_app(loaded_app):
     """A loaded app with the Playground sub-tab built."""
-    from well_viewer.features.playground.tab_view import build_playground_tab
+    from well_viewer.features.image_browser.playground.tab_view import build_playground_tab
     from PySide6.QtWidgets import QWidget, QHBoxLayout
     frame = QWidget()
     QHBoxLayout(frame)
@@ -150,7 +150,7 @@ def test_tab_builds_and_populates_selectors(playground_app):
 def test_on_change_corrects_and_renders(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     frame = _frame(5)
     mask = np.zeros_like(frame, dtype=np.int32)
     mask[10:20, 10:20] = 1
@@ -181,7 +181,7 @@ def test_source_segmented_control_has_three_stages(playground_app):
 def test_flatfield_source_applies_only_flatfield(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     import process_microscopy as pm
     frame = _frame(7)
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
@@ -200,7 +200,7 @@ def test_flatfield_source_applies_only_flatfield(playground_app, monkeypatch):
 def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     from well_viewer.core.channel_state_controller import get_thresh_frac_on
     frame = np.zeros((20, 20), dtype=np.float32)
     frame[2:6, 2:6] = 1000.0     # bright cell
@@ -226,7 +226,7 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
 def test_qc_size_filter_drops_out_of_range_cells(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     img = np.zeros((40, 40), dtype=np.float32)
     mask = np.zeros((40, 40), dtype=np.int32)
     mask[2:5, 2:5] = 1
@@ -248,7 +248,7 @@ def test_qc_size_filter_drops_out_of_range_cells(playground_app, monkeypatch):
 
 def test_per_source_lut_memory(playground_app, monkeypatch):
     app = playground_app
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     img = _frame(11)
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: img)
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
@@ -266,7 +266,7 @@ def test_per_source_lut_memory(playground_app, monkeypatch):
 def test_pan_updates_state(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: _frame(12))
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
     st.source = "raw"
@@ -288,7 +288,7 @@ def test_pan_updates_state(playground_app, monkeypatch):
 def test_hover_tooltip_reads_display_value(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     frame = _frame(9)
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
@@ -313,7 +313,7 @@ def test_auto_lut_stays_live_and_reflects_param_changes(playground_app, monkeypa
     being reflected on screen instead of being masked by a locked window."""
     app = playground_app
     st = app._app_state.playground
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     rng = np.random.default_rng(3)
     yy, xx = np.mgrid[0:128, 0:128]
     img = (300 + 600 * np.exp(-((yy - 40) ** 2 + (xx - 90) ** 2) / (2 * 50 ** 2))
@@ -338,7 +338,7 @@ def test_auto_lut_stays_live_and_reflects_param_changes(playground_app, monkeypa
 
 def test_on_change_handles_missing_frame(playground_app, monkeypatch):
     app = playground_app
-    from well_viewer.features.playground import controller as C
+    from well_viewer.features.image_browser.playground import controller as C
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: None)
     C.playground_on_change(app)        # must not raise
     assert "No raw image" in app._playground_status.text()

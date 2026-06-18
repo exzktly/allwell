@@ -7,11 +7,11 @@ import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
-from well_viewer.features.image_table.controller import image_table_refresh_picker
-from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
+from well_viewer.features.image_browser.image_table.controller import image_table_refresh_picker
+from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
 from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.channel_state_controller import recalculate_threshold
-from well_viewer.features.review_image.controller import apply_review_overrides_to_cache
+from well_viewer.features.image_browser.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.safe import swallowed
 

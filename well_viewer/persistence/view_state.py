@@ -28,6 +28,13 @@ _PLOT_SUBTABS = (
     "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
 )
 
+# Image-review sub-tab names that live inside the "Image Browser" parent
+# QTabWidget. The snapshot records the leaf (via _current_leaf_tab), so restore
+# must route the leaf back through the rail entry + sub-tab selection.
+_IMAGE_BROWSER_SUBTABS = (
+    "Segmentation", "Image Table", "Cell Browser", "Playground",
+)
+
 
 # ── snapshot ───────────────────────────────────────────────────────────────
 
@@ -349,6 +356,14 @@ def _activate_tab(app, name: str) -> None:
             sub = getattr(app, "_plotting_notebook", None)
             if sub is not None:
                 sub.setCurrentByName(name)
+        elif name in _IMAGE_BROWSER_SUBTABS:
+            outer.setCurrentByName("Image Browser")
+            sub = getattr(app, "_image_browser_subtabs", None)
+            if sub is not None:
+                for i in range(sub.count()):
+                    if sub.tabText(i) == name:
+                        sub.setCurrentIndex(i)
+                        break
         else:
             outer.setCurrentByName(name)
     except Exception:
@@ -513,7 +528,7 @@ def _apply_image_table(app, state: dict) -> None:
                 # Function-local feature import keeps this persistence module
                 # data-only at module scope (see test_layering) — mirrors the
                 # deferred ``image_table_refresh_display_menu`` import below.
-                from well_viewer.features.image_table.controller import (
+                from well_viewer.features.image_browser.image_table.controller import (
                     image_table_apply_dimensions,
                 )
                 image_table_apply_dimensions(app)

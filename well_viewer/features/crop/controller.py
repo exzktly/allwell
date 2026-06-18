@@ -78,7 +78,7 @@ def _save_redraw_refresh(app) -> None:
         # crop). review_image.controller imports crop.controller, so this stays
         # function-local to break that cycle (counted by the deferred-import
         # ratchet in tests/test_deferred_imports.py).
-        from well_viewer.features.review_image.renderer import refresh_review_image
+        from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
         refresh_review_image(app)
     except Exception:
         swallowed()  # was: pass (silent except)
@@ -170,7 +170,7 @@ def set_crop_edit_mode(app, enabled: bool) -> None:
     if enabled and app._app_state.review_image.include_edit_mode:
         # Leave delete mode (also un-checks the Delete button). Sanctioned
         # deferred import — see the crop↔review_image note above.
-        from well_viewer.features.review_image.renderer import (
+        from well_viewer.features.image_browser.review_image.renderer import (
             set_review_image_include_mode,
         )
         set_review_image_include_mode(app, False)

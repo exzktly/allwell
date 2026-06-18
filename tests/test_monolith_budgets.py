@@ -77,7 +77,7 @@ def test_process_microscopy_line_budget():
 
 
 def test_image_table_controller_line_budget():
-    n = _line_count("well_viewer/features/image_table/controller.py")
+    n = _line_count("well_viewer/features/image_browser/image_table/controller.py")
     assert n <= IMAGE_TABLE_CONTROLLER_BUDGET, (
         f"image_table/controller.py is {n} lines, over the "
         f"{IMAGE_TABLE_CONTROLLER_BUDGET} budget. Split a cohesive cluster "
@@ -105,7 +105,7 @@ def test_barplot_controller_line_budget():
 
 
 def test_review_image_controller_line_budget():
-    n = _line_count("well_viewer/features/review_image/controller.py")
+    n = _line_count("well_viewer/features/image_browser/review_image/controller.py")
     assert n <= REVIEW_IMAGE_CONTROLLER_BUDGET, (
         f"review_image/controller.py is {n} lines, over the "
         f"{REVIEW_IMAGE_CONTROLLER_BUDGET} budget. Extract a cohesive cluster "

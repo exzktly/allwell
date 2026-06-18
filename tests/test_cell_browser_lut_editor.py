@@ -7,10 +7,11 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 
 def test_lut_editor_rows_built_and_edit_shared_lut(loaded_app):
-    from well_viewer.features.cell_browser import tab_view as cbt
+    from well_viewer.features.image_browser.cell_browser import tab_view as cbt
 
     app = loaded_app
-    assert app._notebook.setCurrentByName("Cell Browser")
+    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    assert show_image_browser_subtab(app, "Cell Browser")
     cbt.cell_browser_refresh_lut_rows(app)
     rows = app._cell_browser_lut_rows
     assert rows, "expected per-channel LUT rows"

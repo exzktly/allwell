@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from well_viewer.features.review_image.controller import _binary_gate_columns
+from well_viewer.features.image_browser.review_image.controller import _binary_gate_columns
 
 
 def _app(*, image_channel, metric="mean_intensity", active_val_col="mcherry_mean_intensity",

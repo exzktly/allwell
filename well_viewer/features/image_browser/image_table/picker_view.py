@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
-from well_viewer.features.image_table.controller import image_table_clear_active
-from well_viewer.features.image_table.controller import image_table_refresh_picker
-from well_viewer.features.image_table.controller import image_table_select_all
+from well_viewer.features.image_browser.image_table.controller import image_table_clear_active
+from well_viewer.features.image_browser.image_table.controller import image_table_refresh_picker
+from well_viewer.features.image_browser.image_table.controller import image_table_select_all
 
 
 def build_image_table_picker(app, parent: QWidget) -> None:

@@ -29,6 +29,8 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_rebuild_grid
 from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
 from well_viewer.features.image_browser.image_table.controller import image_table_set_zoom
+from well_viewer.features.image_browser.image_table.controller import image_table_set_thresh_frac
+from widgets.stepper import Stepper
 from well_viewer.features.image_browser.image_table.controller import image_table_open_add_row_dialog
 from functools import partial
 from well_viewer.features.image_browser.image_table.controller import image_table_copy_png
@@ -342,6 +344,28 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     # Crop status, shown inline so an active crop is visible at a glance.
     tr.addWidget(_crop.make_status_label(action_row))
+
+    # ON/OFF intensity threshold quick-edit for the active channel — drives the
+    # per-row "≥ Thr" binary overlay. Edits the same ThreshFracOn value as the
+    # Cell Gating tab / the plot tabs, and re-composites the generated table.
+    tr.addSpacing(12)
+    tr.addWidget(QLabel("ON threshold:", action_row))
+    ctx.app._image_table_thresh_frac_stepper = Stepper(
+        action_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
+    ctx.app._image_table_thresh_frac_stepper.setFixedWidth(96)
+    ctx.app._image_table_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
+    _it_edit = getattr(ctx.app._image_table_thresh_frac_stepper, "_edit", None)
+    if _it_edit is not None:
+        _it_edit.setFocusPolicy(Qt.ClickFocus)
+    ctx.app._image_table_thresh_frac_stepper.setToolTip(
+        "ON/OFF intensity threshold for the active channel — drives a row's "
+        "≥ Thr binary overlay. Same value as the Cell Gating tab's "
+        "ThreshFracOn and the plot tabs' Threshold quick-edit."
+    )
+    ctx.app._image_table_thresh_frac_stepper.valueChanged.connect(
+        lambda v: image_table_set_thresh_frac(ctx.app, v)
+    )
+    tr.addWidget(ctx.app._image_table_thresh_frac_stepper)
 
     tr.addStretch(1)
 

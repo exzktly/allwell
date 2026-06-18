@@ -952,6 +952,22 @@ def image_table_set_zoom(app, factor: float, *, relative: bool = False) -> None:
         image_table_generate(app)
 
 
+def image_table_set_thresh_frac(app, value) -> None:
+    """Edit the active channel's ON/OFF intensity threshold (ThreshFracOn) from
+    the Image Table controls row, then re-composite so the per-row "≥ Thr"
+    binary overlay reflects it.
+
+    Writes through ``set_thresh_frac_on`` (the single source of truth shared with
+    the Cell Gating tab and the other quick-edits). Re-renders only when a table
+    has already been generated — the cached images are reused, so it's the same
+    cheap re-composite the zoom control does; before the first Generate it just
+    stores the value.
+    """
+    app._set_thresh_frac_on(value)
+    if getattr(app._app_state.image_table, "last_render", None):
+        image_table_generate(app)
+
+
 # ── Per-cell mouse handling: hover pixel readout + crop drag ────────────────
 
 

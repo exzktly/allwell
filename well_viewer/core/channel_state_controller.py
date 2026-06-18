@@ -903,25 +903,35 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
 
 
 def refresh_thresh_frac_quick_edit(app) -> None:
-    """Sync the ctxbar quick-edit Stepper to the active channel's ThreshFracOn.
+    """Sync the ON-threshold quick-edit Steppers to the active channel's
+    ThreshFracOn.
 
-    Signals are blocked so this display sync doesn't loop back through
-    ``set_thresh_frac_on`` (``Stepper.setValue`` emits ``valueChanged``). No-op
-    when the stepper hasn't been built yet.
+    There are now three of these quick-edits — the Plotting ctxbar, the
+    Segmentation (Review Image) controls row, and the Image Table controls row —
+    all editing the same per-channel value (the active channel's ON/OFF
+    intensity threshold). Signals are blocked so this display sync doesn't loop
+    back through ``set_thresh_frac_on`` (``Stepper.setValue`` emits
+    ``valueChanged``). No-op for any stepper that hasn't been built yet.
     """
     # Keep the status-bar threshold chip (F1) in sync — runs on channel switch
     # and every threshold edit, the same triggers as the ctxbar stepper.
     refresh_chips = getattr(app, "_refresh_status_chips", None)
     if callable(refresh_chips):
         refresh_chips()
-    stepper = getattr(app, "_plotting_thresh_frac_stepper", None)
-    if stepper is None:
-        return
-    blocked = stepper.blockSignals(True)
-    try:
-        stepper.setValue(float(get_thresh_frac_on(app)))
-    finally:
-        stepper.blockSignals(blocked)
+    value = float(get_thresh_frac_on(app))
+    for attr in (
+        "_plotting_thresh_frac_stepper",
+        "_review_thresh_frac_stepper",
+        "_image_table_thresh_frac_stepper",
+    ):
+        stepper = getattr(app, attr, None)
+        if stepper is None:
+            continue
+        blocked = stepper.blockSignals(True)
+        try:
+            stepper.setValue(value)
+        finally:
+            stepper.blockSignals(blocked)
 
 
 def get_fluor_gate(app, channel: str) -> float:

@@ -32,6 +32,7 @@ from well_viewer.features.crop.controller import (
 )
 from well_viewer.features.image_browser.review_image.controller import on_review_image_channel_selected
 from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
+from widgets.stepper import Stepper
 from functools import partial
 from well_viewer.features.image_browser.review_image.controller import on_review_image_move
 from well_viewer.features.image_browser.review_image.controller import on_review_image_press
@@ -165,7 +166,8 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # The QC debris-gate controls now live on the Sample Definitions → Cell
     # Gating tab (a fundamental inclusion layer alongside FluorGating / scatter
     # gates). This overlay still *renders* the QC verdict — excluded cells show
-    # here — it just no longer hosts the threshold editor.
+    # here. The per-channel ON/OFF intensity threshold (ThreshFracOn) IS editable
+    # here again, via the quick-edit Stepper added to the LUT row below.
     self._review_image_status = QLabel("", inner)
     self._review_image_status.setObjectName("Muted")
     il.addWidget(self._review_image_status)
@@ -191,6 +193,32 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     lr.addWidget(self._review_lmax_entry)
 
     lr.addWidget(btn_secondary(lut_row, "Auto LUT", self._review_image_auto_lut))
+
+    # ON/OFF intensity threshold quick-edit (the editor this row used to host;
+    # see the comment above). Edits the active channel's ThreshFracOn — the same
+    # value the Cell Gating tab and the Plotting quick-edit own — and re-renders,
+    # so the Binary (≥ ON threshold) overlay updates live without leaving the tab.
+    lr.addSpacing(12)
+    lr.addWidget(QLabel("ON threshold:", lut_row))
+    self._review_thresh_frac_stepper = Stepper(
+        lut_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
+    self._review_thresh_frac_stepper.setFixedWidth(96)
+    self._review_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
+    _rt_edit = getattr(self._review_thresh_frac_stepper, "_edit", None)
+    if _rt_edit is not None:
+        _rt_edit.setFocusPolicy(Qt.ClickFocus)
+    self._review_thresh_frac_stepper.setToolTip(
+        "ON/OFF intensity threshold for the active channel — drives the Binary "
+        "(≥ ON threshold) overlay. Same value as the Cell Gating tab's "
+        "ThreshFracOn and the plot tabs' Threshold quick-edit."
+    )
+    # Edit the active channel's ThreshFracOn (single source of truth, shared
+    # with Cell Gating / the plot quick-edit) and re-render so the binary
+    # overlay updates live.
+    self._review_thresh_frac_stepper.valueChanged.connect(
+        lambda v: (self._set_thresh_frac_on(v), refresh_review_image(self))
+    )
+    lr.addWidget(self._review_thresh_frac_stepper)
     lr.addStretch(1)
     il.addWidget(lut_row)
 

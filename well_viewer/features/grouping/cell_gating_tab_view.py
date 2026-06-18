@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -36,12 +37,14 @@ import pandas as pd
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QVBoxLayout, QWidget,
 )
 
 from ui.theme import get_color
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.ui_helpers import install_canvas_wheel_scroll
+from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 from well_viewer.features.image_browser.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.features.scatter.gating import compute_gate_inclusion
 from well_viewer.features.qc.tab_view import build_qc_gate_controls
@@ -49,6 +52,18 @@ from well_viewer.core.safe import swallowed
 
 
 logger = logging.getLogger("well_viewer.gating_worker")
+
+
+@dataclass(frozen=True)
+class ThreshFracOptimizationResult:
+    """Best threshold scan result for a two-well fraction-on comparison."""
+
+    threshold: float
+    frac_a: float
+    frac_b: float
+    difference: float
+    n_a: int
+    n_b: int
 
 
 class GatingWorker(QThread):
@@ -437,6 +452,62 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_status_label.setObjectName("Muted")
     root.addWidget(ctx.app._cell_gating_status_label)
 
+    opt_panel = QWidget(parent)
+    opt_layout = QVBoxLayout(opt_panel)
+    opt_layout.setContentsMargins(0, 4, 0, 0)
+    opt_title = QLabel("Optimize ThreshFracOn between two wells", opt_panel)
+    opt_title.setProperty("role", "section")
+    opt_layout.addWidget(opt_title)
+    opt_row = QWidget(opt_panel)
+    opt_row_layout = QHBoxLayout(opt_row)
+    opt_row_layout.setContentsMargins(0, 0, 0, 0)
+    opt_row_layout.addWidget(QLabel("Channel:", opt_row))
+    ctx.app._cell_gating_opt_channel_combo = QComboBox(opt_row)
+    ctx.app._cell_gating_opt_channel_combo.setMinimumWidth(140)
+    opt_row_layout.addWidget(ctx.app._cell_gating_opt_channel_combo)
+    opt_row_layout.addWidget(QLabel("Well A:", opt_row))
+    ctx.app._cell_gating_opt_well_a_combo = QComboBox(opt_row)
+    ctx.app._cell_gating_opt_well_a_combo.setMinimumWidth(90)
+    opt_row_layout.addWidget(ctx.app._cell_gating_opt_well_a_combo)
+    opt_row_layout.addWidget(QLabel("Well B:", opt_row))
+    ctx.app._cell_gating_opt_well_b_combo = QComboBox(opt_row)
+    ctx.app._cell_gating_opt_well_b_combo.setMinimumWidth(90)
+    opt_row_layout.addWidget(ctx.app._cell_gating_opt_well_b_combo)
+    opt_row_layout.addWidget(QLabel("Min:", opt_row))
+    ctx.app._cell_gating_opt_min_edit = QLineEdit("0.0", opt_row)
+    ctx.app._cell_gating_opt_min_edit.setFixedWidth(80)
+    opt_row_layout.addWidget(ctx.app._cell_gating_opt_min_edit)
+    opt_row_layout.addWidget(QLabel("Max:", opt_row))
+    ctx.app._cell_gating_opt_max_edit = QLineEdit("100.0", opt_row)
+    ctx.app._cell_gating_opt_max_edit.setFixedWidth(80)
+    opt_row_layout.addWidget(ctx.app._cell_gating_opt_max_edit)
+    opt_row_layout.addWidget(QLabel("Steps:", opt_row))
+    ctx.app._cell_gating_opt_steps_edit = QLineEdit("101", opt_row)
+    ctx.app._cell_gating_opt_steps_edit.setFixedWidth(64)
+    opt_row_layout.addWidget(ctx.app._cell_gating_opt_steps_edit)
+    from PySide6.QtWidgets import QPushButton as _QPushButton
+    opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
+    opt_btn.setProperty("variant", "secondary")
+    opt_btn.setToolTip(
+        "Scan thresholds between Min and Max for the selected channel, compute "
+        "fraction-on in Well A and Well B at each threshold, then apply the "
+        "threshold that maximizes their absolute fraction-on difference."
+    )
+    opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx.app))
+    ctx.app._cell_gating_opt_btn = opt_btn
+    opt_row_layout.addWidget(opt_btn)
+    opt_row_layout.addStretch(1)
+    opt_layout.addWidget(opt_row)
+    ctx.app._cell_gating_opt_result_label = QLabel(
+        "Choose two wells and a threshold range, then optimize.",
+        opt_panel,
+    )
+    ctx.app._cell_gating_opt_result_label.setObjectName("Muted")
+    ctx.app._cell_gating_opt_result_label.setWordWrap(True)
+    opt_layout.addWidget(ctx.app._cell_gating_opt_result_label)
+    root.addWidget(opt_panel)
+    _cell_gating_refresh_optimizer_controls(ctx.app)
+
     # Paint the themed empty state now so the canvas is never a bare white
     # block before a dataset loads (it only gets painted on data otherwise).
     _cell_gating_plot_cdf(ctx.app)
@@ -541,6 +612,7 @@ def cell_gating_load_cell_areas(app) -> None:
                 )
 
     _cell_gating_build_channel_controls(app)
+    _cell_gating_refresh_optimizer_controls(app)
 
     if app._cell_gating_cell_areas:
         app._cell_gating_axes_stack = []
@@ -1114,6 +1186,72 @@ def cell_gating_auto_threshold(app) -> None:
     worker.start()
 
 
+def cell_gating_optimize_thresh_frac_on(app) -> None:
+    """Scan a threshold range and apply the best two-well ThreshFracOn cut."""
+    label = getattr(app, "_cell_gating_opt_result_label", None)
+
+    def _status(msg: str) -> None:
+        if label is not None:
+            label.setText(msg)
+        try:
+            app._set_status(msg)
+        except Exception:
+            swallowed()
+
+    try:
+        channel_combo = app._cell_gating_opt_channel_combo
+        well_a_combo = app._cell_gating_opt_well_a_combo
+        well_b_combo = app._cell_gating_opt_well_b_combo
+        channel_key = str(channel_combo.currentData() or channel_combo.currentText()).strip()
+        well_a = str(well_a_combo.currentText()).strip()
+        well_b = str(well_b_combo.currentText()).strip()
+        if not channel_key:
+            _status("Optimize ThreshFracOn: choose a channel first.")
+            return
+        if not well_a or not well_b:
+            _status("Optimize ThreshFracOn: choose two wells first.")
+            return
+        if well_a == well_b:
+            _status("Optimize ThreshFracOn: choose two different wells.")
+            return
+        lo = float(app._cell_gating_opt_min_edit.text())
+        hi = float(app._cell_gating_opt_max_edit.text())
+        steps = int(float(app._cell_gating_opt_steps_edit.text()))
+    except ValueError:
+        _status("Optimize ThreshFracOn: min, max, and steps must be numeric.")
+        return
+    except Exception as exc:
+        _status(f"Optimize ThreshFracOn: controls are not ready ({exc}).")
+        return
+
+    try:
+        result = _optimize_thresh_frac_on_between_wells(
+            app._get_rows(well_a),
+            app._get_rows(well_b),
+            channel_key=channel_key,
+            min_threshold=lo,
+            max_threshold=hi,
+            steps=steps,
+            ratios=getattr(app._app_state.channel, "ratio_index", None) or {},
+        )
+    except ValueError as exc:
+        _status(f"Optimize ThreshFracOn: {exc}")
+        return
+
+    edit = (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).get(channel_key)
+    if edit is None:
+        _status(f"Optimize ThreshFracOn: no ThreshFracOn field for {channel_key}.")
+        return
+    edit.setText(f"{result.threshold:.6g}")
+    cell_gating_on_threshold_frac_on_change(app)
+    _status(
+        f"Optimized {channel_key}: threshold={result.threshold:.6g}; "
+        f"{well_a} fraction-on={result.frac_a:.3f} (n={result.n_a}), "
+        f"{well_b} fraction-on={result.frac_b:.3f} (n={result.n_b}); "
+        f"|Δ|={result.difference:.3f}."
+    )
+
+
 def cell_gating_update_theme(app) -> None:
     fig = getattr(app, "_cell_gating_figure", None)
     if fig is not None:
@@ -1187,6 +1325,119 @@ def _cell_gating_build_channel_controls(app) -> None:
 
         inner_layout.addWidget(ch_row)
     inner_layout.addStretch(1)
+
+
+def _cell_gating_optimizer_channel_specs(app) -> list[tuple[str, str]]:
+    specs: list[tuple[str, str]] = [
+        (ch, ch.upper()) for ch in list(app._app_state.channel.fluor_channels)
+    ]
+    for ratio in list(app._app_state.channel.ratio_metrics or []):
+        try:
+            label = app._ratio_label_for(ratio)
+        except Exception:
+            label = ratio.name
+        specs.append((ratio.key(), f"{label} (ratio)"))
+    return specs
+
+
+def _cell_gating_refresh_optimizer_controls(app) -> None:
+    """Refresh optimizer channel/well dropdowns after data or ratios change."""
+    channel_combo = getattr(app, "_cell_gating_opt_channel_combo", None)
+    well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
+    well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
+    if channel_combo is None or well_a_combo is None or well_b_combo is None:
+        return
+
+    prev_channel = channel_combo.currentData()
+    channel_combo.blockSignals(True)
+    channel_combo.clear()
+    for key, label in _cell_gating_optimizer_channel_specs(app):
+        channel_combo.addItem(label, key)
+    if prev_channel:
+        idx = channel_combo.findData(prev_channel)
+        if idx >= 0:
+            channel_combo.setCurrentIndex(idx)
+    channel_combo.blockSignals(False)
+
+    wells = sorted(list(app._app_state.dataset.well_paths or {}), key=app._parse_rc)
+    for combo in (well_a_combo, well_b_combo):
+        prev = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(wells)
+        if prev:
+            idx = combo.findText(prev)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+    if well_b_combo.count() > 1 and well_b_combo.currentIndex() == well_a_combo.currentIndex():
+        well_b_combo.setCurrentIndex(1)
+
+    btn = getattr(app, "_cell_gating_opt_btn", None)
+    if btn is not None:
+        btn.setEnabled(bool(channel_combo.count() and len(wells) >= 2))
+
+
+def _fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
+    if values.size == 0:
+        return float("nan")
+    return float(np.count_nonzero(values > threshold) / values.size)
+
+
+def _included_values_for_channel(df, channel_key: str, ratios=None) -> np.ndarray:
+    if df is None or df.empty:
+        return np.array([], dtype=float)
+    val_col = channel_key if str(channel_key).startswith("ratio:") else f"{channel_key}_mean_intensity"
+    values = resolve_value_series(df, val_col, ratios).to_numpy(dtype=float)
+    mask = df_included_mask(df).to_numpy(copy=False) & np.isfinite(values)
+    return values[mask]
+
+
+def _optimize_thresh_frac_on_between_wells(
+    df_a,
+    df_b,
+    *,
+    channel_key: str,
+    min_threshold: float,
+    max_threshold: float,
+    steps: int,
+    ratios=None,
+) -> ThreshFracOptimizationResult:
+    """Return the threshold maximizing |fraction_on(A) - fraction_on(B)|."""
+    lo = float(min_threshold)
+    hi = float(max_threshold)
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        raise ValueError("threshold range must be finite.")
+    if hi < lo:
+        raise ValueError("max threshold must be greater than or equal to min threshold.")
+    if int(steps) < 2:
+        raise ValueError("steps must be at least 2.")
+    if int(steps) > 10001:
+        raise ValueError("steps must be 10,001 or fewer.")
+
+    values_a = _included_values_for_channel(df_a, channel_key, ratios)
+    values_b = _included_values_for_channel(df_b, channel_key, ratios)
+    if values_a.size == 0:
+        raise ValueError("Well A has no included finite values for the selected channel.")
+    if values_b.size == 0:
+        raise ValueError("Well B has no included finite values for the selected channel.")
+
+    best: ThreshFracOptimizationResult | None = None
+    for threshold in np.linspace(lo, hi, int(steps)):
+        frac_a = _fraction_on_for_threshold(values_a, float(threshold))
+        frac_b = _fraction_on_for_threshold(values_b, float(threshold))
+        diff = abs(frac_a - frac_b)
+        if best is None or diff > best.difference:
+            best = ThreshFracOptimizationResult(
+                threshold=float(threshold),
+                frac_a=frac_a,
+                frac_b=frac_b,
+                difference=float(diff),
+                n_a=int(values_a.size),
+                n_b=int(values_b.size),
+            )
+    assert best is not None
+    return best
 
 
 def _cell_gating_first_frame_rows(df) -> tuple:

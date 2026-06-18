@@ -55,10 +55,12 @@ def _build_fake_pasteboard():
 def _patch_macos_clipboard(monkeypatch):
     """Pretend the test environment is macOS with pyobjc available,
     and inject the fake pasteboard. Returns the recording structures."""
-    from well_viewer.features.export import style as export_style
+    # The pasteboard writer lives in widgets.fig_clipboard now (re-exported by
+    # export.style); patch the platform check on its owning module.
+    from widgets import fig_clipboard
 
     pb_cls, data_cls, declared, calls = _build_fake_pasteboard()
-    monkeypatch.setattr(export_style.sys, "platform", "darwin")
+    monkeypatch.setattr(fig_clipboard.sys, "platform", "darwin")
     monkeypatch.setitem(
         sys.modules, "AppKit", type("appkit_stub", (), {"NSPasteboard": pb_cls}),
     )

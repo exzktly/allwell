@@ -151,6 +151,8 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # left hidden — its statsChanged signal isn't wired to ctx.app state yet (the
     # error band lives on the controls row above; Mean/Median is unsupported).
     card.plotThemeChanged.connect(lambda _m: ctx.app._redraw())
+    # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
+    card.panelCopied.connect(ctx.app._set_status)
     card.setStatsChipVisible(False)
 
     scroll = reg.register("_line_scroll_canvas", QScrollArea(parent))

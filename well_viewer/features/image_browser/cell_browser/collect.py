@@ -42,6 +42,21 @@ class Criterion:
 
 
 @dataclass(frozen=True)
+class SortKey:
+    """One sort row: order cells by ``field``, ascending or descending.
+
+    ``field`` is either an intrinsic token (``"well"`` / ``"timepoint"`` /
+    ``"fov"``) or anything ``resolve_value_series`` understands — a real CSV
+    column (``gfp_mean_intensity``, ``shape_area``) or a ratio key
+    (``ratio:<name>``). Cells with no measurable value for the field (NaN /
+    missing) always sort **last**, regardless of direction.
+    """
+
+    field: str
+    ascending: bool = True
+
+
+@dataclass(frozen=True)
 class CellDescriptor:
     """A single cell that passed the filter — enough to load + locate its image.
 
@@ -126,6 +141,42 @@ def enumerate_properties(app) -> List[Tuple[str, str]]:
     return deduped
 
 
+def sort_field_options(app) -> List[Tuple[str, str]]:
+    """Ordered ``[(field, label)]`` for the sort-key picker.
+
+    The intrinsic image dimensions (Well, plus Timepoint / FOV when the dataset
+    has them) followed by every measured property (``enumerate_properties``), so
+    a sort key can be any of well / timepoint / filter value / metric value.
+    """
+    df = _sample_df(app)
+    out: List[Tuple[str, str]] = [("well", "Well")]
+    if df is not None:
+        if "timepoint_hours" in df.columns or "timepoint" in df.columns:
+            out.append(("timepoint", "Timepoint"))
+        if "fov" in df.columns:
+            out.append(("fov", "FOV"))
+    out.extend(enumerate_properties(app))
+    return out
+
+
+def _natural_key(s: str):
+    """Numeric-first natural sort key (mirrors criteria_view._sort_key)."""
+    try:
+        return (0, float(s))
+    except (TypeError, ValueError):
+        return (1, str(s))
+
+
+def _is_missing(v) -> bool:
+    """True for sort values we treat as "unmeasurable" → always sorted last."""
+    if v is None:
+        return True
+    try:
+        return bool(np.isnan(v))
+    except (TypeError, ValueError):
+        return False
+
+
 def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
     """Boolean mask over *df* of cells satisfying every criterion (AND).
 
@@ -166,6 +217,7 @@ def collect_cells(
     criteria: List[Criterion],
     timepoints: Optional[List[float]] = None,
     fovs: Optional[List[str]] = None,
+    sort_keys: Optional[List[SortKey]] = None,
 ) -> List[CellDescriptor]:
     """Ordered list of cells (across selected wells) matching *criteria* within
     the selected *timepoints* and *fovs*.
@@ -177,6 +229,11 @@ def collect_cells(
     * ``[]`` → options exist but none are selected → **no cells** match;
     * non-empty → only cells in those timepoints / FOVs.
 
+    ``sort_keys`` defines the gallery order: an ordered list of
+    :class:`SortKey` (well / timepoint / fov / any metric, ascending or
+    descending). When empty/None the cells keep their natural per-well row
+    order. Cells with no measurable value for a key sort **last** for that key.
+
     Criteria-only filtering per the feature spec (the app-wide Included/QC/Crop
     inclusion is intentionally NOT applied here).
     """
@@ -184,8 +241,12 @@ def collect_cells(
     target = (None if timepoints is None
               else np.asarray([float(t) for t in timepoints], dtype=float))
     fov_set = None if fovs is None else {str(f) for f in fovs}
+    keys = list(sort_keys or [])
 
     out: List[CellDescriptor] = []
+    # One parallel value list per sort key (aligned with ``out``), filled per
+    # well so the cross-well sort below has a value for every cell.
+    sort_cols: List[list] = [[] for _ in keys]
     selected = cell_browser_source_wells(app)
     for well in selected:
         df = app._get_rows(well)
@@ -226,6 +287,21 @@ def collect_cells(
         ccol = (pd.to_numeric(sel["shape_centroid_col"], errors="coerce").to_numpy()
                 if "shape_centroid_col" in cols else np.full(len(sel), np.nan))
         ridx = sel.index.to_numpy()
+        # Per-key sort values for this well's cells (aligned with the appends
+        # below). Intrinsic dimensions are read off the arrays we already have;
+        # anything else resolves through the shared value resolver (handles
+        # ratios + case-folding) exactly like the criteria filter does.
+        key_vals = []
+        for sk in keys:
+            if sk.field == "well":
+                key_vals.append([well] * len(sel))
+            elif sk.field == "timepoint":
+                key_vals.append(tph.tolist())
+            elif sk.field == "fov":
+                key_vals.append([str(v) for v in fov_vals])
+            else:
+                key_vals.append(
+                    resolve_value_series(sel, sk.field, ratios).to_numpy().tolist())
         for i in range(len(sel)):
             out.append(CellDescriptor(
                 well=well, fov=str(fov_vals[i]), tp_token=str(tp_tokens[i]),
@@ -235,4 +311,35 @@ def collect_cells(
                 centroid_row=float(crow[i]) if np.isfinite(crow[i]) else None,
                 centroid_col=float(ccol[i]) if np.isfinite(ccol[i]) else None,
             ))
+            for k in range(len(keys)):
+                sort_cols[k].append(key_vals[k][i])
+
+    if keys and out:
+        out = _apply_sort(app, out, keys, sort_cols)
     return out
+
+
+def _apply_sort(app, out, keys: List[SortKey], sort_cols: List[list]):
+    """Stable multi-key sort of *out* by *keys* (sort_cols holds each key's
+    per-cell value, aligned with *out*).
+
+    Implemented as successive stable passes from least- to most-significant key
+    (Python's ``sort`` is stable, so earlier passes break ties in later ones).
+    Missing/NaN values are pushed to the end on every pass, so a cell that can't
+    be measured against the primary key always lands last.
+    """
+    parse_rc = getattr(app, "_parse_rc", None) or (lambda s: s)
+    order = list(range(len(out)))
+    for k in range(len(keys) - 1, -1, -1):
+        sk = keys[k]
+        vals = sort_cols[k]
+        present = [i for i in order if not _is_missing(vals[i])]
+        missing = [i for i in order if _is_missing(vals[i])]
+        if sk.field == "well":
+            present.sort(key=lambda i: parse_rc(str(vals[i])), reverse=not sk.ascending)
+        elif sk.field == "fov":
+            present.sort(key=lambda i: _natural_key(vals[i]), reverse=not sk.ascending)
+        else:
+            present.sort(key=lambda i: vals[i], reverse=not sk.ascending)
+        order = present + missing
+    return [out[i] for i in order]

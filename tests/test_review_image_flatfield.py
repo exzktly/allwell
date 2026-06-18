@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.review_image import controller as C  # noqa: E402
-from well_viewer.features.review_image.renderer import set_review_image_source  # noqa: E402
+from well_viewer.features.image_browser.review_image import controller as C  # noqa: E402
+from well_viewer.features.image_browser.review_image.renderer import set_review_image_source  # noqa: E402
 
 
 def _set_flatfield_mode(app, mode, background_well=""):

@@ -16,14 +16,14 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from well_viewer.features.cell_browser import controller as ctl
-from well_viewer.features.cell_browser.criteria_view import (  # re-export
+from well_viewer.features.image_browser.cell_browser import controller as ctl
+from well_viewer.features.image_browser.cell_browser.criteria_view import (  # re-export
     build_cell_browser_sidebar,
     cell_browser_sidebar_refresh,
 )
-from well_viewer.features.cell_browser.collect import cell_browser_channels
-from well_viewer.features.cell_browser.state import CellBrowserState
-from well_viewer.features.cell_browser.worker import CellImageLoader
+from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
+from well_viewer.features.image_browser.cell_browser.state import CellBrowserState
+from well_viewer.features.image_browser.cell_browser.worker import CellImageLoader
 
 __all__ = [
     "build_cell_browser_tab",

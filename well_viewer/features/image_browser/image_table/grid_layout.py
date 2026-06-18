@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional  # noqa: F401
 
-from well_viewer.features.image_table.image_compose import (  # noqa: F401
+from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: F401
     NUC_SEG_TOKEN,
     _norm_token,
 )

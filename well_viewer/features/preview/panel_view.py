@@ -30,13 +30,13 @@ from well_viewer.core.ui_helpers import btn_card, btn_danger, btn_secondary
 from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
-from well_viewer.features.review_image.controller import on_review_image_channel_selected
-from well_viewer.features.review_image.renderer import refresh_review_image
+from well_viewer.features.image_browser.review_image.controller import on_review_image_channel_selected
+from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
 from functools import partial
-from well_viewer.features.review_image.controller import on_review_image_move
-from well_viewer.features.review_image.controller import on_review_image_press
-from well_viewer.features.review_image.controller import on_review_image_release
-from well_viewer.features.review_image.controller import pick_review_image_color
+from well_viewer.features.image_browser.review_image.controller import on_review_image_move
+from well_viewer.features.image_browser.review_image.controller import on_review_image_press
+from well_viewer.features.image_browser.review_image.controller import on_review_image_release
+from well_viewer.features.image_browser.review_image.controller import pick_review_image_color
 from well_viewer.core.safe import swallowed
 
 

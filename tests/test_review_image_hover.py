@@ -16,7 +16,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QLabel, QToolTip  # noqa: E402
 from PySide6.QtCore import QPointF  # noqa: E402
 
-from well_viewer.features.review_image.controller import _show_image_pixel_tooltip  # noqa: E402
+from well_viewer.features.image_browser.review_image.controller import _show_image_pixel_tooltip  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 

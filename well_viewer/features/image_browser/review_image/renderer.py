@@ -224,7 +224,7 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
             )
         return
 
-    from well_viewer.features.review_image.controller import review_resolve_image_refs
+    from well_viewer.features.image_browser.review_image.controller import review_resolve_image_refs
     fluor_ref, mask_ref = review_resolve_image_refs(app, fov_raw=fov_raw, tp_raw=tp_raw)
     if image_load_debug:
         fluor_path = getattr(fluor_ref, "full_path_str", str(fluor_ref)) if fluor_ref is not None else None
@@ -277,7 +277,7 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
         # no-op when the mode resolves to no field (e.g. flatfield="none").
         if image_source == "flatfield":
             import pipeline.flatfield as _ffc
-            from well_viewer.features.review_image.controller import flatfield_field_for
+            from well_viewer.features.image_browser.review_image.controller import flatfield_field_for
             field = flatfield_field_for(
                 app, str(app._app_state.channel.active_image_channel or ""), fluor_arr,
                 tp=tp)
@@ -301,7 +301,7 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
     ic_key = (well, fov, tp, app._app_state.review_image.override_version)
     include_by_nid = app._app_state.review_image.include_cache.get(ic_key)
     if include_by_nid is None:
-        from well_viewer.features.review_image.controller import review_build_include_map
+        from well_viewer.features.image_browser.review_image.controller import review_build_include_map
         include_by_nid = review_build_include_map(app, center, well, fov, tp)
         if len(app._app_state.review_image.include_cache) > 32:
             app._app_state.review_image.include_cache.clear()
@@ -318,7 +318,7 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
         )
         above_by_nid = app._app_state.review_image.threshold_map_cache.get(tm_key)
         if above_by_nid is None:
-            from well_viewer.features.review_image.controller import review_build_threshold_map
+            from well_viewer.features.image_browser.review_image.controller import review_build_threshold_map
             above_by_nid = review_build_threshold_map(app, center, well, fov, tp)
             if len(app._app_state.review_image.threshold_map_cache) > 32:
                 app._app_state.review_image.threshold_map_cache.clear()

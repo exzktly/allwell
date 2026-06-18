@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
-from well_viewer.features.review_image.renderer import update_preview
+from well_viewer.features.image_browser.review_image.renderer import update_preview
 
 
 def build_preview_picker(app, parent: QWidget) -> None:

@@ -10,8 +10,8 @@ import pytest
 
 pytestmark = pytest.mark.qt
 
-from well_viewer.features.image_table import controller as C
-from well_viewer.features.image_table.image_compose import _parse_lut, _row_display_opts
+from well_viewer.features.image_browser.image_table import controller as C
+from well_viewer.features.image_browser.image_table.image_compose import _parse_lut, _row_display_opts
 
 
 def test_lut_table_is_per_row_not_per_channel(loaded_app):
@@ -50,7 +50,7 @@ def test_generate_runs_with_per_row_display(loaded_app):
 def test_per_row_controls_do_not_auto_generate(loaded_app, monkeypatch):
     """Toggling a row's display options / colormap / Fit must NOT render — only
     the explicit Generate button does (regression for accidental auto-Generate)."""
-    import well_viewer.features.image_table.controller as ic
+    import well_viewer.features.image_browser.image_table.controller as ic
 
     app = loaded_app
     ic.image_table_repopulate_dropdowns(app)

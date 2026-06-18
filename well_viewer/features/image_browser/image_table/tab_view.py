@@ -23,23 +23,23 @@ from PySide6.QtWidgets import (
 
 from well_viewer.data.crop_tool import CropTool
 from well_viewer.core.ui_helpers import btn_primary
-from well_viewer.features.image_table.controller import image_table_open_export_settings
-from well_viewer.features.image_table.controller import image_table_apply_dimensions
-from well_viewer.features.image_table.controller import image_table_apply_global
-from well_viewer.features.image_table.controller import image_table_rebuild_grid
-from well_viewer.features.image_table.controller import image_table_repopulate_dropdowns
-from well_viewer.features.image_table.controller import image_table_set_zoom
-from well_viewer.features.image_table.controller import image_table_open_add_row_dialog
+from well_viewer.features.image_browser.image_table.controller import image_table_open_export_settings
+from well_viewer.features.image_browser.image_table.controller import image_table_apply_dimensions
+from well_viewer.features.image_browser.image_table.controller import image_table_apply_global
+from well_viewer.features.image_browser.image_table.controller import image_table_rebuild_grid
+from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
+from well_viewer.features.image_browser.image_table.controller import image_table_set_zoom
+from well_viewer.features.image_browser.image_table.controller import image_table_open_add_row_dialog
 from functools import partial
-from well_viewer.features.image_table.controller import image_table_copy_png
-from well_viewer.features.image_table.controller import image_table_copy_svg
-from well_viewer.features.image_table.controller import image_table_distribute_timepoints
-from well_viewer.features.image_table.controller import image_table_distribute_wells
-from well_viewer.features.image_table.controller import image_table_export
-from well_viewer.features.image_table.controller import image_table_generate
-from well_viewer.features.image_table.controller import image_table_load_heatmap_layout
-from well_viewer.features.image_table.controller import image_table_build_layout
-from well_viewer.features.image_table.controller import image_table_apply_preset
+from well_viewer.features.image_browser.image_table.controller import image_table_copy_png
+from well_viewer.features.image_browser.image_table.controller import image_table_copy_svg
+from well_viewer.features.image_browser.image_table.controller import image_table_distribute_timepoints
+from well_viewer.features.image_browser.image_table.controller import image_table_distribute_wells
+from well_viewer.features.image_browser.image_table.controller import image_table_export
+from well_viewer.features.image_browser.image_table.controller import image_table_generate
+from well_viewer.features.image_browser.image_table.controller import image_table_load_heatmap_layout
+from well_viewer.features.image_browser.image_table.controller import image_table_build_layout
+from well_viewer.features.image_browser.image_table.controller import image_table_apply_preset
 
 
 def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") -> QToolButton:

@@ -171,7 +171,7 @@ def _export_binary_mask(app, cache, well, chan, tp, fov, binary_mode, crop_tool)
     if binary_mode == "threshold":
         above_by_nid: Dict[int, bool] = {}
         try:
-            from well_viewer.features.review_image.controller import review_build_threshold_map
+            from well_viewer.features.image_browser.review_image.controller import review_build_threshold_map
             above_by_nid = review_build_threshold_map(app, mask_arr, well, fov, tp) or {}
         except Exception:  # noqa: BLE001
             above_by_nid = {}
@@ -597,7 +597,7 @@ def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
         return None
     above_by_nid: Dict[int, bool] = {}
     try:
-        from well_viewer.features.review_image.controller import (
+        from well_viewer.features.image_browser.review_image.controller import (
             review_build_threshold_map, review_norm_fov,
         )
         # The CSV row keys are normalised (e.g. timepoint "0h" -> "0"); the

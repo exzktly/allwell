@@ -11,7 +11,7 @@ pytest.importorskip("PySide6")
 import numpy as np  # noqa: E402
 from PySide6.QtWidgets import QLineEdit  # noqa: E402
 
-from well_viewer.features.review_image.renderer import review_image_resolve_lut  # noqa: E402
+from well_viewer.features.image_browser.review_image.renderer import review_image_resolve_lut  # noqa: E402
 
 
 def _app(min_text, max_text):

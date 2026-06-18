@@ -12,7 +12,9 @@ def test_smfish_is_top_level_tab(viewer_app):
     app = viewer_app
     names = app._notebook.pageNames()
     assert "smFISH" in names, "smFISH should be its own top-level tab"
-    assert "Segmentation" in names
+    # Segmentation is now a sub-tab of the unified Image Browser rail entry.
+    assert "Image Browser" in names
+    assert "Segmentation" not in names
     # Its own rail icon.
     assert app._SECTION_ICONS.get("smFISH") == "dna"
     # Heavy deps → lazy-only (builds on first click, not during the drain).
@@ -23,7 +25,9 @@ def test_smfish_is_top_level_tab(viewer_app):
 
 def test_segmentation_and_smfish_resolve_as_leaf_tabs(viewer_app):
     app = viewer_app
-    app._notebook.setCurrentByName("Segmentation")
+    # Segmentation resolves as a leaf via the Image Browser sub-tab descent.
+    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    assert show_image_browser_subtab(app, "Segmentation")
     assert app._current_centre_tab() == "Segmentation"
     app._notebook.setCurrentByName("smFISH")
     assert app._current_centre_tab() == "smFISH"

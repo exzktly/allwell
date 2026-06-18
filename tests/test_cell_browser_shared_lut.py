@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from well_viewer.features.cell_browser.worker import _norm01
+from well_viewer.features.image_browser.cell_browser.worker import _norm01
 
 
 def test_norm01_uses_shared_bounds_when_given():

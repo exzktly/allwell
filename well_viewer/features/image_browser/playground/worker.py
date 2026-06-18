@@ -31,7 +31,7 @@ def build_reference_fields(app, well: str, chan_lower: str, *,
     import process_microscopy as pm
     from pipeline.flatfield import estimate_basic_flatfield, normalize_flatfield
     from well_viewer.data.image_discovery import open_imgref_as_array
-    from well_viewer.features.image_table.controller import _load_well_channel
+    from well_viewer.features.image_browser.image_table.controller import _load_well_channel
 
     refs = _load_well_channel(app, {}, well, chan_lower, use_tophat=False)
     frames: list = []

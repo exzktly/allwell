@@ -138,7 +138,7 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
         _sync_enabled()
         set_qc_params(app, _fields_params())  # recompute + persist + redraw
         try:
-            from well_viewer.features.review_image.renderer import refresh_review_image
+            from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
             refresh_review_image(app)  # reflect QC in the segmentation overlay
         except Exception:
             swallowed()  # was: pass (silent except)

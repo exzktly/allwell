@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from well_viewer.features.cell_browser.collect import (
+from well_viewer.features.image_browser.cell_browser.collect import (
     Criterion,
     collect_cells,
     enumerate_properties,
@@ -142,7 +142,7 @@ def test_fov_filter_is_strict_include_list():
 def test_channels_prefer_app_list():
     app = _app(_df())
     app._app_state.channel.fluor_channels = ["gfp", "mcherry"]
-    from well_viewer.features.cell_browser.collect import cell_browser_channels
+    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
     assert cell_browser_channels(app) == ["gfp", "mcherry"]
 
 
@@ -151,7 +151,7 @@ def test_channels_fall_back_to_detection_when_app_list_empty():
     # so the chips still appear (regression: blank channel row).
     app = _app(_df())
     app._app_state.channel.fluor_channels = []
-    from well_viewer.features.cell_browser.collect import cell_browser_channels
+    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
     assert "gfp" in cell_browser_channels(app)  # from gfp_mean_intensity column
 
 
@@ -159,5 +159,5 @@ def test_channels_coerced_to_str():
     # Non-string tokens would crash tok.upper() when building chips; coerce them.
     app = _app(_df())
     app._app_state.channel.fluor_channels = [1, "gfp"]
-    from well_viewer.features.cell_browser.collect import cell_browser_channels
+    from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
     assert cell_browser_channels(app) == ["1", "gfp"]

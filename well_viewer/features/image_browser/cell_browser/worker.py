@@ -1,6 +1,6 @@
 """Cell Browser image loading — composes per-cell thumbnails off the UI thread.
 
-Given a page of :class:`~well_viewer.features.cell_browser.collect.CellDescriptor`,
+Given a page of :class:`~well_viewer.features.image_browser.cell_browser.collect.CellDescriptor`,
 loads each cell's FOV channel images + segmentation mask (reusing the Image Table
 loaders, so the zipfile cache is shared), crops to the cell, and builds a
 multi-channel composite RGB. Runs on a daemon thread and pushes results back to
@@ -18,8 +18,8 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from well_viewer.core.safe import swallowed
-from well_viewer.features.cell_browser.collect import CellDescriptor
-from well_viewer.features.image_table.image_compose import _load_array, _load_mask_array
+from well_viewer.features.image_browser.cell_browser.collect import CellDescriptor
+from well_viewer.features.image_browser.image_table.image_compose import _load_array, _load_mask_array
 
 _logger = logging.getLogger("well_viewer")
 

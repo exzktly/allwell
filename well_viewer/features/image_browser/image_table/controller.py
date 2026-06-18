@@ -35,7 +35,7 @@ from well_viewer.core.ui_helpers import set_combo_values
 # loading, mask/threshold rendering, RGB composer, overlay) lives in
 # ``image_compose``. Re-exported so call sites + external importers
 # (playground, grid_view) are unchanged.
-from well_viewer.features.image_table.image_compose import (  # noqa: E402,F401
+from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: E402,F401
     LUT_COLORS,
     LUT_COLOR_NAMES,
     NUC_SEG_TOKEN,
@@ -107,7 +107,7 @@ def image_table_clear_active(app) -> None:
 # The layout/dimension layer (axis math, per-dim option lists, channel
 # enumeration, cell snapshot) lives in ``grid_layout``. Re-exported so call
 # sites + external importers (playground) are unchanged.
-from well_viewer.features.image_table.grid_layout import (  # noqa: E402,F401
+from well_viewer.features.image_browser.image_table.grid_layout import (  # noqa: E402,F401
     _DIM_KEY,
     _all_dim_options,
     _axis_values,
@@ -201,7 +201,7 @@ def image_table_apply_dimensions(app) -> None:
 def image_table_rebuild_grid(app) -> None:
     """Rebuild the selector grid (rows × cols of cell groupboxes) plus the
     per-row channel + LUT-colour column at column 0."""
-    from well_viewer.features.image_table.grid_view import build_image_table_grid
+    from well_viewer.features.image_browser.image_table.grid_view import build_image_table_grid
 
     rows = int(getattr(app._app_state.image_table, "rows", 2) or 2)
     cols = int(getattr(app._app_state.image_table, "cols", 3) or 3)
@@ -905,7 +905,7 @@ def image_table_distribute_wells(app) -> None:
 
 def image_table_rebuild_lut_row(app) -> None:
     """Rebuild the per-row LUT + display editors (one box per grid row)."""
-    from well_viewer.features.image_table.grid_view import build_lut_row
+    from well_viewer.features.image_browser.image_table.grid_view import build_lut_row
 
     build_lut_row(
         app,
@@ -1360,7 +1360,7 @@ def image_table_auto_lut(app, row_idx: int) -> None:
 
 # The export cluster (settings dialog, figure builder, PNG/SVG save+copy)
 # lives in ``export``. Re-exported so the tab_view toolbar wiring is unchanged.
-from well_viewer.features.image_table.export import (  # noqa: E402,F401
+from well_viewer.features.image_browser.image_table.export import (  # noqa: E402,F401
     _export_opts,
     image_table_open_export_settings,
     _build_export_figure,

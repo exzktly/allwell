@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_table import controller as C  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
 
 
 def test_channel_dropdown_populates_and_filters(loaded_app):
@@ -40,7 +40,7 @@ def test_build_does_not_render(loaded_app):
 def test_display_options_are_per_row(loaded_app):
     """Top-hat / boundaries / binary now live in each row's LUT/Display box and
     are read per-row by the renderer (image_compose._row_display_opts)."""
-    from well_viewer.features.image_table.image_compose import _row_display_opts
+    from well_viewer.features.image_browser.image_table.image_compose import _row_display_opts
 
     app = loaded_app
     C.image_table_repopulate_dropdowns(app)

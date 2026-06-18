@@ -15,6 +15,7 @@ from well_viewer.core.selection_controller import on_sidebar_plate_row_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_selection_changed
 from well_viewer.core.selection_controller import on_sidebar_plate_well_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_well_dropped
+from well_viewer.core.safe import swallowed
 from well_viewer.domain.plot_groups import make_plot_group
 
 
@@ -186,7 +187,7 @@ def _plot_groups_add_current(app) -> None:
         try:
             app._set_status("Select wells before adding a Plot Group.")
         except Exception:
-            pass
+            swallowed("plot_groups: set status (no wells selected)")
         return
     edit = getattr(app, "_plot_group_name_edit", None)
     name = edit.text().strip() if edit is not None else ""
@@ -209,7 +210,7 @@ def _plot_groups_add_current(app) -> None:
             f"Added Plot Group “{group['name']}” ({len(group['wells'])} wells)."
         )
     except Exception:
-        pass
+        swallowed("plot_groups: set status (added group)")
 
 
 def _plot_groups_load(app, group_id: str) -> None:
@@ -231,7 +232,7 @@ def _plot_groups_load(app, group_id: str) -> None:
             f"({len(wells)} wells)."
         )
     except Exception:
-        pass
+        swallowed("plot_groups: set status (loaded group)")
 
 
 def _plot_groups_delete(app, group_id: str) -> None:

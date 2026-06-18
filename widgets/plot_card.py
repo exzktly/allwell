@@ -32,12 +32,13 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt, Signal  # noqa: E402
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import theme  # noqa: E402
+from widgets.icon_button import IconButton  # noqa: E402
 from widgets.mpl_toolbar import MplToolbar  # noqa: E402
 
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
@@ -119,6 +120,7 @@ if _HAVE_MPL:
     class PlotCard(QFrame):
         statsChanged = Signal(str, str)   # (statistic, error-band)
         plotThemeChanged = Signal(str)    # "screen" | "publication"
+        panelCopied = Signal(str)         # status text after a per-axis copy
 
         def __init__(self, parent=None, *, figsize=(4.0, 3.0), constrained=True) -> None:
             super().__init__(parent)
@@ -173,6 +175,122 @@ if _HAVE_MPL:
             # measurement; the `install_qss_refresh` helper is still
             # available in `widgets/_support.py` for opt-in use.
             self._sync_theme_ui()
+            self._build_axis_copy_overlay()
+
+        # ── per-axis copy overlay ─────────────────────────────────────────
+        def _build_axis_copy_overlay(self) -> None:
+            """A small "copy" IconButton that floats near the top of whichever
+            subplot the cursor is over, so a single panel can be copied to the
+            clipboard. Only shown on multi-axis figures (Bar/Line) — on a
+            single-axis plot a per-panel copy is the same as the whole-canvas
+            Copy button, so it would just duplicate that affordance."""
+            self._hover_ax = None
+            self._copy_btn_hovered = False
+            self._copy_btn = IconButton(
+                "copy", self.canvas, size=theme.Typography.body_size,
+                tooltip="Copy this panel to the clipboard",
+            )
+            self._copy_btn.adjustSize()
+            self._copy_btn.hide()
+            self._copy_btn.installEventFilter(self)
+            self._copy_btn.clicked.connect(self._on_copy_axis_clicked)
+            # Single-shot, delayed hide so the cursor can transit from the
+            # canvas onto the floating button (which itself fires
+            # ``figure_leave_event``) without the button vanishing first.
+            self._copy_hide_timer = QTimer(self)
+            self._copy_hide_timer.setSingleShot(True)
+            self._copy_hide_timer.setInterval(180)
+            self._copy_hide_timer.timeout.connect(self._maybe_hide_copy_btn)
+            self.canvas.mpl_connect("motion_notify_event", self._on_canvas_motion)
+            self.canvas.mpl_connect("figure_leave_event", self._on_canvas_leave)
+
+        def _on_canvas_motion(self, event) -> None:
+            # Multi-axis figures only — a single subplot's per-panel copy is
+            # already covered by the whole-canvas Copy button.
+            if len(self.figure.axes) <= 1:
+                if self._hover_ax is not None:
+                    self._copy_hide_timer.start()
+                return
+            ax = event.inaxes
+            if ax is None:
+                self._copy_hide_timer.start()
+                return
+            if ax is not self._hover_ax:
+                self._hover_ax = ax
+                self._position_copy_btn(ax)
+                self._copy_btn.raise_()
+                self._copy_btn.show()
+            self._copy_hide_timer.stop()
+
+        def _on_canvas_leave(self, _event) -> None:
+            # Never hide synchronously: moving onto the child button also fires
+            # this. Defer and let the timer re-check whether the button is hovered.
+            self._copy_hide_timer.start()
+
+        def _maybe_hide_copy_btn(self) -> None:
+            if self._copy_btn_hovered:
+                return
+            self._copy_btn.hide()
+            self._hover_ax = None
+
+        def _position_copy_btn(self, ax) -> None:
+            """Place the button just inside the top-right corner of *ax*.
+
+            ``Axes.get_window_extent`` is in matplotlib display pixels (origin
+            bottom-left, scaled by the device pixel ratio); Qt child-widget
+            coordinates are logical pixels with a top-left origin — hence the
+            ``/ dpr`` and the ``canvas.height() - …`` Y flip."""
+            ext = ax.get_window_extent()
+            dpr = getattr(self.canvas, "device_pixel_ratio", None) \
+                or self.canvas.devicePixelRatioF()
+            inset = theme.Spacing.xs
+            bx = round(ext.x1 / dpr) - self._copy_btn.width() - inset
+            by = round(self.canvas.height() - ext.y1 / dpr) + inset
+            self._copy_btn.move(int(bx), int(by))
+
+        def _on_copy_axis_clicked(self) -> None:
+            ax = self._hover_ax
+            if ax is None:
+                return
+            from widgets.fig_clipboard import (
+                axis_tight_bbox_inches, copy_figure_to_clipboard,
+            )
+            # Capture in publication mode (the canonical export look), then
+            # revert — mirrors the whole-canvas Copy path.
+            prev = self._plot_theme
+            try:
+                if prev != "publication":
+                    self.setPlotTheme("publication")
+                bbox = axis_tight_bbox_inches(
+                    ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
+                status = copy_figure_to_clipboard(
+                    self.figure,
+                    svg_kwargs={"bbox_inches": bbox},
+                    pdf_kwargs={"bbox_inches": bbox},
+                )
+            finally:
+                if self._plot_theme != prev:
+                    self.setPlotTheme(prev)
+            failed = status.startswith("Copy failed")
+            # Neutral message: this is a clipboard copy, not tied to any one app.
+            msg = status if failed else "Copied panel to clipboard"
+            try:
+                from widgets.toast import Toast
+                Toast.show_message(self.window(), msg,
+                                   kind="danger" if failed else "success")
+            except Exception:
+                pass
+            self.panelCopied.emit(msg)
+
+        def eventFilter(self, obj, event):
+            if obj is getattr(self, "_copy_btn", None):
+                if event.type() == QEvent.Enter:
+                    self._copy_btn_hovered = True
+                    self._copy_hide_timer.stop()
+                elif event.type() == QEvent.Leave:
+                    self._copy_btn_hovered = False
+                    self._copy_hide_timer.start()
+            return super().eventFilter(obj, event)
 
         # ── public API ───────────────────────────────────────────────────
         def add_subplot(self, *args, **kwargs):

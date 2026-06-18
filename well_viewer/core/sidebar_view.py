@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QTabWidget,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
     QVBoxLayout, QWidget,
 )
 from functools import partial
@@ -110,18 +110,31 @@ def build_sidebar(app, parent: QWidget) -> None:
     app._line_group_hint.setWordWrap(True)
     layout.addWidget(app._line_group_hint)
 
-    # Plot Groups are quick-load well subsets for plotting only. They live
-    # below the main plate selector so users can select wells, save that subset,
-    # and later restore it without creating stats/replicate groups.
-    plot_groups_tabs = QTabWidget(parent)
-    plot_groups_tabs.setObjectName("PlotGroupsSidebarTabs")
-    plot_groups_tabs.tabBar().setExpanding(False)
-    plot_groups_tab = QWidget(plot_groups_tabs)
-    pg_layout = QVBoxLayout(plot_groups_tab)
-    pg_layout.setContentsMargins(8, 8, 8, 8)
-    pg_layout.setSpacing(6)
+    # Heat-map layout configurator (sidebar variant). Hidden by default;
+    # ``_on_tab_change`` reveals it when the Heat Map tab is active.
+    from well_viewer.features.heatmap.sidebar_view import (
+        build_heatmap_layout_sidebar,
+    )
+    heatmap_frame = build_heatmap_layout_sidebar(app, parent)
+    heatmap_frame.setVisible(False)
 
-    name_row = QWidget(plot_groups_tab)
+    # Absorb leftover vertical space so the well picker stays pinned to the
+    # top of the sidebar even when the sidebar is taller than its contents.
+    # Placed *before* the Plot Groups drawer so that drawer is pinned to the
+    # bottom of the sidebar and expands upward (see below).
+    layout.addStretch(1)
+
+    # Plot Groups are quick-load well subsets for plotting only. They live in a
+    # collapsible drawer pinned to the bottom of the sidebar so users can save
+    # the current selection and restore it later without creating stats /
+    # replicate groups. Collapsed by default — only the header shows until the
+    # user opens it — so the name field + saved-group list never push up into
+    # (and overlap) the selected-well count bar above the plate.
+    from widgets.collapsible_section import CollapsibleSection
+    plot_groups_section = CollapsibleSection("Plot Groups", parent, expanded=False)
+    plot_groups_section.setObjectName("PlotGroupsDrawer")
+
+    name_row = QWidget(plot_groups_section)
     nr = QHBoxLayout(name_row)
     nr.setContentsMargins(0, 0, 0, 0)
     nr.setSpacing(6)
@@ -136,40 +149,30 @@ def build_sidebar(app, parent: QWidget) -> None:
     )
     add_btn.clicked.connect(lambda _=False: _plot_groups_add_current(app))
     nr.addWidget(add_btn)
-    pg_layout.addWidget(name_row)
+    plot_groups_section.addWidget(name_row)
 
-    app._plot_groups_empty_label = QLabel("No Plot Groups yet.", plot_groups_tab)
+    app._plot_groups_empty_label = QLabel("No Plot Groups yet.", plot_groups_section)
     app._plot_groups_empty_label.setObjectName("Muted")
     app._plot_groups_empty_label.setWordWrap(True)
-    pg_layout.addWidget(app._plot_groups_empty_label)
+    plot_groups_section.addWidget(app._plot_groups_empty_label)
 
-    scroll = QScrollArea(plot_groups_tab)
+    scroll = QScrollArea(plot_groups_section)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QScrollArea.NoFrame)
+    # Cap the list height so a long set of saved groups scrolls inside the
+    # drawer instead of growing it tall enough to cover the plate.
+    scroll.setMaximumHeight(200)
     app._plot_groups_list_widget = QWidget(scroll)
     app._plot_groups_list_layout = QVBoxLayout(app._plot_groups_list_widget)
     app._plot_groups_list_layout.setContentsMargins(0, 0, 0, 0)
     app._plot_groups_list_layout.setSpacing(4)
     scroll.setWidget(app._plot_groups_list_widget)
-    pg_layout.addWidget(scroll, 1)
+    plot_groups_section.addWidget(scroll)
 
-    plot_groups_tabs.addTab(plot_groups_tab, "Plot Groups")
-    layout.addWidget(plot_groups_tabs)
-    app._plot_groups_sidebar_tabs = plot_groups_tabs
+    layout.addWidget(plot_groups_section)
+    app._plot_groups_sidebar_section = plot_groups_section
     app._plot_groups_add_btn = add_btn
     app._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(app)
-
-    # Heat-map layout configurator (sidebar variant). Hidden by default;
-    # ``_on_tab_change`` reveals it when the Heat Map tab is active.
-    from well_viewer.features.heatmap.sidebar_view import (
-        build_heatmap_layout_sidebar,
-    )
-    heatmap_frame = build_heatmap_layout_sidebar(app, parent)
-    heatmap_frame.setVisible(False)
-
-    # Absorb leftover vertical space so the well picker stays pinned to the
-    # top of the sidebar even when the sidebar is taller than its contents.
-    layout.addStretch(1)
 
 
 def _plot_groups_schedule_save(app) -> None:

@@ -31,7 +31,9 @@ def from_dict(app, data) -> None:
     """Restore selections state on *app* from a saved (v1 or v2) payload.
     v1 is migrated by ``from_block``."""
     tok_to_label = app._app_state.dataset.tok_to_label
-    selections, current_id, _labels, _notes = _sel.from_block(data, tok_to_label=tok_to_label)
+    selections, current_id, _labels, _notes, _plot_groups = _sel.from_block(
+        data, tok_to_label=tok_to_label,
+    )
     app._app_state.selection.selections = selections
     app._app_state.selection.current_selection_id = current_id
 

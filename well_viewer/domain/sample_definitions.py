@@ -66,13 +66,16 @@ def build_sample_definitions_v2(
     current_id: Optional[str] = None,
     *,
     notes: str = "",
+    plot_groups: Any = None,
 ) -> Dict[str, Any]:
     """Snapshot the unified ``selections`` state as a JSON-friendly v2 block.
 
     (Schema v2 — ``schema_version: 2`` + ``selections`` + ``current_id``; the
     legacy ``rep_sets`` / ``groups`` keys are intentionally absent.)
     """
-    return _sel_model.to_block(list(selections or []), well_labels, notes, current_id)
+    return _sel_model.to_block(
+        list(selections or []), well_labels, notes, current_id, plot_groups,
+    )
 
 
 def _backup_pre_v2(info_path: Path) -> None:
@@ -177,5 +180,4 @@ def read_sample_definitions(out_dir: Path) -> Optional[Dict[str, Any]]:
     if not isinstance(block, dict):
         return None
     return block
-
 

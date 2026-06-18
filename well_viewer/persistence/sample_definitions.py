@@ -58,8 +58,10 @@ def autosave_to_pipeline_info(app) -> None:
     app._notes_text = notes_text
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
+    plot_groups = list(app._app_state.selection.plot_groups or [])
     block = build_sample_definitions_v2(
         ds.well_labels, selections, current_id, notes=notes_text,
+        plot_groups=plot_groups,
     )
     try:
         _write_block(ds.data_dir, block)
@@ -94,8 +96,10 @@ def save_to_pipeline_info(app) -> None:
     app._notes_text = notes_text
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
+    plot_groups = list(app._app_state.selection.plot_groups or [])
     block = build_sample_definitions_v2(
-        app._app_state.dataset.well_labels, selections, current_id, notes=notes_text,
+        app._app_state.dataset.well_labels, selections, current_id,
+        notes=notes_text, plot_groups=plot_groups,
     )
     try:
         info_path = _write_block(app._app_state.dataset.data_dir, block)
@@ -109,7 +113,8 @@ def save_to_pipeline_info(app) -> None:
     app._set_status(
         f"Sample definitions saved to {info_path.name}: "
         f"{len(block['well_labels'])} label(s), "
-        f"{len(selections)} selection(s)"
+        f"{len(selections)} selection(s), "
+        f"{len(plot_groups)} plot group(s)"
         + (f" ({n_hidden} hidden)" if n_hidden else "")
         + " (schema v2)."
     )
@@ -155,7 +160,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
     try:
         # Don't honour line order here — line_order.json loads *after* this; its
         # loader re-applies the reorder.
-        selections, current_id, well_labels, notes = _sel.from_block(
+        selections, current_id, well_labels, notes, plot_groups = _sel.from_block(
             block, tok_to_label=tok_to_label)
     except Exception:  # pragma: no cover - defensive: never crash on bad data
         _logger.exception("Couldn't upgrade saved sample definitions — using "
@@ -170,6 +175,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
 
     app._app_state.selection.selections = selections
     app._app_state.selection.current_selection_id = current_id
+    app._app_state.selection.plot_groups = plot_groups
     if was_v1:
         # Surface the migration so users know an upgrade happened; the new
         # state will be persisted with a backup the next time they Save.
@@ -236,6 +242,10 @@ def save_all(app) -> None:
         except Exception:
             _logger.exception("Ratio panel apply failed during Save")
     save_to_pipeline_info(app)
+    try:
+        app._persistence.save("plot_groups")
+    except Exception:
+        _logger.exception("Plot Groups save during combined Save failed")
     _ratios.save_to_data_dir(app)
     try:
         _cell_gating.save_to_pipeline_info(app)
@@ -267,6 +277,11 @@ def load_all(app) -> None:
             app._groups_centre_refresh()
         except Exception:
             _logger.exception("Sample Definitions refresh after Load failed")
+    if hasattr(app, "_plot_groups_refresh"):
+        try:
+            app._plot_groups_refresh()
+        except Exception:
+            _logger.exception("Plot Groups refresh after Load failed")
     panel = getattr(app, "_ratio_panel", None)
     if panel is not None:
         try:
@@ -315,6 +330,11 @@ def clear_all(app) -> None:
 
     app._app_state.selection.selections = []
     app._app_state.selection.current_selection_id = None
+    app._app_state.selection.plot_groups = []
+    try:
+        app._persistence.save("plot_groups")
+    except Exception:
+        _logger.exception("Plot Groups save after Clear failed")
 
     app._set_ratio_metrics([])
 
@@ -339,6 +359,11 @@ def clear_all(app) -> None:
             app._groups_centre_refresh()
         except Exception:
             _logger.exception("Sample Definitions refresh after Clear failed")
+    if hasattr(app, "_plot_groups_refresh"):
+        try:
+            app._plot_groups_refresh()
+        except Exception:
+            _logger.exception("Plot Groups refresh after Clear failed")
     app._invalidate_stats_cache()
     if hasattr(app, "_redraw"):
         try:

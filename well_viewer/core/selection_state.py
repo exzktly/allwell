@@ -39,6 +39,7 @@ class SelectionState:
 
     selections: list[dict] = field(default_factory=list)
     current_selection_id: str | None = None
+    plot_groups: list[dict] = field(default_factory=list)
     v2_writes_disabled: bool = False
 
     plate_commit_pending: bool = False

@@ -538,11 +538,13 @@ def from_block(block: Any, *, tok_to_label: Any = None,
     well_labels = _clean_labels(block.get("well_labels"))
     notes_raw = block.get("notes", "")
     notes = notes_raw if isinstance(notes_raw, str) else ""
-    return selections, current_id, well_labels, notes
+    from well_viewer.domain.plot_groups import validate_repair_plot_groups
+    plot_groups = validate_repair_plot_groups(block.get("plot_groups"))
+    return selections, current_id, well_labels, notes, plot_groups
 
 
 def to_block(selections: Sequence[dict], well_labels: Any = None, notes: Any = "",
-             current_id: Any = None) -> dict:
+             current_id: Any = None, plot_groups: Any = None) -> dict:
     """Serialise unified state to a v2 ``sample_definitions`` block.
 
     Drops the legacy ``rep_sets`` / ``groups`` keys; adds ``schema_version: 2``.
@@ -550,6 +552,7 @@ def to_block(selections: Sequence[dict], well_labels: Any = None, notes: Any = "
     key of ``pipeline_info.json`` while preserving every other key verbatim.
     """
     sels = validate_repair(list(selections or []))
+    from well_viewer.domain.plot_groups import validate_repair_plot_groups
     return {
         "schema_version": SCHEMA_VERSION,
         "selections": sels,
@@ -558,6 +561,7 @@ def to_block(selections: Sequence[dict], well_labels: Any = None, notes: Any = "
                        else (sels[0]["id"] if sels else "")),
         "well_labels": _clean_labels(well_labels),
         "notes": str(notes or ""),
+        "plot_groups": validate_repair_plot_groups(plot_groups),
     }
 
 

@@ -90,6 +90,7 @@ def load_directory(app, d: Path, label=None) -> None:
     app._app_state.selection.selected_wells.clear()
     app._app_state.selection.last_sel = None
     app._app_state.selection.prev_sel = set()
+    app._app_state.selection.plot_groups = []
     app._app_state.plot.bar_order = None
     # Drop the per-channel threshold (min, max) cache; the new dataset's
     # ranges may be completely different.
@@ -135,6 +136,15 @@ def load_directory(app, d: Path, label=None) -> None:
             app._load_sample_definitions_from_pipeline_info()
         except Exception:
             swallowed()  # was: pass (silent except)
+    try:
+        app._persistence.load("plot_groups")
+    except Exception:
+        swallowed()
+    if hasattr(app, "_plot_groups_refresh"):
+        try:
+            app._plot_groups_refresh()
+        except Exception:
+            swallowed()
     # Hydrate per-cell Segmentation-tab overrides (cell_overrides.json) before
     # any controller queries cached rows, then project them onto row['Included']
     # so all downstream stats honor user curation. Both calls are safe no-ops
@@ -337,4 +347,3 @@ def load_path_shim(app, path):
     refresh_chips = getattr(app, "_refresh_status_chips", None)
     if callable(refresh_chips):
         refresh_chips()
-

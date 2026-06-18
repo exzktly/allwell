@@ -19,11 +19,15 @@ def test_image_browser_is_single_rail_entry(viewer_app):
     # The former top-level image tabs are gone from the rail — they're sub-tabs.
     for leaf in _SUBTABS:
         assert leaf not in names
-    # The rail entry carries the icon + lazy-only flag (heavy image deps).
+    # The rail entry carries the section icon.
     assert app._SECTION_ICONS.get("Image Browser")
-    assert "Image Browser" in app._centre_lazy_only_titles
-    # smFISH stays its own separate rail entry (not an image-review surface).
+    # It is NOT lazy-only: like the old Image Table / Segmentation tabs it
+    # drains and eagerly builds its Segmentation + Image Table sub-tabs (the
+    # heavier Cell Browser / Playground sub-tabs stay lazy). smFISH stays its
+    # own separate, lazy-only rail entry (not an image-review surface).
+    assert "Image Browser" not in app._centre_lazy_only_titles
     assert "smFISH" in names
+    assert "smFISH" in app._centre_lazy_only_titles
 
 
 def test_subtabs_resolve_as_leaf_tabs(viewer_app):

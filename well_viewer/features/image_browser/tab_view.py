@@ -50,7 +50,12 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     sub_tabs.currentChanged.connect(
         lambda idx: ctl.on_image_browser_subtab_changed(ctx.app, idx))
 
-    # Build the initially-selected sub-tab eagerly so the first paint after the
-    # user opens Image Browser shows content (and so the leaf the sidebar
-    # dispatch lands on already has its widgets).
+    # Eagerly build the commonly-used sub-tabs (Segmentation — the initial,
+    # current sub-tab — and Image Table), matching the laziness profile of the
+    # old top-level tabs they replaced. The heavier Cell Browser / Playground
+    # sub-tabs stay lazy: built on first sub-tab click.
     ctl.build_image_browser_subtab(ctx.app, sub_tabs.currentIndex())
+    for i in range(sub_tabs.count()):
+        if sub_tabs.tabText(i) == "Image Table":
+            ctl.build_image_browser_subtab(ctx.app, i)
+            break

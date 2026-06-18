@@ -61,11 +61,9 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
 
 def test_cell_browser_section_icon_registered(viewer_app):
     # Cell Browser is now a sub-tab of the unified Image Browser rail entry —
-    # it's the rail entry that carries the section icon + lazy-only flag.
+    # it's the rail entry that carries the section icon, not the leaf.
     assert viewer_app._SECTION_ICONS.get("Image Browser")
     assert "Cell Browser" not in viewer_app._SECTION_ICONS
-    # Heavy worker deps → lazy-only (builds on first click, not in the drain).
-    assert "Image Browser" in viewer_app._centre_lazy_only_titles
 
 
 def test_cell_browser_click_navigates_to_segmentation(loaded_app):

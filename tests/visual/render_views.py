@@ -123,10 +123,24 @@ def make_app(load: bool):
     return w, rev
 
 
+# Image-review surfaces are now sub-tabs of the unified "Image Browser" rail
+# entry, not top-level pages.
+_IMAGE_BROWSER_SUBTABS = ("Segmentation", "Image Table", "Cell Browser", "Playground")
+
+
 def goto(app, rev, page: str) -> bool:
-    """Switch the centre notebook to *page*; force lazy body build + settle."""
+    """Switch the centre notebook to *page*; force lazy body build + settle.
+
+    *page* may be a top-level page name or an Image Browser sub-tab leaf
+    ("Segmentation" / "Image Table" / "Cell Browser" / "Playground"), in which
+    case it navigates to the Image Browser rail entry and selects the sub-tab.
+    """
     nb = rev._notebook
-    ok = nb.setCurrentByName(page)
+    if page in _IMAGE_BROWSER_SUBTABS:
+        from well_viewer.features.image_browser.controller import show_image_browser_subtab
+        ok = show_image_browser_subtab(rev, page)
+    else:
+        ok = nb.setCurrentByName(page)
     rev._drain_pending_centre_builders()
     settle(app)
     return ok

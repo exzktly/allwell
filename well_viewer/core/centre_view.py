@@ -129,11 +129,12 @@ def build_centre(app, parent: QWidget) -> None:
     # Tabs whose construction we never want to run from the background
     # drain — they only build on first user access (tab click). The tabs
     # listed here pull in the heaviest dependencies (matplotlib QtAgg,
-    # skimage, tifffile) that aren't worth amortising at startup. "Image
-    # Browser" is the unified image-review rail entry (Segmentation / Image
-    # Table / Cell Browser / Playground sub-tabs) — its sub-tab bodies pull the
-    # image-table loaders, so it (and each sub-tab inside it) builds on demand.
-    lazy_only: Set[str] = {"smFISH", "Image Browser"}
+    # skimage, tifffile) that aren't worth amortising at startup. The unified
+    # "Image Browser" rail entry is NOT lazy-only: like the old top-level Image
+    # Table / Segmentation tabs, its container drains and eagerly builds the
+    # commonly-used Segmentation + Image Table sub-tabs, while the heavier Cell
+    # Browser / Playground sub-tabs stay lazy (built on first sub-tab click).
+    lazy_only: Set[str] = {"smFISH"}
     app._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can

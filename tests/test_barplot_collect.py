@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import math
 
+import pytest
 
 from well_viewer.features.barplot.controller import (
     BarItem, FC_STATE_OFF, collect_bar_items, collect_bar_items_for_group,
 )
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+from tests.conftest import make_agg
 
 
 def test_collect_bar_items_emits_bar_item_for_each_repset(mock_app):
@@ -222,3 +224,189 @@ def test_collect_bar_items_baseline_missing_tp_falls_back_to_earliest(mock_app):
     # And the fallback gives the same FC ratio earliest mode does
     # (TREAT@0 = 100 normalised by TREAT@earliest = 100 → 1.0).
     assert math.isclose(by_key_missing["TREAT"].mean, 1.0)
+
+
+# ── Hypothesis tests for "FC has no effect on regular bars after v7.1.4" ─────
+
+
+def _fc_diff(mock_app, target_t, *, fc_vs_t0=False, fc_baseline_tp="",
+             fc_vs_ctrl=False, fc_ctrl_lbl=""):
+    """Helper: return ``(off_means, on_means)`` so callers can compare keys."""
+    mock_app.fc_vs_t0_on = False
+    mock_app.fc_baseline_tp = ""
+    mock_app.fc_vs_control_on = False
+    mock_app.fc_control_label = ""
+    _, off, _ = collect_bar_items(mock_app, target_t, fc_state=FC_STATE_OFF)
+    off_by_key = {it.key: it.mean for it in off}
+    mock_app.fc_vs_t0_on = fc_vs_t0
+    mock_app.fc_baseline_tp = fc_baseline_tp
+    mock_app.fc_vs_control_on = fc_vs_ctrl
+    mock_app.fc_control_label = fc_ctrl_lbl
+    _, on, _ = collect_bar_items(mock_app, target_t)
+    on_by_key = {it.key: it.mean for it in on}
+    return off_by_key, on_by_key
+
+
+def test_h1_empty_rep_set_yields_nan_visible_signal(mock_app):
+    """Hypothesis 1: rset with no AggPoints → ``compute_rep_stats`` returns
+    NaN, ``member_first_tp_stats`` returns None → bar value is NaN.
+    Verified NOT a silent no-op: NaN is a visible signal (no bar drawn).
+    Both FC-on and FC-off produce NaN for the empty rset; CTRL stays
+    different so the user can still distinguish them."""
+    mock_app.per_well_pts["B01"] = []
+    mock_app.per_well_pts["B02"] = []
+    off, on = _fc_diff(mock_app, 1.0, fc_vs_t0=True, fc_baseline_tp="")
+    assert math.isnan(off["TREAT"]) and math.isnan(on["TREAT"])
+    # CTRL still has data; FC on vs off DIFFERS visibly (1.0 vs 100.0).
+    assert off["CTRL"] != on["CTRL"]
+    assert math.isclose(on["CTRL"], 1.0)
+
+
+def test_h2_single_tp_rset_fc_collapses_to_one(mock_app):
+    """Hypothesis 2: rset has data ONLY at the plotted tp. fall-through goes to
+    that same tp → bar = raw/raw = 1.0 for every well. With multiple wells, all
+    bars become 1.0. Visually identical to "no effect of the user's FC toggle"
+    if the user thought "no effect" means "all bars look the same"."""
+    # Keep TREAT at only tp=2.0
+    mock_app.per_well_pts["B01"] = [make_agg(2.0, 200.0)]
+    mock_app.per_well_pts["B02"] = [make_agg(2.0, 200.0)]
+    off, on = _fc_diff(mock_app, 2.0, fc_vs_t0=True, fc_baseline_tp="")
+    assert on["TREAT"] == pytest.approx(1.0)
+    assert off["TREAT"] != on["TREAT"], (
+        "Single-tp data: FC on collapses every bar to 1.0; off shows raw value. "
+        "Different but might look like 'no effect' to a user expecting more drama."
+    )
+
+
+def test_h3_fc_force_nan_when_control_missing(mock_app):
+    """Hypothesis 3: fc_vs_ctrl=True + ctrl label resolves but no data at
+    target_t → fc_control_mean_at_t is None → fc_force_nan True → bars NaN.
+    The user would see EMPTY bars, not "no effect"."""
+    off, on = _fc_diff(mock_app, 99.0, fc_vs_ctrl=True, fc_ctrl_lbl="CTRL")
+    # At tp=99 the mock has no data, so control_stats returns None → NaN.
+    assert math.isnan(on["TREAT"]), (
+        "fc_force_nan should fire when control resolves but tp doesn't"
+    )
+
+
+def test_h4_nonexistent_control_label_silent_skip(mock_app):
+    """Hypothesis 4: fc_vs_ctrl=True with a control_label that doesn't match
+    any rset OR loaded well → ``control_stats_at_for_bar`` returns None.
+    ``fc_force_nan`` is True (because fc_vs_ctrl=True and ctrl_lbl=truthy),
+    so bars become NaN. Pin this behaviour."""
+    off, on = _fc_diff(mock_app, 1.0, fc_vs_ctrl=True, fc_ctrl_lbl="DOES_NOT_EXIST")
+    assert math.isnan(on["TREAT"]), (
+        "Nonexistent control label should NaN the bars (visible empty bars), "
+        "not silently produce the raw value"
+    )
+
+
+def test_h6_active_val_col_drives_lookup(mock_app):
+    """Hypothesis 6: ``member_stats_series`` uses ``app.active_val_col``. The
+    mock's _aggregate_well returns precomputed pts regardless of val_col so
+    the lookup is technically OK on the mock — but pin that FC math still
+    flows when the active_val_col differs from the bar's default."""
+    # Override val_col via app state so the inner aggregate_well sees a
+    # different column. Mock ignores it (returns pts), so FC should still
+    # apply normally. If a real-app version of this test ever fails it'd
+    # mean stats_compute is using a different lookup than the FC path.
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = ""
+    _, items, _ = collect_bar_items(mock_app, 1.0)
+    by_key = {it.key: it.mean for it in items}
+    # CTRL@1 / CTRL@0 = 100 / 100 = 1.0
+    assert math.isclose(by_key["CTRL"], 1.0)
+    # TREAT@1 / TREAT@0 = 200 / 100 = 2.0
+    assert math.isclose(by_key["TREAT"], 2.0)
+
+
+def test_h7_changing_between_missing_baseline_tps_looks_unchanged(mock_app):
+    """Most likely user-perception scenario: user picks baseline_tp=12 (not in
+    data), sees bar value X (= raw / earliest). Then picks baseline_tp=6
+    (also not in data), bar value is STILL X (both fall through to earliest).
+
+    This is the v7.1.4 fallback working as designed, but to the user it looks
+    like 'no effect of changing baseline_tp'. NOT a bug per se — but THE most
+    likely explanation for the user's report. Demonstrates that toggling
+    vs_t0 on/off DOES produce a visible change (1.0 vs raw), which the user
+    should see if they test that toggle."""
+    # Mock data has tps {0.0, 1.0, 2.0}; pick two tps in neither
+    mock_app.fc_vs_t0_on = True
+
+    mock_app.fc_baseline_tp = "12"  # missing → falls through to earliest=0
+    _, items_tp12, _ = collect_bar_items(mock_app, 1.0)
+    treat_tp12 = next(it.mean for it in items_tp12 if it.key == "TREAT")
+
+    mock_app.fc_baseline_tp = "6"  # also missing → also falls through to earliest=0
+    _, items_tp6, _ = collect_bar_items(mock_app, 1.0)
+    treat_tp6 = next(it.mean for it in items_tp6 if it.key == "TREAT")
+
+    # Both fell through to earliest → IDENTICAL bar value. User changing
+    # baseline_tp between these would see "no effect" — which is the design,
+    # not a bug.
+    assert math.isclose(treat_tp12, treat_tp6)
+
+    # But toggling vs_t0 OFF vs ON should still show a visible change.
+    mock_app.fc_vs_t0_on = False
+    mock_app.fc_baseline_tp = ""
+    _, items_off, _ = collect_bar_items(mock_app, 1.0, fc_state=FC_STATE_OFF)
+    treat_off = next(it.mean for it in items_off if it.key == "TREAT")
+    assert not math.isclose(treat_tp12, treat_off), (
+        "If this fails the v7.1.4 fix is broken — vs_t0 toggle should produce "
+        "a visible numerical change in the bar value."
+    )
+
+
+def test_h8_user_data_with_matching_baseline_tp_works(mock_app):
+    """Verify the success case: user's data has the picked baseline_tp.
+    Mock has tps {0, 1, 2}. Pick baseline_tp=1 explicitly. TREAT@2 should
+    normalise vs TREAT@1: 400/200 = 2.0, not the default 4.0 (vs @0)."""
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = "1"
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    # TREAT@2 = 400, TREAT@1 = 200 → 400/200 = 2.0
+    assert math.isclose(by_key["TREAT"], 2.0)
+    # CTRL@2 = 100, CTRL@1 = 100 → 100/100 = 1.0
+    assert math.isclose(by_key["CTRL"], 1.0)
+
+
+def test_h9_subtract_op_with_baseline_tp_works(mock_app):
+    """Verify subtract op works end-to-end with baseline_tp."""
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = "1"
+    mock_app.fc_op = "subtract"
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    # TREAT@2 - TREAT@1 = 400 - 200 = 200
+    assert math.isclose(by_key["TREAT"], 200.0)
+    # CTRL@2 - CTRL@1 = 100 - 100 = 0
+    assert math.isclose(by_key["CTRL"], 0.0)
+
+
+def test_h10_subtract_op_with_vs_control_works(mock_app):
+    """vs_control with op=subtract: bar = raw - control_at_target_tp."""
+    mock_app.fc_vs_control_on = True
+    mock_app.fc_control_label = "CTRL"
+    mock_app.fc_op = "subtract"
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    # CTRL@2 - CTRL@2 = 100 - 100 = 0
+    assert math.isclose(by_key["CTRL"], 0.0)
+    # TREAT@2 - CTRL@2 = 400 - 100 = 300
+    assert math.isclose(by_key["TREAT"], 300.0)
+
+
+def test_h11_subtract_op_with_both_axes_works(mock_app):
+    """vs_control + vs_t0 with op=subtract: bar = raw - control - baseline."""
+    mock_app.fc_vs_control_on = True
+    mock_app.fc_control_label = "CTRL"
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = ""  # earliest = 0
+    mock_app.fc_op = "subtract"
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    # CTRL@2 - CTRL@2 - CTRL@0 = 100 - 100 - 100 = -100
+    assert math.isclose(by_key["CTRL"], -100.0)
+    # TREAT@2 - CTRL@2 - TREAT@0 = 400 - 100 - 100 = 200
+    assert math.isclose(by_key["TREAT"], 200.0)

@@ -61,6 +61,7 @@ class MockApp:
     fc_control_label: str = ""
     fc_vs_t0_on: bool = False
     fc_baseline_tp: str = ""
+    fc_op: str = "ratio"
 
     # Read by ``fold_change.fold_change_state`` etc.
     @property
@@ -180,6 +181,7 @@ class MockApp:
         st.plot.fc_control_label = self.fc_control_label
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on
         st.plot.fc_baseline_tp = self.fc_baseline_tp
+        st.plot.fc_op = self.fc_op
         st.plot.bar_order = getattr(self, "_bar_order", None)
         st.plot.line_order_rsets = getattr(self, "_line_order_rsets", [])
         st.plot.line_order_wells = getattr(self, "_line_order_wells", [])

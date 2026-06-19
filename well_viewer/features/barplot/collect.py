@@ -378,6 +378,7 @@ def collect_bar_items_for_group(
     use_sem: bool,
     per_fov_spread: bool,
     fc_state: Tuple[bool, str, bool],
+    fc_baseline_tp: Optional[float] = None,
     fluor_gates: Optional[dict] = None,
     pool_replicates: bool = True,
     group_mode: str = "well",

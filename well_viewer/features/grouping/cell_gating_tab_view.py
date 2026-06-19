@@ -511,17 +511,24 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_opt_max_edit = QLineEdit("100.0", opt_row)
     ctx.app._cell_gating_opt_max_edit.setFixedWidth(80)
     opt_row_layout.addWidget(ctx.app._cell_gating_opt_max_edit)
-    opt_row_layout.addWidget(QLabel("Steps:", opt_row))
+    opt_row_layout.addWidget(QLabel("# Points:", opt_row))
     ctx.app._cell_gating_opt_steps_edit = QLineEdit("101", opt_row)
     ctx.app._cell_gating_opt_steps_edit.setFixedWidth(64)
+    ctx.app._cell_gating_opt_steps_edit.setToolTip(
+        "Number of thresholds scanned across the Min–Max range, evenly "
+        "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
+        "thresholds (every 1 unit across a 0–100 range). Higher values "
+        "give a finer scan at the cost of a little compute."
+    )
     opt_row_layout.addWidget(ctx.app._cell_gating_opt_steps_edit)
     from PySide6.QtWidgets import QPushButton as _QPushButton
     opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
     opt_btn.setProperty("variant", "secondary")
     opt_btn.setToolTip(
-        "Scan thresholds between Min and Max for the selected channel, compute "
-        "fraction-on in Well A and Well B at each threshold, then apply the "
-        "threshold that maximizes their absolute fraction-on difference."
+        "Scan # Points thresholds between Min and Max for the selected "
+        "channel, compute fraction-on in Well A and Well B at each "
+        "threshold, then apply the threshold that maximizes their "
+        "absolute fraction-on difference."
     )
     opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx.app))
     ctx.app._cell_gating_opt_btn = opt_btn
@@ -1275,10 +1282,22 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
         timepoint = tp_combo.currentData() if tp_combo is not None else None
     except ValueError:
-        _status("Optimize ThreshFracOn: min, max, and steps must be numeric.")
+        _status("Optimize ThreshFracOn: Min, Max, and # Points must be numeric.")
         return
     except Exception as exc:
         _status(f"Optimize ThreshFracOn: controls are not ready ({exc}).")
+        return
+    # # Points is the NUMBER OF thresholds we scan (numpy.linspace's third
+    # arg), NOT a step size. A small value (e.g. 2) only samples the
+    # endpoints — argmax(|Δ|) then lands at whichever boundary has the
+    # bigger diff, which is a useless answer. Refuse the degenerate range
+    # with a user-facing message so the field's semantics is unmissable.
+    if steps < 10:
+        _status(
+            "Optimize ThreshFracOn: # Points must be at least 10 — it's the "
+            "number of thresholds scanned across the Min–Max range, not a "
+            "step size."
+        )
         return
 
     try:
@@ -1295,63 +1314,6 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
     except ValueError as exc:
         _status(f"Optimize ThreshFracOn: {exc}")
         return
-
-    # ── one-shot diagnostic ──────────────────────────────────────────────
-    # Re-derives the same value series and diff array the pure function
-    # used, then logs the boundary numbers so we can see WHY argmax keeps
-    # landing at lo on real data. Recomputed locally so the pure function
-    # stays uncoupled from the debug path. Remove this block once the
-    # root cause is identified.
-    try:
-        _ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
-        _values_a = _valid_values_for_channel(
-            app._get_rows(well_a), channel_key, _ratios, timepoint,
-        )
-        _values_b = _valid_values_for_channel(
-            app._get_rows(well_b), channel_key, _ratios, timepoint,
-        )
-        _thresholds = np.linspace(lo, hi, int(steps))
-        _diffs = np.array(
-            [
-                abs(_fraction_on_for_threshold(_values_a, float(t))
-                    - _fraction_on_for_threshold(_values_b, float(t)))
-                for t in _thresholds
-            ],
-            dtype=float,
-        )
-        _top_idx = np.argsort(_diffs)[-5:][::-1]
-        _top = [(float(_thresholds[i]), float(_diffs[i])) for i in _top_idx]
-
-        def _summ(arr):
-            return (
-                f"n={arr.size}, min={float(np.nanmin(arr)):.6g}, "
-                f"med={float(np.nanmedian(arr)):.6g}, "
-                f"max={float(np.nanmax(arr)):.6g}, "
-                f"mean={float(np.nanmean(arr)):.6g}"
-            ) if arr.size else "n=0"
-
-        logger.info(
-            "OPT-DIAG channel=%s tp=%s well_a=%s well_b=%s "
-            "Min=%.6g Max=%.6g steps=%d | "
-            "values_a: %s | values_b: %s | "
-            "linspace[0]=%.6g linspace[-1]=%.6g | "
-            "diffs[0]=%.6g diffs[-1]=%.6g diffs.max=%.6g argmax=%d | "
-            "top5(thr,diff)=%s | "
-            "result.threshold=%.6g result.frac_a=%.6g result.frac_b=%.6g "
-            "result.difference=%.6g result.n_a=%d result.n_b=%d",
-            channel_key, timepoint, well_a, well_b,
-            lo, hi, int(steps),
-            _summ(_values_a), _summ(_values_b),
-            float(_thresholds[0]), float(_thresholds[-1]),
-            float(_diffs[0]), float(_diffs[-1]),
-            float(_diffs.max()), int(np.argmax(_diffs)),
-            _top,
-            result.threshold, result.frac_a, result.frac_b,
-            result.difference, result.n_a, result.n_b,
-        )
-    except Exception:
-        logger.exception("OPT-DIAG failed")
-    # ── end diagnostic ───────────────────────────────────────────────────
 
     tp_note = "" if timepoint is None else f" at {_timepoint_label(timepoint)}"
     # A zero best difference means the scan range never crossed where the two

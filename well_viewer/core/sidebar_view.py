@@ -278,19 +278,28 @@ def _plot_groups_load(app, group_id: str) -> None:
     # group picked from any sidebar (plotting or Image Table) immediately
     # drives the Image Table grid — without this, the Image Table's plate
     # picker stayed pinned to its own previous selection.
+    #
+    # The plate's ``setSelectedWellIds`` emits ``selectionChanged``, which
+    # the picker view wires to ``_on_plate_changed`` — that handler is the
+    # canonical mutator for ``image_table.active_wells`` AND triggers the
+    # grid refresh (``image_table_refresh_picker``). So the only thing we
+    # need to do here is feed the plate the wells; we don't write
+    # ``active_wells`` ourselves (it would race with the signal handler).
+    # When the plate widget doesn't exist yet (user hasn't opened Image
+    # Table this session, so its sidebar wasn't built), fall back to
+    # writing ``active_wells`` directly so the state is correct when the
+    # tab does build.
     try:
-        image_table_state = getattr(app._app_state, "image_table", None)
-        if image_table_state is not None:
-            image_table_state.active_wells = set(wells)
         plate = getattr(app, "_sidebar_image_table_plate", None)
         if plate is not None:
             try:
-                plate.setSelectedWells(sorted(wells))
+                plate.setSelectedWellIds(sorted(wells))
             except Exception:
                 swallowed("plot_groups: image table plate sync")
-        refresh = getattr(app, "_image_table_refresh_picker", None)
-        if callable(refresh):
-            refresh()
+        else:
+            image_table_state = getattr(app._app_state, "image_table", None)
+            if image_table_state is not None:
+                image_table_state.active_wells = set(wells)
     except Exception:
         _logger.debug("plot_groups: image table active_wells sync failed", exc_info=True)
     try:

@@ -37,7 +37,7 @@ import pandas as pd
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
@@ -1345,6 +1345,130 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         f"{well_b} fraction-on={result.frac_b:.3f} (n={result.n_b}); "
         f"|Δ|={result.difference:.3f}."
     )
+    # Validation popup: show fraction-on(A), fraction-on(B), and |Δ| as
+    # functions of the scanned threshold, with the chosen threshold marked.
+    # Lets the user eyeball whether argmax landed where they'd expect, vs.
+    # what the full diff curve actually looks like.
+    try:
+        _cell_gating_show_opt_curve_popup(
+            app,
+            channel_key=channel_key,
+            well_a=well_a,
+            well_b=well_b,
+            timepoint=timepoint,
+            lo=lo,
+            hi=hi,
+            steps=steps,
+            result=result,
+        )
+    except Exception:
+        swallowed("cell gating: optimizer curve popup failed")
+
+
+def _cell_gating_show_opt_curve_popup(
+    app,
+    *,
+    channel_key: str,
+    well_a: str,
+    well_b: str,
+    timepoint,
+    lo: float,
+    hi: float,
+    steps: int,
+    result: "ThreshFracOptimizationResult",
+) -> None:
+    """Open (or refresh) a non-modal window plotting the optimizer's diff
+    curve. Re-derives values_a, values_b, and the per-threshold fractions
+    locally so the pure function stays uncoupled from the GUI.
+
+    The window stays open across consecutive Optimize clicks — subsequent
+    clicks just repaint the existing axes, so the user can iterate on
+    wells / timepoints / range and watch the curve update.
+    """
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+
+    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    values_a = _valid_values_for_channel(
+        app._get_rows(well_a), channel_key, ratios, timepoint,
+    )
+    values_b = _valid_values_for_channel(
+        app._get_rows(well_b), channel_key, ratios, timepoint,
+    )
+    thresholds = np.linspace(lo, hi, int(steps))
+    frac_a = np.array(
+        [_fraction_on_for_threshold(values_a, float(t)) for t in thresholds],
+        dtype=float,
+    )
+    frac_b = np.array(
+        [_fraction_on_for_threshold(values_b, float(t)) for t in thresholds],
+        dtype=float,
+    )
+    diffs = np.abs(frac_a - frac_b)
+
+    popup = getattr(app, "_cell_gating_opt_curve_popup", None)
+    if popup is None or not popup.isVisible():
+        popup = QDialog(getattr(app, "_cell_gating_frame", None) or app)
+        popup.setWindowTitle("Optimizer curve")
+        popup.resize(820, 460)
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(8, 8, 8, 8)
+        fig = Figure(figsize=(7.8, 4.4), dpi=100)
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        # Wire the matplotlib toolbar so the user can pan/zoom/save the
+        # curve while keeping the popup non-modal.
+        from widgets.mpl_toolbar import MplToolbar
+        toolbar = MplToolbar(canvas, popup)
+        layout.addWidget(toolbar)
+        popup.finished.connect(
+            lambda _r: setattr(app, "_cell_gating_opt_curve_popup", None)
+        )
+        popup._fig = fig
+        popup._canvas = canvas
+        app._cell_gating_opt_curve_popup = popup
+        popup.show()
+
+    fig = popup._fig
+    fig.clear()
+    bg_panel = get_color("BG_PANEL")
+    txt_pri = get_color("TXT_PRI")
+    txt_mut = get_color("TXT_MUT")
+    accent = get_color("ACCENT")
+    fig.patch.set_facecolor(bg_panel)
+    ax = fig.add_subplot(111)
+    ax.set_facecolor(bg_panel)
+    for spine in ax.spines.values():
+        spine.set_color(txt_mut)
+    ax.tick_params(colors=txt_mut)
+
+    ax.plot(thresholds, frac_a, color="#4FC3F7", lw=1.4,
+            label=f"fraction-on({well_a})")
+    ax.plot(thresholds, frac_b, color="#FF8A65", lw=1.4,
+            label=f"fraction-on({well_b})")
+    ax.plot(thresholds, diffs, color=accent, lw=1.8, label="|Δ|")
+    ax.axvline(
+        result.threshold, color=txt_pri, lw=1.2, ls="--",
+        label=f"chosen threshold = {result.threshold:.4g}",
+    )
+    ax.set_xlim(float(thresholds[0]), float(thresholds[-1]))
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel(f"Threshold ({channel_key})", color=txt_pri)
+    ax.set_ylabel("Fraction-on / |Δ|", color=txt_pri)
+    tp_note = "" if timepoint is None else f" @ {_timepoint_label(timepoint)}"
+    ax.set_title(
+        f"{channel_key}: {well_a} vs {well_b}{tp_note} "
+        f"— scan {lo:g}…{hi:g}, {int(steps)} points",
+        color=txt_pri, fontsize=11,
+    )
+    leg = ax.legend(loc="upper right", framealpha=0.85, fontsize=9)
+    if leg is not None:
+        for txt in leg.get_texts():
+            txt.set_color(txt_pri)
+    fig.tight_layout()
+    popup._canvas.draw_idle()
+    popup.raise_()
+    popup.activateWindow()
 
 
 def cell_gating_update_theme(app) -> None:

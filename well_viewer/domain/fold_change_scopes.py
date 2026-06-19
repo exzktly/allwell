@@ -88,12 +88,28 @@ def current_scope_name(app) -> "str | None":
 
 
 def _call_redraw(app, scope: FoldChangeScope) -> None:
-    """Invoke the scope's redraw callable, swallowing exceptions to a trace."""
-    import traceback
+    """Invoke the scope's redraw callable.
+
+    Logs and surfaces failures via the status bar so a broken redraw doesn't
+    look identical to "no change was made" — the previous ``print_exc``-only
+    handling left the user with a frozen-looking plot and a traceback in
+    stderr they'd never see when running the .app bundle. We still don't
+    let one scope's failure crash the app, but we make sure it's visible.
+    """
+    import logging
+    from well_viewer.core.safe import swallowed
     try:
         scope.redraw(app)
-    except Exception:
-        traceback.print_exc()
+    except Exception as exc:
+        logging.getLogger("well_viewer").exception(
+            "Fold-change redraw failed for scope %r", scope.name,
+        )
+        setter = getattr(app, "_set_status", None)
+        if callable(setter):
+            try:
+                setter(f"Plot redraw failed ({scope.name}): {exc}")
+            except Exception:
+                swallowed("fold_change_scopes: status-bar update failed")
 
 
 def redraw_scopes_or_defer(app) -> None:

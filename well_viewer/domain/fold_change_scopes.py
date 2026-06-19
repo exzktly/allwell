@@ -121,6 +121,19 @@ def redraw_scopes_or_defer(app) -> None:
     so a deferred redraw runs as soon as the user looks at the tab.
     """
     visible = current_scope_name(app)
+    # One-shot diagnostic for the "fold-change change has no effect, no
+    # error" report (v7.1.3+). ``current_scope_name`` returning ``None``
+    # would silently skip every redraw — surface what the dispatcher sees
+    # so the user can paste it back.
+    import logging
+    try:
+        tab_name = app._current_centre_tab() if callable(getattr(app, "_current_centre_tab", None)) else "?"
+    except Exception:
+        tab_name = "?"
+    logging.getLogger("well_viewer").info(
+        "redraw_scopes_or_defer: tab=%r visible_scope=%r registered=%r",
+        tab_name, visible, [s.name for s in registered_scopes()],
+    )
     dirty = _dirty_set(app)
     for scope in registered_scopes():
         if scope.name == visible:

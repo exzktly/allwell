@@ -226,6 +226,14 @@ def set_fold_change_state(
     # redraw — visible scope now, others marked dirty for redraw on tab switch
     # (the tab-change handler calls ``flush_dirty_scopes``). The bus emit *is*
     # the redraw trigger; see redraw_coordinator.py / fold_change_scopes.py.
+    import logging
+    logging.getLogger("well_viewer").info(
+        "fold_change.set_fold_change_state: post-mutation state=(vs_ctrl=%r, ctrl_lbl=%r, vs_t0=%r, baseline_tp=%r) — emitting plot_options_changed",
+        app._app_state.plot.fc_vs_control_on,
+        app._app_state.plot.fc_control_label,
+        app._app_state.plot.fc_vs_t0_on,
+        getattr(app._app_state.plot, "fc_baseline_tp", ""),
+    )
     app._event_bus.plot_options_changed.emit(app._app_state.plot)
 
 
@@ -261,7 +269,11 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
     layout.addWidget(baseline_combo)
 
     def _on_ctrl_changed(_idx: int) -> None:
+        import logging
         text = ctrl_combo.currentText()
+        logging.getLogger("well_viewer").info(
+            "fold_change._on_ctrl_changed scope=%r text=%r", scope, text,
+        )
         if text == _NONE_LABEL or not text:
             set_fold_change_state(
                 app, vs_control_on=False, control_label="",
@@ -274,7 +286,11 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
             )
 
     def _on_baseline_changed(_idx: int) -> None:
+        import logging
         text = baseline_combo.currentText()
+        logging.getLogger("well_viewer").info(
+            "fold_change._on_baseline_changed scope=%r text=%r", scope, text,
+        )
         if text == _NONE_LABEL or not text:
             set_fold_change_state(
                 app, vs_t0_on=False, baseline_tp="",

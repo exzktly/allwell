@@ -462,11 +462,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
     ctx.app._cell_gating_plot_scroll.setMinimumHeight(420)
     install_canvas_wheel_scroll(ctx.app._cell_gating_canvas, ctx.app._cell_gating_plot_scroll)
-    root.addWidget(ctx.app._cell_gating_plot_scroll)
 
     from widgets.mpl_toolbar import MplToolbar
     ctx.app._cell_gating_toolbar = MplToolbar(ctx.app._cell_gating_canvas, parent)
-    root.addWidget(ctx.app._cell_gating_toolbar)
 
     ctx.app._cell_gating_status_label = QLabel("No data loaded", parent)
     ctx.app._cell_gating_status_label.setObjectName("Muted")
@@ -560,6 +558,13 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_opt_result_label.setWordWrap(True)
     opt_layout.addWidget(ctx.app._cell_gating_opt_result_label)
     root.addWidget(opt_panel)
+
+    # CDFs anchor the bottom of the tab — controls + optimizer sit above,
+    # CDFs (with their toolbar) are the visual readout the user reads while
+    # tuning those controls, so we put them last.
+    root.addWidget(ctx.app._cell_gating_plot_scroll)
+    root.addWidget(ctx.app._cell_gating_toolbar)
+
     _cell_gating_refresh_optimizer_controls(ctx.app)
 
     # Paint the themed empty state now so the canvas is never a bare white

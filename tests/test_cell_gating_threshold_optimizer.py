@@ -9,7 +9,7 @@ from well_viewer.features.grouping.cell_gating_tab_view import (
 )
 
 
-def _df(values, *, included=None, den=None):
+def _df(values, *, included=None, den=None, qc=None, crop=None):
     if included is None:
         included = [1] * len(values)
     data = {
@@ -19,6 +19,10 @@ def _df(values, *, included=None, den=None):
     }
     if den is not None:
         data["mcherry_mean_intensity"] = den
+    if qc is not None:
+        data["QC_Pass"] = qc
+    if crop is not None:
+        data["Crop_Pass"] = crop
     return pd.DataFrame(data)
 
 
@@ -43,8 +47,13 @@ def test_optimizer_maximizes_absolute_fraction_difference():
     assert result.n_b == 4
 
 
-def test_optimizer_respects_included_mask():
-    a = _df([0, 100], included=[1, 0])
+def test_optimizer_ignores_included_gate():
+    # ``Included`` is set by the asynchronous gating worker from FluorGating —
+    # the very threshold the optimizer is helping pick. Filtering by it would
+    # be circular (and would silently shift the answer the first time the
+    # worker writes the column). The optimizer must see every QC+Crop-valid
+    # cell regardless of the per-channel fluorescence gate.
+    a = _df([0, 100], included=[1, 0])  # the "on" cell is gated out by FluorGating
     b = _df([0, 100], included=[1, 1])
 
     result = _optimize_thresh_frac_on_between_wells(
@@ -56,11 +65,67 @@ def test_optimizer_respects_included_mask():
         steps=2,
     )
 
-    assert result.frac_a == pytest.approx(0.0)
+    # Both wells contribute both cells: A is 50% on, B is 50% on ⇒ no difference.
+    assert result.frac_a == pytest.approx(0.5)
     assert result.frac_b == pytest.approx(0.5)
-    assert result.difference == pytest.approx(0.5)
-    assert result.n_a == 1
+    assert result.difference == pytest.approx(0.0)
+    assert result.n_a == 2
     assert result.n_b == 2
+
+
+def test_optimizer_excludes_qc_and_crop_failures():
+    # QC_Pass / Crop_Pass are independent of the fluorescence gate and ARE
+    # honoured — they remove debris and out-of-region cells from the population
+    # the optimizer scans.
+    a = _df([0, 100], qc=[1, 0])         # the "on" cell fails QC
+    b = _df([0, 100], crop=[0, 1])       # the "off" cell falls outside the crop
+
+    result = _optimize_thresh_frac_on_between_wells(
+        a,
+        b,
+        channel_key="gfp",
+        min_threshold=50,
+        max_threshold=50,
+        steps=2,
+    )
+
+    assert result.frac_a == pytest.approx(0.0)
+    assert result.frac_b == pytest.approx(1.0)
+    assert result.n_a == 1
+    assert result.n_b == 1
+
+
+def test_optimizer_stable_across_gating():
+    # Re-running the optimizer after the background gating worker has written
+    # FluorGating's choices into ``Included`` must return the same threshold —
+    # otherwise the first Optimize is right and every later one drifts (the
+    # original bug: argmax landed at the range edge once Included was filled in).
+    values_a = [0, 5, 10, 50, 100, 200]
+    values_b = [0, 0, 0, 0, 5, 10]
+
+    a_pre = _df(values_a)   # cached frame: Included all 1 (no gating pass yet)
+    b_pre = _df(values_b)
+
+    # Simulate FluorGating's pass: Included becomes ``intensity > FluorGating``
+    # for some chosen FluorGating (here 8). This is the asynchronous mutation
+    # the optimizer used to silently filter itself by.
+    fluor_gate = 8.0
+    a_post = _df(values_a, included=[int(v > fluor_gate) for v in values_a])
+    b_post = _df(values_b, included=[int(v > fluor_gate) for v in values_b])
+
+    pre = _optimize_thresh_frac_on_between_wells(
+        a_pre, b_pre, channel_key="gfp",
+        min_threshold=0, max_threshold=200, steps=201,
+    )
+    post = _optimize_thresh_frac_on_between_wells(
+        a_post, b_post, channel_key="gfp",
+        min_threshold=0, max_threshold=200, steps=201,
+    )
+
+    assert post.threshold == pytest.approx(pre.threshold)
+    assert post.difference == pytest.approx(pre.difference)
+    assert post.n_a == pre.n_a
+    assert post.n_b == pre.n_b
 
 
 def test_optimizer_supports_ratio_channels():
@@ -149,8 +214,9 @@ def test_optimizer_rejects_invalid_range_and_empty_values():
             min_threshold=10, max_threshold=1, steps=2,
         )
 
-    with pytest.raises(ValueError, match="Well A has no included finite values"):
+    with pytest.raises(ValueError, match="Well A has no valid finite values"):
+        # QC_Pass=0 removes the only row, leaving no valid finite values.
         _optimize_thresh_frac_on_between_wells(
-            _df([1], included=[0]), _df([2]), channel_key="gfp",
+            _df([1], qc=[0]), _df([2]), channel_key="gfp",
             min_threshold=0, max_threshold=1, steps=2,
         )

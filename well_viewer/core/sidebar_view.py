@@ -86,23 +86,23 @@ def build_sidebar(app, parent: QWidget) -> None:
     # below the buttons also removed (functionality is discoverable via
     # the plate header hover state).
 
-    # Selected-well count status text (legacy plain QLabel kept so existing
-    # call sites in runtime_app keep writing to it). The mockup's pill-shaped
-    # SelectionChip in the plate header (Phase 10 B6) wraps the same value
-    # via _sel_count_chip; both render concurrently — the chip in the
-    # header, the long-form caption below it.
-    from widgets.selection_chip import SelectionChip as _SelectionChip
-    app._sel_count_lbl = QLabel("", parent)
-    app._sel_count_lbl.setObjectName("Caption")
-    chip_row = QWidget(parent)
-    chip_row_layout = QHBoxLayout(chip_row)
-    chip_row_layout.setContentsMargins(0, 0, 0, 0)
-    chip_row_layout.setSpacing(8)
-    chip_row_layout.addWidget(app._sel_count_lbl, 1)
-    app._sel_count_chip = _SelectionChip("0 / 96", icon="check", variant="accent",
-                                          parent=chip_row)
-    chip_row_layout.addWidget(app._sel_count_chip, 0)
-    layout.addWidget(chip_row)
+    # "Deselect all" button. Replaces the old selected-well count indicator
+    # (count + pill chip), which was redundant with the plate itself. The
+    # selection-count writers in selection_controller guard with hasattr, so
+    # omitting ``_sel_count_lbl`` / ``_sel_count_chip`` here is safe — they
+    # simply no-op.
+    from well_viewer.core.selection_controller import select_none as _select_none
+    deselect_row = QWidget(parent)
+    deselect_row_layout = QHBoxLayout(deselect_row)
+    deselect_row_layout.setContentsMargins(0, 0, 0, 0)
+    deselect_row_layout.setSpacing(8)
+    app._deselect_all_btn = QPushButton("Deselect all", deselect_row)
+    app._deselect_all_btn.setProperty("variant", "secondary")
+    app._deselect_all_btn.setToolTip("Clear the current well selection.")
+    app._deselect_all_btn.clicked.connect(lambda _=False: _select_none(app))
+    deselect_row_layout.addWidget(app._deselect_all_btn)
+    deselect_row_layout.addStretch(1)
+    layout.addWidget(deselect_row)
 
     # Group-mode hint
     app._line_group_hint = QLabel("", parent)

@@ -1296,6 +1296,63 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         _status(f"Optimize ThreshFracOn: {exc}")
         return
 
+    # ── one-shot diagnostic ──────────────────────────────────────────────
+    # Re-derives the same value series and diff array the pure function
+    # used, then logs the boundary numbers so we can see WHY argmax keeps
+    # landing at lo on real data. Recomputed locally so the pure function
+    # stays uncoupled from the debug path. Remove this block once the
+    # root cause is identified.
+    try:
+        _ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+        _values_a = _valid_values_for_channel(
+            app._get_rows(well_a), channel_key, _ratios, timepoint,
+        )
+        _values_b = _valid_values_for_channel(
+            app._get_rows(well_b), channel_key, _ratios, timepoint,
+        )
+        _thresholds = np.linspace(lo, hi, int(steps))
+        _diffs = np.array(
+            [
+                abs(_fraction_on_for_threshold(_values_a, float(t))
+                    - _fraction_on_for_threshold(_values_b, float(t)))
+                for t in _thresholds
+            ],
+            dtype=float,
+        )
+        _top_idx = np.argsort(_diffs)[-5:][::-1]
+        _top = [(float(_thresholds[i]), float(_diffs[i])) for i in _top_idx]
+
+        def _summ(arr):
+            return (
+                f"n={arr.size}, min={float(np.nanmin(arr)):.6g}, "
+                f"med={float(np.nanmedian(arr)):.6g}, "
+                f"max={float(np.nanmax(arr)):.6g}, "
+                f"mean={float(np.nanmean(arr)):.6g}"
+            ) if arr.size else "n=0"
+
+        logger.info(
+            "OPT-DIAG channel=%s tp=%s well_a=%s well_b=%s "
+            "Min=%.6g Max=%.6g steps=%d | "
+            "values_a: %s | values_b: %s | "
+            "linspace[0]=%.6g linspace[-1]=%.6g | "
+            "diffs[0]=%.6g diffs[-1]=%.6g diffs.max=%.6g argmax=%d | "
+            "top5(thr,diff)=%s | "
+            "result.threshold=%.6g result.frac_a=%.6g result.frac_b=%.6g "
+            "result.difference=%.6g result.n_a=%d result.n_b=%d",
+            channel_key, timepoint, well_a, well_b,
+            lo, hi, int(steps),
+            _summ(_values_a), _summ(_values_b),
+            float(_thresholds[0]), float(_thresholds[-1]),
+            float(_diffs[0]), float(_diffs[-1]),
+            float(_diffs.max()), int(np.argmax(_diffs)),
+            _top,
+            result.threshold, result.frac_a, result.frac_b,
+            result.difference, result.n_a, result.n_b,
+        )
+    except Exception:
+        logger.exception("OPT-DIAG failed")
+    # ── end diagnostic ───────────────────────────────────────────────────
+
     tp_note = "" if timepoint is None else f" at {_timepoint_label(timepoint)}"
     # A zero best difference means the scan range never crossed where the two
     # wells' fraction-on diverge (e.g. the range sits entirely below/above the

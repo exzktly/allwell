@@ -61,14 +61,32 @@ class PlotState:
     # (the original ``vs t0`` behaviour), so backward-compat with saved state
     # that only carries ``fc_vs_t0_on=True`` is preserved.
     fc_baseline_tp: str = ""
-    # Whether to apply each fold-change axis as a **ratio** (x / d, the
-    # original behaviour and v7.1.3-and-earlier default) or a
-    # **subtraction** (x - d). Same operator applies to both the
-    # vs-control and vs-baseline-tp axes when active.
-    fc_op: str = "ratio"   # one of {"ratio", "subtract"}
+    # Per-axis fold-change operator. **ratio** (x / d, the original behaviour
+    # and v7.1.x default) or **subtract** (x - d). Independent per axis so a
+    # user can e.g. subtract a background-control and then divide by t0.
+    fc_op_ctrl: str = "ratio"   # vs-control axis; one of {"ratio", "subtract"}
+    fc_op_t0: str = "ratio"     # vs-baseline-tp axis; one of {"ratio", "subtract"}
     fc_dirty_scopes: set[str] = field(default_factory=set)
 
     # ── fold change ──────────────────────────────────────────────────────────
+
+    @property
+    def fc_op(self) -> str:
+        """Legacy single-op accessor: returns the control-axis op for compat
+        with snapshot readers / older code. New callers should read
+        ``fc_op_ctrl`` and ``fc_op_t0`` directly."""
+        return self.fc_op_ctrl
+
+    @fc_op.setter
+    def fc_op(self, value: str) -> None:
+        """Legacy single-op setter: fan out to both axes so old code paths
+        (saved snapshots that only carry ``op``) keep their previous
+        same-op-on-both-axes semantics."""
+        v = str(value) if value is not None else "ratio"
+        if v not in ("ratio", "subtract"):
+            v = "ratio"
+        self.fc_op_ctrl = v
+        self.fc_op_t0 = v
 
     @property
     def fc_state(self) -> tuple[bool, str, bool]:
@@ -84,14 +102,17 @@ class PlotState:
                         control_label: str | None = None,
                         vs_t0_on: bool | None = None,
                         baseline_tp: str | None = None,
-                        op: str | None = None) -> None:
+                        op: str | None = None,
+                        op_ctrl: str | None = None,
+                        op_t0: str | None = None) -> None:
         """Apply a fold-change state change. A ``None`` argument leaves that
         field unchanged. ``control_label`` is stored verbatim — the UI layer
         strips its display-only disambiguation suffix before calling.
         ``baseline_tp`` is the dataset's timepoint string the user picked as
         the per-member baseline; empty means "use the earliest finite point"
-        (the original behaviour). ``op`` is one of ``"ratio"`` /
-        ``"subtract"``."""
+        (the original behaviour). ``op_ctrl`` / ``op_t0`` are the per-axis
+        operators (``"ratio"`` / ``"subtract"``). ``op`` is the legacy
+        single-op kwarg — sets both axes for back-compat."""
         if vs_control_on is not None:
             self.fc_vs_control_on = bool(vs_control_on)
         if control_label is not None:
@@ -101,7 +122,11 @@ class PlotState:
         if baseline_tp is not None:
             self.fc_baseline_tp = str(baseline_tp)
         if op is not None and str(op) in ("ratio", "subtract"):
-            self.fc_op = str(op)
+            self.fc_op = str(op)  # fans out to both via property setter
+        if op_ctrl is not None and str(op_ctrl) in ("ratio", "subtract"):
+            self.fc_op_ctrl = str(op_ctrl)
+        if op_t0 is not None and str(op_t0) in ("ratio", "subtract"):
+            self.fc_op_t0 = str(op_t0)
 
     # ── toggles ──────────────────────────────────────────────────────────────
 

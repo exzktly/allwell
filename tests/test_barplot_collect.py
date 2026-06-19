@@ -410,3 +410,114 @@ def test_h11_subtract_op_with_both_axes_works(mock_app):
     assert math.isclose(by_key["CTRL"], -100.0)
     # TREAT@2 - CTRL@2 - TREAT@0 = 400 - 100 - 100 = 200
     assert math.isclose(by_key["TREAT"], 200.0)
+
+
+# ── OnFraction fold-change regression ────────────────────────────────────────
+#
+# Until this fix, FC was applied to ``mean`` but ``frac`` was passed through
+# raw — so users viewing the OnFraction panel saw FC having no visible effect.
+# These tests construct rsets with distinct frac values per tp and assert that
+# the OnFraction bar's value DOES change under FC.
+
+def _frac_app():
+    """MockApp variant where frac varies meaningfully across tps and rsets.
+
+    CTRL: frac 0.2 / 0.2 / 0.2 (flat)
+    TREAT: frac 0.1 / 0.3 / 0.6 (rising)
+    """
+    from tests.conftest import MockApp
+    pts = {
+        "A01": [
+            make_agg(0.0, 100.0, frac=0.2),
+            make_agg(1.0, 100.0, frac=0.2),
+            make_agg(2.0, 100.0, frac=0.2),
+        ],
+        "A02": [
+            make_agg(0.0, 100.0, frac=0.2),
+            make_agg(1.0, 100.0, frac=0.2),
+            make_agg(2.0, 100.0, frac=0.2),
+        ],
+        "B01": [
+            make_agg(0.0, 100.0, frac=0.1),
+            make_agg(1.0, 200.0, frac=0.3),
+            make_agg(2.0, 400.0, frac=0.6),
+        ],
+        "B02": [
+            make_agg(0.0, 100.0, frac=0.1),
+            make_agg(1.0, 200.0, frac=0.3),
+            make_agg(2.0, 400.0, frac=0.6),
+        ],
+    }
+    selections = [
+        {"name": "CTRL", "wells": ["A01", "A02"], "hidden": False},
+        {"name": "TREAT", "wells": ["B01", "B02"], "hidden": False},
+    ]
+    return MockApp(per_well_pts=pts, selections=selections)
+
+
+def test_onfraction_fc_off_returns_raw_frac():
+    """Sanity baseline: FC off → frac is the raw mean-of-per-well frac."""
+    app = _frac_app()
+    _, items, _ = collect_bar_items(app, 2.0, fc_state=FC_STATE_OFF)
+    by_key = {it.key: it for it in items}
+    assert math.isclose(by_key["CTRL"].frac, 0.2)
+    assert math.isclose(by_key["TREAT"].frac, 0.6)
+
+
+def test_onfraction_vs_control_scales_frac_panel():
+    """Regression: FC vs control MUST scale the OnFraction bar, not just mean.
+
+    The bug: ``frac`` was passed through raw → toggling FC on the OnFraction
+    panel had no visible effect. Fix: scale frac independently using the
+    control's frac at target_t as denominator.
+
+    TREAT.frac@2 = 0.6, CTRL.frac@2 = 0.2 → ratio = 3.0.
+    """
+    app = _frac_app()
+    app.fc_vs_control_on = True
+    app.fc_control_label = "CTRL"
+    _, items, _ = collect_bar_items(app, 2.0)
+    by_key = {it.key: it for it in items}
+    # CTRL bar normalised against itself = 1.0.
+    assert math.isclose(by_key["CTRL"].frac, 1.0)
+    # TREAT bar = 0.6 / 0.2 = 3.0.
+    assert math.isclose(by_key["TREAT"].frac, 3.0)
+
+
+def test_onfraction_vs_t0_scales_frac_panel():
+    """FC vs t0 must also scale the frac panel.
+
+    TREAT.frac@2 = 0.6, TREAT.frac@0 = 0.1 → ratio = 6.0.
+    """
+    app = _frac_app()
+    app.fc_vs_t0_on = True
+    _, items, _ = collect_bar_items(app, 2.0)
+    by_key = {it.key: it for it in items}
+    assert math.isclose(by_key["CTRL"].frac, 1.0)  # 0.2 / 0.2
+    assert math.isclose(by_key["TREAT"].frac, 6.0)  # 0.6 / 0.1
+
+
+def test_onfraction_subtract_op_scales_frac_panel():
+    """``op=subtract`` must apply to frac too — for users normalising against
+    a background fraction-on rather than dividing."""
+    app = _frac_app()
+    app.fc_vs_control_on = True
+    app.fc_control_label = "CTRL"
+    app.fc_op = "subtract"
+    _, items, _ = collect_bar_items(app, 2.0)
+    by_key = {it.key: it.frac for it in items}
+    assert math.isclose(by_key["CTRL"], 0.0)         # 0.2 - 0.2
+    assert math.isclose(by_key["TREAT"], 0.4)        # 0.6 - 0.2
+
+
+def test_onfraction_force_nan_when_control_missing():
+    """When the control isn't resolvable, mean is NaN'd; frac MUST be too —
+    otherwise the OnFraction panel shows a stale raw value while the mean
+    panel correctly blanks."""
+    app = _frac_app()
+    app.fc_vs_control_on = True
+    app.fc_control_label = "NONEXISTENT"
+    _, items, _ = collect_bar_items(app, 2.0)
+    for it in items:
+        assert math.isnan(it.mean)
+        assert math.isnan(it.frac)

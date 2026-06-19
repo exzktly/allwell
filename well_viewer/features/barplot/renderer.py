@@ -484,6 +484,19 @@ def redraw_bars(app) -> None:
     """Top-level bar plot redraw (drives the Bar Plots tab)."""
     if not hasattr(app, "_ax_bar_mean"):
         return
+    # ── one-shot diagnostic ──────────────────────────────────────────────
+    import logging
+    _logger_diag = logging.getLogger("well_viewer")
+    _logger_diag.info(
+        "redraw_bars: enter; fc=(vs_ctrl=%r, ctrl_lbl=%r, vs_t0=%r, baseline_tp=%r) channel=%r metric=%r",
+        getattr(app._app_state.plot, "fc_vs_control_on", None),
+        getattr(app._app_state.plot, "fc_control_label", None),
+        getattr(app._app_state.plot, "fc_vs_t0_on", None),
+        getattr(app._app_state.plot, "fc_baseline_tp", None),
+        app._app_state.channel.active_channel,
+        app._app_state.channel.active_metric,
+    )
+    # ── end diagnostic ───────────────────────────────────────────────────
     ax_mean = app._ax_bar_mean
     ax_frac = app._ax_bar_frac
     ax_n = getattr(app, "_ax_bar_n", None)

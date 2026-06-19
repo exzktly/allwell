@@ -37,7 +37,7 @@ import pandas as pd
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
@@ -316,25 +316,6 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     title.setProperty("role", "section")
     tr.addWidget(title)
     tr.addStretch(1)
-    # Auto-threshold all channels: runs the same Otsu pass the pipeline's
-    # final stage executes (well_viewer.auto_threshold) and writes the
-    # results into the ThreshFracOn edits for every loaded channel — it
-    # is the fraction-on cut used in downstream plots, NOT the per-cell
-    # FluorGating inclusion threshold. Status messages stream to the log
-    # drawer via the standard logger.
-    from PySide6.QtWidgets import QPushButton as _QPushButton
-    auto_btn = _QPushButton("Auto-threshold all channels", title_row)
-    auto_btn.setProperty("variant", "secondary")
-    auto_btn.setToolTip(
-        "Compute a default ThreshFracOn cut per channel via Otsu on "
-        "a per-cell + matched-background-pixel distribution sampled from "
-        "the first, middle, and last timepoint of every FOV. The "
-        "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
-        "Progress + per-channel results are written to the log drawer."
-    )
-    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx.app))
-    tr.addWidget(auto_btn)
-    ctx.app._cell_gating_auto_btn = auto_btn
     cf_layout.addWidget(title_row)
 
     # MFI-only note: FluorGating + ThreshFracOn always run against per-cell
@@ -440,6 +421,33 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     _cell_gating_refresh_gate_summary(ctx.app)
     _cell_gating_apply_scatter_gate_mode(ctx.app)
 
+    # Auto-threshold all channels: runs the same Otsu pass the pipeline's
+    # final stage executes (well_viewer.auto_threshold) and writes the
+    # results into the ThreshFracOn edits for every loaded channel — it
+    # is the fraction-on cut used in downstream plots, NOT the per-cell
+    # FluorGating inclusion threshold. Status messages stream to the log
+    # drawer via the standard logger. Sits in its own row directly above
+    # the per-channel FluorGating / ThreshFracOn table it modifies, so it
+    # never floats away from the controls it acts on.
+    from PySide6.QtWidgets import QPushButton as _QPushButton
+    auto_row = QWidget(control_frame)
+    auto_row_layout = QHBoxLayout(auto_row)
+    auto_row_layout.setContentsMargins(0, 0, 0, 0)
+    auto_btn = _QPushButton("Auto-threshold all channels (ThreshFracOn)", auto_row)
+    auto_btn.setProperty("variant", "secondary")
+    auto_btn.setToolTip(
+        "Compute a default ThreshFracOn cut per channel via Otsu on "
+        "a per-cell + matched-background-pixel distribution sampled from "
+        "the first, middle, and last timepoint of every FOV. The "
+        "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
+        "Progress + per-channel results are written to the log drawer."
+    )
+    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx.app))
+    auto_row_layout.addWidget(auto_btn)
+    auto_row_layout.addStretch(1)
+    ctx.app._cell_gating_auto_btn = auto_btn
+    cf_layout.addWidget(auto_row)
+
     ctx.app._cell_gating_scroll = QScrollArea(control_frame)
     ctx.app._cell_gating_scroll.setWidgetResizable(True)
     ctx.app._cell_gating_scroll.setFrameShape(QFrame.NoFrame)
@@ -462,11 +470,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
     ctx.app._cell_gating_plot_scroll.setMinimumHeight(420)
     install_canvas_wheel_scroll(ctx.app._cell_gating_canvas, ctx.app._cell_gating_plot_scroll)
-    root.addWidget(ctx.app._cell_gating_plot_scroll)
 
     from widgets.mpl_toolbar import MplToolbar
     ctx.app._cell_gating_toolbar = MplToolbar(ctx.app._cell_gating_canvas, parent)
-    root.addWidget(ctx.app._cell_gating_toolbar)
 
     ctx.app._cell_gating_status_label = QLabel("No data loaded", parent)
     ctx.app._cell_gating_status_label.setObjectName("Muted")
@@ -511,17 +517,24 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_opt_max_edit = QLineEdit("100.0", opt_row)
     ctx.app._cell_gating_opt_max_edit.setFixedWidth(80)
     opt_row_layout.addWidget(ctx.app._cell_gating_opt_max_edit)
-    opt_row_layout.addWidget(QLabel("Steps:", opt_row))
+    opt_row_layout.addWidget(QLabel("# Points:", opt_row))
     ctx.app._cell_gating_opt_steps_edit = QLineEdit("101", opt_row)
     ctx.app._cell_gating_opt_steps_edit.setFixedWidth(64)
+    ctx.app._cell_gating_opt_steps_edit.setToolTip(
+        "Number of thresholds scanned across the Min–Max range, evenly "
+        "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
+        "thresholds (every 1 unit across a 0–100 range). Higher values "
+        "give a finer scan at the cost of a little compute."
+    )
     opt_row_layout.addWidget(ctx.app._cell_gating_opt_steps_edit)
     from PySide6.QtWidgets import QPushButton as _QPushButton
     opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
     opt_btn.setProperty("variant", "secondary")
     opt_btn.setToolTip(
-        "Scan thresholds between Min and Max for the selected channel, compute "
-        "fraction-on in Well A and Well B at each threshold, then apply the "
-        "threshold that maximizes their absolute fraction-on difference."
+        "Scan # Points thresholds between Min and Max for the selected "
+        "channel, compute fraction-on in Well A and Well B at each "
+        "threshold, then apply the threshold that maximizes their "
+        "absolute fraction-on difference."
     )
     opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx.app))
     ctx.app._cell_gating_opt_btn = opt_btn
@@ -553,6 +566,13 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_opt_result_label.setWordWrap(True)
     opt_layout.addWidget(ctx.app._cell_gating_opt_result_label)
     root.addWidget(opt_panel)
+
+    # CDFs anchor the bottom of the tab — controls + optimizer sit above,
+    # CDFs (with their toolbar) are the visual readout the user reads while
+    # tuning those controls, so we put them last.
+    root.addWidget(ctx.app._cell_gating_plot_scroll)
+    root.addWidget(ctx.app._cell_gating_toolbar)
+
     _cell_gating_refresh_optimizer_controls(ctx.app)
 
     # Paint the themed empty state now so the canvas is never a bare white
@@ -1275,10 +1295,22 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
         timepoint = tp_combo.currentData() if tp_combo is not None else None
     except ValueError:
-        _status("Optimize ThreshFracOn: min, max, and steps must be numeric.")
+        _status("Optimize ThreshFracOn: Min, Max, and # Points must be numeric.")
         return
     except Exception as exc:
         _status(f"Optimize ThreshFracOn: controls are not ready ({exc}).")
+        return
+    # # Points is the NUMBER OF thresholds we scan (numpy.linspace's third
+    # arg), NOT a step size. A small value (e.g. 2) only samples the
+    # endpoints — argmax(|Δ|) then lands at whichever boundary has the
+    # bigger diff, which is a useless answer. Refuse the degenerate range
+    # with a user-facing message so the field's semantics is unmissable.
+    if steps < 10:
+        _status(
+            "Optimize ThreshFracOn: # Points must be at least 10 — it's the "
+            "number of thresholds scanned across the Min–Max range, not a "
+            "step size."
+        )
         return
 
     try:
@@ -1321,6 +1353,130 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         f"{well_b} fraction-on={result.frac_b:.3f} (n={result.n_b}); "
         f"|Δ|={result.difference:.3f}."
     )
+    # Validation popup: show fraction-on(A), fraction-on(B), and |Δ| as
+    # functions of the scanned threshold, with the chosen threshold marked.
+    # Lets the user eyeball whether argmax landed where they'd expect, vs.
+    # what the full diff curve actually looks like.
+    try:
+        _cell_gating_show_opt_curve_popup(
+            app,
+            channel_key=channel_key,
+            well_a=well_a,
+            well_b=well_b,
+            timepoint=timepoint,
+            lo=lo,
+            hi=hi,
+            steps=steps,
+            result=result,
+        )
+    except Exception:
+        swallowed("cell gating: optimizer curve popup failed")
+
+
+def _cell_gating_show_opt_curve_popup(
+    app,
+    *,
+    channel_key: str,
+    well_a: str,
+    well_b: str,
+    timepoint,
+    lo: float,
+    hi: float,
+    steps: int,
+    result: "ThreshFracOptimizationResult",
+) -> None:
+    """Open (or refresh) a non-modal window plotting the optimizer's diff
+    curve. Re-derives values_a, values_b, and the per-threshold fractions
+    locally so the pure function stays uncoupled from the GUI.
+
+    The window stays open across consecutive Optimize clicks — subsequent
+    clicks just repaint the existing axes, so the user can iterate on
+    wells / timepoints / range and watch the curve update.
+    """
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+
+    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    values_a = _valid_values_for_channel(
+        app._get_rows(well_a), channel_key, ratios, timepoint,
+    )
+    values_b = _valid_values_for_channel(
+        app._get_rows(well_b), channel_key, ratios, timepoint,
+    )
+    thresholds = np.linspace(lo, hi, int(steps))
+    frac_a = np.array(
+        [_fraction_on_for_threshold(values_a, float(t)) for t in thresholds],
+        dtype=float,
+    )
+    frac_b = np.array(
+        [_fraction_on_for_threshold(values_b, float(t)) for t in thresholds],
+        dtype=float,
+    )
+    diffs = np.abs(frac_a - frac_b)
+
+    popup = getattr(app, "_cell_gating_opt_curve_popup", None)
+    if popup is None or not popup.isVisible():
+        popup = QDialog(getattr(app, "_cell_gating_frame", None) or app)
+        popup.setWindowTitle("Optimizer curve")
+        popup.resize(820, 460)
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(8, 8, 8, 8)
+        fig = Figure(figsize=(7.8, 4.4), dpi=100)
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        # Wire the matplotlib toolbar so the user can pan/zoom/save the
+        # curve while keeping the popup non-modal.
+        from widgets.mpl_toolbar import MplToolbar
+        toolbar = MplToolbar(canvas, popup)
+        layout.addWidget(toolbar)
+        popup.finished.connect(
+            lambda _r: setattr(app, "_cell_gating_opt_curve_popup", None)
+        )
+        popup._fig = fig
+        popup._canvas = canvas
+        app._cell_gating_opt_curve_popup = popup
+        popup.show()
+
+    fig = popup._fig
+    fig.clear()
+    bg_panel = get_color("BG_PANEL")
+    txt_pri = get_color("TXT_PRI")
+    txt_mut = get_color("TXT_MUT")
+    accent = get_color("ACCENT")
+    fig.patch.set_facecolor(bg_panel)
+    ax = fig.add_subplot(111)
+    ax.set_facecolor(bg_panel)
+    for spine in ax.spines.values():
+        spine.set_color(txt_mut)
+    ax.tick_params(colors=txt_mut)
+
+    ax.plot(thresholds, frac_a, color="#4FC3F7", lw=1.4,
+            label=f"fraction-on({well_a})")
+    ax.plot(thresholds, frac_b, color="#FF8A65", lw=1.4,
+            label=f"fraction-on({well_b})")
+    ax.plot(thresholds, diffs, color=accent, lw=1.8, label="|Δ|")
+    ax.axvline(
+        result.threshold, color=txt_pri, lw=1.2, ls="--",
+        label=f"chosen threshold = {result.threshold:.4g}",
+    )
+    ax.set_xlim(float(thresholds[0]), float(thresholds[-1]))
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel(f"Threshold ({channel_key})", color=txt_pri)
+    ax.set_ylabel("Fraction-on / |Δ|", color=txt_pri)
+    tp_note = "" if timepoint is None else f" @ {_timepoint_label(timepoint)}"
+    ax.set_title(
+        f"{channel_key}: {well_a} vs {well_b}{tp_note} "
+        f"— scan {lo:g}…{hi:g}, {int(steps)} points",
+        color=txt_pri, fontsize=11,
+    )
+    leg = ax.legend(loc="upper right", framealpha=0.85, fontsize=9)
+    if leg is not None:
+        for txt in leg.get_texts():
+            txt.set_color(txt_pri)
+    fig.tight_layout()
+    popup._canvas.draw_idle()
+    popup.raise_()
+    popup.activateWindow()
 
 
 def cell_gating_update_theme(app) -> None:

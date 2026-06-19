@@ -15,8 +15,12 @@ from well_viewer.core.selection_controller import on_sidebar_plate_row_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_selection_changed
 from well_viewer.core.selection_controller import on_sidebar_plate_well_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_well_dropped
+import logging
+
 from well_viewer.core.safe import swallowed
 from well_viewer.domain.plot_groups import make_plot_group
+
+_logger = logging.getLogger("well_viewer")
 
 
 def build_sidebar(app, parent: QWidget) -> None:
@@ -130,49 +134,90 @@ def build_sidebar(app, parent: QWidget) -> None:
     # replicate groups. Collapsed by default — only the header shows until the
     # user opens it — so the name field + saved-group list never push up into
     # (and overlap) the selected-well count bar above the plate.
-    from widgets.collapsible_section import CollapsibleSection
-    plot_groups_section = CollapsibleSection("Plot Groups", parent, expanded=False)
-    plot_groups_section.setObjectName("PlotGroupsDrawer")
-
-    name_row = QWidget(plot_groups_section)
-    nr = QHBoxLayout(name_row)
-    nr.setContentsMargins(0, 0, 0, 0)
-    nr.setSpacing(6)
-    app._plot_group_name_edit = QLineEdit(name_row)
-    app._plot_group_name_edit.setPlaceholderText("Name current selection…")
-    nr.addWidget(app._plot_group_name_edit, 1)
-    add_btn = QPushButton("Add", name_row)
-    add_btn.setProperty("variant", "secondary")
-    add_btn.setToolTip(
-        "Save the currently selected wells as a Plot Group. Plot Groups only "
-        "reload well selections; they are not stats or replicate groups."
+    plot_groups_section = build_plot_groups_drawer(
+        app, parent, include_add_controls=True,
     )
-    add_btn.clicked.connect(lambda _=False: _plot_groups_add_current(app))
-    nr.addWidget(add_btn)
-    plot_groups_section.addWidget(name_row)
+    layout.addWidget(plot_groups_section)
+    app._plot_groups_sidebar_section = plot_groups_section
+    app._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(app)
 
-    app._plot_groups_empty_label = QLabel("No Plot Groups yet.", plot_groups_section)
-    app._plot_groups_empty_label.setObjectName("Muted")
-    app._plot_groups_empty_label.setWordWrap(True)
-    plot_groups_section.addWidget(app._plot_groups_empty_label)
 
-    scroll = QScrollArea(plot_groups_section)
+def build_plot_groups_drawer(app, parent, *, include_add_controls: bool = True):
+    """Build a Plot Groups quick-load drawer and register it for refresh.
+
+    Returns a ``CollapsibleSection`` widget the caller adds to its layout.
+    Multiple drawers can co-exist (one on the main plotting sidebar, one on
+    the Image Table sidebar) — each is registered in
+    ``app._plot_groups_drawers`` and ``refresh_plot_groups_sidebar`` updates
+    them all in lock-step.
+
+    ``include_add_controls=False`` omits the "name + Add" row, useful for
+    secondary drawers (e.g. Image Table's) where the user only wants to
+    pick from existing groups, not author new ones.
+    """
+    from widgets.collapsible_section import CollapsibleSection
+
+    section = CollapsibleSection("Plot Groups", parent, expanded=False)
+    section.setObjectName("PlotGroupsDrawer")
+
+    if include_add_controls:
+        name_row = QWidget(section)
+        nr = QHBoxLayout(name_row)
+        nr.setContentsMargins(0, 0, 0, 0)
+        nr.setSpacing(6)
+        name_edit = QLineEdit(name_row)
+        name_edit.setPlaceholderText("Name current selection…")
+        nr.addWidget(name_edit, 1)
+        add_btn = QPushButton("Add", name_row)
+        add_btn.setProperty("variant", "secondary")
+        add_btn.setToolTip(
+            "Save the currently selected wells as a Plot Group. Plot Groups only "
+            "reload well selections; they are not stats or replicate groups."
+        )
+        add_btn.clicked.connect(lambda _=False: _plot_groups_add_current(app))
+        nr.addWidget(add_btn)
+        section.addWidget(name_row)
+        # Back-compat: the original main-sidebar API exposed these directly.
+        app._plot_group_name_edit = name_edit
+        app._plot_groups_add_btn = add_btn
+
+    empty_label = QLabel("No Plot Groups yet.", section)
+    empty_label.setObjectName("Muted")
+    empty_label.setWordWrap(True)
+    section.addWidget(empty_label)
+
+    scroll = QScrollArea(section)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QScrollArea.NoFrame)
     # Cap the list height so a long set of saved groups scrolls inside the
-    # drawer instead of growing it tall enough to cover the plate.
+    # drawer instead of growing it tall enough to cover whatever sits above.
     scroll.setMaximumHeight(200)
-    app._plot_groups_list_widget = QWidget(scroll)
-    app._plot_groups_list_layout = QVBoxLayout(app._plot_groups_list_widget)
-    app._plot_groups_list_layout.setContentsMargins(0, 0, 0, 0)
-    app._plot_groups_list_layout.setSpacing(4)
-    scroll.setWidget(app._plot_groups_list_widget)
-    plot_groups_section.addWidget(scroll)
+    list_widget = QWidget(scroll)
+    list_layout = QVBoxLayout(list_widget)
+    list_layout.setContentsMargins(0, 0, 0, 0)
+    list_layout.setSpacing(4)
+    scroll.setWidget(list_widget)
+    section.addWidget(scroll)
 
-    layout.addWidget(plot_groups_section)
-    app._plot_groups_sidebar_section = plot_groups_section
-    app._plot_groups_add_btn = add_btn
-    app._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(app)
+    drawer = {
+        "section": section,
+        "list_widget": list_widget,
+        "list_layout": list_layout,
+        "empty_label": empty_label,
+    }
+    drawers = getattr(app, "_plot_groups_drawers", None)
+    if drawers is None:
+        app._plot_groups_drawers = [drawer]
+    else:
+        drawers.append(drawer)
+    # Back-compat: keep the original singular references pointing at the
+    # primary (main-sidebar) drawer so older callers still resolve.
+    if not hasattr(app, "_plot_groups_list_widget"):
+        app._plot_groups_list_widget = list_widget
+        app._plot_groups_list_layout = list_layout
+        app._plot_groups_empty_label = empty_label
+
+    return section
 
 
 def _plot_groups_schedule_save(app) -> None:
@@ -229,6 +274,25 @@ def _plot_groups_load(app, group_id: str) -> None:
         app._set_selected_wells(wells)
     else:
         app._app_state.selection.selected_wells = wells
+    # Mirror the selection into the Image Table's tab-local well set so a
+    # group picked from any sidebar (plotting or Image Table) immediately
+    # drives the Image Table grid — without this, the Image Table's plate
+    # picker stayed pinned to its own previous selection.
+    try:
+        image_table_state = getattr(app._app_state, "image_table", None)
+        if image_table_state is not None:
+            image_table_state.active_wells = set(wells)
+        plate = getattr(app, "_sidebar_image_table_plate", None)
+        if plate is not None:
+            try:
+                plate.setSelectedWells(sorted(wells))
+            except Exception:
+                swallowed("plot_groups: image table plate sync")
+        refresh = getattr(app, "_image_table_refresh_picker", None)
+        if callable(refresh):
+            refresh()
+    except Exception:
+        _logger.debug("plot_groups: image table active_wells sync failed", exc_info=True)
     try:
         app._set_status(
             f"Loaded Plot Group “{group.get('name', 'Plot Group')}” "
@@ -249,41 +313,60 @@ def _plot_groups_delete(app, group_id: str) -> None:
 
 
 def refresh_plot_groups_sidebar(app) -> None:
-    """Rebuild the Plot Groups quick-load buttons under the well grid."""
-    lay = getattr(app, "_plot_groups_list_layout", None)
-    if lay is None:
-        return
-    while lay.count():
-        item = lay.takeAt(0)
-        widget = item.widget()
-        if widget is not None:
-            widget.deleteLater()
+    """Rebuild the Plot Groups quick-load buttons across every registered drawer.
+
+    Each sidebar that hosts a Plot Groups drawer registers it via
+    ``build_plot_groups_drawer``; this function repaints every one so the
+    main plotting sidebar and the Image Table sidebar stay in lock-step.
+    """
+    drawers = getattr(app, "_plot_groups_drawers", None)
+    if not drawers:
+        # Fallback for any builder that still uses the original singular refs.
+        lay = getattr(app, "_plot_groups_list_layout", None)
+        empty = getattr(app, "_plot_groups_empty_label", None)
+        if lay is None:
+            return
+        drawers = [{
+            "list_layout": lay,
+            "list_widget": getattr(app, "_plot_groups_list_widget", None),
+            "empty_label": empty,
+        }]
     groups = list(app._app_state.selection.plot_groups or [])
-    empty = getattr(app, "_plot_groups_empty_label", None)
-    if empty is not None:
-        empty.setVisible(not groups)
     valid = set(app._app_state.dataset.well_paths or {})
-    for group in groups:
-        row = QWidget(getattr(app, "_plot_groups_list_widget", None))
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(4)
-        wells = [w for w in (group.get("wells") or []) if w in valid]
-        load_btn = QPushButton(
-            f"{group.get('name', 'Plot Group')} ({len(wells)})",
-            row,
-        )
-        load_btn.setToolTip(", ".join(wells) or "No loaded wells in this group")
-        load_btn.clicked.connect(
-            lambda _=False, gid=group.get("id", ""): _plot_groups_load(app, gid)
-        )
-        rl.addWidget(load_btn, 1)
-        del_btn = QPushButton("×", row)
-        del_btn.setFixedWidth(28)
-        del_btn.setToolTip("Delete this Plot Group")
-        del_btn.clicked.connect(
-            lambda _=False, gid=group.get("id", ""): _plot_groups_delete(app, gid)
-        )
-        rl.addWidget(del_btn)
-        lay.addWidget(row)
-    lay.addStretch(1)
+    for drawer in drawers:
+        lay = drawer.get("list_layout")
+        if lay is None:
+            continue
+        while lay.count():
+            item = lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        empty = drawer.get("empty_label")
+        if empty is not None:
+            empty.setVisible(not groups)
+        list_widget = drawer.get("list_widget")
+        for group in groups:
+            row = QWidget(list_widget)
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(4)
+            wells = [w for w in (group.get("wells") or []) if w in valid]
+            load_btn = QPushButton(
+                f"{group.get('name', 'Plot Group')} ({len(wells)})",
+                row,
+            )
+            load_btn.setToolTip(", ".join(wells) or "No loaded wells in this group")
+            load_btn.clicked.connect(
+                lambda _=False, gid=group.get("id", ""): _plot_groups_load(app, gid)
+            )
+            rl.addWidget(load_btn, 1)
+            del_btn = QPushButton("×", row)
+            del_btn.setFixedWidth(28)
+            del_btn.setToolTip("Delete this Plot Group")
+            del_btn.clicked.connect(
+                lambda _=False, gid=group.get("id", ""): _plot_groups_delete(app, gid)
+            )
+            rl.addWidget(del_btn)
+            lay.addWidget(row)
+        lay.addStretch(1)

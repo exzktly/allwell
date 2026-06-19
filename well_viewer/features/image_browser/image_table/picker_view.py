@@ -8,6 +8,8 @@ that explicitly ignores replicate sets / groups. State is held in
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+
+from well_viewer.core.safe import swallowed
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 from well_viewer.features.image_browser.image_table.controller import image_table_clear_active
 from well_viewer.features.image_browser.image_table.controller import image_table_refresh_picker
@@ -81,4 +83,22 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     help_lbl.setWordWrap(True)
     layout.addWidget(help_lbl)
 
+    # Plot Groups drawer — same widget that lives on the plotting sidebar,
+    # added here so users can pick a saved well set and have it drive the
+    # Image Table grid immediately. ``include_add_controls=False`` because
+    # authoring new groups belongs with the plotting workflow.
+    from well_viewer.core.sidebar_view import build_plot_groups_drawer
+    plot_groups_section = build_plot_groups_drawer(
+        app, parent, include_add_controls=False,
+    )
+    layout.addWidget(plot_groups_section)
+
     image_table_refresh_picker(app)
+    # Repaint both Plot Groups drawers now that the Image Table's drawer
+    # has registered itself — otherwise the first paint of the sidebar
+    # shows an empty group list even when groups exist in app state.
+    try:
+        from well_viewer.core.sidebar_view import refresh_plot_groups_sidebar
+        refresh_plot_groups_sidebar(app)
+    except Exception:
+        swallowed("image table picker: plot groups refresh on build")

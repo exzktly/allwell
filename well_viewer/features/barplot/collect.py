@@ -232,7 +232,7 @@ def collect_bar_items(
                 t0_frac = None
                 t0_frac_spread = None
                 if fc_vs_t0:
-                    stats = _fc.member_first_tp_stats(
+                    stats = _fc.member_first_tp_stats_resolved(
                         app, rset.name,
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -240,8 +240,26 @@ def collect_bar_items(
                         baseline_tp=fc_baseline_tp,
                     )
                     if stats is not None:
-                        t0_mean, t0_spread = stats
-                    fstats = _fc.member_first_tp_frac(
+                        resolved_tp, t0_mean, t0_spread = stats
+                        # Apply the control op to the raw baseline so the t0
+                        # denominator is in the same scale as the post-control
+                        # numerator. Without this, mixed ops produced nonsense
+                        # (e.g. ratio_ctrl then subtract_t0 ended up subtracting
+                        # a raw 200 from a normalised 4.0).
+                        if fc_vs_ctrl and fc_ctrl_lbl:
+                            ctrl_b = _fc.control_stats_at_for_bar(
+                                app, fc_ctrl_lbl, resolved_tp,
+                                threshold=threshold,
+                                val_col=app._app_state.channel.active_val_col,
+                                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                                fluor_gates=fluor_gates,
+                            )
+                            if ctrl_b is not None:
+                                t0_mean, t0_spread = _fc._apply_axis(
+                                    t0_mean, t0_spread,
+                                    ctrl_b[0], ctrl_b[1], fc_op_ctrl,
+                                )
+                    fstats = _fc.member_first_tp_frac_resolved(
                         app, rset.name,
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -249,7 +267,20 @@ def collect_bar_items(
                         baseline_tp=fc_baseline_tp,
                     )
                     if fstats is not None:
-                        t0_frac, t0_frac_spread = fstats
+                        resolved_tp_f, t0_frac, t0_frac_spread = fstats
+                        if fc_vs_ctrl and fc_ctrl_lbl:
+                            ctrl_bf = _fc.control_frac_at_for_bar(
+                                app, fc_ctrl_lbl, resolved_tp_f,
+                                threshold=threshold,
+                                val_col=app._app_state.channel.active_val_col,
+                                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                                fluor_gates=fluor_gates,
+                            )
+                            if ctrl_bf is not None:
+                                t0_frac, t0_frac_spread = _fc._apply_axis(
+                                    t0_frac, t0_frac_spread,
+                                    ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
+                                )
                 if fc_force_nan:
                     gm = float("nan")
                     g_err_m = 0.0
@@ -354,12 +385,40 @@ def collect_bar_items(
                     t0_frac = None
                     t0_frac_spread = None
                     if fc_vs_t0:
-                        t0_mean, t0_spread = _fc.baseline_from_points(
+                        resolved_tp, t0_mean, t0_spread = _fc.baseline_from_points_resolved(
                             pts, baseline_tp=fc_baseline_tp,
                         )
-                        t0_frac, t0_frac_spread = _fc.baseline_frac_from_points(
+                        resolved_tp_f, t0_frac, t0_frac_spread = _fc.baseline_frac_from_points_resolved(
                             pts, baseline_tp=fc_baseline_tp,
                         )
+                        # Apply control op to the raw baseline so the t0 denominator
+                        # is in the post-control scale (matches grouped-mode fix).
+                        if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp is not None and t0_mean is not None:
+                            ctrl_b = _fc.control_stats_at_for_bar(
+                                app, fc_ctrl_lbl, resolved_tp,
+                                threshold=threshold,
+                                val_col=app._app_state.channel.active_val_col,
+                                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                                fluor_gates=fluor_gates,
+                            )
+                            if ctrl_b is not None:
+                                t0_mean, t0_spread = _fc._apply_axis(
+                                    t0_mean, t0_spread,
+                                    ctrl_b[0], ctrl_b[1], fc_op_ctrl,
+                                )
+                        if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_f is not None and t0_frac is not None:
+                            ctrl_bf = _fc.control_frac_at_for_bar(
+                                app, fc_ctrl_lbl, resolved_tp_f,
+                                threshold=threshold,
+                                val_col=app._app_state.channel.active_val_col,
+                                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                                fluor_gates=fluor_gates,
+                            )
+                            if ctrl_bf is not None:
+                                t0_frac, t0_frac_spread = _fc._apply_axis(
+                                    t0_frac, t0_frac_spread,
+                                    ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
+                                )
                     m, s = _fc.scale_bar_value(
                         m, s,
                         control_mean=fc_control_mean_at_t if fc_vs_ctrl else None,

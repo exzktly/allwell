@@ -398,7 +398,12 @@ def test_h10_subtract_op_with_vs_control_works(mock_app):
 
 
 def test_h11_subtract_op_with_both_axes_works(mock_app):
-    """vs_control + vs_t0 with op=subtract: bar = raw - control - baseline."""
+    """vs_control + vs_t0 with op=subtract.
+
+    Baseline is post-control (v7.1.8 fix): raw_baseline OP_CTRL ctrl_at_baseline.
+    For subtract+subtract, baseline = TREAT@0 - CTRL@0 = 100 - 100 = 0.
+    Then result = (raw - ctrl) - baseline = (400 - 100) - (100 - 100) = 300 - 0 = 300.
+    """
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
     mock_app.fc_vs_t0_on = True
@@ -406,10 +411,10 @@ def test_h11_subtract_op_with_both_axes_works(mock_app):
     mock_app.fc_op = "subtract"
     _, items, _ = collect_bar_items(mock_app, 2.0)
     by_key = {it.key: it.mean for it in items}
-    # CTRL@2 - CTRL@2 - CTRL@0 = 100 - 100 - 100 = -100
-    assert math.isclose(by_key["CTRL"], -100.0)
-    # TREAT@2 - CTRL@2 - TREAT@0 = 400 - 100 - 100 = 200
-    assert math.isclose(by_key["TREAT"], 200.0)
+    # CTRL: (100-100) - (100-100) = 0
+    assert math.isclose(by_key["CTRL"], 0.0)
+    # TREAT: (400-100) - (100-100) = 300
+    assert math.isclose(by_key["TREAT"], 300.0)
 
 
 # ── OnFraction fold-change regression ────────────────────────────────────────
@@ -530,14 +535,13 @@ def test_onfraction_force_nan_when_control_missing():
 # verify each combination produces the expected stacked result.
 
 def test_per_axis_ops_subtract_ctrl_ratio_t0(mock_app):
-    """Subtract control, then divide by raw baseline.
+    """Subtract control, then divide by post-control baseline.
 
-    Bar's baseline is the member's RAW value at baseline_tp (not the
-    post-control baseline — that's a separate question; the per-axis
-    op split just lets each axis pick its own operator).
+    The baseline is now post-control (v7.1.8): raw_baseline OP_CTRL ctrl_at_baseline.
 
     TREAT@2 = 400, CTRL@2 = 100 → step1 = 400 - 100 = 300.
-    baseline (raw) = TREAT@1 = 200. step2 = 300 / 200 = 1.5.
+    baseline (post-control, op_ctrl=subtract) = TREAT@1 - CTRL@1 = 200 - 100 = 100.
+    step2 (op_t0=ratio) = 300 / 100 = 3.0.
     """
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
@@ -547,14 +551,15 @@ def test_per_axis_ops_subtract_ctrl_ratio_t0(mock_app):
     mock_app.fc_op_t0 = "ratio"
     _, items, _ = collect_bar_items(mock_app, 2.0)
     by_key = {it.key: it.mean for it in items}
-    assert math.isclose(by_key["TREAT"], 1.5)
+    assert math.isclose(by_key["TREAT"], 3.0)
 
 
 def test_per_axis_ops_ratio_ctrl_subtract_t0(mock_app):
-    """Divide by control, then subtract raw baseline.
+    """Divide by control, then subtract post-control baseline.
 
-    TREAT@2 / CTRL@2 = 4.0. baseline (raw) = TREAT@1 = 200.
-    Result = 4.0 - 200 = -196.0.
+    TREAT@2 / CTRL@2 = 4.0.
+    baseline (post-control, op_ctrl=ratio) = TREAT@1 / CTRL@1 = 200/100 = 2.0.
+    step2 (op_t0=subtract) = 4.0 - 2.0 = 2.0.
     """
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
@@ -564,18 +569,20 @@ def test_per_axis_ops_ratio_ctrl_subtract_t0(mock_app):
     mock_app.fc_op_t0 = "subtract"
     _, items, _ = collect_bar_items(mock_app, 2.0)
     by_key = {it.key: it.mean for it in items}
-    # CTRL: (100/100) - 100 = 1 - 100 = -99
-    assert math.isclose(by_key["CTRL"], -99.0)
-    # TREAT: (400/100) - 200 = 4 - 200 = -196
-    assert math.isclose(by_key["TREAT"], -196.0)
+    # CTRL: (100/100) - (100/100) = 1 - 1 = 0
+    assert math.isclose(by_key["CTRL"], 0.0)
+    # TREAT: (400/100) - (200/100) = 4 - 2 = 2.0
+    assert math.isclose(by_key["TREAT"], 2.0)
 
 
 def test_per_axis_ops_legacy_fc_op_still_fans_out(mock_app):
-    """Setting the legacy single ``fc_op`` field must still apply to both
-    axes for back-compat with snapshots / older callers.
+    """Setting the legacy single ``fc_op`` field must still apply to both axes
+    for back-compat with snapshots / older callers.
 
-    Both axes subtract: TREAT@2 - CTRL@2 - baseline_raw
-                      = 400 - 100 - 200 = 100.
+    Both axes subtract, post-control baseline (v7.1.8):
+    step1 = TREAT@2 - CTRL@2 = 300.
+    baseline = TREAT@1 - CTRL@1 = 200 - 100 = 100.
+    step2 = step1 - baseline = 300 - 100 = 200.
     """
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
@@ -584,4 +591,4 @@ def test_per_axis_ops_legacy_fc_op_still_fans_out(mock_app):
     mock_app.fc_op = "subtract"   # legacy single-op
     _, items, _ = collect_bar_items(mock_app, 2.0)
     by_key = {it.key: it.mean for it in items}
-    assert math.isclose(by_key["TREAT"], 100.0)
+    assert math.isclose(by_key["TREAT"], 200.0)

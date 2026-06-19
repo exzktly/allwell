@@ -534,7 +534,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "Scan # Points thresholds between Min and Max for the selected "
         "channel, compute fraction-on in Well A and Well B at each "
         "threshold, then apply the threshold that maximizes their "
-        "absolute fraction-on difference."
+        "relative fraction-on gap, |Δ| / max(fa, fb)."
     )
     opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx.app))
     ctx.app._cell_gating_opt_btn = opt_btn
@@ -1351,7 +1351,7 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         f"Optimized {channel_key}{tp_note}: threshold={result.threshold:.6g}; "
         f"{well_a} fraction-on={result.frac_a:.3f} (n={result.n_a}), "
         f"{well_b} fraction-on={result.frac_b:.3f} (n={result.n_b}); "
-        f"|Δ|={result.difference:.3f}."
+        f"|Δ|/max={result.difference:.3f}."
     )
     # Validation popup: show fraction-on(A), fraction-on(B), and |Δ| as
     # functions of the scanned threshold, with the chosen threshold marked.
@@ -1412,7 +1412,14 @@ def _cell_gating_show_opt_curve_popup(
         [_fraction_on_for_threshold(values_b, float(t)) for t in thresholds],
         dtype=float,
     )
-    diffs = np.abs(frac_a - frac_b)
+    # Match the optimizer's relative-gap metric so the popup shows exactly
+    # the curve argmax operates on: |fa - fb| / max(fa, fb), with the
+    # both-zero case clamped to 0 instead of nan.
+    _abs_gap = np.abs(frac_a - frac_b)
+    _larger = np.maximum(frac_a, frac_b)
+    diffs = np.divide(
+        _abs_gap, _larger, out=np.zeros_like(_abs_gap), where=_larger > 0,
+    )
 
     popup = getattr(app, "_cell_gating_opt_curve_popup", None)
     if popup is None or not popup.isVisible():
@@ -1454,7 +1461,8 @@ def _cell_gating_show_opt_curve_popup(
             label=f"fraction-on({well_a})")
     ax.plot(thresholds, frac_b, color="#FF8A65", lw=1.4,
             label=f"fraction-on({well_b})")
-    ax.plot(thresholds, diffs, color=accent, lw=1.8, label="|Δ|")
+    ax.plot(thresholds, diffs, color=accent, lw=1.8,
+            label="|Δ| / max(fa, fb)")
     ax.axvline(
         result.threshold, color=txt_pri, lw=1.2, ls="--",
         label=f"chosen threshold = {result.threshold:.4g}",
@@ -1462,7 +1470,7 @@ def _cell_gating_show_opt_curve_popup(
     ax.set_xlim(float(thresholds[0]), float(thresholds[-1]))
     ax.set_ylim(-0.02, 1.02)
     ax.set_xlabel(f"Threshold ({channel_key})", color=txt_pri)
-    ax.set_ylabel("Fraction-on / |Δ|", color=txt_pri)
+    ax.set_ylabel("Fraction-on / relative gap", color=txt_pri)
     tp_note = "" if timepoint is None else f" @ {_timepoint_label(timepoint)}"
     ax.set_title(
         f"{channel_key}: {well_a} vs {well_b}{tp_note} "
@@ -1785,7 +1793,18 @@ def _optimize_thresh_frac_on_between_wells(
     ratios=None,
     timepoint=None,
 ) -> ThreshFracOptimizationResult:
-    """Return the threshold maximizing |fraction_on(A) - fraction_on(B)|.
+    """Return the threshold maximizing the **relative** fraction-on gap:
+    ``|fraction_on(A) - fraction_on(B)| / max(fraction_on(A), fraction_on(B))``.
+
+    The absolute gap ``|fa - fb|`` peaks wherever the populations diverge
+    *most in count* — useful when both wells share an "on" tail. But for two
+    skewed fluorescence distributions where most cells are barely-on, the
+    absolute gap stays small even where the well *ratio* differs sharply
+    (one well 5% on, the other 0.5% on is a 10× difference but only 0.045
+    in absolute terms). Normalising by the larger fraction surfaces those
+    relative differences instead, which is what a fraction-on cut is
+    supposed to discriminate. When both fractions are zero we treat the
+    relative gap as zero rather than emit ``nan``.
 
     ``timepoint`` is an optional ``(kind, value)`` token (see
     :func:`_distinct_timepoints`); when given, only rows at that timepoint
@@ -1810,24 +1829,34 @@ def _optimize_thresh_frac_on_between_wells(
         raise ValueError("Well B has no valid finite values for the selected channel.")
 
     thresholds = np.linspace(lo, hi, int(steps))
-    diffs = np.array(
-        [
-            abs(_fraction_on_for_threshold(values_a, float(t))
-                - _fraction_on_for_threshold(values_b, float(t)))
-            for t in thresholds
-        ],
+    fa = np.array(
+        [_fraction_on_for_threshold(values_a, float(t)) for t in thresholds],
         dtype=float,
     )
+    fb = np.array(
+        [_fraction_on_for_threshold(values_b, float(t)) for t in thresholds],
+        dtype=float,
+    )
+    abs_gap = np.abs(fa - fb)
+    larger = np.maximum(fa, fb)
+    # ``where`` keeps the division finite when both wells are entirely off
+    # at a given threshold (max=0). ``out=zeros_like(abs_gap)`` makes those
+    # entries 0 instead of nan / inf so argmax picks a meaningful index.
+    diffs = np.divide(
+        abs_gap, larger,
+        out=np.zeros_like(abs_gap),
+        where=larger > 0,
+    )
 
-    # The threshold where the absolute fraction-on difference is biggest.
-    # ``np.argmax`` returns the FIRST index attaining that maximum, so when a
-    # run of thresholds ties for the max |Δ| (fraction-on is a step function,
-    # so ties are common between two separated populations) the lowest such
-    # threshold is reported.
+    # The threshold where the relative fraction-on gap is biggest.
+    # ``np.argmax`` returns the FIRST index attaining the maximum, so when
+    # a run of thresholds ties for the max gap (fraction-on is a step
+    # function, so ties are common between two separated populations) the
+    # lowest such threshold is reported.
     best_idx = int(np.argmax(diffs))
     best_t = float(thresholds[best_idx])
-    frac_a = _fraction_on_for_threshold(values_a, best_t)
-    frac_b = _fraction_on_for_threshold(values_b, best_t)
+    frac_a = float(fa[best_idx])
+    frac_b = float(fb[best_idx])
     return ThreshFracOptimizationResult(
         threshold=best_t,
         frac_a=frac_a,

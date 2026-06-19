@@ -26,7 +26,12 @@ def _df(values, *, included=None, den=None, qc=None, crop=None):
     return pd.DataFrame(data)
 
 
-def test_optimizer_maximizes_absolute_fraction_difference():
+def test_optimizer_maximizes_relative_fraction_gap():
+    # Optimizer maximises ``|fa - fb| / max(fa, fb)`` (relative gap), so
+    # B is fully off and A is partially on ⇒ the gap is 100% of the larger
+    # fraction at every threshold ≤ A's max, even when the absolute
+    # difference is shrinking. argmax-on-tie returns the first index — the
+    # range Min — same threshold the absolute metric used to pick here.
     a = _df([0, 10, 20, 30])
     b = _df([0, 0, 0, 0])
 
@@ -42,9 +47,37 @@ def test_optimizer_maximizes_absolute_fraction_difference():
     assert result.threshold == pytest.approx(0.0)
     assert result.frac_a == pytest.approx(0.75)
     assert result.frac_b == pytest.approx(0.0)
-    assert result.difference == pytest.approx(0.75)
+    assert result.difference == pytest.approx(1.0)
     assert result.n_a == 4
     assert result.n_b == 4
+
+
+def test_optimizer_normalisation_prefers_relative_over_absolute():
+    # Both wells have the same number of bright cells but A also has a long
+    # background tail. At a high threshold, A is 1% on and B is 0% on — an
+    # absolute gap of 0.01, but a 100% relative gap. At a low threshold,
+    # both wells are nearly fully on — a 0.05 absolute gap but only a few-%
+    # relative gap. Absolute argmax would land at the low threshold; the
+    # relative metric correctly picks the high one (where the populations
+    # actually separate).
+    a_values = [0] * 95 + [500] * 5            # 5% bright tail above background
+    b_values = [0] * 90 + [50] * 10            # 10% mid-bright, no bright tail
+    a = _df(a_values)
+    b = _df(b_values)
+
+    result = _optimize_thresh_frac_on_between_wells(
+        a, b, channel_key="gfp",
+        min_threshold=0, max_threshold=500, steps=501,
+    )
+
+    # At threshold >= 50 (no B cells above 50), fa = 0.05, fb = 0 ⇒ relative
+    # gap = 1.0. The metric must pick a threshold in that high band, not
+    # the noise-floor band where both wells are nearly fully off and the
+    # absolute gap is small but the relative gap is also small.
+    assert result.threshold >= 50.0
+    assert result.frac_a == pytest.approx(0.05)
+    assert result.frac_b == pytest.approx(0.0)
+    assert result.difference == pytest.approx(1.0)
 
 
 def test_optimizer_ignores_included_gate():

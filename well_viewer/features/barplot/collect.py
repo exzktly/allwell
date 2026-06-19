@@ -231,6 +231,9 @@ def collect_bar_items(
                     )
                     if stats is not None:
                         t0_mean, t0_spread = stats
+                # Diagnostic — capture the bar's pre-scaling mean and the
+                # denominators it would use, before scale_bar_value runs.
+                _gm_pre = gm
                 if fc_force_nan:
                     gm = float("nan")
                     g_err_m = 0.0
@@ -242,6 +245,14 @@ def collect_bar_items(
                         t0_mean=t0_mean if fc_vs_t0 else None,
                         t0_spread=t0_spread if fc_vs_t0 else None,
                     )
+                import logging as _ld
+                _ld.getLogger("well_viewer").info(
+                    "collect_bar_items rset=%r tp=%r raw_mean=%r t0_mean=%r ctrl_mean=%r → scaled_mean=%r",
+                    rset.name, target_t, _gm_pre,
+                    t0_mean if fc_vs_t0 else None,
+                    fc_control_mean_at_t if fc_vs_ctrl else None,
+                    gm,
+                )
                 has_mean = not math.isnan(gm)
                 has_frac = has_mean and not math.isnan(gf)
                 gk = rset_disp if group_mode == "well" else tp_str

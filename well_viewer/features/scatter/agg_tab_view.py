@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     make_band_controls, make_plot_with_right_dock, make_popover_button,
-    make_plot_view_switcher, send_plot_to_batch_export)
+    make_plot_view_switcher)
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 
 
@@ -94,13 +94,6 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(_disp_btn)
 
     cl.addStretch(1)
-
-    # S5: send the current scatter spec to Batch Export (aggregate mode).
-    _batch_btn = QPushButton("Open in Batch Export", ctrl)
-    _batch_btn.setProperty("variant", "secondary")
-    _batch_btn.setToolTip("Open Batch Export with these plot settings (Scatter aggregate)")
-    _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "scatter_agg"))
-    cl.addWidget(_batch_btn)
 
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")

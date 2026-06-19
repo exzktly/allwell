@@ -52,6 +52,7 @@ def snapshot(app) -> dict:
             "control_label": str(app._app_state.plot.fc_control_label or ""),
             "vs_t0_on": bool(app._app_state.plot.fc_vs_t0_on),
             "baseline_tp": str(getattr(app._app_state.plot, "fc_baseline_tp", "") or ""),
+            "op": str(getattr(app._app_state.plot, "fc_op", "ratio") or "ratio"),
         },
         "export_style_prefs": dict(getattr(app, "_export_style_prefs", {}) or {}),
         "tabs": _snapshot_tabs(app),
@@ -290,6 +291,9 @@ def restore(app, state: dict) -> None:
             app._app_state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
         if "baseline_tp" in fc:
             app._app_state.plot.fc_baseline_tp = str(fc.get("baseline_tp") or "")
+        if "op" in fc:
+            op_in = str(fc.get("op") or "ratio")
+            app._app_state.plot.fc_op = op_in if op_in in ("ratio", "subtract") else "ratio"
         # Push the restored state into any fold-change combos that have
         # already been built. Lazily-built tabs (Bar) will pick the
         # values up on first install via _repopulate_*_combo, which both
@@ -738,6 +742,7 @@ def reset(app) -> None:
     app._app_state.plot.fc_control_label = ""
     app._app_state.plot.fc_vs_t0_on = False
     app._app_state.plot.fc_baseline_tp = ""
+    app._app_state.plot.fc_op = "ratio"
     try:
         from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
         _sync_widgets_to_state(app)

@@ -118,6 +118,24 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
         combo.blockSignals(blocked)
 
 
+_OP_LABEL_RATIO = "Ratio (÷ denominator)"
+_OP_LABEL_SUBTRACT = "Subtract (− denominator)"
+
+
+def _repopulate_op_combo(app, combo: QComboBox) -> None:
+    """Populate the Operator combo with the two FC operators and set
+    the current selection from ``PlotState.fc_op``."""
+    chosen = str(getattr(app._app_state.plot, "fc_op", "ratio") or "ratio")
+    blocked = combo.blockSignals(True)
+    try:
+        combo.clear()
+        combo.addItem(_OP_LABEL_RATIO)
+        combo.addItem(_OP_LABEL_SUBTRACT)
+        combo.setCurrentIndex(1 if chosen == "subtract" else 0)
+    finally:
+        combo.blockSignals(blocked)
+
+
 def _available_timepoint_strs(app) -> list[str]:
     """Return the dataset's timepoints formatted as the bar tp-strings
     (``f"{t:.4g}"``), so the baseline picker matches the rest of the UI."""
@@ -196,6 +214,7 @@ def set_fold_change_state(
     control_label: "str | None" = None,
     vs_t0_on: "bool | None" = None,
     baseline_tp: "str | None" = None,
+    op: "str | None" = None,
     initiating_scope: str = "",
 ) -> None:
     """Single entry point for fold-change state mutations.
@@ -218,6 +237,7 @@ def set_fold_change_state(
         control_label=control_label,
         vs_t0_on=vs_t0_on,
         baseline_tp=baseline_tp,
+        op=op,
     )
 
     _sync_widgets_to_state(app, skip_scope=initiating_scope)
@@ -226,14 +246,6 @@ def set_fold_change_state(
     # redraw — visible scope now, others marked dirty for redraw on tab switch
     # (the tab-change handler calls ``flush_dirty_scopes``). The bus emit *is*
     # the redraw trigger; see redraw_coordinator.py / fold_change_scopes.py.
-    import logging
-    logging.getLogger("well_viewer").info(
-        "fold_change.set_fold_change_state: post-mutation state=(vs_ctrl=%r, ctrl_lbl=%r, vs_t0=%r, baseline_tp=%r) — emitting plot_options_changed",
-        app._app_state.plot.fc_vs_control_on,
-        app._app_state.plot.fc_control_label,
-        app._app_state.plot.fc_vs_t0_on,
-        getattr(app._app_state.plot, "fc_baseline_tp", ""),
-    )
     app._event_bus.plot_options_changed.emit(app._app_state.plot)
 
 
@@ -262,18 +274,30 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
     baseline_combo = QComboBox(parent)
     baseline_combo.setMinimumWidth(140)
     baseline_combo.setToolTip(
-        "Divide each bar / curve by its own value at the reference "
-        "timepoint. — disables this axis."
+        "Normalise each bar / curve against its own value at the "
+        "reference timepoint. — disables this axis."
     )
     _repopulate_baseline_combo(app, baseline_combo)
     layout.addWidget(baseline_combo)
 
+    # Operator selector — ratio (X / denom) or subtraction (X − denom).
+    # Same operator applies to both the vs-control and vs-baseline-tp
+    # axes; defaults to ratio for back-compat.
+    layout.addWidget(QLabel("Operator", parent))
+    op_combo = QComboBox(parent)
+    op_combo.setMinimumWidth(140)
+    op_combo.setToolTip(
+        "How each normalisation denominator is applied. ‘Ratio’ divides "
+        "each value by the denominator (the original v7.1.x behaviour); "
+        "‘Subtract’ subtracts it. Use Subtract for additive baselines "
+        "or background subtraction where dividing would distort the "
+        "scale."
+    )
+    _repopulate_op_combo(app, op_combo)
+    layout.addWidget(op_combo)
+
     def _on_ctrl_changed(_idx: int) -> None:
-        import logging
         text = ctrl_combo.currentText()
-        logging.getLogger("well_viewer").info(
-            "fold_change._on_ctrl_changed scope=%r text=%r", scope, text,
-        )
         if text == _NONE_LABEL or not text:
             set_fold_change_state(
                 app, vs_control_on=False, control_label="",
@@ -286,11 +310,7 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
             )
 
     def _on_baseline_changed(_idx: int) -> None:
-        import logging
         text = baseline_combo.currentText()
-        logging.getLogger("well_viewer").info(
-            "fold_change._on_baseline_changed scope=%r text=%r", scope, text,
-        )
         if text == _NONE_LABEL or not text:
             set_fold_change_state(
                 app, vs_t0_on=False, baseline_tp="",
@@ -308,8 +328,14 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
                 initiating_scope=scope,
             )
 
+    def _on_op_changed(_idx: int) -> None:
+        text = op_combo.currentText()
+        op = "subtract" if text == _OP_LABEL_SUBTRACT else "ratio"
+        set_fold_change_state(app, op=op, initiating_scope=scope)
+
     ctrl_combo.currentIndexChanged.connect(_on_ctrl_changed)
     baseline_combo.currentIndexChanged.connect(_on_baseline_changed)
+    op_combo.currentIndexChanged.connect(_on_op_changed)
 
     # Stash references using the scope descriptor's attribute names so
     # the cross-tab sync helper picks them up via the registry. Falls

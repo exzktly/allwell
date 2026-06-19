@@ -100,6 +100,33 @@ def _propagate_spread(
     return abs(new_mean) * math.sqrt(rel_sq)
 
 
+def _subtract_pt(
+    pt: tuple, shift: float, *,
+    shift_spread: float = 0.0,
+) -> tuple:
+    """Return a copy of *pt* with ``shift`` subtracted from the mean.
+
+    Absolute variances add in quadrature: ``σ_Y² = σ_X² + σ_shift²``.
+    Companion to :func:`_scale_pt` for the additive (``op="subtract"``)
+    fold-change branch.
+    """
+    m = pt[1]
+    s = pt[2]
+    if not (isinstance(m, (int, float)) and math.isfinite(m)):
+        new = list(pt); new[1] = float("nan"); new[2] = 0.0
+        return tuple(new)
+    if not math.isfinite(shift):
+        new = list(pt); new[1] = float("nan"); new[2] = 0.0
+        return tuple(new)
+    s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
+    shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
+    new_spread = math.sqrt(s_val * s_val + shift_var)
+    new = list(pt)
+    new[1] = float(m) - float(shift)
+    new[2] = float(new_spread)
+    return tuple(new)
+
+
 def _scale_pt(
     pt: tuple, factor: float, *,
     factor_rel_err_sq: float = 0.0,
@@ -167,6 +194,7 @@ def normalize_pts(
     control_stats: Optional[Dict[float, Tuple[float, float]]] = None,
     use_t0: bool = False,
     baseline_tp: Optional[float] = None,
+    op: str = "ratio",
     miss_sink: Optional[Set[float]] = None,
 ) -> list:
     """Apply optional vs-control and/or vs-t0 normalization to AggPoint list.
@@ -233,9 +261,13 @@ def normalize_pts(
                      if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t))),
                     (cm, 0.0),
                 )
-                rel_err_sq = _rel_err_sq(ctrl_mean, ctrl_spread)
-                stage1.append(_scale_pt(pt, ctrl_mean,
-                                         factor_rel_err_sq=rel_err_sq))
+                if op == "subtract":
+                    stage1.append(_subtract_pt(pt, ctrl_mean,
+                                               shift_spread=ctrl_spread or 0.0))
+                else:
+                    rel_err_sq = _rel_err_sq(ctrl_mean, ctrl_spread)
+                    stage1.append(_scale_pt(pt, ctrl_mean,
+                                             factor_rel_err_sq=rel_err_sq))
     else:
         stage1 = list(pts)
 
@@ -283,6 +315,9 @@ def normalize_pts(
                     break
         if baseline is None:
             return stage1
+        if op == "subtract":
+            return [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
+                    for pt in stage1]
         baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
         return [_scale_pt(pt, baseline,
                           factor_rel_err_sq=baseline_rel_err_sq)
@@ -331,8 +366,13 @@ def baseline_from_points(
                         float(m),
                         float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
                     )
-                return None, 0.0
-        return None, 0.0
+                # Matched tp but its mean isn't finite/non-zero — fall
+                # through to earliest so the bar still normalises.
+                break
+        # Requested baseline tp wasn't found (or had bad data); fall
+        # through to earliest-finite — matches normalize_pts so the
+        # bar plot doesn't silently no-op when the user picks a tp
+        # the per-well series doesn't sample.
     for pt in sorted(pts, key=lambda p: p[0]):
         m = pt[1]
         if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
@@ -342,6 +382,14 @@ def baseline_from_points(
                 float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
             )
     return None, 0.0
+
+
+def parse_fc_op(app) -> str:
+    """Return the user's chosen fold-change operator (``"ratio"`` or
+    ``"subtract"``). Defaults to ``"ratio"`` for back-compat with
+    ``PlotState`` snapshots that don't carry the field."""
+    op = getattr(app._app_state.plot, "fc_op", "ratio") or "ratio"
+    return op if op in ("ratio", "subtract") else "ratio"
 
 
 def parse_baseline_tp(app) -> Optional[float]:
@@ -767,10 +815,12 @@ def member_first_tp_stats(
 
     Returns the stats at ``baseline_tp`` when supplied (matched with a
     relative tolerance to absorb float-printing drift) and falls back to
-    the member's earliest finite tp otherwise — same "vs t0" semantics
-    as before for callers that don't yet pass a baseline tp. Returns
-    ``None`` for unknown / empty members, OR when the requested tp has
-    no sample for this member.
+    the member's earliest finite tp otherwise — matching the
+    ``normalize_pts`` line-scope semantics so a user who picks a
+    baseline tp the bar's rep-set doesn't sample gets the same fallback
+    the line scope already gives them, instead of a silent no-op that
+    looks indistinguishable from FC-off. Returns ``None`` only for
+    unknown / empty members.
     """
     series = member_stats_series(
         app, label,
@@ -785,7 +835,11 @@ def member_first_tp_stats(
         for t, ms in series.items():
             if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
                 return ms
-        return None
+        # Requested baseline tp not present for this member — fall
+        # through to earliest-finite so the bar still normalises, same
+        # as ``normalize_pts``. Without this the FC toggle is a silent
+        # no-op visually (see test_collect_bar_items_baseline_missing
+        # _tp_falls_back_silently for the regression).
     earliest = min(series)
     return series[earliest]
 
@@ -800,23 +854,47 @@ def scale_bar_value(
     control_spread: Optional[float] = None,
     t0_mean: Optional[float] = None,
     t0_spread: Optional[float] = None,
+    op: str = "ratio",
 ) -> Tuple[float, float]:
     """Apply control and/or t0 normalization with error propagation.
 
-    For ``Y = X / (C · B)`` (one or both denominators present) with all
-    three quantities independent, the relative variance adds:
+    ``op`` selects how the denominator(s) are applied:
 
-        (σ_Y / Y)² = (σ_X / X)² + (σ_C / C)² + (σ_B / B)²
+    * ``"ratio"`` (default, original behaviour) — ``Y = X / (C · B)``.
+      For independent quantities the relative variance adds:
+      ``(σ_Y / Y)² = (σ_X / X)² + (σ_C / C)² + (σ_B / B)²``.
+    * ``"subtract"`` — ``Y = X - C - B``. Independent absolute variances
+      add: ``σ_Y² = σ_X² + σ_C² + σ_B²``. Useful for additive
+      baselines / background subtraction where dividing distorts.
 
     *control_spread* / *t0_spread* default to None (treated as 0), which
-    recovers the original "denominator treated as exact" behaviour for
-    callers that don't have a meaningful uncertainty for the
-    denominator. With both spreads supplied the result's spread is the
-    properly-propagated value, not the naive ``spread / factor``.
+    recovers the original "denominator treated as exact" behaviour.
 
     Returns ``(scaled_mean, scaled_spread)`` with NaN propagation when
-    any factor is non-finite or zero. Spread is always non-negative.
+    a ratio denominator is non-finite or zero. Spread is always
+    non-negative.
     """
+    if not math.isfinite(mean):
+        return float("nan"), 0.0
+    if op == "subtract":
+        # Additive composition. NaN denominator → NaN result; zero is
+        # benign (it just means no shift). Variances add in quadrature.
+        new_mean = mean
+        var = float(spread) * float(spread) if (spread is not None and math.isfinite(spread)) else 0.0
+        for d_mean, d_spread in (
+            (control_mean, control_spread),
+            (t0_mean, t0_spread),
+        ):
+            if d_mean is None:
+                continue
+            if not math.isfinite(d_mean):
+                return float("nan"), 0.0
+            new_mean -= float(d_mean)
+            if d_spread is not None and math.isfinite(d_spread):
+                var += float(d_spread) * float(d_spread)
+        new_spread = math.sqrt(var) if var > 0 else 0.0
+        return float(new_mean), float(new_spread)
+    # default: ratio
     factor = 1.0
     denom_rel_err_sq = 0.0
     if control_mean is not None:
@@ -831,8 +909,6 @@ def scale_bar_value(
         factor *= t0_mean
         if t0_spread is not None:
             denom_rel_err_sq += _rel_err_sq(t0_mean, t0_spread)
-    if not math.isfinite(mean):
-        return float("nan"), 0.0
     new_mean = mean / factor
     new_spread = _propagate_spread(new_mean, mean, spread, denom_rel_err_sq)
     return float(new_mean), float(new_spread)

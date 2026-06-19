@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_plot_view_switcher, send_plot_to_batch_export)
+    make_plot_with_right_dock, make_plot_view_switcher)
 from functools import partial
 from well_viewer.features.export.service import export_plot_data
 from well_viewer.features.lineplot.controller import on_fig_click
@@ -88,13 +88,6 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(_disp_btn)
 
     cl.addStretch(1)
-
-    # S5: send the current plot spec to Batch Export (matching chart-type).
-    _batch_btn = QPushButton("Open in Batch Export", line_ctrl)
-    _batch_btn.setProperty("variant", "secondary")
-    _batch_btn.setToolTip("Open Batch Export with these plot settings (Line)")
-    _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "line"))
-    cl.addWidget(_batch_btn)
 
     # IconButton (QToolButton subclass) matches the Sample Definitions
     # top toolbar style — compact, auto-raise icon-only buttons rather

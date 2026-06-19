@@ -252,13 +252,10 @@ def render_bar_items(
     if has_clusters:
         _annotate_cluster_headers(items, xs, ax_mean)
 
-    # ── Auto-fit y-limits: best-fit all bars ────────────────────────────────
-    # Keep the honest 0 baseline but trim the TOP to the tallest bar + its
-    # error bar (plus ~8% headroom so the error-bar caps aren't clipped), so
-    # the bars fill the panel instead of floating under matplotlib's default
-    # margin. Applied to every panel; the Fraction panel is additionally
-    # capped at 1.05 (it's a fraction). User-entered limits — applied by
-    # apply_bar_ylims, which runs AFTER this — still override.
+    # ── Auto-fit y-limits ────────────────────────────────────────────────────
+    # Honest 0 baseline; trim top to tallest bar + error + ~8% headroom so the
+    # error caps aren't clipped. Frac panel is capped at 1.05 when FC is off.
+    # apply_bar_ylims runs AFTER this and applies user-entered overrides.
     _HEADROOM = 1.08
 
     def _tops_lows(get_val, get_spread):
@@ -290,9 +287,7 @@ def render_bar_items(
     _autofit(ax_mean, *_tops_lows(
         lambda it: it.mean if it.has_mean else float("nan"),
         lambda it: it.spread))
-    # Cap the frac panel at 1.05 only when FC is off — under FC the frac
-    # becomes a ratio (or subtract result) that can exceed 1 or go negative,
-    # and the cap silently clips the bars.
+    # cap=1.05 only when FC is off — under FC the frac may be a ratio > 1.
     _autofit(ax_frac, *_tops_lows(
         lambda it: it.frac if it.has_frac else float("nan"),
         lambda it: it.frac_spread), cap=None if fc_active else 1.05)

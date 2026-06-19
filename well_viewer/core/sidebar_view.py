@@ -83,6 +83,11 @@ def build_sidebar(app, parent: QWidget) -> None:
     plate.rowHeaderActivated.connect(partial(on_sidebar_plate_row_activated, app))
     plate.columnHeaderActivated.connect(partial(on_sidebar_plate_col_activated, app))
     plate.wellDropped.connect(partial(on_sidebar_plate_well_dropped, app))
+    # Hover tooltip surfaces the user's Sample-Definitions label when set,
+    # alongside the well id, so the rail plate doubles as a quick label
+    # readout — useful on tabs where the sidebar doesn't show the labels.
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(app))
 
     # User request: All 96 / Invert / Clear quick-select buttons removed
     # from the sidebar — row and column header clicks on the plate cover

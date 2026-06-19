@@ -131,6 +131,13 @@ def _snapshot_bar(app) -> dict:
             out["group_mode"] = str(plot.bar_group_mode)
         if hasattr(plot, "bar_pool_replicates"):
             out["pool_replicates"] = bool(plot.bar_pool_replicates)
+        # The user's drag-to-reorder bar layout. ``ordered_bar_keys``
+        # falls back to the canonical order when the saved list doesn't
+        # cover the current dataset's keys, so an empty / stale list is
+        # benign.
+        order = getattr(plot, "bar_order", None)
+        if isinstance(order, list) and order:
+            out["bar_order"] = [str(k) for k in order]
     return out
 
 
@@ -491,6 +498,8 @@ def _apply_bar(app, state: dict) -> None:
             plot.bar_group_mode = str(state["group_mode"])
         if "pool_replicates" in state:
             plot.bar_pool_replicates = bool(state["pool_replicates"])
+        if "bar_order" in state and isinstance(state["bar_order"], list):
+            plot.bar_order = [str(k) for k in state["bar_order"]]
 
 
 def _apply_distribution(app, state: dict) -> None:

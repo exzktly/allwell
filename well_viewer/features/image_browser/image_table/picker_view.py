@@ -33,6 +33,8 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])               # nothing selectable until a dataset loads
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(app))
     # Match the main sidebar plate's geometry so the picker stays in the
     # same screen position when the user switches tabs.
     plate.setMinimumHeight(280)

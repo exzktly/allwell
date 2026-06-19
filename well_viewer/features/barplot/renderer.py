@@ -29,6 +29,23 @@ from well_viewer.features.barplot.controller import (
 import numpy as np
 import pandas as pd
 
+
+def _set_frac_ylim(app, ax_frac) -> None:
+    """Clamp the OnFraction panel to [0, 1] unless fold-change is on.
+
+    Raw fractions are bounded so the clamp is a sensible default — without
+    it matplotlib's autoscaler wastes the panel on a tiny range. Under
+    fold-change the frac becomes a ratio (can exceed 1) or subtract result
+    (can go negative); the clamp would silently clip the bars and hide the
+    FC effect, so we let matplotlib auto-scale instead. User-entered y-lim
+    overrides still apply in either case via ``apply_bar_ylims``.
+    """
+    from well_viewer.domain import fold_change as _fc
+    fc_on, _, fc_t0 = _fc.fold_change_state(app)
+    if fc_on or fc_t0:
+        return
+    ax_frac.set_ylim(-0.05, 1.05)
+
 from well_viewer.data.data_loading import (
     _beeswarm_jitter,
     df_included_mask,
@@ -230,7 +247,7 @@ def draw_violin(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    ax_frac.set_ylim(-0.05, 1.05)
+    _set_frac_ylim(app, ax_frac)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
@@ -377,7 +394,7 @@ def draw_beeswarm(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    ax_frac.set_ylim(-0.05, 1.05)
+    _set_frac_ylim(app, ax_frac)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import (
         METRIC_KEY_TO_LABEL as _MLB,
@@ -533,7 +550,7 @@ def redraw_bars(app) -> None:
                 ax_n, events_total_title(_metric_key),
                 "N(spots)" if _metric_key == "smfish_count" else "N(above)",
             )
-    ax_frac.set_ylim(-0.05, 1.05)
+    _set_frac_ylim(app, ax_frac)
 
     if not app._app_state.dataset.well_paths:
         draw_bar_empty_state(

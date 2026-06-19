@@ -49,7 +49,9 @@ class BarItem:
       * ``mean`` / ``spread`` — post-normalization values. NaN /
         ``has_mean=False`` means render as the dashed placeholder.
       * ``frac`` / ``frac_spread`` / ``has_frac`` — fraction-above-
-        threshold panel. Always raw (fractions don't get fold-changed).
+        threshold panel. Fold-changed independently of ``mean`` when
+        fold-change is on (FC denominator is the control / baseline's
+        frac — frac and mean are independent quantities).
       * ``n_above`` / ``n_above_spread`` — events-above-threshold panel.
         ``n_above_spread > 0`` indicates per-FOV spread mode; in that
         case ``n_above`` is the per-FOV mean (float), otherwise it's
@@ -170,6 +172,8 @@ def collect_bar_items(
         """
         fc_control_mean_at_t = None
         fc_control_spread_at_t = None
+        fc_control_frac_at_t = None
+        fc_control_frac_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             ctrl_stats = _fc.control_stats_at_for_bar(
                 app, fc_ctrl_lbl, target_t,
@@ -182,6 +186,14 @@ def collect_bar_items(
                     miss_sink.add(float(target_t))
             else:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
+            ctrl_frac = _fc.control_frac_at_for_bar(
+                app, fc_ctrl_lbl, target_t,
+                threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                fluor_gates=fluor_gates,
+            )
+            if ctrl_frac is not None:
+                fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac
         fc_force_nan = fc_vs_ctrl and fc_ctrl_lbl and fc_control_mean_at_t is None
 
         out: List[BarItem] = []
@@ -216,6 +228,8 @@ def collect_bar_items(
                     n_above_err = 0.0
                 t0_mean = None
                 t0_spread = None
+                t0_frac = None
+                t0_frac_spread = None
                 if fc_vs_t0:
                     stats = _fc.member_first_tp_stats(
                         app, rset.name,
@@ -226,9 +240,20 @@ def collect_bar_items(
                     )
                     if stats is not None:
                         t0_mean, t0_spread = stats
+                    fstats = _fc.member_first_tp_frac(
+                        app, rset.name,
+                        threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                        use_sem=use_sem, per_fov_spread=per_fov_spread,
+                        fluor_gates=fluor_gates,
+                        baseline_tp=fc_baseline_tp,
+                    )
+                    if fstats is not None:
+                        t0_frac, t0_frac_spread = fstats
                 if fc_force_nan:
                     gm = float("nan")
                     g_err_m = 0.0
+                    gf = float("nan")
+                    g_err_f = 0.0
                 elif fc_vs_ctrl or fc_vs_t0:
                     gm, g_err_m = _fc.scale_bar_value(
                         gm, g_err_m,
@@ -236,6 +261,14 @@ def collect_bar_items(
                         control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
                         t0_mean=t0_mean if fc_vs_t0 else None,
                         t0_spread=t0_spread if fc_vs_t0 else None,
+                        op=fc_op,
+                    )
+                    gf, g_err_f = _fc.scale_bar_value(
+                        gf, g_err_f,
+                        control_mean=fc_control_frac_at_t if fc_vs_ctrl else None,
+                        control_spread=fc_control_frac_spread_at_t if fc_vs_ctrl else None,
+                        t0_mean=t0_frac if fc_vs_t0 else None,
+                        t0_spread=t0_frac_spread if fc_vs_t0 else None,
                         op=fc_op,
                     )
                 has_mean = not math.isnan(gm)
@@ -312,11 +345,18 @@ def collect_bar_items(
                 if fc_force_nan:
                     m = float("nan")
                     s = 0.0
+                    f = float("nan")
+                    fs = 0.0
                 elif fc_vs_ctrl or fc_vs_t0:
                     t0_mean = None
                     t0_spread = None
+                    t0_frac = None
+                    t0_frac_spread = None
                     if fc_vs_t0:
                         t0_mean, t0_spread = _fc.baseline_from_points(
+                            pts, baseline_tp=fc_baseline_tp,
+                        )
+                        t0_frac, t0_frac_spread = _fc.baseline_frac_from_points(
                             pts, baseline_tp=fc_baseline_tp,
                         )
                     m, s = _fc.scale_bar_value(
@@ -325,6 +365,15 @@ def collect_bar_items(
                         control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
                         t0_mean=t0_mean if fc_vs_t0 else None,
                         t0_spread=t0_spread if fc_vs_t0 else None,
+                        op=fc_op,
+                    )
+                    f, fs = _fc.scale_bar_value(
+                        f, fs,
+                        control_mean=fc_control_frac_at_t if fc_vs_ctrl else None,
+                        control_spread=fc_control_frac_spread_at_t if fc_vs_ctrl else None,
+                        t0_mean=t0_frac if fc_vs_t0 else None,
+                        t0_spread=t0_frac_spread if fc_vs_t0 else None,
+                        op=fc_op,
                     )
                 has_mean = not math.isnan(m)
                 has_frac = not math.isnan(f)
@@ -452,6 +501,8 @@ def collect_bar_items_for_group(
         # Resolve control denominator once per tp.
         fc_control_mean_at_t = None
         fc_control_spread_at_t = None
+        fc_control_frac_at_t = None
+        fc_control_frac_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             ctrl_stats = _fc.control_stats_at(
                 app, fc_ctrl_lbl, target_t,
@@ -460,6 +511,18 @@ def collect_bar_items_for_group(
             )
             if ctrl_stats is not None:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
+            ctrl_pts = _fc.control_pts_for_line(
+                app, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
+                fluor_gates=fluor_gates,
+            )
+            if ctrl_pts:
+                for pt in ctrl_pts:
+                    if abs(pt[0] - target_t) < 1e-6:
+                        cf, cfs = _fc._pt_frac(pt)
+                        if cf is not None:
+                            fc_control_frac_at_t = cf
+                            fc_control_frac_spread_at_t = cfs
+                        break
 
         out: List[BarItem] = []
         tp_str = _format_tp(target_t)
@@ -488,8 +551,13 @@ def collect_bar_items_for_group(
                 if fc_vs_ctrl or fc_vs_t0:
                     t0_mean = None
                     t0_spread = None
+                    t0_frac = None
+                    t0_frac_spread = None
                     if fc_vs_t0:
                         t0_mean, t0_spread = _fc.baseline_from_points(
+                            pts, baseline_tp=fc_baseline_tp,
+                        )
+                        t0_frac, t0_frac_spread = _fc.baseline_frac_from_points(
                             pts, baseline_tp=fc_baseline_tp,
                         )
                     m, s = _fc.scale_bar_value(
@@ -498,6 +566,13 @@ def collect_bar_items_for_group(
                         control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
                         t0_mean=t0_mean if fc_vs_t0 else None,
                         t0_spread=t0_spread if fc_vs_t0 else None,
+                    )
+                    f, frac_spread = _fc.scale_bar_value(
+                        f, frac_spread,
+                        control_mean=fc_control_frac_at_t if fc_vs_ctrl else None,
+                        control_spread=fc_control_frac_spread_at_t if fc_vs_ctrl else None,
+                        t0_mean=t0_frac if fc_vs_t0 else None,
+                        t0_spread=t0_frac_spread if fc_vs_t0 else None,
                     )
                 has_mean = not math.isnan(m)
                 has_frac = has_mean and not math.isnan(f)

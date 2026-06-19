@@ -13,9 +13,12 @@ The helpers operate on aggregation-point ("AggPoint") tuples produced by
     (t, mean, spread, frac, n_above, n_total,
      frac_spread?, n_above_pf_mean?, n_above_pf_spread?)
 
-Only ``mean`` and its ``spread`` field are rescaled; fractions, counts and
-per-FOV spreads of counts are left untouched (they're not interpretable as
-fold-change). The transform returns new tuples with the same arity.
+``mean``/``spread`` are rescaled by the bar's mean panel, and ``frac``/
+``frac_spread`` are independently rescaled by the bar's OnFraction panel
+(its FC denominator is the control's / baseline's frac, not its mean — they
+are independent quantities and shouldn't share a denominator). Counts and
+per-FOV spreads of counts are left untouched. The transform returns new
+tuples with the same arity.
 
 Stacking order: when both axes are active, ``vs t0`` is applied to the
 post-control values. The final value is::
@@ -341,6 +344,18 @@ def fold_change_state(app) -> Tuple[bool, str, bool]:
     )
 
 
+def _pt_frac(pt) -> Tuple[Optional[float], float]:
+    """Extract ``(frac, frac_spread)`` from an AggPoint, with NaN guarding."""
+    if len(pt) < 4:
+        return None, 0.0
+    f = pt[3]
+    if not isinstance(f, (int, float)) or not math.isfinite(f):
+        return None, 0.0
+    fs = pt[6] if len(pt) >= 7 else 0.0
+    fs = float(fs) if isinstance(fs, (int, float)) and math.isfinite(fs) else 0.0
+    return float(f), fs
+
+
 def baseline_from_points(
     pts, baseline_tp: Optional[float] = None,
 ) -> Tuple[Optional[float], float]:
@@ -381,6 +396,35 @@ def baseline_from_points(
                 float(m),
                 float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
             )
+    return None, 0.0
+
+
+def baseline_frac_from_points(
+    pts, baseline_tp: Optional[float] = None,
+) -> Tuple[Optional[float], float]:
+    """Pull the ``(frac, frac_spread)`` baseline out of an AggPoint sequence.
+
+    Fraction-on counterpart of :func:`baseline_from_points`. Same fall-through
+    semantics: matched ``baseline_tp`` wins; otherwise the earliest finite tp
+    is used. Returns ``(None, 0.0)`` when nothing qualifies — that signals
+    "no baseline available" so the fraction bar passes through raw rather than
+    div-by-zeroing.
+    """
+    if not pts:
+        return None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                f, fs = _pt_frac(pt)
+                if f is not None and f != 0:
+                    return f, fs
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        f, fs = _pt_frac(pt)
+        if f is not None and f != 0:
+            return f, fs
     return None, 0.0
 
 
@@ -840,6 +884,127 @@ def member_first_tp_stats(
         # as ``normalize_pts``. Without this the FC toggle is a silent
         # no-op visually (see test_collect_bar_items_baseline_missing
         # _tp_falls_back_silently for the regression).
+    earliest = min(series)
+    return series[earliest]
+
+
+# ── Bar-plot fraction-on FC helpers ─────────────────────────────────────────
+#
+# The "OnFraction" panel (fraction of cells above the gate) is its own bar
+# row. Mean and frac are independent quantities; FC for frac normalises
+# against the control / baseline's frac, not its mean. These helpers mirror
+# the mean-side trio so ``collect_bar_items`` can scale the frac panel the
+# same way it scales the mean panel.
+
+
+def member_frac_series(
+    app, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> Dict[float, Tuple[float, float]]:
+    """``{t: (frac, frac_spread)}`` for a member.
+
+    Fraction-on counterpart of :func:`member_stats_series`. Same rset /
+    solo-well dispatch.
+    """
+    label = (label or "").strip()
+    if not label:
+        return {}
+    rset = _label_to_replicate_set(app, label)
+    if rset is not None:
+        tps: Set[float] = set()
+        for w in rset.wells:
+            pts = aggregate_well(app,
+                w, threshold=threshold, use_sem=False,
+                val_col=val_col,
+                fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread,
+            )
+            for pt in pts:
+                tps.add(float(pt[0]))
+        out: Dict[float, Tuple[float, float]] = {}
+        for t in tps:
+            if per_fov_spread:
+                _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(app,
+                    rset, t, threshold, use_sem,
+                )
+            else:
+                _, _, gf, gerr_f = compute_rep_stats(app,
+                    rset, t, threshold, use_sem,
+                )
+            if isinstance(gf, (int, float)) and math.isfinite(gf):
+                fs = float(gerr_f) if (
+                    isinstance(gerr_f, (int, float)) and math.isfinite(gerr_f)
+                ) else 0.0
+                out[t] = (float(gf), fs)
+        return out
+    if label in (app._app_state.dataset.well_paths or {}):
+        pts = aggregate_well(app,
+            label, threshold=threshold, use_sem=use_sem,
+            val_col=val_col,
+            fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        out = {}
+        for pt in pts:
+            f, fs = _pt_frac(pt)
+            if f is not None:
+                out[float(pt[0])] = (f, fs)
+        return out
+    return {}
+
+
+def control_frac_at_for_bar(
+    app, control_label: str, target_t: float, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> Optional[Tuple[float, float]]:
+    """``(frac, frac_spread)`` of the control at *target_t* for the bar's frac
+    panel. Returns ``None`` when the control can't be resolved or has no
+    sample at *target_t*."""
+    series = member_frac_series(
+        app, control_label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if target_t in series:
+        return series[target_t]
+    for ct, val in series.items():
+        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
+            return val
+    return None
+
+
+def member_first_tp_frac(
+    app, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: Optional[float] = None,
+) -> Optional[Tuple[float, float]]:
+    """``(frac, frac_spread)`` for the member's baseline timepoint.
+
+    Fraction-on counterpart of :func:`member_first_tp_stats` with the same
+    matched-tp + fall-through-to-earliest semantics.
+    """
+    series = member_frac_series(
+        app, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, fs in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return fs
     earliest = min(series)
     return series[earliest]
 

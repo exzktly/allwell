@@ -111,18 +111,22 @@ class MockApp:
 
     def _compute_rep_stats(self, rset, target_t: float,
                            threshold: float, use_sem: bool) -> tuple:
-        """Mean of per-well means at *target_t*."""
+        """Mean of per-well means + mean of per-well fracs at *target_t*."""
         well_means: List[float] = []
+        well_fracs: List[float] = []
         for w in rset.wells:
             for pt in self.per_well_pts.get(w, []):
                 if abs(pt[0] - target_t) < 1e-3 * max(1.0, abs(pt[0]),
                                                       abs(target_t)):
                     well_means.append(pt[1])
+                    if len(pt) >= 4:
+                        well_fracs.append(pt[3])
                     break
         if not well_means:
             return (float("nan"), 0.0, float("nan"), 0.0)
         gm = sum(well_means) / len(well_means)
-        return (gm, 0.0, 0.5, 0.0)
+        gf = sum(well_fracs) / len(well_fracs) if well_fracs else 0.5
+        return (gm, 0.0, gf, 0.0)
 
     def _compute_rep_per_fov_stats(self, rset, target_t: float,
                                    threshold: float, use_sem: bool) -> tuple:

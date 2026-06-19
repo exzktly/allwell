@@ -198,6 +198,8 @@ def normalize_pts(
     use_t0: bool = False,
     baseline_tp: Optional[float] = None,
     op: str = "ratio",
+    op_ctrl: Optional[str] = None,
+    op_t0: Optional[str] = None,
     miss_sink: Optional[Set[float]] = None,
 ) -> list:
     """Apply optional vs-control and/or vs-t0 normalization to AggPoint list.
@@ -229,6 +231,11 @@ def normalize_pts(
     """
     if not pts:
         return []
+
+    # Per-axis ops fall through to the legacy ``op`` when unspecified, so
+    # callers that still pass a single ``op`` keep their old contract.
+    effective_op_ctrl = op_ctrl if op_ctrl is not None else op
+    effective_op_t0 = op_t0 if op_t0 is not None else op
 
     # Use control_stats when provided; fall back to control_means (with
     # zero spread per tp) for the legacy callers / tests.
@@ -264,7 +271,7 @@ def normalize_pts(
                      if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t))),
                     (cm, 0.0),
                 )
-                if op == "subtract":
+                if effective_op_ctrl == "subtract":
                     stage1.append(_subtract_pt(pt, ctrl_mean,
                                                shift_spread=ctrl_spread or 0.0))
                 else:
@@ -318,7 +325,7 @@ def normalize_pts(
                     break
         if baseline is None:
             return stage1
-        if op == "subtract":
+        if effective_op_t0 == "subtract":
             return [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
                     for pt in stage1]
         baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
@@ -431,8 +438,27 @@ def baseline_frac_from_points(
 def parse_fc_op(app) -> str:
     """Return the user's chosen fold-change operator (``"ratio"`` or
     ``"subtract"``). Defaults to ``"ratio"`` for back-compat with
-    ``PlotState`` snapshots that don't carry the field."""
+    ``PlotState`` snapshots that don't carry the field.
+
+    Legacy single-op accessor — returns the control-axis op. New callers
+    should use :func:`parse_fc_op_ctrl` / :func:`parse_fc_op_t0` to read
+    the per-axis ops independently.
+    """
     op = getattr(app._app_state.plot, "fc_op", "ratio") or "ratio"
+    return op if op in ("ratio", "subtract") else "ratio"
+
+
+def parse_fc_op_ctrl(app) -> str:
+    """Return the user's chosen vs-control operator (``"ratio"`` or
+    ``"subtract"``)."""
+    op = getattr(app._app_state.plot, "fc_op_ctrl", "ratio") or "ratio"
+    return op if op in ("ratio", "subtract") else "ratio"
+
+
+def parse_fc_op_t0(app) -> str:
+    """Return the user's chosen vs-baseline-tp operator (``"ratio"`` or
+    ``"subtract"``)."""
+    op = getattr(app._app_state.plot, "fc_op_t0", "ratio") or "ratio"
     return op if op in ("ratio", "subtract") else "ratio"
 
 
@@ -1011,6 +1037,36 @@ def member_first_tp_frac(
 
 # ── Bar-plot scaling ────────────────────────────────────────────────────────
 
+def _apply_axis(value: float, spread: float, d_mean: Optional[float],
+                d_spread: Optional[float], op: str) -> Tuple[float, float]:
+    """Apply a single FC axis to a (value, spread) pair.
+
+    ``ratio`` divides; ``subtract`` subtracts. Variances combine in
+    quadrature in both cases (independent quantities). Returns
+    ``(nan, 0.0)`` when the ratio denominator is non-finite or zero.
+    """
+    if d_mean is None:
+        return value, spread
+    if not math.isfinite(d_mean):
+        return float("nan"), 0.0
+    ds = float(d_spread) if (d_spread is not None and math.isfinite(d_spread)) else 0.0
+    s = float(spread) if (spread is not None and math.isfinite(spread)) else 0.0
+    if op == "subtract":
+        new_val = value - float(d_mean)
+        new_spread = math.sqrt(s * s + ds * ds)
+        return float(new_val), float(new_spread)
+    # default: ratio
+    if d_mean == 0:
+        return float("nan"), 0.0
+    new_val = value / float(d_mean)
+    rel_x_sq = _rel_err_sq(value, s)
+    rel_d_sq = _rel_err_sq(d_mean, ds)
+    if not math.isfinite(new_val):
+        return float("nan"), 0.0
+    new_spread = abs(new_val) * math.sqrt(rel_x_sq + rel_d_sq) if (rel_x_sq + rel_d_sq) > 0 else 0.0
+    return float(new_val), float(new_spread)
+
+
 def scale_bar_value(
     mean: float,
     spread: float,
@@ -1020,63 +1076,39 @@ def scale_bar_value(
     t0_mean: Optional[float] = None,
     t0_spread: Optional[float] = None,
     op: str = "ratio",
+    op_ctrl: Optional[str] = None,
+    op_t0: Optional[str] = None,
 ) -> Tuple[float, float]:
     """Apply control and/or t0 normalization with error propagation.
 
-    ``op`` selects how the denominator(s) are applied:
+    ``op_ctrl`` and ``op_t0`` select how each axis's denominator is
+    applied — independent so users can subtract one and divide by the
+    other. Each is ``"ratio"`` (``Y = X / D``, relative variances add in
+    quadrature) or ``"subtract"`` (``Y = X - D``, absolute variances add
+    in quadrature). When ``op_ctrl`` / ``op_t0`` are ``None`` they fall
+    back to ``op`` — the legacy single-op contract.
 
-    * ``"ratio"`` (default, original behaviour) — ``Y = X / (C · B)``.
-      For independent quantities the relative variance adds:
-      ``(σ_Y / Y)² = (σ_X / X)² + (σ_C / C)² + (σ_B / B)²``.
-    * ``"subtract"`` — ``Y = X - C - B``. Independent absolute variances
-      add: ``σ_Y² = σ_X² + σ_C² + σ_B²``. Useful for additive
-      baselines / background subtraction where dividing distorts.
+    Application order: control first, then t0 on the post-control value
+    (preserving the ΔΔCt-style stacking when both are ratios).
 
-    *control_spread* / *t0_spread* default to None (treated as 0), which
-    recovers the original "denominator treated as exact" behaviour.
+    *control_spread* / *t0_spread* default to ``None`` (treated as 0),
+    recovering the original "denominator treated as exact" behaviour.
 
     Returns ``(scaled_mean, scaled_spread)`` with NaN propagation when
-    a ratio denominator is non-finite or zero. Spread is always
-    non-negative.
+    a ratio denominator is non-finite or zero. Spread is non-negative.
     """
     if not math.isfinite(mean):
         return float("nan"), 0.0
-    if op == "subtract":
-        # Additive composition. NaN denominator → NaN result; zero is
-        # benign (it just means no shift). Variances add in quadrature.
-        new_mean = mean
-        var = float(spread) * float(spread) if (spread is not None and math.isfinite(spread)) else 0.0
-        for d_mean, d_spread in (
-            (control_mean, control_spread),
-            (t0_mean, t0_spread),
-        ):
-            if d_mean is None:
-                continue
-            if not math.isfinite(d_mean):
-                return float("nan"), 0.0
-            new_mean -= float(d_mean)
-            if d_spread is not None and math.isfinite(d_spread):
-                var += float(d_spread) * float(d_spread)
-        new_spread = math.sqrt(var) if var > 0 else 0.0
-        return float(new_mean), float(new_spread)
-    # default: ratio
-    factor = 1.0
-    denom_rel_err_sq = 0.0
-    if control_mean is not None:
-        if not math.isfinite(control_mean) or control_mean == 0:
-            return float("nan"), 0.0
-        factor *= control_mean
-        if control_spread is not None:
-            denom_rel_err_sq += _rel_err_sq(control_mean, control_spread)
-    if t0_mean is not None:
-        if not math.isfinite(t0_mean) or t0_mean == 0:
-            return float("nan"), 0.0
-        factor *= t0_mean
-        if t0_spread is not None:
-            denom_rel_err_sq += _rel_err_sq(t0_mean, t0_spread)
-    new_mean = mean / factor
-    new_spread = _propagate_spread(new_mean, mean, spread, denom_rel_err_sq)
-    return float(new_mean), float(new_spread)
+    effective_op_ctrl = op_ctrl if op_ctrl is not None else op
+    effective_op_t0 = op_t0 if op_t0 is not None else op
+    val, sp = float(mean), float(spread) if (spread is not None and math.isfinite(spread)) else 0.0
+    val, sp = _apply_axis(val, sp, control_mean, control_spread, effective_op_ctrl)
+    if not math.isfinite(val):
+        return float("nan"), 0.0
+    val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
+    if not math.isfinite(val):
+        return float("nan"), 0.0
+    return val, sp
 
 
 def first_tp_value(pts) -> Optional[float]:

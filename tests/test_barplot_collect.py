@@ -521,3 +521,67 @@ def test_onfraction_force_nan_when_control_missing():
     for it in items:
         assert math.isnan(it.mean)
         assert math.isnan(it.frac)
+
+
+# ── Per-axis operator independence ───────────────────────────────────────────
+#
+# v7.1.7: ``fc_op`` split into ``fc_op_ctrl`` + ``fc_op_t0`` so users can apply
+# different ops per axis (e.g. subtract control, divide by t0). These tests
+# verify each combination produces the expected stacked result.
+
+def test_per_axis_ops_subtract_ctrl_ratio_t0(mock_app):
+    """Subtract control, then divide by raw baseline.
+
+    Bar's baseline is the member's RAW value at baseline_tp (not the
+    post-control baseline — that's a separate question; the per-axis
+    op split just lets each axis pick its own operator).
+
+    TREAT@2 = 400, CTRL@2 = 100 → step1 = 400 - 100 = 300.
+    baseline (raw) = TREAT@1 = 200. step2 = 300 / 200 = 1.5.
+    """
+    mock_app.fc_vs_control_on = True
+    mock_app.fc_control_label = "CTRL"
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = "1"
+    mock_app.fc_op_ctrl = "subtract"
+    mock_app.fc_op_t0 = "ratio"
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    assert math.isclose(by_key["TREAT"], 1.5)
+
+
+def test_per_axis_ops_ratio_ctrl_subtract_t0(mock_app):
+    """Divide by control, then subtract raw baseline.
+
+    TREAT@2 / CTRL@2 = 4.0. baseline (raw) = TREAT@1 = 200.
+    Result = 4.0 - 200 = -196.0.
+    """
+    mock_app.fc_vs_control_on = True
+    mock_app.fc_control_label = "CTRL"
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = "1"
+    mock_app.fc_op_ctrl = "ratio"
+    mock_app.fc_op_t0 = "subtract"
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    # CTRL: (100/100) - 100 = 1 - 100 = -99
+    assert math.isclose(by_key["CTRL"], -99.0)
+    # TREAT: (400/100) - 200 = 4 - 200 = -196
+    assert math.isclose(by_key["TREAT"], -196.0)
+
+
+def test_per_axis_ops_legacy_fc_op_still_fans_out(mock_app):
+    """Setting the legacy single ``fc_op`` field must still apply to both
+    axes for back-compat with snapshots / older callers.
+
+    Both axes subtract: TREAT@2 - CTRL@2 - baseline_raw
+                      = 400 - 100 - 200 = 100.
+    """
+    mock_app.fc_vs_control_on = True
+    mock_app.fc_control_label = "CTRL"
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = "1"
+    mock_app.fc_op = "subtract"   # legacy single-op
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    assert math.isclose(by_key["TREAT"], 100.0)

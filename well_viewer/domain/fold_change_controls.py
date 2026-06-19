@@ -118,14 +118,15 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
         combo.blockSignals(blocked)
 
 
-_OP_LABEL_RATIO = "Ratio (÷ denominator)"
-_OP_LABEL_SUBTRACT = "Subtract (− denominator)"
+_OP_LABEL_RATIO = "Ratio (÷)"
+_OP_LABEL_SUBTRACT = "Subtract (−)"
 
 
-def _repopulate_op_combo(app, combo: QComboBox) -> None:
-    """Populate the Operator combo with the two FC operators and set
-    the current selection from ``PlotState.fc_op``."""
-    chosen = str(getattr(app._app_state.plot, "fc_op", "ratio") or "ratio")
+def _repopulate_op_combo(app, combo: QComboBox, *, attr: str) -> None:
+    """Populate an Operator combo with the two FC operators and set the
+    current selection from ``PlotState.<attr>``. ``attr`` is one of
+    ``"fc_op_ctrl"`` / ``"fc_op_t0"`` — each axis has its own combo."""
+    chosen = str(getattr(app._app_state.plot, attr, "ratio") or "ratio")
     blocked = combo.blockSignals(True)
     try:
         combo.clear()
@@ -196,6 +197,8 @@ def _sync_widgets_to_state(app, *, skip_scope: str = "") -> None:
     new state — the per-tab combos are independent QWidget instances, so
     without this sync the inactive tab's UI would go stale. Iterates the
     scope registry, so adding a third tab only requires registering it.
+    Op combos use the standard naming convention ``_fc_op_ctrl_combo_<scope>``
+    / ``_fc_op_t0_combo_<scope>``.
     """
     for scope in registered_scopes():
         if scope.name == skip_scope:
@@ -206,6 +209,12 @@ def _sync_widgets_to_state(app, *, skip_scope: str = "") -> None:
             _repopulate_control_combo(app, ctrl)
         if base is not None:
             _repopulate_baseline_combo(app, base)
+        op_ctrl_combo = getattr(app, f"_fc_op_ctrl_combo_{scope.name}", None)
+        if op_ctrl_combo is not None:
+            _repopulate_op_combo(app, op_ctrl_combo, attr="fc_op_ctrl")
+        op_t0_combo = getattr(app, f"_fc_op_t0_combo_{scope.name}", None)
+        if op_t0_combo is not None:
+            _repopulate_op_combo(app, op_t0_combo, attr="fc_op_t0")
 
 
 def set_fold_change_state(
@@ -215,6 +224,8 @@ def set_fold_change_state(
     vs_t0_on: "bool | None" = None,
     baseline_tp: "str | None" = None,
     op: "str | None" = None,
+    op_ctrl: "str | None" = None,
+    op_t0: "str | None" = None,
     initiating_scope: str = "",
 ) -> None:
     """Single entry point for fold-change state mutations.
@@ -238,6 +249,8 @@ def set_fold_change_state(
         vs_t0_on=vs_t0_on,
         baseline_tp=baseline_tp,
         op=op,
+        op_ctrl=op_ctrl,
+        op_t0=op_t0,
     )
 
     _sync_widgets_to_state(app, skip_scope=initiating_scope)
@@ -270,6 +283,18 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
     _repopulate_control_combo(app, ctrl_combo)
     layout.addWidget(ctrl_combo)
 
+    # Per-axis operator selector for the control axis.
+    op_ctrl_combo = QComboBox(parent)
+    op_ctrl_combo.setMinimumWidth(110)
+    op_ctrl_combo.setToolTip(
+        "How the control denominator is applied. 'Ratio' divides each "
+        "value by the control; 'Subtract' subtracts it. Independent of "
+        "the baseline operator — you can subtract the control and divide "
+        "by t0 (or vice-versa)."
+    )
+    _repopulate_op_combo(app, op_ctrl_combo, attr="fc_op_ctrl")
+    layout.addWidget(op_ctrl_combo)
+
     layout.addWidget(QLabel("Baseline", parent))
     baseline_combo = QComboBox(parent)
     baseline_combo.setMinimumWidth(140)
@@ -280,21 +305,16 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
     _repopulate_baseline_combo(app, baseline_combo)
     layout.addWidget(baseline_combo)
 
-    # Operator selector — ratio (X / denom) or subtraction (X − denom).
-    # Same operator applies to both the vs-control and vs-baseline-tp
-    # axes; defaults to ratio for back-compat.
-    layout.addWidget(QLabel("Operator", parent))
-    op_combo = QComboBox(parent)
-    op_combo.setMinimumWidth(140)
-    op_combo.setToolTip(
-        "How each normalisation denominator is applied. ‘Ratio’ divides "
-        "each value by the denominator (the original v7.1.x behaviour); "
-        "‘Subtract’ subtracts it. Use Subtract for additive baselines "
-        "or background subtraction where dividing would distort the "
-        "scale."
+    # Per-axis operator selector for the baseline-tp axis.
+    op_t0_combo = QComboBox(parent)
+    op_t0_combo.setMinimumWidth(110)
+    op_t0_combo.setToolTip(
+        "How the baseline-tp denominator is applied. 'Ratio' divides "
+        "each value by its own baseline; 'Subtract' subtracts it. "
+        "Independent of the control operator."
     )
-    _repopulate_op_combo(app, op_combo)
-    layout.addWidget(op_combo)
+    _repopulate_op_combo(app, op_t0_combo, attr="fc_op_t0")
+    layout.addWidget(op_t0_combo)
 
     def _on_ctrl_changed(_idx: int) -> None:
         text = ctrl_combo.currentText()
@@ -328,14 +348,20 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
                 initiating_scope=scope,
             )
 
-    def _on_op_changed(_idx: int) -> None:
-        text = op_combo.currentText()
-        op = "subtract" if text == _OP_LABEL_SUBTRACT else "ratio"
-        set_fold_change_state(app, op=op, initiating_scope=scope)
+    def _on_op_ctrl_changed(_idx: int) -> None:
+        text = op_ctrl_combo.currentText()
+        op_v = "subtract" if text == _OP_LABEL_SUBTRACT else "ratio"
+        set_fold_change_state(app, op_ctrl=op_v, initiating_scope=scope)
+
+    def _on_op_t0_changed(_idx: int) -> None:
+        text = op_t0_combo.currentText()
+        op_v = "subtract" if text == _OP_LABEL_SUBTRACT else "ratio"
+        set_fold_change_state(app, op_t0=op_v, initiating_scope=scope)
 
     ctrl_combo.currentIndexChanged.connect(_on_ctrl_changed)
     baseline_combo.currentIndexChanged.connect(_on_baseline_changed)
-    op_combo.currentIndexChanged.connect(_on_op_changed)
+    op_ctrl_combo.currentIndexChanged.connect(_on_op_ctrl_changed)
+    op_t0_combo.currentIndexChanged.connect(_on_op_t0_changed)
 
     # Stash references using the scope descriptor's attribute names so
     # the cross-tab sync helper picks them up via the registry. Falls
@@ -348,3 +374,7 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
                      else f"_fc_baseline_combo_{scope}")
     setattr(app, ctrl_attr, ctrl_combo)
     setattr(app, baseline_attr, baseline_combo)
+    # Per-axis op combos stash under the standard naming convention the
+    # cross-tab sync helper looks up.
+    setattr(app, f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
+    setattr(app, f"_fc_op_t0_combo_{scope}", op_t0_combo)

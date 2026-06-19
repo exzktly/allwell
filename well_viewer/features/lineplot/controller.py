@@ -184,7 +184,8 @@ def collect_line_series(
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(app)
-    fc_op = _fc.parse_fc_op(app)
+    fc_op_ctrl = _fc.parse_fc_op_ctrl(app)
+    fc_op_t0 = _fc.parse_fc_op_t0(app)
     if val_col is None:
         val_col = app._app_state.channel.active_val_col
 
@@ -256,7 +257,8 @@ def collect_line_series(
                     control_stats=fc_control_stats or None,
                     use_t0=fc_vs_t0,
                     baseline_tp=fc_baseline_tp,
-                    op=fc_op,
+                    op_ctrl=fc_op_ctrl,
+                    op_t0=fc_op_t0,
                     miss_sink=miss_sink,
                 )
             points = [_aggpoint_to_linepoint(pt) for pt in _raw_pts]
@@ -294,7 +296,8 @@ def collect_line_series(
                 control_stats=fc_control_stats or None,
                 use_t0=fc_vs_t0,
                 baseline_tp=fc_baseline_tp,
-                op=fc_op,
+                op_ctrl=fc_op_ctrl,
+                op_t0=fc_op_t0,
                 miss_sink=miss_sink,
             )
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]

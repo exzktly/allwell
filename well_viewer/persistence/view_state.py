@@ -301,17 +301,23 @@ def restore(app, state: dict) -> None:
 
     # Active channel — validated against the canonical list. Fall through
     # silently when the saved channel no longer exists in the new dataset.
+    # Direct field assignment mirrors the active_metric path below: the combos
+    # may not exist yet, but ``recalculate_threshold`` (which runs right after
+    # view_state.load in load_controller) calls ``update_channel_selector``,
+    # which picks the active label off the field we just set, so every plot
+    # tab's channel combo ends up on the restored value. The previous
+    # ``hasattr(app, "_set_active_channel")`` guard always failed
+    # (``_set_active_channel`` is never bound onto the app) so channel
+    # restoration silently no-op'd — every reopen reverted to the default
+    # first fluor channel.
     ch = state.get("active_channel")
     fluor = list(app._app_state.channel.fluor_channels or [])
-    if (
-        isinstance(ch, str) and ch
-        and ch in fluor
-        and hasattr(app, "_set_active_channel")
-    ):
+    if isinstance(ch, str) and ch and ch in fluor:
         try:
+            app._app_state.channel.active_channel = ch
             set_active_channel(app, ch)
         except Exception:
-            _logger.debug("view_state: _set_active_channel failed", exc_info=True)
+            _logger.debug("view_state: active_channel restore failed", exc_info=True)
 
     metric = state.get("active_metric")
     if isinstance(metric, str) and metric:
@@ -429,11 +435,34 @@ def _apply_bar(app, state: dict) -> None:
         _set_combo_if_valid(app, "_bar_tp_cb", str(state["timepoint"]))
     if "timepoint_selections" in state and isinstance(state["timepoint_selections"], dict):
         try:
-            app._app_state.bar.tp_selections = {
-                str(k): bool(v) for k, v in state["timepoint_selections"].items()
-            }
+            # Intersect with the dataset's current timepoint keys so a saved
+            # selection from a slightly differently-formatted run doesn't leave
+            # orphan keys that the popup ignores. ``update_bar_tp_menu`` keys
+            # via ``f"{t:.4g}"``; we keep whatever is in the saved file as the
+            # authoritative selection unless the key is no longer present.
+            current = dict(app._app_state.bar.tp_selections or {})
+            saved = {str(k): bool(v) for k, v in state["timepoint_selections"].items()}
+            merged = {k: (saved[k] if k in saved else False) for k in current}
+            # When the saved set covers every current timepoint (common when
+            # nothing's changed between runs), use it verbatim.
+            if set(saved.keys()) >= set(current.keys()):
+                merged = {k: saved.get(k, False) for k in current}
+            app._app_state.bar.tp_selections = merged or saved
         except Exception:
             swallowed()  # was: pass (silent except)
+        # Sync the hidden back-compat combo + the "(X selected)" label so every
+        # downstream reader (export, status text, the popup itself) reflects
+        # the restored selection. Without this the popup defaults checkboxes
+        # from a stale ``tp_selections`` snapshot taken before the restore.
+        try:
+            from well_viewer.features.barplot.controller import (
+                sync_hidden_bar_tp_combo,
+                update_bar_tp_selection_display,
+            )
+            sync_hidden_bar_tp_combo(app)
+            update_bar_tp_selection_display(app)
+        except Exception:
+            _logger.debug("view_state: bar tp post-restore sync failed", exc_info=True)
     if "swarm" in state:
         app._bar_swarm = bool(state["swarm"])
     if "violin" in state:

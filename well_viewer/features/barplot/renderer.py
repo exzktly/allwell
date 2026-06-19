@@ -452,6 +452,7 @@ def draw_grouped_bar_mode(
         placeholder_color=CLR_PLACEHOLDER,
         disabled_well_color=CLR_MUTED_DISABLED,
         err_bar_color=CLR_ERR_BAR,
+        fc_active=bool(app._app_state.plot.fold_change_active),
     )
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = app._app_state.channel.active_channel.upper()

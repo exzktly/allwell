@@ -1261,11 +1261,20 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         if well_a == well_b:
             _status("Optimize ThreshFracOn: choose two different wells.")
             return
-        lo = float(app._cell_gating_opt_min_edit.text())
-        hi = float(app._cell_gating_opt_max_edit.text())
         steps = int(float(app._cell_gating_opt_steps_edit.text()))
         tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
         timepoint = tp_combo.currentData() if tp_combo is not None else None
+        # Re-fit Min/Max to the data span for the *current* well / channel /
+        # timepoint selection right before scanning. The signal-driven autofill
+        # can miss — e.g. per-well rows lazy-load only after the combo-change
+        # fired — leaving the 0–100 default in the fields while the scan reads
+        # real MFI data (often 100s–1000s). That mismatch is what made Optimize
+        # return a meaningless range-edge threshold instead of the value that
+        # maximizes the fraction-on difference. Refitting here guarantees the
+        # scan always spans where fraction-on actually changes.
+        _cell_gating_autofill_opt_range(app)
+        lo = float(app._cell_gating_opt_min_edit.text())
+        hi = float(app._cell_gating_opt_max_edit.text())
     except ValueError:
         _status("Optimize ThreshFracOn: min, max, and steps must be numeric.")
         return

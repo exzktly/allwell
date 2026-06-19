@@ -17,6 +17,7 @@ from well_viewer.features.scatter.collect import (
     collect_scatter_agg_data as _scatter_collect_agg_data,
     collect_scatter_data as _scatter_collect_data,
 )
+from well_viewer.features.barplot.renderer import resolve_bar_timepoints
 
 
 _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
@@ -337,88 +338,87 @@ def export_bar_plot_data(app) -> None:
     from well_viewer.domain import fold_change as _fc
     from well_viewer.features.barplot.controller import FC_STATE_OFF
 
-    tp_str = app._bar_tp_cb.currentText()
-    if tp_str in ("—", ""):
+    # Pull EVERY selected timepoint from the multi-select popup, falling
+    # back to the hidden single-tp combo only when the popup hasn't been
+    # populated yet (legacy single-tp behaviour). Previously the export
+    # read ``_bar_tp_cb.currentText()`` directly — that carries just the
+    # first checked timepoint, so a multi-tp selection silently dropped
+    # every additional one from the CSV.
+    tp_list = resolve_bar_timepoints(app)
+    if not tp_list:
         _warn(app, "Export", "Select a timepoint first.")
         return
-    try:
-        target_t = float(tp_str)
-    except ValueError:
-        return
+    target_ts = [t for t, _ in tp_list]
+    target_t_arg = target_ts[0] if len(target_ts) == 1 else target_ts
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app)
     fc_active = fc_vs_ctrl or fc_vs_t0
     # Additive CSV: raw values in the standard ``mean_*`` / ``err_*``
     # columns, fold-change values in their own columns. The aggregation
     # helpers are cached so the second call to collect_bar_items is cheap.
     use_groups, items_raw, band_lbl = app._collect_bar_items(
-        target_t, fc_state=FC_STATE_OFF,
+        target_t_arg, fc_state=FC_STATE_OFF,
     )
     if fc_active:
-        _, items_fc, _ = app._collect_bar_items(target_t)
-        fc_by_key = {it.key: it for it in items_fc}
+        _, items_fc, _ = app._collect_bar_items(target_t_arg)
+        # Match raw items by (key, tp) — same key can appear at multiple tps
+        # in a multi-tp export, so a single ``key → fc_item`` map would
+        # collapse them all onto the last timepoint's FC values.
+        fc_by_key_tp = {(it.key, float(it.tp)): it for it in items_fc}
     else:
-        fc_by_key = {}
+        fc_by_key_tp = {}
     ch = app._app_state.channel.active_channel
     metric = app._app_state.channel.active_metric
     threshold = app._get_thresh_frac_on(ch)
     well_labels = _well_labels_map(app)
     well_paths = _well_paths_keys(app)
     rows_out = []
-    if use_groups:
-        id_cols = ["name", "well_name"]
-        for item in items_raw:
+    id_cols = (["name", "well_name"] if use_groups else ["well", "well_name"])
+    for item in items_raw:
+        if use_groups:
             row = {
                 "name": item.key,
                 "well_name": well_name_for(item.key, well_labels,
                                            well_paths=well_paths, strict=True),
             }
-            row.update(bar_metric_row(
-                mean=item.mean, spread=item.spread,
-                frac=item.frac, frac_spread=item.frac_spread,
-                has=item.has_mean,
-                n_above=float(item.n_above),
-                n_above_spread=float(item.n_above_spread),
-                ch=ch, metric=metric, tp_str=tp_str,
-                threshold=threshold, band_lbl=band_lbl,
-            ))
-            if fc_active and item.key in fc_by_key:
-                fc_item = fc_by_key[item.key]
-                attach_bar_fold_change_columns(
-                    row, fc_mean=fc_item.mean, fc_spread=fc_item.spread,
-                    fc_has=fc_item.has_mean, band_lbl=band_lbl,
-                    vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
-                    control_label=fc_ctrl_lbl,
-                )
-            rows_out.append(row)
-    else:
-        id_cols = ["well", "well_name"]
-        for item in items_raw:
+        else:
             row = {
                 "well": item.key,
                 "well_name": well_name_for(item.key, well_labels),
             }
-            row.update(bar_metric_row(
-                mean=item.mean, spread=item.spread,
-                frac=item.frac, frac_spread=item.frac_spread,
-                has=item.has_mean,
-                n_above=float(item.n_above),
-                n_above_spread=float(item.n_above_spread),
-                ch=ch, metric=metric, tp_str=tp_str,
-                threshold=threshold, band_lbl=band_lbl,
-            ))
-            if fc_active and item.key in fc_by_key:
-                fc_item = fc_by_key[item.key]
+        # Use each item's own timepoint string so multi-tp rows differ
+        # in the ``timepoint_h`` column. Format matches ``BarItem.tp``
+        # convention from ``collect_bar_items`` (``f"{tp:.4g}"``).
+        item_tp_str = f"{float(item.tp):.4g}"
+        row.update(bar_metric_row(
+            mean=item.mean, spread=item.spread,
+            frac=item.frac, frac_spread=item.frac_spread,
+            has=item.has_mean,
+            n_above=float(item.n_above),
+            n_above_spread=float(item.n_above_spread),
+            ch=ch, metric=metric, tp_str=item_tp_str,
+            threshold=threshold, band_lbl=band_lbl,
+        ))
+        if fc_active:
+            fc_item = fc_by_key_tp.get((item.key, float(item.tp)))
+            if fc_item is not None:
                 attach_bar_fold_change_columns(
                     row, fc_mean=fc_item.mean, fc_spread=fc_item.spread,
                     fc_has=fc_item.has_mean, band_lbl=band_lbl,
                     vs_control=fc_vs_ctrl, vs_t0=fc_vs_t0,
                     control_label=fc_ctrl_lbl,
                 )
-            rows_out.append(row)
+        rows_out.append(row)
     if not rows_out:
         _warn(app, "Export", "No data to export.")
         return
-    out_path = _ask_save_csv(app, "Export bar plot data", f"bar_t{tp_str}.csv")
+    tp_label_for_filename = (
+        tp_list[0][1] if len(tp_list) == 1
+        else f"{tp_list[0][1]}-{tp_list[-1][1]}"
+    )
+    out_path = _ask_save_csv(
+        app, "Export bar plot data",
+        f"bar_t{tp_label_for_filename}.csv",
+    )
     if not out_path:
         return
     fieldnames = id_cols + bar_metric_fieldnames(ch, metric, band_lbl)

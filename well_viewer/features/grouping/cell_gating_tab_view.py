@@ -316,25 +316,6 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     title.setProperty("role", "section")
     tr.addWidget(title)
     tr.addStretch(1)
-    # Auto-threshold all channels: runs the same Otsu pass the pipeline's
-    # final stage executes (well_viewer.auto_threshold) and writes the
-    # results into the ThreshFracOn edits for every loaded channel — it
-    # is the fraction-on cut used in downstream plots, NOT the per-cell
-    # FluorGating inclusion threshold. Status messages stream to the log
-    # drawer via the standard logger.
-    from PySide6.QtWidgets import QPushButton as _QPushButton
-    auto_btn = _QPushButton("Auto-threshold all channels", title_row)
-    auto_btn.setProperty("variant", "secondary")
-    auto_btn.setToolTip(
-        "Compute a default ThreshFracOn cut per channel via Otsu on "
-        "a per-cell + matched-background-pixel distribution sampled from "
-        "the first, middle, and last timepoint of every FOV. The "
-        "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
-        "Progress + per-channel results are written to the log drawer."
-    )
-    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx.app))
-    tr.addWidget(auto_btn)
-    ctx.app._cell_gating_auto_btn = auto_btn
     cf_layout.addWidget(title_row)
 
     # MFI-only note: FluorGating + ThreshFracOn always run against per-cell
@@ -439,6 +420,33 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     _cell_gating_refresh_gate_filter(ctx.app)
     _cell_gating_refresh_gate_summary(ctx.app)
     _cell_gating_apply_scatter_gate_mode(ctx.app)
+
+    # Auto-threshold all channels: runs the same Otsu pass the pipeline's
+    # final stage executes (well_viewer.auto_threshold) and writes the
+    # results into the ThreshFracOn edits for every loaded channel — it
+    # is the fraction-on cut used in downstream plots, NOT the per-cell
+    # FluorGating inclusion threshold. Status messages stream to the log
+    # drawer via the standard logger. Sits in its own row directly above
+    # the per-channel FluorGating / ThreshFracOn table it modifies, so it
+    # never floats away from the controls it acts on.
+    from PySide6.QtWidgets import QPushButton as _QPushButton
+    auto_row = QWidget(control_frame)
+    auto_row_layout = QHBoxLayout(auto_row)
+    auto_row_layout.setContentsMargins(0, 0, 0, 0)
+    auto_btn = _QPushButton("Auto-threshold all channels (ThreshFracOn)", auto_row)
+    auto_btn.setProperty("variant", "secondary")
+    auto_btn.setToolTip(
+        "Compute a default ThreshFracOn cut per channel via Otsu on "
+        "a per-cell + matched-background-pixel distribution sampled from "
+        "the first, middle, and last timepoint of every FOV. The "
+        "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
+        "Progress + per-channel results are written to the log drawer."
+    )
+    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx.app))
+    auto_row_layout.addWidget(auto_btn)
+    auto_row_layout.addStretch(1)
+    ctx.app._cell_gating_auto_btn = auto_btn
+    cf_layout.addWidget(auto_row)
 
     ctx.app._cell_gating_scroll = QScrollArea(control_frame)
     ctx.app._cell_gating_scroll.setWidgetResizable(True)

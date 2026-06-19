@@ -454,13 +454,25 @@ def _apply_bar(app, state: dict) -> None:
         # downstream reader (export, status text, the popup itself) reflects
         # the restored selection. Without this the popup defaults checkboxes
         # from a stale ``tp_selections`` snapshot taken before the restore.
+        # Inlined (rather than importing the bar controller helpers) so this
+        # module doesn't add a new deferred ``from well_viewer.features ...``
+        # import — the cycle-budget guard in test_deferred_imports caps those.
         try:
-            from well_viewer.features.barplot.controller import (
-                sync_hidden_bar_tp_combo,
-                update_bar_tp_selection_display,
-            )
-            sync_hidden_bar_tp_combo(app)
-            update_bar_tp_selection_display(app)
+            sels = app._app_state.bar.tp_selections or {}
+            hidden = getattr(app, "_bar_tp_cb", None)
+            if hidden is not None and sels:
+                for tp_str in sorted(sels.keys(), key=lambda s: float(s)):
+                    if sels[tp_str]:
+                        hidden.setCurrentText(tp_str)
+                        break
+            lbl = getattr(app, "_bar_tp_label", None)
+            if lbl is not None:
+                total = len(sels)
+                count = sum(1 for v in sels.values() if v)
+                if total and count == total:
+                    lbl.setText(f"(All {count} selected)")
+                else:
+                    lbl.setText(f"({count}/{total} selected)" if total else "(0 selected)")
         except Exception:
             _logger.debug("view_state: bar tp post-restore sync failed", exc_info=True)
     if "swarm" in state:

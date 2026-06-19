@@ -152,12 +152,7 @@ def collect_bar_items(
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
     if fc_baseline_tp is None:
         fc_baseline_tp = _fc.parse_baseline_tp(app)
-    # Diagnostic — pin what the bar collector actually saw at call time.
-    import logging
-    logging.getLogger("well_viewer").info(
-        "collect_bar_items: fc_state=(vs_ctrl=%r, ctrl_lbl=%r, vs_t0=%r) baseline_tp=%r target_t=%r",
-        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0, fc_baseline_tp, target_t,
-    )
+    fc_op = _fc.parse_fc_op(app)
     fluor_gates = app._get_all_fluor_gates()
     per_fov_spread = app._use_fov_spread_active()
 
@@ -241,6 +236,7 @@ def collect_bar_items(
                         control_spread=fc_control_spread_at_t if fc_vs_ctrl else None,
                         t0_mean=t0_mean if fc_vs_t0 else None,
                         t0_spread=t0_spread if fc_vs_t0 else None,
+                        op=fc_op,
                     )
                 has_mean = not math.isnan(gm)
                 has_frac = has_mean and not math.isnan(gf)

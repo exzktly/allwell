@@ -61,6 +61,11 @@ class PlotState:
     # (the original ``vs t0`` behaviour), so backward-compat with saved state
     # that only carries ``fc_vs_t0_on=True`` is preserved.
     fc_baseline_tp: str = ""
+    # Whether to apply each fold-change axis as a **ratio** (x / d, the
+    # original behaviour and v7.1.3-and-earlier default) or a
+    # **subtraction** (x - d). Same operator applies to both the
+    # vs-control and vs-baseline-tp axes when active.
+    fc_op: str = "ratio"   # one of {"ratio", "subtract"}
     fc_dirty_scopes: set[str] = field(default_factory=set)
 
     # ── fold change ──────────────────────────────────────────────────────────
@@ -78,13 +83,15 @@ class PlotState:
     def set_fold_change(self, *, vs_control_on: bool | None = None,
                         control_label: str | None = None,
                         vs_t0_on: bool | None = None,
-                        baseline_tp: str | None = None) -> None:
+                        baseline_tp: str | None = None,
+                        op: str | None = None) -> None:
         """Apply a fold-change state change. A ``None`` argument leaves that
         field unchanged. ``control_label`` is stored verbatim — the UI layer
         strips its display-only disambiguation suffix before calling.
         ``baseline_tp`` is the dataset's timepoint string the user picked as
         the per-member baseline; empty means "use the earliest finite point"
-        (the original behaviour)."""
+        (the original behaviour). ``op`` is one of ``"ratio"`` /
+        ``"subtract"``."""
         if vs_control_on is not None:
             self.fc_vs_control_on = bool(vs_control_on)
         if control_label is not None:
@@ -93,6 +100,8 @@ class PlotState:
             self.fc_vs_t0_on = bool(vs_t0_on)
         if baseline_tp is not None:
             self.fc_baseline_tp = str(baseline_tp)
+        if op is not None and str(op) in ("ratio", "subtract"):
+            self.fc_op = str(op)
 
     # ── toggles ──────────────────────────────────────────────────────────────
 

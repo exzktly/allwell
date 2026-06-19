@@ -175,10 +175,18 @@ def render_scatter_points(
     # Scatter axes default to log/log and must stay that way regardless of the
     # shared x_log/y_log export pref (which other plot types reset). Tag the
     # axis with the scatter-specific choice; apply_export_style_prefs honors
-    # ``_aw_force_xlog`` / ``_aw_force_ylog`` over the shared pref.
+    # ``_aw_force_xlog`` / ``_aw_force_ylog`` over the shared pref. Also set
+    # the scale directly NOW so the first-paint after a cold open isn't
+    # left at the matplotlib default (linear) until the user toggles the
+    # checkbox off + on — apply_export_style_prefs runs later in the
+    # redraw and would normally pick this up, but only if data is in
+    # the axis at that point; setting it eagerly avoids the
+    # "checkbox is checked but plot is linear until I toggle" reload bug.
     try:
         ax._aw_force_xlog = bool(x_log)
         ax._aw_force_ylog = bool(y_log)
+        ax.set_xscale("log" if x_log else "linear")
+        ax.set_yscale("log" if y_log else "linear")
     except Exception:
         swallowed()
 

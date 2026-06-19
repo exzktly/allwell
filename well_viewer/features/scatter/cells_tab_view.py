@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     make_plot_with_right_dock, make_popover_button,
-    make_plot_view_switcher, send_plot_to_batch_export)
+    make_plot_view_switcher)
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from functools import partial
 from well_viewer.features.export.service import export_scatter_data
@@ -143,13 +143,6 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # the controller (avoids a scatter-internal import cycle).
     ctx.app._scatter_gate_redraw_cb = redraw_scatter_orchestrate
     cl.addStretch(1)
-
-    # S5: send the current scatter spec to Batch Export (cells mode).
-    _batch_btn = QPushButton("Open in Batch Export", ctrl)
-    _batch_btn.setProperty("variant", "secondary")
-    _batch_btn.setToolTip("Open Batch Export with these plot settings (Scatter cells)")
-    _batch_btn.clicked.connect(lambda _=False: send_plot_to_batch_export(ctx.app, "scatter_cells"))
-    cl.addWidget(_batch_btn)
 
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")

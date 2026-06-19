@@ -417,10 +417,12 @@ _AXIS_MAX = 12  # grid is capped at 12×12; longer axes are truncated
 
 def _apply_row_channel_styling(app, channels: List[str]) -> None:
     """When rows are channels, mirror each channel onto its row-0 channel combo
-    and give each row a distinct colormap so the channels read apart."""
+    and default every row to grayscale (Greys). The user can recolor any row
+    via its LutSelector — defaulting to grayscale makes channels comparable at a
+    glance and avoids implying meaning (e.g. green = GFP) that the data may not
+    carry."""
     row_chan = getattr(app, "_image_table_row_chan_cbs", None) or []
     row_lut = getattr(app, "_image_table_row_lut_color_cbs", None) or []
-    palette = [n for n in LUT_COLOR_NAMES if n != "Greys"] or LUT_COLOR_NAMES
     for r, chan in enumerate(channels):
         if r < len(row_chan) and row_chan[r] is not None:
             cb = row_chan[r]
@@ -428,11 +430,11 @@ def _apply_row_channel_styling(app, channels: List[str]) -> None:
             if cb.findText(chan) >= 0:
                 cb.setCurrentText(chan)
             cb.blockSignals(False)
-        if palette and r < len(row_lut) and row_lut[r] is not None and hasattr(row_lut[r], "setLut"):
+        if r < len(row_lut) and row_lut[r] is not None and hasattr(row_lut[r], "setLut"):
             sel = row_lut[r]
             sel.blockSignals(True)
             try:
-                sel.setLut(palette[r % len(palette)])
+                sel.setLut("Greys")
             except Exception:  # noqa: BLE001 — colormap styling is best-effort
                 swallowed()  # was: pass (silent except)
             sel.blockSignals(False)
@@ -740,22 +742,23 @@ def image_table_open_add_row_dialog(app) -> None:
 
 
 def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
-    """Set one row's channel combo + a distinct colormap (used by Add-row)."""
+    """Set one row's channel combo + default the LUT to grayscale (used by
+    Add-row). Matches ``_apply_row_channel_styling``: rows default to Greys
+    regardless of channel; user can recolor a row via its LutSelector."""
     row_chan = getattr(app, "_image_table_row_chan_cbs", None) or []
     row_lut = getattr(app, "_image_table_row_lut_color_cbs", None) or []
-    palette = [n for n in LUT_COLOR_NAMES if n != "Greys"] or LUT_COLOR_NAMES
     if 0 <= row_idx < len(row_chan) and row_chan[row_idx] is not None:
         cb = row_chan[row_idx]
         cb.blockSignals(True)
         if cb.findText(channel) >= 0:
             cb.setCurrentText(channel)
         cb.blockSignals(False)
-    if palette and 0 <= row_idx < len(row_lut) and row_lut[row_idx] is not None \
+    if 0 <= row_idx < len(row_lut) and row_lut[row_idx] is not None \
             and hasattr(row_lut[row_idx], "setLut"):
         sel = row_lut[row_idx]
         sel.blockSignals(True)
         try:
-            sel.setLut(palette[row_idx % len(palette)])
+            sel.setLut("Greys")
         except Exception:  # noqa: BLE001
             swallowed()  # was: pass (silent except)
         sel.blockSignals(False)

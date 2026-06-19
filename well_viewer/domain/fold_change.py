@@ -521,6 +521,13 @@ def parse_fc_op_t0(app) -> str:
     return op if op in ("ratio", "subtract") else "ratio"
 
 
+def parse_fc_order(app) -> str:
+    """Return the user's chosen FC application order (``"ctrl_first"`` or
+    ``"t0_first"``). Defaults to ``"ctrl_first"`` for back-compat."""
+    order = getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first"
+    return order if order in ("ctrl_first", "t0_first") else "ctrl_first"
+
+
 def parse_baseline_tp(app) -> Optional[float]:
     """Resolve ``PlotState.fc_baseline_tp`` (a tp string) to a float.
 
@@ -1196,6 +1203,7 @@ def scale_bar_value(
     op: str = "ratio",
     op_ctrl: Optional[str] = None,
     op_t0: Optional[str] = None,
+    order: str = "ctrl_first",
 ) -> Tuple[float, float]:
     """Apply control and/or t0 normalization with error propagation.
 
@@ -1220,10 +1228,16 @@ def scale_bar_value(
     effective_op_ctrl = op_ctrl if op_ctrl is not None else op
     effective_op_t0 = op_t0 if op_t0 is not None else op
     val, sp = float(mean), float(spread) if (spread is not None and math.isfinite(spread)) else 0.0
-    val, sp = _apply_axis(val, sp, control_mean, control_spread, effective_op_ctrl)
-    if not math.isfinite(val):
-        return float("nan"), 0.0
-    val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
+    if order == "t0_first":
+        val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
+        if not math.isfinite(val):
+            return float("nan"), 0.0
+        val, sp = _apply_axis(val, sp, control_mean, control_spread, effective_op_ctrl)
+    else:
+        val, sp = _apply_axis(val, sp, control_mean, control_spread, effective_op_ctrl)
+        if not math.isfinite(val):
+            return float("nan"), 0.0
+        val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
     if not math.isfinite(val):
         return float("nan"), 0.0
     return val, sp

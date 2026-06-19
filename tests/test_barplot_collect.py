@@ -575,6 +575,57 @@ def test_per_axis_ops_ratio_ctrl_subtract_t0(mock_app):
     assert math.isclose(by_key["TREAT"], 2.0)
 
 
+def test_per_axis_ops_order_t0_first_with_mixed_ops(mock_app):
+    """``order=t0_first`` flips which axis applies first.
+
+    With op_ctrl=ratio + op_t0=subtract:
+      ctrl_first: (X/C_t) - (X_b/C_b)                    [v7.1.8 default]
+      t0_first:   (X - X_b) / (C_t - C_b)                [new]
+
+    For TREAT at target_t=2, baseline_tp=1, with CTRL flat at 100:
+      ctrl_first:  (400/100) - (200/100) = 4 - 2 = 2.0
+      t0_first:    (400 - 200) / (100 - 100) = 200 / 0 → NaN
+
+    Use a non-degenerate variant: target=2, baseline=0 (where CTRL=100, TREAT=100):
+      t0_first: (400 - 100) / (100 - 100) = 300/0 = NaN.
+
+    Pick a case where t0_first gives a finite distinct answer: switch to baseline_tp=1
+    with op_ctrl=subtract + op_t0=ratio:
+      ctrl_first: (400 - 100) / (200 - 100) = 300/100 = 3.0
+      t0_first:   (400 / 200) - (100 / 100) = 2.0 - 1.0 = 1.0
+    """
+    mock_app.fc_vs_control_on = True
+    mock_app.fc_control_label = "CTRL"
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = "1"
+    mock_app.fc_op_ctrl = "subtract"
+    mock_app.fc_op_t0 = "ratio"
+    mock_app.fc_order = "t0_first"
+    _, items, _ = collect_bar_items(mock_app, 2.0)
+    by_key = {it.key: it.mean for it in items}
+    # TREAT, t0_first: (400/200) - (100/100) = 2 - 1 = 1.0
+    assert math.isclose(by_key["TREAT"], 1.0)
+
+
+def test_per_axis_ops_order_commutes_when_ops_equal(mock_app):
+    """Same-op cases must produce identical results regardless of order
+    (subtraction and ratio both commute when applied to the same dataset)."""
+    mock_app.fc_vs_control_on = True
+    mock_app.fc_control_label = "CTRL"
+    mock_app.fc_vs_t0_on = True
+    mock_app.fc_baseline_tp = "1"
+    mock_app.fc_op = "subtract"  # both axes subtract
+
+    mock_app.fc_order = "ctrl_first"
+    _, items_a, _ = collect_bar_items(mock_app, 2.0)
+    mock_app.fc_order = "t0_first"
+    _, items_b, _ = collect_bar_items(mock_app, 2.0)
+    by_key_a = {it.key: it.mean for it in items_a}
+    by_key_b = {it.key: it.mean for it in items_b}
+    assert math.isclose(by_key_a["TREAT"], by_key_b["TREAT"])
+    assert math.isclose(by_key_a["CTRL"], by_key_b["CTRL"])
+
+
 def test_per_axis_ops_legacy_fc_op_still_fans_out(mock_app):
     """Setting the legacy single ``fc_op`` field must still apply to both axes
     for back-compat with snapshots / older callers.

@@ -51,6 +51,7 @@ def snapshot(app) -> dict:
             "vs_control_on": bool(app._app_state.plot.fc_vs_control_on),
             "control_label": str(app._app_state.plot.fc_control_label or ""),
             "vs_t0_on": bool(app._app_state.plot.fc_vs_t0_on),
+            "baseline_tp": str(getattr(app._app_state.plot, "fc_baseline_tp", "") or ""),
         },
         "export_style_prefs": dict(getattr(app, "_export_style_prefs", {}) or {}),
         "tabs": _snapshot_tabs(app),
@@ -131,6 +132,13 @@ def _snapshot_bar(app) -> dict:
             out["group_mode"] = str(plot.bar_group_mode)
         if hasattr(plot, "bar_pool_replicates"):
             out["pool_replicates"] = bool(plot.bar_pool_replicates)
+        # The user's drag-to-reorder bar layout. ``ordered_bar_keys``
+        # falls back to the canonical order when the saved list doesn't
+        # cover the current dataset's keys, so an empty / stale list is
+        # benign.
+        order = getattr(plot, "bar_order", None)
+        if isinstance(order, list) and order:
+            out["bar_order"] = [str(k) for k in order]
     return out
 
 
@@ -280,6 +288,8 @@ def restore(app, state: dict) -> None:
             app._app_state.plot.fc_control_label = str(fc.get("control_label") or "")
         if "vs_t0_on" in fc:
             app._app_state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
+        if "baseline_tp" in fc:
+            app._app_state.plot.fc_baseline_tp = str(fc.get("baseline_tp") or "")
         # Push the restored state into any fold-change combos that have
         # already been built. Lazily-built tabs (Bar) will pick the
         # values up on first install via _repopulate_*_combo, which both
@@ -491,6 +501,8 @@ def _apply_bar(app, state: dict) -> None:
             plot.bar_group_mode = str(state["group_mode"])
         if "pool_replicates" in state:
             plot.bar_pool_replicates = bool(state["pool_replicates"])
+        if "bar_order" in state and isinstance(state["bar_order"], list):
+            plot.bar_order = [str(k) for k in state["bar_order"]]
 
 
 def _apply_distribution(app, state: dict) -> None:
@@ -725,6 +737,7 @@ def reset(app) -> None:
     app._app_state.plot.fc_vs_control_on = False
     app._app_state.plot.fc_control_label = ""
     app._app_state.plot.fc_vs_t0_on = False
+    app._app_state.plot.fc_baseline_tp = ""
     try:
         from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
         _sync_widgets_to_state(app)

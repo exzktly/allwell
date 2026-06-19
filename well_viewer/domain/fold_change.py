@@ -166,6 +166,7 @@ def normalize_pts(
     control_means: Optional[Dict[float, float]] = None,
     control_stats: Optional[Dict[float, Tuple[float, float]]] = None,
     use_t0: bool = False,
+    baseline_tp: Optional[float] = None,
     miss_sink: Optional[Set[float]] = None,
 ) -> list:
     """Apply optional vs-control and/or vs-t0 normalization to AggPoint list.
@@ -238,22 +239,48 @@ def normalize_pts(
     else:
         stage1 = list(pts)
 
-    # Step 2: t0 normalization (uses post-control values). The baseline's
-    # own spread folds into every downstream point's spread via the same
-    # quadrature formula.
+    # Step 2: baseline normalization (uses post-control values). The
+    # baseline's own spread folds into every downstream point's spread via
+    # the same quadrature formula.
+    #
+    # ``baseline_tp`` (when finite) names the exact timepoint to use as the
+    # divisor — its mean / spread are pulled from the point at that tp
+    # (with a relative tolerance to absorb float-printing drift). When
+    # ``baseline_tp`` is ``None`` we fall back to the earliest finite
+    # non-zero mean — the original "vs t0" semantics — so saved state
+    # that only carries ``use_t0=True`` keeps working.
     if use_t0:
         baseline = None
         baseline_spread = 0.0
-        for pt in sorted(stage1, key=lambda p: p[0]):
-            m = pt[1]
-            if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
-                baseline = float(m)
-                s = pt[2] if len(pt) > 2 else 0.0
-                baseline_spread = (
-                    float(s) if isinstance(s, (int, float)) and math.isfinite(s)
-                    else 0.0
-                )
-                break
+        if baseline_tp is not None and math.isfinite(baseline_tp):
+            tgt = float(baseline_tp)
+            for pt in stage1:
+                t = float(pt[0])
+                if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                    m = pt[1]
+                    if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                        baseline = float(m)
+                        s = pt[2] if len(pt) > 2 else 0.0
+                        baseline_spread = (
+                            float(s) if isinstance(s, (int, float)) and math.isfinite(s)
+                            else 0.0
+                        )
+                    break
+        if baseline is None:
+            # Either no ``baseline_tp`` was supplied or the requested
+            # timepoint had no finite non-zero mean — fall through to
+            # earliest-finite behaviour so the user still gets a useful
+            # normalisation rather than a silent no-op.
+            for pt in sorted(stage1, key=lambda p: p[0]):
+                m = pt[1]
+                if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                    baseline = float(m)
+                    s = pt[2] if len(pt) > 2 else 0.0
+                    baseline_spread = (
+                        float(s) if isinstance(s, (int, float)) and math.isfinite(s)
+                        else 0.0
+                    )
+                    break
         if baseline is None:
             return stage1
         baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
@@ -277,6 +304,62 @@ def fold_change_state(app) -> Tuple[bool, str, bool]:
         str(app._app_state.plot.fc_control_label or ""),
         bool(app._app_state.plot.fc_vs_t0_on),
     )
+
+
+def baseline_from_points(
+    pts, baseline_tp: Optional[float] = None,
+) -> Tuple[Optional[float], float]:
+    """Pull the ``(mean, spread)`` baseline out of an AggPoint sequence.
+
+    ``baseline_tp`` (when finite) picks the point at that timepoint;
+    otherwise the earliest finite non-zero mean wins (the original "vs
+    t0" semantics). Returns ``(None, 0.0)`` when no point qualifies, so
+    callers can treat that as "no baseline available" without divide-by-
+    zero or NaN propagation surprises.
+    """
+    if not pts:
+        return None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                m = pt[1]
+                if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                    s = pt[2] if len(pt) > 2 else 0.0
+                    return (
+                        float(m),
+                        float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+                    )
+                return None, 0.0
+        return None, 0.0
+    for pt in sorted(pts, key=lambda p: p[0]):
+        m = pt[1]
+        if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+            s = pt[2] if len(pt) > 2 else 0.0
+            return (
+                float(m),
+                float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+            )
+    return None, 0.0
+
+
+def parse_baseline_tp(app) -> Optional[float]:
+    """Resolve ``PlotState.fc_baseline_tp`` (a tp string) to a float.
+
+    Returns ``None`` when no baseline tp is set, when the saved string
+    isn't parseable as a float, or when the user has parameterised
+    "earliest available point" via an empty value (which ``normalize_pts``
+    handles as the original ``vs t0`` semantics).
+    """
+    raw = getattr(app._app_state.plot, "fc_baseline_tp", "") or ""
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 def is_active(app) -> bool:
@@ -678,12 +761,16 @@ def member_first_tp_stats(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
+    baseline_tp: Optional[float] = None,
 ) -> Optional[Tuple[float, float]]:
-    """``(mean, spread)`` for the member's earliest finite tp.
+    """``(mean, spread)`` for the member's baseline timepoint.
 
-    The t0 baseline counterpart that lets the bar exporter propagate
-    the baseline's own uncertainty into the displayed spread. Returns
-    ``None`` for unknown / empty members.
+    Returns the stats at ``baseline_tp`` when supplied (matched with a
+    relative tolerance to absorb float-printing drift) and falls back to
+    the member's earliest finite tp otherwise — same "vs t0" semantics
+    as before for callers that don't yet pass a baseline tp. Returns
+    ``None`` for unknown / empty members, OR when the requested tp has
+    no sample for this member.
     """
     series = member_stats_series(
         app, label,
@@ -692,6 +779,12 @@ def member_first_tp_stats(
         fluor_gates=fluor_gates,
     )
     if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, ms in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return ms
         return None
     earliest = min(series)
     return series[earliest]

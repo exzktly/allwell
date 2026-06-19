@@ -68,6 +68,8 @@ def build_replicate_panel(app, parent: QWidget) -> None:
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(app))
     # The plate is the only widget in this sidebar now — give it room to
     # expand vertically with the column. heightForWidth keeps the aspect.
     plate.setMinimumHeight(280)

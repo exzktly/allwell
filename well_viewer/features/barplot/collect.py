@@ -88,6 +88,7 @@ FC_STATE_OFF: Tuple[bool, str, bool] = (False, "", False)
 def collect_bar_items(
     app, target_t, *,
     fc_state: Optional[Tuple[bool, str, bool]] = None,
+    fc_baseline_tp: Optional[float] = None,
     miss_sink: Optional[set] = None,
 ) -> Tuple[bool, List[BarItem], str]:
     """Compute the bar-plot ``BarItem``s for the active mode (rep-set or per-well).
@@ -149,6 +150,8 @@ def collect_bar_items(
     if fc_state is None:
         fc_state = _fc.fold_change_state(app)
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+    if fc_baseline_tp is None:
+        fc_baseline_tp = _fc.parse_baseline_tp(app)
     fluor_gates = app._get_all_fluor_gates()
     per_fov_spread = app._use_fov_spread_active()
 
@@ -218,6 +221,7 @@ def collect_bar_items(
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
                         fluor_gates=fluor_gates,
+                        baseline_tp=fc_baseline_tp,
                     )
                     if stats is not None:
                         t0_mean, t0_spread = stats
@@ -310,19 +314,9 @@ def collect_bar_items(
                     t0_mean = None
                     t0_spread = None
                     if fc_vs_t0:
-                        for _pt in sorted(pts, key=lambda p: p[0]):
-                            _m = _pt[1]
-                            if (isinstance(_m, (int, float))
-                                    and math.isfinite(_m) and _m != 0):
-                                t0_mean = float(_m)
-                                _sp = _pt[2] if len(_pt) > 2 else 0.0
-                                t0_spread = (
-                                    float(_sp) if (
-                                        isinstance(_sp, (int, float))
-                                        and math.isfinite(_sp)
-                                    ) else 0.0
-                                )
-                                break
+                        t0_mean, t0_spread = _fc.baseline_from_points(
+                            pts, baseline_tp=fc_baseline_tp,
+                        )
                     m, s = _fc.scale_bar_value(
                         m, s,
                         control_mean=fc_control_mean_at_t if fc_vs_ctrl else None,
@@ -384,6 +378,7 @@ def collect_bar_items_for_group(
     use_sem: bool,
     per_fov_spread: bool,
     fc_state: Tuple[bool, str, bool],
+    fc_baseline_tp: Optional[float] = None,
     fluor_gates: Optional[dict] = None,
     pool_replicates: bool = True,
     group_mode: str = "well",
@@ -492,19 +487,9 @@ def collect_bar_items_for_group(
                     t0_mean = None
                     t0_spread = None
                     if fc_vs_t0:
-                        for _pt in sorted(pts, key=lambda p: p[0]):
-                            _m = _pt[1]
-                            if (isinstance(_m, (int, float))
-                                    and math.isfinite(_m) and _m != 0):
-                                t0_mean = float(_m)
-                                _sp = _pt[2] if len(_pt) > 2 else 0.0
-                                t0_spread = (
-                                    float(_sp) if (
-                                        isinstance(_sp, (int, float))
-                                        and math.isfinite(_sp)
-                                    ) else 0.0
-                                )
-                                break
+                        t0_mean, t0_spread = _fc.baseline_from_points(
+                            pts, baseline_tp=fc_baseline_tp,
+                        )
                     m, s = _fc.scale_bar_value(
                         m, s,
                         control_mean=fc_control_mean_at_t if fc_vs_ctrl else None,

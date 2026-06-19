@@ -15,6 +15,25 @@ from well_viewer.data.data_loading import parse_timepoint_hours
 from well_viewer.core.safe import swallowed
 
 
+def well_plate_tooltip_provider(app) -> Callable[[str], str]:
+    """Tooltip-provider closure for ``WellPlateSelector.setWellTooltipProvider``.
+
+    Returns ``"<well_id> — <label>"`` for wells the user has named in
+    Sample Definitions, falling back to the bare well id otherwise. The
+    closure reads ``app._app_state.dataset.well_labels`` on every hover
+    so a label edit reflects immediately without re-wiring the provider.
+    """
+    def _tooltip(well_id: str) -> str:
+        try:
+            labels = getattr(app._app_state.dataset, "well_labels", None) or {}
+            name = labels.get(well_id)
+        except Exception:
+            name = None
+        if name and str(name).strip() and str(name).strip() != well_id:
+            return f"{well_id} — {str(name).strip()}"
+        return well_id
+    return _tooltip
+
 def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
     """Parse a ``QLineEdit``'s text as ``float``; return *fallback* on blank,
     non-numeric, or (when *allow_auto*) the literal ``"auto"``.

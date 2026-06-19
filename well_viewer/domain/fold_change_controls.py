@@ -5,8 +5,9 @@ Used by the Bar Plots and Line Graphs tabs. Two parallel dropdowns:
 * Control — divides each bar / curve by the picked well or replicate set's
   mean at the matching timepoint. ``—`` disables this axis.
 * Baseline — divides each bar / curve by its own value at the chosen
-  reference timepoint. Currently only ``t0`` (each member's first
-  available timepoint) is offered; ``—`` disables this axis.
+  reference timepoint. Pick any available timepoint, or "earliest" to
+  mean "each member's first finite point" (the legacy ``vs t0``
+  behaviour); ``—`` disables this axis.
 
 Both dropdowns are independent and may be combined. They mirror the
 shared ``app._fc_*`` state so the same selection applies to both tabs.
@@ -20,7 +21,10 @@ from PySide6.QtWidgets import (
 
 
 _NONE_LABEL = "—"
-_T0_LABEL = "t0 (first timepoint)"
+# "earliest" means: pick each member's own earliest finite point — the
+# original ``vs t0`` semantics. Distinct from naming an explicit tp so
+# datasets with different first-tp values keep behaving consistently.
+_EARLIEST_LABEL = "earliest (each member's first tp)"
 
 
 # Re-export the scope registry + dirty-flag helpers from the pure-logic
@@ -114,15 +118,43 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
         combo.blockSignals(blocked)
 
 
+def _available_timepoint_strs(app) -> list[str]:
+    """Return the dataset's timepoints formatted as the bar tp-strings
+    (``f"{t:.4g}"``), so the baseline picker matches the rest of the UI."""
+    try:
+        tps = sorted(app._app_state.dataset.all_timepoints_cache or [])
+    except Exception:
+        return []
+    return [f"{float(t):.4g}" for t in tps]
+
+
 def _repopulate_baseline_combo(app, combo: QComboBox) -> None:
-    """Refresh the Baseline combo. Only ``t0`` is supported today."""
+    """Refresh the Baseline combo with every available timepoint.
+
+    Items: ``—`` (off), ``earliest`` (each member's first finite point —
+    the original ``vs t0`` behaviour), then one entry per dataset
+    timepoint formatted the same way the Bar Plots tp-multi-select uses
+    (``f"{t:.4g}"``). Selection is driven from ``PlotState.fc_vs_t0_on``
+    and ``PlotState.fc_baseline_tp``: empty + on → ``earliest``; a
+    matching tp string → that timepoint; off → ``—``.
+    """
     on = bool(app._app_state.plot.fc_vs_t0_on)
+    chosen_tp = str(getattr(app._app_state.plot, "fc_baseline_tp", "") or "").strip()
+    tp_strs = _available_timepoint_strs(app)
+
     blocked = combo.blockSignals(True)
     try:
         combo.clear()
         combo.addItem(_NONE_LABEL)
-        combo.addItem(_T0_LABEL)
-        combo.setCurrentIndex(1 if on else 0)
+        combo.addItem(_EARLIEST_LABEL)
+        for tp in tp_strs:
+            combo.addItem(tp)
+        if not on:
+            combo.setCurrentIndex(0)
+        elif chosen_tp and chosen_tp in tp_strs:
+            combo.setCurrentText(chosen_tp)
+        else:
+            combo.setCurrentIndex(1)  # earliest
     finally:
         combo.blockSignals(blocked)
 
@@ -163,6 +195,7 @@ def set_fold_change_state(
     vs_control_on: "bool | None" = None,
     control_label: "str | None" = None,
     vs_t0_on: "bool | None" = None,
+    baseline_tp: "str | None" = None,
     initiating_scope: str = "",
 ) -> None:
     """Single entry point for fold-change state mutations.
@@ -184,6 +217,7 @@ def set_fold_change_state(
         vs_control_on=vs_control_on,
         control_label=control_label,
         vs_t0_on=vs_t0_on,
+        baseline_tp=baseline_tp,
     )
 
     _sync_widgets_to_state(app, skip_scope=initiating_scope)
@@ -241,10 +275,22 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
 
     def _on_baseline_changed(_idx: int) -> None:
         text = baseline_combo.currentText()
-        set_fold_change_state(
-            app, vs_t0_on=(text == _T0_LABEL),
-            initiating_scope=scope,
-        )
+        if text == _NONE_LABEL or not text:
+            set_fold_change_state(
+                app, vs_t0_on=False, baseline_tp="",
+                initiating_scope=scope,
+            )
+        elif text == _EARLIEST_LABEL:
+            set_fold_change_state(
+                app, vs_t0_on=True, baseline_tp="",
+                initiating_scope=scope,
+            )
+        else:
+            # An explicit timepoint string from ``_available_timepoint_strs``.
+            set_fold_change_state(
+                app, vs_t0_on=True, baseline_tp=text,
+                initiating_scope=scope,
+            )
 
     ctrl_combo.currentIndexChanged.connect(_on_ctrl_changed)
     baseline_combo.currentIndexChanged.connect(_on_baseline_changed)

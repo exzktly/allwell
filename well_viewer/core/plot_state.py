@@ -56,6 +56,11 @@ class PlotState:
     fc_vs_control_on: bool = False
     fc_control_label: str = ""
     fc_vs_t0_on: bool = False
+    # User-chosen baseline timepoint (the dataset's tp string, e.g. ``"24"``).
+    # Empty when the user wants the **earliest** finite-mean point per member
+    # (the original ``vs t0`` behaviour), so backward-compat with saved state
+    # that only carries ``fc_vs_t0_on=True`` is preserved.
+    fc_baseline_tp: str = ""
     fc_dirty_scopes: set[str] = field(default_factory=set)
 
     # ── fold change ──────────────────────────────────────────────────────────
@@ -72,16 +77,22 @@ class PlotState:
 
     def set_fold_change(self, *, vs_control_on: bool | None = None,
                         control_label: str | None = None,
-                        vs_t0_on: bool | None = None) -> None:
+                        vs_t0_on: bool | None = None,
+                        baseline_tp: str | None = None) -> None:
         """Apply a fold-change state change. A ``None`` argument leaves that
         field unchanged. ``control_label`` is stored verbatim — the UI layer
-        strips its display-only disambiguation suffix before calling."""
+        strips its display-only disambiguation suffix before calling.
+        ``baseline_tp`` is the dataset's timepoint string the user picked as
+        the per-member baseline; empty means "use the earliest finite point"
+        (the original behaviour)."""
         if vs_control_on is not None:
             self.fc_vs_control_on = bool(vs_control_on)
         if control_label is not None:
             self.fc_control_label = control_label
         if vs_t0_on is not None:
             self.fc_vs_t0_on = bool(vs_t0_on)
+        if baseline_tp is not None:
+            self.fc_baseline_tp = str(baseline_tp)
 
     # ── toggles ──────────────────────────────────────────────────────────────
 

@@ -406,6 +406,65 @@ def baseline_from_points(
     return None, 0.0
 
 
+def baseline_from_points_resolved(
+    pts, baseline_tp: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float], float]:
+    """Like :func:`baseline_from_points` but also returns the resolved tp.
+
+    Returns ``(tp, mean, spread)``. ``tp`` is ``None`` when no baseline
+    qualifies. Used by the bar's per-well path so the caller can look up
+    the control's value at the SAME tp the per-well baseline used."""
+    if not pts:
+        return None, None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                m = pt[1]
+                if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+                    s = pt[2] if len(pt) > 2 else 0.0
+                    return (
+                        t,
+                        float(m),
+                        float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+                    )
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        m = pt[1]
+        if isinstance(m, (int, float)) and math.isfinite(m) and m != 0:
+            s = pt[2] if len(pt) > 2 else 0.0
+            return (
+                float(pt[0]),
+                float(m),
+                float(s) if isinstance(s, (int, float)) and math.isfinite(s) else 0.0,
+            )
+    return None, None, 0.0
+
+
+def baseline_frac_from_points_resolved(
+    pts, baseline_tp: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float], float]:
+    """Frac counterpart of :func:`baseline_from_points_resolved` —
+    returns ``(tp, frac, frac_spread)`` with ``tp=None`` for the no-match case."""
+    if not pts:
+        return None, None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                f, fs = _pt_frac(pt)
+                if f is not None and f != 0:
+                    return t, f, fs
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        f, fs = _pt_frac(pt)
+        if f is not None and f != 0:
+            return float(pt[0]), f, fs
+    return None, None, 0.0
+
+
 def baseline_frac_from_points(
     pts, baseline_tp: Optional[float] = None,
 ) -> Tuple[Optional[float], float]:
@@ -914,6 +973,38 @@ def member_first_tp_stats(
     return series[earliest]
 
 
+def member_first_tp_stats_resolved(
+    app, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: Optional[float] = None,
+) -> Optional[Tuple[float, float, float]]:
+    """Like :func:`member_first_tp_stats` but also returns the resolved tp.
+
+    Returns ``(tp, mean, spread)`` so the bar plot can look up the control's
+    value at the SAME baseline tp the member used — needed for correct
+    post-control baseline stacking when ops are mixed (e.g. ratio-control
+    + subtract-baseline). Returns ``None`` only for unknown / empty members.
+    """
+    series = member_stats_series(
+        app, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, ms in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return (float(t), ms[0], ms[1])
+    earliest = min(series)
+    ms = series[earliest]
+    return (float(earliest), ms[0], ms[1])
+
+
 # ── Bar-plot fraction-on FC helpers ─────────────────────────────────────────
 #
 # The "OnFraction" panel (fraction of cells above the gate) is its own bar
@@ -1033,6 +1124,33 @@ def member_first_tp_frac(
                 return fs
     earliest = min(series)
     return series[earliest]
+
+
+def member_first_tp_frac_resolved(
+    app, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: Optional[float] = None,
+) -> Optional[Tuple[float, float, float]]:
+    """``(tp, frac, frac_spread)`` for the member's baseline timepoint —
+    the frac counterpart of :func:`member_first_tp_stats_resolved`."""
+    series = member_frac_series(
+        app, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, fs in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return (float(t), fs[0], fs[1])
+    earliest = min(series)
+    fs = series[earliest]
+    return (float(earliest), fs[0], fs[1])
 
 
 # ── Bar-plot scaling ────────────────────────────────────────────────────────

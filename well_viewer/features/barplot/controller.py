@@ -170,6 +170,7 @@ def render_bar_items(
     disabled_well_color: str,
     err_bar_color: str,
     ax_n=None,
+    fc_active: bool = False,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
 
@@ -289,9 +290,12 @@ def render_bar_items(
     _autofit(ax_mean, *_tops_lows(
         lambda it: it.mean if it.has_mean else float("nan"),
         lambda it: it.spread))
+    # Cap the frac panel at 1.05 only when FC is off — under FC the frac
+    # becomes a ratio (or subtract result) that can exceed 1 or go negative,
+    # and the cap silently clips the bars.
     _autofit(ax_frac, *_tops_lows(
         lambda it: it.frac if it.has_frac else float("nan"),
-        lambda it: it.frac_spread), cap=1.05)
+        lambda it: it.frac_spread), cap=None if fc_active else 1.05)
 
     if ax_n is not None:
         _autofit(ax_n, *_tops_lows(

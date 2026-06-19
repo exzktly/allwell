@@ -237,6 +237,30 @@ def _sync_widgets_to_state(app, *, skip_scope: str = "") -> None:
             _repopulate_order_combo(app, order_combo)
 
 
+def _reset_bar_ylim_edits(app) -> None:
+    """Clear the bar plot's user-entered y-lim edits so the autofit reclaims
+    the panels. Idempotent and no-op when the edits aren't built yet."""
+    for attr in (
+        "_bar_ylim_mean_lo_edit", "_bar_ylim_mean_hi_edit",
+        "_bar_ylim_frac_lo_edit", "_bar_ylim_frac_hi_edit",
+    ):
+        edit = getattr(app, attr, None)
+        if edit is None:
+            continue
+        setter = getattr(edit, "setText", None)
+        if not callable(setter):
+            continue
+        blocked = False
+        blocker = getattr(edit, "blockSignals", None)
+        if callable(blocker):
+            blocked = blocker(True)
+        try:
+            setter("")
+        finally:
+            if callable(blocker):
+                blocker(blocked)
+
+
 def set_fold_change_state(
     app, *,
     vs_control_on: "bool | None" = None,
@@ -274,6 +298,13 @@ def set_fold_change_state(
         op_t0=op_t0,
         order=order,
     )
+
+    # Any FC mutation invalidates the user's previous y-axis range —
+    # under different FC settings the bar values live on a different
+    # scale (raw 100-1500 vs ratio 0-10 vs subtract -100 to 300). Clear
+    # the user-entered y-lim edits so apply_bar_ylims falls through and
+    # the autofit takes over.
+    _reset_bar_ylim_edits(app)
 
     _sync_widgets_to_state(app, skip_scope=initiating_scope)
 

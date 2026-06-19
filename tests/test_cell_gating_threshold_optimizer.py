@@ -90,11 +90,11 @@ def test_optimizer_supports_ratio_channels():
     assert result.difference == pytest.approx(1.0)
 
 
-def test_optimizer_picks_plateau_centre_not_low_edge():
-    # Two well-separated populations: A all ~100, B all ~1000. Every threshold
-    # between 100 and 1000 yields the same maximal |Δ| (=1.0), forming a wide
-    # plateau. The optimizer must return the CENTRE of that plateau (a robust
-    # separator between the populations), not its low edge near the dim noise.
+def test_optimizer_returns_first_threshold_at_max_difference():
+    # Two well-separated populations: A all 100, B all 1000. Every threshold in
+    # [100, 1000) yields the maximal |Δ| (=1.0). The optimizer reports the
+    # threshold where the difference is biggest; np.argmax returns the FIRST
+    # such threshold, i.e. the lowest one attaining the max (100).
     a = _df([100] * 50)
     b = _df([1000] * 50)
 
@@ -104,8 +104,7 @@ def test_optimizer_picks_plateau_centre_not_low_edge():
     )
 
     assert result.difference == pytest.approx(1.0)
-    # Centre of the [100, 1000] plateau is ~550 — far from the 100 low edge.
-    assert 500 < result.threshold < 600
+    assert result.threshold == pytest.approx(100.0)
 
 
 def test_optimizer_filters_by_timepoint():

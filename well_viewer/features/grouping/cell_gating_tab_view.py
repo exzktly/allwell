@@ -1261,20 +1261,11 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         if well_a == well_b:
             _status("Optimize ThreshFracOn: choose two different wells.")
             return
+        lo = float(app._cell_gating_opt_min_edit.text())
+        hi = float(app._cell_gating_opt_max_edit.text())
         steps = int(float(app._cell_gating_opt_steps_edit.text()))
         tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
         timepoint = tp_combo.currentData() if tp_combo is not None else None
-        # Re-fit Min/Max to the data span for the *current* well / channel /
-        # timepoint selection right before scanning. The signal-driven autofill
-        # can miss — e.g. per-well rows lazy-load only after the combo-change
-        # fired — leaving the 0–100 default in the fields while the scan reads
-        # real MFI data (often 100s–1000s). That mismatch is what made Optimize
-        # return a meaningless range-edge threshold instead of the value that
-        # maximizes the fraction-on difference. Refitting here guarantees the
-        # scan always spans where fraction-on actually changes.
-        _cell_gating_autofill_opt_range(app)
-        lo = float(app._cell_gating_opt_min_edit.text())
-        hi = float(app._cell_gating_opt_max_edit.text())
     except ValueError:
         _status("Optimize ThreshFracOn: min, max, and steps must be numeric.")
         return
@@ -1659,43 +1650,20 @@ def _optimize_thresh_frac_on_between_wells(
         dtype=float,
     )
 
-    # Fraction-on is a step function, so |Δ| is piecewise-constant: the maximum
-    # is typically reached across a *plateau* of thresholds (the gap between the
-    # two populations), not a single point. Returning the first such threshold —
-    # what ``diff > best`` did — lands on the LOW EDGE of that plateau, i.e. right
-    # at the top of the dimmer population's noise: a fragile cut that looks like
-    # "it always picks the smallest value". Instead pick the CENTRE of the widest
-    # maximal-|Δ| run, which sits between the populations and is the robust
-    # separator the user is after. ``isclose`` groups the rational fraction-on
-    # values that are equal up to float error into one plateau.
-    max_diff = float(diffs.max())
-    is_max = np.isclose(diffs, max_diff, rtol=0.0, atol=1e-9)
-    best_start, best_len = 0, 0
-    i, n = 0, len(is_max)
-    while i < n:
-        if is_max[i]:
-            j = i
-            while j < n and is_max[j]:
-                j += 1
-            if (j - i) > best_len:
-                best_start, best_len = i, j - i
-            i = j
-        else:
-            i += 1
-
-    # Centre of the widest plateau. Use the middle *scanned* index (uniform
-    # spacing ⇒ that is the value midpoint) so the reported threshold is always a
-    # point we actually evaluated at the maximum |Δ| — never a value that, by
-    # landing on a data step between two samples, would report a smaller diff.
-    best_idx = best_start + (best_len - 1) // 2
-    mid = float(thresholds[best_idx])
-    frac_a = _fraction_on_for_threshold(values_a, mid)
-    frac_b = _fraction_on_for_threshold(values_b, mid)
+    # The threshold where the absolute fraction-on difference is biggest.
+    # ``np.argmax`` returns the FIRST index attaining that maximum, so when a
+    # run of thresholds ties for the max |Δ| (fraction-on is a step function,
+    # so ties are common between two separated populations) the lowest such
+    # threshold is reported.
+    best_idx = int(np.argmax(diffs))
+    best_t = float(thresholds[best_idx])
+    frac_a = _fraction_on_for_threshold(values_a, best_t)
+    frac_b = _fraction_on_for_threshold(values_b, best_t)
     return ThreshFracOptimizationResult(
-        threshold=mid,
+        threshold=best_t,
         frac_a=frac_a,
         frac_b=frac_b,
-        difference=float(abs(frac_a - frac_b)),
+        difference=float(diffs[best_idx]),
         n_a=int(values_a.size),
         n_b=int(values_b.size),
     )

@@ -66,6 +66,13 @@ class PlotState:
     # user can e.g. subtract a background-control and then divide by t0.
     fc_op_ctrl: str = "ratio"   # vs-control axis; one of {"ratio", "subtract"}
     fc_op_t0: str = "ratio"     # vs-baseline-tp axis; one of {"ratio", "subtract"}
+    # Which axis applies FIRST when both are active. Commutes when both
+    # ops are the same; matters only with mixed ops. ``"ctrl_first"`` (default,
+    # the v7.1.8 behaviour and ΔΔCt-style stacking): the t0 baseline is
+    # post-control. ``"t0_first"``: the control denominator is post-t0
+    # (each member self-normalises against its own baseline first, then
+    # the control normalisation is applied).
+    fc_order: str = "ctrl_first"  # one of {"ctrl_first", "t0_first"}
     fc_dirty_scopes: set[str] = field(default_factory=set)
 
     # ── fold change ──────────────────────────────────────────────────────────
@@ -104,7 +111,8 @@ class PlotState:
                         baseline_tp: str | None = None,
                         op: str | None = None,
                         op_ctrl: str | None = None,
-                        op_t0: str | None = None) -> None:
+                        op_t0: str | None = None,
+                        order: str | None = None) -> None:
         """Apply a fold-change state change. A ``None`` argument leaves that
         field unchanged. ``control_label`` is stored verbatim — the UI layer
         strips its display-only disambiguation suffix before calling.
@@ -127,6 +135,8 @@ class PlotState:
             self.fc_op_ctrl = str(op_ctrl)
         if op_t0 is not None and str(op_t0) in ("ratio", "subtract"):
             self.fc_op_t0 = str(op_t0)
+        if order is not None and str(order) in ("ctrl_first", "t0_first"):
+            self.fc_order = str(order)
 
     # ── toggles ──────────────────────────────────────────────────────────────
 

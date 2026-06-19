@@ -121,6 +121,9 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
 _OP_LABEL_RATIO = "Ratio (÷)"
 _OP_LABEL_SUBTRACT = "Subtract (−)"
 
+_ORDER_LABEL_CTRL_FIRST = "Control first"
+_ORDER_LABEL_T0_FIRST = "Baseline first"
+
 
 def _repopulate_op_combo(app, combo: QComboBox, *, attr: str) -> None:
     """Populate an Operator combo with the two FC operators and set the
@@ -133,6 +136,20 @@ def _repopulate_op_combo(app, combo: QComboBox, *, attr: str) -> None:
         combo.addItem(_OP_LABEL_RATIO)
         combo.addItem(_OP_LABEL_SUBTRACT)
         combo.setCurrentIndex(1 if chosen == "subtract" else 0)
+    finally:
+        combo.blockSignals(blocked)
+
+
+def _repopulate_order_combo(app, combo: QComboBox) -> None:
+    """Populate the Order combo with the two FC application orders and
+    set the current selection from ``PlotState.fc_order``."""
+    chosen = str(getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first")
+    blocked = combo.blockSignals(True)
+    try:
+        combo.clear()
+        combo.addItem(_ORDER_LABEL_CTRL_FIRST)
+        combo.addItem(_ORDER_LABEL_T0_FIRST)
+        combo.setCurrentIndex(1 if chosen == "t0_first" else 0)
     finally:
         combo.blockSignals(blocked)
 
@@ -215,6 +232,9 @@ def _sync_widgets_to_state(app, *, skip_scope: str = "") -> None:
         op_t0_combo = getattr(app, f"_fc_op_t0_combo_{scope.name}", None)
         if op_t0_combo is not None:
             _repopulate_op_combo(app, op_t0_combo, attr="fc_op_t0")
+        order_combo = getattr(app, f"_fc_order_combo_{scope.name}", None)
+        if order_combo is not None:
+            _repopulate_order_combo(app, order_combo)
 
 
 def set_fold_change_state(
@@ -226,6 +246,7 @@ def set_fold_change_state(
     op: "str | None" = None,
     op_ctrl: "str | None" = None,
     op_t0: "str | None" = None,
+    order: "str | None" = None,
     initiating_scope: str = "",
 ) -> None:
     """Single entry point for fold-change state mutations.
@@ -251,6 +272,7 @@ def set_fold_change_state(
         op=op,
         op_ctrl=op_ctrl,
         op_t0=op_t0,
+        order=order,
     )
 
     _sync_widgets_to_state(app, skip_scope=initiating_scope)
@@ -316,6 +338,22 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
     _repopulate_op_combo(app, op_t0_combo, attr="fc_op_t0")
     layout.addWidget(op_t0_combo)
 
+    # Order selector — which axis applies first. Matters only with mixed
+    # ops (same-op cases commute mathematically).
+    layout.addWidget(QLabel("Order", parent))
+    order_combo = QComboBox(parent)
+    order_combo.setMinimumWidth(130)
+    order_combo.setToolTip(
+        "Which fold-change axis applies first. ‘Control first’ "
+        "(ΔΔCt-style): control is applied, then baseline normalises the "
+        "result against its own post-control baseline. ‘Baseline first’: "
+        "baseline is applied, then control is divided/subtracted against "
+        "its own post-baseline control. Commutes when both axes use the "
+        "same operator; matters with mixed ops."
+    )
+    _repopulate_order_combo(app, order_combo)
+    layout.addWidget(order_combo)
+
     def _on_ctrl_changed(_idx: int) -> None:
         text = ctrl_combo.currentText()
         if text == _NONE_LABEL or not text:
@@ -358,10 +396,16 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
         op_v = "subtract" if text == _OP_LABEL_SUBTRACT else "ratio"
         set_fold_change_state(app, op_t0=op_v, initiating_scope=scope)
 
+    def _on_order_changed(_idx: int) -> None:
+        text = order_combo.currentText()
+        order_v = "t0_first" if text == _ORDER_LABEL_T0_FIRST else "ctrl_first"
+        set_fold_change_state(app, order=order_v, initiating_scope=scope)
+
     ctrl_combo.currentIndexChanged.connect(_on_ctrl_changed)
     baseline_combo.currentIndexChanged.connect(_on_baseline_changed)
     op_ctrl_combo.currentIndexChanged.connect(_on_op_ctrl_changed)
     op_t0_combo.currentIndexChanged.connect(_on_op_t0_changed)
+    order_combo.currentIndexChanged.connect(_on_order_changed)
 
     # Stash references using the scope descriptor's attribute names so
     # the cross-tab sync helper picks them up via the registry. Falls
@@ -378,3 +422,4 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
     # cross-tab sync helper looks up.
     setattr(app, f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
     setattr(app, f"_fc_op_t0_combo_{scope}", op_t0_combo)
+    setattr(app, f"_fc_order_combo_{scope}", order_combo)

@@ -54,6 +54,7 @@ def snapshot(app) -> dict:
             "baseline_tp": str(getattr(app._app_state.plot, "fc_baseline_tp", "") or ""),
             "op_ctrl": str(getattr(app._app_state.plot, "fc_op_ctrl", "ratio") or "ratio"),
             "op_t0": str(getattr(app._app_state.plot, "fc_op_t0", "ratio") or "ratio"),
+            "order": str(getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first"),
         },
         "export_style_prefs": dict(getattr(app, "_export_style_prefs", {}) or {}),
         "tabs": _snapshot_tabs(app),
@@ -303,6 +304,9 @@ def restore(app, state: dict) -> None:
         if "op_t0" in fc:
             op_in = str(fc.get("op_t0") or "ratio")
             app._app_state.plot.fc_op_t0 = op_in if op_in in ("ratio", "subtract") else "ratio"
+        if "order" in fc:
+            o_in = str(fc.get("order") or "ctrl_first")
+            app._app_state.plot.fc_order = o_in if o_in in ("ctrl_first", "t0_first") else "ctrl_first"
         # Push the restored state into any fold-change combos that have
         # already been built. Lazily-built tabs (Bar) will pick the
         # values up on first install via _repopulate_*_combo, which both
@@ -753,6 +757,7 @@ def reset(app) -> None:
     app._app_state.plot.fc_baseline_tp = ""
     app._app_state.plot.fc_op_ctrl = "ratio"
     app._app_state.plot.fc_op_t0 = "ratio"
+    app._app_state.plot.fc_order = "ctrl_first"
     try:
         from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
         _sync_widgets_to_state(app)

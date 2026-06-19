@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 from ui.theme import get_color
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.ui_helpers import install_canvas_wheel_scroll
-from well_viewer.data.data_loading import df_included_mask, resolve_value_series
+from well_viewer.data.data_loading import resolve_value_series
 from well_viewer.features.image_browser.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.features.scatter.gating import compute_gate_inclusion
 from well_viewer.features.qc.tab_view import build_qc_gate_controls
@@ -589,20 +589,28 @@ def build_cell_gating_subtab(app) -> None:
         app._cell_gating_subtab_built = True
 
 
-def _cell_gating_valid_rows(frame_df):
-    """Rows that pass the crop region AND the QC debris gate (absent columns ⇒
-    all-pass). The per-channel fluorescence gate is deliberately NOT applied:
-    these CDFs are what the user reads to SET that gate, so filtering by it (via
-    the ``Included`` column) would be circular — raising the threshold would
-    shrink the very curve being read. Crop + QC are independent of the gate, so
-    the CDFs show the valid population without that feedback loop.
+def _cell_gating_valid_mask(frame_df):
+    """Boolean mask: rows that pass crop AND QC (absent columns ⇒ all-pass).
+
+    The per-channel fluorescence gate (``Included``) is deliberately NOT applied:
+    the CDFs and the threshold optimizer are what the user reads to SET that
+    gate, so filtering by it would be circular — raising the threshold would
+    shrink the very curve being read, and the optimizer would only see cells
+    that already pass its own (asynchronously-rewritten) cut. Crop + QC are
+    independent of the fluorescence gate, so they show the valid population
+    without that feedback loop.
     """
     mask = pd.Series(True, index=frame_df.index)
     for col in ("QC_Pass", "Crop_Pass"):
         if col in frame_df.columns:
             vals = pd.to_numeric(frame_df[col], errors="coerce").fillna(1)
             mask = mask & vals.eq(1)
-    return frame_df[mask]
+    return mask
+
+
+def _cell_gating_valid_rows(frame_df):
+    """Rows of ``frame_df`` selected by :func:`_cell_gating_valid_mask`."""
+    return frame_df[_cell_gating_valid_mask(frame_df)]
 
 
 def cell_gating_load_cell_areas(app) -> None:
@@ -1509,8 +1517,8 @@ def _cell_gating_autofill_opt_range(app) -> None:
     timepoint = tp_combo.currentData() if tp_combo is not None else None
     ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
     try:
-        va = _included_values_for_channel(app._get_rows(well_a), channel_key, ratios, timepoint)
-        vb = _included_values_for_channel(app._get_rows(well_b), channel_key, ratios, timepoint)
+        va = _valid_values_for_channel(app._get_rows(well_a), channel_key, ratios, timepoint)
+        vb = _valid_values_for_channel(app._get_rows(well_b), channel_key, ratios, timepoint)
     except Exception:
         swallowed("cell gating: optimizer range autofill failed")
         return
@@ -1592,8 +1600,13 @@ def _filter_rows_by_timepoint(df, timepoint):
     return df
 
 
-def _included_values_for_channel(df, channel_key: str, ratios=None,
-                                 timepoint=None) -> np.ndarray:
+def _valid_values_for_channel(df, channel_key: str, ratios=None,
+                              timepoint=None) -> np.ndarray:
+    """Finite per-cell values for ``channel_key`` over the QC+Crop-valid
+    population (at ``timepoint`` if given). Mirrors the CDF population — the
+    fluorescence ``Included`` gate is deliberately not applied so the optimizer
+    isn't filtered by the very threshold it's helping pick (see
+    :func:`_cell_gating_valid_mask`)."""
     if df is None or df.empty:
         return np.array([], dtype=float)
     df = _filter_rows_by_timepoint(df, timepoint)
@@ -1601,7 +1614,7 @@ def _included_values_for_channel(df, channel_key: str, ratios=None,
         return np.array([], dtype=float)
     val_col = channel_key if str(channel_key).startswith("ratio:") else f"{channel_key}_mean_intensity"
     values = resolve_value_series(df, val_col, ratios).to_numpy(dtype=float)
-    mask = df_included_mask(df).to_numpy(copy=False) & np.isfinite(values)
+    mask = _cell_gating_valid_mask(df).to_numpy(copy=False) & np.isfinite(values)
     return values[mask]
 
 
@@ -1633,12 +1646,12 @@ def _optimize_thresh_frac_on_between_wells(
     if int(steps) > 10001:
         raise ValueError("steps must be 10,001 or fewer.")
 
-    values_a = _included_values_for_channel(df_a, channel_key, ratios, timepoint)
-    values_b = _included_values_for_channel(df_b, channel_key, ratios, timepoint)
+    values_a = _valid_values_for_channel(df_a, channel_key, ratios, timepoint)
+    values_b = _valid_values_for_channel(df_b, channel_key, ratios, timepoint)
     if values_a.size == 0:
-        raise ValueError("Well A has no included finite values for the selected channel.")
+        raise ValueError("Well A has no valid finite values for the selected channel.")
     if values_b.size == 0:
-        raise ValueError("Well B has no included finite values for the selected channel.")
+        raise ValueError("Well B has no valid finite values for the selected channel.")
 
     thresholds = np.linspace(lo, hi, int(steps))
     diffs = np.array(

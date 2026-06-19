@@ -35,7 +35,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QVBoxLayout, QWidget,
@@ -260,10 +260,27 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         ctx.app, "_cell_gating_use_scatter_thresh", False
     )
 
-    root = parent.layout()
-    if root is None:
-        root = QVBoxLayout(parent)
-        parent.setLayout(root)
+    # The tab stacks a tall column of gating controls *above* the CDF plot and
+    # the optimizer panel. On shorter windows that column squeezed the plot down
+    # to a sliver (the CDFs were clipped to their top edge). Host the whole tab
+    # in one vertical scroll area and give the plot a real minimum height: the
+    # CDFs always render full-size, and anything that overflows a short window is
+    # reachable by scrolling instead of collapsing the plot.
+    outer_layout = parent.layout()
+    if outer_layout is None:
+        outer_layout = QVBoxLayout(parent)
+        parent.setLayout(outer_layout)
+    outer_layout.setContentsMargins(0, 0, 0, 0)
+    outer_scroll = QScrollArea(parent)
+    outer_scroll.setWidgetResizable(True)
+    outer_scroll.setFrameShape(QFrame.NoFrame)
+    outer_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    outer_layout.addWidget(outer_scroll)
+    content = QWidget()
+    outer_scroll.setWidget(content)
+    # Section builders below append to ``root``; point it at the scrollable
+    # content so the existing ``root.addWidget(...)`` calls need no changes.
+    root = QVBoxLayout(content)
     root.setContentsMargins(12, 12, 12, 12)
 
     control_frame = QWidget(parent)
@@ -441,8 +458,11 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_plot_scroll.setWidgetResizable(True)
     ctx.app._cell_gating_plot_scroll.setFrameShape(QFrame.NoFrame)
     ctx.app._cell_gating_plot_scroll.setWidget(ctx.app._cell_gating_canvas)
+    # Floor the plot height so the gating controls above can never squeeze the
+    # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
+    ctx.app._cell_gating_plot_scroll.setMinimumHeight(420)
     install_canvas_wheel_scroll(ctx.app._cell_gating_canvas, ctx.app._cell_gating_plot_scroll)
-    root.addWidget(ctx.app._cell_gating_plot_scroll, 1)
+    root.addWidget(ctx.app._cell_gating_plot_scroll)
 
     from widgets.mpl_toolbar import MplToolbar
     ctx.app._cell_gating_toolbar = MplToolbar(ctx.app._cell_gating_canvas, parent)
@@ -473,6 +493,16 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.app._cell_gating_opt_well_b_combo = QComboBox(opt_row)
     ctx.app._cell_gating_opt_well_b_combo.setMinimumWidth(90)
     opt_row_layout.addWidget(ctx.app._cell_gating_opt_well_b_combo)
+    opt_row_layout.addWidget(QLabel("Timepoint:", opt_row))
+    ctx.app._cell_gating_opt_timepoint_combo = QComboBox(opt_row)
+    ctx.app._cell_gating_opt_timepoint_combo.setMinimumWidth(110)
+    ctx.app._cell_gating_opt_timepoint_combo.setToolTip(
+        "Restrict the fraction-on comparison to one timepoint, or pool all "
+        "timepoints. Pooling across timepoints where the wells are both 'off' "
+        "early dilutes the difference, so picking the relevant timepoint gives a "
+        "sharper threshold."
+    )
+    opt_row_layout.addWidget(ctx.app._cell_gating_opt_timepoint_combo)
     opt_row_layout.addWidget(QLabel("Min:", opt_row))
     ctx.app._cell_gating_opt_min_edit = QLineEdit("0.0", opt_row)
     ctx.app._cell_gating_opt_min_edit.setFixedWidth(80)
@@ -498,6 +528,23 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     opt_row_layout.addWidget(opt_btn)
     opt_row_layout.addStretch(1)
     opt_layout.addWidget(opt_row)
+
+    # Changing the channel or either well re-derives the available timepoints and
+    # auto-fills Min/Max from the data range (so the scan actually spans the
+    # values — the hardcoded 0–100 default sits below typical MFI data, which is
+    # why a fresh Optimize used to return the range minimum). Changing only the
+    # timepoint just re-derives the range.
+    for _combo in (
+        ctx.app._cell_gating_opt_channel_combo,
+        ctx.app._cell_gating_opt_well_a_combo,
+        ctx.app._cell_gating_opt_well_b_combo,
+    ):
+        _combo.currentIndexChanged.connect(
+            lambda _idx=0, _app=ctx.app: _cell_gating_on_opt_scope_changed(_app)
+        )
+    ctx.app._cell_gating_opt_timepoint_combo.currentIndexChanged.connect(
+        lambda _idx=0, _app=ctx.app: _cell_gating_autofill_opt_range(_app)
+    )
     ctx.app._cell_gating_opt_result_label = QLabel(
         "Choose two wells and a threshold range, then optimize.",
         opt_panel,
@@ -1217,6 +1264,8 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         lo = float(app._cell_gating_opt_min_edit.text())
         hi = float(app._cell_gating_opt_max_edit.text())
         steps = int(float(app._cell_gating_opt_steps_edit.text()))
+        tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
+        timepoint = tp_combo.currentData() if tp_combo is not None else None
     except ValueError:
         _status("Optimize ThreshFracOn: min, max, and steps must be numeric.")
         return
@@ -1233,9 +1282,23 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
             max_threshold=hi,
             steps=steps,
             ratios=getattr(app._app_state.channel, "ratio_index", None) or {},
+            timepoint=timepoint,
         )
     except ValueError as exc:
         _status(f"Optimize ThreshFracOn: {exc}")
+        return
+
+    tp_note = "" if timepoint is None else f" at {_timepoint_label(timepoint)}"
+    # A zero best difference means the scan range never crossed where the two
+    # wells' fraction-on diverge (e.g. the range sits entirely below/above the
+    # data). Applying ``lo`` there would be the old "always the smallest value"
+    # bug — surface it instead of silently writing a meaningless threshold.
+    if not (result.difference > 0):
+        _status(
+            f"Optimize ThreshFracOn: {well_a} and {well_b} have the same "
+            f"fraction-on across [{lo:g}, {hi:g}]{tp_note} for {channel_key}. "
+            "Adjust Min/Max to span the data, or pick different wells/timepoint."
+        )
         return
 
     edit = (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).get(channel_key)
@@ -1245,7 +1308,7 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
     edit.setText(f"{result.threshold:.6g}")
     cell_gating_on_threshold_frac_on_change(app)
     _status(
-        f"Optimized {channel_key}: threshold={result.threshold:.6g}; "
+        f"Optimized {channel_key}{tp_note}: threshold={result.threshold:.6g}; "
         f"{well_a} fraction-on={result.frac_a:.3f} (n={result.n_a}), "
         f"{well_b} fraction-on={result.frac_b:.3f} (n={result.n_b}); "
         f"|Δ|={result.difference:.3f}."
@@ -1377,6 +1440,92 @@ def _cell_gating_refresh_optimizer_controls(app) -> None:
     if btn is not None:
         btn.setEnabled(bool(channel_combo.count() and len(wells) >= 2))
 
+    _cell_gating_refresh_opt_timepoints(app)
+    _cell_gating_autofill_opt_range(app)
+
+
+def _cell_gating_on_opt_scope_changed(app) -> None:
+    """React to a channel/well change: re-list timepoints, then re-fit the range."""
+    _cell_gating_refresh_opt_timepoints(app)
+    _cell_gating_autofill_opt_range(app)
+
+
+def _cell_gating_refresh_opt_timepoints(app) -> None:
+    """Populate the optimizer timepoint dropdown from the two selected wells."""
+    combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
+    well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
+    well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
+    if combo is None or well_a_combo is None or well_b_combo is None:
+        return
+    seen: set = set()
+    tps: list = []
+    for combo_w in (well_a_combo, well_b_combo):
+        label = str(combo_w.currentText()).strip()
+        if not label or label not in (app._app_state.dataset.well_paths or {}):
+            continue
+        for tp in _distinct_timepoints(app._get_rows(label)):
+            if tp not in seen:
+                seen.add(tp)
+                tps.append(tp)
+    tps.sort(key=lambda t: (0, t[1]) if t[0] == "hours" else (1, str(t[1])))
+
+    prev = combo.currentData()
+    combo.blockSignals(True)
+    combo.clear()
+    combo.addItem("All timepoints", None)
+    for tp in tps:
+        combo.addItem(_timepoint_label(tp), tp)
+    if prev is not None:
+        # Qt's findData can't match a Python tuple stored as itemData, so search
+        # by value to preserve the user's timepoint across refreshes.
+        restored = next(
+            (i for i in range(combo.count()) if combo.itemData(i) == prev), 0
+        )
+        combo.setCurrentIndex(restored)
+    combo.blockSignals(False)
+
+
+def _cell_gating_autofill_opt_range(app) -> None:
+    """Fit Min/Max to the selected channel's data range over the two wells.
+
+    Pools the included finite values from Well A and Well B (at the chosen
+    timepoint) and writes their min/max into the Min/Max edits, so the scan spans
+    where fraction-on actually changes rather than the hardcoded 0–100 default.
+    """
+    min_edit = getattr(app, "_cell_gating_opt_min_edit", None)
+    max_edit = getattr(app, "_cell_gating_opt_max_edit", None)
+    channel_combo = getattr(app, "_cell_gating_opt_channel_combo", None)
+    well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
+    well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
+    tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
+    if not all((min_edit, max_edit, channel_combo, well_a_combo, well_b_combo)):
+        return
+    channel_key = str(channel_combo.currentData() or channel_combo.currentText()).strip()
+    well_a = str(well_a_combo.currentText()).strip()
+    well_b = str(well_b_combo.currentText()).strip()
+    valid = app._app_state.dataset.well_paths or {}
+    if not channel_key or well_a not in valid or well_b not in valid:
+        return
+    timepoint = tp_combo.currentData() if tp_combo is not None else None
+    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    try:
+        va = _included_values_for_channel(app._get_rows(well_a), channel_key, ratios, timepoint)
+        vb = _included_values_for_channel(app._get_rows(well_b), channel_key, ratios, timepoint)
+    except Exception:
+        swallowed("cell gating: optimizer range autofill failed")
+        return
+    pooled = np.concatenate([va, vb]) if (va.size or vb.size) else np.array([], dtype=float)
+    if pooled.size == 0:
+        return
+    lo = float(np.nanmin(pooled))
+    hi = float(np.nanmax(pooled))
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return
+    if hi <= lo:
+        hi = lo + 1.0
+    min_edit.setText(f"{lo:.6g}")
+    max_edit.setText(f"{hi:.6g}")
+
 
 def _fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
     if values.size == 0:
@@ -1384,7 +1533,70 @@ def _fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
     return float(np.count_nonzero(values > threshold) / values.size)
 
 
-def _included_values_for_channel(df, channel_key: str, ratios=None) -> np.ndarray:
+def _timepoint_label(timepoint) -> str:
+    """Human-readable label for a ``(kind, value)`` timepoint token."""
+    kind, value = timepoint
+    if kind == "hours":
+        return f"{value:g} h"
+    return str(value)
+
+
+def _distinct_timepoints(df) -> list[tuple[str, object]]:
+    """Ordered distinct ``(kind, value)`` timepoint tokens present in ``df``.
+
+    Prefers the numeric ``timepoint_hours`` column; falls back to the
+    ``timepoint`` string column. Returns ``[]`` when neither is available.
+    """
+    if df is None or getattr(df, "empty", True):
+        return []
+    if "timepoint_hours" in df.columns:
+        h = pd.to_numeric(df["timepoint_hours"], errors="coerce").dropna().unique()
+        if len(h):
+            return [("hours", float(v)) for v in sorted(float(x) for x in h)]
+    if "timepoint" in df.columns:
+        s = df["timepoint"].fillna("").astype(str).str.strip()
+        vals = [v for v in s.unique() if v != ""]
+
+        def _key(v: str):
+            try:
+                return (0, float(v), "")
+            except ValueError:
+                return (1, 0.0, v.lower())
+
+        return [("str", v) for v in sorted(vals, key=_key)]
+    return []
+
+
+def _filter_rows_by_timepoint(df, timepoint):
+    """Rows of ``df`` at ``timepoint`` (a ``(kind, value)`` token).
+
+    ``None`` ⇒ all rows. Unknown / missing timepoint columns ⇒ all rows (so the
+    optimizer degrades to its previous all-timepoints behaviour).
+    """
+    if timepoint is None or df is None or df.empty:
+        return df
+    kind, value = timepoint
+    if kind == "hours" and "timepoint_hours" in df.columns:
+        col = pd.to_numeric(df["timepoint_hours"], errors="coerce")
+        return df.loc[col == value]
+    if "timepoint" in df.columns:
+        col = df["timepoint"].fillna("").astype(str).str.strip()
+        sel = col == str(value)
+        if not sel.any():
+            num = pd.to_numeric(col, errors="coerce")
+            try:
+                sel = num == float(value)
+            except (TypeError, ValueError):
+                pass
+        return df.loc[sel]
+    return df
+
+
+def _included_values_for_channel(df, channel_key: str, ratios=None,
+                                 timepoint=None) -> np.ndarray:
+    if df is None or df.empty:
+        return np.array([], dtype=float)
+    df = _filter_rows_by_timepoint(df, timepoint)
     if df is None or df.empty:
         return np.array([], dtype=float)
     val_col = channel_key if str(channel_key).startswith("ratio:") else f"{channel_key}_mean_intensity"
@@ -1402,8 +1614,14 @@ def _optimize_thresh_frac_on_between_wells(
     max_threshold: float,
     steps: int,
     ratios=None,
+    timepoint=None,
 ) -> ThreshFracOptimizationResult:
-    """Return the threshold maximizing |fraction_on(A) - fraction_on(B)|."""
+    """Return the threshold maximizing |fraction_on(A) - fraction_on(B)|.
+
+    ``timepoint`` is an optional ``(kind, value)`` token (see
+    :func:`_distinct_timepoints`); when given, only rows at that timepoint
+    contribute to each well's fraction-on.
+    """
     lo = float(min_threshold)
     hi = float(max_threshold)
     if not np.isfinite(lo) or not np.isfinite(hi):
@@ -1415,29 +1633,63 @@ def _optimize_thresh_frac_on_between_wells(
     if int(steps) > 10001:
         raise ValueError("steps must be 10,001 or fewer.")
 
-    values_a = _included_values_for_channel(df_a, channel_key, ratios)
-    values_b = _included_values_for_channel(df_b, channel_key, ratios)
+    values_a = _included_values_for_channel(df_a, channel_key, ratios, timepoint)
+    values_b = _included_values_for_channel(df_b, channel_key, ratios, timepoint)
     if values_a.size == 0:
         raise ValueError("Well A has no included finite values for the selected channel.")
     if values_b.size == 0:
         raise ValueError("Well B has no included finite values for the selected channel.")
 
-    best: ThreshFracOptimizationResult | None = None
-    for threshold in np.linspace(lo, hi, int(steps)):
-        frac_a = _fraction_on_for_threshold(values_a, float(threshold))
-        frac_b = _fraction_on_for_threshold(values_b, float(threshold))
-        diff = abs(frac_a - frac_b)
-        if best is None or diff > best.difference:
-            best = ThreshFracOptimizationResult(
-                threshold=float(threshold),
-                frac_a=frac_a,
-                frac_b=frac_b,
-                difference=float(diff),
-                n_a=int(values_a.size),
-                n_b=int(values_b.size),
-            )
-    assert best is not None
-    return best
+    thresholds = np.linspace(lo, hi, int(steps))
+    diffs = np.array(
+        [
+            abs(_fraction_on_for_threshold(values_a, float(t))
+                - _fraction_on_for_threshold(values_b, float(t)))
+            for t in thresholds
+        ],
+        dtype=float,
+    )
+
+    # Fraction-on is a step function, so |Δ| is piecewise-constant: the maximum
+    # is typically reached across a *plateau* of thresholds (the gap between the
+    # two populations), not a single point. Returning the first such threshold —
+    # what ``diff > best`` did — lands on the LOW EDGE of that plateau, i.e. right
+    # at the top of the dimmer population's noise: a fragile cut that looks like
+    # "it always picks the smallest value". Instead pick the CENTRE of the widest
+    # maximal-|Δ| run, which sits between the populations and is the robust
+    # separator the user is after. ``isclose`` groups the rational fraction-on
+    # values that are equal up to float error into one plateau.
+    max_diff = float(diffs.max())
+    is_max = np.isclose(diffs, max_diff, rtol=0.0, atol=1e-9)
+    best_start, best_len = 0, 0
+    i, n = 0, len(is_max)
+    while i < n:
+        if is_max[i]:
+            j = i
+            while j < n and is_max[j]:
+                j += 1
+            if (j - i) > best_len:
+                best_start, best_len = i, j - i
+            i = j
+        else:
+            i += 1
+
+    # Centre of the widest plateau. Use the middle *scanned* index (uniform
+    # spacing ⇒ that is the value midpoint) so the reported threshold is always a
+    # point we actually evaluated at the maximum |Δ| — never a value that, by
+    # landing on a data step between two samples, would report a smaller diff.
+    best_idx = best_start + (best_len - 1) // 2
+    mid = float(thresholds[best_idx])
+    frac_a = _fraction_on_for_threshold(values_a, mid)
+    frac_b = _fraction_on_for_threshold(values_b, mid)
+    return ThreshFracOptimizationResult(
+        threshold=mid,
+        frac_a=frac_a,
+        frac_b=frac_b,
+        difference=float(abs(frac_a - frac_b)),
+        n_a=int(values_a.size),
+        n_b=int(values_b.size),
+    )
 
 
 def _cell_gating_first_frame_rows(df) -> tuple:

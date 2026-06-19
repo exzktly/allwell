@@ -90,6 +90,59 @@ def test_optimizer_supports_ratio_channels():
     assert result.difference == pytest.approx(1.0)
 
 
+def test_optimizer_picks_plateau_centre_not_low_edge():
+    # Two well-separated populations: A all ~100, B all ~1000. Every threshold
+    # between 100 and 1000 yields the same maximal |Δ| (=1.0), forming a wide
+    # plateau. The optimizer must return the CENTRE of that plateau (a robust
+    # separator between the populations), not its low edge near the dim noise.
+    a = _df([100] * 50)
+    b = _df([1000] * 50)
+
+    result = _optimize_thresh_frac_on_between_wells(
+        a, b, channel_key="gfp",
+        min_threshold=0, max_threshold=1100, steps=1101,
+    )
+
+    assert result.difference == pytest.approx(1.0)
+    # Centre of the [100, 1000] plateau is ~550 — far from the 100 low edge.
+    assert 500 < result.threshold < 600
+
+
+def test_optimizer_filters_by_timepoint():
+    a = pd.DataFrame({
+        "area_px": [100] * 4,
+        "Included": [1] * 4,
+        "timepoint_hours": [0.0, 0.0, 24.0, 24.0],
+        "gfp_mean_intensity": [0, 0, 100, 100],
+    })
+    b = pd.DataFrame({
+        "area_px": [100] * 4,
+        "Included": [1] * 4,
+        "timepoint_hours": [0.0, 0.0, 24.0, 24.0],
+        "gfp_mean_intensity": [0, 0, 0, 0],
+    })
+
+    # At 24 h, A is all-on above 50 and B is all-off ⇒ |Δ| = 1.0 over 2 cells each.
+    at_24 = _optimize_thresh_frac_on_between_wells(
+        a, b, channel_key="gfp",
+        min_threshold=50, max_threshold=50, steps=2,
+        timepoint=("hours", 24.0),
+    )
+    assert at_24.frac_a == pytest.approx(1.0)
+    assert at_24.frac_b == pytest.approx(0.0)
+    assert at_24.difference == pytest.approx(1.0)
+    assert at_24.n_a == 2 and at_24.n_b == 2
+
+    # At 0 h both wells are off ⇒ no difference, and only the 2 tp=0 rows count.
+    at_0 = _optimize_thresh_frac_on_between_wells(
+        a, b, channel_key="gfp",
+        min_threshold=50, max_threshold=50, steps=2,
+        timepoint=("hours", 0.0),
+    )
+    assert at_0.difference == pytest.approx(0.0)
+    assert at_0.n_a == 2 and at_0.n_b == 2
+
+
 def test_optimizer_rejects_invalid_range_and_empty_values():
     with pytest.raises(ValueError, match="max threshold"):
         _optimize_thresh_frac_on_between_wells(

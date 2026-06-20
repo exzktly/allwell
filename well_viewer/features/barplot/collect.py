@@ -176,6 +176,8 @@ def collect_bar_items(
         fc_control_spread_at_t = None
         fc_control_frac_at_t = None
         fc_control_frac_spread_at_t = None
+        fc_control_n_at_t = None
+        fc_control_n_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             ctrl_stats = _fc.control_stats_at_for_bar(
                 app, fc_ctrl_lbl, target_t,
@@ -196,6 +198,14 @@ def collect_bar_items(
             )
             if ctrl_frac is not None:
                 fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac
+            ctrl_n = _fc.control_n_at_for_bar(
+                app, fc_ctrl_lbl, target_t,
+                threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                fluor_gates=fluor_gates,
+            )
+            if ctrl_n is not None:
+                fc_control_n_at_t, fc_control_n_spread_at_t = ctrl_n
         fc_force_nan = fc_vs_ctrl and fc_ctrl_lbl and fc_control_mean_at_t is None
 
         out: List[BarItem] = []
@@ -232,6 +242,8 @@ def collect_bar_items(
                 t0_spread = None
                 t0_frac = None
                 t0_frac_spread = None
+                t0_n = None
+                t0_n_spread = None
                 # Per-rset effective control denominator. Outer-scope
                 # fc_control_mean_at_t / _spread_at_t are the raw ctrl@t —
                 # in t0_first mode we replace them locally with the post-t0
@@ -240,6 +252,8 @@ def collect_bar_items(
                 eff_ctrl_spread = fc_control_spread_at_t
                 eff_ctrl_frac = fc_control_frac_at_t
                 eff_ctrl_frac_spread = fc_control_frac_spread_at_t
+                eff_ctrl_n = fc_control_n_at_t
+                eff_ctrl_n_spread = fc_control_n_spread_at_t
                 if fc_vs_t0:
                     stats = _fc.member_first_tp_stats_resolved(
                         app, rset.name,
@@ -300,11 +314,41 @@ def collect_bar_items(
                                         t0_frac, t0_frac_spread,
                                         ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
                                     )
+                    nstats = _fc.member_first_tp_n_resolved(
+                        app, rset.name,
+                        threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                        use_sem=use_sem, per_fov_spread=per_fov_spread,
+                        fluor_gates=fluor_gates,
+                        baseline_tp=fc_baseline_tp,
+                    )
+                    if nstats is not None:
+                        resolved_tp_n, t0_n, t0_n_spread = nstats
+                        if fc_vs_ctrl and fc_ctrl_lbl:
+                            ctrl_bn = _fc.control_n_at_for_bar(
+                                app, fc_ctrl_lbl, resolved_tp_n,
+                                threshold=threshold,
+                                val_col=app._app_state.channel.active_val_col,
+                                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                                fluor_gates=fluor_gates,
+                            )
+                            if ctrl_bn is not None:
+                                if fc_order == "t0_first":
+                                    eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
+                                        eff_ctrl_n, eff_ctrl_n_spread or 0.0,
+                                        ctrl_bn[0], ctrl_bn[1], fc_op_t0,
+                                    )
+                                else:
+                                    t0_n, t0_n_spread = _fc._apply_axis(
+                                        t0_n, t0_n_spread,
+                                        ctrl_bn[0], ctrl_bn[1], fc_op_ctrl,
+                                    )
                 if fc_force_nan:
                     gm = float("nan")
                     g_err_m = 0.0
                     gf = float("nan")
                     g_err_f = 0.0
+                    n_above_val = float("nan")
+                    n_above_err = 0.0
                 elif fc_vs_ctrl or fc_vs_t0:
                     gm, g_err_m = _fc.scale_bar_value(
                         gm, g_err_m,
@@ -321,6 +365,15 @@ def collect_bar_items(
                         control_spread=eff_ctrl_frac_spread if fc_vs_ctrl else None,
                         t0_mean=t0_frac if fc_vs_t0 else None,
                         t0_spread=t0_frac_spread if fc_vs_t0 else None,
+                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
+                        order=fc_order,
+                    )
+                    n_above_val, n_above_err = _fc.scale_bar_value(
+                        n_above_val, n_above_err,
+                        control_mean=eff_ctrl_n if fc_vs_ctrl else None,
+                        control_spread=eff_ctrl_n_spread if fc_vs_ctrl else None,
+                        t0_mean=t0_n if fc_vs_t0 else None,
+                        t0_spread=t0_n_spread if fc_vs_t0 else None,
                         op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
                         order=fc_order,
                     )
@@ -395,26 +448,41 @@ def collect_bar_items(
                 fs = float(pt[6]) if len(pt) >= 7 else 0.0
                 n_above_pf_mean = float(pt[7]) if len(pt) >= 8 else 0.0
                 n_above_pf_spread = float(pt[8]) if len(pt) >= 9 else 0.0
+                if per_fov_spread:
+                    n_above_val = n_above_pf_mean
+                    n_above_err = n_above_pf_spread
+                else:
+                    n_above_val = float(n_above_total)
+                    n_above_err = 0.0
                 if fc_force_nan:
                     m = float("nan")
                     s = 0.0
                     f = float("nan")
                     fs = 0.0
+                    n_above_val = float("nan")
+                    n_above_err = 0.0
                 elif fc_vs_ctrl or fc_vs_t0:
                     t0_mean = None
                     t0_spread = None
                     t0_frac = None
                     t0_frac_spread = None
+                    t0_n = None
+                    t0_n_spread = None
                     eff_ctrl_mean = fc_control_mean_at_t
                     eff_ctrl_spread = fc_control_spread_at_t
                     eff_ctrl_frac = fc_control_frac_at_t
                     eff_ctrl_frac_spread = fc_control_frac_spread_at_t
+                    eff_ctrl_n = fc_control_n_at_t
+                    eff_ctrl_n_spread = fc_control_n_spread_at_t
                     if fc_vs_t0:
                         resolved_tp, t0_mean, t0_spread = _fc.baseline_from_points_resolved(
                             pts, baseline_tp=fc_baseline_tp,
                         )
                         resolved_tp_f, t0_frac, t0_frac_spread = _fc.baseline_frac_from_points_resolved(
                             pts, baseline_tp=fc_baseline_tp,
+                        )
+                        resolved_tp_n, t0_n, t0_n_spread = _fc.baseline_n_from_points_resolved(
+                            pts, per_fov_spread=per_fov_spread, baseline_tp=fc_baseline_tp,
                         )
                         # Cross-axis stacking: ctrl_first → adjust t0 denom; t0_first → adjust control denom.
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp is not None and t0_mean is not None:
@@ -455,6 +523,25 @@ def collect_bar_items(
                                         t0_frac, t0_frac_spread,
                                         ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
                                     )
+                        if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_n is not None and t0_n is not None:
+                            ctrl_bn = _fc.control_n_at_for_bar(
+                                app, fc_ctrl_lbl, resolved_tp_n,
+                                threshold=threshold,
+                                val_col=app._app_state.channel.active_val_col,
+                                use_sem=use_sem, per_fov_spread=per_fov_spread,
+                                fluor_gates=fluor_gates,
+                            )
+                            if ctrl_bn is not None:
+                                if fc_order == "t0_first":
+                                    eff_ctrl_n, eff_ctrl_n_spread = _fc._apply_axis(
+                                        eff_ctrl_n, eff_ctrl_n_spread or 0.0,
+                                        ctrl_bn[0], ctrl_bn[1], fc_op_t0,
+                                    )
+                                else:
+                                    t0_n, t0_n_spread = _fc._apply_axis(
+                                        t0_n, t0_n_spread,
+                                        ctrl_bn[0], ctrl_bn[1], fc_op_ctrl,
+                                    )
                     m, s = _fc.scale_bar_value(
                         m, s,
                         control_mean=eff_ctrl_mean if fc_vs_ctrl else None,
@@ -473,14 +560,17 @@ def collect_bar_items(
                         op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
                         order=fc_order,
                     )
+                    n_above_val, n_above_err = _fc.scale_bar_value(
+                        n_above_val, n_above_err,
+                        control_mean=eff_ctrl_n if fc_vs_ctrl else None,
+                        control_spread=eff_ctrl_n_spread if fc_vs_ctrl else None,
+                        t0_mean=t0_n if fc_vs_t0 else None,
+                        t0_spread=t0_n_spread if fc_vs_t0 else None,
+                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
+                        order=fc_order,
+                    )
                 has_mean = not math.isnan(m)
                 has_frac = not math.isnan(f)
-                if per_fov_spread:
-                    n_above_val = n_above_pf_mean
-                    n_above_err = n_above_pf_spread
-                else:
-                    n_above_val = float(n_above_total)
-                    n_above_err = 0.0
                 out.append(BarItem(
                     key=label, display=display, color=color,
                     mean=m, spread=s, has_mean=has_mean,

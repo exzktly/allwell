@@ -59,6 +59,7 @@ import math
 from typing import Dict, List, Optional, Set, Tuple
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
+from well_viewer.domain.stats_compute import compute_rep_n_above
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group
 
@@ -492,6 +493,145 @@ def baseline_frac_from_points(
         if f is not None and f != 0:
             return f, fs
     return None, 0.0
+
+
+def _pt_n_above(pt, per_fov_spread: bool = False) -> Tuple[float, float]:
+    """Extract ``(n_above, n_above_spread)`` from an AggPoint."""
+    if per_fov_spread:
+        n = float(pt[7]) if len(pt) >= 8 else 0.0
+        ns = float(pt[8]) if len(pt) >= 9 else 0.0
+        return n, ns
+    n = float(int(pt[4])) if len(pt) >= 5 else 0.0
+    return n, 0.0
+
+
+def baseline_n_from_points_resolved(
+    pts, *, per_fov_spread: bool = False, baseline_tp: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float], float]:
+    """``(tp, n_above, n_above_spread)`` for the member's baseline tp.
+
+    N-events counterpart of :func:`baseline_from_points_resolved`.
+    """
+    if not pts:
+        return None, None, 0.0
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            t = float(pt[0])
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                n, ns = _pt_n_above(pt, per_fov_spread)
+                if n != 0:
+                    return t, n, ns
+                break
+    for pt in sorted(pts, key=lambda p: p[0]):
+        n, ns = _pt_n_above(pt, per_fov_spread)
+        if n != 0:
+            return float(pt[0]), n, ns
+    return None, None, 0.0
+
+
+def member_n_series(
+    app, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> Dict[float, Tuple[float, float]]:
+    """``{t: (n_above, n_above_spread)}`` for a member.
+
+    N-events counterpart of :func:`member_frac_series`. Same rset /
+    solo-well dispatch.
+    """
+    label = (label or "").strip()
+    if not label:
+        return {}
+    rset = _label_to_replicate_set(app, label)
+    if rset is not None:
+        tps: Set[float] = set()
+        for w in rset.wells:
+            pts = aggregate_well(app,
+                w, threshold=threshold, use_sem=False,
+                val_col=val_col,
+                fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread,
+            )
+            for pt in pts:
+                tps.add(float(pt[0]))
+        out: Dict[float, Tuple[float, float]] = {}
+        for t in tps:
+            if per_fov_spread:
+                _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(app,
+                    rset, t, threshold, use_sem,
+                )
+                out[t] = (float(n_mean),
+                          float(n_spread) if math.isfinite(n_spread) else 0.0)
+            else:
+                n_total = compute_rep_n_above(app, rset, t)
+                out[t] = (float(n_total), 0.0)
+        return out
+    if label in (app._app_state.dataset.well_paths or {}):
+        pts = aggregate_well(app,
+            label, threshold=threshold, use_sem=use_sem,
+            val_col=val_col,
+            fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        return {float(pt[0]): _pt_n_above(pt, per_fov_spread) for pt in pts}
+    return {}
+
+
+def control_n_at_for_bar(
+    app, control_label: str, target_t: float, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> Optional[Tuple[float, float]]:
+    """``(n_above, n_above_spread)`` of the control at *target_t* for the
+    bar's N-events panel. Returns ``None`` when the control can't be
+    resolved or has no sample at *target_t*."""
+    series = member_n_series(
+        app, control_label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if target_t in series:
+        return series[target_t]
+    for ct, val in series.items():
+        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
+            return val
+    return None
+
+
+def member_first_tp_n_resolved(
+    app, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+    baseline_tp: Optional[float] = None,
+) -> Optional[Tuple[float, float, float]]:
+    """``(tp, n_above, n_above_spread)`` for the member's baseline timepoint.
+
+    N-events counterpart of :func:`member_first_tp_frac_resolved` with the
+    same matched-tp + fall-through-to-earliest semantics.
+    """
+    series = member_n_series(
+        app, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, ns in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return (float(t), ns[0], ns[1])
+    earliest = min(series)
+    ns = series[earliest]
+    return (float(earliest), ns[0], ns[1])
 
 
 def parse_fc_op(app) -> str:

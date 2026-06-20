@@ -377,7 +377,7 @@ def collect_bar_items(
                     display = f"t={tp_str}"
                 else:
                     display = well_disp
-                gk = label if group_mode == "well" else tp_str
+                gk = well_disp if group_mode == "well" else tp_str
                 label_iter.append((label, color, display, gk))
 
         for label, color, display, gk in label_iter:

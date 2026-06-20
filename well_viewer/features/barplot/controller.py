@@ -150,9 +150,12 @@ def _annotate_cluster_headers(items: List[BarItem], xs: List[float], ax) -> None
     """Per-cluster label centred above the mean panel."""
     if not items or not xs:
         return
+    from well_viewer.core.plot_style import tokens_for
+    _fg = tokens_for(ax)[1]
     for gk, cx in cluster_centers(items, xs):
         ax.text(cx, 1.02, gk, transform=ax.get_xaxis_transform(),
-                ha="center", va="bottom", fontsize=8, fontweight="bold")
+                ha="center", va="bottom", fontsize=8, fontweight="bold",
+                color=_fg)
 
 
 def render_bar_items(

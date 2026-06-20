@@ -127,15 +127,9 @@ def clustered_x_positions(items: List[BarItem]) -> List[float]:
     return xs
 
 
-def _annotate_cluster_headers(items: List[BarItem], xs: List[float], ax) -> None:
-    """Draw a small per-cluster header label centred over each cluster.
-
-    Used when items are clustered by ``group_key`` (multi-tp views). The
-    header sits above the mean panel; the per-bar tick labels still show
-    each item's own ``display`` underneath.
-    """
-    if not items or not xs:
-        return
+def cluster_centers(items: List[BarItem], xs: List[float]):
+    """Yield ``(gk, cx)`` for each non-empty cluster in encounter order.
+    Public so the renderer can re-use the same iteration for footers."""
     cluster_x: dict = {}
     cluster_order: List[str] = []
     for it, x in zip(items, xs):
@@ -148,13 +142,17 @@ def _annotate_cluster_headers(items: List[BarItem], xs: List[float], ax) -> None
         cluster_x[gk].append(x)
     for gk in cluster_order:
         positions = cluster_x[gk]
-        if not positions:
-            continue
-        cx = sum(positions) / len(positions)
-        ax.text(
-            cx, 1.02, gk, transform=ax.get_xaxis_transform(),
-            ha="center", va="bottom", fontsize=8, fontweight="bold",
-        )
+        if positions:
+            yield gk, sum(positions) / len(positions)
+
+
+def _annotate_cluster_headers(items: List[BarItem], xs: List[float], ax) -> None:
+    """Per-cluster label centred above the mean panel."""
+    if not items or not xs:
+        return
+    for gk, cx in cluster_centers(items, xs):
+        ax.text(cx, 1.02, gk, transform=ax.get_xaxis_transform(),
+                ha="center", va="bottom", fontsize=8, fontweight="bold")
 
 
 def render_bar_items(

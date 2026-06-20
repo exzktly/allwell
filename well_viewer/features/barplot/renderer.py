@@ -30,18 +30,25 @@ from well_viewer.features.barplot.controller import (
 )
 
 
-def _annotate_cluster_footers(items, ax) -> None:
-    """Per-cluster well/rset label centred under the bottom panel's xtick
-    row — for group-by-well multi-tp the ticks are ``t=0`` / ``t=1`` / ...,
-    so the cluster's well/rset identity goes here too."""
-    if not items:
+def _annotate_cluster_footers(items, axes) -> None:
+    """Per-cluster well/rset label centred under each axis's xtick row.
+
+    Group-by-well multi-tp shows ``t=0`` / ``t=1`` / ... as the per-bar
+    ticks (mirrored on every panel via ``set_xticklabels``), so the
+    cluster's identity gets a footer on EACH axis below its tick row.
+    Text uses the same muted_fg the ticks themselves are drawn with.
+    """
+    if not items or not axes:
         return
+    from well_viewer.core.plot_style import tokens_for
     xs = _clustered_x_positions(items)
-    for gk, cx in _cluster_centers(items, xs):
-        ax.annotate(gk, xy=(cx, 0), xycoords=("data", "axes fraction"),
-                    xytext=(0, -32), textcoords="offset points",
-                    ha="center", va="top", fontsize=8, fontweight="bold",
-                    annotation_clip=False)
+    for ax in axes:
+        _muted_fg = tokens_for(ax)[2]
+        for gk, cx in _cluster_centers(items, xs):
+            ax.annotate(gk, xy=(cx, 0), xycoords=("data", "axes fraction"),
+                        xytext=(0, -32), textcoords="offset points",
+                        ha="center", va="top", fontsize=8, fontweight="bold",
+                        color=_muted_fg, annotation_clip=False)
 import numpy as np
 import pandas as pd
 
@@ -471,7 +478,8 @@ def draw_grouped_bar_mode(
         fc_active=bool(app._app_state.plot.fold_change_active),
     )
     if str(getattr(app._app_state.plot, "bar_group_mode", "well") or "well") == "well":
-        _annotate_cluster_footers(items, ax_n if ax_n is not None else ax_frac)
+        _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
+        _annotate_cluster_footers(items, _xtick_axes)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = app._app_state.channel.active_channel.upper()
     from well_viewer.data.metric_labels import (

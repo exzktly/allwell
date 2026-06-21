@@ -30,7 +30,7 @@ from well_viewer.features.barplot.controller import (
 )
 
 
-def _annotate_cluster_footers(items, axes) -> None:
+def _annotate_cluster_footers(items, axes, fontsize: float = 8) -> None:
     """Per-cluster well/rset label centred under each axis's xtick row.
 
     Group-by-well multi-tp shows ``t=0`` / ``t=1`` / ... as the per-bar
@@ -47,7 +47,7 @@ def _annotate_cluster_footers(items, axes) -> None:
         for gk, cx in _cluster_centers(items, xs):
             ax.annotate(gk, xy=(cx, 0), xycoords=("data", "axes fraction"),
                         xytext=(0, -32), textcoords="offset points",
-                        ha="center", va="top", fontsize=8, fontweight="bold",
+                        ha="center", va="top", fontsize=fontsize, fontweight="bold",
                         color=_muted_fg, annotation_clip=False)
 import numpy as np
 import pandas as pd
@@ -76,6 +76,7 @@ from well_viewer.data.data_loading import (
     resolve_value_series,
 )
 from well_viewer.core.plot_style import (
+    _ensure_export_style_prefs,
     apply_ax_style,
     apply_export_style_to_current,
     tokens_for,
@@ -477,9 +478,11 @@ def draw_grouped_bar_mode(
         err_bar_color=CLR_ERR_BAR,
         fc_active=bool(app._app_state.plot.fold_change_active),
     )
-    if str(getattr(app._app_state.plot, "bar_group_mode", "well") or "well") == "well":
+    if (str(getattr(app._app_state.plot, "bar_group_mode", "well") or "well") == "well"
+            and len(target_ts) > 1):
+        _fsize = float(_ensure_export_style_prefs(app).get("group_label_size", 8))
         _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
-        _annotate_cluster_footers(items, _xtick_axes)
+        _annotate_cluster_footers(items, _xtick_axes, fontsize=_fsize)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = app._app_state.channel.active_channel.upper()
     from well_viewer.data.metric_labels import (

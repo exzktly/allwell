@@ -120,6 +120,7 @@ DEFAULT_EXPORT_STYLE_PREFS = {
     "legend_show": True,
     "legend_font_size": 12,
     "legend_loc": "best",
+    "group_label_size": 8,
     "line_width": 1.8,
     "line_style": "-",
     "marker_size": 5.0,

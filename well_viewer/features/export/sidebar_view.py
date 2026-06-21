@@ -336,6 +336,7 @@ class ExportStyleSidebar(QWidget):
             ("tick_label_size", "Tick label size", 1, 96),
             ("title_size", "Title size", 1, 128),
             ("x_tick_angle", "X tick angle°", 0, 90),
+            ("group_label_size", "Group label size", 1, 96),
         ]:
             spin = _Stepper(minimum=lo, maximum=hi, single_step=1,
                             value=float(self._prefs[key]), decimals=0)

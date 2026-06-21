@@ -593,7 +593,7 @@ def _apply_image_table(app, state: dict) -> None:
                     changed = True
             except Exception:
                 swallowed()  # was: pass (silent except)
-        if changed and hasattr(app, "_image_table_apply_dimensions"):
+        if changed:
             try:
                 # Function-local feature import keeps this persistence module
                 # data-only at module scope (see test_layering) — mirrors the

@@ -21,11 +21,10 @@ def test_image_browser_is_single_rail_entry(viewer_app):
         assert leaf not in names
     # The rail entry carries the section icon.
     assert app._SECTION_ICONS.get("Image Browser")
-    # It is NOT lazy-only: like the old Image Table / Segmentation tabs it
-    # drains and eagerly builds its Segmentation + Image Table sub-tabs (the
-    # heavier Cell Browser / Playground sub-tabs stay lazy). smFISH stays its
-    # own separate, lazy-only rail entry (not an image-review surface).
-    assert "Image Browser" not in app._centre_lazy_only_titles
+    # It IS lazy-only: the Image Browser container (and all its sub-tabs) is
+    # deferred until the user first clicks the rail entry, so it does not drain
+    # at load time. smFISH is also lazy.
+    assert "Image Browser" in app._centre_lazy_only_titles
     assert "smFISH" in names
     assert "smFISH" in app._centre_lazy_only_titles
 

@@ -50,12 +50,7 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     sub_tabs.currentChanged.connect(
         lambda idx: ctl.on_image_browser_subtab_changed(ctx.app, idx))
 
-    # Eagerly build the commonly-used sub-tabs (Segmentation — the initial,
-    # current sub-tab — and Image Table), matching the laziness profile of the
-    # old top-level tabs they replaced. The heavier Cell Browser / Playground
-    # sub-tabs stay lazy: built on first sub-tab click.
+    # Eagerly build Segmentation (the initial, current sub-tab) so the canvas
+    # is ready on first open. Image Table / Cell Browser / Playground stay lazy:
+    # built on first sub-tab click.
     ctl.build_image_browser_subtab(ctx.app, sub_tabs.currentIndex())
-    for i in range(sub_tabs.count()):
-        if sub_tabs.tabText(i) == "Image Table":
-            ctl.build_image_browser_subtab(ctx.app, i)
-            break

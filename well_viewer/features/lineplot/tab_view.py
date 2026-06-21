@@ -15,7 +15,7 @@ from well_viewer.features.export.service import export_plot_data
 from well_viewer.features.lineplot.controller import on_fig_click
 
 # The Line Graphs figure: three stacked subplots (mean / fraction / CDF).
-_FIG_W, _FIG_H, _DPI = 7.2, 10.5, 100
+_FIG_W, _FIG_H, _DPI = 7.2, 14.0, 100
 
 
 def build_line_graphs_tab(ctx, parent: QWidget) -> None:
@@ -126,11 +126,12 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     reg = ctx.app._widget_registry
     reg.register("_line_card", card)
     fig = reg.register("_line_fig", card.figure)
-    ax_mean = reg.register("_line_ax_mean", fig.add_subplot(3, 1, 1))
-    reg.register("_line_ax_frac", fig.add_subplot(3, 1, 2, sharex=ax_mean))
-    reg.register("_line_ax_cdf", fig.add_subplot(3, 1, 3))
+    ax_mean = reg.register("_line_ax_mean", fig.add_subplot(4, 1, 1))
+    reg.register("_line_ax_frac", fig.add_subplot(4, 1, 2, sharex=ax_mean))
+    reg.register("_line_ax_n",    fig.add_subplot(4, 1, 3, sharex=ax_mean))
+    reg.register("_line_ax_cdf",  fig.add_subplot(4, 1, 4))
     fig.subplots_adjust(
-        hspace=0.62, top=0.96, bottom=0.08, left=0.13, right=0.97,
+        hspace=0.55, top=0.96, bottom=0.08, left=0.13, right=0.97,
     )
     canvas = reg.register("_line_canvas", card.canvas)
     canvas.setMinimumHeight(int(_FIG_H * _DPI))

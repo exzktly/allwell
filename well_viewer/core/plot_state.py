@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 
 def _default_legend() -> dict[str, bool]:
-    return {"mean": True, "frac": True, "cdf": True}
+    return {"mean": True, "frac": True, "cdf": True, "n": True}
 
 
 @dataclass

@@ -11,6 +11,7 @@ from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.domain.stats_compute import compute_rep_n_above
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 
@@ -244,13 +245,15 @@ def collect_line_series(
                     gm, gerr, gf, _ = compute_rep_stats(app,
                         rset, t, threshold, use_sem,
                     )
+                    # compute_rep_n_above reads threshold from app state internally
+                    _n_above_val = compute_rep_n_above(app, rset, t)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
                     # per-FOV n-above mean/spread. These were previously dropped,
                     # so the "fraction above threshold" subplot had no FOV error
                     # to draw and fell back to shading the area under the line.
-                    _raw_pts.append((t, gm, gerr, gf, 0, 0, gfe, gnpf_m, gnpf_s))
+                    _raw_pts.append((t, gm, gerr, gf, _n_above_val if not rep_per_fov else 0, 0, gfe, gnpf_m, gnpf_s))
             if _raw_pts and (fc_control_stats or fc_vs_t0):
                 _raw_pts = _fc.normalize_pts(
                     _raw_pts,
@@ -333,11 +336,14 @@ def redraw_line_plots(
     if not all(
         hasattr(app, attr)
         for attr in ("_line_ax_mean", "_line_ax_frac", "_line_ax_cdf",
-                     "_line_fig", "_line_canvas")
+                     "_line_ax_n", "_line_fig", "_line_canvas")
     ):
         return
-    for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_cdf):
+    for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_n, app._line_ax_cdf):
         ax.cla()
+    # Re-suppress shared-x tick labels reset by cla()
+    app._line_ax_mean.tick_params(labelbottom=False)
+    app._line_ax_frac.tick_params(labelbottom=False)
 
     use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
@@ -368,13 +374,22 @@ def redraw_line_plots(
 
     _ch = app._app_state.channel.active_channel.upper()
     _fc_suffix = _fc.fold_change_suffix(fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl)
-    from well_viewer.data.metric_labels import threshold_qualifier, fraction_title
+    from well_viewer.data.metric_labels import threshold_qualifier, fraction_title, events_per_fov_title, events_total_title
     _thr_q = threshold_qualifier(app._app_state.channel.active_metric)
     apply_ax_style(app._line_ax_mean, f"{_ch} {metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)
     apply_ax_style(app._line_ax_frac, fraction_title(app._app_state.channel.active_metric), "Fraction")
+    _fov_active = app._use_fov_spread_active()
+    _metric_key = app._app_state.channel.active_metric
+    if _fov_active:
+        _n_title = events_per_fov_title(_metric_key, band_lbl)
+        _n_ylabel = "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV"
+    else:
+        _n_title = events_total_title(_metric_key)
+        _n_ylabel = "N(spots)" if _metric_key == "smfish_count" else "N(above)"
+    apply_ax_style(app._line_ax_n, _n_title, _n_ylabel)
     cdf_lbl = (f"{_ch} {metric_label} CDF (all wells per replicate set)" if app._rep_sets_active() else f"{_ch} {metric_label} CDF (all selected wells)")
     apply_ax_style(app._line_ax_cdf, cdf_lbl, "Cumulative fraction")
-    app._line_ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
+    app._line_ax_n.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
     app._line_ax_frac.set_ylim(-0.05, 1.05)
     app._line_ax_cdf.set_xlabel(f"{_ch} {metric_label}", fontsize=8, labelpad=5)
     app._line_ax_cdf.set_ylim(-0.02, 1.05)
@@ -390,7 +405,7 @@ def redraw_line_plots(
             app._line_fig.set_facecolor(_bg)
         except Exception:
             swallowed()  # was: pass (silent except)
-        for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_cdf):
+        for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_n, app._line_ax_cdf):
             ax.set_title("")
             ax.cla()
             ax.set_facecolor(_bg)
@@ -405,7 +420,7 @@ def redraw_line_plots(
             app._line_fig.set_facecolor(_bg)
         except Exception:
             swallowed()  # was: pass (silent except)
-        for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_cdf):
+        for ax in (app._line_ax_mean, app._line_ax_frac, app._line_ax_n, app._line_ax_cdf):
             ax.set_title("")
             ax.set_facecolor(_bg)
             ax.text(0.5, 0.5, NO_SELECTION_MSG, transform=ax.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
@@ -414,7 +429,7 @@ def redraw_line_plots(
         app._set_status("No wells selected.")
         return
 
-    any_ts = any_cdf = False
+    any_ts = any_cdf = any_n = False
     # Single source of truth: ask ``collect_line_series`` for the
     # fully-normalized series in legend order, then iterate to paint.
     series_list, _ = collect_line_series(
@@ -463,6 +478,24 @@ def redraw_line_plots(
                         vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
                     )
             any_ts = True
+            # N events panel
+            if _fov_active:
+                vn = [(p.t, p.n_above_pf_mean, p.n_above_pf_spread)
+                      for p in series.points if p.has_mean]
+            else:
+                vn = [(p.t, float(p.n_above), 0.0)
+                      for p in series.points if p.has_mean]
+            if vn:
+                vnt, vnv, vne = zip(*vn)
+                app._line_ax_n.plot(
+                    vnt, vnv, color=color, lw=2,
+                    marker="^", markersize=3, label=series.display, zorder=3,
+                )
+                if any(e > 0 for e in vne):
+                    lo = [max(0.0, v - e) for v, e in zip(vnv, vne)]
+                    hi = [v + e for v, e in zip(vnv, vne)]
+                    app._line_ax_n.fill_between(vnt, lo, hi, color=color, alpha=0.15, zorder=2)
+                any_n = True
         if series.cdf_vals:
             fluor_s = sorted(series.cdf_vals)
             n = len(fluor_s)
@@ -481,6 +514,12 @@ def redraw_line_plots(
         handles, labels = ax.get_legend_handles_labels()
         return any(lbl and not str(lbl).startswith("_") for lbl in labels)
 
+    if any_n:
+        cur_lo, cur_hi = app._line_ax_n.get_ylim()
+        app._line_ax_n.set_ylim(0, max(cur_hi, 1))
+        if not _fov_active:
+            from matplotlib.ticker import MaxNLocator
+            app._line_ax_n.yaxis.set_major_locator(MaxNLocator(integer=True))
     if any_ts:
         if _has_labeled(app._line_ax_mean):
             leg_mean = app._line_ax_mean.legend(**legend_kw)
@@ -490,6 +529,10 @@ def redraw_line_plots(
             leg_frac = app._line_ax_frac.legend(**legend_kw)
             leg_frac.set_draggable(True)
             leg_frac.set_visible(app._app_state.plot.legend_visible["frac"])
+        if any_n and _has_labeled(app._line_ax_n):
+            leg_n = app._line_ax_n.legend(**legend_kw)
+            leg_n.set_draggable(True)
+            leg_n.set_visible(app._app_state.plot.legend_visible.get("n", True))
     if any_cdf:
         app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
         try:
@@ -545,6 +588,7 @@ def on_fig_click(app, event) -> None:
     ax_map = {
         id(app._line_ax_mean): "mean",
         id(app._line_ax_frac): "frac",
+        id(app._line_ax_n):    "n",
         id(app._line_ax_cdf):  "cdf",
     }
     clicked_ax = event.inaxes

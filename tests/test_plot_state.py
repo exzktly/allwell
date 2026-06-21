@@ -13,7 +13,7 @@ def test_defaults():
     ps = PlotState()
     assert ps.use_sem is True
     assert ps.use_fov_replicates is False
-    assert ps.legend_visible == {"mean": True, "frac": True, "cdf": True}
+    assert ps.legend_visible == {"mean": True, "frac": True, "cdf": True, "n": True}
     assert ps.bar_order is None
     assert ps.fc_state == (False, "", False)
 

@@ -175,7 +175,7 @@ well_viewer/
 │   │   ├── review_image/ controller.py, renderer.py, state.py, collect.py,
 │   │   │                 box_select.py
 │   │   ├── image_table/  controller.py, tab_view.py, panel_view.py,
-│   │   │                 grid_view.py, picker_view.py
+│   │   │                 grid_view.py, grid_ops.py, picker_view.py
 │   │   ├── cell_browser/ controller.py, collect.py, state.py, tab_view.py,
 │   │   │                 criteria_view.py, sort_view.py, worker.py
 │   │   └── playground/   controller.py, renderer.py, state.py, tab_view.py,

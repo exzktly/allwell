@@ -36,6 +36,13 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **7.2.0 — Legend labels, fold-change panels, persistence & Image Table columns.** A round of plotting and review-side fixes:
+  - **Sample-definition labels in every legend.** The **Scatter Plot** and **Distribution** legends now show your custom well / group labels (set on **Sample Definitions → Well Labels**) instead of the raw well token or group name — matching what Line Graphs and Bar Plots already did.
+  - **Fold change now rescales all three Line Graphs panels.** Turning on fold change previously only rescaled the **mean** panel; the **fraction-on** and **N-events** panels stayed on raw values. Now all three normalize together (including in FOV-spread mode, where the N panel shows per-FOV mean counts).
+  - **More selections persist across a reopen.** The **Heat Map** timepoint slider position and the **FOV** (per-FOV spread) toggle on Line Graphs / Bar Plots now come back where you left them.
+  - **Image Table column management.** New one-click **×** buttons remove any row or column, and an **Add column…** item in the **More ▾** menu mirrors the existing **Add row…** (clone a column, varying channel / timepoint / FOV / well uniformly or stepped).
+  - **Active channel restored on reopen.** Reopening a dataset no longer reverts the plot channel to the first one — your last-selected channel is restored.
+
 - **7.1.1 — ThreshFracOn optimizer + persistence fixes + Plot Groups on Image Table.** A consolidated round of Cell Gating fixes plus reach-back across the rest of the app.
 
   *Cell Gating sub-tab (Sample Definitions).*
@@ -597,6 +604,11 @@ Both axes are independent and may be combined. With both active the
 math is ΔΔCt-style: `(X(t)/C(t)) / (X(0)/C(0))` — each member's value
 normalized to the control at the same timepoint, then re-normalized to
 its own pre-control baseline at t0.
+
+On Line Graphs the normalization applies to all three stacked panels —
+**mean**, **fraction-on**, and **N-events** — each divided by the
+control's / baseline's value for that same quantity (in FOV-spread mode
+the N panel uses per-FOV mean counts).
 
 The Bar Plots tab applies normalization in all three view modes — bar,
 violin, and beeswarm. In violin and beeswarm, each well's per-cell

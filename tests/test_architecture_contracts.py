@@ -188,6 +188,9 @@ FEATURE_NAME_EXCEPTIONS = {
     # density math, gate stats, RectangleSelector wiring) — a draw-mode of the
     # scatter canvas, paired with scatter/controller.py.
     "gating.py",
+    # image_table row/column add+remove helpers (and the Add-column dialog),
+    # paired with image_table/controller.py.
+    "grid_ops.py",
 }
 
 

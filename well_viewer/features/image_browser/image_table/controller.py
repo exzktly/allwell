@@ -202,6 +202,12 @@ def image_table_rebuild_grid(app) -> None:
     """Rebuild the selector grid (rows × cols of cell groupboxes) plus the
     per-row channel + LUT-colour column at column 0."""
     from well_viewer.features.image_browser.image_table.grid_view import build_image_table_grid
+    # Deferred to break the controller ↔ grid_ops cycle (grid_ops imports the
+    # rebuild helpers from this module); counted by test_deferred_imports.
+    from well_viewer.features.image_browser.image_table.grid_ops import (
+        image_table_remove_col,
+        image_table_remove_row,
+    )
 
     rows = int(getattr(app._app_state.image_table, "rows", 2) or 2)
     cols = int(getattr(app._app_state.image_table, "cols", 3) or 3)
@@ -221,6 +227,8 @@ def image_table_rebuild_grid(app) -> None:
         well_opts=well_opts,
         on_apply_row_well=image_table_apply_row_well,
         on_apply_row_channel=image_table_apply_row_channel,
+        on_remove_row=image_table_remove_row,
+        on_remove_col=image_table_remove_col,
     )
 
     app._image_table_cells = cells

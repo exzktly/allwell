@@ -6,6 +6,31 @@ including the associated dialogs and state updates.
 
 from typing import Dict, List
 
+# Deferred imports to avoid circular dependency with controller.py.
+# Imported at function level (see bottom of module for pattern).
+_controller_imports = None
+
+
+def _get_controller_imports():
+    """Lazy-load controller functions on first use to avoid circular imports."""
+    global _controller_imports
+    if _controller_imports is None:
+        from well_viewer.features.image_browser.image_table.controller import (
+            _snapshot_cells,
+            _write_cell,
+            image_table_rebuild_grid,
+            image_table_rebuild_lut_row,
+            _all_dim_options,
+        )
+        _controller_imports = {
+            '_snapshot_cells': _snapshot_cells,
+            '_write_cell': _write_cell,
+            'image_table_rebuild_grid': image_table_rebuild_grid,
+            'image_table_rebuild_lut_row': image_table_rebuild_lut_row,
+            '_all_dim_options': _all_dim_options,
+        }
+    return _controller_imports
+
 
 def image_table_remove_row(app, r: int) -> None:
     """Remove row *r* from the grid. Guard against removing the only row.
@@ -14,12 +39,11 @@ def image_table_remove_row(app, r: int) -> None:
     spinner (blocking signals), calls image_table_rebuild_grid, then
     restores the remaining rows via _write_cell.
     """
-    from well_viewer.features.image_browser.image_table.controller import (
-        _snapshot_cells,
-        _write_cell,
-        image_table_rebuild_grid,
-        image_table_rebuild_lut_row,
-    )
+    ci = _get_controller_imports()
+    _snapshot_cells = ci['_snapshot_cells']
+    _write_cell = ci['_write_cell']
+    image_table_rebuild_grid = ci['image_table_rebuild_grid']
+    image_table_rebuild_lut_row = ci['image_table_rebuild_lut_row']
 
     cells = getattr(app, "_image_table_cells", None) or []
     if not cells:
@@ -63,12 +87,11 @@ def image_table_remove_col(app, c: int) -> None:
     updates the spinner (blocking signals), calls image_table_rebuild_grid,
     then restores the remaining cells.
     """
-    from well_viewer.features.image_browser.image_table.controller import (
-        _snapshot_cells,
-        _write_cell,
-        image_table_rebuild_grid,
-        image_table_rebuild_lut_row,
-    )
+    ci = _get_controller_imports()
+    _snapshot_cells = ci['_snapshot_cells']
+    _write_cell = ci['_write_cell']
+    image_table_rebuild_grid = ci['image_table_rebuild_grid']
+    image_table_rebuild_lut_row = ci['image_table_rebuild_lut_row']
 
     cells = getattr(app, "_image_table_cells", None) or []
     if not cells or not cells[0]:
@@ -114,13 +137,12 @@ def image_table_add_varied_col(app, *, src_idx: int, dim: str, mode: str, value:
     value). Other dimensions are copied as-is. Builds the selector grid only —
     press Generate to render. Driven by :func:`image_table_open_add_col_dialog`.
     """
-    from well_viewer.features.image_browser.image_table.controller import (
-        _snapshot_cells,
-        _write_cell,
-        image_table_rebuild_grid,
-        image_table_rebuild_lut_row,
-        _all_dim_options,
-    )
+    ci = _get_controller_imports()
+    _snapshot_cells = ci['_snapshot_cells']
+    _write_cell = ci['_write_cell']
+    image_table_rebuild_grid = ci['image_table_rebuild_grid']
+    image_table_rebuild_lut_row = ci['image_table_rebuild_lut_row']
+    _all_dim_options = ci['_all_dim_options']
 
     cells = getattr(app, "_image_table_cells", None) or []
     if not cells:
@@ -187,9 +209,8 @@ def image_table_open_add_col_dialog(app) -> None:
     :func:`image_table_add_varied_col`.
     """
     from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout
-    from well_viewer.features.image_browser.image_table.controller import (
-        _all_dim_options,
-    )
+    ci = _get_controller_imports()
+    _all_dim_options = ci['_all_dim_options']
 
     cells = getattr(app, "_image_table_cells", None) or []
     if not cells or not cells[0]:

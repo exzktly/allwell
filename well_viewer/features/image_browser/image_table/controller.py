@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import set_combo_values
-from well_viewer.features.image_browser.image_table.management import (
+from well_viewer.features.image_browser.image_table.grid_ops import (
     image_table_remove_row,
     image_table_remove_col,
 )

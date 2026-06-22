@@ -501,7 +501,7 @@ def normalize_pts(
                 new = list(pt)
                 while len(new) <= 4:
                     new.append(0.0)
-                new[4] = float("nan")
+                new[4] = 0
                 stage4.append(tuple(new))
             else:
                 ctrl_n = control_n_stats.get(

@@ -42,6 +42,8 @@ Newest first:
   - **More selections persist across a reopen.** The **Heat Map** timepoint slider position and the **FOV** (per-FOV spread) toggle on Line Graphs / Bar Plots now come back where you left them.
   - **Image Table column management.** New one-click **×** buttons remove any row or column, and an **Add column…** item in the **More ▾** menu mirrors the existing **Add row…** (clone a column, varying channel / timepoint / FOV / well uniformly or stepped).
   - **Active channel restored on reopen.** Reopening a dataset no longer reverts the plot channel to the first one — your last-selected channel is restored.
+  - **Cell Gating tab tidy-up.** Clearer section dividers, and the **Optimize ThreshFracOn** tool can now optimise over a **fold-change-adjusted** fraction-on — pick a Control and/or Baseline (its own controls, independent of the plot tabs) so the threshold is chosen on the normalised metric.
+  - **Log-scale images.** Image Table rows have a new **Log** toggle to display the image on a log10 intensity scale (high-dynamic-range stains read better); it persists with the rest of the row's display settings.
 
 - **7.1.1 — ThreshFracOn optimizer + persistence fixes + Plot Groups on Image Table.** A consolidated round of Cell Gating fixes plus reach-back across the rest of the app.
 

@@ -23,6 +23,10 @@ from PySide6.QtWidgets import (
 )
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import set_combo_values
+from well_viewer.features.image_browser.image_table.grid_ops import (
+    image_table_remove_row,
+    image_table_remove_col,
+)
 
 
 # ── LUT colour palette ──────────────────────────────────────────────────────
@@ -221,6 +225,8 @@ def image_table_rebuild_grid(app) -> None:
         well_opts=well_opts,
         on_apply_row_well=image_table_apply_row_well,
         on_apply_row_channel=image_table_apply_row_channel,
+        on_remove_row=image_table_remove_row,
+        on_remove_col=image_table_remove_col,
     )
 
     app._image_table_cells = cells
@@ -762,8 +768,6 @@ def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
         except Exception:  # noqa: BLE001
             swallowed()  # was: pass (silent except)
         sel.blockSignals(False)
-
-
 
 
 def image_table_load_heatmap_layout(app) -> None:

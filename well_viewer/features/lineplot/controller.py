@@ -200,11 +200,25 @@ def collect_line_series(
     # so error propagation through normalize_pts has the right
     # denominator uncertainty.
     fc_control_stats: dict = {}
+    fc_control_frac_stats: dict = {}
+    fc_control_n_stats: dict = {}
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_stats = _fc.member_stats_series(
             app, fc_ctrl_lbl,
             threshold=threshold, val_col=val_col,
             use_sem=use_sem, per_fov_spread=rep_per_fov or per_fov_spread,
+            fluor_gates=fluor_gates,
+        )
+        fc_control_frac_stats = _fc.member_frac_stats_series(
+            app, fc_ctrl_lbl,
+            threshold=threshold, val_col=val_col,
+            use_sem=use_sem, per_fov_spread=rep_per_fov or per_fov_spread,
+            fluor_gates=fluor_gates,
+        )
+        fc_control_n_stats = _fc.member_n_stats_series(
+            app, fc_ctrl_lbl,
+            threshold=threshold, val_col=val_col,
+            per_fov_spread=rep_per_fov or per_fov_spread,
             fluor_gates=fluor_gates,
         )
 
@@ -258,6 +272,8 @@ def collect_line_series(
                 _raw_pts = _fc.normalize_pts(
                     _raw_pts,
                     control_stats=fc_control_stats or None,
+                    control_frac_stats=fc_control_frac_stats or None,
+                    control_n_stats=fc_control_n_stats or None,
                     use_t0=fc_vs_t0,
                     baseline_tp=fc_baseline_tp,
                     op_ctrl=fc_op_ctrl,
@@ -297,6 +313,8 @@ def collect_line_series(
             pts = _fc.normalize_pts(
                 pts,
                 control_stats=fc_control_stats or None,
+                control_frac_stats=fc_control_frac_stats or None,
+                control_n_stats=fc_control_n_stats or None,
                 use_t0=fc_vs_t0,
                 baseline_tp=fc_baseline_tp,
                 op_ctrl=fc_op_ctrl,

@@ -33,6 +33,8 @@ def build_image_table_grid(
     well_opts: List[str],
     on_apply_row_well,
     on_apply_row_channel,
+    on_remove_row=None,
+    on_remove_col=None,
 ) -> Tuple[
     List[List[Dict[str, Any]]],
     List[QComboBox],
@@ -53,6 +55,35 @@ def build_image_table_grid(
     row_chan_cbs: List[QComboBox] = []
     row_well_cbs: List[QComboBox] = []
 
+    # Column header row (row 0) — only added when on_remove_col is provided
+    if on_remove_col is not None:
+        # Empty placeholder at (0, 0) for the row-controls column
+        from PySide6.QtWidgets import QPushButton
+        from well_viewer.core.ui_helpers import btn_secondary
+        placeholder = QLabel("", layout)
+        placeholder.setFixedHeight(30)
+        layout.addWidget(placeholder, 0, 0)
+        # Remove buttons for each column
+        for c in range(cols):
+            col_header = QWidget(layout)
+            col_h = QHBoxLayout(col_header)
+            col_h.setContentsMargins(2, 2, 2, 2)
+            col_h.setSpacing(2)
+            lbl = QLabel(f"Col {c + 1}", col_header)
+            lbl.setObjectName("Muted")
+            lbl.setStyleSheet("font-size: 9px;")
+            col_h.addWidget(lbl)
+            col_h.addStretch(1)
+            remove_btn = btn_secondary(col_header, "×", lambda c_=c: on_remove_col(app, c_))
+            remove_btn.setFixedWidth(24)
+            remove_btn.setFixedHeight(24)
+            remove_btn.setToolTip(f"Remove column {c + 1}")
+            col_h.addWidget(remove_btn)
+            layout.addWidget(col_header, 0, c + 1)
+        grid_row_offset = 1
+    else:
+        grid_row_offset = 0
+
     for r in range(rows):
         row_box = QGroupBox(f"Row {r + 1}")
         row_box.setObjectName("ImageTableRowOptions")
@@ -69,6 +100,15 @@ def build_image_table_grid(
         rbl = QVBoxLayout(row_box)
         rbl.setContentsMargins(6, 8, 6, 6)
         rbl.setSpacing(4)
+
+        # Remove button (if callback provided) — top of the row box
+        if on_remove_row is not None:
+            from well_viewer.core.ui_helpers import btn_secondary
+            remove_row_btn = btn_secondary(row_box, "×", lambda r_=r: on_remove_row(app, r_))
+            remove_row_btn.setFixedWidth(28)
+            remove_row_btn.setFixedHeight(28)
+            remove_row_btn.setToolTip(f"Remove row {r + 1}")
+            rbl.addWidget(remove_row_btn)
 
         # Make clear this tinted box is a row-wide shortcut, not another cell:
         # its Well/Channel apply to every cell in the row.
@@ -98,7 +138,7 @@ def build_image_table_grid(
             lambda _i, ridx=r: on_apply_row_channel(app, ridx)
         )
 
-        layout.addWidget(row_box, r, 0)
+        layout.addWidget(row_box, r + grid_row_offset, 0)
         row_chan_cbs.append(row_chan_cb)
         row_well_cbs.append(row_well_cb)
 
@@ -107,7 +147,7 @@ def build_image_table_grid(
             cell = build_selector_cell(
                 r, c, well_opts, chan_opts, tp_opts, fov_opts,
             )
-            layout.addWidget(cell["frame"], r, c + 1)
+            layout.addWidget(cell["frame"], r + grid_row_offset, c + 1)
             cell_row.append(cell)
         cells.append(cell_row)
 

@@ -131,73 +131,6 @@ def _subtract_pt(
     return tuple(new)
 
 
-def _scale_field(
-    pt: tuple, val_idx: int, spread_idx: int, factor: float, *,
-    factor_rel_err_sq: float = 0.0,
-) -> tuple:
-    """Return a copy of *pt* with field at *val_idx* & *spread_idx* scaled by ``1/factor``.
-
-    Generic version of _scale_pt for use on arbitrary field pairs (e.g., fraction,
-    N_above) instead of just the mean/spread at indices [1]/[2].
-    """
-    if factor == 0 or not math.isfinite(factor):
-        scaled_val = float("nan")
-        scaled_spread = 0.0
-    else:
-        v = pt[val_idx] if val_idx < len(pt) else None
-        s = pt[spread_idx] if spread_idx < len(pt) else None
-        if isinstance(v, (int, float)) and math.isfinite(v):
-            scaled_val = v / factor
-        else:
-            scaled_val = float("nan")
-        s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
-        scaled_spread = _propagate_spread(
-            scaled_val, v if isinstance(v, (int, float)) else float("nan"),
-            s_val, factor_rel_err_sq,
-        )
-    new = list(pt)
-    while len(new) <= max(val_idx, spread_idx):
-        new.append(0.0)
-    new[val_idx] = scaled_val
-    new[spread_idx] = scaled_spread
-    return tuple(new)
-
-
-def _subtract_field(
-    pt: tuple, val_idx: int, spread_idx: int, shift: float, *,
-    shift_spread: float = 0.0,
-) -> tuple:
-    """Return a copy of *pt* with field at *val_idx* & *spread_idx* shifted by ``shift``.
-
-    Generic version of _subtract_pt for use on arbitrary field pairs.
-    """
-    v = pt[val_idx] if val_idx < len(pt) else None
-    s = pt[spread_idx] if spread_idx < len(pt) else None
-    if not (isinstance(v, (int, float)) and math.isfinite(v)):
-        new = list(pt)
-        while len(new) <= max(val_idx, spread_idx):
-            new.append(0.0)
-        new[val_idx] = float("nan")
-        new[spread_idx] = 0.0
-        return tuple(new)
-    if not math.isfinite(shift):
-        new = list(pt)
-        while len(new) <= max(val_idx, spread_idx):
-            new.append(0.0)
-        new[val_idx] = float("nan")
-        new[spread_idx] = 0.0
-        return tuple(new)
-    s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
-    shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
-    new_spread = math.sqrt(s_val * s_val + shift_var)
-    new = list(pt)
-    while len(new) <= max(val_idx, spread_idx):
-        new.append(0.0)
-    new[val_idx] = float(v) - float(shift)
-    new[spread_idx] = float(new_spread)
-    return tuple(new)
-
-
 def _scale_pt(
     pt: tuple, factor: float, *,
     factor_rel_err_sq: float = 0.0,
@@ -263,8 +196,6 @@ def normalize_pts(
     *,
     control_means: Optional[Dict[float, float]] = None,
     control_stats: Optional[Dict[float, Tuple[float, float]]] = None,
-    control_frac_stats: Optional[Dict[float, Tuple[float, float]]] = None,
-    control_n_stats: Optional[Dict[float, Tuple[float, float]]] = None,
     use_t0: bool = False,
     baseline_tp: Optional[float] = None,
     op: str = "ratio",
@@ -284,22 +215,11 @@ def normalize_pts(
     for proper error propagation; pass *control_means* alone for the
     legacy "treat denominator as exact" behaviour.
 
-    *control_frac_stats* — ``{t: (frac, frac_spread)}`` for the control.
-    Normalizes the fraction field (index [3]) and its spread (index [6])
-    using the same control/vs_t0 logic as the mean. Used by line-plot FC
-    normalization to scale fraction panels.
-
-    *control_n_stats* — ``{t: (n_above, 0.0)}`` for the control.
-    Normalizes the N_above field (index [4]) using control logic.
-    Spread is always 0 since N_above is a count. Used by line-plot FC
-    to scale N panels. Not subject to vs_t0 baseline normalization.
-
     *use_t0* — when True, finds the member's earliest finite mean and
     divides every point by it after the control step. The earliest
     point itself becomes 1.0 ± propagated spread by construction.
     The baseline's OWN spread (taken from the same AggPoint) is folded
-    into the propagation. Also applies to frac/frac_spread if control_frac_stats
-    is present.
+    into the propagation.
 
     *miss_sink* — optional set the caller passes in to collect the
     timepoints where the control had no sample (so the renderer can
@@ -405,143 +325,16 @@ def normalize_pts(
                     )
                     break
         if baseline is None:
-            stage2 = stage1
-        else:
-            if effective_op_t0 == "subtract":
-                stage2 = [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
-                        for pt in stage1]
-            else:
-                baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
-                stage2 = [_scale_pt(pt, baseline,
-                                  factor_rel_err_sq=baseline_rel_err_sq)
-                        for pt in stage1]
-    else:
-        stage2 = stage1
+            return stage1
+        if effective_op_t0 == "subtract":
+            return [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
+                    for pt in stage1]
+        baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
+        return [_scale_pt(pt, baseline,
+                          factor_rel_err_sq=baseline_rel_err_sq)
+                for pt in stage1]
 
-    # Step 3: Fraction normalization (indices [3] / [6])
-    if control_frac_stats:
-        stage3: list = []
-        frac_means = {t: ms[0] for t, ms in control_frac_stats.items()}
-        for pt in stage2:
-            t = float(pt[0])
-            cm = _match_control_mean(t, frac_means)
-            if cm is None:
-                new = list(pt)
-                while len(new) <= 6:
-                    new.append(0.0)
-                new[3] = float("nan")
-                new[6] = 0.0
-                stage3.append(tuple(new))
-            else:
-                ctrl_frac, ctrl_frac_spread = control_frac_stats.get(
-                    t, (cm, 0.0)
-                ) if t in control_frac_stats else next(
-                    ((f, fs) for ct, (f, fs) in control_frac_stats.items()
-                     if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t))),
-                    (cm, 0.0),
-                )
-                if effective_op_ctrl == "subtract":
-                    stage3.append(_subtract_field(pt, 3, 6, ctrl_frac,
-                                                   shift_spread=ctrl_frac_spread or 0.0))
-                else:
-                    frac_rel_err_sq = _rel_err_sq(ctrl_frac, ctrl_frac_spread)
-                    stage3.append(_scale_field(pt, 3, 6, ctrl_frac,
-                                               factor_rel_err_sq=frac_rel_err_sq))
-    else:
-        stage3 = stage2
-
-    # Step 4: Fraction vs_t0 baseline normalization (indices [3] / [6])
-    if use_t0 and control_frac_stats:
-        frac_baseline = None
-        frac_baseline_spread = 0.0
-        if baseline_tp is not None and math.isfinite(baseline_tp):
-            tgt = float(baseline_tp)
-            for pt in stage3:
-                t = float(pt[0])
-                if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                    f = pt[3] if len(pt) > 3 else 0.0
-                    if isinstance(f, (int, float)) and math.isfinite(f) and f != 0:
-                        frac_baseline = float(f)
-                        fs = pt[6] if len(pt) > 6 else 0.0
-                        frac_baseline_spread = (
-                            float(fs) if isinstance(fs, (int, float)) and math.isfinite(fs)
-                            else 0.0
-                        )
-                    break
-        if frac_baseline is None:
-            for pt in sorted(stage3, key=lambda p: p[0]):
-                f = pt[3] if len(pt) > 3 else 0.0
-                if isinstance(f, (int, float)) and math.isfinite(f) and f != 0:
-                    frac_baseline = float(f)
-                    fs = pt[6] if len(pt) > 6 else 0.0
-                    frac_baseline_spread = (
-                        float(fs) if isinstance(fs, (int, float)) and math.isfinite(fs)
-                        else 0.0
-                    )
-                    break
-        if frac_baseline is not None:
-            if effective_op_t0 == "subtract":
-                stage3 = [_subtract_field(pt, 3, 6, frac_baseline,
-                                         shift_spread=frac_baseline_spread)
-                         for pt in stage3]
-            else:
-                frac_baseline_rel_err_sq = _rel_err_sq(frac_baseline, frac_baseline_spread)
-                stage3 = [_scale_field(pt, 3, 6, frac_baseline,
-                                      factor_rel_err_sq=frac_baseline_rel_err_sq)
-                         for pt in stage3]
-
-    # Step 5: N_above normalization (index [4], no spread)
-    if control_n_stats:
-        stage4: list = []
-        n_means = {t: ms[0] for t, ms in control_n_stats.items()}
-        for pt in stage3:
-            t = float(pt[0])
-            cm = _match_control_mean(t, n_means)
-            if cm is None:
-                new = list(pt)
-                while len(new) <= 4:
-                    new.append(0.0)
-                new[4] = 0
-                stage4.append(tuple(new))
-            else:
-                ctrl_n = control_n_stats.get(
-                    t, (cm, 0.0)
-                )[0] if t in control_n_stats else next(
-                    (n for ct, (n, _) in control_n_stats.items()
-                     if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t))),
-                    cm,
-                )
-                if effective_op_ctrl == "subtract":
-                    new = list(pt)
-                    while len(new) <= 4:
-                        new.append(0.0)
-                    n = pt[4] if len(pt) > 4 else 0.0
-                    if isinstance(n, (int, float)) and math.isfinite(n):
-                        new[4] = float(n) - float(ctrl_n)
-                    else:
-                        new[4] = float("nan")
-                    stage4.append(tuple(new))
-                else:
-                    if ctrl_n == 0 or not math.isfinite(ctrl_n):
-                        new = list(pt)
-                        while len(new) <= 4:
-                            new.append(0.0)
-                        new[4] = float("nan")
-                        stage4.append(tuple(new))
-                    else:
-                        new = list(pt)
-                        while len(new) <= 4:
-                            new.append(0.0)
-                        n = pt[4] if len(pt) > 4 else 0.0
-                        if isinstance(n, (int, float)) and math.isfinite(n):
-                            new[4] = float(n) / float(ctrl_n)
-                        else:
-                            new[4] = float("nan")
-                        stage4.append(tuple(new))
-    else:
-        stage4 = stage3
-
-    return stage4
+    return stage1
 
 
 # ── State accessors / app integration ───────────────────────────────────────
@@ -1224,117 +1017,6 @@ def member_stats_series(
                     isinstance(s, (int, float)) and math.isfinite(s)
                 ) else 0.0
                 out[float(pt[0])] = (float(m), spread)
-        return out
-    return {}
-
-
-def member_frac_stats_series(
-    app, label: str, *,
-    threshold: float, val_col: str, use_sem: bool,
-    per_fov_spread: bool,
-    fluor_gates,
-) -> Dict[float, Tuple[float, float]]:
-    """``{t: (frac, frac_spread)}`` for a member — fraction above threshold + spread.
-
-    Mirrors :func:`member_stats_series` but extracts fraction fields instead of mean.
-    Used by FC normalization on line plots to scale fraction panels.
-    """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(app, label)
-    if rset is not None:
-        tps: Set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(app,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col,
-                fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
-            )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        out: Dict[float, Tuple[float, float]] = {}
-        for t in tps:
-            if per_fov_spread:
-                *_, gf, ferr = compute_rep_per_fov_stats(app,
-                    rset, t, threshold, use_sem,
-                )
-            else:
-                *_, gf, ferr = compute_rep_stats(app,
-                    rset, t, threshold, use_sem,
-                )
-            if math.isfinite(gf):
-                spread = float(ferr) if (
-                    isinstance(ferr, (int, float)) and math.isfinite(ferr)
-                ) else 0.0
-                out[t] = (float(gf), spread)
-        return out
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
-            label, threshold=threshold, use_sem=use_sem,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        out = {}
-        for pt in pts:
-            f = pt[3]
-            if isinstance(f, (int, float)) and math.isfinite(f):
-                s = pt[6] if len(pt) > 6 else 0.0
-                spread = float(s) if (
-                    isinstance(s, (int, float)) and math.isfinite(s)
-                ) else 0.0
-                out[float(pt[0])] = (float(f), spread)
-        return out
-    return {}
-
-
-def member_n_stats_series(
-    app, label: str, *,
-    threshold: float, val_col: str,
-    per_fov_spread: bool,
-    fluor_gates,
-) -> Dict[float, Tuple[float, float]]:
-    """``{t: (n_above, 0.0)}`` for a member — N above threshold (spread is always 0).
-
-    Mirrors :func:`member_stats_series` but extracts N_above counts.
-    Used by FC normalization on line plots to scale N panels.
-    Spread is always 0.0 since N_above is a total count, not a mean.
-    """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(app, label)
-    if rset is not None:
-        tps: Set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(app,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col,
-                fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
-            )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        out: Dict[float, Tuple[float, float]] = {}
-        for t in tps:
-            n_above = compute_rep_n_above(app, rset, t)
-            if isinstance(n_above, int) and n_above >= 0:
-                out[t] = (float(n_above), 0.0)
-        return out
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
-            label, threshold=threshold, use_sem=False,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        out = {}
-        for pt in pts:
-            n = pt[4]
-            if isinstance(n, (int, float)) and math.isfinite(n):
-                out[float(pt[0])] = (float(n), 0.0)
         return out
     return {}
 

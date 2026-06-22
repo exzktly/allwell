@@ -47,7 +47,6 @@ def snapshot(app) -> dict:
         "active_channel": str(app._app_state.channel.active_channel or ""),
         "active_metric": str(app._app_state.channel.active_metric or ""),
         "use_sem": bool(app._app_state.plot.use_sem),
-        "use_fov_replicates": bool(app._app_state.plot.use_fov_replicates),
         "fold_change": {
             "vs_control_on": bool(app._app_state.plot.fc_vs_control_on),
             "control_label": str(app._app_state.plot.fc_control_label or ""),
@@ -281,12 +280,6 @@ def restore(app, state: dict) -> None:
     if "use_sem" in state:
         try:
             app._app_state.plot.use_sem = bool(state["use_sem"])
-        except Exception:
-            swallowed()  # was: pass (silent except)
-
-    if "use_fov_replicates" in state:
-        try:
-            app._app_state.plot.use_fov_replicates = bool(state["use_fov_replicates"])
         except Exception:
             swallowed()  # was: pass (silent except)
 

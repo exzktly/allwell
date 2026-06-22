@@ -32,7 +32,6 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_set_thresh_frac
 from widgets.stepper import Stepper
 from well_viewer.features.image_browser.image_table.controller import image_table_open_add_row_dialog
-from well_viewer.features.image_browser.image_table.grid_ops import image_table_open_add_col_dialog
 from functools import partial
 from well_viewer.features.image_browser.image_table.controller import image_table_copy_png
 from well_viewer.features.image_browser.image_table.controller import image_table_copy_svg
@@ -197,8 +196,6 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     _mm.addSeparator()
     _mm.addAction("Add row…").triggered.connect(
         lambda _=False: image_table_open_add_row_dialog(ctx.app))
-    _mm.addAction("Add column…").triggered.connect(
-        lambda _=False: image_table_open_add_col_dialog(ctx.app))
     ar.addWidget(more_btn)
     ar.addStretch(1)
     bv.addWidget(axes_row)

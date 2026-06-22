@@ -102,6 +102,15 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     ctx.app._distribution_log_x_cb.stateChanged.connect(_on_log_changed)
     cl.addWidget(ctx.app._distribution_log_x_cb)
 
+    ctx.app._distribution_log_y_cb = QCheckBox("log y", ctrl)
+    ctx.app._distribution_log_y = False
+
+    def _on_log_y_changed(state: int) -> None:
+        ctx.app._distribution_log_y = bool(state)
+        _on_changed(ctx.app)
+    ctx.app._distribution_log_y_cb.stateChanged.connect(_on_log_y_changed)
+    cl.addWidget(ctx.app._distribution_log_y_cb)
+
     cl.addStretch(1)
 
     from widgets.icon_button import IconButton as _IconButton

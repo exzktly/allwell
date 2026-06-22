@@ -161,6 +161,8 @@ def _snapshot_distribution(app) -> dict:
         out["bins"] = int(app._distribution_bins)
     if hasattr(app, "_distribution_log_x"):
         out["log_x"] = bool(app._distribution_log_x)
+    if hasattr(app, "_distribution_log_y"):
+        out["log_y"] = bool(app._distribution_log_y)
     return out
 
 
@@ -565,6 +567,14 @@ def _apply_distribution(app, state: dict) -> None:
                 cb.setChecked(bool(state["log_x"]))
             except Exception:
                 swallowed()  # was: pass (silent except)
+    if "log_y" in state:
+        app._distribution_log_y = bool(state["log_y"])
+        cb = getattr(app, "_distribution_log_y_cb", None)
+        if cb is not None:
+            try:
+                cb.setChecked(bool(state["log_y"]))
+            except Exception:
+                swallowed()  # was: pass (silent except)
 
 
 def _apply_scatter(app, state: dict) -> None:
@@ -842,6 +852,13 @@ def _reset_distribution(app) -> None:
     app._distribution_bins = 40
     app._distribution_log_x = False
     cb = getattr(app, "_distribution_log_x_cb", None)
+    if cb is not None:
+        try:
+            cb.setChecked(False)
+        except Exception:
+            swallowed()  # was: pass (silent except)
+    app._distribution_log_y = False
+    cb = getattr(app, "_distribution_log_y_cb", None)
     if cb is not None:
         try:
             cb.setChecked(False)

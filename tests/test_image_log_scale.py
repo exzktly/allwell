@@ -33,8 +33,12 @@ def test_lut_colormap_log_scale_differs_from_linear():
     log = lut_colormap_to_rgb(a, None, None, "", log_scale=True)
     assert lin.shape == log.shape == (2, 2, 3)
     assert not np.array_equal(lin, log)
-    # On a log scale the evenly-spaced decades map to evenly-spaced grey levels.
-    grey = log[..., 0].ravel()
-    # vals [1,10,100,1000] → log10 [0,1,2,3] → norm [0,1/3,2/3,1] → *255 with
-    # uint8 truncation: 1/3*255 = 84.99 → 84.
-    assert sorted(grey.tolist()) == [0, 84, 170, 255]
+    # On a log scale the evenly-spaced decades map to evenly-spaced grey levels:
+    # vals [1,10,100,1000] → log10 [0,1,2,3] → grey ≈ [0, 85, 170, 255]. Use a
+    # tolerance because 1/3*255 = 84.999… sits on the uint8 truncation boundary
+    # and rounds to 84 or 85 depending on the platform's float32 rounding.
+    grey = sorted(log[..., 0].ravel().tolist())
+    assert np.allclose(grey, [0, 85, 170, 255], atol=1)
+    # The decades are (near-)evenly spaced — that's the log scale's signature.
+    diffs = np.diff(grey)
+    assert diffs.max() - diffs.min() <= 2

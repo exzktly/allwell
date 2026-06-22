@@ -195,6 +195,7 @@ def _compose_image_table_rgb(
     is_overlay: bool,
     binary_mask=None,
     show_boundaries: bool,
+    log_scale: bool = False,
 ):
     """Render the cell's display state to a uint8 RGB array.
 
@@ -243,7 +244,7 @@ def _compose_image_table_rgb(
     #    helper; also used by the Playground renderer).
     from well_viewer.core.ui_helpers import lut_colormap_to_rgb
     af = a.astype(_np.float32)
-    rgb = lut_colormap_to_rgb(af, lo, hi, cmap_name or "")
+    rgb = lut_colormap_to_rgb(af, lo, hi, cmap_name or "", log_scale=log_scale)
 
     # 4. Boundary overlay: paint white pixels at the segmentation
     # boundaries (same padded-diff scheme used by the live renderer).
@@ -328,6 +329,20 @@ def _row_display_opts(app, row_idx: int) -> Tuple[bool, bool, str]:
     show_boundaries = bool(bound_w.isChecked()) if bound_w is not None else False
     binary_mode = (bin_w.currentData() if bin_w is not None else "") or ""
     return use_tophat, show_boundaries, binary_mode
+
+
+def _row_log_scale(app, row_idx: int) -> bool:
+    """Whether grid row *row_idx* shows its image on a log intensity scale.
+
+    Separate from :func:`_row_display_opts` so that helper's 3-tuple unpack call
+    sites stay unchanged. Reads the row's ``"log"`` checkbox (``build_lut_row``).
+    """
+    entry = (getattr(app, "_image_table_lut", None) or {}).get(row_idx) or {}
+    log_w = entry.get("log")
+    try:
+        return bool(log_w.isChecked()) if log_w is not None else False
+    except Exception:
+        return False
 
 def _load_well_channel(
     app,
@@ -505,7 +520,8 @@ def _load_ratio_array(app, cache, well, ratio, tp, fov, *, use_tophat):
     eps = float(ratio.epsilon) if getattr(ratio, "epsilon", None) else 1e-6
     return num_f / (den_f + eps)
 
-def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_arr):
+def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_arr,
+                                  log_scale: bool = False):
     """Render a greyscale/ratio array with white cell-boundary outlines.
 
     Applies the colormap and LUT to *arr_2d*, then paints white pixels
@@ -518,10 +534,10 @@ def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_ar
     try:
         import numpy as _np
     except Exception:
-        return make_fluor_thumb(arr_2d, sz_w, sz_h, lo, hi, cmap=cmap_name)
+        return make_fluor_thumb(arr_2d, sz_w, sz_h, lo, hi, cmap=cmap_name, log_scale=log_scale)
 
     arr = _np.asarray(arr_2d, dtype=_np.float32)
-    rgb = lut_colormap_to_rgb(arr, lo, hi, cmap_name)
+    rgb = lut_colormap_to_rgb(arr, lo, hi, cmap_name, log_scale=log_scale)
 
     center_int = _np.asarray(mask_arr, dtype=_np.int32)
     if center_int.shape[:2] == arr.shape[:2]:

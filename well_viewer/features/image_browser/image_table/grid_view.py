@@ -224,6 +224,7 @@ def build_lut_row(
                 "source": entry["source"].currentData() if entry.get("source") else "raw",
                 "boundaries": bool(entry["boundaries"].isChecked()) if entry.get("boundaries") else False,
                 "binary": entry["binary"].currentData() if entry.get("binary") else "",
+                "log": bool(entry["log"].isChecked()) if entry.get("log") else False,
             }
         except Exception:
             swallowed()  # silent except
@@ -259,7 +260,7 @@ def build_lut_row(
         return ""
 
     # ── header row ───────────────────────────────────────────────────────
-    headers = ("", "Color", "Min", "Max", "", "Source", "Boundaries", "Binary")
+    headers = ("", "Color", "Min", "Max", "", "Source", "Boundaries", "Binary", "Log")
     for c, text in enumerate(headers):
         if not text:
             continue
@@ -359,10 +360,17 @@ def build_lut_row(
         bin_cb.setFixedWidth(96)
         layout.addWidget(bin_cb, grow, 7)
 
+        # Log-scale display toggle (per row) — staged like the other display
+        # options; the next Generate / export renders the intensity on a log
+        # scale (image_compose._row_log_scale reads it).
+        log_wrap, log_cb = _checkbox_cell(p.get("log", False))
+        log_cb.setToolTip("Show this row's image on a log10 intensity scale.")
+        layout.addWidget(log_wrap, grow, 8)
+
         app._image_table_lut[r] = {
             "min": min_edit, "max": max_edit, "auto": bool(p.get("auto", True)),
             "source": source_cb, "boundaries": bound_cb, "binary": bin_cb,
-            "chan": chan,
+            "log": log_cb, "chan": chan,
         }
 
     app._image_table_row_lut_color_cbs = color_cbs

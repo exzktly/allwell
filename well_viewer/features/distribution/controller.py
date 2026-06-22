@@ -211,6 +211,7 @@ def redraw_distribution(app) -> None:
             else "Histogram + KDE")
     bins = int(getattr(app, "_distribution_bins", 40) or 40)
     log_x = bool(getattr(app, "_distribution_log_x", False))
+    log_y = bool(getattr(app, "_distribution_log_y", False))
     layout_choice = (
         getattr(app, "_distribution_layout_var", None).currentText()
         if getattr(app, "_distribution_layout_var", None) is not None
@@ -250,12 +251,12 @@ def redraw_distribution(app) -> None:
     )
 
     if is_faceted:
-        _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h)
+        _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h, log_y=log_y)
     else:
         axes = _setup_axes(app, 1)
         ax = axes[0]
         ax.set_axis_on()
-        _render_overlay(app, ax, groups, mode, bins, log_x, tp_h)
+        _render_overlay(app, ax, groups, mode, bins, log_x, tp_h, log_y=log_y)
 
     # Re-apply theme text colours after the renderers set titles/labels.
     # `apply_axes_style` is called inside `_setup_axes` *before* the title
@@ -323,7 +324,7 @@ def _retint_axes_text(app) -> None:
             swallowed()  # was: pass (silent except)
 
 
-def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
+def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) -> None:
     """Single-axis renderer covering every mode (Hist / Hist+KDE / KDE / CDF / Violin)."""
     if mode == "Violin (per group)":
         data = [vals for _, _, vals in groups]
@@ -356,7 +357,15 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
                 swallowed()  # was: pass (silent except)
         ax.set_xlabel(_xlabel_for(app))
         ax.set_ylabel("Cumulative fraction")
-        ax.set_ylim(-0.02, 1.05)
+        if log_y:
+            # A log y-axis can't include the 0/negative padding the linear CDF
+            # uses; let matplotlib autoscale the positive cumulative fractions.
+            try:
+                ax.set_yscale("log")
+            except Exception:
+                swallowed()
+        else:
+            ax.set_ylim(-0.02, 1.05)
         if any(name for name, _, _ in groups):
             try:
                 ax.legend(fontsize=7, loc="best", framealpha=0.0, facecolor="none")
@@ -383,6 +392,11 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
                 ax.set_xscale("log")
             except Exception:
                 swallowed()  # was: pass (silent except)
+        if log_y:
+            try:
+                ax.set_yscale("log")
+            except Exception:
+                swallowed()
         ax.set_xlabel(_xlabel_for(app))
         ax.set_ylabel("Density")
         if any(name for name, _, _ in groups):
@@ -405,7 +419,7 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h) -> None:
     ax.set_title(title, fontsize=9)
 
 
-def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h) -> None:
+def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h, *, log_y=False) -> None:
     """One axis per group, stacked vertically with minimal padding.
 
     Shared x-axis (``sharex=True`` via ``_setup_axes``) + shared bin
@@ -445,6 +459,11 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h) -> None:
                 ax.set_xscale("log")
             except Exception:
                 swallowed()  # was: pass (silent except)
+        if log_y:
+            try:
+                ax.set_yscale("log")
+            except Exception:
+                swallowed()
         # Annotate group name on the right edge of each panel so the
         # vertical stack reads top-to-bottom without consuming a slot
         # in a legend or stretching the layout horizontally.

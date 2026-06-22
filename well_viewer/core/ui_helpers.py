@@ -667,11 +667,38 @@ def refresh_plot_toolbar_icons(widget: QWidget) -> None:
 
 # ── Thumbnail rendering ──────────────────────────────────────────────────────
 
+def apply_log_scale(arr, lo, hi):
+    """Map ``arr`` (and the LUT window ``lo``/``hi``) into log10 space.
+
+    Single source of truth for the Image Table's log-intensity display, shared by
+    the live thumbnail (:func:`make_fluor_thumb`) and the export composer
+    (:func:`lut_colormap_to_rgb`) so the two render paths agree. Non-positive
+    pixels are floored to the smallest positive value present (``1.0`` when there
+    is none) so ``log10`` stays finite; ``lo``/``hi`` are floored the same way.
+    ``None`` bounds pass through as ``None`` so the caller's auto-fit still works
+    (now in log space). Returns ``(arr_log, lo_log, hi_log)``.
+    """
+    import numpy as _np
+
+    a = _np.asarray(arr, dtype=_np.float32)
+    pos = a[a > 0]
+    floor = float(pos.min()) if pos.size else 1.0
+    arr_log = _np.log10(_np.clip(a, floor, None))
+
+    def _b(v):
+        if v is None:
+            return None
+        return float(_np.log10(max(float(v), floor)))
+
+    return arr_log, _b(lo), _b(hi)
+
+
 def make_fluor_thumb(arr, sz_w: int, sz_h: int,
                      lo: Optional[float], hi: Optional[float],
                      crop=None,
                      tint: Optional[Tuple[float, float, float]] = None,
-                     cmap: Optional[str] = None):
+                     cmap: Optional[str] = None,
+                     log_scale: bool = False):
     """Render a greyscale float32 array as a QPixmap with LUT [lo, hi].
 
     Rendering selection (in priority order):
@@ -701,6 +728,8 @@ def make_fluor_thumb(arr, sz_w: int, sz_h: int,
         x1 = max(x0, min(int(x1), iw))
         if y1 > y0 and x1 > x0:
             arr = arr[y0:y1, x0:x1]
+    if log_scale:
+        arr, lo, hi = apply_log_scale(arr, lo, hi)
     alo = lo if lo is not None else float(arr.min())
     ahi = hi if hi is not None else float(arr.max())
     if ahi <= alo:
@@ -737,10 +766,14 @@ def make_fluor_thumb(arr, sz_w: int, sz_h: int,
 
 
 def lut_colormap_to_rgb(arr, lo: Optional[float] = None,
-                        hi: Optional[float] = None, cmap_name: str = ""):
+                        hi: Optional[float] = None, cmap_name: str = "",
+                        log_scale: bool = False):
     """Map a 2-D array to an (H, W, 3) uint8 RGB via a [lo, hi] LUT window and an
     optional matplotlib colormap. ``lo``/``hi`` default to the array min/max;
     an empty/None ``cmap_name`` (or an unknown one) falls back to greyscale.
+
+    ``log_scale`` maps the array + window into log10 space first (see
+    :func:`apply_log_scale`) so the LUT spans the data logarithmically.
 
     Shared by the Image Table cell renderer and the Playground renderer so the
     LUT + colormap math has a single source of truth.
@@ -748,6 +781,8 @@ def lut_colormap_to_rgb(arr, lo: Optional[float] = None,
     import numpy as _np
 
     a = _np.asarray(arr, dtype=_np.float32)
+    if log_scale:
+        a, lo, hi = apply_log_scale(a, lo, hi)
     alo = lo if lo is not None else float(a.min())
     ahi = hi if hi is not None else float(a.max())
     if ahi <= alo:

@@ -205,6 +205,12 @@ def collect_scatter_data(
                     'color': color,
                     'metadata': metadata,
                     'wells': wells_breakdown,
+                    # Legend display name — user-defined sample-definition label
+                    # for the group (falls back to the group name). The dict key
+                    # stays the raw identity used by the click resolver / export.
+                    'label': (app._replicate_display_label(rset)
+                              if hasattr(app, "_replicate_display_label")
+                              else group_name),
                 }
     else:
         from well_viewer.features.lineplot.controller import _apply_order as _apply_well_order
@@ -242,6 +248,11 @@ def collect_scatter_data(
                         'metadata': wmeta,
                     },
                 },
+                # Legend display name — user-defined well label (falls back to
+                # the well token). Key stays the raw token used as identity.
+                'label': (app._well_display_label(well_label)
+                          if hasattr(app, "_well_display_label")
+                          else well_label),
             }
 
     return scatter_data

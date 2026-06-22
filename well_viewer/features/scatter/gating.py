@@ -208,6 +208,9 @@ def render_scatter_points(
         ]
 
     for label, data in scatter_data.items():
+        # Legend text prefers the sample-definition display label; the dict key
+        # (`label`) stays the raw identity used for gids / metadata lookup.
+        legend_label = data.get("label") or label
         wells_breakdown = data.get("wells") or {label: {
             "x": data["x"], "y": data["y"],
             "tp": data.get("tp", []),
@@ -263,12 +266,12 @@ def render_scatter_points(
                 if first_well_in_group:
                     legend_handles.append(Line2D(
                         [], [], marker="o", linestyle="none",
-                        color=data["color"], label=label,
+                        color=data["color"], label=legend_label,
                     ))
             else:
                 (line,) = ax.plot(
                     well_data["x"], well_data["y"], marker="o", linestyle="none",
-                    label=label if first_well_in_group else "_nolegend_",
+                    label=legend_label if first_well_in_group else "_nolegend_",
                     color=data["color"], alpha=0.6, markersize=6,
                     markeredgecolor="none",
                 )

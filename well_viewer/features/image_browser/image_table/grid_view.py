@@ -33,6 +33,8 @@ def build_image_table_grid(
     well_opts: List[str],
     on_apply_row_well,
     on_apply_row_channel,
+    on_remove_row=None,
+    on_remove_col=None,
 ) -> Tuple[
     List[List[Dict[str, Any]]],
     List[QComboBox],
@@ -44,7 +46,7 @@ def build_image_table_grid(
     levels / display toggles live in the separate per-row table built by
     :func:`build_lut_row`, not here.
     """
-    from well_viewer.core.ui_helpers import clear_layout
+    from well_viewer.core.ui_helpers import btn_secondary, clear_layout
 
     layout = app._image_table_selector_grid
     clear_layout(layout)
@@ -52,6 +54,28 @@ def build_image_table_grid(
     cells: List[List[Dict[str, Any]]] = []
     row_chan_cbs: List[QComboBox] = []
     row_well_cbs: List[QComboBox] = []
+
+    # Optional column-header row of "×" remove buttons. When present it shifts
+    # every data row down by one (grid row 0 becomes the header).
+    grid_row_offset = 0
+    if on_remove_col is not None:
+        grid_row_offset = 1
+        layout.addWidget(QLabel(""), 0, 0)  # placeholder over row-controls
+        for c in range(cols):
+            col_header = QWidget()
+            col_h = QHBoxLayout(col_header)
+            col_h.setContentsMargins(2, 2, 2, 2)
+            col_h.setSpacing(2)
+            lbl = QLabel(f"Col {c + 1}", col_header)
+            lbl.setObjectName("Muted")
+            lbl.setStyleSheet("font-size: 9px;")
+            col_h.addWidget(lbl)
+            col_h.addStretch(1)
+            remove_btn = btn_secondary(col_header, "×", lambda c_=c: on_remove_col(app, c_))
+            remove_btn.setFixedSize(24, 24)
+            remove_btn.setToolTip(f"Remove column {c + 1}")
+            col_h.addWidget(remove_btn)
+            layout.addWidget(col_header, 0, c + 1)
 
     for r in range(rows):
         row_box = QGroupBox(f"Row {r + 1}")
@@ -78,6 +102,12 @@ def build_image_table_grid(
         hint_lbl.setWordWrap(True)
         rbl.addWidget(hint_lbl)
 
+        # Per-row "×" remove button.
+        if on_remove_row is not None:
+            remove_row_btn = btn_secondary(row_box, "× Remove row", lambda r_=r: on_remove_row(app, r_))
+            remove_row_btn.setToolTip(f"Remove row {r + 1}")
+            rbl.addWidget(remove_row_btn)
+
         well_lbl = QLabel("Well:", row_box)
         well_lbl.setStyleSheet("font-size: 10px;")
         rbl.addWidget(well_lbl)
@@ -98,7 +128,7 @@ def build_image_table_grid(
             lambda _i, ridx=r: on_apply_row_channel(app, ridx)
         )
 
-        layout.addWidget(row_box, r, 0)
+        layout.addWidget(row_box, r + grid_row_offset, 0)
         row_chan_cbs.append(row_chan_cb)
         row_well_cbs.append(row_well_cb)
 
@@ -107,7 +137,7 @@ def build_image_table_grid(
             cell = build_selector_cell(
                 r, c, well_opts, chan_opts, tp_opts, fov_opts,
             )
-            layout.addWidget(cell["frame"], r, c + 1)
+            layout.addWidget(cell["frame"], r + grid_row_offset, c + 1)
             cell_row.append(cell)
         cells.append(cell_row)
 

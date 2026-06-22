@@ -36,7 +36,10 @@ FEATURE_PREFIX = "well_viewer.features"
 # Lowered to 134 in the Image Browser consolidation: the unified container's
 # sub-tab builders import at module scope (not a cycle — centre_view defers the
 # container import), and the Playground sidebar refresh promoted to module scope.
-MAX_DEFERRED_FEATURE_IMPORTS = 134
+# Raised to 135 for the image_table grid_ops module: grid_ops imports the rebuild
+# helpers from controller, so controller defers its grid_ops import (to wire the
+# row/column remove callbacks) to break the controller ↔ grid_ops cycle.
+MAX_DEFERRED_FEATURE_IMPORTS = 135
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

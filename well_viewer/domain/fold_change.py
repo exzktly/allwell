@@ -162,6 +162,160 @@ def _scale_pt(
     return tuple(new)
 
 
+def _grow(new: list, idx_a: int, idx_b: Optional[int]) -> None:
+    """Pad *new* with 0.0 so indices ``idx_a`` and ``idx_b`` are addressable."""
+    need = idx_a if idx_b is None else max(idx_a, idx_b)
+    while len(new) <= need:
+        new.append(0.0)
+
+
+def _scale_field(
+    pt: tuple, val_idx: int, spread_idx: Optional[int], factor: float, *,
+    factor_rel_err_sq: float = 0.0,
+) -> tuple:
+    """Generic ``_scale_pt`` over an arbitrary ``(val_idx, spread_idx)`` field.
+
+    Used to fold-change the fraction field ([3]/[6]) and the N-events field
+    ([4] non-FOV, no spread; [7]/[8] per-FOV) the same way the mean field
+    ([1]/[2]) is scaled. ``spread_idx=None`` marks a count-like field with no
+    spread — the value is scaled and no spread is written.
+    """
+    new = list(pt)
+    _grow(new, val_idx, spread_idx)
+    if factor == 0 or not math.isfinite(factor):
+        new[val_idx] = float("nan")
+        if spread_idx is not None:
+            new[spread_idx] = 0.0
+        return tuple(new)
+    v = pt[val_idx] if val_idx < len(pt) else None
+    scaled_val = v / factor if isinstance(v, (int, float)) and math.isfinite(v) else float("nan")
+    new[val_idx] = scaled_val
+    if spread_idx is not None:
+        s = pt[spread_idx] if spread_idx < len(pt) else None
+        s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
+        new[spread_idx] = _propagate_spread(
+            scaled_val, v if isinstance(v, (int, float)) else float("nan"),
+            s_val, factor_rel_err_sq,
+        )
+    return tuple(new)
+
+
+def _subtract_field(
+    pt: tuple, val_idx: int, spread_idx: Optional[int], shift: float, *,
+    shift_spread: float = 0.0,
+) -> tuple:
+    """Generic ``_subtract_pt`` over an arbitrary ``(val_idx, spread_idx)`` field."""
+    new = list(pt)
+    _grow(new, val_idx, spread_idx)
+    v = pt[val_idx] if val_idx < len(pt) else None
+    if not (isinstance(v, (int, float)) and math.isfinite(v)) or not math.isfinite(shift):
+        new[val_idx] = float("nan")
+        if spread_idx is not None:
+            new[spread_idx] = 0.0
+        return tuple(new)
+    new[val_idx] = float(v) - float(shift)
+    if spread_idx is not None:
+        s = pt[spread_idx] if spread_idx < len(pt) else None
+        s_val = s if isinstance(s, (int, float)) and math.isfinite(s) else 0.0
+        shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
+        new[spread_idx] = math.sqrt(s_val * s_val + shift_var)
+    return tuple(new)
+
+
+def _resolve_stat(
+    t: float, stats: Dict[float, Tuple[float, float]],
+    default: Tuple[float, float],
+) -> Tuple[float, float]:
+    """Resolve the ``(value, spread)`` for *t* in *stats* under relative tol."""
+    if t in stats:
+        return stats[t]
+    for ct, vs in stats.items():
+        if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t)):
+            return vs
+    return default
+
+
+def _field_baseline(
+    pts, val_idx: int, baseline_tp: Optional[float],
+) -> Tuple[Optional[float], float]:
+    """``(baseline_val, baseline_spread_unused)`` for a field's vs-t0 step.
+
+    Mirrors the mean baseline logic: prefer the point at *baseline_tp*, else the
+    earliest finite non-zero value. The spread returned is always the field's
+    own spread at that point is *not* needed here — the count/fraction t0
+    propagation reuses the field's own spread via ``_scale_field`` — so this
+    returns only the divisor; the caller passes ``shift_spread=0`` / a 0 rel-err
+    for the baseline (matching the mean path, which folds only the control and
+    the member's own per-point spread, not a separate baseline spread term).
+    """
+    candidates = pts
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for pt in pts:
+            if abs(float(pt[0]) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(pt[0])), abs(tgt)):
+                v = pt[val_idx] if len(pt) > val_idx else None
+                if isinstance(v, (int, float)) and math.isfinite(v) and v != 0:
+                    return float(v), 0.0
+                break
+    for pt in sorted(candidates, key=lambda p: p[0]):
+        v = pt[val_idx] if len(pt) > val_idx else None
+        if isinstance(v, (int, float)) and math.isfinite(v) and v != 0:
+            return float(v), 0.0
+    return None, 0.0
+
+
+def _normalize_field(
+    pts, *, val_idx: int, spread_idx: Optional[int],
+    control_stats: Optional[Dict[float, Tuple[float, float]]],
+    use_t0: bool, baseline_tp: Optional[float],
+    op_ctrl: str, op_t0: str,
+) -> list:
+    """Apply vs-control + vs-t0 normalization to ONE AggPoint field.
+
+    Generic counterpart to the mean steps in :func:`normalize_pts`, used for the
+    fraction and N-events fields so all three line-plot panels fold-change
+    consistently. The mean field is left untouched (it has its own steps). A
+    point with no matching control sample has only *this* field set to NaN — the
+    mean step already recorded the miss in ``miss_sink``.
+    """
+    # Step A: control normalization.
+    if control_stats:
+        means_only = {t: vs[0] for t, vs in control_stats.items()}
+        stage: list = []
+        for pt in pts:
+            t = float(pt[0])
+            cm = _match_control_mean(t, means_only)
+            if cm is None:
+                new = list(pt)
+                _grow(new, val_idx, spread_idx)
+                new[val_idx] = float("nan")
+                if spread_idx is not None:
+                    new[spread_idx] = 0.0
+                stage.append(tuple(new))
+                continue
+            cval, cspread = _resolve_stat(t, control_stats, (cm, 0.0))
+            if op_ctrl == "subtract":
+                stage.append(_subtract_field(pt, val_idx, spread_idx, cval,
+                                             shift_spread=cspread or 0.0))
+            else:
+                stage.append(_scale_field(pt, val_idx, spread_idx, cval,
+                                          factor_rel_err_sq=_rel_err_sq(cval, cspread)))
+        pts = stage
+
+    # Step B: vs-t0 baseline (uses each member's own post-control values).
+    if use_t0:
+        base, base_spread = _field_baseline(pts, val_idx, baseline_tp)
+        if base is not None:
+            if op_t0 == "subtract":
+                pts = [_subtract_field(pt, val_idx, spread_idx, base,
+                                       shift_spread=base_spread) for pt in pts]
+            else:
+                pts = [_scale_field(pt, val_idx, spread_idx, base,
+                                    factor_rel_err_sq=_rel_err_sq(base, base_spread))
+                       for pt in pts]
+    return pts
+
+
 def pts_to_mean_by_t(pts) -> Dict[float, float]:
     """Build a ``{t: mean}`` dict from an AggPoint list, skipping NaN means."""
     out: Dict[float, float] = {}
@@ -196,6 +350,10 @@ def normalize_pts(
     *,
     control_means: Optional[Dict[float, float]] = None,
     control_stats: Optional[Dict[float, Tuple[float, float]]] = None,
+    control_frac_stats: Optional[Dict[float, Tuple[float, float]]] = None,
+    control_n_stats: Optional[Dict[float, Tuple[float, float]]] = None,
+    normalize_frac_n: bool = False,
+    n_per_fov: bool = False,
     use_t0: bool = False,
     baseline_tp: Optional[float] = None,
     op: str = "ratio",
@@ -214,6 +372,23 @@ def normalize_pts(
     spread folds the control's relative error in quadrature. Pass this
     for proper error propagation; pass *control_means* alone for the
     legacy "treat denominator as exact" behaviour.
+
+    *control_frac_stats* — ``{t: (frac, frac_spread)}`` for the control.
+    Normalizes the fraction field (value [3], spread [6]) with the same
+    vs-control / vs-t0 logic as the mean, so the Line Graphs' OnFraction
+    panel rescales under fold change instead of staying at raw values.
+
+    *control_n_stats* — ``{t: (n, 0.0)}`` for the control's N-events value.
+    Normalizes the N-events field with the same logic. ``n_per_fov`` selects
+    which AggPoint field the N panel actually plots: the per-FOV-mean count
+    ([7]/[8]) when FOV-spread is on, else the total count ([4], no spread).
+    The control denominator in *control_n_stats* must be computed for the
+    matching representation (see ``member_n_stats_series``).
+
+    The vs-t0 baseline applies to the mean, fraction, and N fields alike, so
+    every panel responds to "vs t0" consistently. When only ``use_t0`` is set
+    (no control selected) the fraction / N fields still normalize against their
+    own t0 even though *control_frac_stats* / *control_n_stats* are empty.
 
     *use_t0* — when True, finds the member's earliest finite mean and
     divides every point by it after the control step. The earliest
@@ -325,16 +500,43 @@ def normalize_pts(
                     )
                     break
         if baseline is None:
-            return stage1
-        if effective_op_t0 == "subtract":
-            return [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
-                    for pt in stage1]
-        baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
-        return [_scale_pt(pt, baseline,
-                          factor_rel_err_sq=baseline_rel_err_sq)
-                for pt in stage1]
+            stage2 = stage1
+        elif effective_op_t0 == "subtract":
+            stage2 = [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
+                      for pt in stage1]
+        else:
+            baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
+            stage2 = [_scale_pt(pt, baseline,
+                                factor_rel_err_sq=baseline_rel_err_sq)
+                      for pt in stage1]
+    else:
+        stage2 = stage1
 
-    return stage1
+    # The fraction / N-events fields are normalized only for the Line Graphs
+    # panels that plot them (``normalize_frac_n``). Bar / batch / CSV callers
+    # leave the flag off so their AggPoint count semantics are unchanged.
+    if normalize_frac_n:
+        # Steps 3+4: fraction field ([3]/[6]) — same vs-control + vs-t0 logic.
+        stage2 = _normalize_field(
+            stage2, val_idx=3, spread_idx=6,
+            control_stats=control_frac_stats, use_t0=use_t0,
+            baseline_tp=baseline_tp,
+            op_ctrl=effective_op_ctrl, op_t0=effective_op_t0,
+        )
+        # Steps 5+6: N-events field — [7]/[8] per-FOV-mean (the panel's
+        # FOV-spread series) or [4] total count (no spread) otherwise.
+        if n_per_fov:
+            n_val_idx, n_spread_idx = 7, 8
+        else:
+            n_val_idx, n_spread_idx = 4, None
+        stage2 = _normalize_field(
+            stage2, val_idx=n_val_idx, spread_idx=n_spread_idx,
+            control_stats=control_n_stats, use_t0=use_t0,
+            baseline_tp=baseline_tp,
+            op_ctrl=effective_op_ctrl, op_t0=effective_op_t0,
+        )
+
+    return stage2
 
 
 # ── State accessors / app integration ───────────────────────────────────────
@@ -1017,6 +1219,133 @@ def member_stats_series(
                     isinstance(s, (int, float)) and math.isfinite(s)
                 ) else 0.0
                 out[float(pt[0])] = (float(m), spread)
+        return out
+    return {}
+
+
+def member_frac_stats_series(
+    app, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> Dict[float, Tuple[float, float]]:
+    """``{t: (frac, frac_spread)}`` for a member — fraction-above-threshold + spread.
+
+    Mirrors :func:`member_stats_series` but extracts the fraction field. The
+    fraction lives at index [2] and its spread at index [3] of BOTH
+    ``compute_rep_stats`` (4-tuple) and ``compute_rep_per_fov_stats`` (6-tuple),
+    so front-indexing ``res[2]``/``res[3]`` is correct for either — a ``*_, gf,
+    ferr`` tail-unpack would wrongly grab the per-FOV count fields from the
+    6-tuple. Used by line-plot FC to scale the OnFraction panel.
+    """
+    label = (label or "").strip()
+    if not label:
+        return {}
+    rset = _label_to_replicate_set(app, label)
+    if rset is not None:
+        tps: Set[float] = set()
+        for w in rset.wells:
+            pts = aggregate_well(app,
+                w, threshold=threshold, use_sem=False,
+                val_col=val_col, fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread,
+            )
+            for pt in pts:
+                tps.add(float(pt[0]))
+        out: Dict[float, Tuple[float, float]] = {}
+        for t in tps:
+            if per_fov_spread:
+                res = compute_rep_per_fov_stats(app, rset, t, threshold, use_sem)
+            else:
+                res = compute_rep_stats(app, rset, t, threshold, use_sem)
+            gf, ferr = res[2], res[3]
+            if isinstance(gf, (int, float)) and math.isfinite(gf):
+                spread = float(ferr) if (
+                    isinstance(ferr, (int, float)) and math.isfinite(ferr)
+                ) else 0.0
+                out[t] = (float(gf), spread)
+        return out
+    if label in (app._app_state.dataset.well_paths or {}):
+        pts = aggregate_well(app,
+            label, threshold=threshold, use_sem=use_sem,
+            val_col=val_col, fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        out = {}
+        for pt in pts:
+            f = pt[3] if len(pt) > 3 else None
+            if isinstance(f, (int, float)) and math.isfinite(f):
+                s = pt[6] if len(pt) > 6 else 0.0
+                spread = float(s) if (
+                    isinstance(s, (int, float)) and math.isfinite(s)
+                ) else 0.0
+                out[float(pt[0])] = (float(f), spread)
+        return out
+    return {}
+
+
+def member_n_stats_series(
+    app, label: str, *,
+    threshold: float, val_col: str,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> Dict[float, Tuple[float, float]]:
+    """``{t: (n, spread)}`` for a member — N-events denominator for the N panel.
+
+    Returns the value in the SAME representation the N panel plots, selected by
+    *per_fov_spread*: the per-FOV-mean count (± per-FOV spread) when FOV-spread
+    is on, else the total events-above-threshold (spread 0, counts have none).
+    Used by line-plot FC to scale the N panel; the caller passes ``n_per_fov``
+    to :func:`normalize_pts` so the scaled field matches this denominator.
+    """
+    label = (label or "").strip()
+    if not label:
+        return {}
+    rset = _label_to_replicate_set(app, label)
+    if rset is not None:
+        out: Dict[float, Tuple[float, float]] = {}
+        tps: Set[float] = set()
+        for w in rset.wells:
+            pts = aggregate_well(app,
+                w, threshold=threshold, use_sem=False,
+                val_col=val_col, fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread,
+            )
+            for pt in pts:
+                tps.add(float(pt[0]))
+        for t in tps:
+            if per_fov_spread:
+                res = compute_rep_per_fov_stats(app, rset, t, threshold, False)
+                n_mean, n_spread = res[4], res[5]
+                if isinstance(n_mean, (int, float)) and math.isfinite(n_mean):
+                    spread = float(n_spread) if (
+                        isinstance(n_spread, (int, float)) and math.isfinite(n_spread)
+                    ) else 0.0
+                    out[t] = (float(n_mean), spread)
+            else:
+                n_above = compute_rep_n_above(app, rset, t)
+                if isinstance(n_above, int) and n_above >= 0:
+                    out[t] = (float(n_above), 0.0)
+        return out
+    if label in (app._app_state.dataset.well_paths or {}):
+        pts = aggregate_well(app,
+            label, threshold=threshold, use_sem=False,
+            val_col=val_col, fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        out = {}
+        for pt in pts:
+            if per_fov_spread:
+                n = pt[7] if len(pt) > 7 else None
+                s = pt[8] if len(pt) > 8 else 0.0
+            else:
+                n = pt[4] if len(pt) > 4 else None
+                s = 0.0
+            if isinstance(n, (int, float)) and math.isfinite(n):
+                spread = float(s) if (
+                    isinstance(s, (int, float)) and math.isfinite(s)
+                ) else 0.0
+                out[float(pt[0])] = (float(n), spread)
         return out
     return {}
 

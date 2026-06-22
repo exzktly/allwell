@@ -1319,9 +1319,7 @@ def member_n_stats_series(
                 tps.add(float(pt[0]))
         out: Dict[float, Tuple[float, float]] = {}
         for t in tps:
-            n_above = compute_rep_n_above(app,
-                rset, t, threshold,
-            )
+            n_above = compute_rep_n_above(app, rset, t)
             if isinstance(n_above, int) and n_above >= 0:
                 out[t] = (float(n_above), 0.0)
         return out

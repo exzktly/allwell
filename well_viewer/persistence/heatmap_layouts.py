@@ -22,7 +22,6 @@ def _collect_settings(app) -> dict:
         if isinstance(v, (int, float)) and math.isfinite(float(v)):
             return float(v)
         return None
-    slider = getattr(app, "_heatmap_tp_slider", None)
     return {
         "cmap": str(getattr(app, "_heatmap_cmap_name", "") or ""),
         "scale_mode": str(getattr(app, "_heatmap_scale_mode", "Auto") or "Auto"),
@@ -30,7 +29,6 @@ def _collect_settings(app) -> dict:
         "vmax": _f("_heatmap_vmax"),
         "repset_avg": bool(getattr(app, "_heatmap_repset_avg", False)),
         "log_scale": bool(getattr(app, "_heatmap_log_scale", False)),
-        "tp_index": int(slider.value()) if slider is not None else 0,
     }
 
 
@@ -140,21 +138,6 @@ def apply_persisted_settings(app) -> None:
             log_cb.setChecked(log_scale)
         finally:
             log_cb.blockSignals(blocked)
-
-    tp_idx = settings.get("tp_index")
-    if isinstance(tp_idx, int):
-        slider = getattr(app, "_heatmap_tp_slider", None)
-        if slider is not None:
-            clamped = max(0, min(tp_idx, slider.maximum()))
-            blocked = slider.blockSignals(True)
-            try:
-                slider.setValue(clamped)
-            finally:
-                slider.blockSignals(blocked)
-            tps = list(getattr(app, "_heatmap_tp_values", []) or [])
-            label = getattr(app, "_heatmap_tp_label", None)
-            if label is not None and tps:
-                label.setText(f"t = {tps[clamped]:g} h")
 
     # Successfully applied — keep the dict around in case the tab rebuilds.
     # (No need to clear it; a subsequent save_to_data_dir overwrites the file

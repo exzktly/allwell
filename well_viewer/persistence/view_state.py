@@ -234,6 +234,7 @@ def _snapshot_image_table(app) -> dict:
             tophat = edits.get("tophat")
             bound = edits.get("boundaries")
             binw = edits.get("binary")
+            logw = edits.get("log")
             try:
                 if mn is not None:
                     slot["min"] = str(mn.text())
@@ -245,6 +246,8 @@ def _snapshot_image_table(app) -> dict:
                     slot["boundaries"] = bool(bound.isChecked())
                 if binw is not None:
                     slot["binary"] = str(binw.currentData() or "")
+                if logw is not None:
+                    slot["log"] = bool(logw.isChecked())
             except Exception:
                 swallowed()  # silent except
                 continue
@@ -688,7 +691,7 @@ def _apply_image_table(app, state: dict) -> None:
                         edit.blockSignals(blocked)
                 except Exception:
                     swallowed()  # was: pass (silent except)
-            for k in ("tophat", "boundaries"):
+            for k in ("tophat", "boundaries", "log"):
                 w = edits.get(k)
                 if w is None or k not in slot:
                     continue

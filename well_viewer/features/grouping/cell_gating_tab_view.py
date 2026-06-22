@@ -43,7 +43,11 @@ from PySide6.QtWidgets import (
 
 from ui.theme import get_color
 from well_viewer.core import debug_flags as _debug_flags
-from well_viewer.core.ui_helpers import install_canvas_wheel_scroll
+from well_viewer.core.ui_helpers import (
+    build_hline_separator,
+    build_section_header,
+    install_canvas_wheel_scroll,
+)
 from well_viewer.data.data_loading import resolve_value_series
 from well_viewer.features.image_browser.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.features.scatter.gating import compute_gate_inclusion
@@ -292,31 +296,21 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # (QC_Pass at the df_included_mask chokepoint), composing with FluorGating
     # and the scatter gates below, so it leads the tab. Editing here re-flags the
     # whole dataset live and refreshes the Segmentation overlay.
-    qc_title = QLabel("QC debris gate (always applied)", control_frame)
-    qc_title.setProperty("role", "section")
-    cf_layout.addWidget(qc_title)
+    cf_layout.addWidget(build_section_header(
+        control_frame, "QC debris gate (always applied)",
+        hint="Size / solidity debris gating — a fundamental layer applied to "
+             "every cell, on top of the FluorGating thresholds and any scatter "
+             "gates below.",
+    ))
     try:
         cf_layout.addWidget(build_qc_gate_controls(ctx.app, control_frame))
     except Exception:
         swallowed()  # QC controls are best-effort; never block the tab build
-    qc_note = QLabel(
-        "Size / solidity debris gating is a fundamental layer applied to every "
-        "cell, in addition to the FluorGating thresholds and any scatter gates "
-        "below.",
-        control_frame,
-    )
-    qc_note.setObjectName("Muted")
-    qc_note.setWordWrap(True)
-    cf_layout.addWidget(qc_note)
 
-    title_row = QWidget(control_frame)
-    tr = QHBoxLayout(title_row)
-    tr.setContentsMargins(0, 0, 0, 0)
-    title = QLabel("FluorGating (Cell Inclusion)", title_row)
-    title.setProperty("role", "section")
-    tr.addWidget(title)
-    tr.addStretch(1)
-    cf_layout.addWidget(title_row)
+    cf_layout.addWidget(build_hline_separator(control_frame))
+    cf_layout.addWidget(build_section_header(
+        control_frame, "FluorGating (Cell Inclusion)",
+    ))
 
     # MFI-only note: FluorGating + ThreshFracOn always run against per-cell
     # mean fluorescence intensity, regardless of which Property the user
@@ -429,6 +423,12 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # drawer via the standard logger. Sits in its own row directly above
     # the per-channel FluorGating / ThreshFracOn table it modifies, so it
     # never floats away from the controls it acts on.
+    cf_layout.addWidget(build_hline_separator(control_frame))
+    cf_layout.addWidget(build_section_header(
+        control_frame, "ThreshFracOn (Fraction-On Cut)",
+        hint="Per-channel cut used for fraction-on in downstream plots / stats "
+             "(separate from the FluorGating inclusion thresholds above).",
+    ))
     from PySide6.QtWidgets import QPushButton as _QPushButton
     auto_row = QWidget(control_frame)
     auto_row_layout = QHBoxLayout(auto_row)
@@ -481,9 +481,10 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     opt_panel = QWidget(parent)
     opt_layout = QVBoxLayout(opt_panel)
     opt_layout.setContentsMargins(0, 4, 0, 0)
-    opt_title = QLabel("Optimize ThreshFracOn between two wells", opt_panel)
-    opt_title.setProperty("role", "section")
-    opt_layout.addWidget(opt_title)
+    opt_layout.addWidget(build_hline_separator(opt_panel))
+    opt_layout.addWidget(build_section_header(
+        opt_panel, "Optimize ThreshFracOn between two wells",
+    ))
     opt_row = QWidget(opt_panel)
     opt_row_layout = QHBoxLayout(opt_row)
     opt_row_layout.setContentsMargins(0, 0, 0, 0)
@@ -542,6 +543,52 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     opt_row_layout.addStretch(1)
     opt_layout.addWidget(opt_row)
 
+    # Optional fold-change row: optimise over a fold-change-adjusted fraction-on
+    # (the same vs-control / vs-t0 normalisation the plot tabs use), so the
+    # threshold that best separates A and B is chosen on the *normalised* metric.
+    # These controls are INDEPENDENT of the plotting tabs' fold-change state —
+    # they live only here and are read at optimise time, so configuring them
+    # never disturbs the Bar / Line plots.
+    fc_row = QWidget(opt_panel)
+    fc_row_layout = QHBoxLayout(fc_row)
+    fc_row_layout.setContentsMargins(0, 0, 0, 0)
+    fc_row_layout.addWidget(QLabel("Fold change —  Control:", fc_row))
+    ctx.app._cell_gating_opt_fc_control_combo = QComboBox(fc_row)
+    ctx.app._cell_gating_opt_fc_control_combo.setMinimumWidth(120)
+    ctx.app._cell_gating_opt_fc_control_combo.setToolTip(
+        "Divide (or subtract) each well's fraction-on by a control well / "
+        "replicate set's fraction-on at the same scanned threshold. \"—\" "
+        "optimises over the raw fraction-on (the original behaviour).\n\n"
+        "Note: with the Ratio operator a shared control cancels in the "
+        "relative gap, so it only narrows the scan to where the control still "
+        "has signal — use Subtract, or a Baseline, to actually reshape the "
+        "A-vs-B separation."
+    )
+    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_control_combo)
+    ctx.app._cell_gating_opt_fc_ctrl_op_combo = QComboBox(fc_row)
+    ctx.app._cell_gating_opt_fc_ctrl_op_combo.addItem("Ratio", "ratio")
+    ctx.app._cell_gating_opt_fc_ctrl_op_combo.addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_ctrl_op_combo)
+    fc_row_layout.addWidget(QLabel("Baseline:", fc_row))
+    ctx.app._cell_gating_opt_fc_baseline_combo = QComboBox(fc_row)
+    ctx.app._cell_gating_opt_fc_baseline_combo.setMinimumWidth(110)
+    ctx.app._cell_gating_opt_fc_baseline_combo.setToolTip(
+        "Divide (or subtract) each well's fraction-on by its own fraction-on at "
+        "a baseline timepoint. \"t0\" uses each well's earliest timepoint."
+    )
+    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_baseline_combo)
+    ctx.app._cell_gating_opt_fc_t0_op_combo = QComboBox(fc_row)
+    ctx.app._cell_gating_opt_fc_t0_op_combo.addItem("Ratio", "ratio")
+    ctx.app._cell_gating_opt_fc_t0_op_combo.addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_t0_op_combo)
+    fc_row_layout.addWidget(QLabel("Order:", fc_row))
+    ctx.app._cell_gating_opt_fc_order_combo = QComboBox(fc_row)
+    ctx.app._cell_gating_opt_fc_order_combo.addItem("Control first", "ctrl_first")
+    ctx.app._cell_gating_opt_fc_order_combo.addItem("Baseline first", "t0_first")
+    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_order_combo)
+    fc_row_layout.addStretch(1)
+    opt_layout.addWidget(fc_row)
+
     # Changing the channel or either well re-derives the available timepoints and
     # auto-fills Min/Max from the data range (so the scan actually spans the
     # values — the hardcoded 0–100 default sits below typical MFI data, which is
@@ -570,6 +617,10 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # CDFs anchor the bottom of the tab — controls + optimizer sit above,
     # CDFs (with their toolbar) are the visual readout the user reads while
     # tuning those controls, so we put them last.
+    root.addWidget(build_hline_separator(parent))
+    root.addWidget(build_section_header(
+        parent, "Cumulative distributions (CDF)",
+    ))
     root.addWidget(ctx.app._cell_gating_plot_scroll)
     root.addWidget(ctx.app._cell_gating_toolbar)
 
@@ -1261,6 +1312,70 @@ def cell_gating_auto_threshold(app) -> None:
     worker.start()
 
 
+def _earliest_timepoint(df):
+    """The earliest ``(kind, value)`` timepoint token present in *df* (or None)."""
+    tps = _distinct_timepoints(df)
+    if not tps:
+        return None
+    return sorted(tps, key=lambda t: (0, t[1]) if t[0] == "hours" else (1, str(t[1])))[0]
+
+
+def _cell_gating_opt_fc_inputs(app, *, channel_key, well_a, well_b, timepoint, ratios):
+    """Resolve the optimizer's fold-change config into optimizer kwargs + a note.
+
+    Reads the optimizer-local FC combos (independent of the plot tabs), resolves
+    the chosen control label into a pooled control population at the scan
+    timepoint, and each well's baseline-timepoint population. Returns
+    ``(kwargs, note)`` where *kwargs* feeds ``_optimize_thresh_frac_on_between_wells``
+    / ``_scan_fc_fractions`` (empty ⇒ raw fraction-on) and *note* is a status
+    suffix describing the active normalisation.
+    """
+    from well_viewer.domain.fold_change import resolve_control_wells
+
+    ctrl_combo = getattr(app, "_cell_gating_opt_fc_control_combo", None)
+    base_combo = getattr(app, "_cell_gating_opt_fc_baseline_combo", None)
+    ctrl_label = str(ctrl_combo.currentText()).strip() if ctrl_combo is not None else ""
+    baseline_data = base_combo.currentData() if base_combo is not None else None
+
+    kwargs: dict = {
+        "op_ctrl": (app._cell_gating_opt_fc_ctrl_op_combo.currentData()
+                    if getattr(app, "_cell_gating_opt_fc_ctrl_op_combo", None) else "ratio") or "ratio",
+        "op_t0": (app._cell_gating_opt_fc_t0_op_combo.currentData()
+                  if getattr(app, "_cell_gating_opt_fc_t0_op_combo", None) else "ratio") or "ratio",
+        "order": (app._cell_gating_opt_fc_order_combo.currentData()
+                  if getattr(app, "_cell_gating_opt_fc_order_combo", None) else "ctrl_first") or "ctrl_first",
+    }
+    notes: list = []
+
+    # vs control — pool the resolved control wells' valid values at this scan tp.
+    if ctrl_label and ctrl_label != "—":
+        ctrl_wells = resolve_control_wells(app, ctrl_label)
+        chunks = [
+            _valid_values_for_channel(app._get_rows(w), channel_key, ratios, timepoint)
+            for w in ctrl_wells if w in (app._app_state.dataset.well_paths or {})
+        ]
+        chunks = [c for c in chunks if c.size]
+        if chunks:
+            kwargs["ctrl_values"] = np.concatenate(chunks)
+            notes.append(f"vs {ctrl_label}")
+
+    # vs baseline timepoint — each well's own population at the baseline tp.
+    if baseline_data is not None:
+        def _base_vals(well):
+            df = app._get_rows(well)
+            tp = _earliest_timepoint(df) if baseline_data == _OPT_FC_T0_TOKEN else baseline_data
+            if tp is None:
+                return np.array([], dtype=float)
+            return _valid_values_for_channel(df, channel_key, ratios, tp)
+        kwargs["base_values_a"] = _base_vals(well_a)
+        kwargs["base_values_b"] = _base_vals(well_b)
+        notes.append("vs t0" if baseline_data == _OPT_FC_T0_TOKEN
+                     else f"vs {_timepoint_label(baseline_data)}")
+
+    note = f" (fold change {', '.join(notes)})" if notes else ""
+    return kwargs, note
+
+
 def cell_gating_optimize_thresh_frac_on(app) -> None:
     """Scan a threshold range and apply the best two-well ThreshFracOn cut."""
     label = getattr(app, "_cell_gating_opt_result_label", None)
@@ -1313,6 +1428,16 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         )
         return
 
+    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    try:
+        fc_kwargs, fc_note = _cell_gating_opt_fc_inputs(
+            app, channel_key=channel_key, well_a=well_a, well_b=well_b,
+            timepoint=timepoint, ratios=ratios,
+        )
+    except Exception as exc:
+        _status(f"Optimize ThreshFracOn: fold-change inputs not ready ({exc}).")
+        return
+
     try:
         result = _optimize_thresh_frac_on_between_wells(
             app._get_rows(well_a),
@@ -1321,14 +1446,15 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
             min_threshold=lo,
             max_threshold=hi,
             steps=steps,
-            ratios=getattr(app._app_state.channel, "ratio_index", None) or {},
+            ratios=ratios,
             timepoint=timepoint,
+            **fc_kwargs,
         )
     except ValueError as exc:
         _status(f"Optimize ThreshFracOn: {exc}")
         return
 
-    tp_note = "" if timepoint is None else f" at {_timepoint_label(timepoint)}"
+    tp_note = ("" if timepoint is None else f" at {_timepoint_label(timepoint)}") + fc_note
     # A zero best difference means the scan range never crossed where the two
     # wells' fraction-on diverge (e.g. the range sits entirely below/above the
     # data). Applying ``lo`` there would be the old "always the smallest value"
@@ -1368,6 +1494,7 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
             hi=hi,
             steps=steps,
             result=result,
+            fc_kwargs=fc_kwargs,
         )
     except Exception:
         swallowed("cell gating: optimizer curve popup failed")
@@ -1384,10 +1511,12 @@ def _cell_gating_show_opt_curve_popup(
     hi: float,
     steps: int,
     result: "ThreshFracOptimizationResult",
+    fc_kwargs: "dict | None" = None,
 ) -> None:
     """Open (or refresh) a non-modal window plotting the optimizer's diff
     curve. Re-derives values_a, values_b, and the per-threshold fractions
-    locally so the pure function stays uncoupled from the GUI.
+    locally (through the SAME fold-change scan the optimizer uses) so the
+    plotted curve matches the metric ``argmax`` ran on.
 
     The window stays open across consecutive Optimize clicks — subsequent
     clicks just repaint the existing axes, so the user can iterate on
@@ -1404,21 +1533,10 @@ def _cell_gating_show_opt_curve_popup(
         app._get_rows(well_b), channel_key, ratios, timepoint,
     )
     thresholds = np.linspace(lo, hi, int(steps))
-    frac_a = np.array(
-        [_fraction_on_for_threshold(values_a, float(t)) for t in thresholds],
-        dtype=float,
-    )
-    frac_b = np.array(
-        [_fraction_on_for_threshold(values_b, float(t)) for t in thresholds],
-        dtype=float,
-    )
-    # Match the optimizer's relative-gap metric so the popup shows exactly
-    # the curve argmax operates on: |fa - fb| / max(fa, fb), with the
-    # both-zero case clamped to 0 instead of nan.
-    _abs_gap = np.abs(frac_a - frac_b)
-    _larger = np.maximum(frac_a, frac_b)
-    diffs = np.divide(
-        _abs_gap, _larger, out=np.zeros_like(_abs_gap), where=_larger > 0,
+    # Use the SAME scan the optimizer ran (raw, or fold-change-adjusted) so the
+    # popup curve is exactly the metric argmax operated on.
+    frac_a, frac_b, diffs = _scan_fc_fractions(
+        thresholds, values_a, values_b, **(fc_kwargs or {}),
     )
 
     popup = getattr(app, "_cell_gating_opt_curve_popup", None)
@@ -1613,13 +1731,75 @@ def _cell_gating_refresh_optimizer_controls(app) -> None:
         btn.setEnabled(bool(channel_combo.count() and len(wells) >= 2))
 
     _cell_gating_refresh_opt_timepoints(app)
+    _cell_gating_refresh_opt_fc_controls(app)
     _cell_gating_autofill_opt_range(app)
 
 
 def _cell_gating_on_opt_scope_changed(app) -> None:
     """React to a channel/well change: re-list timepoints, then re-fit the range."""
     _cell_gating_refresh_opt_timepoints(app)
+    _cell_gating_refresh_opt_fc_controls(app)
     _cell_gating_autofill_opt_range(app)
+
+
+_OPT_FC_T0_TOKEN = "__t0__"
+
+
+def _cell_gating_refresh_opt_fc_controls(app) -> None:
+    """Populate the optimizer's fold-change Control + Baseline combos.
+
+    Control candidates mirror the plot tabs' Control combo (well tokens +
+    replicate-set names, with the ``" (well)"`` collision suffix) via
+    ``fold_change_controls._all_member_labels``. Baseline offers "—",
+    "t0 (first timepoint)", and the explicit timepoints shared by wells A/B.
+    Selections are preserved across refreshes; this state is local to the
+    optimizer and never touches ``app._app_state.plot.fc_*``.
+    """
+    from well_viewer.domain.fold_change_controls import _all_member_labels
+
+    ctrl = getattr(app, "_cell_gating_opt_fc_control_combo", None)
+    base = getattr(app, "_cell_gating_opt_fc_baseline_combo", None)
+    if ctrl is not None:
+        prev = ctrl.currentText()
+        items = ["—", *_all_member_labels(app)]
+        if [ctrl.itemText(i) for i in range(ctrl.count())] != items:
+            blocked = ctrl.blockSignals(True)
+            try:
+                ctrl.clear()
+                ctrl.addItems(items)
+                idx = ctrl.findText(prev)
+                ctrl.setCurrentIndex(idx if idx >= 0 else 0)
+            finally:
+                ctrl.blockSignals(blocked)
+
+    if base is not None:
+        well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
+        well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
+        seen: set = set()
+        tps: list = []
+        for combo_w in (well_a_combo, well_b_combo):
+            if combo_w is None:
+                continue
+            label = str(combo_w.currentText()).strip()
+            if not label or label not in (app._app_state.dataset.well_paths or {}):
+                continue
+            for tp in _distinct_timepoints(app._get_rows(label)):
+                if tp not in seen:
+                    seen.add(tp)
+                    tps.append(tp)
+        tps.sort(key=lambda t: (0, t[1]) if t[0] == "hours" else (1, str(t[1])))
+        prev = base.currentData()
+        blocked = base.blockSignals(True)
+        try:
+            base.clear()
+            base.addItem("—", None)
+            base.addItem("t0 (first timepoint)", _OPT_FC_T0_TOKEN)
+            for tp in tps:
+                base.addItem(_timepoint_label(tp), tp)
+            idx = base.findData(prev) if prev is not None else 0
+            base.setCurrentIndex(idx if idx >= 0 else 0)
+        finally:
+            base.blockSignals(blocked)
 
 
 def _cell_gating_refresh_opt_timepoints(app) -> None:
@@ -1703,6 +1883,70 @@ def _fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
     if values.size == 0:
         return float("nan")
     return float(np.count_nonzero(values > threshold) / values.size)
+
+
+def _frac_curve(values: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
+    """Fraction-on of *values* at each scanned threshold."""
+    return np.array(
+        [_fraction_on_for_threshold(values, float(t)) for t in thresholds],
+        dtype=float,
+    )
+
+
+def _scan_fc_fractions(
+    thresholds: np.ndarray,
+    values_a: np.ndarray,
+    values_b: np.ndarray,
+    *,
+    ctrl_values: "np.ndarray | None" = None,
+    base_values_a: "np.ndarray | None" = None,
+    base_values_b: "np.ndarray | None" = None,
+    op_ctrl: str = "ratio",
+    op_t0: str = "ratio",
+    order: str = "ctrl_first",
+):
+    """Per-threshold (fa, fb, relative-gap) curves, optionally fold-changed.
+
+    Each well's raw fraction-on is computed at every scanned threshold, then —
+    when control / baseline value arrays are supplied — adjusted at the SAME
+    threshold via :func:`fold_change.scale_bar_value` (so numerator and the
+    fold-change denominators stay self-consistent). ``ctrl_values`` is the pooled
+    control population; ``base_values_*`` are each well's baseline-timepoint
+    population. With all three ``None`` the result is the raw fraction-on scan
+    (identical to the pre-fold-change behaviour). Returns ``(fa, fb, diffs)``
+    with non-finite / max≤0 gaps coerced to ``0.0`` so ``argmax`` is meaningful.
+    """
+    from well_viewer.domain.fold_change import scale_bar_value
+
+    fa = _frac_curve(values_a, thresholds)
+    fb = _frac_curve(values_b, thresholds)
+
+    fc_on = ctrl_values is not None or base_values_a is not None or base_values_b is not None
+    if fc_on:
+        fc = ctrl_values is not None and ctrl_values.size > 0
+        fctrl = _frac_curve(ctrl_values, thresholds) if fc else None
+        fbase_a = _frac_curve(base_values_a, thresholds) if base_values_a is not None else None
+        fbase_b = _frac_curve(base_values_b, thresholds) if base_values_b is not None else None
+        for i in range(len(thresholds)):
+            fa[i], _ = scale_bar_value(
+                fa[i], 0.0,
+                control_mean=(fctrl[i] if fctrl is not None else None),
+                t0_mean=(fbase_a[i] if fbase_a is not None else None),
+                op_ctrl=op_ctrl, op_t0=op_t0, order=order,
+            )
+            fb[i], _ = scale_bar_value(
+                fb[i], 0.0,
+                control_mean=(fctrl[i] if fctrl is not None else None),
+                t0_mean=(fbase_b[i] if fbase_b is not None else None),
+                op_ctrl=op_ctrl, op_t0=op_t0, order=order,
+            )
+
+    abs_gap = np.abs(fa - fb)
+    larger = np.maximum(fa, fb)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        diffs = np.divide(abs_gap, larger, out=np.zeros_like(abs_gap), where=larger > 0)
+    diffs = np.where(np.isfinite(diffs), diffs, 0.0)
+    return fa, fb, diffs
 
 
 def _timepoint_label(timepoint) -> str:
@@ -1792,6 +2036,12 @@ def _optimize_thresh_frac_on_between_wells(
     steps: int,
     ratios=None,
     timepoint=None,
+    ctrl_values=None,
+    base_values_a=None,
+    base_values_b=None,
+    op_ctrl: str = "ratio",
+    op_t0: str = "ratio",
+    order: str = "ctrl_first",
 ) -> ThreshFracOptimizationResult:
     """Return the threshold maximizing the **relative** fraction-on gap:
     ``|fraction_on(A) - fraction_on(B)| / max(fraction_on(A), fraction_on(B))``.
@@ -1829,23 +2079,15 @@ def _optimize_thresh_frac_on_between_wells(
         raise ValueError("Well B has no valid finite values for the selected channel.")
 
     thresholds = np.linspace(lo, hi, int(steps))
-    fa = np.array(
-        [_fraction_on_for_threshold(values_a, float(t)) for t in thresholds],
-        dtype=float,
-    )
-    fb = np.array(
-        [_fraction_on_for_threshold(values_b, float(t)) for t in thresholds],
-        dtype=float,
-    )
-    abs_gap = np.abs(fa - fb)
-    larger = np.maximum(fa, fb)
-    # ``where`` keeps the division finite when both wells are entirely off
-    # at a given threshold (max=0). ``out=zeros_like(abs_gap)`` makes those
-    # entries 0 instead of nan / inf so argmax picks a meaningful index.
-    diffs = np.divide(
-        abs_gap, larger,
-        out=np.zeros_like(abs_gap),
-        where=larger > 0,
+    # Raw fraction-on scan, optionally fold-change-adjusted at each threshold
+    # (control / baseline value arrays supplied by the caller). With all None
+    # this is the original raw-fraction relative-gap scan.
+    fa, fb, diffs = _scan_fc_fractions(
+        thresholds, values_a, values_b,
+        ctrl_values=ctrl_values,
+        base_values_a=base_values_a,
+        base_values_b=base_values_b,
+        op_ctrl=op_ctrl, op_t0=op_t0, order=order,
     )
 
     # The threshold where the relative fraction-on gap is biggest.

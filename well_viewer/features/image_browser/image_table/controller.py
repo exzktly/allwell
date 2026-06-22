@@ -55,6 +55,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     _render_threshold_binary,
     _render_with_boundary_overlay,
     _row_cmap_name,
+    _row_log_scale,
     _row_export_cmap,
     _row_tint,
     _tint_from_colormap,
@@ -1184,6 +1185,7 @@ def image_table_generate(app) -> None:
         # read from this row's box so two rows on the same channel stay
         # independent (see grid_view.build_lut_row).
         use_tophat, show_boundaries, binary_mode = _row_display_opts(app, r)
+        log_scale = _row_log_scale(app, r)
         for c, cell in enumerate(row):
             well = cell["well_cb"].currentText().strip()
             chan = cell["chan_cb"].currentText().strip()
@@ -1233,12 +1235,12 @@ def image_table_generate(app) -> None:
                     # Every segmented cell white on black.
                     pix = _render_mask_binary(app, cache, well, tp, fov, crop_tool, sz)
                     if pix is None:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r))
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r), log_scale=log_scale)
                 elif binary_mode == "threshold":
                     # Only cells above the active ON threshold white on black.
                     pix = _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz)
                     if pix is None:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r))
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r), log_scale=log_scale)
                 elif show_boundaries:
                     # Overlay white cell-boundary outlines on the fluorescence image.
                     mask_arr = _load_mask_array(app, cache, well, tp, fov)
@@ -1246,14 +1248,14 @@ def image_table_generate(app) -> None:
                         cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
                         pix = _render_with_boundary_overlay(
                             cropped, sz, sz, lo, hi,
-                            _row_cmap_name(app, r), cm,
+                            _row_cmap_name(app, r), cm, log_scale=log_scale,
                         )
                     else:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r))
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r), log_scale=log_scale)
                 else:
                     pix = make_fluor_thumb(
                         cropped, sz, sz, lo, hi,
-                        cmap=_row_cmap_name(app, r),
+                        cmap=_row_cmap_name(app, r), log_scale=log_scale,
                     )
                 # CropTool needs the FULL source array + the active crop on
                 # the label so label-pixel → image-pixel coord conversion

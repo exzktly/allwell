@@ -23,6 +23,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     _parse_lut,
     _row_display_opts,
     _row_cmap_name,
+    _row_log_scale,
 )
 
 
@@ -241,6 +242,7 @@ def _build_export_figure(app):
                     is_overlay=_is_nuc_seg(chan),
                     binary_mask=binary_mask,
                     show_boundaries=show_boundaries,
+                    log_scale=_row_log_scale(app, r),
                 )
                 if rgb is not None:
                     ax.imshow(rgb, aspect="equal")

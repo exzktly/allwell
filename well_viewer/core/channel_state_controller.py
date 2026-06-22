@@ -357,8 +357,12 @@ def update_channel_selector(app) -> None:
             return candidates[0]
         return "—"
 
-    # Plot tabs: only measurement channels.
-    plot_label = _pick_valid(app._plot_chan_var.currentText(), labels, active_label)
+    # Plot tabs: only measurement channels. Prefer the restored/active label
+    # over the combo's current text so a saved channel survives a dataset
+    # reopen — at load time the combo still shows its default (just-repopulated)
+    # text, which would otherwise win over the channel we restored. Falls back
+    # to the current text when the saved channel is stale (gone in this dataset).
+    plot_label = _pick_valid(active_label, labels, app._plot_chan_var.currentText())
     app._plot_chan_var.setCurrentText(plot_label)
 
     # Image tabs: each validates against its own channel universe.

@@ -210,6 +210,22 @@ def test_redraw_solid_mode_uses_lines_no_density():
     assert not any(getattr(c, "_aw_density_collection", False) for c in ax.collections)
 
 
+def test_scatter_legend_uses_sample_definition_label():
+    """Per-well scatter legend text comes from the sample-definition label when
+    one is defined (``_well_display_label``), not the raw well token. The Line2D
+    gid still keys off the raw token identity."""
+    from well_viewer.features.scatter.controller import redraw_scatter
+
+    app, ax = _render_app(density=False, gates=[])
+    app._well_display_label = lambda tok: "Treated 5nM" if tok == "A01" else tok
+    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+                   well_colors=["#3366cc"])
+
+    labels = [ln.get_label() for ln in ax.lines]
+    assert "Treated 5nM" in labels
+    assert "A01" not in labels  # raw token no longer used as the legend text
+
+
 def test_hidden_gates_are_not_drawn():
     """The 'Show gates' toggle (``_scatter_gates_hidden``) suppresses rendering
     without discarding the stored gates."""

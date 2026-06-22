@@ -227,7 +227,10 @@ def redraw_distribution(app) -> None:
             tp_filter=tp_filter,
         )
         if vals.size:
-            groups.append((name, color, vals))
+            # Legend / violin / facet labels use the sample-definition display
+            # label when one is defined (the raw name stays the CSV identity in
+            # iter_plot_groups, which the export path keys on).
+            groups.append((_display_label_for(app, name), color, vals))
 
     if not groups:
         axes = _setup_axes(app, 1)
@@ -262,6 +265,29 @@ def redraw_distribution(app) -> None:
     _retint_axes_text(app)
     _apply_export_style(app)
     canvas.draw_idle()
+
+
+def _display_label_for(app, name: str) -> str:
+    """Resolve the legend display label for an ``iter_plot_groups`` name.
+
+    ``iter_plot_groups`` yields the raw identity — a well token (when no
+    replicate sets are active) or a replicate-set name. A user-defined
+    sample-definition label, when present, should show in the legend instead:
+    a well token resolves through ``_well_display_label``; a replicate-set name
+    resolves through ``_replicate_display_label`` (group name, with a well-label
+    fallback for generic names). This mirrors what the Line / Bar plots already
+    do. The raw ``name`` is left untouched in ``iter_plot_groups`` because the
+    CSV export path keys its columns on it.
+    """
+    try:
+        if name in (app._app_state.dataset.well_paths or {}):
+            return app._well_display_label(name)
+        for rset in app._rep_sets_active():
+            if getattr(rset, "name", None) == name:
+                return app._replicate_display_label(rset)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    return name
 
 
 def _retint_axes_text(app) -> None:

@@ -30,6 +30,56 @@ def test_pts_to_mean_by_t_skips_nan():
     assert pts_to_mean_by_t(pts) == {0.0: 1.0, 2.0: 3.0}
 
 
+def _agg(t, mean, frac, n_above, *, frac_spread=0.0, n_pf_mean=0.0, n_pf_spread=0.0):
+    # (t, mean, spread, frac, n_above, n_total, frac_spread, n_pf_mean, n_pf_spread)
+    return (t, mean, 0.0, frac, n_above, 100, frac_spread, n_pf_mean, n_pf_spread)
+
+
+def test_normalize_frac_n_scales_fraction_and_count_panels():
+    """With ``normalize_frac_n`` the fraction ([3]) and N-events ([4]) fields
+    rescale alongside the mean — the Line Graphs panels no longer stay at raw
+    values under fold change."""
+    pts = [_agg(0.0, 10.0, 0.4, 20), _agg(1.0, 20.0, 0.8, 40)]
+    ctrl_mean = {0.0: (10.0, 0.0), 1.0: (10.0, 0.0)}
+    ctrl_frac = {0.0: (0.4, 0.0), 1.0: (0.4, 0.0)}
+    ctrl_n = {0.0: (20.0, 0.0), 1.0: (20.0, 0.0)}
+
+    out = normalize_pts(
+        pts, control_stats=ctrl_mean,
+        control_frac_stats=ctrl_frac, control_n_stats=ctrl_n,
+        normalize_frac_n=True,
+    )
+    # mean: 10/10=1, 20/10=2 ; frac: 0.4/0.4=1, 0.8/0.4=2 ; n: 20/20=1, 40/20=2
+    assert out[0][1] == 1.0 and out[1][1] == 2.0
+    assert out[0][3] == 1.0 and out[1][3] == 2.0
+    assert out[0][4] == 1.0 and out[1][4] == 2.0
+
+
+def test_normalize_frac_n_flag_off_leaves_frac_and_count_raw():
+    """Default callers (bar / batch / CSV) don't pass the flag, so only the mean
+    is normalized and the count field keeps its integer value."""
+    pts = [_agg(0.0, 10.0, 0.4, 20), _agg(1.0, 20.0, 0.8, 40)]
+    ctrl_mean = {0.0: (10.0, 0.0), 1.0: (10.0, 0.0)}
+    out = normalize_pts(pts, control_stats=ctrl_mean)
+    assert out[0][1] == 1.0 and out[1][1] == 2.0
+    # frac + n_above untouched (raw)
+    assert out[0][3] == 0.4 and out[1][3] == 0.8
+    assert out[0][4] == 20 and out[1][4] == 40
+
+
+def test_normalize_frac_n_per_fov_scales_index_7_8():
+    """In FOV-spread mode the N panel plots the per-FOV-mean ([7]/[8]); FC scales
+    that field, not the total-count [4]."""
+    pts = [_agg(0.0, 10.0, 0.4, 20, n_pf_mean=5.0), _agg(1.0, 20.0, 0.8, 40, n_pf_mean=10.0)]
+    ctrl_mean = {0.0: (10.0, 0.0), 1.0: (10.0, 0.0)}
+    ctrl_n = {0.0: (5.0, 0.0), 1.0: (5.0, 0.0)}
+    out = normalize_pts(
+        pts, control_stats=ctrl_mean, control_n_stats=ctrl_n,
+        normalize_frac_n=True, n_per_fov=True,
+    )
+    assert out[0][7] == 1.0 and out[1][7] == 2.0
+
+
 def test_match_control_mean_exact():
     assert _match_control_mean(1.0, {0.0: 10.0, 1.0: 20.0}) == 20.0
 

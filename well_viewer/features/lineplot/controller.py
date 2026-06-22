@@ -43,7 +43,7 @@ class LinePoint:
     mean: float
     spread: float
     frac: float
-    n_above: int = 0
+    n_above: float = 0.0
     n_total: int = 0
     frac_spread: float = 0.0
     n_above_pf_mean: float = 0.0
@@ -53,9 +53,12 @@ class LinePoint:
 
     def as_aggpoint(self) -> tuple:
         """Convert back to the AggPoint tuple shape ``line_metric_row`` expects."""
+        n_above = (int(self.n_above)
+                   if isinstance(self.n_above, (int, float)) and math.isfinite(self.n_above)
+                   else float("nan"))
         return (
             self.t, self.mean, self.spread, self.frac,
-            int(self.n_above), int(self.n_total), self.frac_spread,
+            n_above, int(self.n_total), self.frac_spread,
             self.n_above_pf_mean, self.n_above_pf_spread,
         )
 
@@ -129,7 +132,14 @@ def _aggpoint_to_linepoint(pt) -> LinePoint:
     mean = float(pt[1]) if isinstance(pt[1], (int, float)) else float("nan")
     spread = float(pt[2]) if isinstance(pt[2], (int, float)) else 0.0
     frac = float(pt[3]) if (len(pt) > 3 and isinstance(pt[3], (int, float))) else float("nan")
-    n_above = int(pt[4]) if len(pt) > 4 else 0
+    # n_above may be a fold-change ratio (float, or NaN at a missing-control
+    # timepoint) once FC normalizes the N panel, so keep it float / NaN-safe
+    # rather than int(): the renderer reads ``float(p.n_above)`` and skips
+    # points without a mean anyway.
+    _n_raw = pt[4] if len(pt) > 4 else 0
+    n_above = (float(_n_raw)
+               if isinstance(_n_raw, (int, float)) and math.isfinite(_n_raw)
+               else float("nan"))
     n_total = int(pt[5]) if len(pt) > 5 else 0
     frac_spread = float(pt[6]) if len(pt) > 6 else 0.0
     n_above_pf_mean = float(pt[7]) if len(pt) > 7 else 0.0
@@ -200,11 +210,28 @@ def collect_line_series(
     # so error propagation through normalize_pts has the right
     # denominator uncertainty.
     fc_control_stats: dict = {}
+    fc_control_frac_stats: dict = {}
+    fc_control_n_stats: dict = {}
+    # The N panel plots the per-FOV-mean count when FOV-spread is on, else the
+    # total count — the control denominator and the scaled field must match.
+    fc_n_per_fov = bool(rep_per_fov or per_fov_spread)
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_stats = _fc.member_stats_series(
             app, fc_ctrl_lbl,
             threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=rep_per_fov or per_fov_spread,
+            use_sem=use_sem, per_fov_spread=fc_n_per_fov,
+            fluor_gates=fluor_gates,
+        )
+        fc_control_frac_stats = _fc.member_frac_stats_series(
+            app, fc_ctrl_lbl,
+            threshold=threshold, val_col=val_col,
+            use_sem=use_sem, per_fov_spread=fc_n_per_fov,
+            fluor_gates=fluor_gates,
+        )
+        fc_control_n_stats = _fc.member_n_stats_series(
+            app, fc_ctrl_lbl,
+            threshold=threshold, val_col=val_col,
+            per_fov_spread=fc_n_per_fov,
             fluor_gates=fluor_gates,
         )
 
@@ -258,6 +285,10 @@ def collect_line_series(
                 _raw_pts = _fc.normalize_pts(
                     _raw_pts,
                     control_stats=fc_control_stats or None,
+                    control_frac_stats=fc_control_frac_stats or None,
+                    control_n_stats=fc_control_n_stats or None,
+                    normalize_frac_n=True,
+                    n_per_fov=fc_n_per_fov,
                     use_t0=fc_vs_t0,
                     baseline_tp=fc_baseline_tp,
                     op_ctrl=fc_op_ctrl,
@@ -297,6 +328,10 @@ def collect_line_series(
             pts = _fc.normalize_pts(
                 pts,
                 control_stats=fc_control_stats or None,
+                control_frac_stats=fc_control_frac_stats or None,
+                control_n_stats=fc_control_n_stats or None,
+                normalize_frac_n=True,
+                n_per_fov=fc_n_per_fov,
                 use_t0=fc_vs_t0,
                 baseline_tp=fc_baseline_tp,
                 op_ctrl=fc_op_ctrl,
@@ -517,7 +552,9 @@ def redraw_line_plots(
     if any_n:
         cur_lo, cur_hi = app._line_ax_n.get_ylim()
         app._line_ax_n.set_ylim(0, max(cur_hi, 1))
-        if not _fov_active:
+        if not _fov_active and not (fc_vs_ctrl or fc_vs_t0):
+            # Raw counts → integer ticks. Under fold change the N panel shows a
+            # ratio, so let matplotlib pick fractional ticks.
             from matplotlib.ticker import MaxNLocator
             app._line_ax_n.yaxis.set_major_locator(MaxNLocator(integer=True))
     if any_ts:

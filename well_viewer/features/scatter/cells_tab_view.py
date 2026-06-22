@@ -14,6 +14,7 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from functools import partial
 from well_viewer.features.export.service import export_scatter_data
+from well_viewer.features.saved_plots.controller import wire_save_to_gallery
 from well_viewer.features.scatter.controller import on_scatter_click
 from well_viewer.features.scatter.controller import on_scatter_motion
 from well_viewer.features.scatter.gating import (
@@ -163,6 +164,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
+    wire_save_to_gallery(ctx.app, card, "Scatter Plot")
     _sw = make_plot_view_switcher(ctx.app, 'Scatter Plot')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

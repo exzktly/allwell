@@ -133,7 +133,7 @@ def build_centre(app, parent: QWidget) -> None:
     # Browser" is the unified image-review rail entry (Segmentation / Image
     # Table / Cell Browser / Playground sub-tabs) — its sub-tab bodies pull the
     # image-table loaders, so it (and each sub-tab inside it) builds on demand.
-    lazy_only: Set[str] = {"smFISH", "Image Browser"}
+    lazy_only: Set[str] = {"smFISH", "Image Browser", "Saved Plots"}
     app._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
@@ -680,6 +680,10 @@ def build_centre(app, parent: QWidget) -> None:
         from well_viewer.features.batch_export.tab_view import build_batch_export_tab
         build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
 
+    def _build_saved_plots() -> None:
+        from well_viewer.features.saved_plots.tab_view import build_saved_plots_tab
+        build_saved_plots_tab(app._ctx, tab_frames["Saved Plots"])
+
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         ("Analysis", [
             # "Plotting" is a single top-level tab that contains Line Graphs,
@@ -704,6 +708,7 @@ def build_centre(app, parent: QWidget) -> None:
         ("Data", [
             ("Review CSV", _build_review_csv),
             ("Sample Definitions", _build_sample_definitions),
+            ("Saved Plots", _build_saved_plots),
             ("Batch Export", _build_batch_export),
         ]),
     ]

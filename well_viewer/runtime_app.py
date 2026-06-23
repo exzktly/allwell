@@ -411,6 +411,7 @@ class WellViewerApp(QWidget):
         "smFISH":             "dna",
         "Review CSV":         "file-spreadsheet",
         "Sample Definitions": "tag",
+        "Saved Plots":        "image",
         "Batch Export":       "boxes",
     }
 

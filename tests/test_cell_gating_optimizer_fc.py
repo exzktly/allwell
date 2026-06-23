@@ -101,3 +101,22 @@ def test_scan_fc_subtract_control_metric_not_inverted():
     assert np.all(np.isfinite(diffs)) and np.all(diffs >= 0)
     assert diffs.max() > 0                     # not crushed to all-zero
     assert int(np.argmax(diffs)) == 3          # separation peak, not index 0
+
+
+def test_opt_curve_ylim_expands_for_out_of_range_curves():
+    from well_viewer.features.grouping.cell_gating_tab_view import _opt_curve_ylim
+
+    # Raw fraction-on case keeps the familiar [0, 1] frame.
+    lo, hi = _opt_curve_ylim(np.array([0.0, 0.5, 1.0]), np.array([0.0, 0.2]),
+                             np.array([0.0, 0.8]))
+    assert lo <= -0.02 and hi >= 1.02
+
+    # Under subtraction the gap can exceed 1 (fa/fb straddle zero) and fractions
+    # can go negative — the limits must cover them, not clip at ~1.
+    lo, hi = _opt_curve_ylim(np.array([0.5, -0.5]), np.array([-0.5, 0.5]),
+                             np.array([2.0, 0.0]))
+    assert hi >= 2.0       # the >1 gap is visible
+    assert lo <= -0.5      # negative adjusted fractions are visible
+    # Non-finite values are ignored, never crashing or poisoning the range.
+    lo, hi = _opt_curve_ylim(np.array([np.nan, np.inf, 0.3]))
+    assert np.isfinite(lo) and np.isfinite(hi)

@@ -146,6 +146,19 @@ def on_tab_change(app, _e=None) -> None:
         except Exception:
             swallowed()
 
+    elif tab == "Saved Plots":
+        # Gallery of previously saved plots — no plate selection needed; just
+        # repaint from the (per-dataset) store on each visit.
+        app._sidebar_main_frame.setVisible(True)
+        app._refresh_sidebar_map()
+        try:
+            from well_viewer.features.saved_plots.controller import (
+                refresh_saved_plots_gallery,
+            )
+            refresh_saved_plots_gallery(app)
+        except Exception:
+            swallowed()
+
     else:
         # Line Graphs, Bar Plots, or Scatter -- unified picker always shown
         app._sidebar_main_frame.setVisible(True)

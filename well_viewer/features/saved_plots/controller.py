@@ -1,0 +1,112 @@
+"""Saved Plots controller — capture, gallery refresh, restore/delete/export.
+
+Reaches the app only through the ``app`` argument (ARCHITECTURE §9); holds no
+module-level state. The store lives on ``app._saved_plots_store`` (see
+``state.get_store``).
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+
+from well_viewer.core.safe import swallowed
+from well_viewer.persistence import view_state
+from well_viewer.features.saved_plots.collect import build_summary, capture_params
+from well_viewer.features.saved_plots.state import SavedPlot, get_store
+
+_logger = logging.getLogger("well_viewer")
+
+
+def wire_save_to_gallery(app, card, tab_name: str) -> None:
+    """Enable *card*'s hover "save to Saved Plots" button for *tab_name*."""
+    if card is None or not hasattr(card, "set_save_handler"):
+        return
+    card.set_save_handler(
+        lambda png, label: save_plot_from_card(app, tab_name, png, label)
+    )
+
+
+def save_plot_from_card(app, tab: str, png_bytes: bytes, panel_label: str) -> str:
+    """Persist the captured panel + its params; refresh the gallery.
+
+    Returns a short status string (shown as a toast by ``PlotCard``)."""
+    store = get_store(app)
+    store.ensure_loaded(app)
+    if store.images_dir(app) is None:
+        return "Save failed: load a dataset first"
+
+    params, thresholds = capture_params(app, tab)
+    title = (panel_label or "").strip() or tab or "Plot"
+    pid = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    rec = SavedPlot(
+        id=pid,
+        created_at=datetime.now().isoformat(timespec="seconds"),
+        tab=tab,
+        title=title,
+        png_filename=f"{pid}.png",
+        params=params,
+        thresholds=thresholds,
+        summary=build_summary(app, tab, params, thresholds),
+    )
+    if not store.add(app, rec, png_bytes):
+        return "Save failed: could not write image"
+    refresh_saved_plots_gallery(app)
+    return f"Saved “{title}” to Saved Plots"
+
+
+def restore_saved_plot(app, plot_id: str) -> None:
+    """Re-apply a saved plot's params and navigate to its originating tab."""
+    rec = get_store(app).get(plot_id)
+    if rec is None:
+        return
+    try:
+        view_state.restore(app, dict(rec.params))
+    except Exception:
+        _logger.debug("saved_plots: restore failed for %r", plot_id, exc_info=True)
+
+
+def delete_saved_plot(app, plot_id: str) -> None:
+    get_store(app).delete(app, plot_id)
+    refresh_saved_plots_gallery(app)
+
+
+def clear_saved_plots(app) -> None:
+    get_store(app).clear(app)
+    refresh_saved_plots_gallery(app)
+
+
+def export_saved_plot(app, plot_id: str) -> None:
+    """Copy a saved plot's PNG to a user-chosen location."""
+    store = get_store(app)
+    rec = store.get(plot_id)
+    src = store.image_path(app, rec) if rec is not None else None
+    if rec is None or src is None or not src.exists():
+        return
+    try:
+        from PySide6.QtWidgets import QFileDialog
+
+        suggested = f"{rec.tab.replace(' ', '_')}_{rec.id}.png"
+        dest, _flt = QFileDialog.getSaveFileName(
+            None, "Export saved plot", suggested, "PNG image (*.png)")
+        if dest:
+            from pathlib import Path
+            Path(dest).write_bytes(src.read_bytes())
+    except Exception:
+        _logger.debug("saved_plots: export failed for %r", plot_id, exc_info=True)
+
+
+def refresh_saved_plots_gallery(app) -> None:
+    """Repaint the Saved Plots gallery if its tab has been built.
+
+    The tab registers a repopulate callback (``app._saved_plots_repopulate``)
+    at build time so this stays a one-way feature dependency (no controller →
+    tab_view import)."""
+    get_store(app).ensure_loaded(app)
+    fn = getattr(app, "_saved_plots_repopulate", None)
+    if not callable(fn):
+        return
+    try:
+        fn()
+    except Exception:
+        swallowed()  # gallery repaint is best-effort; never block callers

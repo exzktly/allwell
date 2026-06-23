@@ -194,6 +194,21 @@ if _HAVE_MPL:
             self._copy_btn.hide()
             self._copy_btn.installEventFilter(self)
             self._copy_btn.clicked.connect(self._on_copy_axis_clicked)
+            # Optional sibling "save to Saved Plots" button, enabled per-tab via
+            # ``set_save_handler``. Unlike copy (suppressed on single-axis since
+            # the whole-canvas Copy covers it), the save button is the only
+            # affordance for sending a plot to the gallery, so it appears on
+            # single-axis figures too whenever a handler is wired.
+            self._save_handler = None
+            self._save_btn_hovered = False
+            self._save_btn = IconButton(
+                "save", self.canvas, size=theme.Typography.body_size,
+                tooltip="Save this panel to Saved Plots",
+            )
+            self._save_btn.adjustSize()
+            self._save_btn.hide()
+            self._save_btn.installEventFilter(self)
+            self._save_btn.clicked.connect(self._on_save_axis_clicked)
             # Single-shot, delayed hide so the cursor can transit from the
             # canvas onto the floating button (which itself fires
             # ``figure_leave_event``) without the button vanishing first.
@@ -204,10 +219,22 @@ if _HAVE_MPL:
             self.canvas.mpl_connect("motion_notify_event", self._on_canvas_motion)
             self.canvas.mpl_connect("figure_leave_event", self._on_canvas_leave)
 
+        def _hover_buttons(self) -> list:
+            """The hover buttons to show for the current figure, right→left.
+
+            Copy is offered only on multi-axis figures (single-axis is covered
+            by the whole-canvas Copy); the save button shows on any figure once
+            a save handler is wired."""
+            btns = []
+            if len(self.figure.axes) > 1:
+                btns.append(self._copy_btn)
+            if self._save_handler is not None:
+                btns.append(self._save_btn)
+            return btns
+
         def _on_canvas_motion(self, event) -> None:
-            # Multi-axis figures only — a single subplot's per-panel copy is
-            # already covered by the whole-canvas Copy button.
-            if len(self.figure.axes) <= 1:
+            btns = self._hover_buttons()
+            if not btns:
                 if self._hover_ax is not None:
                     self._copy_hide_timer.start()
                 return
@@ -217,9 +244,10 @@ if _HAVE_MPL:
                 return
             if ax is not self._hover_ax:
                 self._hover_ax = ax
-                self._position_copy_btn(ax)
-                self._copy_btn.raise_()
-                self._copy_btn.show()
+                self._position_hover_btns(ax)
+                for b in btns:
+                    b.raise_()
+                    b.show()
             self._copy_hide_timer.stop()
 
         def _on_canvas_leave(self, _event) -> None:
@@ -228,13 +256,15 @@ if _HAVE_MPL:
             self._copy_hide_timer.start()
 
         def _maybe_hide_copy_btn(self) -> None:
-            if self._copy_btn_hovered:
+            if self._copy_btn_hovered or self._save_btn_hovered:
                 return
             self._copy_btn.hide()
+            self._save_btn.hide()
             self._hover_ax = None
 
-        def _position_copy_btn(self, ax) -> None:
-            """Place the button just inside the top-right corner of *ax*.
+        def _position_hover_btns(self, ax) -> None:
+            """Lay the hover buttons just inside the top-right corner of *ax*,
+            right-aligned in a row (rightmost button hugs the corner).
 
             ``Axes.get_window_extent`` is in matplotlib display pixels (origin
             bottom-left, scaled by the device pixel ratio); Qt child-widget
@@ -244,9 +274,13 @@ if _HAVE_MPL:
             dpr = getattr(self.canvas, "device_pixel_ratio", None) \
                 or self.canvas.devicePixelRatioF()
             inset = theme.Spacing.xs
-            bx = round(ext.x1 / dpr) - self._copy_btn.width() - inset
+            gap = theme.Spacing.xs
+            right = round(ext.x1 / dpr) - inset
             by = round(self.canvas.height() - ext.y1 / dpr) + inset
-            self._copy_btn.move(int(bx), int(by))
+            for b in self._hover_buttons():  # right → left
+                bx = right - b.width()
+                b.move(int(bx), int(by))
+                right = bx - gap
 
         def _on_copy_axis_clicked(self) -> None:
             ax = self._hover_ax
@@ -282,6 +316,55 @@ if _HAVE_MPL:
                 pass
             self.panelCopied.emit(msg)
 
+        def set_save_handler(self, handler) -> None:
+            """Enable the hover "save to Saved Plots" button.
+
+            *handler* is called as ``handler(png_bytes: bytes, panel_label: str)
+            -> str`` when the button is clicked and should return a short status
+            string (shown as a toast). Passing ``None`` disables the button."""
+            self._save_handler = handler
+
+        def _on_save_axis_clicked(self) -> None:
+            ax = self._hover_ax
+            if ax is None or self._save_handler is None:
+                return
+            import io
+
+            from widgets.fig_clipboard import axis_tight_bbox_inches
+            # Render the hovered panel in publication mode (the canonical export
+            # look), mirroring the Copy path, then revert.
+            prev = self._plot_theme
+            png_bytes = b""
+            try:
+                if prev != "publication":
+                    self.setPlotTheme("publication")
+                bbox = axis_tight_bbox_inches(
+                    ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
+                buf = io.BytesIO()
+                self.figure.savefig(
+                    buf, format="png", bbox_inches=bbox, dpi=200,
+                    facecolor=self.figure.get_facecolor())
+                png_bytes = buf.getvalue()
+            finally:
+                if self._plot_theme != prev:
+                    self.setPlotTheme(prev)
+            label = ""
+            try:
+                label = (ax.get_title() or "").strip()
+            except Exception:
+                label = ""
+            try:
+                status = self._save_handler(png_bytes, label) or "Saved plot"
+                failed = False
+            except Exception as exc:  # noqa: BLE001 — surface to the user
+                status, failed = f"Save failed: {exc}", True
+            try:
+                from widgets.toast import Toast
+                Toast.show_message(self.window(), status,
+                                   kind="danger" if failed else "success")
+            except Exception:
+                pass
+
         def eventFilter(self, obj, event):
             if obj is getattr(self, "_copy_btn", None):
                 if event.type() == QEvent.Enter:
@@ -289,6 +372,13 @@ if _HAVE_MPL:
                     self._copy_hide_timer.stop()
                 elif event.type() == QEvent.Leave:
                     self._copy_btn_hovered = False
+                    self._copy_hide_timer.start()
+            elif obj is getattr(self, "_save_btn", None):
+                if event.type() == QEvent.Enter:
+                    self._save_btn_hovered = True
+                    self._copy_hide_timer.stop()
+                elif event.type() == QEvent.Leave:
+                    self._save_btn_hovered = False
                     self._copy_hide_timer.start()
             return super().eventFilter(obj, event)
 

@@ -23,6 +23,7 @@ from functools import partial
 from well_viewer.features.barplot.controller import on_bar_drag_press
 from well_viewer.features.barplot.controller import on_bar_drag_release
 from well_viewer.features.export.service import export_bar_plot_data
+from well_viewer.features.saved_plots.controller import wire_save_to_gallery
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -237,6 +238,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False)
+    wire_save_to_gallery(ctx.app, card, "Bar Plots")
     _sw = make_plot_view_switcher(ctx.app, 'Bar Plots')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

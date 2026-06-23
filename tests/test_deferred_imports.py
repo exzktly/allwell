@@ -39,7 +39,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # Raised to 135 for the image_table grid_ops module: grid_ops imports the rebuild
 # helpers from controller, so controller defers its grid_ops import (to wire the
 # row/column remove callbacks) to break the controller ↔ grid_ops cycle.
-MAX_DEFERRED_FEATURE_IMPORTS = 135
+# Raised to 137 for the Saved Plots tab: core/centre_view defers its tab_view
+# builder import and core/tab_controller defers its controller import (core must
+# not import features at module scope) — two standard core → feature defers, not
+# new inter-feature cycles. The six plot tabs wire the save button via a
+# module-level import, so they add nothing here.
+MAX_DEFERRED_FEATURE_IMPORTS = 137
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

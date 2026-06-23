@@ -20,6 +20,7 @@ from well_viewer.core.ui_helpers import (
 )
 from well_viewer.core.channel_state_controller import refresh_metric_combo_for_channel
 from well_viewer.features.export.service import export_heatmap_data
+from well_viewer.features.saved_plots.controller import wire_save_to_gallery
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
 from well_viewer.core.safe import swallowed
 
@@ -187,6 +188,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # ── Figure (in a v2 PlotCard — card chrome + MplToolbar) ────────────────
     from widgets.plot_card import PlotCard
     card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False)
+    wire_save_to_gallery(ctx.app, card, "Heat Map")
     _sw = make_plot_view_switcher(ctx.app, 'Heat Map')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

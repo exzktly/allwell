@@ -13,6 +13,7 @@ from well_viewer.core.ui_helpers import (
 from functools import partial
 from well_viewer.features.export.service import export_plot_data
 from well_viewer.features.lineplot.controller import on_fig_click
+from well_viewer.features.saved_plots.controller import wire_save_to_gallery
 
 # The Line Graphs figure: three stacked subplots (mean / fraction / CDF).
 _FIG_W, _FIG_H, _DPI = 7.2, 14.0, 100
@@ -115,6 +116,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
+    wire_save_to_gallery(ctx.app, card, "Line Graphs")
     _sw = make_plot_view_switcher(ctx.app, 'Line Graphs')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

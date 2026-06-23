@@ -15,6 +15,7 @@ from well_viewer.core.ui_helpers import (
     make_band_controls, make_plot_with_right_dock,
     make_plot_view_switcher)
 from well_viewer.features.export.service import export_distribution_data
+from well_viewer.features.saved_plots.controller import wire_save_to_gallery
 from well_viewer.features.scatter.collect import get_all_timepoints
 
 
@@ -132,6 +133,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False)
+    wire_save_to_gallery(ctx.app, card, "Distribution")
     _sw = make_plot_view_switcher(ctx.app, 'Distribution')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

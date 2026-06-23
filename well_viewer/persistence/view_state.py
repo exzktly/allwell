@@ -174,15 +174,37 @@ def _snapshot_distribution(app) -> dict:
 def _snapshot_scatter(app) -> dict:
     out: dict[str, Any] = {}
     for key, attr in (
+        # Per-cell ("Per-cell points") sub-tab axis selectors.
         ("ch_x", "_scatter_ch_x_cb"),
         ("metric_x", "_scatter_metric_x_cb"),
         ("ch_y", "_scatter_ch_y_cb"),
         ("metric_y", "_scatter_metric_y_cb"),
         ("timepoint", "_scatter_tp_cb"),
+        # Per-well aggregate ("Per-well aggregate") sub-tab axis selectors —
+        # these are independent combos and were previously not captured, so the
+        # aggregate scatter axes reset to defaults on reopen.
+        ("agg_ch_x", "_scatter_agg_ch_x_cb"),
+        ("agg_metric_x", "_scatter_agg_metric_x_cb"),
+        ("agg_ch_y", "_scatter_agg_ch_y_cb"),
+        ("agg_metric_y", "_scatter_agg_metric_y_cb"),
     ):
         v = _combo_text(app, attr)
         if v is not None:
             out[key] = v
+    # Which sub-tab (per-cell vs aggregate) was active.
+    mode = getattr(app, "_scatter_mode", None)
+    if mode:
+        out["mode"] = str(mode)
+    # Per-timepoint multi-select checkboxes for each sub-tab (the dataset-wide
+    # timepoint filter the user can toggle). Mirrors the Bar tab's
+    # ``timepoint_selections`` round-trip.
+    for key, attr in (
+        ("tp_selections", "_scatter_tp_selections"),
+        ("agg_tp_selections", "_scatter_agg_tp_selections"),
+    ):
+        sel = getattr(app, attr, None)
+        if isinstance(sel, dict) and sel:
+            out[key] = {str(k): bool(v) for k, v in sel.items()}
     return out
 
 
@@ -600,9 +622,43 @@ def _apply_scatter(app, state: dict) -> None:
         ("ch_y", "_scatter_ch_y_cb"),
         ("metric_y", "_scatter_metric_y_cb"),
         ("timepoint", "_scatter_tp_cb"),
+        ("agg_ch_x", "_scatter_agg_ch_x_cb"),
+        ("agg_metric_x", "_scatter_agg_metric_x_cb"),
+        ("agg_ch_y", "_scatter_agg_ch_y_cb"),
+        ("agg_metric_y", "_scatter_agg_metric_y_cb"),
     ):
         if key in state:
             _set_combo_if_valid(app, attr, str(state[key]))
+    # Restore the per-timepoint multi-select filters, intersected with the
+    # timepoints the current dataset actually has (a saved tp may be gone).
+    for skey, attr in (
+        ("tp_selections", "_scatter_tp_selections"),
+        ("agg_tp_selections", "_scatter_agg_tp_selections"),
+    ):
+        saved = state.get(skey)
+        live = getattr(app, attr, None)
+        if isinstance(saved, dict) and isinstance(live, dict):
+            for tp_str in live:
+                if tp_str in saved:
+                    live[tp_str] = bool(saved[tp_str])
+    # Refresh the timepoint-selector summary labels so the restored filter is
+    # reflected in the UI, then re-apply the active sub-tab last (it repopulates
+    # the axis combos but preserves the values we just set, and redraws).
+    for fn_name in ("_update_scatter_tp_selection_display",
+                    "_update_tp_selection_display"):
+        fn = getattr(app, fn_name, None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                swallowed()
+    mode = state.get("mode")
+    set_mode = getattr(app, "_scatter_set_mode", None)
+    if mode and callable(set_mode):
+        try:
+            set_mode(str(mode))
+        except Exception:
+            swallowed()
 
 
 def _apply_image_table(app, state: dict) -> None:

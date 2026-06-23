@@ -135,6 +135,24 @@ class SavedPlotsStore:
         rec.title = str(new_title)
         self._persist(app)
 
+    def move(self, app, plot_id: str, up: bool) -> bool:
+        """Reorder a saved plot one slot within the *displayed* gallery
+        (newest-first = ``reversed(records)``). ``up`` moves it toward the top.
+
+        Returns True when a swap happened (so callers can skip a needless
+        repaint at the list ends)."""
+        disp = list(reversed(self.records))
+        idx = next((i for i, r in enumerate(disp) if r.id == plot_id), None)
+        if idx is None:
+            return False
+        swap = idx - 1 if up else idx + 1
+        if swap < 0 or swap >= len(disp):
+            return False
+        disp[idx], disp[swap] = disp[swap], disp[idx]
+        self.records = list(reversed(disp))
+        self._persist(app)
+        return True
+
     def clear(self, app) -> None:
         for r in list(self.records):
             p = self.image_path(app, r)

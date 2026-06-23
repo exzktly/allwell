@@ -243,7 +243,10 @@ def test_scatter_draw_with_shape_axis(loaded_app_shape):
     assert cache["col_x"] == "shape_eccentricity"
     assert cache["col_y"] == "gfp_mean_intensity"
     assert len(cache["points"]) > 0
-    assert app._ax_scatter.get_xlabel() == "Eccentricity"
+    # Scatter axes default to the log10(value+1) display transform, which
+    # annotates the axis label with a "(log₁₀, +1)" suffix.
+    from well_viewer.features.scatter._layout import log1p_axis_suffix
+    assert app._ax_scatter.get_xlabel() == "Eccentricity" + log1p_axis_suffix(True)
 
 
 def test_scatter_menus_preserve_timepoint_selection(loaded_app_shape):

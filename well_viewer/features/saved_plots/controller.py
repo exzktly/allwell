@@ -77,6 +77,12 @@ def rename_saved_plot(app, plot_id: str, new_title: str) -> None:
     refresh_saved_plots_gallery(app)
 
 
+def move_saved_plot(app, plot_id: str, up: bool) -> None:
+    """Reorder a saved plot up/down in the gallery and repaint."""
+    if get_store(app).move(app, plot_id, up):
+        refresh_saved_plots_gallery(app)
+
+
 def clear_saved_plots(app) -> None:
     get_store(app).clear(app)
     refresh_saved_plots_gallery(app)

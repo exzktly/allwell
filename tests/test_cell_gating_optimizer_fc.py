@@ -84,3 +84,20 @@ def test_optimizer_accepts_fc_kwargs_and_off_is_unchanged():
     )
     assert (same.threshold, same.frac_a, same.frac_b, same.difference) == (
         raw.threshold, raw.frac_a, raw.frac_b, raw.difference)
+
+
+def test_scan_fc_subtract_control_metric_not_inverted():
+    # Regression: under the *subtract* operator the adjusted fractions go
+    # negative (wells below their control), and a signed max(fa, fb) denominator
+    # used to zero the gap across that whole region (and spike at the sign
+    # crossing) — inverting the curve / picking the wrong threshold. The
+    # magnitude denominator keeps the metric finite, non-negative, and peaked
+    # where A and B actually separate.
+    th = np.array([0, 1, 2, 3, 4], dtype=float)
+    a = np.array([5, 5, 5, 5], dtype=float)   # on across the whole range
+    b = np.array([3, 3, 3, 3], dtype=float)   # drops off at t=3
+    ctrl = np.array([10, 10, 10, 10], dtype=float)  # control on everywhere
+    fa, fb, diffs = _scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="subtract")
+    assert np.all(np.isfinite(diffs)) and np.all(diffs >= 0)
+    assert diffs.max() > 0                     # not crushed to all-zero
+    assert int(np.argmax(diffs)) == 3          # separation peak, not index 0

@@ -607,7 +607,18 @@ def _beeswarm_jitter(
     max_spread: float = 0.35,
     n_bins: int = 40,
 ) -> Tuple[List[float], List[float]]:
-    """Compute x-jitter positions for a beeswarm column via ``np.digitize``."""
+    """Random x-jitter for a beeswarm column.
+
+    Each point keeps its real y value and is offset from the column midline by a
+    *random* amount whose magnitude is proportional to the local point density
+    at its value — the fraction of the column's points sharing its y-bin
+    (densest bin → full ``max_spread``; sparse tails hug the midline). So the
+    column is widest where points are most abundant and pinches in at the tails.
+
+    The deviation is random (seeded for stable redraws), NOT assigned by rank
+    along y: a rank-based outward fill correlates x with y within each bin and
+    draws chevron / "V" artefacts instead of a cloud.
+    """
     arr = np.asarray(values, dtype=float)
     n = arr.size
     if n == 0:
@@ -615,28 +626,17 @@ def _beeswarm_jitter(
 
     lo = float(arr.min())
     hi = float(arr.max())
-    rng = hi - lo if hi > lo else 1.0
-    bin_w = rng / n_bins
+    rng_span = hi - lo if hi > lo else 1.0
+    bin_w = rng_span / n_bins
     edges = lo + bin_w * np.arange(1, n_bins)
     bin_idx = np.minimum(np.digitize(arr, edges), n_bins - 1)
 
     counts = np.bincount(bin_idx, minlength=n_bins)
-    step = max_spread / max(int(counts.max()), 1)
-
-    xs = np.zeros(n, dtype=float)
-    order = np.lexsort((arr, bin_idx))
-    starts = np.cumsum(counts) - counts
-    seen = np.zeros(n_bins, dtype=int)
-    for idx in order:
-        b = bin_idx[idx]
-        rank = seen[b]
-        seen[b] += 1
-        offset = ((rank + 1) // 2) * (1 if rank % 2 == 1 else -1)
-        xs[idx] = x_center + offset * step
-    # `starts` is unused but kept for clarity; bincount-based ordering
-    # produces identical layout to the legacy "alternate left/right by rank
-    # within bin" scheme.
-    del starts
+    max_count = max(int(counts.max()), 1)
+    # Per-point half-width ∝ local abundance at that y (relative to the mode).
+    half = (counts[bin_idx] / max_count) * max_spread
+    gen = np.random.default_rng(0)  # deterministic so redraws are stable
+    xs = x_center + gen.uniform(-1.0, 1.0, size=n) * half
 
     return xs.tolist(), arr.tolist()
 

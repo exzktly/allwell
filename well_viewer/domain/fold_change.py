@@ -900,19 +900,23 @@ def _fc_op_word(op: str) -> str:
 
 def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
                        control_label: str = "",
-                       op_ctrl: str = "ratio", op_t0: str = "ratio") -> str:
+                       op_ctrl: str = "ratio", op_t0: str = "ratio",
+                       baseline_label: str = "") -> str:
     """Compact " (fold-change …)" label fragment for axis titles.
 
     Names the operator (ratio vs subtraction) for each active axis so the plot
-    title makes explicit *how* the values were normalised, e.g.
-    ``"  (fold change vs DMSO (ratio), vs t0 (subtraction))"``.
+    title makes explicit *how* the values were normalised, and — for the vs-t0
+    axis — *which* timepoint is the baseline (``baseline_label``, e.g.
+    ``"t=24h"``; falls back to ``"t0"``). Example:
+    ``"  (fold change vs DMSO (ratio), vs t=0h (subtraction))"``.
     """
     parts: List[str] = []
     if vs_control_on:
         lbl = f"vs {control_label}" if control_label else "vs control"
         parts.append(f"{lbl} ({_fc_op_word(op_ctrl)})")
     if vs_t0_on:
-        parts.append(f"vs t0 ({_fc_op_word(op_t0)})")
+        base = baseline_label or "t0"
+        parts.append(f"vs {base} ({_fc_op_word(op_t0)})")
     if not parts:
         return ""
     return "  (fold change " + ", ".join(parts) + ")"
@@ -920,14 +924,17 @@ def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
 
 def fold_change_suffix_for(app) -> str:
     """``fold_change_suffix`` built from the app's live fold-change state
-    (including the per-axis ratio/subtract operators)."""
+    (per-axis ratio/subtract operators + the resolved baseline timepoint)."""
     plot = app._app_state.plot
+    base_tp = parse_baseline_tp(app)
+    baseline_label = f"t={base_tp:g}h" if base_tp is not None else "first timepoint"
     return fold_change_suffix(
         bool(getattr(plot, "fc_vs_control_on", False)),
         bool(getattr(plot, "fc_vs_t0_on", False)),
         str(getattr(plot, "fc_control_label", "") or ""),
         op_ctrl=str(getattr(plot, "fc_op_ctrl", "ratio") or "ratio"),
         op_t0=str(getattr(plot, "fc_op_t0", "ratio") or "ratio"),
+        baseline_label=baseline_label,
     )
 
 

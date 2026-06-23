@@ -128,6 +128,13 @@ class SavedPlotsStore:
         self.records = keep
         self._persist(app)
 
+    def rename(self, app, plot_id: str, new_title: str) -> None:
+        rec = self.get(plot_id)
+        if rec is None:
+            return
+        rec.title = str(new_title)
+        self._persist(app)
+
     def clear(self, app) -> None:
         for r in list(self.records):
             p = self.image_path(app, r)

@@ -90,3 +90,13 @@ def test_get_store_is_singleton_on_app():
     s1 = get_store(app)
     s2 = get_store(app)
     assert s1 is s2
+
+
+def test_store_rename_updates_title_and_persists(tmp_path):
+    app = _app(tmp_path)
+    store = SavedPlotsStore()
+    store.add(app, _rec(), b"x")
+    store.rename(app, "20260101-000000-000000", "My figure")
+    assert store.get("20260101-000000-000000").title == "My figure"
+    from well_viewer.persistence import _doc
+    assert _doc.get_section(app, "saved_plots")[0]["title"] == "My figure"

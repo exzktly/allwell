@@ -12,6 +12,7 @@ from datetime import datetime
 
 from well_viewer.core.safe import swallowed
 from well_viewer.persistence import view_state
+from well_viewer.features.saved_plots._report import build_saved_plots_report
 from well_viewer.features.saved_plots.collect import build_summary, capture_params
 from well_viewer.features.saved_plots.state import SavedPlot, get_store
 
@@ -99,6 +100,46 @@ def export_saved_plot(app, plot_id: str) -> None:
             Path(dest).write_bytes(src.read_bytes())
     except Exception:
         _logger.debug("saved_plots: export failed for %r", plot_id, exc_info=True)
+
+
+def export_report_pdf(app) -> None:
+    """Export all saved plots as a multi-page PDF report (cover + one page each)."""
+    store = get_store(app)
+    store.ensure_loaded(app)
+    if not store.records:
+        _status(app, "No saved plots to export.")
+        return
+    try:
+        from pathlib import Path
+        from PySide6.QtWidgets import QFileDialog
+
+        data_dir = getattr(app._app_state.dataset, "data_dir", None)
+        suggested = str(Path(data_dir) / "saved_plots_report.pdf") if data_dir \
+            else "saved_plots_report.pdf"
+        dest, _flt = QFileDialog.getSaveFileName(
+            None, "Export Saved Plots report", suggested, "PDF document (*.pdf)")
+        if not dest:
+            return
+        n = build_saved_plots_report(
+            store.records,
+            lambda r: store.image_path(app, r),
+            dest,
+            dataset_name=(Path(data_dir).name if data_dir else ""),
+            summary_for=lambda r: r.summary,
+        )
+        _status(app, f"Saved Plots report → {Path(dest).name} ({n} plots)")
+    except Exception as exc:  # noqa: BLE001 — surface to the user
+        _logger.debug("saved_plots: report export failed", exc_info=True)
+        _status(app, f"Report export failed: {exc}")
+
+
+def _status(app, msg: str) -> None:
+    fn = getattr(app, "_set_status", None)
+    if callable(fn):
+        try:
+            fn(msg)
+        except Exception:
+            swallowed()
 
 
 def refresh_saved_plots_gallery(app) -> None:

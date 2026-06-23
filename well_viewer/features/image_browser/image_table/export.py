@@ -14,6 +14,8 @@ from typing import Any, Dict, Optional, Tuple  # noqa: F401
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox  # noqa: F401
 
+from well_viewer.core.safe import swallowed
+
 from well_viewer.features.image_browser.image_table.image_compose import (
     _compose_image_table_rgb,
     _export_binary_mask,
@@ -25,6 +27,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     _row_cmap_name,
     _row_log_scale,
 )
+from well_viewer.features.saved_plots.controller import save_plot_from_card
 
 
 def _export_opts(app) -> Dict[str, Any]:
@@ -355,3 +358,56 @@ def image_table_copy_svg(app) -> None:
         QMessageBox.critical(app, "Copy failed", "Could not render the image table.")
         return
     app._set_status("Image table " + status[0].lower() + status[1:])
+
+
+def _downsample_dpi(orig_dpi: int, w_in: float, h_in: float,
+                    *, max_px: int = 1600, floor: int = 60) -> int:
+    """Pick a render dpi so the figure's longest side is ≤ *max_px* pixels,
+    never above *orig_dpi* and never below *floor*."""
+    longest = max(float(w_in), float(h_in), 0.1)
+    return max(floor, min(int(orig_dpi), int(max_px / longest)))
+
+
+def image_table_save_to_gallery(app) -> None:
+    """Render the current image grid (downsampled) and save it to Saved Plots.
+
+    Microscopy grids can be enormous at full export resolution, so the saved
+    snapshot is capped to a modest longest-side pixel budget — enough to read
+    the grid in the gallery / PDF report without bloating the per-dataset store.
+    """
+    import io
+
+    fig, save_kwargs = _build_export_figure(app)
+    if fig is None:
+        app._set_status("Image table is empty — nothing to save.")
+        return
+    orig_dpi = int(save_kwargs.pop("_dpi", 200) or 200)
+    save_kwargs.pop("format", None)
+
+    # Downsample: cap the longest side to ~1600 px.
+    try:
+        w_in, h_in = (float(v) for v in fig.get_size_inches())
+        dpi_ds = _downsample_dpi(orig_dpi, w_in, h_in)
+    except Exception:
+        dpi_ds = min(orig_dpi, 110)
+
+    buf = io.BytesIO()
+    try:
+        fig.savefig(buf, format="png", dpi=dpi_ds, **save_kwargs)
+    except Exception as exc:
+        QMessageBox.critical(app, "Save failed", str(exc))
+        return
+    finally:
+        try:
+            import matplotlib.pyplot as _plt
+            _plt.close(fig)
+        except Exception:
+            swallowed()  # figure cleanup is best-effort
+
+    cells = getattr(app, "_image_table_cells", None) or []
+    rows = len(cells)
+    cols = len(cells[0]) if rows and cells[0] else 0
+    label = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
+
+    status = save_plot_from_card(app, "Image Table", buf.getvalue(), label)
+    app._set_status(status)

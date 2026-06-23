@@ -161,6 +161,39 @@ def _to_float_or_none(value: str):
     return float(s)
 
 
+def apply_axis_log_scale(ax, which: str, on: bool) -> None:
+    """Set an axis to log scale, honouring a scatter ``_aw_log_plus1`` request.
+
+    Plain ``log`` can't show 0 (it drops it). Axes tagged ``_aw_log_plus1`` (the
+    per-cell scatter) instead use a ``log10(x+1)`` *display* transform via
+    matplotlib ``FuncScale``: the data stays in raw units — so gates, clicks and
+    exports are unaffected ("display-only, not saved") — while zeros land at the
+    left edge. Ticks sit at real decade values (incl. 0) positioned by the
+    transform, so it still reads like a log axis.
+    """
+    set_scale = ax.set_xscale if which == "x" else ax.set_yscale
+    if not on:
+        set_scale("linear")
+        return
+    if not bool(getattr(ax, "_aw_log_plus1", False)):
+        set_scale("log")
+        return
+    import numpy as _np
+
+    def _fwd(v):
+        return _np.log10(_np.clip(_np.asarray(v, dtype=float), 0.0, None) + 1.0)
+
+    def _inv(u):
+        return _np.power(10.0, _np.asarray(u, dtype=float)) - 1.0
+
+    set_scale("function", functions=(_fwd, _inv))
+    from matplotlib.ticker import FixedLocator, FuncFormatter
+    mpl_axis = ax.xaxis if which == "x" else ax.yaxis
+    decades = [0, 1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000]
+    mpl_axis.set_major_locator(FixedLocator(decades))
+    mpl_axis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:g}"))
+
+
 def _ensure_export_style_prefs(app) -> dict:
     if not hasattr(app, "_export_style_prefs"):
         app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
@@ -490,11 +523,11 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             if not getattr(ax, "_categorical_xaxis", False):
                 _fx = getattr(ax, "_aw_force_xlog", None)
                 _xlog = bool(prefs.get("x_log", False)) if _fx is None else bool(_fx)
-                ax.set_xscale("log" if _xlog else "linear")
+                apply_axis_log_scale(ax, "x", _xlog)
             if not getattr(ax, "_categorical_yaxis", False):
                 _fy = getattr(ax, "_aw_force_ylog", None)
                 _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
-                ax.set_yscale("log" if _ylog else "linear")
+                apply_axis_log_scale(ax, "y", _ylog)
 
         if bool(prefs.get("tick_minor", False)):
             ax.minorticks_on()

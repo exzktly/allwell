@@ -607,37 +607,96 @@ def _beeswarm_jitter(
     max_spread: float = 0.35,
     n_bins: int = 40,
 ) -> Tuple[List[float], List[float]]:
-    """Random x-jitter for a beeswarm column.
+    """Standard (non-overlapping) beeswarm x-positions for a column.
 
-    Each point keeps its real y value and is offset from the column midline by a
-    *random* amount whose magnitude is proportional to the local point density
-    at its value — the fraction of the column's points sharing its y-bin
-    (densest bin → full ``max_spread``; sparse tails hug the midline). So the
-    column is widest where points are most abundant and pinches in at the tails.
+    Each point keeps its real y value and is nudged sideways to the position
+    *closest to the column midline* that doesn't collide with an
+    already-placed point — the classic "swarm" packing used by R's ``beeswarm``
+    / seaborn ``swarmplot``. Points are placed in ascending-y order; for the
+    new point, every placed point within one dot-diameter ``d`` in y carves out
+    a forbidden x-interval, and the new point takes the nearest free x. The
+    column therefore fans out where points are dense and stays slim in the
+    tails, with no overlaps and no x↔y correlation (so no chevron / "V").
 
-    The deviation is random (seeded for stable redraws), NOT assigned by rank
-    along y: a rank-based outward fill correlates x with y within each bin and
-    draws chevron / "V" artefacts instead of a cloud.
+    Placement runs in a normalised space (y scaled to ``[0, 1]``, dot diameter
+    ``d = 1/n_bins``); the resulting offsets are then scaled so the densest part
+    of the column just fills ``max_spread`` (its half-slot width). Deterministic.
     """
     arr = np.asarray(values, dtype=float)
     n = arr.size
     if n == 0:
         return [], []
+    if n == 1:
+        return [x_center], [float(arr[0])]
 
     lo = float(arr.min())
     hi = float(arr.max())
-    rng_span = hi - lo if hi > lo else 1.0
-    bin_w = rng_span / n_bins
-    edges = lo + bin_w * np.arange(1, n_bins)
-    bin_idx = np.minimum(np.digitize(arr, edges), n_bins - 1)
+    span = hi - lo if hi > lo else 1.0
+    yn = (arr - lo) / span                       # normalised y in [0, 1]
+    d = 1.0 / float(max(n_bins, 1))              # dot diameter (normalised)
+    d2 = d * d
 
-    counts = np.bincount(bin_idx, minlength=n_bins)
-    max_count = max(int(counts.max()), 1)
-    # Per-point half-width ∝ local abundance at that y (relative to the mode).
-    half = (counts[bin_idx] / max_count) * max_spread
-    gen = np.random.default_rng(0)  # deterministic so redraws are stable
-    xs = x_center + gen.uniform(-1.0, 1.0, size=n) * half
+    # Very dense columns can't be packed without overlap (and the swarm loop is
+    # superlinear) — fall back to a density-weighted jitter, which still reads
+    # as a swarm and shows every point.
+    if n > 6000:
+        bin_idx = np.minimum(np.digitize(arr, lo + (span / n_bins) * np.arange(1, n_bins)),
+                             n_bins - 1)
+        counts = np.bincount(bin_idx, minlength=n_bins)
+        half = (counts[bin_idx] / max(int(counts.max()), 1)) * max_spread
+        xs = x_center + np.random.default_rng(0).uniform(-1.0, 1.0, size=n) * half
+        return xs.tolist(), arr.tolist()
 
+    order = np.argsort(yn, kind="mergesort")     # ascending y, stable
+    offs = np.zeros(n, dtype=float)
+    placed_x: List[float] = []
+    placed_y: List[float] = []                   # ascending (insertion order)
+    win = 0                                       # sliding-window start
+    bal = 0.0                                     # running L/R balance (symmetry)
+    for idx in order:
+        y = float(yn[idx])
+        while win < len(placed_y) and placed_y[win] <= y - d:
+            win += 1
+        # Forbidden x-intervals from still-active placed points (|Δy| < d).
+        intervals: List[Tuple[float, float]] = []
+        for j in range(win, len(placed_y)):
+            dy = y - placed_y[j]
+            g = d2 - dy * dy
+            if g > 0.0:
+                w = math.sqrt(g)
+                px = placed_x[j]
+                intervals.append((px - w, px + w))
+        if not intervals:
+            chosen = 0.0
+        else:
+            intervals.sort()
+            merged = [list(intervals[0])]
+            for a, b in intervals[1:]:
+                if a <= merged[-1][1] + 1e-12:
+                    merged[-1][1] = max(merged[-1][1], b)
+                else:
+                    merged.append([a, b])
+            cover = next(((a, b) for a, b in merged
+                          if a - 1e-12 <= 0.0 <= b + 1e-12), None)
+            if cover is None:
+                chosen = 0.0                       # midline is free
+            else:
+                a, b = cover                        # nearest free spot each side
+                if abs(b) < abs(a) - 1e-12:
+                    chosen = b
+                elif abs(a) < abs(b) - 1e-12:
+                    chosen = a
+                else:                               # tie → balance the column
+                    chosen = b if bal <= 0.0 else a
+        offs[idx] = chosen
+        bal += chosen
+        placed_x.append(chosen)
+        placed_y.append(y)
+
+    m = float(np.max(np.abs(offs)))
+    if m > 0.0:
+        offs *= max_spread / m
+    xs = x_center + offs
     return xs.tolist(), arr.tolist()
 
 

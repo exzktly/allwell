@@ -22,11 +22,11 @@ from well_viewer.features.export.style import (
     DEFAULT_EXPORT_STYLE_PREFS,
     EXPORT_PROFILES,
     _ensure_custom_export_profiles,
-    _ensure_export_style_prefs,
     _get_all_profile_names,
     _resolve_export_dock,
     apply_export_style_to_current,
 )
+from well_viewer.core.plot_style import figure_prefs
 
 # v2 chrome: this panel is composed from the custom widgets in ``widgets/``
 # (CollapsibleSection, ToggleSwitch) plus theme-styled stock widgets. The
@@ -78,7 +78,10 @@ class ExportStyleSidebar(QWidget):
         self._canvas = canvas
         self._default_name = default_name
         self._base_dir = Path(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else Path.cwd()
-        self._prefs = _ensure_export_style_prefs(app)
+        # Per-figure view: global publication style (fonts, line/marker, grid,
+        # legend …) is shared, but axis limits / log scaling are scoped to this
+        # figure so they no longer leak across tabs.
+        self._prefs = figure_prefs(app, fig)
         self._updating = False
         self._getters: dict[str, Callable[[], object]] = {}
         self._setters: dict[str, Callable[[object], None]] = {}

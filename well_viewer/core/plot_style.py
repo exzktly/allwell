@@ -12,6 +12,8 @@ card), falls back to the legacy ``ui.theme`` constants (publication-style).
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
+
 from ui.theme import PLOT_BG, PLOT_GRD, PLOT_SPN, PLOT_TXT, TXT_PRI
 from well_viewer.core.safe import swallowed
 
@@ -163,6 +165,103 @@ def _ensure_export_style_prefs(app) -> dict:
     if not hasattr(app, "_export_style_prefs"):
         app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
     return app._export_style_prefs
+
+
+# Prefs that describe a single plot's *view* (axis limits, log scaling, and the
+# per-axis bucket/target bookkeeping) rather than the global publication style
+# (fonts, line/marker, grid, legend …). These are inherently per-figure: a bar
+# chart's y-limit or a distribution's log-y has no meaning on the scatter tab.
+# They were historically kept in the one app-wide ``_export_style_prefs`` dict,
+# so editing them on one tab leaked onto every other tab. They now live in a
+# per-figure store (``app._export_axis_prefs[fig_key]``) overlaid on the global
+# style via :class:`_FigurePrefs`.
+AXIS_SCOPED_PREF_KEYS = frozenset({
+    "x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max",
+    "x_log", "y_log", "axis_buckets", "axis_target",
+})
+
+# Stable per-figure keys (survive figure recreation across sessions, unlike
+# ``id(fig)``) so the per-figure axis prefs can persist.
+_FIG_PREF_KEY_MAP = (
+    ("_line_fig", "line"),
+    ("_bar_fig", "bar"),
+    ("_scatter_fig", "scatter_cells"),
+    ("_scatter_agg_fig", "scatter_agg"),
+    ("_heatmap_fig", "heatmap"),
+    ("_distribution_fig", "distribution"),
+)
+
+
+def figure_pref_key(app, fig) -> str:
+    """A stable identifier for *fig* used to scope its axis prefs."""
+    for attr, key in _FIG_PREF_KEY_MAP:
+        if getattr(app, attr, None) is fig:
+            return key
+    return f"fig:{id(fig)}"
+
+
+def _ensure_axis_prefs_store(app) -> dict:
+    if not hasattr(app, "_export_axis_prefs"):
+        app._export_axis_prefs = {}
+    return app._export_axis_prefs
+
+
+class _FigurePrefs(MutableMapping):
+    """Read/write view over one figure's prefs.
+
+    Axis-scoped keys (:data:`AXIS_SCOPED_PREF_KEYS`) route to the figure's own
+    dict; everything else routes to the shared global style. Reads of an unset
+    axis key fall back to the neutral default (never the global dict), so a
+    value set on one figure can never bleed into another. Behaves like a plain
+    ``dict`` for every existing call site (``[]``/``get``/``in``/``dict(...)``).
+    """
+
+    __slots__ = ("_global", "_axis")
+
+    def __init__(self, global_prefs: dict, axis_prefs: dict) -> None:
+        self._global = global_prefs
+        self._axis = axis_prefs
+
+    def __getitem__(self, key):
+        if key in AXIS_SCOPED_PREF_KEYS:
+            if key in self._axis:
+                return self._axis[key]
+            return DEFAULT_EXPORT_STYLE_PREFS.get(key)
+        return self._global[key]
+
+    def __setitem__(self, key, value) -> None:
+        if key in AXIS_SCOPED_PREF_KEYS:
+            self._axis[key] = value
+        else:
+            self._global[key] = value
+
+    def __delitem__(self, key) -> None:
+        if key in AXIS_SCOPED_PREF_KEYS:
+            self._axis.pop(key, None)
+        else:
+            self._global.pop(key, None)
+
+    def __iter__(self):
+        seen = set()
+        for k in self._global:
+            if k not in AXIS_SCOPED_PREF_KEYS:
+                seen.add(k)
+                yield k
+        for k in AXIS_SCOPED_PREF_KEYS:
+            if k not in seen:
+                yield k
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+def figure_prefs(app, fig):
+    """A :class:`_FigurePrefs` view for *fig* — global style + that figure's
+    own axis limits / log scaling."""
+    global_prefs = _ensure_export_style_prefs(app)
+    store = _ensure_axis_prefs_store(app)
+    axis = store.setdefault(figure_pref_key(app, fig), {})
+    return _FigurePrefs(global_prefs, axis)
 
 
 def apply_export_style_prefs(fig, prefs: dict) -> None:
@@ -452,7 +551,9 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
 
 
 def apply_export_style_to_current(app, fig, canvas=None) -> None:
-    prefs = _ensure_export_style_prefs(app)
+    # Per-figure view (global style + *this* figure's axis limits / log scaling)
+    # so axis settings never leak across tabs.
+    prefs = figure_prefs(app, fig)
     apply_export_style_prefs(fig, prefs)
     if canvas is not None:
         canvas.draw_idle()

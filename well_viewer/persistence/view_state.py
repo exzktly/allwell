@@ -58,6 +58,11 @@ def snapshot(app) -> dict:
             "order": str(getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first"),
         },
         "export_style_prefs": dict(getattr(app, "_export_style_prefs", {}) or {}),
+        "export_axis_prefs": {
+            str(k): dict(v)
+            for k, v in (getattr(app, "_export_axis_prefs", {}) or {}).items()
+            if isinstance(v, dict)
+        },
         "tabs": _snapshot_tabs(app),
     }
 
@@ -338,11 +343,22 @@ def restore(app, state: dict) -> None:
 
     prefs_in = state.get("export_style_prefs")
     if isinstance(prefs_in, dict):
+        # Axis-scoped keys are persisted per-figure (below); strip any that
+        # linger in a pre-split saved global dict so they can't leak into every
+        # tab (or the batch-export path) on load.
+        from well_viewer.core.plot_style import AXIS_SCOPED_PREF_KEYS
+        clean_in = {k: v for k, v in prefs_in.items() if k not in AXIS_SCOPED_PREF_KEYS}
         existing = getattr(app, "_export_style_prefs", None)
         if isinstance(existing, dict):
-            existing.update(prefs_in)
+            existing.update(clean_in)
         else:
-            app._export_style_prefs = dict(prefs_in)
+            app._export_style_prefs = dict(clean_in)
+
+    axis_in = state.get("export_axis_prefs")
+    if isinstance(axis_in, dict):
+        app._export_axis_prefs = {
+            str(k): dict(v) for k, v in axis_in.items() if isinstance(v, dict)
+        }
 
     # Active channel — validated against the canonical list. Fall through
     # silently when the saved channel no longer exists in the new dataset.

@@ -36,6 +36,11 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **7.3.0 — Saved Plots, per-tab axis properties & clearer fold-change titles.**
+  - **Saved Plots tab.** Hover any plot panel's top-right corner and click the new **save** button to send that panel — plus the exact parameters/thresholds that produced it — to a per-dataset **Saved Plots** gallery (with Restore / Export / Delete). The gallery now has its own sidebar icon.
+  - **Properties no longer leak across tabs.** Axis **limits** and **log-scale** toggles set in a plot's Properties sidebar are now scoped to that plot — changing them on one tab no longer silently changes another tab. (Global publication style — fonts, line/marker, grid, legend — is still shared.)
+  - **Fold change is named in the graph title.** When a plot is fold-change-normalised, every affected panel title (not just the first) now says so and names the operator, e.g. *(fold change vs DMSO (ratio), vs t0 (subtraction))*.
+
 - **7.2.0 — Legend labels, fold-change panels, persistence & Image Table columns.** A round of plotting and review-side fixes:
   - **Sample-definition labels in every legend.** The **Scatter Plot** and **Distribution** legends now show your custom well / group labels (set on **Sample Definitions → Well Labels**) instead of the raw well token or group name — matching what Line Graphs and Bar Plots already did.
   - **Fold change now rescales all three Line Graphs panels.** Turning on fold change previously only rescaled the **mean** panel; the **fraction-on** and **N-events** panels stayed on raw values. Now all three normalize together (including in FOV-spread mode, where the N panel shows per-FOV mean counts).

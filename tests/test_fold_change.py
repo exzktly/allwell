@@ -230,6 +230,12 @@ def test_fold_change_suffix_both():
     assert "vs t0" in s
 
 
+def test_fold_change_suffix_names_operator():
+    s = fold_change_suffix(True, True, "CTRL", op_ctrl="ratio", op_t0="subtract")
+    assert "vs CTRL (ratio)" in s
+    assert "vs t0 (subtraction)" in s
+
+
 # ── resolve_control_wells ───────────────────────────────────────────────────
 
 def test_resolve_control_wells_rep_set(mock_app):

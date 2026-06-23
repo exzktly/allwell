@@ -893,17 +893,42 @@ def is_active(app) -> bool:
     return vs_ctrl or vs_t0
 
 
+def _fc_op_word(op: str) -> str:
+    """Human word for a fold-change operator token."""
+    return "subtraction" if str(op) == "subtract" else "ratio"
+
+
 def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
-                       control_label: str = "") -> str:
-    """Compact " (fold-change …)" label fragment for axis titles."""
+                       control_label: str = "",
+                       op_ctrl: str = "ratio", op_t0: str = "ratio") -> str:
+    """Compact " (fold-change …)" label fragment for axis titles.
+
+    Names the operator (ratio vs subtraction) for each active axis so the plot
+    title makes explicit *how* the values were normalised, e.g.
+    ``"  (fold change vs DMSO (ratio), vs t0 (subtraction))"``.
+    """
     parts: List[str] = []
     if vs_control_on:
-        parts.append(f"vs {control_label}" if control_label else "vs control")
+        lbl = f"vs {control_label}" if control_label else "vs control"
+        parts.append(f"{lbl} ({_fc_op_word(op_ctrl)})")
     if vs_t0_on:
-        parts.append("vs t0")
+        parts.append(f"vs t0 ({_fc_op_word(op_t0)})")
     if not parts:
         return ""
     return "  (fold change " + ", ".join(parts) + ")"
+
+
+def fold_change_suffix_for(app) -> str:
+    """``fold_change_suffix`` built from the app's live fold-change state
+    (including the per-axis ratio/subtract operators)."""
+    plot = app._app_state.plot
+    return fold_change_suffix(
+        bool(getattr(plot, "fc_vs_control_on", False)),
+        bool(getattr(plot, "fc_vs_t0_on", False)),
+        str(getattr(plot, "fc_control_label", "") or ""),
+        op_ctrl=str(getattr(plot, "fc_op_ctrl", "ratio") or "ratio"),
+        op_t0=str(getattr(plot, "fc_op_t0", "ratio") or "ratio"),
+    )
 
 
 # ── Control-series helpers ──────────────────────────────────────────────────

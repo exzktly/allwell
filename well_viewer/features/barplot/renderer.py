@@ -276,15 +276,14 @@ def draw_violin(
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
-    _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
-    _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(app) if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{app._app_state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"{fraction_title(app._app_state.channel.active_metric)}  —  {_tp_suffix}",
+        f"{fraction_title(app._app_state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -427,15 +426,14 @@ def draw_beeswarm(
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _thr_q = threshold_qualifier(app._app_state.channel.active_metric)
-    _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
-    _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(app) if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{app._app_state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
     ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"{fraction_title(app._app_state.channel.active_metric)}  —  {_tp_suffix}",
+        f"{fraction_title(app._app_state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -494,8 +492,7 @@ def draw_grouped_bar_mode(
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _metric_key = app._app_state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
-    _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl)
+    _fc_suffix = _fc.fold_change_suffix_for(app)
     _tp_suffix = _format_tp_title(target_ts, tp_str)
     ax_mean.set_title(
         f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}  —  {_tp_suffix}",
@@ -503,16 +500,16 @@ def draw_grouped_bar_mode(
     )
     ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"{fraction_title(_metric_key)}  —  {_tp_suffix}",
+        f"{fraction_title(_metric_key)}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6,
     )
     if ax_n is not None:
         fov_active = app._use_fov_spread_active()
         if fov_active:
-            n_title = f"{events_per_fov_title(_metric_key, band_lbl)}  —  {_tp_suffix}"
+            n_title = f"{events_per_fov_title(_metric_key, band_lbl)}{_fc_suffix}  —  {_tp_suffix}"
             n_ylabel = "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV"
         else:
-            n_title = f"{events_total_title(_metric_key)}  —  {_tp_suffix}"
+            n_title = f"{events_total_title(_metric_key)}{_fc_suffix}  —  {_tp_suffix}"
             n_ylabel = "N(spots)" if _metric_key == "smfish_count" else "N(above)"
         ax_n.set_title(
             n_title, color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold", pad=6,
@@ -561,23 +558,22 @@ def redraw_bars(app) -> None:
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _metric_key = app._app_state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_v, _fc_lbl, _fc_t0 = _fc.fold_change_state(app)
-    _fc_suffix = _fc.fold_change_suffix(_fc_v, _fc_t0, _fc_lbl)
+    _fc_suffix = _fc.fold_change_suffix_for(app)
     apply_ax_style(ax_mean,
                    f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}",
                    f"{_ch} {_metric_label}{_fc_suffix}")
-    apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
+    apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}", "Fraction" + _fc_suffix)
     if ax_n is not None:
         fov_active = app._use_fov_spread_active()
         if fov_active:
             apply_ax_style(
                 ax_n,
-                events_per_fov_title(_metric_key, band_lbl),
+                f"{events_per_fov_title(_metric_key, band_lbl)}{_fc_suffix}",
                 "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV",
             )
         else:
             apply_ax_style(
-                ax_n, events_total_title(_metric_key),
+                ax_n, f"{events_total_title(_metric_key)}{_fc_suffix}",
                 "N(spots)" if _metric_key == "smfish_count" else "N(above)",
             )
     _set_frac_ylim(app, ax_frac)

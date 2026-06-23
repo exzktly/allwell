@@ -53,3 +53,19 @@ def test_downsample_dpi_caps_longest_side():
     assert _downsample_dpi(120, 2.0, 2.0, max_px=1600) == 120
     # Never below the floor.
     assert _downsample_dpi(300, 100.0, 100.0, floor=60) == 60
+
+
+def test_max_pool_rgb_preserves_sparse_bright_signal():
+    from well_viewer.features.image_browser.image_table.export import _max_pool_rgb
+
+    # A single bright 2×2 spot on black — the fluorescence case that plain
+    # area-averaging washes out.
+    rgb = np.zeros((100, 100, 3), np.uint8)
+    rgb[10:12, 10:12] = 255
+    out = _max_pool_rgb(rgb, 20)  # ~5× shrink
+    assert max(out.shape[:2]) <= 20
+    assert int(out.max()) == 255  # peak preserved (averaging would crush it)
+    # No-op when already within budget.
+    small = np.zeros((10, 10, 3), np.uint8)
+    assert _max_pool_rgb(small, 20) is small
+

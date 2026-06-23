@@ -119,13 +119,52 @@ def image_table_open_export_settings(app) -> None:
     })
 
 
-def _build_export_figure(app):
+def _max_pool_rgb(rgb, max_side: int):
+    """Shrink an (H,W,3+) uint8 image so its longest side ≤ *max_side*, keeping
+    the **brightest** pixel of each block (by luminance).
+
+    Plain area-averaging (matplotlib's default when an imshow'd image is drawn
+    smaller than native) collapses sparse bright-on-dark fluorescence — the few
+    bright pixels get averaged with their dark neighbours and the contrast washes
+    out. Max-luminance pooling preserves the peak signal (and the true colour of
+    that peak pixel), so a downsampled grid still reads like the live view.
+    """
+    import numpy as _np
+
+    a = _np.asarray(rgb)
+    if a.ndim != 3 or a.shape[2] < 3:
+        return rgb
+    h, w = a.shape[:2]
+    longest = max(h, w)
+    if longest <= max_side:
+        return rgb
+    k = int(_np.ceil(longest / float(max_side)))
+    if k <= 1:
+        return rgb
+    ph, pw = (-h) % k, (-w) % k
+    if ph or pw:
+        a = _np.pad(a, ((0, ph), (0, pw), (0, 0)), mode="edge")
+    H, W, C = a.shape
+    nbh, nbw = H // k, W // k
+    blocks = a.reshape(nbh, k, nbw, k, C).transpose(0, 2, 1, 3, 4).reshape(nbh, nbw, k * k, C)
+    lum = blocks[..., :3].astype(_np.float32) @ _np.array([0.299, 0.587, 0.114], _np.float32)
+    idx = lum.argmax(axis=2)  # brightest pixel per block
+    out = _np.take_along_axis(blocks, idx[..., None, None], axis=2)[:, :, 0, :]
+    return out.astype(a.dtype)
+
+
+def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
     """Render the current image-table contents to a matplotlib Figure.
 
     Returns ``(fig, save_kwargs)`` where *save_kwargs* are the format-agnostic
     keyword arguments to feed into ``fig.savefig`` (caller adds ``format`` and
     optionally ``dpi`` for raster outputs). Returns ``(None, None)`` when there
     is nothing to render (no cells, missing matplotlib/numpy).
+
+    ``cell_max_px`` (gallery-save path only) pre-shrinks each cell to that
+    longest-side pixel budget via brightness-preserving max-pooling + nearest
+    interpolation, so a small saved snapshot keeps its contrast (see
+    :func:`_max_pool_rgb`). ``None`` (file export / clipboard) renders full-res.
     """
     cells = getattr(app, "_image_table_cells", None) or []
     if not cells:
@@ -248,7 +287,11 @@ def _build_export_figure(app):
                     log_scale=_row_log_scale(app, r),
                 )
                 if rgb is not None:
-                    ax.imshow(rgb, aspect="equal")
+                    if cell_max_px:
+                        rgb = _max_pool_rgb(rgb, cell_max_px)
+                        ax.imshow(rgb, aspect="equal", interpolation="nearest")
+                    else:
+                        ax.imshow(rgb, aspect="equal")
                 else:
                     ax.text(
                         0.5, 0.5, "(unrenderable)",
@@ -377,7 +420,10 @@ def image_table_save_to_gallery(app) -> None:
     """
     import io
 
-    fig, save_kwargs = _build_export_figure(app)
+    # Pre-shrink each cell with brightness-preserving max-pooling so the small
+    # saved snapshot keeps its contrast (plain dpi downscaling area-averages and
+    # washes out sparse fluorescence).
+    fig, save_kwargs = _build_export_figure(app, cell_max_px=320)
     if fig is None:
         app._set_status("Image table is empty — nothing to save.")
         return

@@ -236,6 +236,30 @@ def test_fold_change_suffix_names_operator():
     assert "vs t0 (subtraction)" in s
 
 
+def test_fold_change_suffix_names_baseline_timepoint():
+    # The vs-t0 axis now states which timepoint is the baseline.
+    s = fold_change_suffix(False, True, op_t0="subtract", baseline_label="t=0h")
+    assert "vs t=0h (subtraction)" in s
+    # Falls back to "t0" when no explicit baseline label is given.
+    assert "vs t0" in fold_change_suffix(False, True)
+
+
+def test_fold_change_suffix_for_uses_resolved_baseline():
+    from types import SimpleNamespace
+    from well_viewer.domain.fold_change import fold_change_suffix_for
+
+    def _app(baseline_tp):
+        plot = SimpleNamespace(
+            fc_vs_control_on=False, fc_vs_t0_on=True, fc_control_label="",
+            fc_op_ctrl="ratio", fc_op_t0="subtract", fc_baseline_tp=baseline_tp,
+        )
+        return SimpleNamespace(_app_state=SimpleNamespace(plot=plot))
+
+    assert "vs t=24h (subtraction)" in fold_change_suffix_for(_app("24"))
+    # Empty baseline → each member's earliest point.
+    assert "vs first timepoint (subtraction)" in fold_change_suffix_for(_app(""))
+
+
 # ── resolve_control_wells ───────────────────────────────────────────────────
 
 def test_resolve_control_wells_rep_set(mock_app):

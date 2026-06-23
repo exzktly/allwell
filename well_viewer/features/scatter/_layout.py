@@ -20,6 +20,11 @@ from well_viewer.features.scatter.gating import paint_gates, render_scatter_poin
 SCATTER_PANEL_MIN_PX = 260
 
 
+def log1p_axis_suffix(on: bool) -> str:
+    """Axis-label suffix noting the log10(value+1) display transform."""
+    return "  (log₁₀, +1)" if on else ""
+
+
 def _scatter_col_label(col: str) -> str:
     """Readable axis label for a metric/shape column."""
     from pipeline.shape_features import is_shape_column
@@ -111,8 +116,8 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     # "Color by time" colours each panel's points by timepoint (see
     # render_scatter_points); each panel then legends the timepoints it shows.
     color_by_tp = bool(getattr(app, "_scatter_color_by_tp", False))
-    xlabel = _scatter_col_label(col_x)
-    ylabel = _scatter_col_label(col_y)
+    xlabel = _scatter_col_label(col_x) + log1p_axis_suffix(x_log)
+    ylabel = _scatter_col_label(col_y) + log1p_axis_suffix(y_log)
 
     gate_entries = []
     for ax, (label, data) in zip(axes, items):

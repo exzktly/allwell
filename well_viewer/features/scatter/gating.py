@@ -97,12 +97,12 @@ def compute_point_density(
     xs = x.astype(float, copy=True)
     ys = y.astype(float, copy=True)
     valid = np.isfinite(xs) & np.isfinite(ys)
+    # Match the axis' log10(x+1) display transform so the density shading lines
+    # up with where the points are drawn (and zero-valued cells still count).
     if x_log:
-        valid &= xs > 0
-        xs = np.where(xs > 0, np.log10(np.where(xs > 0, xs, 1.0)), np.nan)
+        xs = np.log10(np.clip(xs, 0.0, None) + 1.0)
     if y_log:
-        valid &= ys > 0
-        ys = np.where(ys > 0, np.log10(np.where(ys > 0, ys, 1.0)), np.nan)
+        ys = np.log10(np.clip(ys, 0.0, None) + 1.0)
 
     if int(valid.sum()) < 3:
         return np.full(n, 0.5)
@@ -183,10 +183,15 @@ def render_scatter_points(
     # the axis at that point; setting it eagerly avoids the
     # "checkbox is checked but plot is linear until I toggle" reload bug.
     try:
+        from well_viewer.core.plot_style import apply_axis_log_scale
         ax._aw_force_xlog = bool(x_log)
         ax._aw_force_ylog = bool(y_log)
-        ax.set_xscale("log" if x_log else "linear")
-        ax.set_yscale("log" if y_log else "linear")
+        # Scatter log axes use a log10(x+1) display transform so zero-valued
+        # cells stay visible; the data itself is untouched (gates/clicks/exports
+        # remain in raw units). See plot_style.apply_axis_log_scale.
+        ax._aw_log_plus1 = True
+        apply_axis_log_scale(ax, "x", x_log)
+        apply_axis_log_scale(ax, "y", y_log)
     except Exception:
         swallowed()
 

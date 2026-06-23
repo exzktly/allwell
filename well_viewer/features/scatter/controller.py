@@ -31,7 +31,7 @@ from well_viewer.features.scatter.gating import (
     render_scatter_points,
 )
 
-from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes  # noqa: E501
+from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, log1p_axis_suffix  # noqa: E501
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -169,8 +169,8 @@ def redraw_scatter(
             return f"{ch} smFISH Count"
         return label
 
-    app._ax_scatter.set_xlabel(_col_label(col_x))
-    app._ax_scatter.set_ylabel(_col_label(col_y))
+    app._ax_scatter.set_xlabel(_col_label(col_x) + log1p_axis_suffix(bool(prefs.get("scatter_x_log", True))))
+    app._ax_scatter.set_ylabel(_col_label(col_y) + log1p_axis_suffix(bool(prefs.get("scatter_y_log", True))))
     if not tps_list:
         tp_tag = ""
     elif len(tps_list) == 1:

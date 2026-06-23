@@ -63,13 +63,15 @@ def test_density_histogram_fallback_path():
     assert out.min() >= 0.0 and out.max() <= 1.0
 
 
-def test_density_log_masks_nonpositive():
-    # Non-positive x under x_log get the minimum (0.0) density, no crash.
+def test_density_log_plus1_includes_nonpositive():
+    # Under the log10(x+1) display transform, zero / negative x are clipped to 0
+    # (→ log10(1)=0) rather than masked, so every point gets a finite density and
+    # zero-valued cells stay visible. No crash.
     x = np.array([-1.0, 0.0, 1.0, 10.0, 100.0, 1000.0])
     y = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
     out = compute_point_density(x, y, x_log=True)
     assert out.shape == x.shape
-    assert out[0] == 0.0 and out[1] == 0.0  # masked-out non-positive points
+    assert np.all(np.isfinite(out))
 
 
 # ── compute_gate_stats ───────────────────────────────────────────────────────
@@ -569,8 +571,9 @@ def test_gate_edit_press_ignored_in_draw_mode():
 # ── log defaults + faceted gate sync + stacked min-height ─────────────────────
 
 def test_scatter_defaults_to_log_and_survives_restyle():
-    """Scatter axes default to log/log and stay log even when the shared
-    x_log/y_log pref (used by other plot types) is False."""
+    """Scatter axes default to the log10(x+1) display transform (matplotlib
+    "function" scale) and stay so even when the shared x_log/y_log pref (used by
+    other plot types) is False."""
     from well_viewer.core.plot_style import apply_export_style_to_current
     from well_viewer.features.scatter.controller import redraw_scatter
 
@@ -580,11 +583,11 @@ def test_scatter_defaults_to_log_and_survives_restyle():
     app._export_style_prefs["y_log"] = False
     redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
-    assert ax.get_xscale() == "log"
-    assert ax.get_yscale() == "log"
+    assert ax.get_xscale() == "function"
+    assert ax.get_yscale() == "function"
     # A later restyle (e.g. sidebar field change) must not revert to linear.
     apply_export_style_to_current(app, app._scatter_fig, app._scatter_canvas)
-    assert ax.get_xscale() == "log" and ax.get_yscale() == "log"
+    assert ax.get_xscale() == "function" and ax.get_yscale() == "function"
 
 
 def test_scatter_log_off_via_scatter_pref():
@@ -594,7 +597,7 @@ def test_scatter_log_off_via_scatter_pref():
     redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     assert ax.get_xscale() == "linear"
-    assert ax.get_yscale() == "log"
+    assert ax.get_yscale() == "function"  # log10(y+1) display transform
 
 
 def test_drawing_a_gate_exits_create_mode():
@@ -735,3 +738,30 @@ def test_density_filled_keeps_per_point_gradient():
     faces = coll.get_facecolors()
     # Filled → per-point face colours preserved (gradient not collapsed).
     assert len(faces) > 1 and len(np.unique(faces[:, :3], axis=0)) > 1
+
+
+def test_apply_axis_log_scale_plus1_keeps_data_raw():
+    # The scatter log axis uses a log10(x+1) *display* transform (FuncScale): the
+    # axis scale is "function", 0 is representable, and data coordinates stay raw
+    # (so gates / clicks / exports are unaffected — "display-only, not saved").
+    import numpy as np
+    from matplotlib.figure import Figure
+    from well_viewer.core.plot_style import apply_axis_log_scale
+
+    ax = Figure().add_subplot(1, 1, 1)
+    ax._aw_log_plus1 = True
+    ax.scatter([0.0, 9.0, 99.0, 999.0], [0.0, 9.0, 99.0, 999.0])
+    apply_axis_log_scale(ax, "x", True)
+    apply_axis_log_scale(ax, "y", True)
+    assert ax.get_xscale() == "function"
+    # Zero (and every raw value) maps to a finite, monotonic display position.
+    pos = [ax.transData.transform((x, 0.0))[0] for x in (0.0, 9.0, 99.0, 999.0)]
+    assert all(np.isfinite(pos)) and pos[0] < pos[1] < pos[2] < pos[3]
+
+    # Without the +1 flag, a plain log axis is used.
+    ax2 = Figure().add_subplot(1, 1, 1)
+    ax2.plot([1, 10, 100], [1, 10, 100])
+    apply_axis_log_scale(ax2, "x", True)
+    assert ax2.get_xscale() == "log"
+    apply_axis_log_scale(ax2, "x", False)
+    assert ax2.get_xscale() == "linear"

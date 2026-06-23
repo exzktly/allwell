@@ -1396,6 +1396,7 @@ from well_viewer.features.image_browser.image_table.export import (  # noqa: E40
     image_table_export,
     image_table_copy_png,
     image_table_copy_svg,
+    image_table_save_to_gallery,
 )
 
 

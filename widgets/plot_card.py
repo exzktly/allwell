@@ -342,7 +342,7 @@ if _HAVE_MPL:
                     ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
                 buf = io.BytesIO()
                 self.figure.savefig(
-                    buf, format="png", bbox_inches=bbox, dpi=200,
+                    buf, format="png", bbox_inches=bbox, dpi=300,
                     facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
             finally:

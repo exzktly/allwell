@@ -39,6 +39,7 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_distribute_timepoints
 from well_viewer.features.image_browser.image_table.controller import image_table_distribute_wells
 from well_viewer.features.image_browser.image_table.controller import image_table_export
+from well_viewer.features.image_browser.image_table.controller import image_table_save_to_gallery
 from well_viewer.features.image_browser.image_table.controller import image_table_generate
 from well_viewer.features.image_browser.image_table.controller import image_table_load_heatmap_layout
 from well_viewer.features.image_browser.image_table.controller import image_table_build_layout
@@ -384,6 +385,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         lambda _=False: image_table_copy_png(ctx.app))
     emenu.addAction("Copy SVG").triggered.connect(
         lambda _=False: image_table_copy_svg(ctx.app))
+    emenu.addSeparator()
+    emenu.addAction("Save to Saved Plots").triggered.connect(
+        lambda _=False: image_table_save_to_gallery(ctx.app))
     emenu.addSeparator()
     emenu.addAction("Export settings…").triggered.connect(
         lambda _=False: image_table_open_export_settings(ctx.app))

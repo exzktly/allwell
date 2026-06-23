@@ -71,6 +71,11 @@ def delete_saved_plot(app, plot_id: str) -> None:
     refresh_saved_plots_gallery(app)
 
 
+def rename_saved_plot(app, plot_id: str, new_title: str) -> None:
+    get_store(app).rename(app, plot_id, new_title)
+    refresh_saved_plots_gallery(app)
+
+
 def clear_saved_plots(app) -> None:
     get_store(app).clear(app)
     refresh_saved_plots_gallery(app)

@@ -171,8 +171,23 @@ def _export_binary_mask(app, cache, well, chan, tp, fov, binary_mode, crop_tool)
     if binary_mode == "threshold":
         above_by_nid: Dict[int, bool] = {}
         try:
-            from well_viewer.features.image_browser.review_image.controller import review_build_threshold_map
-            above_by_nid = review_build_threshold_map(app, mask_arr, well, fov, tp) or {}
+            from well_viewer.features.image_browser.review_image.controller import (
+                review_build_threshold_map, review_norm_fov,
+            )
+            # Mirror the live _render_threshold_binary path: the CSV row keys are
+            # normalised (timepoint "0h" -> "0", fov tokens), and gating is per
+            # the cell's OWN channel. Passing the raw tp/fov + no channel (as
+            # this path used to) matches no rows → every cell reads as
+            # below-threshold → an all-black mask.
+            norm_tp = app._norm_timepoint(tp) if hasattr(app, "_norm_timepoint") else tp
+            norm_fov = review_norm_fov(fov)
+            chan_l = str(chan or "").strip().lower()
+            fluor = {str(c).strip().lower()
+                     for c in (app._app_state.channel.fluor_channels or [])}
+            gate_channel = chan_l if chan_l in fluor else None
+            above_by_nid = review_build_threshold_map(
+                app, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
+            ) or {}
         except Exception:  # noqa: BLE001
             above_by_nid = {}
         m = _np.asarray(mask_arr)

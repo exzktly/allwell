@@ -50,6 +50,33 @@ def test_store_reload_from_disk(tmp_path):
     assert [r.id for r in store2.records] == ["20260101-000000-000000"]
 
 
+def test_store_move_reorders_in_display_order(tmp_path):
+    app = _app(tmp_path)
+    store = SavedPlotsStore()
+    # Added oldest→newest; display order is newest-first: [c, b, a].
+    for pid in ("a", "b", "c"):
+        store.add(app, _rec(pid=pid), b"x")
+
+    def display_ids():
+        return [r.id for r in reversed(store.records)]
+
+    assert display_ids() == ["c", "b", "a"]
+    # Move the top item ("c") down → [b, c, a].
+    assert store.move(app, "c", up=False) is True
+    assert display_ids() == ["b", "c", "a"]
+    # Move "a" up → [b, a, c].
+    assert store.move(app, "a", up=True) is True
+    assert display_ids() == ["b", "a", "c"]
+    # No-ops at the ends return False and don't change order.
+    assert store.move(app, "b", up=True) is False
+    assert store.move(app, "c", up=False) is False
+    assert display_ids() == ["b", "a", "c"]
+    # The new order persisted to disk.
+    store2 = SavedPlotsStore()
+    store2.load(app)
+    assert [r.id for r in reversed(store2.records)] == ["b", "a", "c"]
+
+
 def test_store_delete_removes_image_and_record(tmp_path):
     app = _app(tmp_path)
     store = SavedPlotsStore()

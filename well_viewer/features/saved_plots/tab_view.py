@@ -143,11 +143,14 @@ def populate_saved_plots_grid(app) -> None:
     if stack is not None:
         stack.setCurrentIndex(1 if records else 0)
 
-    for rec in records:
-        col.addWidget(_build_saved_card(app, store, rec))
+    total = len(records)
+    for i, rec in enumerate(records):
+        col.addWidget(_build_saved_card(
+            app, store, rec, is_first=(i == 0), is_last=(i == total - 1)))
 
 
-def _build_saved_card(app, store, rec) -> QWidget:
+def _build_saved_card(app, store, rec, *, is_first: bool = True,
+                      is_last: bool = True) -> QWidget:
     card = QFrame()
     card.setObjectName("Panel")
     card.setAttribute(Qt.WA_StyledBackground, True)
@@ -195,6 +198,20 @@ def _build_saved_card(app, store, rec) -> QWidget:
 
     # Actions
     actions = QHBoxLayout()
+    up_btn = QPushButton("▲", card)
+    up_btn.setProperty("variant", "secondary")
+    up_btn.setToolTip("Move up")
+    up_btn.setFixedWidth(32)
+    up_btn.setEnabled(not is_first)
+    up_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(app, _id, True))
+    actions.addWidget(up_btn)
+    down_btn = QPushButton("▼", card)
+    down_btn.setProperty("variant", "secondary")
+    down_btn.setToolTip("Move down")
+    down_btn.setFixedWidth(32)
+    down_btn.setEnabled(not is_last)
+    down_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(app, _id, False))
+    actions.addWidget(down_btn)
     restore_btn = QPushButton("Restore settings", card)
     restore_btn.setToolTip("Re-apply these parameters and open the source tab.")
     restore_btn.clicked.connect(lambda _=False, _id=rec.id: C.restore_saved_plot(app, _id))

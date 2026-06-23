@@ -1914,7 +1914,16 @@ def _scan_fc_fractions(
     control population; ``base_values_*`` are each well's baseline-timepoint
     population. With all three ``None`` the result is the raw fraction-on scan
     (identical to the pre-fold-change behaviour). Returns ``(fa, fb, diffs)``
-    with non-finite / max≤0 gaps coerced to ``0.0`` so ``argmax`` is meaningful.
+    where ``diffs`` is the relative gap ``|fa-fb| / max(|fa|, |fb|)`` (non-finite
+    / zero-magnitude coerced to ``0.0`` so ``argmax`` is meaningful).
+
+    The denominator uses the **magnitude** ``max(|fa|, |fb|)`` rather than
+    ``max(fa, fb)``: under the *subtract* fold-change operator the adjusted
+    fractions are differences that can go negative (a well below its control /
+    baseline), and a signed ``max(fa, fb)`` denominator would zero the gap across
+    the whole negative region and spike at the sign crossing — inverting the
+    curve and the chosen threshold. Magnitude is sign-safe and, for the
+    non-negative raw / ratio cases, identical to the old ``max(fa, fb)``.
     """
     from well_viewer.domain.fold_change import scale_bar_value
 
@@ -1942,7 +1951,9 @@ def _scan_fc_fractions(
             )
 
     abs_gap = np.abs(fa - fb)
-    larger = np.maximum(fa, fb)
+    # Sign-safe denominator: magnitude, not signed max — see docstring. For
+    # non-negative raw / ratio fractions this equals the old max(fa, fb).
+    larger = np.maximum(np.abs(fa), np.abs(fb))
     with np.errstate(invalid="ignore", divide="ignore"):
         diffs = np.divide(abs_gap, larger, out=np.zeros_like(abs_gap), where=larger > 0)
     diffs = np.where(np.isfinite(diffs), diffs, 0.0)

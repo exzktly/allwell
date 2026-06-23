@@ -16,6 +16,65 @@ from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.safe import swallowed
 
 
+# ── "Opening dataset…" responsiveness guard ─────────────────────────────────
+# Opening a dataset reads pipeline_info.json, globs the directory, sniffs every
+# CSV header, then loads each well CSV — all synchronous on the GUI thread. Over
+# a slow network share the pre-load phase (sniffing, before any progress) can
+# block for minutes with no repaint, so Windows flags the window "Not
+# Responding". These helpers show a visible modal "Opening dataset…" dialog and
+# pump the event loop as each file is touched, so the window stays alive and the
+# user sees live progress instead of a frozen UI.
+
+def _make_opening_dialog(app, text: str):
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication, QProgressDialog
+
+        dlg = QProgressDialog(text, None, 0, 0, app)  # 0,0 = busy spinner; no Cancel
+        dlg.setCancelButton(None)
+        dlg.setWindowTitle("Opening dataset")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+        dlg.show()
+        QApplication.processEvents()
+        app._opening_dialog = dlg
+        return dlg
+    except Exception:
+        swallowed()  # never let the progress UI block a load (e.g. headless)
+        return None
+
+
+def _opening_set_phase(app, text: str, *, value=None, maximum=None) -> None:
+    """Update the opening dialog's label / progress and pump the event loop so
+    the window repaints (and Windows doesn't mark it 'Not Responding')."""
+    dlg = getattr(app, "_opening_dialog", None)
+    if dlg is None:
+        return
+    try:
+        from PySide6.QtWidgets import QApplication
+        if maximum is not None:
+            dlg.setMaximum(int(maximum))
+        dlg.setLabelText(text)
+        if value is not None:
+            dlg.setValue(int(value))
+        QApplication.processEvents()
+    except Exception:
+        swallowed()
+
+
+def _close_opening_dialog(app) -> None:
+    dlg = app.__dict__.pop("_opening_dialog", None)
+    if dlg is not None:
+        try:
+            dlg.close()
+            dlg.deleteLater()
+        except Exception:
+            swallowed()
+
+
 def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
     """Return *extractor* unchanged when read_pipeline_info gave us one;
     otherwise build a separator-aware 5-field fallback from
@@ -37,28 +96,45 @@ def load_path(app, path: Path) -> None:
         QMessageBox.critical(app, "Not a directory", f"Expected a directory:\n{path}")
         return
     app._cleanup_tmp()
-    in_dir = path / "in"
-    out_dir = path / "out"
-    if in_dir.is_dir() and out_dir.is_dir():
-        logger = logging.getLogger("well_viewer")
-        logger.info("Detected in/out layout: in=%s  out=%s", in_dir, out_dir)
-        logger.info("Fluor images from: %s  |  masks/overlays from: %s", in_dir, out_dir)
-        app._app_state.dataset.in_dir = in_dir
-        app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(out_dir)
-        app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
-        app._app_state.channel.smfish_channels = _smfish_tokens
-        app._load_directory(out_dir, label=f"{path.name}/out")
-    else:
-        app._app_state.dataset.in_dir = None
-        app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(path)
-        app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
-        app._app_state.channel.smfish_channels = _smfish_tokens
-        app._load_directory(path)
+    # Visible "Opening dataset…" guard so a slow-network open never looks frozen.
+    _make_opening_dialog(app, "Opening dataset…")
+    try:
+        in_dir = path / "in"
+        out_dir = path / "out"
+        if in_dir.is_dir() and out_dir.is_dir():
+            logger = logging.getLogger("well_viewer")
+            logger.info("Detected in/out layout: in=%s  out=%s", in_dir, out_dir)
+            logger.info("Fluor images from: %s  |  masks/overlays from: %s", in_dir, out_dir)
+            app._app_state.dataset.in_dir = in_dir
+            _opening_set_phase(app, "Reading dataset info…")
+            app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(out_dir)
+            app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
+            app._app_state.channel.smfish_channels = _smfish_tokens
+            app._load_directory(out_dir, label=f"{path.name}/out")
+        else:
+            app._app_state.dataset.in_dir = None
+            _opening_set_phase(app, "Reading dataset info…")
+            app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(path)
+            app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
+            app._app_state.channel.smfish_channels = _smfish_tokens
+            app._load_directory(path)
+    finally:
+        _close_opening_dialog(app)
 
 
 def load_directory(app, d: Path, label=None) -> None:
+    _opening_set_phase(app, "Scanning folder…")
     csvs_all = [p for p in sorted(d.glob("*.csv")) if not p.name.startswith(".")]
-    csvs = [p for p in csvs_all if _looks_like_well_measurement_csv(p)]
+    # Sniffing opens every CSV header (a network read each) — drive it as a
+    # progress loop that pumps the event loop so the window stays responsive
+    # instead of silently hanging before the load even starts.
+    csvs = []
+    n_all = len(csvs_all)
+    _opening_set_phase(app, f"Scanning {n_all} file(s)…", value=0, maximum=n_all or 1)
+    for i, p in enumerate(csvs_all, 1):
+        if _looks_like_well_measurement_csv(p):
+            csvs.append(p)
+        _opening_set_phase(app, f"Scanning {i}/{n_all}…", value=i)
     skipped = [p for p in csvs_all if p not in csvs]
     if skipped:
         logging.getLogger("well_viewer").info(
@@ -67,6 +143,7 @@ def load_directory(app, d: Path, label=None) -> None:
             ", ".join(p.name for p in skipped[:8]) + ("…" if len(skipped) > 8 else ""),
         )
     if not csvs:
+        _close_opening_dialog(app)  # don't stack a warning behind the modal guard
         if csvs_all:
             QMessageBox.warning(
                 app,
@@ -117,12 +194,14 @@ def load_directory(app, d: Path, label=None) -> None:
             swallowed()  # was: pass (silent except)
     n = len(csvs)
     app._show_progress(n, f"Loading {n} CSV file(s)…")
+    _opening_set_phase(app, f"Loading {n} well CSV(s)…", value=0, maximum=n)
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(p.stem)
         key = tok if tok else p.stem
         app._app_state.dataset.well_paths[key] = p
         app._app_state.dataset.cache[key] = app._load_well_csv(p)
         app._step_progress(i, f"Loading {i}/{n}: {p.name}")
+        _opening_set_phase(app, f"Loading {i}/{n}: {p.name}", value=i)
     app._hide_progress()
     app._rebuild_all_timepoints_cache()
     app._rebuild_all_fovs_cache()

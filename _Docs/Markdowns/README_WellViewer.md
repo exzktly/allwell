@@ -36,6 +36,8 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **7.3.1 — Saved Plots polish & optimizer fix.** Patch release: export all saved plots as a multi-page **PDF report** (cover page + one full-quality page per plot with its parameters); **save the Image Browser grid** to Saved Plots (downsampled, brightness-preserving so contrast isn't washed out); and a fix to the **Optimize ThreshFracOn** metric under fold-change *subtraction* (the validation curve no longer inverts / picks the wrong threshold).
+
 - **7.3.0 — Saved Plots, per-tab axis properties & clearer fold-change titles.**
   - **Saved Plots tab.** Hover any plot panel's top-right corner and click the new **save** button to send that panel — plus the exact parameters/thresholds that produced it — to a per-dataset **Saved Plots** gallery (with Restore / Export / Delete). The gallery now has its own sidebar icon.
   - **Properties no longer leak across tabs.** Axis **limits** and **log-scale** toggles set in a plot's Properties sidebar are now scoped to that plot — changing them on one tab no longer silently changes another tab. (Global publication style — fonts, line/marker, grid, legend — is still shared.)

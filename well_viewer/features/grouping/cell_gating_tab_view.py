@@ -1580,13 +1580,13 @@ def _cell_gating_show_opt_curve_popup(
     ax.plot(thresholds, frac_b, color="#FF8A65", lw=1.4,
             label=f"fraction-on({well_b})")
     ax.plot(thresholds, diffs, color=accent, lw=1.8,
-            label="|Δ| / max(fa, fb)")
+            label="|Δ| / max(|fa|, |fb|)")
     ax.axvline(
         result.threshold, color=txt_pri, lw=1.2, ls="--",
         label=f"chosen threshold = {result.threshold:.4g}",
     )
     ax.set_xlim(float(thresholds[0]), float(thresholds[-1]))
-    ax.set_ylim(-0.02, 1.02)
+    ax.set_ylim(*_opt_curve_ylim(frac_a, frac_b, diffs))
     ax.set_xlabel(f"Threshold ({channel_key})", color=txt_pri)
     ax.set_ylabel("Fraction-on / relative gap", color=txt_pri)
     tp_note = "" if timepoint is None else f" @ {_timepoint_label(timepoint)}"
@@ -1958,6 +1958,26 @@ def _scan_fc_fractions(
         diffs = np.divide(abs_gap, larger, out=np.zeros_like(abs_gap), where=larger > 0)
     diffs = np.where(np.isfinite(diffs), diffs, 0.0)
     return fa, fb, diffs
+
+
+def _opt_curve_ylim(*series) -> tuple:
+    """Y-limits for the optimizer-curve popup.
+
+    Defaults to the familiar [0, 1] fraction-on frame, but expands to cover
+    whatever the plotted curves actually span (with padding). Under fold change
+    the adjusted fractions can be ratios (>1) or differences (<0), and the
+    relative gap can exceed 1 when fa/fb straddle zero — without this they'd be
+    clipped above / below the axis and vanish.
+    """
+    ys = np.concatenate([np.asarray(s, dtype=float).ravel() for s in series]) \
+        if series else np.array([], dtype=float)
+    ys = ys[np.isfinite(ys)]
+    if not ys.size:
+        return (-0.02, 1.02)
+    ymin = min(-0.02, float(ys.min()))
+    ymax = max(1.02, float(ys.max()))
+    pad = 0.02 * (ymax - ymin)
+    return (ymin - pad, ymax + pad)
 
 
 def _timepoint_label(timepoint) -> str:

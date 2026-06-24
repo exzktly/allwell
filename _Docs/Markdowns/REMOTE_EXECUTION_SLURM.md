@@ -87,21 +87,46 @@ byte-identical to legacy direct-on-host execution.
 
 ---
 
-## Selecting which *type* of node the job runs on
+## Selecting which compute option the job runs on
 
-There is **no separate node-type field**. Node selection is expressed entirely
-through the scheduler flags inside `compute_launcher`, which AllWell passes
-**verbatim** to the scheduler — SLURM, not AllWell, interprets them.
+### Compute profiles (the JupyterHub options)
 
-> **Partition dropdown.** In the Add/Edit Remote form, the **Partition** field
-> has a **Fetch** button that runs `sinfo` on the host over SSH and fills the
-> dropdown with the cluster's real partition names — pick one instead of
-> guessing. Choosing a partition rewrites the `--partition=` flag in the
-> Scheduler command; the command line stays the source of truth, and you can
-> still type a partition by hand (e.g. for a non-SLURM scheduler, or when you
-> don't have `sinfo` access).
+JupyterHub's spawn page shows a **discrete, admin-curated set of options** — its
+spawner *profile list* (`c.ProfilesSpawner.profiles` for wrapspawner/batchspawner,
+or `*.profile_list` for other spawners), defined in `jupyterhub_config.py`. Each
+profile bundles a full set of SLURM parameters ("GPU node — 1×A100, 4h",
+"CPU — 16 cores, 1 day", …). These are **not** the raw `sinfo` partition list, and
+they are not exposed by the JupyterHub REST API or by any SLURM command.
 
-To target a particular node type, use the scheduler's own selectors:
+AllWell surfaces those same options **without the JupyterHub webpage**: in the
+Add/Edit Remote form (scheduled mode), the **Compute profile** dropdown has a
+**Fetch** button that reads `jupyterhub_config.py` on the host over SSH and lists
+the profiles by name. Picking one fills in the whole **Scheduler command**
+(`srun …`) with that profile's flags; the command stays editable so you can
+verify it. Selecting a profile is just a convenient way to author
+`compute_launcher` — that string remains the source of truth for the run.
+
+How discovery works (best-effort, side-effect-free):
+
+- A small dependency-free Python snippet runs on the login node. It loads
+  `jupyterhub_config.py` with a stand-in `c` object and a stub importer, so the
+  config's `c.X.Y = …` assignments still land **even when `wrapspawner` /
+  `batchspawner` / `kubespawner` aren't importable** in the login node's plain
+  `python3`. It then prints the profiles (name + spawner kwargs) as JSON.
+- AllWell maps each profile's batchspawner `req_*` fields to `srun` flags:
+  `req_partition`→`--partition`, `req_ngpus`→`--gres=gpu:N`, `req_runtime`→`--time`,
+  `req_memory`→`--mem`, `req_nprocs`→`--cpus-per-task`, plus raw `req_options`.
+- **Config location.** By default the snippet probes
+  `/etc/jupyterhub/jupyterhub_config.py`, `$JUPYTERHUB_CONFIG`, and a couple of
+  conventional paths. If yours lives elsewhere, set **JupyterHub config** in the
+  form (or `jupyterhub_config_path` in `remotes.toml`).
+- **If discovery fails** (config not readable, profiles built by code the stub
+  importer can't evaluate, a non-SLURM spawner), the error is surfaced and you
+  just type the `srun` command by hand — see the flag table below.
+
+### Hand-authoring the command
+
+To target a node type directly, use the scheduler's own selectors:
 
 | You want… | Add to `compute_launcher` |
 |---|---|

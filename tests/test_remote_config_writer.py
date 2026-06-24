@@ -159,6 +159,39 @@ def test_write_remote_ssh_key_path_round_trip(tmp_path):
     assert reloaded["keyed"].ssh_key_path == ""
 
 
+def test_write_remote_compute_launcher_round_trip(tmp_path):
+    """The scheduler command (compute_launcher) must survive a write
+    cycle, default to empty when absent, and — like ssh_key_path — NOT
+    emit an empty line in the common (run-on-host) case."""
+    cfg = tmp_path / "remotes.toml"
+
+    launcher = "srun --partition=gpu --gres=gpu:1 --time=4:00:00"
+    write_remote(_make_host("cluster", compute_launcher=launcher), path=cfg)
+    reloaded = load_remotes(cfg)
+    assert reloaded["cluster"].compute_launcher == launcher
+    assert "compute_launcher" in cfg.read_text(encoding="utf-8")
+
+    # Switch back to running on the host itself — the line disappears.
+    write_remote(_make_host("cluster", compute_launcher=""), path=cfg)
+    text = cfg.read_text(encoding="utf-8")
+    assert "compute_launcher" not in text
+    reloaded = load_remotes(cfg)
+    assert reloaded["cluster"].compute_launcher == ""
+
+
+def test_compute_launcher_defaults_empty_when_absent(tmp_path):
+    """A pre-existing block with no compute_launcher key loads with the
+    field defaulted to '' (runs on the SSH host, legacy behaviour)."""
+    cfg = tmp_path / "remotes.toml"
+    cfg.write_text(
+        "[remote.legacy]\n"
+        'ssh_alias = "legacy"\n',
+        encoding="utf-8",
+    )
+    reloaded = load_remotes(cfg)
+    assert reloaded["legacy"].compute_launcher == ""
+
+
 def test_write_remote_windows_path_with_backslashes(tmp_path):
     """A Windows-style ssh_key_path with backslashes must be escaped
     so the TOML parser doesn't read ``\\U`` (from ``\\Users``) as the

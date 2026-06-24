@@ -1391,6 +1391,69 @@ def _conda_run_prefix(env_name: str = "allwell") -> list[str]:
     return ["conda", "run", "--no-capture-output", "-n", env_name]
 
 
+def _compose_remote_cmd(
+    launcher: str,
+    remote_pidfile: str,
+    remote_argv: list[str],
+    *,
+    cache_hit: bool,
+) -> str:
+    """Build the bash command string ssh runs on the remote login node.
+
+    Pure (no IO) so it can be unit-tested without a live ssh. Two shapes:
+
+    **Direct execution** (``launcher`` empty, or ``cache_hit`` — never
+    allocate a compute node just to run the ``true`` no-op): the login
+    shell records its own PID, activates conda, and execs the pipeline.
+    This is byte-identical to the pre-``compute_launcher`` behaviour::
+
+        echo $$ > <pidfile>; <conda activate>; exec <pipeline argv>
+
+    **Scheduled execution** (``launcher`` set, e.g. an ``srun …`` line,
+    and not a cache hit): the login shell records its PID then *execs the
+    launcher*, which places a fresh allocation on a compute node the
+    cluster schedules. Conda activation and the pipeline run **inside**
+    that allocation (``bash -lc``) — that's where the env, the shared-FS
+    conda install, and any requested GPU live. The job's own
+    ``$SLURM_JOB_ID`` is written to ``<pidfile>.slurm`` (on the shared FS,
+    so the login-side ``cancel()`` can ``scancel`` it as a second kill
+    channel)::
+
+        echo $$ > <pidfile>; exec srun … bash -lc '<conda>; echo $JOBID > <pidfile>.slurm; exec <pipeline argv>'
+
+    The inner script is single-quoted for the *outer* login shell (via
+    ``shlex.quote``) so the outer shell passes it through literally and
+    the inner ``bash`` is the one that expands ``$HOME`` / ``$SLURM_JOB_ID``
+    on the compute node.
+    """
+    pidfile_q = _remote_quote(remote_pidfile)
+    launcher = launcher.strip()
+    if cache_hit or not launcher:
+        # PID echoed first so the cancel path can target the pipeline
+        # directly; conda activated on the login shell; then exec.
+        return (
+            f"echo $$ > {pidfile_q}; "
+            f"{_CONDA_ACTIVATE_SNIPPET}; "
+            f"exec {_remote_join(remote_argv)}"
+        )
+
+    slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
+    inner = (
+        f"{_CONDA_ACTIVATE_SNIPPET}; "
+        f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
+        f"exec {_remote_join(remote_argv)}"
+    )
+    # shlex.split→join normalises whitespace AND re-quotes any token with
+    # shell metacharacters (e.g. ``--constraint=a|b``) so the outer remote
+    # login shell passes them to the scheduler literally instead of, say,
+    # treating ``|`` as a pipe.
+    launcher_str = shlex.join(shlex.split(launcher))
+    return (
+        f"echo $$ > {pidfile_q}; "
+        f"exec {launcher_str} bash -lc {shlex.quote(inner)}"
+    )
+
+
 @lru_cache(maxsize=1)
 def _rsync_version() -> tuple[int, int]:
     """Parsed ``(major, minor)`` of the local rsync, or ``(0, 0)`` if
@@ -2684,10 +2747,15 @@ class _BatchedRemoteProcess:
                 # below).
                 if "--no_auto_threshold" not in remote_argv:
                     remote_argv = list(remote_argv) + ["--no_auto_threshold"]
-                remote_cmd = (
-                    f"echo $$ > {_remote_quote(self._runner._run.remote_pidfile)}; "  # noqa: SLF001
-                    f"{_CONDA_ACTIVATE_SNIPPET}; "
-                    f"exec {_remote_join(remote_argv)}"
+                # Each batch is its own pipeline launch, so on a
+                # scheduler-backed host (``compute_launcher``) each batch
+                # gets its own fresh allocation on a scheduled compute
+                # node. No cache-hit fast path exists in batched mode.
+                remote_cmd = _compose_remote_cmd(
+                    self._runner.host.compute_launcher,
+                    self._runner._run.remote_pidfile,  # noqa: SLF001
+                    remote_argv,
+                    cache_hit=False,
                 )
                 ssh_argv = (
                     self._runner.host.ssh_argv(allocate_tty=True)
@@ -3653,10 +3721,18 @@ class RemoteRunner:
         # v5.2.13: source conda.sh and exec via ``conda run`` so the
         # pipeline runs inside the ``allwell`` env regardless of where
         # the user's conda is installed.
-        remote_cmd = (
-            f"echo $$ > {_remote_quote(remote_pidfile)}; "
-            f"{_CONDA_ACTIVATE_SNIPPET}; "
-            f"exec {_remote_join(remote_argv)}"
+        #
+        # When the host has a ``compute_launcher`` (e.g. an ``srun …``
+        # line), the pipeline is launched into a scheduler allocation so
+        # it runs on a compute node the remote schedules rather than on
+        # the login/"lobby" node we ssh into — see _compose_remote_cmd.
+        # A cache hit short-circuits to a ``true`` no-op, which must NOT
+        # consume a compute allocation, so the launcher is skipped there.
+        remote_cmd = _compose_remote_cmd(
+            self.host.compute_launcher,
+            remote_pidfile,
+            remote_argv,
+            cache_hit=cache_hit,
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
 
@@ -4052,6 +4128,14 @@ class RemoteRunner:
         braces second channel via a fresh ssh that ``kill``s the PID we
         wrote on startup.
 
+        When the host runs compute through a scheduler
+        (``compute_launcher``), killing the login-side ``srun`` client
+        normally tears the allocation down, but a queued/odd state can
+        leave the job alive — so we also ``scancel`` the ``$SLURM_JOB_ID``
+        the run wrote to ``<pidfile>.slurm`` on the shared filesystem. The
+        ``scancel`` tail is a no-op when no sidecar / no scancel exists,
+        so it's harmless on direct-execution hosts.
+
         Also interrupts the local download side: the per-well Fetcher runs
         rsync on a background thread in THIS process (separate from the ssh
         process group), and the end-of-run retry backstop polls ``_cancelled``.
@@ -4067,12 +4151,20 @@ class RemoteRunner:
         if self._run is None:
             return
         run = self._run
+        pidfile_q = _remote_quote(run.remote_pidfile)
+        kill_cmd = (
+            f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
+        )
+        if self.host.compute_launcher.strip():
+            slurm_sidecar_q = _remote_quote(f"{run.remote_pidfile}.slurm")
+            kill_cmd += (
+                f"; _jid=$(cat {slurm_sidecar_q} 2>/dev/null); "
+                '[ -n "$_jid" ] && command -v scancel >/dev/null 2>&1 '
+                '&& scancel "$_jid" 2>/dev/null || true'
+            )
         try:
             subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + [
-                    f"kill -TERM $(cat {_remote_quote(run.remote_pidfile)} 2>/dev/null) "
-                    "2>/dev/null || true"
-                ],
+                self.host.ssh_argv(allocate_tty=False) + [kill_cmd],
                 capture_output=True, timeout=10,
             )
         except (subprocess.TimeoutExpired, OSError):

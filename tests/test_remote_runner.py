@@ -25,6 +25,7 @@ from services.remote_runner import (
     RemoteRunner,
     ZippedInput,
     _REQUIRED_REMOTE_FILES,
+    _compose_remote_cmd,
     _detect_local_input_mode,
     _CONDA_ACTIVATE_SNIPPET,
     _conda_run_prefix,
@@ -2802,3 +2803,64 @@ def test_sweep_stale_scratch_removes_old_only(tmp_path, monkeypatch):
     assert not old.exists()      # stale leftover removed
     assert fresh.exists()        # a concurrent run's live staging is kept
     assert other.exists()        # unrelated dirs untouched
+
+
+# ── _compose_remote_cmd: direct vs scheduler-launched compute ────────────────
+
+
+_PIDFILE = "~/.allwell-staging/run-abc/pid"
+_ARGV = ["conda", "run", "--no-capture-output", "-n", "allwell", "python",
+         "~/allwell/process_microscopy.py", "--input_dir", "~/.allwell-staging/in",
+         "--output_dir", "~/.allwell-staging/out"]
+
+
+def test_compose_remote_cmd_direct_is_legacy_shape():
+    """No launcher → byte-identical to the pre-compute_launcher command:
+    record PID on the login shell, activate conda there, exec the pipeline.
+    This is the backward-compat guard — every existing host hits this path."""
+    cmd = _compose_remote_cmd("", _PIDFILE, _ARGV, cache_hit=False)
+    assert cmd.startswith('echo $$ > "$HOME"')          # tilde-aware pidfile
+    assert _CONDA_ACTIVATE_SNIPPET in cmd
+    assert "srun" not in cmd
+    assert "bash -lc" not in cmd
+    # conda activation precedes the exec of the pipeline.
+    assert cmd.index(_CONDA_ACTIVATE_SNIPPET) < cmd.index("process_microscopy.py")
+
+
+def test_compose_remote_cmd_scheduled_wraps_in_srun():
+    """A launcher → the login shell records its PID then execs srun, and the
+    conda activation + pipeline run INSIDE the srun step (bash -lc) so they
+    land on the scheduled compute node, not the login node."""
+    launcher = "srun --partition=gpu --gres=gpu:1 --time=4:00:00"
+    cmd = _compose_remote_cmd(launcher, _PIDFILE, _ARGV, cache_hit=False)
+    # PID still recorded on the login side, before srun.
+    assert cmd.startswith('echo $$ > "$HOME"')
+    assert cmd.index("echo $$") < cmd.index("srun")
+    # The launcher tokens are present and followed by bash -lc.
+    assert "srun --partition=gpu --gres=gpu:1 --time=4:00:00 bash -lc" in cmd
+    # conda + the pipeline are inside the wrapped (quoted) inner script.
+    assert _CONDA_ACTIVATE_SNIPPET in cmd
+    assert "process_microscopy.py" in cmd
+    # The job id is captured for the scancel cancel-channel.
+    assert "SLURM_JOB_ID" in cmd
+    assert ".slurm" in cmd
+
+
+def test_compose_remote_cmd_cache_hit_never_allocates_a_node():
+    """A full cache hit replaces the pipeline with the ``true`` no-op; even
+    with a launcher configured we must NOT consume a compute allocation just
+    to run ``true``, so the command stays the direct (unwrapped) shape."""
+    cmd = _compose_remote_cmd(
+        "srun --partition=gpu", _PIDFILE, ["true"], cache_hit=True,
+    )
+    assert "srun" not in cmd
+    assert "bash -lc" not in cmd
+    assert cmd.endswith("exec true")
+
+
+def test_compose_remote_cmd_whitespace_only_launcher_is_direct():
+    """A launcher that is only whitespace is treated as 'no launcher' so a
+    stray space in remotes.toml can't silently force scheduler mode."""
+    cmd = _compose_remote_cmd("   ", _PIDFILE, _ARGV, cache_hit=False)
+    assert "srun" not in cmd
+    assert "bash -lc" not in cmd

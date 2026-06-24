@@ -87,6 +87,29 @@ class RemoteHost:
     every ssh / rsync invocation gets ``-i <expanded_path>`` so the
     framework never relies on agent-forwarded or password auth.
     """
+    compute_launcher: str = ""
+    """Optional scheduler command that launches the pipeline onto a
+    *compute node the remote schedules*, rather than running it on the
+    SSH host directly.
+
+    This is what makes an HPC "lobby" / login-node setup work: you SSH
+    into the login node (``ssh_alias``), but the cluster forbids heavy
+    compute there — you must acquire a node from the batch scheduler
+    (the same mechanism JupyterHub's BatchSpawner uses). When set, the
+    runner prepends this command to the pipeline invocation so it runs
+    inside a fresh scheduler allocation, e.g.::
+
+        compute_launcher = "srun --partition=gpu --gres=gpu:1 --cpus-per-task=16 --mem=64G --time=4:00:00"
+
+    All the cheap control-plane work (rsync staging, cache check, fetch,
+    cleanup) still runs on the login node against the shared filesystem;
+    only this one command lands on the allocated node.
+
+    When empty (the default, and every pre-existing config) the pipeline
+    runs **directly on the SSH host** — byte-identical to legacy
+    behaviour. The string is tokenised with ``shlex.split`` at use time,
+    so it stays human-readable on disk.
+    """
 
     def ssh_argv(self, *, allocate_tty: bool = True) -> list[str]:
         """Build the leading ``ssh`` command for this host.
@@ -461,10 +484,18 @@ def _format_block(host: RemoteHost) -> str:
         f"ssh_key_path = {_toml_string(host.ssh_key_path)}\n"
         if host.ssh_key_path else ""
     )
+    # compute_launcher is only emitted when set, like ssh_key_path: the
+    # common case (compute runs on the SSH host) leaves the block tidy
+    # and loaders default the field to "" when absent.
+    launcher_line = (
+        f"compute_launcher = {_toml_string(host.compute_launcher)}\n"
+        if host.compute_launcher else ""
+    )
     return (
         f"[remote.{host.name}]\n"
         f"ssh_alias = {_toml_string(host.ssh_alias)}\n"
         f"{key_line}"
+        f"{launcher_line}"
         f"remote_project_dir = {_toml_string(host.remote_project_dir)}\n"
         f"remote_staging_dir = {_toml_string(host.remote_staging_dir)}\n"
         f"remote_python = {_toml_string(host.remote_python)}\n"
@@ -640,4 +671,5 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
             entry.get("measured_bandwidth_mbps", defaults.measured_bandwidth_mbps)
         ),
         ssh_key_path=str(entry.get("ssh_key_path", defaults.ssh_key_path)),
+        compute_launcher=str(entry.get("compute_launcher", defaults.compute_launcher)),
     )

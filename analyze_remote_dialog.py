@@ -31,9 +31,10 @@ from typing import Optional
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
-    QPlainTextEdit, QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from services.remote_config import (
@@ -48,6 +49,12 @@ from services.subprocess_kill import signal_subprocess
 
 # Alias must look like a TOML bare key — letters, digits, dash, underscore.
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# Prefilled into the "Scheduler command" field the first time a user
+# switches a host to scheduled compute, so they have a working SLURM
+# starting point to tweak rather than a blank box. CPU-only by default;
+# add ``--gres=gpu:1`` (and uncheck "CPU only") for GPU partitions.
+_DEFAULT_COMPUTE_LAUNCHER = "srun --cpus-per-task=16 --mem=64G --time=4:00:00"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -153,6 +160,46 @@ class RemoteFormDialog(QDialog):
         self._cpu_only_cb = QCheckBox("CPU only (disable GPU on remote)", self)
         self._cpu_only_cb.setChecked(host.cpu_only)
         main_form.addRow("", self._cpu_only_cb)
+
+        # ── Where compute runs ──────────────────────────────────────────
+        # Default: the pipeline runs on the SSH host itself. On an HPC
+        # "lobby"/login node you instead acquire a compute node from the
+        # batch scheduler — pick "On a node it schedules" and give the
+        # srun command. Both map onto the single compute_launcher string
+        # (empty = on this machine; non-empty = the scheduler command).
+        self._compute_loc_combo = QComboBox(self)
+        self._compute_loc_combo.addItem("On the remote machine itself", "local")
+        self._compute_loc_combo.addItem("On a node it schedules (SLURM)", "scheduled")
+        self._compute_loc_combo.setToolTip(
+            "Where the analysis pipeline actually runs. Use 'On a node it "
+            "schedules' when the SSH host is an HPC login/lobby node that "
+            "forbids heavy compute and hands work to a batch scheduler."
+        )
+        main_form.addRow("Run compute", self._compute_loc_combo)
+
+        # Full-width row (label + edit inside one wrapper) so toggling its
+        # visibility hides the label too — a plain QFormLayout field would
+        # leave its label stranded when the row is collapsed.
+        self._launcher_row = QWidget(self)
+        launcher_layout = QHBoxLayout(self._launcher_row)
+        launcher_layout.setContentsMargins(0, 0, 0, 0)
+        launcher_layout.setSpacing(6)
+        launcher_label = QLabel("Scheduler command", self._launcher_row)
+        launcher_layout.addWidget(launcher_label)
+        self._compute_launcher_edit = QLineEdit(host.compute_launcher, self._launcher_row)
+        self._compute_launcher_edit.setPlaceholderText(
+            "srun --cpus-per-task=16 --mem=64G --time=4:00:00   "
+            "(add --gres=gpu:1 for GPU)"
+        )
+        launcher_layout.addWidget(self._compute_launcher_edit, 1)
+        main_form.addRow(self._launcher_row)
+
+        scheduled = bool(host.compute_launcher.strip())
+        self._compute_loc_combo.setCurrentIndex(1 if scheduled else 0)
+        self._launcher_row.setVisible(scheduled)
+        self._compute_loc_combo.currentIndexChanged.connect(
+            self._on_compute_loc_changed
+        )
 
         self._cache_budget_spin = QSpinBox(self)
         self._cache_budget_spin.setRange(1, 10000)
@@ -311,7 +358,26 @@ class RemoteFormDialog(QDialog):
             extra_args=extras,
             cache_budget_gb=self._cache_budget_spin.value(),
             ssh_key_path=self._ssh_key_edit.text().strip(),
+            compute_launcher=(
+                self._compute_launcher_edit.text().strip()
+                if self._compute_loc_combo.currentData() == "scheduled"
+                else ""
+            ),
         )
+
+    # ── compute-location toggle ────────────────────────────────────────────
+
+    def _on_compute_loc_changed(self, _idx: int) -> None:
+        """Show/hide the scheduler-command field as the user flips between
+        running compute on the SSH host vs. a scheduled node. On the first
+        switch to scheduled, seed a working ``srun`` default so the user
+        edits rather than starts from a blank box."""
+        scheduled = self._compute_loc_combo.currentData() == "scheduled"
+        self._launcher_row.setVisible(scheduled)
+        if scheduled and not self._compute_launcher_edit.text().strip():
+            self._compute_launcher_edit.setText(_DEFAULT_COMPUTE_LAUNCHER)
+        # Grow/shrink the dialog to fit the row appearing/disappearing.
+        self.adjustSize()
 
     # ── advanced expander ──────────────────────────────────────────────────
 

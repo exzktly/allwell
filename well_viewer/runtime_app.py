@@ -199,7 +199,7 @@ from well_viewer.features.scatter.callbacks import open_scatter_cell_viewer
 from well_viewer.features.scatter.controller import col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display
 from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
 from well_viewer.features.stats.controller import stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change
-from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks
+from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks, apply_sidebar_visibility, toggle_sidebar
 from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.features.preview.panel_view import refresh_fov_btn_state
@@ -400,6 +400,10 @@ class WellViewerApp(QWidget):
         return "analyze" if stack.currentIndex() == 1 else "review"
 
     def _on_central_pane_changed(self, idx: int) -> None: return on_central_pane_changed(self, idx)
+
+    def _apply_sidebar_visibility(self) -> None: return apply_sidebar_visibility(self)
+
+    def _toggle_sidebar(self) -> None: return toggle_sidebar(self)
 
     def _build_centre(self, parent) -> None: return build_centre_shim(self, parent)
 

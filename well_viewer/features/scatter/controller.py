@@ -25,7 +25,6 @@ from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
     get_all_timepoints,
 )
 from well_viewer.features.scatter.gating import (
-    gate_edge_at,
     paint_gates,
     refresh_gate_selector,
     render_scatter_points,
@@ -200,6 +199,10 @@ def redraw_scatter(
     # Redraw canvas
     app._scatter_interaction_cache = {
         "points": interaction_points,
+        # Overlay is a single panel: pair the points with the one axis so the
+        # click/hover handlers share one panel-resolution path with the
+        # "Separate axes" layout (see _layout._render_scatter_faceted).
+        "axes_points": [(app._ax_scatter, interaction_points)],
         # Single-tp callers used ``timepoint_h``; preserve that key when
         # exactly one tp was passed so downstream consumers (export CSV,
         # click metadata) don't need to know about the new list shape.
@@ -444,96 +447,6 @@ def redraw_scatter_orchestrate(app) -> None:
         fluor_gate_y=fluor_gate_y,
     )
     apply_export_style_to_current(app, app._scatter_fig, getattr(app, "_scatter_canvas", None))
-
-
-def on_scatter_click(app, event) -> None:
-    """Handle click events on scatter plot datapoints."""
-    if event.inaxes is not app._ax_scatter or event.xdata is None or event.ydata is None:
-        return
-
-    if event.button != 1:
-        return
-
-    # Drawing/editing a gate owns its own press — skip the cell viewer for those.
-    if getattr(app, "_scatter_gate_draw_mode", False) or gate_edge_at(app, event) is not None:
-        return
-
-    try:
-        interaction_cache = getattr(app, "_scatter_interaction_cache", None) or {}
-        points = interaction_cache.get("points", [])
-        if not points:
-            return
-
-        min_dist = float('inf')
-        nearest_well = None
-        nearest_filename = None
-        nearest_nuclear_id = None
-        nearest_row_idx = None
-
-        for x, y, meta in points:
-            dx = x - event.xdata
-            dy = y - event.ydata
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist < min_dist:
-                min_dist = dist
-                nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx = meta
-
-        if nearest_well is not None:
-            app._open_scatter_cell_viewer(nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx)
-
-    except Exception as e:
-        # The user clicked expecting a popup -- surface the failure instead of
-        # swallowing it into a fleeting status line.
-        import logging
-        import traceback
-        from PySide6.QtWidgets import QMessageBox
-        logging.getLogger(__name__).exception("Error handling scatter-plot cell click")
-        tb = traceback.format_exc()
-        app._set_status(f"Could not open cell viewer: {e}")
-        try:
-            box = QMessageBox(app)
-            box.setIcon(QMessageBox.Warning)
-            box.setWindowTitle("Cell viewer error")
-            box.setText("Could not open the cell-image viewer for the clicked point.")
-            box.setInformativeText(str(e))
-            box.setDetailedText(tb)
-            box.exec()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-
-
-def on_scatter_motion(app, event) -> None:
-    """Handle hover events on scatter plot to show tooltips."""
-    if event.inaxes is not app._ax_scatter or event.xdata is None or event.ydata is None:
-        return
-
-    try:
-        interaction_cache = getattr(app, "_scatter_interaction_cache", None) or {}
-        points = interaction_cache.get("points", [])
-        if not points:
-            return
-
-        min_dist = float('inf')
-        nearest_info = None
-        threshold = 0.5
-
-        for x, y, meta in points:
-            dx = x - event.xdata
-            dy = y - event.ydata
-            dist = (dx * dx + dy * dy) ** 0.5
-            if dist < min_dist:
-                min_dist = dist
-                nearest_info = meta
-
-        if min_dist < threshold and nearest_info:
-            well_label, filename, nuclear_id, row_idx = nearest_info
-            tooltip_text = f"File: {filename} | Nuclear ID: {nuclear_id}"
-            app._set_status(tooltip_text)
-        else:
-            app._set_status("")
-
-    except Exception:
-        swallowed()  # was: pass (silent except)
 
 
 def redraw_scatter_agg_orchestrate(app) -> None:

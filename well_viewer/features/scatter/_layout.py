@@ -83,10 +83,15 @@ def _setup_scatter_axes(app, n_axes: int):
                 swallowed()
         if n_axes == 1:
             axes = [fig.add_subplot(1, 1, 1)]
-            fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
+            fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.16, right=0.97)
         else:
+            # Wider left margin so the per-panel y-axis label clears the figure's
+            # left edge — in publication mode (larger fonts + log tick labels) a
+            # tight 0.12 margin pushed the label off-canvas, where it was clipped
+            # at render and dropped from the per-panel "save to gallery" crop
+            # (get_tightbbox only captures artists inside the figure).
             axes = list(fig.subplots(n_axes, 1, sharex=True, sharey=True))
-            fig.subplots_adjust(top=0.95, bottom=0.10, left=0.12, right=0.97, hspace=0.08)
+            fig.subplots_adjust(top=0.95, bottom=0.10, left=0.16, right=0.97, hspace=0.08)
     app._ax_scatter = axes[0]
     app._scatter_axes = axes
     # Keep a reasonable minimum height per panel so stacked panels don't squish:
@@ -120,6 +125,7 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     ylabel = _scatter_col_label(col_y) + log1p_axis_suffix(y_log)
 
     gate_entries = []
+    axes_points = []
     for ax, (label, data) in zip(axes, items):
         _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(app, ax)
         _ipts, legend_handles = render_scatter_points(
@@ -127,6 +133,10 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
             x_log=x_log, y_log=y_log, marker_size=marker_size,
             color_by_tp=color_by_tp,
         )
+        # Remember each panel's click-interaction points alongside its axis so
+        # on_scatter_click can resolve which panel was clicked (shared x/y axes
+        # make a single global nearest-search ambiguous across panels).
+        axes_points.append((ax, _ipts))
         ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3, color=_grid)
         if legend_handles:
@@ -141,9 +151,19 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     axes[-1].set_xlabel(xlabel)
     paint_gates(app, gate_entries, cols=(col_x, col_y))
 
-    # Editing the gate on the top panel mirrors to the panels below; the
-    # click-to-view-cell cache stays overlay-only.
-    app._scatter_interaction_cache = {"points": []}
+    # Editing the gate on the top panel mirrors to the panels below. Click- and
+    # hover-to-view-cell now work per panel: ``axes_points`` pairs each panel's
+    # points with its axis; ``points`` is the flattened union kept for callers
+    # that don't care which panel a point came from.
+    flat_points = [pt for _ax, pts in axes_points for pt in pts]
+    app._scatter_interaction_cache = {
+        "points": flat_points,
+        "axes_points": axes_points,
+        "timepoint_h": tps_list[0] if len(tps_list) == 1 else None,
+        "timepoints_h": tps_list,
+        "col_x": col_x,
+        "col_y": col_y,
+    }
     try:
         apply_export_style_to_current(
             app, app._scatter_fig, getattr(app, "_scatter_canvas", None))

@@ -15,8 +15,8 @@ from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from functools import partial
 from well_viewer.features.export.service import export_scatter_data
 from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-from well_viewer.features.scatter.controller import on_scatter_click
-from well_viewer.features.scatter.controller import on_scatter_motion
+from well_viewer.features.scatter.callbacks import on_scatter_click
+from well_viewer.features.scatter.callbacks import on_scatter_motion
 from well_viewer.features.scatter.gating import (
     on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
 )
@@ -174,7 +174,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_card = card
     ctx.app._scatter_fig = card.figure
     ctx.app._ax_scatter = ctx.app._scatter_fig.add_subplot(1, 1, 1)
-    ctx.app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
+    ctx.app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.16, right=0.97)
     ctx.app._scatter_canvas = card.canvas
     # No error-band controls here: the per-cell scatter draws individual points,
     # so SEM/SD has no meaning (it belongs only on the aggregate scatter).

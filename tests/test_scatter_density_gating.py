@@ -268,8 +268,9 @@ def test_drawing_a_gate_notifies_count_callback():
 
 
 def test_separate_axes_layout_stacks_one_panel_per_group():
-    """'Separate axes' layout renders one stacked panel per group (view-only),
-    and switching back to Overlay collapses to a single axis."""
+    """'Separate axes' layout renders one stacked panel per group — with
+    click-to-view-cell enabled per panel — and switching back to Overlay
+    collapses to a single axis."""
     from types import SimpleNamespace
 
     import pandas as pd
@@ -317,7 +318,14 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
     cols = ("w3cy5_mean_intensity", "w4gfp_mean_intensity")
     redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
     assert len(app._scatter_fig.axes) == 2                     # one panel per group
-    assert app._scatter_interaction_cache == {"points": []}    # view-only
+    # Click-to-view-cell now works per panel: each panel's interaction points
+    # are recorded against its axis (axes_points), with the flattened union under
+    # "points" and the active columns stamped for gate hit-testing.
+    cache = app._scatter_interaction_cache
+    assert [ax for ax, _pts in cache["axes_points"]] == list(app._scatter_fig.axes)
+    assert len(cache["points"]) == 2 * n                       # both panels, flattened
+    assert cache["col_x"] == "w3cy5_mean_intensity"
+    assert cache["col_y"] == "w4gfp_mean_intensity"
 
     # Back to Overlay → collapses to one axis.
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Overlay")

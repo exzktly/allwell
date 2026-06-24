@@ -31,6 +31,13 @@ def build_ui(app) -> None:
     top_layout = QHBoxLayout(top)
     top_layout.setContentsMargins(14, 8, 14, 8)
     app._top_bar = top
+    # Left-rail collapse toggle. Checked == the rail is hidden; the glyph
+    # flips between panel-open / panel-close.
+    from widgets.icon_button import IconButton as _IconButton
+    app._sidebar_toggle_btn = _IconButton(
+        "panel-right-close", tooltip="Hide sidebar", checkable=True)
+    app._sidebar_toggle_btn.clicked.connect(app._toggle_sidebar)
+    top_layout.addWidget(app._sidebar_toggle_btn)
     app._dir_label = QLabel("No data loaded")
     app._dir_label.setObjectName("Muted")
     top_layout.addWidget(app._dir_label)
@@ -115,6 +122,7 @@ def build_ui(app) -> None:
 
     app._h_pane.addWidget(sidebar)
     app._sidebar_root = sidebar  # so mode toggles can hide/show the whole rail
+    app._sidebar_collapsed = False  # user-driven collapse state (Ctrl+B / top-bar btn)
     build_sidebar(app, app._sidebar_main_frame)
 
     # Centre stack — wraps the existing plots widget so all_well can

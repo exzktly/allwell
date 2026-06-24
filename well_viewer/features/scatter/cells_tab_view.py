@@ -15,8 +15,8 @@ from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from functools import partial
 from well_viewer.features.export.service import export_scatter_data
 from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-from well_viewer.features.scatter.controller import on_scatter_click
-from well_viewer.features.scatter.controller import on_scatter_motion
+from well_viewer.features.scatter.callbacks import on_scatter_click
+from well_viewer.features.scatter.callbacks import on_scatter_motion
 from well_viewer.features.scatter.gating import (
     on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
 )

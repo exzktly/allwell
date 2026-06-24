@@ -644,6 +644,18 @@ class PipelineRunner:
         except Exception as exc:  # noqa: BLE001 — surface any failure to the GUI
             self._enqueue(("error", f"Failed to run pipeline remotely: {exc}\n"))
         finally:
+            # Always close any scheduler job this run spawned — on success,
+            # failure, or exception. ``srun`` normally exits when the
+            # pipeline ends, so this is a no-op in the common case; it's the
+            # guarantee that an orphaned SLURM allocation never lingers in
+            # the queue waiting on the user. No-op on direct-execution hosts.
+            if self._remote_runner is not None:
+                try:
+                    self._remote_runner.close_remote_job(
+                        log_fn=lambda m: self._enqueue(("line", m)),
+                    )
+                except Exception:  # noqa: BLE001 — best-effort teardown
+                    swallowed("remote run: scheduler job close failed")
             if zipped is not None and zipped.cleanup is not None:
                 try:
                     zipped.cleanup()

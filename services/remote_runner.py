@@ -4122,19 +4122,61 @@ class RemoteRunner:
 
     # ── Cancel ──────────────────────────────────────────────────────────
 
+    def close_remote_job(
+        self, *, log_fn: Callable[[str], None] | None = None
+    ) -> None:
+        """Guaranteed-teardown backstop: ensure the scheduler job this run
+        launched is closed.
+
+        Idempotent and best-effort — a no-op on direct-execution hosts (no
+        ``compute_launcher``), when no run has started, or when the job has
+        already exited (``scancel`` on a finished id is harmless). Reads the
+        ``$SLURM_JOB_ID`` the run wrote to ``<pidfile>.slurm`` on the shared
+        filesystem and ``scancel``s it via a fresh ssh.
+
+        ``srun`` already exits when the pipeline finishes *or* fails, so in
+        the common case the job is gone before we get here and this does
+        nothing. Its job is to make sure an *orphaned* allocation — ssh /
+        srun client died, connection dropped, AllWell crashed mid-run —
+        never lingers in the queue waiting on the user. Called from the
+        PipelineRunner's ``finally`` (covers complete / fail / exception)
+        and from :meth:`cancel` (covers user Stop)."""
+        if not self.host.compute_launcher.strip():
+            return
+        run = self._run
+        if run is None:
+            return
+        log = log_fn or (lambda _m: None)
+        slurm_sidecar_q = _remote_quote(f"{run.remote_pidfile}.slurm")
+        cmd = (
+            f"_jid=$(cat {slurm_sidecar_q} 2>/dev/null); "
+            '[ -n "$_jid" ] && command -v scancel >/dev/null 2>&1 '
+            '&& scancel "$_jid" 2>/dev/null && echo "AW_SCANCELLED $_jid" || true'
+        )
+        try:
+            result = subprocess.run(
+                self.host.ssh_argv(allocate_tty=False) + [cmd],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return
+        out = (result.stdout or "")
+        if "AW_SCANCELLED" in out:
+            jid = out.split("AW_SCANCELLED", 1)[1].strip().split()[0:1]
+            log(
+                f"[remote] closed scheduler job {jid[0] if jid else ''}.\n"
+            )
+
     def cancel(self, ssh_proc: subprocess.Popen) -> None:
         """Best-effort remote kill. The local pgid kill (handled by
         PipelineRunner) is the primary mechanism; this is the belt-and-
         braces second channel via a fresh ssh that ``kill``s the PID we
         wrote on startup.
 
-        When the host runs compute through a scheduler
-        (``compute_launcher``), killing the login-side ``srun`` client
-        normally tears the allocation down, but a queued/odd state can
-        leave the job alive — so we also ``scancel`` the ``$SLURM_JOB_ID``
-        the run wrote to ``<pidfile>.slurm`` on the shared filesystem. The
-        ``scancel`` tail is a no-op when no sidecar / no scancel exists,
-        so it's harmless on direct-execution hosts.
+        On a scheduler-backed host this also calls :meth:`close_remote_job`
+        to ``scancel`` the allocation — killing the login-side ``srun``
+        client usually tears it down, but a queued/odd state can leave the
+        job alive.
 
         Also interrupts the local download side: the per-well Fetcher runs
         rsync on a background thread in THIS process (separate from the ssh
@@ -4152,23 +4194,18 @@ class RemoteRunner:
             return
         run = self._run
         pidfile_q = _remote_quote(run.remote_pidfile)
-        kill_cmd = (
-            f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
-        )
-        if self.host.compute_launcher.strip():
-            slurm_sidecar_q = _remote_quote(f"{run.remote_pidfile}.slurm")
-            kill_cmd += (
-                f"; _jid=$(cat {slurm_sidecar_q} 2>/dev/null); "
-                '[ -n "$_jid" ] && command -v scancel >/dev/null 2>&1 '
-                '&& scancel "$_jid" 2>/dev/null || true'
-            )
         try:
             subprocess.run(
-                self.host.ssh_argv(allocate_tty=False) + [kill_cmd],
+                self.host.ssh_argv(allocate_tty=False) + [
+                    f"kill -TERM $(cat {pidfile_q} 2>/dev/null) 2>/dev/null || true"
+                ],
                 capture_output=True, timeout=10,
             )
         except (subprocess.TimeoutExpired, OSError):
             pass
+        # Belt-and-braces: also cancel the scheduler job (no-op on
+        # direct-execution hosts / when no job id was recorded).
+        self.close_remote_job()
 
     # ── Argv building ───────────────────────────────────────────────────
 

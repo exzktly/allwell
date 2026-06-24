@@ -2864,3 +2864,65 @@ def test_compose_remote_cmd_whitespace_only_launcher_is_direct():
     cmd = _compose_remote_cmd("   ", _PIDFILE, _ARGV, cache_hit=False)
     assert "srun" not in cmd
     assert "bash -lc" not in cmd
+
+
+# ── close_remote_job: guaranteed scheduler-job teardown ──────────────────────
+
+
+def _runner_with_run(compute_launcher: str):
+    """A RemoteRunner with a minimal _run set, no real ssh."""
+    h = RemoteHost(name="c", ssh_alias="lobby", compute_launcher=compute_launcher)
+    r = RemoteRunner(h)
+    from services.remote_runner import _RemoteRun
+    r._run = _RemoteRun(
+        run_id="run-x",
+        cache_key="k",
+        remote_input_dir="~/.allwell-staging/in",
+        remote_output_dir="~/.allwell-staging/out",
+        remote_pidfile="~/.allwell-staging/runs/run-x/run.pid",
+        local_output_dir=Path("/tmp/out"),
+        local_input_mode=LocalInputMode.ZIP,
+        output_filter=OutputFilter.FULL,
+        incremental=False,
+    )
+    return r
+
+
+def test_close_remote_job_noop_on_direct_host():
+    """Direct-execution host (no launcher) → never shells out to scancel."""
+    r = _runner_with_run("")
+    with patch("services.remote_runner.subprocess.run") as run:
+        r.close_remote_job()
+    run.assert_not_called()
+
+
+def test_close_remote_job_scancels_scheduled_host():
+    """Scheduler-backed host → ssh's a scancel of the recorded job id."""
+    r = _runner_with_run("srun --partition=gpu")
+    with patch("services.remote_runner.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="AW_SCANCELLED 12345\n", stderr="",
+        )
+        r.close_remote_job()
+    run.assert_called_once()
+    sent = " ".join(run.call_args.args[0])
+    assert "scancel" in sent
+    assert ".slurm" in sent      # reads the recorded job-id sidecar
+
+
+def test_close_remote_job_noop_before_run_starts():
+    h = RemoteHost(name="c", ssh_alias="lobby", compute_launcher="srun -p gpu")
+    r = RemoteRunner(h)  # no _run yet
+    with patch("services.remote_runner.subprocess.run") as run:
+        r.close_remote_job()
+    run.assert_not_called()
+
+
+def test_close_remote_job_swallows_ssh_errors():
+    """Teardown is best-effort: an ssh timeout/OSError must not raise."""
+    r = _runner_with_run("srun -p gpu")
+    with patch(
+        "services.remote_runner.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10),
+    ):
+        r.close_remote_job()  # must not raise

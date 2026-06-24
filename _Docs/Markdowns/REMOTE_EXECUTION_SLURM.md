@@ -91,8 +91,17 @@ byte-identical to legacy direct-on-host execution.
 
 There is **no separate node-type field**. Node selection is expressed entirely
 through the scheduler flags inside `compute_launcher`, which AllWell passes
-**verbatim** to the scheduler — SLURM, not AllWell, interprets them. To target a
-particular node type, use the scheduler's own selectors:
+**verbatim** to the scheduler — SLURM, not AllWell, interprets them.
+
+> **Partition dropdown.** In the Add/Edit Remote form, the **Partition** field
+> has a **Fetch** button that runs `sinfo` on the host over SSH and fills the
+> dropdown with the cluster's real partition names — pick one instead of
+> guessing. Choosing a partition rewrites the `--partition=` flag in the
+> Scheduler command; the command line stays the source of truth, and you can
+> still type a partition by hand (e.g. for a non-SLURM scheduler, or when you
+> don't have `sinfo` access).
+
+To target a particular node type, use the scheduler's own selectors:
 
 | You want… | Add to `compute_launcher` |
 |---|---|
@@ -138,9 +147,24 @@ exec srun <your flags> bash -lc '          # acquire + enter the compute node
 - `srun` streams the job's stdout/stderr back through the login-side SSH in real
   time, so the GUI's per-well progress (`… — done.`) and the run dashboard update
   live exactly as on a direct host.
-- **Cancel / Stop** kills the login-side `srun` client (which tears the
-  allocation down) and additionally `scancel`s the recorded `$SLURM_JOB_ID` as a
-  belt-and-braces second channel.
+
+### The job is always closed
+
+You never have to remember to clean up an allocation. The job is torn down in
+every outcome:
+
+- **Normal completion / failure.** `srun` runs the pipeline *as the job* and
+  exits the moment the pipeline exits — success or non-zero — so the allocation
+  ends on its own.
+- **Stop button.** Cancelling kills the login-side `srun` client (which tears the
+  allocation down) and `scancel`s the recorded `$SLURM_JOB_ID`.
+- **Belt-and-braces backstop.** At the end of *every* remote run — completed,
+  failed, or even if AllWell hit an unexpected error mid-run — AllWell issues a
+  final `scancel` of the recorded job id. The run writes `$SLURM_JOB_ID` to a
+  sidecar on the shared filesystem at launch, so this works even if the SSH
+  connection dropped. In the common case the job is already gone and the
+  `scancel` is a harmless no-op; its only job is to make sure an **orphaned**
+  allocation never lingers in the queue waiting on you.
 
 ---
 

@@ -43,6 +43,7 @@ from services.remote_config import (
     load_remotes,
     write_remote,
 )
+from services import remote_config
 from services import ssh_key_setup
 from services.subprocess_kill import signal_subprocess
 
@@ -177,26 +178,64 @@ class RemoteFormDialog(QDialog):
         )
         main_form.addRow("Run compute", self._compute_loc_combo)
 
-        # Full-width row (label + edit inside one wrapper) so toggling its
-        # visibility hides the label too — a plain QFormLayout field would
-        # leave its label stranded when the row is collapsed.
-        self._launcher_row = QWidget(self)
-        launcher_layout = QHBoxLayout(self._launcher_row)
-        launcher_layout.setContentsMargins(0, 0, 0, 0)
-        launcher_layout.setSpacing(6)
-        launcher_label = QLabel("Scheduler command", self._launcher_row)
-        launcher_layout.addWidget(launcher_label)
-        self._compute_launcher_edit = QLineEdit(host.compute_launcher, self._launcher_row)
+        # The scheduled-only controls (partition picker + scheduler command)
+        # live inside one container that's shown/hidden as a unit when the
+        # "Run compute" choice flips — a plain QFormLayout field would leave
+        # its label stranded when collapsed.
+        self._scheduled_box = QWidget(self)
+        sched_layout = QVBoxLayout(self._scheduled_box)
+        sched_layout.setContentsMargins(0, 0, 0, 0)
+        sched_layout.setSpacing(6)
+
+        # Partition picker: a dropdown populated from the cluster's own
+        # ``sinfo`` (Fetch button) so the user selects a real queue rather
+        # than guessing the name. Editable so a host without sinfo access
+        # (or a non-SLURM scheduler) can still be typed in by hand.
+        part_row = QHBoxLayout()
+        part_row.setSpacing(6)
+        part_row.addWidget(QLabel("Partition", self._scheduled_box))
+        self._partition_combo = QComboBox(self._scheduled_box)
+        self._partition_combo.setEditable(True)
+        self._partition_combo.setInsertPolicy(QComboBox.NoInsert)
+        self._partition_combo.setToolTip(
+            "SLURM partition (queue) the job runs on. Click Fetch to list "
+            "the cluster's partitions via sinfo, or type one in."
+        )
+        part_row.addWidget(self._partition_combo, 1)
+        self._fetch_part_btn = QPushButton("Fetch", self._scheduled_box)
+        self._fetch_part_btn.setProperty("variant", "secondary")
+        self._fetch_part_btn.setToolTip("Run sinfo on the remote and list its partitions.")
+        self._fetch_part_btn.clicked.connect(self._fetch_partitions)
+        part_row.addWidget(self._fetch_part_btn)
+        sched_layout.addLayout(part_row)
+
+        launcher_row = QHBoxLayout()
+        launcher_row.setSpacing(6)
+        launcher_row.addWidget(QLabel("Scheduler command", self._scheduled_box))
+        self._compute_launcher_edit = QLineEdit(host.compute_launcher, self._scheduled_box)
         self._compute_launcher_edit.setPlaceholderText(
             "srun --cpus-per-task=16 --mem=64G --time=4:00:00   "
             "(add --gres=gpu:1 for GPU)"
         )
-        launcher_layout.addWidget(self._compute_launcher_edit, 1)
-        main_form.addRow(self._launcher_row)
+        launcher_row.addWidget(self._compute_launcher_edit, 1)
+        sched_layout.addLayout(launcher_row)
+        main_form.addRow(self._scheduled_box)
+
+        # Seed the partition dropdown from the stored launcher's --partition=.
+        existing_part = remote_config.launcher_get_partition(host.compute_launcher)
+        if existing_part:
+            self._partition_combo.addItem(existing_part)
+            self._partition_combo.setCurrentText(existing_part)
+        else:
+            self._partition_combo.setCurrentText("")
+        # Choosing/typing a partition rewrites the --partition= token in the
+        # command (textActivated is user-driven only, so no feedback loop
+        # with our own programmatic setCurrentText calls).
+        self._partition_combo.textActivated.connect(self._on_partition_chosen)
 
         scheduled = bool(host.compute_launcher.strip())
         self._compute_loc_combo.setCurrentIndex(1 if scheduled else 0)
-        self._launcher_row.setVisible(scheduled)
+        self._scheduled_box.setVisible(scheduled)
         self._compute_loc_combo.currentIndexChanged.connect(
             self._on_compute_loc_changed
         )
@@ -368,16 +407,72 @@ class RemoteFormDialog(QDialog):
     # ── compute-location toggle ────────────────────────────────────────────
 
     def _on_compute_loc_changed(self, _idx: int) -> None:
-        """Show/hide the scheduler-command field as the user flips between
+        """Show/hide the scheduled-compute controls as the user flips between
         running compute on the SSH host vs. a scheduled node. On the first
         switch to scheduled, seed a working ``srun`` default so the user
         edits rather than starts from a blank box."""
         scheduled = self._compute_loc_combo.currentData() == "scheduled"
-        self._launcher_row.setVisible(scheduled)
+        self._scheduled_box.setVisible(scheduled)
         if scheduled and not self._compute_launcher_edit.text().strip():
             self._compute_launcher_edit.setText(_DEFAULT_COMPUTE_LAUNCHER)
-        # Grow/shrink the dialog to fit the row appearing/disappearing.
+        # Grow/shrink the dialog to fit the controls appearing/disappearing.
         self.adjustSize()
+
+    def _on_partition_chosen(self, partition: str) -> None:
+        """Rewrite the ``--partition=`` token in the scheduler command when
+        the user picks/types a partition. The command line stays the source
+        of truth; the dropdown is just a convenient editor for one flag."""
+        launcher = self._compute_launcher_edit.text().strip() or _DEFAULT_COMPUTE_LAUNCHER
+        self._compute_launcher_edit.setText(
+            remote_config.launcher_set_partition(launcher, partition.strip())
+        )
+
+    def _fetch_partitions(self) -> None:
+        """Run ``sinfo`` on the remote (worker thread) and fill the
+        partition dropdown with the result — same queue + QTimer pattern as
+        Test SSH so the dialog stays responsive while ssh round-trips."""
+        alias = self._ssh_alias_edit.text().strip()
+        if not alias:
+            self._test_result_lbl.setText("Set an SSH alias first to fetch partitions.")
+            return
+        host = self.result_host()
+        self._fetch_part_btn.setEnabled(False)
+        self._test_result_lbl.setText(f"Fetching partitions from {alias} via sinfo…")
+        result_q: queue.Queue = queue.Queue()
+
+        def _runner() -> None:
+            ok, parts, detail = remote_config.query_slurm_partitions(host, timeout=20)
+            result_q.put((ok, parts, detail))
+
+        threading.Thread(target=_runner, daemon=True).start()
+
+        def _poll() -> None:
+            try:
+                ok, parts, detail = result_q.get_nowait()
+            except queue.Empty:
+                QTimer.singleShot(120, _poll)
+                return
+            self._fetch_part_btn.setEnabled(True)
+            if not ok:
+                msg = detail.splitlines()[-1] if detail else "sinfo failed"
+                self._test_result_lbl.setText(f"✗ {msg[:140]}")
+                return
+            current = self._partition_combo.currentText().strip()
+            self._partition_combo.blockSignals(True)
+            self._partition_combo.clear()
+            self._partition_combo.addItems(parts)
+            # Preserve the user's current value even if the cluster doesn't
+            # list it (stale config / typo) so we never silently drop it.
+            if current and current not in parts:
+                self._partition_combo.insertItem(0, current)
+            if current:
+                self._partition_combo.setCurrentText(current)
+            self._partition_combo.blockSignals(False)
+            self._test_result_lbl.setText(
+                f"✓ {len(parts)} partition(s) from {alias}."
+            )
+
+        QTimer.singleShot(120, _poll)
 
     # ── advanced expander ──────────────────────────────────────────────────
 

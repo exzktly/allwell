@@ -856,8 +856,9 @@ def write_or_update_remotes_toml(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Start from any prior values for this alias (preserves the user's
-    # extra_args / cache_budget_gb / remote_project_dir customisations
-    # across re-bootstraps); fall back to defaults otherwise.
+    # extra_args / cache_budget_gb / remote_project_dir / compute_launcher /
+    # ssh_key_path customisations across re-bootstraps — anything not
+    # explicitly overridden below); fall back to defaults otherwise.
     prior = get_remote(alias, path=path)
     base = prior or RemoteHost(name=alias, ssh_alias=alias)
     from dataclasses import replace

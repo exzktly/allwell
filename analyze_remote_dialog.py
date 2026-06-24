@@ -187,27 +187,33 @@ class RemoteFormDialog(QDialog):
         sched_layout.setContentsMargins(0, 0, 0, 0)
         sched_layout.setSpacing(6)
 
-        # Partition picker: a dropdown populated from the cluster's own
-        # ``sinfo`` (Fetch button) so the user selects a real queue rather
-        # than guessing the name. Editable so a host without sinfo access
-        # (or a non-SLURM scheduler) can still be typed in by hand.
-        part_row = QHBoxLayout()
-        part_row.setSpacing(6)
-        part_row.addWidget(QLabel("Partition", self._scheduled_box))
-        self._partition_combo = QComboBox(self._scheduled_box)
-        self._partition_combo.setEditable(True)
-        self._partition_combo.setInsertPolicy(QComboBox.NoInsert)
-        self._partition_combo.setToolTip(
-            "SLURM partition (queue) the job runs on. Click Fetch to list "
-            "the cluster's partitions via sinfo, or type one in."
+        # Compute-profile picker: the discrete options the cluster's
+        # JupyterHub web UI would show (its spawner profile_list /
+        # ProfilesSpawner.profiles), discovered by reading jupyterhub_config.py
+        # on the remote — NOT a raw SLURM partition list. Selecting a profile
+        # fills in the whole scheduler command; each item carries its launcher
+        # as item data. The command stays editable so the user can verify it.
+        prof_row = QHBoxLayout()
+        prof_row.setSpacing(6)
+        prof_row.addWidget(QLabel("Compute profile", self._scheduled_box))
+        self._profile_combo = QComboBox(self._scheduled_box)
+        self._profile_combo.setToolTip(
+            "The discrete compute options your JupyterHub exposes. Click "
+            "Fetch to read them from the cluster's jupyterhub_config.py over "
+            "SSH; picking one fills in the scheduler command below."
         )
-        part_row.addWidget(self._partition_combo, 1)
-        self._fetch_part_btn = QPushButton("Fetch", self._scheduled_box)
-        self._fetch_part_btn.setProperty("variant", "secondary")
-        self._fetch_part_btn.setToolTip("Run sinfo on the remote and list its partitions.")
-        self._fetch_part_btn.clicked.connect(self._fetch_partitions)
-        part_row.addWidget(self._fetch_part_btn)
-        sched_layout.addLayout(part_row)
+        self._profile_combo.addItem("(click Fetch to load JupyterHub profiles)", "")
+        self._profile_combo.activated.connect(self._on_profile_chosen)
+        prof_row.addWidget(self._profile_combo, 1)
+        self._fetch_prof_btn = QPushButton("Fetch", self._scheduled_box)
+        self._fetch_prof_btn.setProperty("variant", "secondary")
+        self._fetch_prof_btn.setToolTip(
+            "Read jupyterhub_config.py on the remote and list its compute "
+            "profiles (no JupyterHub webpage needed)."
+        )
+        self._fetch_prof_btn.clicked.connect(self._fetch_profiles)
+        prof_row.addWidget(self._fetch_prof_btn)
+        sched_layout.addLayout(prof_row)
 
         launcher_row = QHBoxLayout()
         launcher_row.setSpacing(6)
@@ -219,19 +225,19 @@ class RemoteFormDialog(QDialog):
         )
         launcher_row.addWidget(self._compute_launcher_edit, 1)
         sched_layout.addLayout(launcher_row)
-        main_form.addRow(self._scheduled_box)
 
-        # Seed the partition dropdown from the stored launcher's --partition=.
-        existing_part = remote_config.launcher_get_partition(host.compute_launcher)
-        if existing_part:
-            self._partition_combo.addItem(existing_part)
-            self._partition_combo.setCurrentText(existing_part)
-        else:
-            self._partition_combo.setCurrentText("")
-        # Choosing/typing a partition rewrites the --partition= token in the
-        # command (textActivated is user-driven only, so no feedback loop
-        # with our own programmatic setCurrentText calls).
-        self._partition_combo.textActivated.connect(self._on_partition_chosen)
+        # Optional override for where jupyterhub_config.py lives on the remote
+        # (blank → probe conventional locations like /etc/jupyterhub/...).
+        jhub_row = QHBoxLayout()
+        jhub_row.setSpacing(6)
+        jhub_row.addWidget(QLabel("JupyterHub config", self._scheduled_box))
+        self._jhub_path_edit = QLineEdit(host.jupyterhub_config_path, self._scheduled_box)
+        self._jhub_path_edit.setPlaceholderText(
+            "/etc/jupyterhub/jupyterhub_config.py  (optional — auto-detected if blank)"
+        )
+        jhub_row.addWidget(self._jhub_path_edit, 1)
+        sched_layout.addLayout(jhub_row)
+        main_form.addRow(self._scheduled_box)
 
         scheduled = bool(host.compute_launcher.strip())
         self._compute_loc_combo.setCurrentIndex(1 if scheduled else 0)
@@ -402,6 +408,7 @@ class RemoteFormDialog(QDialog):
                 if self._compute_loc_combo.currentData() == "scheduled"
                 else ""
             ),
+            jupyterhub_config_path=self._jhub_path_edit.text().strip(),
         )
 
     # ── compute-location toggle ────────────────────────────────────────────
@@ -418,58 +425,58 @@ class RemoteFormDialog(QDialog):
         # Grow/shrink the dialog to fit the controls appearing/disappearing.
         self.adjustSize()
 
-    def _on_partition_chosen(self, partition: str) -> None:
-        """Rewrite the ``--partition=`` token in the scheduler command when
-        the user picks/types a partition. The command line stays the source
-        of truth; the dropdown is just a convenient editor for one flag."""
-        launcher = self._compute_launcher_edit.text().strip() or _DEFAULT_COMPUTE_LAUNCHER
-        self._compute_launcher_edit.setText(
-            remote_config.launcher_set_partition(launcher, partition.strip())
-        )
+    def _on_profile_chosen(self, _idx: int) -> None:
+        """Fill the scheduler command from the selected JupyterHub profile.
 
-    def _fetch_partitions(self) -> None:
-        """Run ``sinfo`` on the remote (worker thread) and fill the
-        partition dropdown with the result — same queue + QTimer pattern as
-        Test SSH so the dialog stays responsive while ssh round-trips."""
+        Each profile item carries its full ``srun`` launcher as item data; the
+        command field stays the source of truth (and editable) so the user can
+        eyeball/tweak it. The placeholder item carries an empty launcher and is
+        ignored."""
+        launcher = self._profile_combo.currentData()
+        if launcher:
+            self._compute_launcher_edit.setText(str(launcher))
+
+    def _fetch_profiles(self) -> None:
+        """Read ``jupyterhub_config.py`` on the remote (worker thread) and fill
+        the profile dropdown with the cluster's discrete compute options — same
+        queue + QTimer pattern as Test SSH so the dialog stays responsive."""
         alias = self._ssh_alias_edit.text().strip()
         if not alias:
-            self._test_result_lbl.setText("Set an SSH alias first to fetch partitions.")
+            self._test_result_lbl.setText("Set an SSH alias first to fetch profiles.")
             return
         host = self.result_host()
-        self._fetch_part_btn.setEnabled(False)
-        self._test_result_lbl.setText(f"Fetching partitions from {alias} via sinfo…")
+        self._fetch_prof_btn.setEnabled(False)
+        self._test_result_lbl.setText(
+            f"Reading JupyterHub profiles from {alias}…"
+        )
         result_q: queue.Queue = queue.Queue()
 
         def _runner() -> None:
-            ok, parts, detail = remote_config.query_slurm_partitions(host, timeout=20)
-            result_q.put((ok, parts, detail))
+            ok, profiles, detail = remote_config.query_jupyterhub_profiles(host, timeout=25)
+            result_q.put((ok, profiles, detail))
 
         threading.Thread(target=_runner, daemon=True).start()
 
         def _poll() -> None:
             try:
-                ok, parts, detail = result_q.get_nowait()
+                ok, profiles, detail = result_q.get_nowait()
             except queue.Empty:
                 QTimer.singleShot(120, _poll)
                 return
-            self._fetch_part_btn.setEnabled(True)
+            self._fetch_prof_btn.setEnabled(True)
             if not ok:
-                msg = detail.splitlines()[-1] if detail else "sinfo failed"
-                self._test_result_lbl.setText(f"✗ {msg[:140]}")
+                msg = detail.splitlines()[-1] if detail else "profile discovery failed"
+                self._test_result_lbl.setText(f"✗ {msg[:160]}")
                 return
-            current = self._partition_combo.currentText().strip()
-            self._partition_combo.blockSignals(True)
-            self._partition_combo.clear()
-            self._partition_combo.addItems(parts)
-            # Preserve the user's current value even if the cluster doesn't
-            # list it (stale config / typo) so we never silently drop it.
-            if current and current not in parts:
-                self._partition_combo.insertItem(0, current)
-            if current:
-                self._partition_combo.setCurrentText(current)
-            self._partition_combo.blockSignals(False)
+            self._profile_combo.blockSignals(True)
+            self._profile_combo.clear()
+            self._profile_combo.addItem(f"({len(profiles)} profile(s) — pick one)", "")
+            for name, launcher in profiles:
+                self._profile_combo.addItem(name, launcher)
+            self._profile_combo.setCurrentIndex(0)
+            self._profile_combo.blockSignals(False)
             self._test_result_lbl.setText(
-                f"✓ {len(parts)} partition(s) from {alias}."
+                f"✓ {len(profiles)} profile(s) from {alias}'s JupyterHub config."
             )
 
         QTimer.singleShot(120, _poll)

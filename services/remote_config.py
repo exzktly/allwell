@@ -18,10 +18,20 @@ Example::
     extra_args = ["--workers", "0"]
     cache_budget_gb = 200
     measured_bandwidth_mbps = 0.0
+
+On an HPC lobby/login node, add ``compute_launcher`` to run the pipeline on
+a scheduler-allocated compute node instead of the SSH host itself (see
+``_Docs/Markdowns/REMOTE_EXECUTION_SLURM.md``)::
+
+    [remote.cluster]
+    ssh_alias = "hpc-login"
+    compute_launcher = "srun --partition=gpu --gres=gpu:1 --time=4:00:00"
+    ...
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -111,6 +121,18 @@ class RemoteHost:
     runs **directly on the SSH host** — byte-identical to legacy
     behaviour. The string is tokenised with ``shlex.split`` at use time,
     so it stays human-readable on disk.
+    """
+    jupyterhub_config_path: str = ""
+    """Optional path to the cluster's ``jupyterhub_config.py`` on the remote.
+
+    Used by the "Fetch profiles" button to discover the discrete compute
+    options the cluster's JupyterHub exposes (its spawner ``profile_list`` /
+    ``ProfilesSpawner.profiles``) **without** going through the JupyterHub
+    web UI — see :func:`query_jupyterhub_profiles`. When empty, a short list
+    of conventional locations (``/etc/jupyterhub/jupyterhub_config.py``, the
+    ``JUPYTERHUB_CONFIG`` env var) is probed on the remote. Purely a
+    discovery convenience: the selected profile is materialised into
+    :attr:`compute_launcher`, which remains the source of truth for a run.
     """
 
     def ssh_argv(self, *, allocate_tty: bool = True) -> list[str]:
@@ -493,11 +515,16 @@ def _format_block(host: RemoteHost) -> str:
         f"compute_launcher = {_toml_string(host.compute_launcher)}\n"
         if host.compute_launcher else ""
     )
+    jhub_line = (
+        f"jupyterhub_config_path = {_toml_string(host.jupyterhub_config_path)}\n"
+        if host.jupyterhub_config_path else ""
+    )
     return (
         f"[remote.{host.name}]\n"
         f"ssh_alias = {_toml_string(host.ssh_alias)}\n"
         f"{key_line}"
         f"{launcher_line}"
+        f"{jhub_line}"
         f"remote_project_dir = {_toml_string(host.remote_project_dir)}\n"
         f"remote_staging_dir = {_toml_string(host.remote_staging_dir)}\n"
         f"remote_python = {_toml_string(host.remote_python)}\n"
@@ -674,80 +701,279 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
         ),
         ssh_key_path=str(entry.get("ssh_key_path", defaults.ssh_key_path)),
         compute_launcher=str(entry.get("compute_launcher", defaults.compute_launcher)),
+        jupyterhub_config_path=str(
+            entry.get("jupyterhub_config_path", defaults.jupyterhub_config_path)
+        ),
     )
 
 
-# ── SLURM partition discovery + launcher editing ───────────────────────────
+# ── JupyterHub profile discovery ────────────────────────────────────────────
+#
+# JupyterHub's spawn page shows a *discrete, admin-curated* set of options
+# (the spawner's ``profile_list`` / ``ProfilesSpawner.profiles``), NOT the raw
+# SLURM partition list. Those profiles live in ``jupyterhub_config.py`` on the
+# cluster and are not exposed by the JupyterHub REST API or by SLURM, so the
+# only way to surface them without the web UI is to read that config.
+#
+# The snippet below runs on the remote login node (over ssh). It is
+# deliberately dependency-free: a tiny auto-vivifying ``c`` shim stands in for
+# ``traitlets.config.Config`` and a stub importer swallows
+# ``import batchspawner`` / ``wrapspawner`` / ``kubespawner`` failures, so the
+# config's ``c.X.Y = …`` assignments still land even when those packages aren't
+# importable in whatever python3 happens to be on PATH. It prints one JSON
+# object describing the discovered profiles (name + raw kwargs); the kwargs →
+# ``srun`` mapping is done locally in :func:`profile_kwargs_to_launcher` so it
+# stays unit-testable.
+
+_JHUB_PROFILES_SNIPPET = r'''
+import json, os, sys, types, builtins
+
+class _C:
+    """Auto-vivifying stand-in for traitlets Config (no dependency)."""
+    def __init__(self):
+        object.__setattr__(self, "_d", {})
+    def __getattr__(self, k):
+        d = object.__getattribute__(self, "_d")
+        if k not in d:
+            d[k] = _C()
+        return d[k]
+    def __setattr__(self, k, v):
+        object.__getattribute__(self, "_d")[k] = v
+
+def _store(obj):
+    try:
+        return object.__getattribute__(obj, "_d")
+    except Exception:
+        return {}
+
+class _Dummy(types.ModuleType):
+    def __getattr__(self, n):
+        return _Dummy(n)
+    def __call__(self, *a, **k):
+        return _Dummy("call")
+
+_real_import = builtins.__import__
+def _safe_import(name, *a, **k):
+    try:
+        return _real_import(name, *a, **k)
+    except Exception:
+        m = sys.modules.get(name) or _Dummy(name)
+        sys.modules[name] = m
+        return m
+builtins.__import__ = _safe_import
+
+candidates = []
+if len(sys.argv) > 1 and sys.argv[1].strip():
+    candidates.append(sys.argv[1].strip())
+if os.environ.get("JUPYTERHUB_CONFIG"):
+    candidates.append(os.environ["JUPYTERHUB_CONFIG"])
+candidates += [
+    "/etc/jupyterhub/jupyterhub_config.py",
+    "/srv/jupyterhub/jupyterhub_config.py",
+    os.path.expanduser("~/.jupyterhub/jupyterhub_config.py"),
+    os.path.expanduser("~/jupyterhub_config.py"),
+]
+
+c = _C()
+ns = {"c": c, "get_config": (lambda: c)}
+used = None
+for path in candidates:
+    try:
+        with open(path) as fh:
+            src = fh.read()
+    except OSError:
+        continue
+    try:
+        exec(compile(src, path, "exec"), ns)
+    except Exception:
+        pass  # partial assignments to c may still have landed
+    used = path
+    break
+
+if used is None:
+    print(json.dumps({"ok": False,
+                      "error": "jupyterhub_config.py not found (looked in: %s)"
+                               % ", ".join(candidates)}))
+    sys.exit(0)
+
+def _jsonable(v):
+    try:
+        json.dumps(v)
+        return v
+    except Exception:
+        return str(v)
+
+def _kwargs(d):
+    return {str(k): _jsonable(v) for k, v in d.items()} if isinstance(d, dict) else {}
+
+profiles = []
+
+# (a) wrapspawner ProfilesSpawner.profiles: list of
+#     (display_name, slug, spawner_class, options_dict) tuples.
+prof_tuples = _store(c).get("ProfilesSpawner")
+prof_tuples = _store(prof_tuples).get("profiles") if prof_tuples is not None else None
+if isinstance(prof_tuples, (list, tuple)):
+    for item in prof_tuples:
+        if isinstance(item, (list, tuple)) and len(item) >= 1:
+            name = str(item[0])
+            slug = str(item[1]) if len(item) >= 2 else ""
+            opts = item[3] if len(item) >= 4 and isinstance(item[3], dict) else {}
+            profiles.append({"name": name, "slug": slug, "kwargs": _kwargs(opts)})
+
+# (b) *.profile_list: list of dicts (KubeSpawner / batchspawner / Spawner).
+for spawner in ("Spawner", "KubeSpawner", "SlurmSpawner", "BatchSpawnerBase",
+                "ProfilesSpawner", "WrapSpawner"):
+    sp = _store(c).get(spawner)
+    plist = _store(sp).get("profile_list") if sp is not None else None
+    if not isinstance(plist, (list, tuple)):
+        continue
+    for item in plist:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("display_name") or item.get("name") or item.get("slug") or "profile")
+        slug = str(item.get("slug") or item.get("key") or "")
+        merged = {}
+        for sub in ("kubespawner_override", "batch_spawner_override", "options", "slurm"):
+            if isinstance(item.get(sub), dict):
+                merged.update(item[sub])
+        merged.update({k: v for k, v in item.items()
+                       if k not in ("display_name", "name", "slug", "key",
+                                    "kubespawner_override", "batch_spawner_override",
+                                    "options", "slurm", "default", "description")})
+        profiles.append({"name": name, "slug": slug, "kwargs": _kwargs(merged)})
+
+# De-dup by (name, slug) preserving order.
+seen = set()
+uniq = []
+for p in profiles:
+    sig = (p["name"], p["slug"])
+    if sig not in seen:
+        seen.add(sig)
+        uniq.append(p)
+
+print(json.dumps({"ok": True, "source": used, "profiles": uniq}))
+'''
 
 
-def launcher_get_partition(launcher: str) -> str:
-    """Return the partition named in a ``compute_launcher`` string, or "".
+# batchspawner req_* kwarg → srun flag. Order is the rendered flag order.
+_REQ_FLAG_MAP: tuple[tuple[str, str], ...] = (
+    ("req_partition", "--partition="),
+    ("req_qos", "--qos="),
+    ("req_account", "--account="),
+    ("req_reservation", "--reservation="),
+    ("req_constraint", "--constraint="),
+    ("req_nprocs", "--cpus-per-task="),
+    ("req_memory", "--mem="),
+    ("req_runtime", "--time="),
+)
 
-    Recognises ``--partition=NAME``, ``--partition NAME``, ``-p NAME`` and
-    the joined short form ``-pNAME`` — the spellings ``srun``/``salloc``
-    accept. Used by the GUI to pre-select the partition dropdown from a
-    host's stored launcher.
+
+def profile_kwargs_to_launcher(kwargs: dict, *, program: str = "srun") -> str:
+    """Map a JupyterHub profile's spawner kwargs to an ``srun`` launcher.
+
+    Recognises batchspawner's ``req_*`` fields (``req_partition``,
+    ``req_ngpus`` → ``--gres=gpu:N``, ``req_runtime`` → ``--time``,
+    ``req_memory`` → ``--mem``, ``req_nprocs`` → ``--cpus-per-task``, plus raw
+    ``req_options``) and the same names without the ``req_`` prefix. An
+    explicit ``launcher`` / ``compute_launcher`` / ``cmd`` string on the
+    profile wins outright. Returns "" when nothing scheduler-shaped is found
+    (the caller skips such profiles). Pure — unit-tested without any ssh.
     """
-    toks = shlex.split(launcher) if launcher.strip() else []
-    for i, t in enumerate(toks):
-        if t.startswith("--partition="):
-            return t.split("=", 1)[1]
-        if t == "--partition" and i + 1 < len(toks):
-            return toks[i + 1]
-        if t == "-p" and i + 1 < len(toks):
-            return toks[i + 1]
-        if t.startswith("-p") and len(t) > 2 and not t.startswith("--"):
-            return t[2:]
-    return ""
+    if not isinstance(kwargs, dict):
+        return ""
+    for k in ("launcher", "compute_launcher", "cmd"):
+        v = kwargs.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+
+    def _val(req_key: str) -> Any:
+        # Accept both the batchspawner ``req_`` form and the bare key.
+        if req_key in kwargs:
+            return kwargs[req_key]
+        bare = req_key[4:] if req_key.startswith("req_") else req_key
+        return kwargs.get(bare)
+
+    parts: list[str] = [program]
+    for key, flag in _REQ_FLAG_MAP:
+        val = _val(key)
+        if val is not None and str(val).strip() != "":
+            parts.append(f"{flag}{str(val).strip()}")
+    ngpus = _val("req_ngpus")
+    if ngpus is not None and str(ngpus).strip() not in ("", "0"):
+        parts.append(f"--gres=gpu:{str(ngpus).strip()}")
+    extra = _val("req_options")
+    if isinstance(extra, str) and extra.strip():
+        parts.extend(shlex.split(extra))
+    if len(parts) == 1:
+        return ""  # only the program token — nothing recognised
+    return shlex.join(parts)
 
 
-def launcher_set_partition(launcher: str, partition: str) -> str:
-    """Return ``launcher`` with its partition flag set to ``partition``.
+def parse_jupyterhub_profiles_json(
+    stdout: str, *, stderr: str = "", returncode: int = 0
+) -> tuple[bool, list[tuple[str, str]], str]:
+    """Parse the discovery snippet's JSON into ``(ok, [(name, launcher)], detail)``.
 
-    Strips any existing partition spelling (``--partition[=| ]`` / ``-p``)
-    and, when ``partition`` is non-empty, inserts a single
-    ``--partition=<name>`` right after the launcher program (e.g. ``srun``)
-    so the result stays readable. An empty ``partition`` just removes the
-    flag. Round-trips through ``shlex`` so quoting is preserved.
+    Tolerant of leading noise (login banners / motd on the ssh channel): if the
+    whole stream isn't valid JSON it retries on the last non-empty line, which
+    is where the snippet's single ``print`` lands.
     """
-    toks = shlex.split(launcher) if launcher.strip() else []
-    out: list[str] = []
-    skip_next = False
-    for i, t in enumerate(toks):
-        if skip_next:
-            skip_next = False
+    text = (stdout or "").strip()
+    if not text:
+        detail = (stderr or "").strip() or f"no output (exit {returncode})"
+        return (False, [], detail[:300])
+    doc: Any = None
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError:
+        for line in reversed([ln for ln in text.splitlines() if ln.strip()]):
+            try:
+                doc = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    if not isinstance(doc, dict):
+        return (False, [], ((stderr or text).strip() or "unparseable output")[:300])
+    if not doc.get("ok"):
+        return (False, [], str(doc.get("error") or "no profiles found")[:300])
+    out: list[tuple[str, str]] = []
+    skipped = 0
+    for p in doc.get("profiles", []):
+        if not isinstance(p, dict):
             continue
-        if t.startswith("--partition="):
-            continue
-        if t in ("--partition", "-p"):
-            skip_next = True
-            continue
-        if t.startswith("-p") and len(t) > 2 and not t.startswith("--"):
-            continue
-        out.append(t)
-    if partition:
-        insert_at = 1 if out else 0  # after the program token (srun/salloc)
-        out[insert_at:insert_at] = [f"--partition={partition}"]
-    return shlex.join(out)
+        name = str(p.get("name") or p.get("slug") or "profile").strip()
+        launcher = profile_kwargs_to_launcher(p.get("kwargs") or {})
+        if launcher:
+            out.append((name, launcher))
+        else:
+            skipped += 1
+    if not out:
+        return (
+            False, [],
+            "JupyterHub config had no SLURM-shaped compute profiles"
+            + (f" ({skipped} non-SLURM profile(s) skipped)." if skipped else "."),
+        )
+    return (True, out, "")
 
 
-def query_slurm_partitions(
-    host: RemoteHost, *, timeout: float = 20.0
-) -> tuple[bool, list[str], str]:
-    """SSH into ``host`` and list its SLURM partitions via ``sinfo``.
+def query_jupyterhub_profiles(
+    host: RemoteHost, *, timeout: float = 25.0
+) -> tuple[bool, list[tuple[str, str]], str]:
+    """SSH into ``host`` and discover its JupyterHub compute profiles.
 
-    Returns ``(ok, partitions, detail)``. ``partitions`` is a sorted,
-    de-duplicated list of names with the default-partition ``*`` marker
-    stripped. On failure ``ok`` is False and ``detail`` carries an
-    actionable message (ssh unreachable, ``sinfo`` not found = not a SLURM
-    cluster, timeout, empty output). Best-effort and side-effect-free; the
-    GUI runs it on a worker thread and surfaces ``detail`` on error.
-
-    Uses the host's own ssh settings (``ssh_argv`` → key, ControlMaster,
-    keepalive) and ``sinfo -h -o '%P'`` (header-less, partition column);
-    duplicate rows across node states are collapsed.
+    Reads ``jupyterhub_config.py`` on the remote (the host's
+    ``jupyterhub_config_path`` if set, else conventional locations) and returns
+    ``(ok, [(display_name, srun_launcher)], detail)``. The profiles are the
+    discrete options the cluster's JupyterHub web UI would show; selecting one
+    gives a ready-made :attr:`RemoteHost.compute_launcher`. Best-effort and
+    side-effect-free — the GUI runs it on a worker thread and surfaces
+    ``detail`` on failure.
     """
-    argv = host.ssh_argv(allocate_tty=False) + ["sinfo -h -o '%P'"]
+    remote_cmd = f"python3 -c {shlex.quote(_JHUB_PROFILES_SNIPPET)}"
+    path = host.jupyterhub_config_path.strip()
+    if path:
+        remote_cmd += f" {shlex.quote(path)}"
+    argv = host.ssh_argv(allocate_tty=False) + [remote_cmd]
     try:
         result = subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout,
@@ -756,22 +982,6 @@ def query_slurm_partitions(
         return (False, [], f"Timed out after {timeout:.0f}s contacting {host.ssh_alias}.")
     except OSError as exc:
         return (False, [], f"Could not launch ssh: {exc}")
-    if result.returncode != 0:
-        detail = (result.stderr or "").strip() or f"sinfo exited {result.returncode}"
-        if "not found" in detail or "No such file" in detail:
-            detail = (
-                "sinfo not found on the remote — this host doesn't look like "
-                "a SLURM cluster. Enter the partition by hand if you use a "
-                "different scheduler."
-            )
-        return (False, [], detail)
-    names: list[str] = []
-    seen: set[str] = set()
-    for line in result.stdout.splitlines():
-        name = line.strip().rstrip("*").strip()
-        if name and name not in seen:
-            seen.add(name)
-            names.append(name)
-    if not names:
-        return (False, [], "sinfo returned no partitions.")
-    return (True, sorted(names), "")
+    return parse_jupyterhub_profiles_json(
+        result.stdout, stderr=result.stderr, returncode=result.returncode,
+    )

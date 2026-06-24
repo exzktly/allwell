@@ -179,6 +179,25 @@ def test_write_remote_compute_launcher_round_trip(tmp_path):
     assert reloaded["cluster"].compute_launcher == ""
 
 
+def test_write_remote_jupyterhub_config_path_round_trip(tmp_path):
+    """jupyterhub_config_path survives a write cycle and is omitted from the
+    block when empty (like ssh_key_path / compute_launcher)."""
+    cfg = tmp_path / "remotes.toml"
+
+    write_remote(
+        _make_host("cluster", jupyterhub_config_path="/opt/jh/jupyterhub_config.py"),
+        path=cfg,
+    )
+    reloaded = load_remotes(cfg)
+    assert reloaded["cluster"].jupyterhub_config_path == "/opt/jh/jupyterhub_config.py"
+    assert "jupyterhub_config_path" in cfg.read_text(encoding="utf-8")
+
+    write_remote(_make_host("cluster", jupyterhub_config_path=""), path=cfg)
+    text = cfg.read_text(encoding="utf-8")
+    assert "jupyterhub_config_path" not in text
+    assert load_remotes(cfg)["cluster"].jupyterhub_config_path == ""
+
+
 def test_compute_launcher_defaults_empty_when_absent(tmp_path):
     """A pre-existing block with no compute_launcher key loads with the
     field defaulted to '' (runs on the SSH host, legacy behaviour)."""

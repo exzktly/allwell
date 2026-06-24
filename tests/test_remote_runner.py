@@ -2844,6 +2844,13 @@ def test_compose_remote_cmd_scheduled_wraps_in_srun():
     # The job id is captured for the scancel cancel-channel.
     assert "SLURM_JOB_ID" in cmd
     assert ".slurm" in cmd
+    # A status echo runs inside the allocation (after a node is granted) so
+    # the user sees the job id + node + partition once the queue wait clears.
+    assert "[remote] scheduler: allocation granted" in cmd
+    assert "SLURMD_NODENAME" in cmd
+    assert "SLURM_JOB_PARTITION" in cmd
+    # ...and it runs before the pipeline exec.
+    assert cmd.index("allocation granted") < cmd.index("process_microscopy.py")
 
 
 def test_compose_remote_cmd_cache_hit_never_allocates_a_node():
@@ -2897,17 +2904,33 @@ def test_close_remote_job_noop_on_direct_host():
 
 
 def test_close_remote_job_scancels_scheduled_host():
-    """Scheduler-backed host → ssh's a scancel of the recorded job id."""
+    """Scheduler-backed host → ssh's a scancel of the recorded job id and
+    logs that a lingering job was cancelled."""
     r = _runner_with_run("srun --partition=gpu")
+    logs: list[str] = []
     with patch("services.remote_runner.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="AW_SCANCELLED 12345\n", stderr="",
         )
-        r.close_remote_job()
+        r.close_remote_job(log_fn=logs.append)
     run.assert_called_once()
     sent = " ".join(run.call_args.args[0])
     assert "scancel" in sent
     assert ".slurm" in sent      # reads the recorded job-id sidecar
+    assert any("cancelled lingering job 12345" in m for m in logs)
+
+
+def test_close_remote_job_logs_clean_finish_when_nothing_to_cancel():
+    """The common case: srun already exited, so scancel finds nothing — we
+    still emit a definite end-of-job marker instead of silence."""
+    r = _runner_with_run("srun --partition=gpu")
+    logs: list[str] = []
+    with patch("services.remote_runner.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr="",
+        )
+        r.close_remote_job(log_fn=logs.append)
+    assert any("already finished" in m for m in logs)
 
 
 def test_close_remote_job_noop_before_run_starts():

@@ -1438,9 +1438,16 @@ def _compose_remote_cmd(
         )
 
     slurm_sidecar_q = _remote_quote(f"{remote_pidfile}.slurm")
+    # The ``[remote] scheduler: …`` echo runs *inside* the allocation, so it
+    # only prints once the scheduler has granted a node — it streams back over
+    # the same ssh stdout and is the user's "queue wait over, now running on
+    # <node>" signal, naming the job id and partition for diagnosis.
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
         f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
+        f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
+        f'on ${{SLURMD_NODENAME:-$(hostname)}} '
+        f'(partition ${{SLURM_JOB_PARTITION:-?}})"; '
         f"exec {_remote_join(remote_argv)}"
     )
     # shlex.split→join normalises whitespace AND re-quotes any token with
@@ -3741,6 +3748,16 @@ class RemoteRunner:
             f"(upload {sent / (1024**2):.1f} MB in {_fmt_secs(elapsed)})\n"
             f"[remote] $ {_remote_join(remote_argv)}\n"
         )
+        # Surface the scheduler hand-off so a queue wait reads as "waiting",
+        # not a hang. The ``[remote] scheduler: allocation granted …`` line
+        # (emitted from inside the srun step) follows once a node is granted.
+        if self.host.compute_launcher.strip() and not cache_hit:
+            log(
+                f"[remote] scheduler: requesting allocation via: "
+                f"{self.host.compute_launcher.strip()}\n"
+                f"[remote] scheduler: waiting for the scheduler to grant a "
+                f"node (this can queue)…\n"
+            )
 
         popen = subprocess.Popen(
             ssh_argv,
@@ -4164,8 +4181,15 @@ class RemoteRunner:
         if "AW_SCANCELLED" in out:
             jid = out.split("AW_SCANCELLED", 1)[1].strip().split()[0:1]
             log(
-                f"[remote] closed scheduler job {jid[0] if jid else ''}.\n"
+                f"[remote] scheduler: cancelled lingering job "
+                f"{jid[0] if jid else ''}.\n"
             )
+        else:
+            # The common case: ``srun`` already exited with the pipeline, so
+            # there was no allocation left to cancel. Confirm the clean
+            # teardown so the log has a definite end-of-job marker rather
+            # than silence.
+            log("[remote] scheduler: job already finished — nothing to cancel.\n")
 
     def cancel(self, ssh_proc: subprocess.Popen) -> None:
         """Best-effort remote kill. The local pgid kill (handled by

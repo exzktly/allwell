@@ -23,6 +23,7 @@ from well_viewer.data.image_resolver import (
     resolve_filename_candidates,
 )
 from well_viewer.core.safe import swallowed
+from well_viewer.features.scatter.gating import gate_edge_at
 
 if TYPE_CHECKING:
     from .runtime_app import WellViewerApp
@@ -1109,7 +1110,6 @@ def on_scatter_click(app, event) -> None:
         return
 
     # Drawing/editing a gate owns its own press — skip the cell viewer for those.
-    from well_viewer.features.scatter.gating import gate_edge_at
     if getattr(app, "_scatter_gate_draw_mode", False) or gate_edge_at(app, event) is not None:
         return
 

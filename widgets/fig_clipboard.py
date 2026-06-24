@@ -182,18 +182,48 @@ def copy_figure_to_clipboard(fig, *, svg_kwargs=None, pdf_kwargs=None) -> str:
 def axis_tight_bbox_inches(ax, *, pad_in: float = 0.04):
     """Return a ``Bbox`` (in inches) tightly enclosing a single *ax*.
 
-    Includes the axes' tick labels, axis labels and title (everything
-    ``Axes.get_tightbbox`` covers), so passing the result as
-    ``savefig(bbox_inches=…)`` crops the saved figure to just that subplot.
+    Includes the axes' tick labels, axis labels and title, so passing the
+    result as ``savefig(bbox_inches=…)`` crops the saved figure to just that
+    subplot.
 
     The canvas is drawn first so the renderer exists and artist positions are
     final — this is correct for both ``layout="constrained"`` figures and ones
     using manual ``subplots_adjust``, since ``get_tightbbox`` reads the
     already-laid-out extents. *pad_in* adds a uniform margin (inches).
+
+    ``Axes.get_tightbbox`` can omit a *shared* axis's own label / tick labels —
+    in the "Separate axes" stacked scatter (panels share x and y), saving a
+    panel cropped the y-axis title off. To be robust to that, union the panel's
+    own decoration artists (axis labels, title, tick labels, offset text)
+    explicitly. For a non-shared axis these already fall inside
+    ``get_tightbbox`` so the union is a no-op.
     """
+    from matplotlib.transforms import Bbox
+
     fig = ax.figure
     fig.canvas.draw()                                       # ensure renderer + final positions
     renderer = fig.canvas.get_renderer()
-    bb = ax.get_tightbbox(renderer)                         # display px (bottom-left origin)
+    extents = [ax.get_tightbbox(renderer)]                  # display px (bottom-left origin)
+
+    decorations = [ax.yaxis.label, ax.xaxis.label, ax.title,
+                   ax.yaxis.get_offset_text(), ax.xaxis.get_offset_text()]
+    try:
+        decorations += list(ax.get_yticklabels()) + list(ax.get_xticklabels())
+    except Exception:
+        pass
+    for art in decorations:
+        try:
+            if art is None or not art.get_visible():
+                continue
+            if hasattr(art, "get_text") and not str(art.get_text()):
+                continue
+            ext = art.get_window_extent(renderer)
+            if ext.width > 0 and ext.height > 0:
+                extents.append(ext)
+        except Exception:
+            continue
+
+    bb = Bbox.union(extents)
     bb = bb.transformed(fig.dpi_scale_trans.inverted())     # -> inches
     return bb.padded(pad_in)                                # uniform margin; scalar = version-safe
+

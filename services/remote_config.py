@@ -18,6 +18,15 @@ Example::
     extra_args = ["--workers", "0"]
     cache_budget_gb = 200
     measured_bandwidth_mbps = 0.0
+
+On an HPC lobby/login node, add ``compute_launcher`` to run the pipeline on
+a scheduler-allocated compute node instead of the SSH host itself (see
+``_Docs/Markdowns/REMOTE_EXECUTION_SLURM.md``)::
+
+    [remote.cluster]
+    ssh_alias = "hpc-login"
+    compute_launcher = "srun --partition=gpu --gres=gpu:1 --time=4:00:00"
+    ...
 """
 
 from __future__ import annotations

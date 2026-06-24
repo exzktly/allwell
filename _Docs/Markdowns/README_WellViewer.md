@@ -36,6 +36,20 @@ live in the code, how to add features, how to debug), see
 The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
 Newest first:
 
+- **7.4.0 — Remote execution on HPC lobby/login nodes (SLURM).** Run the
+  Analyze pipeline on a cluster you reach through a JupyterHub **lobby / login
+  node**: a per-host *Run compute* toggle (on the SSH host itself, or on a node
+  the scheduler allocates) submits the pipeline into a fresh `srun` allocation
+  on a compute node while staging/cache/fetch/cleanup stay on the login node
+  against the shared filesystem. The **Compute profile** dropdown reads the
+  cluster's `jupyterhub_config.py` over SSH and lists the same discrete options
+  the JupyterHub spawn page offers — no JupyterHub webpage needed — and picking
+  one fills in the scheduler command. The scheduler job is **always torn down**
+  (on completion, failure, or cancel), and the run log now narrates the SLURM
+  hand-off: the resources requested, the queue wait, the **job id + node** the
+  moment a node is granted, and a definite end-of-job marker. See
+  `REMOTE_EXECUTION_SLURM.md`.
+
 - **7.3.1 — Saved Plots polish & optimizer fix.** Patch release: export all saved plots as a multi-page **PDF report** (cover page + one full-quality page per plot with its parameters); **save the Image Browser grid** to Saved Plots (downsampled, brightness-preserving so contrast isn't washed out); and a fix to the **Optimize ThreshFracOn** metric under fold-change *subtraction* (the validation curve no longer inverts / picks the wrong threshold).
 
 - **7.3.0 — Saved Plots, per-tab axis properties & clearer fold-change titles.**

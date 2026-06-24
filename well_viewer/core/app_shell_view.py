@@ -31,11 +31,11 @@ def build_ui(app) -> None:
     top_layout = QHBoxLayout(top)
     top_layout.setContentsMargins(14, 8, 14, 8)
     app._top_bar = top
-    # Left-rail collapse toggle (mirrors the Ctrl+B shortcut). Checked == the
-    # rail is hidden; the glyph flips between panel-open / panel-close.
+    # Left-rail collapse toggle. Checked == the rail is hidden; the glyph
+    # flips between panel-open / panel-close.
     from widgets.icon_button import IconButton as _IconButton
     app._sidebar_toggle_btn = _IconButton(
-        "panel-right-close", tooltip="Hide sidebar (Ctrl+B)", checkable=True)
+        "panel-right-close", tooltip="Hide sidebar", checkable=True)
     app._sidebar_toggle_btn.clicked.connect(app._toggle_sidebar)
     top_layout.addWidget(app._sidebar_toggle_btn)
     app._dir_label = QLabel("No data loaded")

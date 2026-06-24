@@ -418,8 +418,7 @@ def toggle_sidebar(app) -> None:
     """User-driven collapse/expand of the left rail.
 
     Flips the persistent collapse flag, re-applies the effective visibility,
-    and syncs the top-bar toggle button's checked state / glyph so the button
-    and the keyboard shortcut stay in lock-step.
+    and syncs the top-bar toggle button's checked state / glyph.
     """
     app._sidebar_collapsed = not getattr(app, "_sidebar_collapsed", False)
     apply_sidebar_visibility(app)
@@ -432,7 +431,7 @@ def toggle_sidebar(app) -> None:
         finally:
             btn.blockSignals(blocked)
         btn.setIconName("panel-right-open" if collapsed else "panel-right-close")
-        btn.setToolTip("Show sidebar (Ctrl+B)" if collapsed else "Hide sidebar (Ctrl+B)")
+        btn.setToolTip("Show sidebar" if collapsed else "Hide sidebar")
 
 
 def on_central_pane_changed(app, idx: int) -> None:

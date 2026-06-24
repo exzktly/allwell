@@ -397,15 +397,52 @@ def tab_history_forward(app) -> None:
 
 
 
+def apply_sidebar_visibility(app) -> None:
+    """Apply the effective left-rail visibility.
+
+    The rail is shown only when **both** conditions hold: the app is in
+    Review mode (Analyze carries no Review-only affordances) and the user
+    hasn't collapsed it via the toggle (``Ctrl+B`` / top-bar button). Routing
+    both the mode switch and the user toggle through this single helper keeps
+    them from fighting over ``setVisible``.
+    """
+    sidebar = getattr(app, "_sidebar_root", None)
+    if sidebar is None:
+        return
+    mode = app.currentMode() if hasattr(app, "currentMode") else "review"
+    visible = (mode == "review") and not getattr(app, "_sidebar_collapsed", False)
+    sidebar.setVisible(visible)
+
+
+def toggle_sidebar(app) -> None:
+    """User-driven collapse/expand of the left rail.
+
+    Flips the persistent collapse flag, re-applies the effective visibility,
+    and syncs the top-bar toggle button's checked state / glyph so the button
+    and the keyboard shortcut stay in lock-step.
+    """
+    app._sidebar_collapsed = not getattr(app, "_sidebar_collapsed", False)
+    apply_sidebar_visibility(app)
+    btn = getattr(app, "_sidebar_toggle_btn", None)
+    if btn is not None:
+        collapsed = app._sidebar_collapsed
+        blocked = btn.blockSignals(True)
+        try:
+            btn.setChecked(collapsed)
+        finally:
+            btn.blockSignals(blocked)
+        btn.setIconName("panel-right-open" if collapsed else "panel-right-close")
+        btn.setToolTip("Show sidebar (Ctrl+B)" if collapsed else "Hide sidebar (Ctrl+B)")
+
+
 def on_central_pane_changed(app, idx: int) -> None:
     # Mode-seg lives in all_well's titlebar; emit modeChanged so the
     # shell can re-sync its own seg without poking widgets here.
     mode = "analyze" if idx == 1 else "review"
     # Hide the section / well-picker sidebar when Analyze is active —
-    # it carries Review-only affordances. Show it again on Review.
-    sidebar = getattr(app, "_sidebar_root", None)
-    if sidebar is not None:
-        sidebar.setVisible(mode == "review")
+    # it carries Review-only affordances. Show it again on Review (unless
+    # the user has collapsed it). Both rules live in apply_sidebar_visibility.
+    apply_sidebar_visibility(app)
     app.modeChanged.emit(mode)
 
 

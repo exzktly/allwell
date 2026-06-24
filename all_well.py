@@ -309,6 +309,8 @@ class AllWellApp(QMainWindow):
         - ⌘← / Ctrl+← — back through the section tab history.
         - ⌘→ / Ctrl+→ — forward through the section tab history.
         - ⌘/ / Ctrl+/ — toggle the help drawer (matches the header ? button).
+        - ⌘B / Ctrl+B — collapse / expand the left sidebar (matches the
+          top-bar panel button).
         - ⌘W / Ctrl+W — close the window.
 
         Every shortcut here is surfaced somewhere in the chrome (statusbar
@@ -322,7 +324,13 @@ class AllWellApp(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Left"), self, activated=self._tab_history_back)
         QShortcut(QKeySequence("Ctrl+Right"), self, activated=self._tab_history_forward)
         QShortcut(QKeySequence("Ctrl+/"), self, activated=self._toggle_help_drawer)
+        QShortcut(QKeySequence("Ctrl+B"), self, activated=self._toggle_sidebar)
         QShortcut(QKeySequence("Ctrl+W"), self, activated=self.close)
+
+    def _toggle_sidebar(self) -> None:
+        review = getattr(self, "_review", None)
+        if review is not None and hasattr(review, "_toggle_sidebar"):
+            review._toggle_sidebar()
 
     def _tab_history_back(self) -> None:
         review = getattr(self, "_review", None)
@@ -606,6 +614,8 @@ class AllWellApp(QMainWindow):
                 "<tt>⌘→</tt> / <tt>Ctrl+→</tt> — Forward to the next section "
                 "tab in history<br>"
                 "<tt>⌘/</tt> / <tt>Ctrl+/</tt> — Toggle this help drawer<br>"
+                "<tt>⌘B</tt> / <tt>Ctrl+B</tt> — Collapse / expand the left "
+                "sidebar<br>"
                 "<tt>⌘W</tt> / <tt>Ctrl+W</tt> — Close window"
             )
             cl.addWidget(body)

@@ -200,6 +200,10 @@ def redraw_scatter(
     # Redraw canvas
     app._scatter_interaction_cache = {
         "points": interaction_points,
+        # Overlay is a single panel: pair the points with the one axis so the
+        # click/hover handlers share one panel-resolution path with the
+        # "Separate axes" layout (see _layout._render_scatter_faceted).
+        "axes_points": [(app._ax_scatter, interaction_points)],
         # Single-tp callers used ``timepoint_h``; preserve that key when
         # exactly one tp was passed so downstream consumers (export CSV,
         # click metadata) don't need to know about the new list shape.
@@ -446,12 +450,30 @@ def redraw_scatter_orchestrate(app) -> None:
     apply_export_style_to_current(app, app._scatter_fig, getattr(app, "_scatter_canvas", None))
 
 
+def _points_for_event(app, event) -> list:
+    """Return the click-interaction points for the panel under *event*.
+
+    Overlay mode has a single panel; the "Separate axes" layout stacks one
+    panel per group with shared x/y axes, so a global nearest-search would be
+    ambiguous. ``axes_points`` pairs each panel's points with its axis, letting
+    both layouts resolve the panel actually clicked/hovered. Falls back to the
+    flat ``points`` list (keyed to the primary axis) for any cache that predates
+    ``axes_points``."""
+    cache = getattr(app, "_scatter_interaction_cache", None) or {}
+    axes_points = cache.get("axes_points")
+    if axes_points:
+        for ax, pts in axes_points:
+            if event.inaxes is ax:
+                return pts
+        return []
+    if event.inaxes is app._ax_scatter:
+        return cache.get("points", [])
+    return []
+
+
 def on_scatter_click(app, event) -> None:
     """Handle click events on scatter plot datapoints."""
-    if event.inaxes is not app._ax_scatter or event.xdata is None or event.ydata is None:
-        return
-
-    if event.button != 1:
+    if event.xdata is None or event.ydata is None or event.button != 1:
         return
 
     # Drawing/editing a gate owns its own press — skip the cell viewer for those.
@@ -459,8 +481,7 @@ def on_scatter_click(app, event) -> None:
         return
 
     try:
-        interaction_cache = getattr(app, "_scatter_interaction_cache", None) or {}
-        points = interaction_cache.get("points", [])
+        points = _points_for_event(app, event)
         if not points:
             return
 
@@ -504,12 +525,11 @@ def on_scatter_click(app, event) -> None:
 
 def on_scatter_motion(app, event) -> None:
     """Handle hover events on scatter plot to show tooltips."""
-    if event.inaxes is not app._ax_scatter or event.xdata is None or event.ydata is None:
+    if event.xdata is None or event.ydata is None:
         return
 
     try:
-        interaction_cache = getattr(app, "_scatter_interaction_cache", None) or {}
-        points = interaction_cache.get("points", [])
+        points = _points_for_event(app, event)
         if not points:
             return
 

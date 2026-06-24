@@ -174,7 +174,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_card = card
     ctx.app._scatter_fig = card.figure
     ctx.app._ax_scatter = ctx.app._scatter_fig.add_subplot(1, 1, 1)
-    ctx.app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
+    ctx.app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.16, right=0.97)
     ctx.app._scatter_canvas = card.canvas
     # No error-band controls here: the per-cell scatter draws individual points,
     # so SEM/SD has no meaning (it belongs only on the aggregate scatter).

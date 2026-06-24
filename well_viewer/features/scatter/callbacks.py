@@ -60,6 +60,10 @@ class ScatterCellViewer(QWidget):
         self._current_channel = None
         self._current_lut: Tuple[float, float] = (0.0, 100.0)
         self._channel_luts: dict[str, Tuple[float, float]] = {}
+        # Image source: "raw" loads the raw input fluor frame; "corrected"
+        # loads the pipeline's top-hat output (same notion the Review Image
+        # tab calls "corrected"), falling back to raw when absent.
+        self._image_source = "raw"
         self._debug_lines: list[str] = []
         self._pixmap_cache: Optional[QPixmap] = None
 
@@ -92,6 +96,20 @@ class ScatterCellViewer(QWidget):
         self._channel_dropdown.setEditable(False)
         self._channel_dropdown.currentIndexChanged.connect(self._on_channel_changed)
         ctrl_row.addWidget(self._channel_dropdown)
+        ctrl_row.addSpacing(10)
+        ctrl_row.addWidget(QLabel("Source:"))
+        self._source_dropdown = QComboBox()
+        self._source_dropdown.setEditable(False)
+        # Data carries the canonical mode; the label is the human-facing text.
+        self._source_dropdown.addItem("Raw", "raw")
+        self._source_dropdown.addItem("Corrected", "corrected")
+        self._source_dropdown.setToolTip(
+            "Raw: the unprocessed input frame.\n"
+            "Corrected: the pipeline's top-hat output (falls back to raw "
+            "when a corrected frame isn't available)."
+        )
+        self._source_dropdown.currentIndexChanged.connect(self._on_source_changed)
+        ctrl_row.addWidget(self._source_dropdown)
         ctrl_row.addStretch(1)
         layout.addLayout(ctrl_row)
 
@@ -125,6 +143,18 @@ class ScatterCellViewer(QWidget):
         self._debug_text.setMinimumHeight(140)
         diag_layout.addWidget(self._debug_text)
         layout.addWidget(diag_group)
+
+    def _on_source_changed(self, *_args) -> None:
+        """Switch between raw and corrected image sources and reload the cell.
+
+        The full reload re-resolves and re-crops every channel against the new
+        source (and recomputes LUTs), so the displayed image, the channel
+        dropdown, and the diagnostics all reflect the chosen source.
+        """
+        data = self._source_dropdown.currentData()
+        self._image_source = str(data or "raw")
+        self._debug(f"image source -> {self._image_source!r}; reloading cell")
+        self._load_cell_data()
 
     def _close_dock(self) -> None:
         """Hide the shared plot dock this panel lives in."""
@@ -425,8 +455,14 @@ class ScatterCellViewer(QWidget):
             self._img_label.setText("No images could be loaded")
             self._debug("No channels were successfully loaded.")
 
-    def _load_output_image_by_filename(self, image_type: str):
-        """Load a mask or overlay from the output zip via canonical filename resolver."""
+    def _load_output_image_by_filename(self, image_type: str, target_channel: str = ""):
+        """Load an output image (mask / overlay / top-hat) from the output zip
+        via the canonical filename resolver.
+
+        *target_channel* is forwarded to the resolver so channel-templated
+        suffixes (e.g. ``_tophat_{channel}.tif``) resolve for the requested
+        channel — required for the "Corrected" source, which reads top-hat
+        output per channel."""
         try:
             import zipfile
             from pathlib import Path as _Path
@@ -444,6 +480,7 @@ class ScatterCellViewer(QWidget):
                 self.filename,
                 pipeline_info=pipeline_info,
                 output_kind=image_type,
+                target_channel=target_channel,
                 filename_variants_fn=self._filename_variants,
             )
             if not candidates:
@@ -481,7 +518,7 @@ class ScatterCellViewer(QWidget):
                         )
                         chosen = self._pick_member_for_fov(matches, target_fov)
                         ref = ImgRef(zip_path=zip_path, zip_member=chosen)
-                        arr = open_imgref_as_array(ref=ref, greyscale=(image_type == "mask"))
+                        arr = open_imgref_as_array(ref=ref, greyscale=(image_type != "overlay"))
                         self._debug(f"loaded {image_type} from zip: {zip_path}::{chosen}")
                         return arr, f"{zip_path}::{chosen}"
 
@@ -499,7 +536,7 @@ class ScatterCellViewer(QWidget):
                     chosen = self._pick_member_for_fov([str(p) for p in paths], target_fov)
                     img_path = _Path(chosen)
                     ref = ImgRef(disk_path=img_path)
-                    arr = open_imgref_as_array(ref=ref, greyscale=(image_type == "mask"))
+                    arr = open_imgref_as_array(ref=ref, greyscale=(image_type != "overlay"))
                     self._debug(f"loaded {image_type} from disk: {img_path}")
                     return arr, str(img_path)
 
@@ -612,6 +649,16 @@ class ScatterCellViewer(QWidget):
             if channel in ("mask", "overlay"):
                 arr, src = self._load_output_image_by_filename(channel)
                 self._debug(f"channel={channel} loaded_from={src}")
+            elif getattr(self, "_image_source", "raw") == "corrected":
+                # Corrected source: prefer the per-channel top-hat output, fall
+                # back to the raw input frame when the dataset ships no top-hat
+                # for this channel (mirrors Review Image's corrected→raw fallback).
+                arr, src = self._load_output_image_by_filename("tophat", target_channel=channel)
+                if arr is not None:
+                    self._debug(f"channel={channel} corrected(tophat) loaded_from={src}")
+                else:
+                    self._debug(f"channel={channel} corrected(tophat) unavailable ({src}); falling back to raw")
+                    arr = self._load_input_channel_by_filename(channel)
             else:
                 arr = self._load_input_channel_by_filename(channel)
             if arr is None or not self._cell_bounds:
@@ -640,6 +687,17 @@ class ScatterCellViewer(QWidget):
             if not self._cell_bounds:
                 self._debug("skip nuclear image load: no cell bounds.")
                 return None
+
+            # Corrected source: prefer the nuclear channel's top-hat output,
+            # falling through to the raw nuclear frame below when absent.
+            if getattr(self, "_image_source", "raw") == "corrected":
+                arr, src = self._load_output_image_by_filename(
+                    "tophat", target_channel=self._nuclear_token)
+                if arr is not None:
+                    self._debug(f"nuclear corrected(tophat) loaded_from={src}")
+                    y_min, x_min, y_max, x_max = self._cell_bounds
+                    return arr[y_min:y_max, x_min:x_max]
+                self._debug(f"nuclear corrected(tophat) unavailable ({src}); falling back to raw")
 
             well_token = extract_well_token(self.well_label)
             if well_token is None:

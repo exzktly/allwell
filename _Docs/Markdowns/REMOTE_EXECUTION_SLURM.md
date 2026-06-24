@@ -106,6 +106,13 @@ the profiles by name. Picking one fills in the whole **Scheduler command**
 verify it. Selecting a profile is just a convenient way to author
 `compute_launcher` — that string remains the source of truth for the run.
 
+The dropdown **remembers** the fetched list (cached locally per host) and a
+status line under it shows the current state — *Saved profile: …* when the saved
+command matches a known profile, *Profile "…" selected — click OK to save* right
+after you pick one, or *Custom command* if you've hand-edited it. So reopening
+the form shows your saved choice already selected without re-fetching; click
+**Fetch** again only when you want to refresh the list from the cluster.
+
 How discovery works (best-effort, side-effect-free):
 
 - A small dependency-free Python snippet runs on the login node. It loads

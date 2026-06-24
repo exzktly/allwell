@@ -18,6 +18,7 @@ Hierarchy:
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
@@ -202,7 +203,6 @@ class RemoteFormDialog(QDialog):
             "Fetch to read them from the cluster's jupyterhub_config.py over "
             "SSH; picking one fills in the scheduler command below."
         )
-        self._profile_combo.addItem("(click Fetch to load JupyterHub profiles)", "")
         self._profile_combo.activated.connect(self._on_profile_chosen)
         prof_row.addWidget(self._profile_combo, 1)
         self._fetch_prof_btn = QPushButton("Fetch", self._scheduled_box)
@@ -215,6 +215,13 @@ class RemoteFormDialog(QDialog):
         prof_row.addWidget(self._fetch_prof_btn)
         sched_layout.addLayout(prof_row)
 
+        # Persistent feedback so the user can tell whether the picked profile
+        # is the saved one, a pending pick, or a hand-edited command.
+        self._profile_status_lbl = QLabel("", self._scheduled_box)
+        self._profile_status_lbl.setObjectName("Muted")
+        self._profile_status_lbl.setWordWrap(True)
+        sched_layout.addWidget(self._profile_status_lbl)
+
         launcher_row = QHBoxLayout()
         launcher_row.setSpacing(6)
         launcher_row.addWidget(QLabel("Scheduler command", self._scheduled_box))
@@ -223,6 +230,10 @@ class RemoteFormDialog(QDialog):
             "srun --cpus-per-task=16 --mem=64G --time=4:00:00   "
             "(add --gres=gpu:1 for GPU)"
         )
+        # Hand-editing the command means it's no longer a pristine profile pick
+        # — reflect that live (textEdited fires only on user edits, not our
+        # programmatic setText, so no feedback loop).
+        self._compute_launcher_edit.textEdited.connect(self._on_launcher_edited)
         launcher_row.addWidget(self._compute_launcher_edit, 1)
         sched_layout.addLayout(launcher_row)
 
@@ -238,6 +249,13 @@ class RemoteFormDialog(QDialog):
         jhub_row.addWidget(self._jhub_path_edit, 1)
         sched_layout.addLayout(jhub_row)
         main_form.addRow(self._scheduled_box)
+
+        # Restore the last-fetched profiles for this host (cached locally) so
+        # reopening doesn't force a re-Fetch, and pre-select the one matching
+        # the saved command so the user sees their saved choice reflected.
+        self._populate_profile_combo(
+            self._load_cached_profiles(), select_launcher=host.compute_launcher,
+        )
 
         scheduled = bool(host.compute_launcher.strip())
         self._compute_loc_combo.setCurrentIndex(1 if scheduled else 0)
@@ -422,6 +440,12 @@ class RemoteFormDialog(QDialog):
         self._scheduled_box.setVisible(scheduled)
         if scheduled and not self._compute_launcher_edit.text().strip():
             self._compute_launcher_edit.setText(_DEFAULT_COMPUTE_LAUNCHER)
+        if scheduled:
+            # Refresh the profile match/status for the now-visible command
+            # (setText above doesn't fire textEdited).
+            self._select_profile_for_launcher(
+                self._compute_launcher_edit.text(), saved=True,
+            )
         # Grow/shrink the dialog to fit the controls appearing/disappearing.
         self.adjustSize()
 
@@ -435,11 +459,101 @@ class RemoteFormDialog(QDialog):
         launcher = self._profile_combo.currentData()
         if launcher:
             self._compute_launcher_edit.setText(str(launcher))
+            self._set_profile_status(self._profile_combo.currentText(), saved=False)
+        else:
+            self._set_profile_status("", saved=False)
+
+    def _on_launcher_edited(self, _text: str) -> None:
+        """Keep the dropdown + status honest when the user hand-edits the
+        command: re-select a matching profile if the text still equals one, or
+        drop to the placeholder + "custom command" otherwise."""
+        self._select_profile_for_launcher(
+            self._compute_launcher_edit.text(), saved=False,
+        )
+
+    # ── profile cache + selection ──────────────────────────────────────────
+
+    def _profiles_cache_key(self) -> str:
+        """QSettings key for this host's last-fetched profiles. Keyed by the
+        remote name (falling back to the ssh alias) so reopening the same host
+        restores its list; empty when neither is known yet."""
+        name = self._name_edit.text().strip() or self._ssh_alias_edit.text().strip()
+        return f"remote_profiles/{name}" if name else ""
+
+    def _load_cached_profiles(self) -> list[tuple[str, str]]:
+        key = self._profiles_cache_key()
+        if not key:
+            return []
+        raw = self._settings().value(key)
+        if not raw:
+            return []
+        try:
+            return [(str(n), str(launcher)) for n, launcher in json.loads(raw)]
+        except (ValueError, TypeError):
+            return []
+
+    def _save_cached_profiles(self, profiles: list[tuple[str, str]]) -> None:
+        key = self._profiles_cache_key()
+        if key:
+            self._settings().setValue(
+                key, json.dumps([[n, launcher] for n, launcher in profiles])
+            )
+
+    def _populate_profile_combo(
+        self, profiles: list[tuple[str, str]], *, select_launcher: str = "",
+    ) -> None:
+        """Rebuild the dropdown from ``profiles`` and select the one whose
+        launcher matches ``select_launcher`` (the saved/current command)."""
+        self._profile_combo.blockSignals(True)
+        self._profile_combo.clear()
+        if profiles:
+            self._profile_combo.addItem(f"({len(profiles)} profile(s) — pick one)", "")
+        else:
+            self._profile_combo.addItem("(click Fetch to load JupyterHub profiles)", "")
+        for name, launcher in profiles:
+            self._profile_combo.addItem(name, launcher)
+        self._profile_combo.blockSignals(False)
+        self._select_profile_for_launcher(select_launcher, saved=True)
+
+    def _select_profile_for_launcher(self, launcher: str, *, saved: bool) -> None:
+        """Select the dropdown item whose launcher equals ``launcher`` (or the
+        placeholder if none), and refresh the status line. ``saved`` marks
+        whether the match reflects the persisted command (open/restore) vs a
+        just-made edit."""
+        target = launcher.strip()
+        matched = ""
+        for i in range(1, self._profile_combo.count()):
+            if target and str(self._profile_combo.itemData(i)).strip() == target:
+                matched = self._profile_combo.itemText(i)
+                index = i
+                break
+        else:
+            index = 0
+        self._profile_combo.blockSignals(True)
+        self._profile_combo.setCurrentIndex(index)
+        self._profile_combo.blockSignals(False)
+        self._set_profile_status(matched, saved=saved)
+
+    def _set_profile_status(self, name: str, *, saved: bool) -> None:
+        if name and saved:
+            text = f"✓ Saved profile: {name}"
+        elif name:
+            text = f"Profile “{name}” selected — click OK to save."
+        elif not self._compute_launcher_edit.text().strip():
+            text = "No profile selected."
+        elif self._profile_combo.count() <= 1:
+            # A command is set but the profile list hasn't been loaded yet, so
+            # we can't name a match — don't cry "custom".
+            text = "Saved command set — click Fetch to match it to a profile."
+        else:
+            text = "Custom command (doesn't match a listed profile)."
+        self._profile_status_lbl.setText(text)
 
     def _fetch_profiles(self) -> None:
         """Read ``jupyterhub_config.py`` on the remote (worker thread) and fill
         the profile dropdown with the cluster's discrete compute options — same
-        queue + QTimer pattern as Test SSH so the dialog stays responsive."""
+        queue + QTimer pattern as Test SSH so the dialog stays responsive. The
+        result is cached locally so reopening the host doesn't re-Fetch."""
         alias = self._ssh_alias_edit.text().strip()
         if not alias:
             self._test_result_lbl.setText("Set an SSH alias first to fetch profiles.")
@@ -468,13 +582,12 @@ class RemoteFormDialog(QDialog):
                 msg = detail.splitlines()[-1] if detail else "profile discovery failed"
                 self._test_result_lbl.setText(f"✗ {msg[:160]}")
                 return
-            self._profile_combo.blockSignals(True)
-            self._profile_combo.clear()
-            self._profile_combo.addItem(f"({len(profiles)} profile(s) — pick one)", "")
-            for name, launcher in profiles:
-                self._profile_combo.addItem(name, launcher)
-            self._profile_combo.setCurrentIndex(0)
-            self._profile_combo.blockSignals(False)
+            # Cache for next open, repopulate, and keep the current command's
+            # profile selected if it's still in the freshly-fetched list.
+            self._save_cached_profiles(profiles)
+            self._populate_profile_combo(
+                profiles, select_launcher=self._compute_launcher_edit.text(),
+            )
             self._test_result_lbl.setText(
                 f"✓ {len(profiles)} profile(s) from {alias}'s JupyterHub config."
             )

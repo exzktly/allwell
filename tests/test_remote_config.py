@@ -273,6 +273,31 @@ def test_ssh_argv_no_tty():
     assert "alias" in argv
 
 
+def test_ssh_argv_server_alive_count_max_from_queue_wait():
+    """The keepalive tolerance (ServerAliveCountMax) is derived from the
+    editable queue-wait timeout: 2 counts/min at the 30s interval, floored
+    at 3, with 0 meaning effectively unlimited."""
+    def count_max(argv):
+        for a in argv:
+            if a.startswith("ServerAliveCountMax="):
+                return int(a.split("=", 1)[1])
+        raise AssertionError("ServerAliveCountMax not in argv")
+
+    # Default 30 min → 60; the stock OpenSSH default of 3 (≈90s) is replaced.
+    assert count_max(RemoteHost(name="x", ssh_alias="a").ssh_argv()) == 60
+    assert count_max(
+        RemoteHost(name="x", ssh_alias="a", queue_wait_timeout_min=5).ssh_argv()
+    ) == 10
+    # Sub-minute waits still floor at 3 so a transient blip doesn't drop us.
+    assert count_max(
+        RemoteHost(name="x", ssh_alias="a", queue_wait_timeout_min=1).ssh_argv()
+    ) == 3
+    # 0 = wait indefinitely.
+    assert count_max(
+        RemoteHost(name="x", ssh_alias="a", queue_wait_timeout_min=0).ssh_argv()
+    ) >= 1_000_000
+
+
 # ── Windows-host helpers ────────────────────────────────────────────────────
 #
 # All tests below toggle the framework's view of the local platform via

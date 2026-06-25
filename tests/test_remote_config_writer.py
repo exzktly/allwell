@@ -198,6 +198,19 @@ def test_write_remote_jupyterhub_config_path_round_trip(tmp_path):
     assert load_remotes(cfg)["cluster"].jupyterhub_config_path == ""
 
 
+def test_write_remote_queue_wait_timeout_round_trip(tmp_path):
+    """queue_wait_timeout_min survives a write cycle and defaults to 30 when
+    a pre-existing block omits it."""
+    cfg = tmp_path / "remotes.toml"
+    write_remote(_make_host("cluster", queue_wait_timeout_min=120), path=cfg)
+    assert load_remotes(cfg)["cluster"].queue_wait_timeout_min == 120
+    assert "queue_wait_timeout_min = 120" in cfg.read_text(encoding="utf-8")
+
+    legacy = tmp_path / "legacy.toml"
+    legacy.write_text("[remote.old]\nssh_alias = \"old\"\n", encoding="utf-8")
+    assert load_remotes(legacy)["old"].queue_wait_timeout_min == 30
+
+
 def test_compute_launcher_defaults_empty_when_absent(tmp_path):
     """A pre-existing block with no compute_launcher key loads with the
     field defaulted to '' (runs on the SSH host, legacy behaviour)."""

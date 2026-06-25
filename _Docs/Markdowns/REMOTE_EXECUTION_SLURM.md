@@ -202,11 +202,16 @@ every outcome:
 
 ## Things to expect
 
-- **Queue wait.** If the requested partition is busy, `srun` blocks while it
-  waits for the allocation. The SSH connection is held open
-  (`ServerAliveInterval=30`), and the dashboard shows no progress until the node
-  is granted — this is normal, not a hang. Keep `--time=` realistic for your
-  cluster's scheduling policy.
+- **Queue wait.** If the requested partition is busy (or a cloud node has to be
+  provisioned), `srun` blocks while it waits for the allocation. The SSH
+  connection is held open with a 30s keepalive, and the dashboard shows no
+  progress until the node is granted — this is normal, not a hang. A queued node
+  emits nothing on the wire, so how long AllWell tolerates that silence is set by
+  **Max queue wait** in the remote-server manager (`queue_wait_timeout_min`,
+  default **30 min**; `0` = wait indefinitely). It drives the ssh
+  `ServerAliveCountMax`, replacing OpenSSH's stock ≈90s default which is far too
+  short for a node that has to spin up — **raise it if your runs were failing in
+  the queue.** Keep `--time=` realistic for your cluster's scheduling policy too.
 - **Per-run allocation.** Each pipeline run (and, in batched mode, each batch)
   acquires a fresh allocation that exits when the work finishes — no long-lived
   session to manage or leak. A full cache hit skips the pipeline entirely and

@@ -248,6 +248,27 @@ class RemoteFormDialog(QDialog):
         )
         jhub_row.addWidget(self._jhub_path_edit, 1)
         sched_layout.addLayout(jhub_row)
+
+        # How long to wait for the scheduler to grant a node before giving up.
+        # A queued / spinning-up node emits nothing, so this drives the ssh
+        # keepalive tolerance (ServerAliveCountMax); the stock ~90s default is
+        # far too short for a node that has to be provisioned.
+        wait_row = QHBoxLayout()
+        wait_row.setSpacing(6)
+        wait_row.addWidget(QLabel("Max queue wait", self._scheduled_box))
+        self._queue_wait_spin = QSpinBox(self._scheduled_box)
+        self._queue_wait_spin.setRange(0, 1440)  # up to 24h; 0 = unlimited
+        self._queue_wait_spin.setSuffix(" min")
+        self._queue_wait_spin.setSpecialValueText("Wait indefinitely")
+        self._queue_wait_spin.setValue(host.queue_wait_timeout_min)
+        self._queue_wait_spin.setToolTip(
+            "How long to wait for the scheduler to allocate (or spin up) a "
+            "compute node before giving up. Raise this if your cluster queues "
+            "or provisions nodes on demand. 0 = wait indefinitely."
+        )
+        wait_row.addWidget(self._queue_wait_spin)
+        wait_row.addStretch(1)
+        sched_layout.addLayout(wait_row)
         main_form.addRow(self._scheduled_box)
 
         # Restore the last-fetched profiles for this host (cached locally) so
@@ -427,6 +448,7 @@ class RemoteFormDialog(QDialog):
                 else ""
             ),
             jupyterhub_config_path=self._jhub_path_edit.text().strip(),
+            queue_wait_timeout_min=self._queue_wait_spin.value(),
         )
 
     # ── compute-location toggle ────────────────────────────────────────────

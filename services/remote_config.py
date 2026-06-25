@@ -134,6 +134,32 @@ class RemoteHost:
     discovery convenience: the selected profile is materialised into
     :attr:`compute_launcher`, which remains the source of truth for a run.
     """
+    queue_wait_timeout_min: int = 30
+    """How long to wait for the scheduler to grant a node before giving up,
+    in minutes (``0`` = wait indefinitely).
+
+    On a scheduled host the run can sit in the queue while a node is
+    allocated (or, on cloud/autoscaling clusters, provisioned) — a phase
+    that emits nothing on the wire. AllWell keeps the SSH connection alive
+    with a 30s keepalive; this value sets how long a quiet/unresponsive
+    connection is tolerated before ssh gives up (it drives
+    ``ServerAliveCountMax`` — see :meth:`ssh_argv`). The stock OpenSSH
+    default (≈90s) is far too short for a node that has to spin up, so this
+    is editable in the remote-server manager. Applies to direct hosts too,
+    where it just makes a transiently-slow login more forgiving.
+    """
+
+    def _server_alive_count_max(self) -> int:
+        """``ServerAliveCountMax`` derived from :attr:`queue_wait_timeout_min`.
+
+        OpenSSH drops a connection after this many unanswered 30s keepalives,
+        so ``count * 30s`` is the window a quiet connection (a queued/spinning-
+        up node) survives. Two counts per minute, floored at 3; ``0`` ⇒
+        effectively unlimited.
+        """
+        if self.queue_wait_timeout_min <= 0:
+            return 1_000_000  # ~347 days at 30s — effectively "wait forever"
+        return max(3, self.queue_wait_timeout_min * 2)
 
     def ssh_argv(self, *, allocate_tty: bool = True) -> list[str]:
         """Build the leading ``ssh`` command for this host.
@@ -178,6 +204,7 @@ class RemoteHost:
             ]
         argv += [
             "-o", "ServerAliveInterval=30",
+            "-o", f"ServerAliveCountMax={self._server_alive_count_max()}",
             self.ssh_alias,
         ]
         return argv
@@ -531,6 +558,7 @@ def _format_block(host: RemoteHost) -> str:
         f"cpu_only = {'true' if host.cpu_only else 'false'}\n"
         f"extra_args = [{extras}]\n"
         f"cache_budget_gb = {host.cache_budget_gb}\n"
+        f"queue_wait_timeout_min = {host.queue_wait_timeout_min}\n"
         f"auto_gc = {'true' if host.auto_gc else 'false'}\n"
         f"measured_bandwidth_mbps = {host.measured_bandwidth_mbps:.2f}\n"
     )
@@ -703,6 +731,9 @@ def _parse_entry(name: str, entry: dict[str, Any]) -> RemoteHost:
         compute_launcher=str(entry.get("compute_launcher", defaults.compute_launcher)),
         jupyterhub_config_path=str(
             entry.get("jupyterhub_config_path", defaults.jupyterhub_config_path)
+        ),
+        queue_wait_timeout_min=int(
+            entry.get("queue_wait_timeout_min", defaults.queue_wait_timeout_min)
         ),
     )
 

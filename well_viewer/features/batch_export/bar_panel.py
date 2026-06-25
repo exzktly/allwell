@@ -447,13 +447,11 @@ class BarBatchExportPanel(BatchExportPanel):
         apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
         if self._app._use_fov_spread_active():
             apply_ax_style(
-                ax_n, events_per_fov_title(_metric_key, band_lbl),
-                "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV",
+                ax_n, events_per_fov_title(_metric_key, band_lbl), "N(above)/FOV",
             )
         else:
             apply_ax_style(
-                ax_n, events_total_title(_metric_key),
-                "N(spots)" if _metric_key == "smfish_count" else "N(above)",
+                ax_n, events_total_title(_metric_key), "N(above)",
             )
         ax_frac.set_ylim(-0.05, 1.05)
 

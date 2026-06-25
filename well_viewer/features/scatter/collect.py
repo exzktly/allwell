@@ -371,9 +371,9 @@ def collect_scatter_agg_data(
     # smfish / ratio).
     if metric_x == "smfish":
         val_col_x = f"{ch_x}_smfish_count"
-        # -1.0 (not 0) so zero-spot cells are counted. Matches the
-        # bar/line/heatmap convention in data_loading.aggregate_with_threshold_df.
-        threshold_x = -1.0
+        # smFISH counts honour the channel's ThreshFracOn (set at line ~342),
+        # like the bar/line/heatmap paths — a cell is "on" when its spot count
+        # exceeds the cutoff (set ThreshFracOn=0 to count any detected spot).
     elif metric_x == "ratio":
         val_col_x = label_to_key.get(ch_x, "")
     elif metric_x == "frac":
@@ -386,8 +386,7 @@ def collect_scatter_agg_data(
 
     if metric_y == "smfish":
         val_col_y = f"{ch_y}_smfish_count"
-        # See threshold_x comment above.
-        threshold_y = -1.0
+        # See the x-axis smFISH comment above — uses the channel's ThreshFracOn.
     elif metric_y == "ratio":
         val_col_y = label_to_key.get(ch_y, "")
     elif metric_y == "frac":

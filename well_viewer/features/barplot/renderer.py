@@ -82,7 +82,6 @@ from well_viewer.core.plot_style import (
     tokens_for,
 )
 from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.core.safe import swallowed
 
 
@@ -507,10 +506,10 @@ def draw_grouped_bar_mode(
         fov_active = app._use_fov_spread_active()
         if fov_active:
             n_title = f"{events_per_fov_title(_metric_key, band_lbl)}{_fc_suffix}  —  {_tp_suffix}"
-            n_ylabel = "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV"
+            n_ylabel = "N(above)/FOV"
         else:
             n_title = f"{events_total_title(_metric_key)}{_fc_suffix}  —  {_tp_suffix}"
-            n_ylabel = "N(spots)" if _metric_key == "smfish_count" else "N(above)"
+            n_ylabel = "N(above)"
         ax_n.set_title(
             n_title, color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold", pad=6,
         )
@@ -538,9 +537,9 @@ def redraw_bars(app) -> None:
 
     use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    # smfish_count: include zero-spot cells in the mean / beeswarm / violin
-    # population (see barplot/controller.py for the full rationale).
-    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
+    # Shapes keep every cell (no ON cutoff); smFISH counts honour the
+    # channel's ThreshFracOn like intensities.
+    if app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
@@ -569,12 +568,12 @@ def redraw_bars(app) -> None:
             apply_ax_style(
                 ax_n,
                 f"{events_per_fov_title(_metric_key, band_lbl)}{_fc_suffix}",
-                "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV",
+                "N(above)/FOV",
             )
         else:
             apply_ax_style(
                 ax_n, f"{events_total_title(_metric_key)}{_fc_suffix}",
-                "N(spots)" if _metric_key == "smfish_count" else "N(above)",
+                "N(above)",
             )
     _set_frac_ylim(app, ax_frac)
 

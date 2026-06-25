@@ -24,7 +24,6 @@ from well_viewer.features.heatmap.models import (
     make_plate_layout,
 )
 from well_viewer.domain.ratio_models import is_ratio_key
-from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
@@ -371,10 +370,9 @@ def redraw_heatmap(app) -> None:
 
     metric = _selected_metric(app)
     val_col = app._app_state.channel.active_val_col
-    # smFISH counts: use a negative floor so cells with zero detected
-    # spots contribute to the mean — at threshold=0 an all-zero
-    # population gives NaN and the heatmap cell stays empty.
-    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
+    # Shapes keep every cell (no ON cutoff); smFISH counts honour the
+    # channel's ThreshFracOn like intensities (count > cutoff is "on").
+    if app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
@@ -600,19 +598,17 @@ def _metric_axis_label(metric: str, app) -> str:
     label = app._active_channel_label() if hasattr(app, "_active_channel_label") else ""
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
     prop_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
-    is_smfish = app._app_state.channel.active_metric == "smfish_count"
     if metric == METRIC_COUNT:
         return "Cell count"
     if metric == METRIC_FRACTION:
-        return (f"{label} fraction with detected spots" if is_smfish
-                else f"{label} fraction above threshold")
+        # smFISH counts now honour ThreshFracOn like intensities, so the
+        # generic "above threshold" wording is accurate for every metric.
+        return f"{label} fraction above threshold"
     if metric == METRIC_RATIO:
         return f"{label} (mean ratio)"
     if metric == METRIC_MEAN_ALL:
         return f"{label} {prop_label} (mean of all cells)"
-    return (f"{label} {prop_label} (mean of cells with spots, thresholds ignored)"
-            if is_smfish
-            else f"{label} {prop_label} (mean above threshold)")
+    return f"{label} {prop_label} (mean above threshold)"
 
 
 # ── Click + hover handlers ───────────────────────────────────────────────────

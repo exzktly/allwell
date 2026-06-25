@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Set, Tuple
 
 from well_viewer.domain import fold_change as _fc
-from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
@@ -382,11 +381,9 @@ def redraw_line_plots(
 
     use_sem = app._app_state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    # smFISH counts: use a negative floor so cells with zero detected
-    # spots still contribute to the mean (see barplot/controller.py for
-    # the full rationale — at threshold=0 an all-zero population yields
-    # NaN means and the plot stays empty).
-    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
+    # Shapes keep every cell (no ON cutoff); smFISH counts honour the
+    # channel's ThreshFracOn like intensities (count > cutoff is "on").
+    if app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
@@ -417,10 +414,10 @@ def redraw_line_plots(
     _metric_key = app._app_state.channel.active_metric
     if _fov_active:
         _n_title = events_per_fov_title(_metric_key, band_lbl)
-        _n_ylabel = "N(spots)/FOV" if _metric_key == "smfish_count" else "N(above)/FOV"
+        _n_ylabel = "N(above)/FOV"
     else:
         _n_title = events_total_title(_metric_key)
-        _n_ylabel = "N(spots)" if _metric_key == "smfish_count" else "N(above)"
+        _n_ylabel = "N(above)"
     apply_ax_style(app._line_ax_n, f"{_n_title}{_fc_suffix}", _n_ylabel + _fc_suffix)
     cdf_lbl = (f"{_ch} {metric_label} CDF (all wells per replicate set)" if app._rep_sets_active() else f"{_ch} {metric_label} CDF (all selected wells)")
     apply_ax_style(app._line_ax_cdf, cdf_lbl, "Cumulative fraction")

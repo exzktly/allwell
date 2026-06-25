@@ -2,12 +2,14 @@
 
 Pins the contract for both halves of the bug:
 
-* ``aggregate_with_threshold_df`` with ``threshold=-1.0`` must include
-  zero-spot cells in the mean and total counts — that's the convention
-  the bar / line / heatmap / scatter-aggregate paths all rely on for
-  ``smfish_count`` metrics. The old default ``threshold=0`` silently
-  dropped every cell whose count was zero, which is real signal in
-  spot-count data.
+* ``aggregate_with_threshold_df`` with a sub-minimum ``threshold`` (e.g.
+  ``-1.0``) must include zero-spot cells in the mean and total counts —
+  the function contract shape metrics rely on (and that smFISH counts used
+  before they switched to honouring the channel's ``ThreshFracOn``; the
+  controllers now feed that cutoff instead, but the function itself is
+  unchanged: ``value > threshold`` defines the "on" population). The old
+  default ``threshold=0`` silently dropped every cell whose count was
+  zero, which is real signal in spot-count data.
 
 * ``resolve_value_series`` returns a NaN-filled Series (right-indexed)
   when the requested column is missing, after first attempting the

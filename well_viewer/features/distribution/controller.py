@@ -15,7 +15,6 @@ import numpy as np
 from well_viewer.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
-from well_viewer.domain.metric_registry import metric_key_gating_exempt
 
 
 NO_DATA_MSG = (
@@ -405,9 +404,10 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
             except Exception:
                 swallowed()  # was: pass (silent except)
 
-    # Threshold marker for non-violin modes. Suppressed for smfish_count —
-    # the channel's intensity threshold doesn't map onto a spot-count axis.
-    if mode != "Violin (per group)" and app._app_state.channel.active_metric != "smfish_count":
+    # Threshold marker for non-violin modes — drawn for intensities and now
+    # for smFISH counts too (ThreshFracOn is the spot-count cutoff). Shape
+    # metrics have no per-channel cutoff, so they fall out via is_shape_active.
+    if mode != "Violin (per group)" and not app._app_state.channel.is_shape_active():
         try:
             threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
             if math.isfinite(threshold):
@@ -431,7 +431,9 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h, *, log_y=Fa
     edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
     grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
 
-    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
+    # Shapes have no ON cutoff → no threshold line. smFISH counts now draw
+    # the ThreshFracOn line like intensities.
+    if app._app_state.channel.is_shape_active():
         threshold = float("nan")
     else:
         try:

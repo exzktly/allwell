@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
-from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import compute_rep_stats

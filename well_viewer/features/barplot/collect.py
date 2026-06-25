@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from well_viewer.domain.batch_models import BarGroup
-from well_viewer.domain.metric_registry import metric_key_gating_exempt
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import (
     aggregate_group,
@@ -129,15 +128,12 @@ def collect_bar_items(
         target_ts = [float(target_t)]
     if not target_ts:
         return False, [], band_lbl
-    # smFISH counts are integer spot counts (0..~100). The channel's
-    # mean-intensity threshold (~50..1500) gates everything out; even
-    # threshold=0 drops cells with no detected spots, which collapses
-    # the mean to NaN when most/all cells are zero. Use a negative
-    # floor so every finite count contributes to the mean — that's the
-    # standard 'mean spots per cell across the whole population'
-    # (fraction-above-threshold loses meaning at this floor; the title
-    # helpers acknowledge this with 'thresholds ignored').
-    if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
+    # Shape/morphology metrics have no per-channel ON cutoff, so a negative
+    # floor keeps every cell in the population. smFISH counts now honour the
+    # channel's ThreshFracOn just like intensities — a cell is "on" when its
+    # spot count exceeds the cutoff (set ThreshFracOn to 0 for the classic
+    # "any detected spot" population).
+    if app._app_state.channel.is_shape_active():
         threshold = -1.0
     else:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
@@ -864,7 +860,7 @@ def collect_bar_items_fov_pooled(
         return [], band_lbl
 
     if threshold is None:
-        if metric_key_gating_exempt(app._app_state.channel.active_metric) or app._app_state.channel.is_shape_active():
+        if app._app_state.channel.is_shape_active():
             threshold = -1.0
         else:
             threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)

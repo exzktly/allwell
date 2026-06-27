@@ -378,8 +378,12 @@ class ExportStyleSidebar(QWidget):
             acr = _stats_state["across"] or "—"
             self._stats_preview.setText(f"{err.upper()} · {acr}")
 
-        # Error bars: SEM / SD wire through; None / 95% CI are placeholders.
-        _err_init = "sem" if bool(self._app._app_state.plot.use_sem) else "sd"
+        # Error bars: None / SEM / SD / 95% CI all drive the bar error bars via
+        # PlotState.bar_err_kind; SEM/SD also keep ``use_sem`` (the per-card band
+        # toggle + line plots) in sync. 95% CI = 1.96 × SEM (normal approx),
+        # computed at draw time.
+        _err_init = str(getattr(self._app._app_state.plot, "bar_err_kind", "")
+                        or ("sem" if bool(self._app._app_state.plot.use_sem) else "sd"))
         err_sc = _seg(
             [("None", "none"), ("SEM", "sem"), ("SD", "sd"), ("95% CI", "ci95")],
             current=_err_init,
@@ -391,12 +395,18 @@ class ExportStyleSidebar(QWidget):
                 v = err_sc.currentData()
                 _stats_state["err"] = v
                 _update_stats_preview()
-                want_sem = (v == "sem")
-                if v in ("sem", "sd") and bool(self._app._app_state.plot.use_sem) != want_sem:
+                self._app._app_state.plot.bar_err_kind = v
+                # SEM/SD keep use_sem in sync (ci95 is SEM-based; none hides).
+                want_sem = (v in ("sem", "ci95"))
+                if v in ("sem", "sd", "ci95") and bool(self._app._app_state.plot.use_sem) != want_sem:
                     try:
                         self._app._toggle_sem()
                     except Exception:
                         swallowed()  # was: pass (silent except)
+                try:
+                    self._redraw_active_plot()
+                except Exception:
+                    swallowed()
 
             err_sc.currentChanged.connect(_on_err_change)
             add_stacked(s_stats, "Error bars", err_sc)
@@ -462,16 +472,26 @@ class ExportStyleSidebar(QWidget):
                 self._app._fov_observers = []
             self._app._fov_observers.append(_sync_across_from_app)
 
-        # Show: placeholder (Mean only; Mean+spread/All points are future).
+        # Show: Mean (bars only) / Mean+spread (bars + error bars) / All points
+        # (overlay per-cell dots via the beeswarm path). Drives
+        # PlotState.bar_show_mode, consumed by the bar renderer.
+        _show_init = str(getattr(self._app._app_state.plot, "bar_show_mode", "mean_spread")
+                         or "mean_spread")
         show_sc = _seg(
             [("Mean", "mean"), ("Mean+spread", "mean_spread"), ("All points", "all_pts")],
-            current="mean",
+            current=_show_init,
         )
         if show_sc is not None:
-            _stats_state["show"] = "Mean"
+            _stats_state["show"] = show_sc.currentData() or "mean_spread"
 
             def _on_show_change(*_a) -> None:
-                _stats_state["show"] = show_sc.currentData() or "mean"
+                v = show_sc.currentData() or "mean_spread"
+                _stats_state["show"] = v
+                self._app._app_state.plot.bar_show_mode = v
+                try:
+                    self._redraw_active_plot()
+                except Exception:
+                    swallowed()
             show_sc.currentChanged.connect(_on_show_change)
             add_stacked(s_stats, "Show", show_sc)
 

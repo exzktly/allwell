@@ -21,7 +21,7 @@ from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import (
     aggregate_group,
     aggregate_well,
-    compute_rep_n_above,
+    compute_rep_n_above_stats,
     compute_rep_per_fov_stats,
     compute_rep_stats,
 )
@@ -232,8 +232,11 @@ def collect_bar_items(
                     n_above_err = float(n_above_pf_spread)
                 else:
                     gm, g_err_m, gf, g_err_f = compute_rep_stats(app, rset, target_t, threshold, use_sem)
-                    n_above_val = float(compute_rep_n_above(app, rset, target_t))
-                    n_above_err = 0.0
+                    # Events panel: per-well mean ± cross-well spread (replicate
+                    # error bars), consistent with the Mean/Fraction panels —
+                    # rather than a spread-less total.
+                    n_above_val, n_above_err = compute_rep_n_above_stats(
+                        app, rset, target_t, use_sem)
                 t0_mean = None
                 t0_spread = None
                 t0_frac = None

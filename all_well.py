@@ -557,7 +557,7 @@ class AllWellApp(QMainWindow):
             heading.setObjectName("Heading")
             cl.addWidget(heading)
             credit = QLabel(
-                "Constructed by Zak Singer, 2026,<br>Regeneron Pharmaceuticals, Inc.",
+                "Constructed by Zak Singer, 2026",
                 content,
             )
             credit.setObjectName("HelpCredit")

@@ -141,6 +141,10 @@ def _snapshot_bar(app) -> dict:
             out["group_mode"] = str(plot.bar_group_mode)
         if hasattr(plot, "bar_pool_replicates"):
             out["pool_replicates"] = bool(plot.bar_pool_replicates)
+        if hasattr(plot, "bar_err_kind"):
+            out["bar_err_kind"] = str(plot.bar_err_kind)
+        if hasattr(plot, "bar_show_mode"):
+            out["bar_show_mode"] = str(plot.bar_show_mode)
         # The user's drag-to-reorder bar layout. ``ordered_bar_keys``
         # falls back to the canonical order when the saved list doesn't
         # cover the current dataset's keys, so an empty / stale list is
@@ -574,6 +578,10 @@ def _apply_bar(app, state: dict) -> None:
             plot.bar_group_mode = str(state["group_mode"])
         if "pool_replicates" in state:
             plot.bar_pool_replicates = bool(state["pool_replicates"])
+        if str(state.get("bar_err_kind")) in ("none", "sem", "sd", "ci95"):
+            plot.bar_err_kind = str(state["bar_err_kind"])
+        if str(state.get("bar_show_mode")) in ("mean", "mean_spread", "all_pts"):
+            plot.bar_show_mode = str(state["bar_show_mode"])
         if "bar_order" in state and isinstance(state["bar_order"], list):
             plot.bar_order = [str(k) for k in state["bar_order"]]
 

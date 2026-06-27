@@ -381,6 +381,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         tooltip="Export the rendered table to a file. ▾ = copy / settings.",
     )
     emenu = export_btn.menu()
+    emenu.addAction("Export to File…").triggered.connect(
+        lambda _=False: image_table_export(ctx.app))
+    emenu.addSeparator()
     emenu.addAction("Copy PNG").triggered.connect(
         lambda _=False: image_table_copy_png(ctx.app))
     emenu.addAction("Copy SVG").triggered.connect(

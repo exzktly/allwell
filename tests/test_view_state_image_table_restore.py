@@ -71,3 +71,42 @@ def test_snapshot_tolerates_unbuilt_image_table(loaded_app):
     app = loaded_app
     app._image_table_cells = []
     assert vs._snapshot_image_table(app) == {}
+
+
+def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
+    """Channel (per-cell) and Source (per-row) come back through the SAME path
+    Saved Plots uses: full ``view_state.snapshot`` → ``view_state.restore`` →
+    ``apply_pending_tab_state`` (rather than calling ``_apply_image_table``
+    directly). This guards the build-order/axis gap the user hit."""
+    app = loaded_app
+    C.image_table_repopulate_dropdowns(app)
+    C.image_table_apply_preset(app, "channel", "timepoint")
+    cells = getattr(app, "_image_table_cells", None) or []
+    luts = getattr(app, "_image_table_lut", None) or {}
+    if not cells or not cells[0] or 0 not in luts:
+        pytest.skip("Image Table grid not built for this dataset")
+
+    chan_cb = cells[0][0].get("chan_cb")
+    chans = [chan_cb.itemText(i) for i in range(chan_cb.count()) if chan_cb.itemText(i)]
+    if len(chans) < 2:
+        pytest.skip("dataset has <2 channels")
+    want_chan = chans[1]
+    chan_cb.setCurrentText(want_chan)
+    if not _set_combo_by_data(luts[0]["source"], "corrected"):
+        pytest.skip("no Corrected source option")
+
+    snap = vs.snapshot(app)
+    it = (snap.get("tabs") or {}).get("Image Table") or {}
+    assert it.get("cells", [[{}]])[0][0].get("chan") == want_chan
+    assert it["row_luts"]["0"].get("source") == "corrected"
+
+    # New session: wipe both, then replay through the public restore path.
+    chan_cb.setCurrentText(chans[0])
+    _set_combo_by_data(luts[0]["source"], "raw")
+    vs.restore(app, snap)
+    # restore stashes pending + tries to activate the tab; apply explicitly so
+    # the assertion doesn't depend on notebook/subtab navigation in the harness.
+    vs.apply_pending_tab_state(app, "Image Table")
+
+    assert app._image_table_cells[0][0]["chan_cb"].currentText() == want_chan
+    assert app._image_table_lut[0]["source"].currentData() == "corrected"

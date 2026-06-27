@@ -155,7 +155,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     sl.addWidget(_disp_btn)
 
     # Layout toggle: cluster bars by well or by timepoint.
-    ctx.app._bar_group_mode_btn = QPushButton("Group by Well", shape_ctrl)
+    ctx.app._bar_group_mode_btn = QPushButton("Grouping: Well", shape_ctrl)
     ctx.app._bar_group_mode_btn.setProperty("variant", "toggle")
     ctx.app._bar_group_mode_btn.setCheckable(True)
     ctx.app._bar_group_mode_btn.setToolTip(
@@ -167,7 +167,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Replicate-pool toggle: collapse rset wells into one column or
     # expand them. Hidden when no replicate sets are active.
-    ctx.app._bar_pool_reps_btn = QPushButton("Pool Replicates", shape_ctrl)
+    ctx.app._bar_pool_reps_btn = QPushButton("Pooled: Off", shape_ctrl)
     ctx.app._bar_pool_reps_btn.setProperty("variant", "toggle")
     ctx.app._bar_pool_reps_btn.setCheckable(True)
     ctx.app._bar_pool_reps_btn.setToolTip(
@@ -182,7 +182,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # visible and gate usability with setEnabled instead.
     _disp_lay.addWidget(ctx.app._bar_pool_reps_btn)
 
-    ctx.app._bar_pool_rset_cells_btn = QPushButton("Pool rset cells", shape_ctrl)
+    ctx.app._bar_pool_rset_cells_btn = QPushButton("Pool cells: Off", shape_ctrl)
     ctx.app._bar_pool_rset_cells_btn.setProperty("variant", "toggle")
     ctx.app._bar_pool_rset_cells_btn.setCheckable(True)
     ctx.app._bar_pool_rset_cells_btn.setToolTip(
@@ -194,7 +194,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Always present; enable-gated on (violin/beeswarm AND active rsets).
     _disp_lay.addWidget(ctx.app._bar_pool_rset_cells_btn)
 
-    ctx.app._swarm_btn = QPushButton("Beeswarm", shape_ctrl)
+    ctx.app._swarm_btn = QPushButton("Beeswarm: Off", shape_ctrl)
     ctx.app._swarm_btn.setProperty("variant", "toggle")
     ctx.app._swarm_btn.setCheckable(True)
     ctx.app._swarm_btn.setToolTip(
@@ -203,7 +203,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _disp_lay.addWidget(ctx.app._swarm_btn)
     ctx.app._bar_swarm = False
 
-    ctx.app._violin_btn = QPushButton("Violin", shape_ctrl)
+    ctx.app._violin_btn = QPushButton("Violin: Off", shape_ctrl)
     ctx.app._violin_btn.setProperty("variant", "toggle")
     ctx.app._violin_btn.setCheckable(True)
     ctx.app._violin_btn.setToolTip(

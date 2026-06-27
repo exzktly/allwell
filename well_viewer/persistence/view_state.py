@@ -256,6 +256,7 @@ def _snapshot_image_table(app) -> dict:
     # row index. Display is now per-row (grid_view.build_lut_row), not a set of
     # global toggles.
     luts = getattr(app, "_image_table_lut", None) or {}
+    color_cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
     row_luts: dict[str, dict[str, Any]] = {}
     if isinstance(luts, dict):
         for r, edits in luts.items():
@@ -264,7 +265,9 @@ def _snapshot_image_table(app) -> dict:
             slot: dict[str, Any] = {}
             mn = edits.get("min")
             mx = edits.get("max")
-            tophat = edits.get("tophat")
+            # Raw/Corrected is a "source" combo (it replaced the old top-hat
+            # checkbox), so the displayed image stage round-trips.
+            src = edits.get("source")
             bound = edits.get("boundaries")
             binw = edits.get("binary")
             logw = edits.get("log")
@@ -273,14 +276,20 @@ def _snapshot_image_table(app) -> dict:
                     slot["min"] = str(mn.text())
                 if mx is not None:
                     slot["max"] = str(mx.text())
-                if tophat is not None:
-                    slot["tophat"] = bool(tophat.isChecked())
+                slot["auto"] = bool(edits.get("auto", True))
+                if src is not None:
+                    slot["source"] = str(src.currentData() or "raw")
                 if bound is not None:
                     slot["boundaries"] = bool(bound.isChecked())
                 if binw is not None:
                     slot["binary"] = str(binw.currentData() or "")
                 if logw is not None:
                     slot["log"] = bool(logw.isChecked())
+                # Per-row colormap (LutSelector: lut()/isReversed()).
+                if isinstance(r, int) and 0 <= r < len(color_cbs):
+                    sel = color_cbs[r]
+                    slot["cmap"] = str(sel.lut())
+                    slot["cmap_reversed"] = bool(sel.isReversed())
             except Exception:
                 swallowed()  # silent except
                 continue
@@ -288,6 +297,21 @@ def _snapshot_image_table(app) -> dict:
                 row_luts[str(r)] = slot
     if row_luts:
         out["row_luts"] = row_luts
+    # Crop region (shared CropTool; (y0,x0,y1,x1) source pixels or None) plus the
+    # display-only zoom, so a restored grid re-crops/re-scales. The ON-threshold
+    # is intentionally NOT captured here — it's a global value shared with Cell
+    # Gating and the plot tabs, so a saved-plot restore must not mutate it.
+    ct = getattr(app, "_image_table_crop_tool", None)
+    if ct is not None:
+        try:
+            out["crop"] = list(ct.crop) if ct.crop else None
+            out["crop_mode"] = bool(ct.mode)
+        except Exception:
+            swallowed()
+    try:
+        out["zoom"] = float(app._app_state.image_table.zoom)
+    except Exception:
+        swallowed()
     return out
 
 
@@ -759,6 +783,7 @@ def _apply_image_table(app, state: dict) -> None:
     # alongside min/max rather than as separate global toggles.
     row_luts = state.get("row_luts") or {}
     live_luts = getattr(app, "_image_table_lut", None) or {}
+    color_cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
     if isinstance(row_luts, dict) and isinstance(live_luts, dict):
         for r_key, slot in row_luts.items():
             try:
@@ -768,6 +793,8 @@ def _apply_image_table(app, state: dict) -> None:
             edits = live_luts.get(r)
             if not isinstance(edits, dict) or not isinstance(slot, dict):
                 continue
+            # Min/max first (via setText, which doesn't fire textEdited under
+            # blockSignals) so the explicit "auto" restore below isn't flipped.
             for k in ("min", "max"):
                 v = slot.get(k)
                 edit = edits.get(k)
@@ -781,7 +808,9 @@ def _apply_image_table(app, state: dict) -> None:
                         edit.blockSignals(blocked)
                 except Exception:
                     swallowed()  # was: pass (silent except)
-            for k in ("tophat", "boundaries", "log"):
+            if "auto" in slot:
+                edits["auto"] = bool(slot["auto"])
+            for k in ("boundaries", "log"):
                 w = edits.get(k)
                 if w is None or k not in slot:
                     continue
@@ -793,20 +822,63 @@ def _apply_image_table(app, state: dict) -> None:
                         w.blockSignals(blocked)
                 except Exception:
                     swallowed()
-            binw = edits.get("binary")
-            bmode = slot.get("binary")
-            if binw is not None and isinstance(bmode, str):
+            # Raw/Corrected ("source") + Binary are userData combos; legacy
+            # snapshots only carried a "tophat" bool → map True→corrected.
+            src_val = slot.get("source")
+            if src_val is None and "tophat" in slot:
+                src_val = "corrected" if slot.get("tophat") else "raw"
+            for cb_key, want in (("source", src_val), ("binary", slot.get("binary"))):
+                w = edits.get(cb_key)
+                if w is None or not isinstance(want, str):
+                    continue
                 try:
-                    for i in range(binw.count()):
-                        if binw.itemData(i) == bmode:
-                            blocked = binw.blockSignals(True)
+                    for i in range(w.count()):
+                        if w.itemData(i) == want:
+                            blocked = w.blockSignals(True)
                             try:
-                                binw.setCurrentIndex(i)
+                                w.setCurrentIndex(i)
                             finally:
-                                binw.blockSignals(blocked)
+                                w.blockSignals(blocked)
                             break
                 except Exception:
                     swallowed()
+            # Per-row colormap (LutSelector).
+            cmap = slot.get("cmap")
+            if isinstance(cmap, str) and cmap and isinstance(r, int) and 0 <= r < len(color_cbs):
+                sel = color_cbs[r]
+                try:
+                    blocked = sel.blockSignals(True)
+                    try:
+                        sel.setLut(cmap, reversed=bool(slot.get("cmap_reversed", False)))
+                    finally:
+                        sel.blockSignals(blocked)
+                except Exception:
+                    swallowed()
+
+    # Crop region: re-apply the saved rectangle (or clear it) + crop mode.
+    ct = getattr(app, "_image_table_crop_tool", None)
+    if ct is not None and "crop" in state:
+        try:
+            crop = state.get("crop")
+            if isinstance(crop, (list, tuple)) and len(crop) == 4:
+                ct.set_crop(tuple(int(v) for v in crop))
+            else:
+                ct.clear()
+            if bool(state.get("crop_mode", False)) != bool(ct.mode):
+                ct.toggle_mode()
+        except Exception:
+            swallowed()
+
+    # Zoom (display-only) via its feature setter. Function-local import keeps
+    # this persistence module data-only at module scope.
+    if isinstance(state.get("zoom"), (int, float)):
+        try:
+            from well_viewer.features.image_browser.image_table.controller import (
+                image_table_set_zoom,
+            )
+            image_table_set_zoom(app, float(state["zoom"]))
+        except Exception:
+            _logger.debug("image_table: zoom restore failed", exc_info=True)
 
     # Intentionally NOT calling image_table_generate here — restore only
     # pre-fills the dropdowns, the user clicks Generate when they actually

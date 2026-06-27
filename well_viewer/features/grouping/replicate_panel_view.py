@@ -251,30 +251,18 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
         parent.setLayout(outer_layout)
     outer_layout.setContentsMargins(0, 0, 0, 0)
 
-    # ── Top toolbar: Save / Load / Clear All ────────────────────────────
-    # Single source of truth for the whole tab — well labels, replicate
-    # sets, bar groups, ratios, and cell gating all flow through these
-    # three buttons.
+    # ── Top toolbar: Import / Clear All ─────────────────────────────────
+    # Every definition on this tab (well labels, replicate sets, bar groups,
+    # ratios, and cell gating) AUTOSAVES to the data folder on edit —
+    # selections/labels/notes/plot-groups + ratios via the persistence registry,
+    # cell gating via _cell_gating_persist_params. So there is no manual
+    # Save/Reload button: Import merges an external JSON, Clear All wipes the
+    # definitions.
     toolbar = _QWidget(parent)
     toolbar.setObjectName("TabCtrl")
     tl = _QHBoxLayout(toolbar)
     tl.setContentsMargins(8, 6, 8, 6)
     tl.setSpacing(6)
-
-    # v2 polish: icon-led toolbar (Save / Load / Clear All).
-    save_ib = _IconButton("save", toolbar)
-    save_ib.setToolTip(
-        "Save every definition on this tab (well labels, replicate sets, "
-        "bar groups, ratio metrics, and cell-gating thresholds) to the "
-        "data folder."
-    )
-    save_ib.clicked.connect(lambda _=False: app._save_sample_definitions_all())
-    tl.addWidget(save_ib)
-
-    load_ib = _IconButton("download", toolbar)
-    load_ib.setToolTip("Reload every definition from the data folder, discarding unsaved edits.")
-    load_ib.clicked.connect(lambda _=False: app._load_sample_definitions_all())
-    tl.addWidget(load_ib)
 
     import_ib = _IconButton("plus", toolbar)
     import_ib.setToolTip("Import selections from a JSON file (merges into the current set).")

@@ -716,7 +716,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         pipeline = find_pipeline_script()
         if pipeline is None:
             QMessageBox.critical(self, "Configuration Error",
-                "process_microscopy.py not found next to all_well.py.")
+                "process_microscopy.py not found next to allwell.py.")
             return None
         return pipeline
 

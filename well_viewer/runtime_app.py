@@ -373,7 +373,7 @@ class WellViewerApp(QWidget):
         The mockup keeps the left rail (with the mode-seg, section nav,
         and plate) visible in both modes; hosting Analyze inside this
         widget's central stack is what makes that possible without
-        hoisting the sidebar out into all_well.
+        hoisting the sidebar out into allwell.
         """
         stack = getattr(self, "_central_pane_stack", None)
         if stack is None:

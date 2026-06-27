@@ -255,7 +255,7 @@ class PipelineRunner:
 
     # Cap the log queue so a stalled UI thread can't let the reader stuff
     # unbounded lines into memory. Overflow drops are surfaced to the GUI
-    # via a single warning line — the ring buffer in all_well captures
+    # via a single warning line — the ring buffer in allwell captures
     # everything for the help-drawer log tab.
     _LOG_QUEUE_MAXSIZE = 10000
 

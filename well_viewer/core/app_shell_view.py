@@ -125,7 +125,7 @@ def build_ui(app) -> None:
     app._sidebar_collapsed = False  # user-driven collapse state (Ctrl+B / top-bar btn)
     build_sidebar(app, app._sidebar_main_frame)
 
-    # Centre stack — wraps the existing plots widget so all_well can
+    # Centre stack — wraps the existing plots widget so allwell can
     # mount the Analyze pane as a peer page. The mode-seg in the sidebar
     # (built below) drives the stack, keeping the sidebar visible in
     # both modes (mockup parity: mode-seg sits at the top of the left

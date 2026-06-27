@@ -65,7 +65,7 @@
 #   mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib-base pillow imageio h5py vs2015_runtime -c conda-forge -y
 #   mamba activate allwell
 #   pip install --no-build-isolation -r _Docs\requirements.txt
-#   python all_well.py
+#   python allwell.py
 #
 # To produce a frozen Windows bundle (optional; only for distribution):
 #

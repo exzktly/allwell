@@ -42,7 +42,7 @@ flows from Analyze (writes it) to Review (reads it).
 
 ## 2. The two-mode shell
 
-The application root (`AllWellApp` in `all_well.py`) owns a title bar and a
+The application root (`AllWellApp` in `allwell.py`) owns a title bar and a
 central pane stack. The central stack has two pages:
 
 | Pane | Mode | Implemented by | Source file |
@@ -70,7 +70,7 @@ they're shell-wide:
 
 ```
 allwell/
-├── all_well.py                  ← app entry point + title bar shell
+├── allwell.py                  ← app entry point + title bar shell
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
@@ -256,7 +256,7 @@ In one diagram, end-to-end:
 all_well_launcher.main()                       (PyInstaller bundle only)
     │
     ▼ regular Python run jumps in here:
-all_well.main()
+allwell.main()
     ├── QApplication(sys.argv)
     ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
     │       ← register bundled Inter / JetBrains Mono (static instances),
@@ -1425,7 +1425,7 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
 - Every module uses
   `logging.getLogger("well_viewer")` (the viewer) or
   `logging.getLogger("well_viewer.auto_threshold")` (per-domain children).
-- `all_well._attach_log_ring_buffer` captures every record into a ring
+- `allwell._attach_log_ring_buffer` captures every record into a ring
   buffer that the Help drawer's log tab and the Analyze tab's live log
   view both read from.
 
@@ -1442,13 +1442,13 @@ auto-clears after `DANGER_HOLD_SECS`.
 `well_viewer/core/debug_flags.py` exposes module-level booleans
 (`REVIEW_TAB_DEBUG`, `REVIEW_BAR_DEBUG`, `REVIEW_SCATTER_DEBUG`,
 `ANALYZE_TAB_DEBUG`, `REVIEW_IMAGE_CHSW_DEBUG`).
-`all_well.main()` wires the top-of-file constants in `all_well.py` into
+`allwell.main()` wires the top-of-file constants in `allwell.py` into
 these flags so toggling them is a one-line edit. Each flag gates `logger.debug`
 calls inside its domain; off by default.
 
 ### 10.4 Build / packaging
 
-- **Source run:** `python all_well.py [--data_dir …]`.
+- **Source run:** `python allwell.py [--data_dir …]`.
 - **macOS .app:** `_Docs/_Installation/build_all_well.sh` (mamba env +
   PyInstaller), spec at `_Docs/_Installation/all_well.spec`.
 - **Pipeline-only run:** `python process_microscopy.py --input_dir … --output_dir …`.
@@ -1538,7 +1538,7 @@ calls inside its domain; off by default.
 ### 11.5 Hook a new keyboard shortcut
 
 Add a `QShortcut(QKeySequence("Ctrl+X"), self, activated=self._handler)`
-line in `AllWellApp._install_shortcuts` (`all_well.py`). The help drawer's
+line in `AllWellApp._install_shortcuts` (`allwell.py`). The help drawer's
 shortcut list is in `_toggle_help_drawer` in the same file — keep it
 in sync.
 
@@ -1557,7 +1557,7 @@ grep -rn '_line_fig\b' well_viewer/ widgets/
 
 That returns both the producer (a `tabs/*_tab_view.py`) and every consumer.
 For widgets in the rail nav, search `centre_view.py`. For controls in the
-title bar, search `all_well.py`.
+title bar, search `allwell.py`.
 
 ### 12.2 "The plot is showing the wrong data"
 
@@ -1600,7 +1600,7 @@ fields. Make sure `--filename_schema` was correct at pipeline-run time.
 Centre pages build lazily. The first time you click a page, its builder
 runs from `centre_view._on_tab_change`. If the builder raises an exception,
 the log captures it — open the help drawer's log tab or run
-`python all_well.py` from a terminal and watch stderr. The most common
+`python allwell.py` from a terminal and watch stderr. The most common
 failure is a missing widget attribute on `WellViewerApp` because two
 builders touch a shared attribute in the wrong order. Use the
 `_centre_lazy_only_titles` set in `centre_view.py` to control which
@@ -1780,7 +1780,7 @@ line. Newest first:
 
 - **6.3.0 — UI polish: bundled static fonts + Analyze info tooltips + dropdown carets + smFISH empty-state.** Shipped static weight instances of Inter / JetBrains Mono (generated via `scripts/make_static_fonts.py`) so the bundled faces register reliably on Windows (variable-font `addApplicationFont` was silently falling back to the platform default). Subsumed the inline helper paragraphs under the Analyze tab's Fluorescent-channels, Radius and Output-options areas into hover `ⓘ` info icons. Reserved space for dropdown-button carets in the global QSS so the `▾`/menu-indicator no longer overlaps button text. Made the smFISH "not enabled" empty state paint on the theme background like every other plot's empty warning (was a bare white axes + hardcoded grey). Version pill → `v6.3.0`.
 
-- **6.2.x — Visual UI audit + fix wave (PRs #406–#417, #410, #413).** A headless render harness (`tests/visual/render_views.py`) grabs every view/tab/empty-state to PNG (offscreen Qt + Agg, compositing nested matplotlib canvases), feeding a graded audit (`_Docs/visual_audit/REPORT.md` + committed screenshots). The audit drove a wave of fixes: bundled **Inter** (UI) + **JetBrains Mono** (numeric) fonts so the chrome and plots match across OSes (`well_viewer/core/app_fonts.py`, wired once in `all_well.main` and read by `plot_style`); fixed a `flush_dirty_scopes` import crash and a scatter `math` `NameError` that cascaded through load (#407); Image-Table declutter — Source **Raw/Corrected** options and a per-channel `≥Thr` threshold map that respects sample-definition thresholds (`image_compose.py`, `review_image/collect.py`, #408/#409); Batch-Export header cleanup (#412), a **filename-collision** guard so two groups with punctuation-only name differences no longer silently overwrite each other (`batch_export/_common.py::unique_export_stem`, #414), and OUTPUT-SETTINGS field alignment + button regrouping (#416); plus scatter agg-title de-clip and a Statistics empty-state hint (#417). Font packaging fixes for frozen builds + the `monospace` QSS alias warning (#413).
+- **6.2.x — Visual UI audit + fix wave (PRs #406–#417, #410, #413).** A headless render harness (`tests/visual/render_views.py`) grabs every view/tab/empty-state to PNG (offscreen Qt + Agg, compositing nested matplotlib canvases), feeding a graded audit (`_Docs/visual_audit/REPORT.md` + committed screenshots). The audit drove a wave of fixes: bundled **Inter** (UI) + **JetBrains Mono** (numeric) fonts so the chrome and plots match across OSes (`well_viewer/core/app_fonts.py`, wired once in `allwell.main` and read by `plot_style`); fixed a `flush_dirty_scopes` import crash and a scatter `math` `NameError` that cascaded through load (#407); Image-Table declutter — Source **Raw/Corrected** options and a per-channel `≥Thr` threshold map that respects sample-definition thresholds (`image_compose.py`, `review_image/collect.py`, #408/#409); Batch-Export header cleanup (#412), a **filename-collision** guard so two groups with punctuation-only name differences no longer silently overwrite each other (`batch_export/_common.py::unique_export_stem`, #414), and OUTPUT-SETTINGS field alignment + button regrouping (#416); plus scatter agg-title de-clip and a Statistics empty-state hint (#417). Font packaging fixes for frozen builds + the `monospace` QSS alias warning (#413).
 
 - **6.1.x — "Code Diet" extraction + CI/test hardening (PRs #400–#405).** Split the oversized monoliths to bring them under enforced line budgets: extracted `analyze_tab_form.py` from `analyze_tab.py`, refactored the Image-Table `grid_view.py` / `controller.py`, and trimmed dead `review_image` code. Added the CI workflow (`ruff` + `pytest` fast lane) and ratchet guards — `test_monolith_budgets.py` (per-file line ceilings, only ever lowered), `test_extracted_module_names.py`, and `test_deferred_imports.py` — plus regression tests (review-image binary, per-row display, CSV-index perf, bar-timepoint restore). Reorganised planning docs under `_Docs/Markdowns/`.
 

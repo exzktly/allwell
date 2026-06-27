@@ -47,7 +47,7 @@ The previous session read `Markdowns/README_WellViewer.md` and
 parallel `general-purpose` audit agents**, each scoped to one slice of
 the codebase. Their reports were synthesised here. The slices:
 
-1. **Analyze side** — `all_well.py`, `all_well_launcher.py`,
+1. **Analyze side** — `allwell.py`, `all_well_launcher.py`,
    `analyze_tab.py`, `process_microscopy.py` (3312 lines),
    `WellPlateZipper.py`, `services/*.py`. Produced findings C1–C3,
    H1–H5, M1–M5, L1–L7. Mapped to §1 below.
@@ -138,14 +138,14 @@ The audit was thorough but the sub-agents had short read windows;
 
 ### 0.6 Repo layout reminders (in case you skip ARCHITECTURE.md)
 
-- `all_well.py` — app entry + shell.
+- `allwell.py` — app entry + shell.
 - `analyze_tab.py` — Analyze pane.
 - `process_microscopy.py` — the pipeline; **must run with no
   `well_viewer/` imports** (CI / headless workers).
 - `well_viewer/` — Review pane. `runtime_app.WellViewerApp` is a
   deliberate god-object; controllers are pure functions of `(app, …)`.
 - `widgets/` — reusable Qt widgets; must not import from
-  `well_viewer/` or `all_well`.
+  `well_viewer/` or `allwell`.
 - `services/` — Analyze-side service modules.
 - `ui/theme/` — claimed-dormant theme system that is actually
   load-bearing (see H20).
@@ -315,7 +315,7 @@ calls out the fix commit.
 - **Fix:** `self._log.document().setMaximumBlockCount(10000)` at
   construction; switch the queue to `queue.Queue(maxsize=10000)` and
   drop-with-warning on overflow, or batch lines per poll. The ring
-  buffer in `all_well._attach_log_ring_buffer` is correctly capped to
+  buffer in `allwell._attach_log_ring_buffer` is correctly capped to
   1000 lines — the on-screen widget should be capped similarly.
 
 ### H1. Stop button leaves zombies on macOS/Linux and can SIGKILL a reused PID
@@ -423,7 +423,7 @@ calls out the fix commit.
   `parser.error` on any returned messages.
 
 ### L1. `_attach_log_ring_buffer` raises root logger level globally
-- **Location:** `all_well.py:719-727`.
+- **Location:** `allwell.py:719-727`.
 - **Fix:** Attach the handler only to `well_viewer` and `__main__`
   loggers; leave root at WARNING so third-party libs don't spam INFO.
 
@@ -449,7 +449,7 @@ calls out the fix commit.
   that.
 
 ### L6. `_install_app_icon` renders 8 pixmaps synchronously on startup
-- **Location:** `all_well.py:305-405`. Heavy QPainter work on the GUI
+- **Location:** `allwell.py:305-405`. Heavy QPainter work on the GUI
   thread before first paint.
 - **Fix:** Defer with `QTimer.singleShot(0, …)` after first paint, or
   cache to `QPixmapCache`.
@@ -1242,7 +1242,7 @@ A flat list of files this plan recommends touching, for grep-friendly
 follow-up:
 
 ```
-all_well.py
+allwell.py
 all_well_launcher.py
 analyze_tab.py
 process_microscopy.py

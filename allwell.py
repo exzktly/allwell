@@ -1,5 +1,5 @@
 """
-all_well.py
+allwell.py
 -----------
 Composition root for the All-Well application (PySide6).
 
@@ -8,7 +8,7 @@ Tabs:
   * Analyze - AnalyzeTab (from analyze_tab.py)
 
 Run:
-    python all_well.py [--data_dir /path/to/results]
+    python allwell.py [--data_dir /path/to/results]
 """
 
 from __future__ import annotations
@@ -111,7 +111,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v7.4.0")
+        self._version_pill = QLabel("v7.4.1")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "

@@ -153,7 +153,7 @@ class Typography:
     # are NOT in Qt's font registry — using them triggers an alias-table
     # walk on every QSS evaluation and Qt logs ``qt.qpa.fonts: Populating
     # font family aliases took NN ms. Replace uses of missing font family
-    # …``. The values below are placeholders; ``all_well.main`` overwrites
+    # …``. The values below are placeholders; ``allwell.main`` overwrites
     # both at startup with the platform's real default UI family
     # (``QApplication.font().family()`` — e.g. "Segoe UI" on Windows,
     # ".AppleSystemUIFont" on macOS) and real fixed-pitch family

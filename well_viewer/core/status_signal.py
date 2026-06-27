@@ -16,7 +16,7 @@ mood at a glance:
 The actual ``StatusDot`` widget lives on ``AllWellApp``; this module is
 the plumbing that lets any module deep in the package push/pop a busy /
 warn scope and trigger the danger pulse, without taking a hard
-dependency on ``all_well.py`` (and without circular imports).
+dependency on ``allwell.py`` (and without circular imports).
 
 ``AllWellApp`` calls :func:`register_driver` at startup with a callable
 that accepts a state string. Until that runs every call here is a

@@ -5,13 +5,13 @@ PyInstaller entry point for AllWell.app.
 
 Referenced by _Installation/all_well.spec as the entry point for the
 macOS bundle. When the app is launched, PyInstaller runs this module
-instead of all_well.py directly.
+instead of allwell.py directly.
 
 This launcher ensures:
   * matplotlib backend is set to QtAgg before any pyplot imports
   * bundled sibling modules are discoverable from the PyInstaller
     extracted resource directory (_MEIPASS)
-  * all_well.main() is invoked without runtime patching of __name__
+  * allwell.main() is invoked without runtime patching of __name__
   * when re-invoked with ``--run-pipeline`` as the first argument,
     the launcher dispatches to ``process_microscopy.main()``
     instead of the GUI. The Analyze tab uses that path to spawn the
@@ -140,7 +140,7 @@ def _dispatch() -> None:
         import process_microscopy
         process_microscopy.main()
         return
-    from all_well import main
+    from allwell import main
     main()
 
 

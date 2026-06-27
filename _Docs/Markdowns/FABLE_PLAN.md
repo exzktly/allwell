@@ -219,7 +219,7 @@ persistence).
       `swallowed`, logs to `allwell.swallowed`) for code that must not import
       `well_viewer` (the headless pipeline + `services`). Migrated **30** silent
       broad-excepts: pipeline side (`process_microscopy.py` 5, `services/` 4) →
-      `aw_safe.swallowed`; GUI shells (`all_well.py` 19, `analyze_tab.py` 2) →
+      `aw_safe.swallowed`; GUI shells (`allwell.py` 19, `analyze_tab.py` 2) →
       `well_viewer.core.safe.swallowed`. (The AST codemod correctly skipped
       specific-tuple catches like `except (OSError, ValueError): pass`.) Added
       `aw_safe.py` to the remote manifest, and **extended

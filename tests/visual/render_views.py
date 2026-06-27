@@ -46,7 +46,7 @@ def setup_app() -> QApplication:
     import theme as th
     from well_viewer.core.app_fonts import register_qt_fonts
 
-    # Mirror all_well.main(): prefer the bundled Inter / JetBrains Mono so the
+    # Mirror allwell.main(): prefer the bundled Inter / JetBrains Mono so the
     # rendered screenshots match what ships, falling back to platform faces.
     ui_family, mono_family = register_qt_fonts()
     th.Typography.family = ui_family or app.font().family()
@@ -102,7 +102,7 @@ def find_tabwidget(root: QWidget, marker: str) -> QTabWidget | None:
 
 # ── app construction ───────────────────────────────────────────────────────
 def make_app(load: bool):
-    from all_well import AllWellApp
+    from allwell import AllWellApp
 
     w = AllWellApp(data_path=None)
     w.resize(WIN_W, WIN_H)

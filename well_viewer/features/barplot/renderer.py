@@ -241,7 +241,7 @@ def draw_violin(
             ax_frac.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
                             marker="x", zorder=3, linewidths=1)
 
-    if app._app_state.plot.show_threshold_line:
+    if getattr(app._app_state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=BORDER, lw=0.8, ls="--", alpha=0.5, zorder=1)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6
     xlim_hi = (max(xs) + 0.6) if xs else 0.4
@@ -388,7 +388,7 @@ def draw_beeswarm(
             ax_frac.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
                             marker="x", zorder=3, linewidths=1)
 
-    if app._app_state.plot.show_threshold_line:
+    if getattr(app._app_state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=BORDER, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6

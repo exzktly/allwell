@@ -457,7 +457,7 @@ def _smfish_update_cdf_plot(app) -> None:
         ax.text(0.5, 0.5, "No candidate values found.", transform=ax.transAxes,
                 ha="center", va="center", color=txt_mut, fontsize=10)
 
-    if app._app_state.plot.show_threshold_line:
+    if getattr(app._app_state.plot, "show_threshold_line", False):
         ax.axvline(thr, color="red", linestyle="--", linewidth=2.0, alpha=0.7)
     ax.set_title("CDF of LoG values inside labels", color=txt_pri,
                  fontsize=10, fontweight="bold")

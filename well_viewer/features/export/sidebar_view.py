@@ -526,7 +526,8 @@ class ExportStyleSidebar(QWidget):
         # smFISH / bar-Fraction renderers.
         s_over = section("Overlays", expanded=False)
         thr_tog = ToggleSwitch("Show threshold line")
-        thr_tog.setChecked(bool(self._app._app_state.plot.show_threshold_line))
+        thr_tog.setChecked(bool(getattr(
+            self._app._app_state.plot, "show_threshold_line", False)))
         thr_tog.setToolTip(
             "Overlay the ON/OFF threshold marker on plots — the line/band at "
             "ThreshFracOn on the Distribution, line-plot CDF and smFISH plots, "

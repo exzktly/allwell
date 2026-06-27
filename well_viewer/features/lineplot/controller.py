@@ -568,7 +568,7 @@ def redraw_line_plots(
             leg_n.set_draggable(True)
             leg_n.set_visible(app._app_state.plot.legend_visible.get("n", True))
     if any_cdf:
-        _show_thr = app._app_state.plot.show_threshold_line
+        _show_thr = getattr(app._app_state.plot, "show_threshold_line", False)
         if _show_thr:
             app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
         try:

@@ -172,6 +172,11 @@ def load_directory(app, d: Path, label=None) -> None:
     # Drop the per-channel threshold (min, max) cache; the new dataset's
     # ranges may be completely different.
     app._app_state.channel.threshold_range_cache.clear()
+    # Drop the Image Table's persistent decoded-image cache + last render — the
+    # new dataset's pixels differ, so the cross-Generate cache must not carry
+    # over (it is keyed only by well/channel/variant, not by data dir).
+    app._app_state.image_table.image_cache = {}
+    app._app_state.image_table.last_render = {}
     if hasattr(app, "_invalidate_review_image_frame_cache"):
         app._invalidate_review_image_frame_cache()
     # Drop every cached ZipFile handle on dataset swap so the new

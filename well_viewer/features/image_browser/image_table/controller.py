@@ -1156,6 +1156,59 @@ def _refresh_lut_fields_from_render(app, rendered) -> None:
 # ── Generate (render image table below the selector) ─────────────────────────
 
 
+def _prefetch_cell_arrays(app, cells, cache) -> None:
+    """Decode the grid's unique (well, channel, variant) images in parallel.
+
+    The first Generate after a dataset load (or after the cache is invalidated)
+    has to read every cell's image off disk; doing that sequentially on the GUI
+    thread is the slow part. One ``_load_array`` call loads (and caches) all
+    FOVs/timepoints for a well+channel, so the unique work is far smaller than
+    the cell count. Threads help because ``zipfile``/``tifffile``/``PIL`` release
+    the GIL for the C-level inflate+decode, and the per-zip-handle serialization
+    in ``data/zipfile_cache.py`` keeps concurrent reads safe (same well → one
+    handle, serialized; different wells → parallel). Ratio channels are skipped
+    (they compose from per-channel arrays, which this still warms). Best-effort:
+    any failure leaves the sequential in-loop load as the fallback.
+    """
+    todo: dict = {}
+    for r, row in enumerate(cells):
+        use_tophat, _b, _bm = _row_display_opts(app, r)
+        for cell in row:
+            well = cell["well_cb"].currentText().strip()
+            chan = cell["chan_cb"].currentText().strip()
+            tp = cell["tp_cb"].currentText().strip()
+            fov = cell["fov_cb"].currentText().strip()
+            if not (well and chan and tp):
+                continue
+            if _find_ratio_for_channel(app, chan) is not None:
+                continue
+            th = bool(use_tophat) and not _is_nuc_seg(chan)
+            variant = "tophat" if th else "raw"
+            key = (well, chan.lower(), variant)
+            if key in cache:
+                continue
+            todo.setdefault(key, (well, chan, tp, fov, th))
+    if len(todo) < 2:
+        return  # nothing to gain from a pool for 0–1 reads
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _warm(spec) -> None:
+        well, chan, tp, fov, th = spec
+        try:
+            _load_array(app, cache, well, chan, tp, fov, use_tophat=th)
+        except Exception:
+            swallowed()  # in-loop load (with its own handling) is the fallback
+
+    try:
+        with ThreadPoolExecutor(max_workers=min(8, (os.cpu_count() or 4))) as ex:
+            list(ex.map(_warm, list(todo.values())))
+    except Exception:
+        import logging as _logging
+        _logging.getLogger("well_viewer.image_table").debug(
+            "image_table: parallel prefetch failed", exc_info=True)
+
+
 def image_table_generate(app) -> None:
     """Load images for every cell and lay out the rendered image table."""
     from well_viewer.core.ui_helpers import make_fluor_thumb, make_overlay_thumb
@@ -1173,12 +1226,21 @@ def image_table_generate(app) -> None:
     if empty is not None:
         empty.setVisible(False)
 
-    cache: Dict[Tuple[str, str, str], Dict] = {}
+    # Persist the decoded-image cache across Generates so crop / zoom / LUT /
+    # threshold re-renders re-composite from memory instead of re-reading and
+    # re-decoding every cell from its zip. Invalidated on dataset load
+    # (load_controller) and keyed by variant, so Raw/Corrected stays correct.
+    cache = app._app_state.image_table.image_cache
+    if not isinstance(cache, dict):
+        cache = {}
+        app._app_state.image_table.image_cache = cache
     rendered: Dict[Tuple[int, int], Any] = {}
     crop_tool = getattr(app, "_image_table_crop_tool", None)
     # Per-cell thumbnail size, scaled by the zoom factor (240 px = 1.0×).
     zoom = float(getattr(app._app_state.image_table, "zoom", 1.0) or 1.0)
     sz = max(80, int(round(240 * zoom)))
+
+    _prefetch_cell_arrays(app, cells, cache)
 
     for r, row in enumerate(cells):
         # Display options (top-hat / boundaries / binary) + LUT are per ROW —

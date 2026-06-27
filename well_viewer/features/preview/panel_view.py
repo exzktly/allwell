@@ -31,7 +31,10 @@ from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
 from well_viewer.features.image_browser.review_image.controller import on_review_image_channel_selected
-from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
+from well_viewer.features.image_browser.review_image.renderer import (
+    refresh_review_image,
+    render_review_image_display,
+)
 from widgets.stepper import Stepper
 from functools import partial
 from well_viewer.features.image_browser.review_image.controller import on_review_image_move
@@ -293,6 +296,21 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_label.setMouseTracking(True)
     self._review_image_canvas.setWidget(self._review_image_label)
     il.addWidget(self._review_image_canvas, 1)
+
+    # Re-fit the image whenever the scroll area is (re)sized. The lazy first
+    # build draws before Qt has laid out the canvas, so the initial
+    # render_review_image_display sees a 0×0 viewport and scales the image
+    # tiny; the first real layout fires resizeEvent with the correct size and
+    # re-fits it (and keeps it fitted on window/splitter resizes). Mirrors the
+    # Image Table / Playground canvases. No recursion: the render resizes the
+    # inner label, not this scroll area.
+    _orig_canvas_resize = self._review_image_canvas.resizeEvent
+
+    def _on_review_image_canvas_resize(ev) -> None:
+        _orig_canvas_resize(ev)
+        render_review_image_display(self)
+
+    self._review_image_canvas.resizeEvent = _on_review_image_canvas_resize
 
     # Install wheel + mouse hooks for zoom / drag
     def _wheel(event):

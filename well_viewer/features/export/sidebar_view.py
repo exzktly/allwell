@@ -520,6 +520,28 @@ class ExportStyleSidebar(QWidget):
         leg_loc.setCurrentText(str(self._prefs["legend_loc"]))
         add_row(s_leg, "Location", leg_loc, "legend_loc")
 
+        # ── Overlays ────────────────────────────────────────────────────────
+        # Cross-plot threshold marker (off by default). Drives
+        # PlotState.show_threshold_line, read by the Distribution / line-CDF /
+        # smFISH / bar-Fraction renderers.
+        s_over = section("Overlays", expanded=False)
+        thr_tog = ToggleSwitch("Show threshold line")
+        thr_tog.setChecked(bool(self._app._app_state.plot.show_threshold_line))
+        thr_tog.setToolTip(
+            "Overlay the ON/OFF threshold marker on plots — the line/band at "
+            "ThreshFracOn on the Distribution, line-plot CDF and smFISH plots, "
+            "and the 0.5 reference + 'threshold=' label on the bar Fraction "
+            "panel.")
+
+        def _on_threshold_line_toggle(on: bool) -> None:
+            self._app._app_state.plot.show_threshold_line = bool(on)
+            try:
+                self._redraw_active_plot()
+            except Exception:
+                swallowed()
+        thr_tog.toggled.connect(_on_threshold_line_toggle)
+        add_row(s_over, "", thr_tog)
+
         # ── Lines & Markers ─────────────────────────────────────────────────
         s_lm = section("Lines & Markers", expanded=False)
         ls_cb = QComboBox()

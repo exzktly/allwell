@@ -48,6 +48,7 @@ def snapshot(app) -> dict:
         "active_metric": str(app._app_state.channel.active_metric or ""),
         "use_sem": bool(app._app_state.plot.use_sem),
         "use_fov_replicates": bool(app._app_state.plot.use_fov_replicates),
+        "show_threshold_line": bool(app._app_state.plot.show_threshold_line),
         "fold_change": {
             "vs_control_on": bool(app._app_state.plot.fc_vs_control_on),
             "control_label": str(app._app_state.plot.fc_control_label or ""),
@@ -363,6 +364,12 @@ def restore(app, state: dict) -> None:
             app._app_state.plot.use_sem = bool(state["use_sem"])
         except Exception:
             swallowed()  # was: pass (silent except)
+
+    if "show_threshold_line" in state:
+        try:
+            app._app_state.plot.show_threshold_line = bool(state["show_threshold_line"])
+        except Exception:
+            swallowed()
 
     if "use_fov_replicates" in state:
         # The FOV-spread toggle on Line Graphs / Bar Plots. Set the field, then

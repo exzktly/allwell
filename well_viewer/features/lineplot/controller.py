@@ -568,7 +568,9 @@ def redraw_line_plots(
             leg_n.set_draggable(True)
             leg_n.set_visible(app._app_state.plot.legend_visible.get("n", True))
     if any_cdf:
-        app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
+        _show_thr = app._app_state.plot.show_threshold_line
+        if _show_thr:
+            app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
         try:
             cdf_lo = float(app._cdf_xmin_edit.text())
         except (ValueError, AttributeError):
@@ -579,7 +581,8 @@ def redraw_line_plots(
             cdf_hi = 300.0
         if cdf_hi <= cdf_lo:
             cdf_hi = cdf_lo + 1.0
-        app._line_ax_cdf.axvspan(threshold, cdf_hi, alpha=0.05, color=warn, zorder=1)
+        if _show_thr:
+            app._line_ax_cdf.axvspan(threshold, cdf_hi, alpha=0.05, color=warn, zorder=1)
         if _has_labeled(app._line_ax_cdf):
             leg_cdf = app._line_ax_cdf.legend(**legend_kw)
             leg_cdf.set_draggable(True)

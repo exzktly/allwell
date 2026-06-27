@@ -407,7 +407,8 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
     # Threshold marker for non-violin modes — drawn for intensities and now
     # for smFISH counts too (ThreshFracOn is the spot-count cutoff). Shape
     # metrics have no per-channel cutoff, so they fall out via is_shape_active.
-    if mode != "Violin (per group)" and not app._app_state.channel.is_shape_active():
+    if (mode != "Violin (per group)" and app._app_state.plot.show_threshold_line
+            and not app._app_state.channel.is_shape_active()):
         try:
             threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
             if math.isfinite(threshold):
@@ -440,7 +441,7 @@ def _render_faceted_histograms(app, groups, mode, bins, log_x, tp_h, *, log_y=Fa
             threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
         except Exception:
             threshold = float("nan")
-    show_threshold = math.isfinite(threshold)
+    show_threshold = math.isfinite(threshold) and app._app_state.plot.show_threshold_line
 
     last_idx = len(groups) - 1
     for i, ((name, color, vals), ax) in enumerate(zip(groups, axes)):

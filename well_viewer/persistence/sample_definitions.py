@@ -10,10 +10,6 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
-from well_viewer.persistence import (
-    cell_gating as _cell_gating,
-    ratios as _ratios,
-)
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
@@ -225,73 +221,6 @@ def load_from_pipeline_info(app) -> bool:
             app._app_state.dataset.well_labels[str(tok)] = str(lab).strip()
     app._invalidate_stats_cache()
     return True
-
-
-def save_all(app) -> None:
-    """Persist labels + reps + groups + ratios + gating in one click."""
-    if not app._app_state.dataset.data_dir:
-        QMessageBox.warning(
-            app, "No data loaded",
-            "Open a data folder before saving sample definitions.",
-        )
-        return
-    panel = getattr(app, "_ratio_panel", None)
-    if panel is not None:
-        try:
-            panel._on_apply()
-        except Exception:
-            _logger.exception("Ratio panel apply failed during Save")
-    save_to_pipeline_info(app)
-    try:
-        app._persistence.save("plot_groups")
-    except Exception:
-        _logger.exception("Plot Groups save during combined Save failed")
-    _ratios.save_to_data_dir(app)
-    try:
-        _cell_gating.save_to_pipeline_info(app)
-    except Exception:
-        _logger.exception("Gating save during combined Save failed")
-
-
-def load_all(app) -> None:
-    """Reload labels + reps + groups + ratios + gating from the data folder."""
-    if not app._app_state.dataset.data_dir:
-        QMessageBox.warning(
-            app, "No data loaded",
-            "Open a data folder before loading sample definitions.",
-        )
-        return
-    applied = load_from_pipeline_info(app)
-    _ratios.load_from_data_dir(app)
-    try:
-        _cell_gating.load_from_pipeline_info(app)
-    except Exception:
-        _logger.exception("Gating load during combined Load failed")
-    try:
-        from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.load_from_pipeline_info(app)
-    except Exception:
-        _logger.exception("smFISH threshold load during combined Load failed")
-    if hasattr(app, "_groups_centre_refresh"):
-        try:
-            app._groups_centre_refresh()
-        except Exception:
-            _logger.exception("Sample Definitions refresh after Load failed")
-    if hasattr(app, "_plot_groups_refresh"):
-        try:
-            app._plot_groups_refresh()
-        except Exception:
-            _logger.exception("Plot Groups refresh after Load failed")
-    panel = getattr(app, "_ratio_panel", None)
-    if panel is not None:
-        try:
-            panel.refresh_from_app()
-        except Exception:
-            _logger.exception("Ratio panel refresh after Load failed")
-    app._set_status(
-        "Sample definitions reloaded." if applied
-        else "No saved sample definitions found in this data folder."
-    )
 
 
 def clear_all(app) -> None:

@@ -493,10 +493,12 @@ def toggle_swarm(app) -> None:
     app._bar_swarm = not app._bar_swarm
     on = app._bar_swarm
     app._swarm_btn.setChecked(on)
+    app._swarm_btn.setText("Beeswarm: On" if on else "Beeswarm: Off")
     if on and app._bar_violin:
         # Swarm and violin are mutually exclusive
         app._bar_violin = False
         app._violin_btn.setChecked(False)
+        app._violin_btn.setText("Violin: Off")
         app._violin_slider.setEnabled(False)
     app._refresh_bar_layout_btn_state()
     redraw_bars(app)
@@ -509,11 +511,13 @@ def toggle_violin(app) -> None:
     app._bar_violin = not app._bar_violin
     on = app._bar_violin
     app._violin_btn.setChecked(on)
+    app._violin_btn.setText("Violin: On" if on else "Violin: Off")
     app._violin_slider.setEnabled(on)
     if on and app._bar_swarm:
         # Mutually exclusive with beeswarm
         app._bar_swarm = False
         app._swarm_btn.setChecked(False)
+        app._swarm_btn.setText("Beeswarm: Off")
     app._refresh_bar_layout_btn_state()
     redraw_bars(app)
 
@@ -673,8 +677,9 @@ def open_bar_timepoint_selector(app) -> None:
 def refresh_bar_layout_btn_state(app) -> None:
     """Sync the bar-tab layout toggle buttons with PlotState.
 
-    Updates the *Group by ...* and *Pool Replicates* button labels / checked
-    states. Both replicate buttons stay visible in the Display ▾ popover and are
+    Updates the *Grouping* and *Pooled* button labels / checked states using the
+    "State: On/Off" convention (label and accent highlight always agree). Both
+    replicate buttons stay visible in the Display ▾ popover and are
     enable-gated instead of visibility-toggled (toggling a child's visibility
     inside a closed QMenu widget-action does not surface reliably). The
     pool-replicates button is enabled only when ≥1 replicate set is active; the
@@ -688,20 +693,20 @@ def refresh_bar_layout_btn_state(app) -> None:
     has_rsets = bool(app._rep_sets_active())
     use_per_cell = bool(getattr(app, "_bar_violin", False) or getattr(app, "_bar_swarm", False))
     if group_btn is not None:
+        # Two-way mode selector: label names the current mode, highlight tracks
+        # the non-default "timepoint" mode so label and highlight never conflict.
         if plot.bar_group_mode == "well":
-            group_btn.setText("Group by Well")
+            group_btn.setText("Grouping: Well")
         else:
-            group_btn.setText("Group by Timepoint")
+            group_btn.setText("Grouping: Timepoint")
         group_btn.setChecked(plot.bar_group_mode == "timepoint")
         group_btn.setEnabled(True)
     if pool_btn is not None:
         pool_btn.setVisible(True)
         pool_btn.setEnabled(has_rsets)
-        if plot.bar_pool_replicates:
-            pool_btn.setText("Pool Replicates")
-        else:
-            pool_btn.setText("Show Wells Separately")
-        pool_btn.setChecked(not plot.bar_pool_replicates)
+        # State-label + matching highlight: highlighted iff pooling is on.
+        pool_btn.setText("Pooled: On" if plot.bar_pool_replicates else "Pooled: Off")
+        pool_btn.setChecked(bool(plot.bar_pool_replicates))
         pool_btn.setToolTip(
             "Collapse each replicate set's wells into one pooled column "
             "(off = one column per well)." if has_rsets
@@ -710,5 +715,7 @@ def refresh_bar_layout_btn_state(app) -> None:
     if pool_cells_btn is not None:
         pool_cells_btn.setVisible(True)
         pool_cells_btn.setEnabled(use_per_cell and has_rsets)
+        pool_cells_btn.setText(
+            "Pool cells: On" if plot.bar_pool_rset_cells else "Pool cells: Off")
         pool_cells_btn.setChecked(bool(plot.bar_pool_rset_cells))
 

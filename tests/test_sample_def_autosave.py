@@ -69,3 +69,34 @@ def test_label_edit_schedules_autosave(loaded_app):
     # common case where a well was available.
     if app._app_state.dataset.well_paths:
         assert "sample_definitions" in app._persistence._pending
+
+
+def test_cell_gating_edit_persists_without_save_button(loaded_app, mini_dataset):
+    """Cell-gating thresholds must autosave on edit — there is no Save button.
+
+    Editing a ThreshFracOn value and firing its change handler writes the
+    ``cell_gating`` block straight to pipeline_info.json (via
+    ``_cell_gating_persist_params``), so removing the explicit Save button does
+    not strand gating state. Guards the autosave coverage the Save removal
+    relies on.
+    """
+    from well_viewer.domain.gating_state import read_gating_params
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        build_cell_gating_subtab,
+        cell_gating_on_threshold_frac_on_change,
+    )
+
+    app = loaded_app
+    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
+        build_cell_gating_subtab(app)
+    edits = getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}
+    if not edits:
+        pytest.skip("mini dataset exposes no gateable fluor channel")
+
+    channel = next(iter(edits))
+    edits[channel].setText("42.0")
+    cell_gating_on_threshold_frac_on_change(app)
+
+    block = read_gating_params(mini_dataset)
+    assert block is not None, "cell_gating block should be written on edit"
+    assert float(block.get("thresh_frac_on", {}).get(channel)) == 42.0

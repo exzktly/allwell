@@ -114,7 +114,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # one well selected the view auto-stacks into one panel per well (overlaying
     # several time-coloured clouds on one axis would be unreadable).
     ctx.app._scatter_color_by_tp = False
-    ctx.app._scatter_color_by_tp_btn = QPushButton("Color by time", ctrl)
+    ctx.app._scatter_color_by_tp_btn = QPushButton("Color by time: Off", ctrl)
     ctx.app._scatter_color_by_tp_btn.setProperty("variant", "toggle")
     ctx.app._scatter_color_by_tp_btn.setCheckable(True)
     ctx.app._scatter_color_by_tp_btn.setToolTip(
@@ -122,7 +122,11 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
         "wells are shown as stacked panels.")
 
     def _toggle_color_by_tp(checked: bool) -> None:
-        ctx.app._scatter_color_by_tp = bool(checked)
+        on = bool(checked)
+        ctx.app._scatter_color_by_tp = on
+        # State-label + matching highlight (label and accent always agree).
+        ctx.app._scatter_color_by_tp_btn.setText(
+            "Color by time: On" if on else "Color by time: Off")
         redraw_scatter_orchestrate(ctx.app)
 
     ctx.app._scatter_color_by_tp_btn.clicked.connect(_toggle_color_by_tp)

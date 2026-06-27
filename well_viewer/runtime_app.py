@@ -656,13 +656,6 @@ class WellViewerApp(QWidget):
         from well_viewer.persistence import sample_definitions as _sd
         return _sd.load_from_pipeline_info(self)
 
-    def _save_sample_definitions_all(self) -> None:
-        from well_viewer.persistence import sample_definitions as _sd
-        _sd.save_all(self)
-
-    def _load_sample_definitions_all(self) -> None:
-        from well_viewer.persistence import sample_definitions as _sd
-        _sd.load_all(self)
 
     def _clear_sample_definitions_all(self) -> None:
         from well_viewer.persistence import sample_definitions as _sd

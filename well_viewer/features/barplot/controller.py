@@ -43,6 +43,12 @@ from well_viewer.features.barplot.collect import (  # noqa: E402,F401
     BarItem,
     FC_STATE_OFF,
     _bar_debug,
+    bar_drag_xs,
+    bar_err_settings,
+    bar_guide_x,
+    bar_idx_at_x,
+    cluster_x_for_group_keys,
+    clustered_x_positions,
     collect_bar_items,
     collect_bar_items_for_app,
     collect_bar_items_for_group,
@@ -75,55 +81,8 @@ def ordered_bar_keys(app) -> list:
     return ordered
 
 
-def cluster_x_for_group_keys(group_keys: List[str]) -> List[float]:
-    """Same cluster-position arithmetic as :func:`clustered_x_positions`
-    but from a parallel list of group_key strings rather than ``BarItem``s.
-
-    Used by the per-cell renderers (violin / beeswarm) and the batch
-    export to compute matching x positions for non-``BarItem`` callers.
-    """
-    xs: List[float] = []
-    cur_x = 0.0
-    last_gk: Optional[str] = None
-    for i, gk in enumerate(group_keys):
-        gk = gk or ""
-        if i == 0:
-            xs.append(cur_x)
-            last_gk = gk
-            continue
-        if gk and gk == last_gk:
-            cur_x += 1.0
-        else:
-            cur_x += 2.0 if gk and last_gk and gk != last_gk else 1.0
-        xs.append(cur_x)
-        last_gk = gk
-    return xs
-
-
-def clustered_x_positions(items: List[BarItem]) -> List[float]:
-    """Compute clustered integer x-positions from ``BarItem.group_key``.
-
-    Items sharing the same ``group_key`` get contiguous adjacent positions; a
-    one-unit gap is inserted between clusters. When every item has an empty
-    or unique ``group_key``, this reduces to ``list(range(len(items)))`` —
-    matching the legacy single-tp single-cluster layout exactly.
-    """
-    xs: List[float] = []
-    cur_x = 0.0
-    last_gk: Optional[str] = None
-    for i, item in enumerate(items):
-        gk = item.group_key or ""
-        if i == 0:
-            xs.append(cur_x)
-            last_gk = gk
-            continue
-        if gk and gk == last_gk:
-            cur_x += 1.0
-        else:
-            cur_x += 2.0 if gk and last_gk and gk != last_gk else 1.0
-        xs.append(cur_x)
-        last_gk = gk
-    return xs
+# ``cluster_x_for_group_keys`` / ``clustered_x_positions`` moved to
+# ``barplot/collect.py`` (Qt-free layout math) and re-exported above.
 
 
 def cluster_centers(items: List[BarItem], xs: List[float]):
@@ -171,6 +130,7 @@ def render_bar_items(
     err_bar_color: str,
     ax_n=None,
     fc_active: bool = False,
+    app=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
 
@@ -188,6 +148,13 @@ def render_bar_items(
     )
 
     xs = clustered_x_positions(items)
+    # Stash the real positions (aligned to the key order) so the drag-reorder
+    # hit-test maps clicks to the right column when clusters insert gaps.
+    if app is not None:
+        app._bar_xs = list(xs)
+        app._bar_xs_keys = list(keys)
+    # Error-bar appearance from the Properties → Statistics controls.
+    err_kind, ci_scale, draw_err = bar_err_settings(app)
     has_clusters = bool(xs and any(_ != i for i, _ in enumerate(xs)))
     bar_w = min(0.65 if use_groups else 0.6, 5.0 / max(n, 1))
     for i, item in enumerate(items):
@@ -197,9 +164,9 @@ def render_bar_items(
         if item.has_mean and not math.isnan(item.mean):
             ax_mean.bar(x, item.mean, width=bar_w, color=color, alpha=0.85,
                         zorder=3, linewidth=0)
-            if item.spread > 0:
-                ax_mean.errorbar(x, item.mean, yerr=item.spread, fmt="none",
-                                 ecolor=err_bar_color, elinewidth=1.4,
+            if draw_err and item.spread > 0:
+                ax_mean.errorbar(x, item.mean, yerr=item.spread * ci_scale,
+                                 fmt="none", ecolor=err_bar_color, elinewidth=1.4,
                                  capsize=4, zorder=4)
         else:
             ax_mean.bar(x, 0, width=bar_w, color=placeholder_color,
@@ -209,8 +176,8 @@ def render_bar_items(
         if item.has_frac and not math.isnan(item.frac):
             ax_frac.bar(x, item.frac, width=bar_w, color=color, alpha=0.85,
                         zorder=3, linewidth=0)
-            if item.frac_spread > 0:
-                ax_frac.errorbar(x, item.frac, yerr=item.frac_spread,
+            if draw_err and item.frac_spread > 0:
+                ax_frac.errorbar(x, item.frac, yerr=item.frac_spread * ci_scale,
                                  fmt="none", ecolor=err_bar_color,
                                  elinewidth=1.4, capsize=4, zorder=4)
         else:
@@ -222,8 +189,8 @@ def render_bar_items(
             if item.has_mean and item.n_above > 0:
                 ax_n.bar(x, item.n_above, width=bar_w, color=color,
                          alpha=0.85, zorder=3, linewidth=0)
-                if item.n_above_spread > 0:
-                    ax_n.errorbar(x, item.n_above, yerr=item.n_above_spread,
+                if draw_err and item.n_above_spread > 0:
+                    ax_n.errorbar(x, item.n_above, yerr=item.n_above_spread * ci_scale,
                                   fmt="none", ecolor=err_bar_color,
                                   elinewidth=1.4, capsize=4, zorder=4)
             else:
@@ -347,9 +314,8 @@ def bar_event_xdata(app, event) -> Optional[float]:
     return float(xdata)
 
 
-def bar_idx_at_x(xdata: float, n: int) -> int:
-    """Return the bar index nearest to *xdata*, clamped to [0, n-1]."""
-    return max(0, min(n - 1, int(round(xdata))))
+# ``bar_idx_at_x`` / ``bar_drag_xs`` / ``bar_guide_x`` / ``bar_err_settings``
+# moved to ``barplot/collect.py`` (Qt-free) and re-exported above.
 
 
 def bar_reset_order(app) -> None:
@@ -372,7 +338,7 @@ def on_bar_drag_press(app, event) -> None:
     n = len(keys)
     if n < 2:
         return
-    idx = bar_idx_at_x(xdata, n)
+    idx = bar_idx_at_x(xdata, n, bar_drag_xs(app, keys))
     app._bar_drag_state.update(active=True, src_idx=idx, cur_idx=idx)
 
 
@@ -388,21 +354,19 @@ def on_bar_drag_motion(app, event, *, accent_color: str) -> None:
     n = len(keys)
     if n < 2:
         return
-    tgt = bar_idx_at_x(xdata, n)
+    xs = bar_drag_xs(app, keys)
+    tgt = bar_idx_at_x(xdata, n, xs)
     if tgt == ds["cur_idx"]:
         return
     ds["cur_idx"] = tgt
 
+    guide_x = bar_guide_x(xs, tgt, ds["src_idx"], n)
     for ax in (app._ax_bar_mean, app._ax_bar_frac, getattr(app, "_ax_bar_n", None)):
         if ax is None:
             continue
         for ln in list(ax.lines):
             if getattr(ln, "_bar_drag_guide", False):
                 ln.remove()
-        if tgt > ds["src_idx"]:
-            guide_x = min(tgt + 0.5, n - 0.5)
-        else:
-            guide_x = max(tgt - 0.5, -0.5)
         ln = ax.axvline(guide_x, color=accent_color, lw=1.5, ls="--",
                         alpha=0.8, zorder=10)
         ln._bar_drag_guide = True

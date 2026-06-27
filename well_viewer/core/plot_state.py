@@ -52,6 +52,15 @@ class PlotState:
     # column per well. Independent of ``use_fov_replicates`` (which controls
     # the SD/SEM source on the bar / n_above panels).
     bar_pool_rset_cells: bool = False
+    # Bar plot Properties → Statistics controls.
+    # ``bar_err_kind``: which error bar to draw — "none" | "sem" | "sd" |
+    # "ci95" (95% CI = 1.96 × SEM, normal approx). Kept in sync with
+    # ``use_sem`` (sem→True, sd→False) so the per-card band toggle agrees.
+    # ``bar_show_mode``: "mean" (bars only) | "mean_spread" (bars + error
+    # bars, the default) | "all_pts" (overlay per-cell points via the
+    # beeswarm path).
+    bar_err_kind: str = "sem"
+    bar_show_mode: str = "mean_spread"
 
     fc_vs_control_on: bool = False
     fc_control_label: str = ""

@@ -275,6 +275,51 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
     return total
 
 
+def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
+                              use_sem: bool) -> tuple:
+    """Mean and SD/SEM of events-above-threshold *across the set's wells*.
+
+    Each loaded well contributes one ``n_above`` value (AggPoint index 4); the
+    spread is the ddof=1 SD (or SEM, when ``use_sem``) across those per-well
+    counts. Returns ``(mean_n_above, spread)`` — the replicate version of the
+    Events panel, mirroring how :func:`compute_rep_stats` aggregates the Mean
+    and Fraction panels (a per-well mean with a cross-well spread), so the
+    Events panel gets replicate error bars instead of a spread-less total.
+    """
+    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
+    fluor_gates = app._get_all_fluor_gates()
+    cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
+                 threshold, use_sem, app._app_state.channel.active_val_col,
+                 tuple(sorted(fluor_gates.items())))
+    if cache_key in app._app_state.stats.cache:
+        return app._app_state.stats.cache[cache_key]
+
+    vals: List[float] = []
+    for lbl in rset.wells:
+        if lbl not in app._app_state.dataset.well_paths:
+            continue
+        pts = aggregate_well(
+            app, lbl, threshold=threshold, use_sem=False,
+            val_col=app._app_state.channel.active_val_col,
+            fluor_gates=fluor_gates,
+        )
+        matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+        if matched:
+            vals.append(float(matched[0][4]))
+
+    if vals:
+        arr = np.asarray(vals, dtype=float)
+        mean = float(arr.mean())
+        nn = arr.size
+        sd = float(arr.std(ddof=1)) if nn > 1 else 0.0
+        spread = sd / math.sqrt(nn) if (use_sem and nn > 1) else sd
+    else:
+        mean, spread = 0.0, 0.0
+    result = (mean, spread)
+    app._app_state.stats.cache[cache_key] = result
+    return result
+
+
 def aggregate_well(
     app,
     label: str,

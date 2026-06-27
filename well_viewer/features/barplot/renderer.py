@@ -474,6 +474,7 @@ def draw_grouped_bar_mode(
         disabled_well_color=CLR_MUTED_DISABLED,
         err_bar_color=CLR_ERR_BAR,
         fc_active=bool(app._app_state.plot.fold_change_active),
+        app=app,
     )
     if (str(getattr(app._app_state.plot, "bar_group_mode", "well") or "well") == "well"
             and len(target_ts) > 1):
@@ -545,6 +546,12 @@ def redraw_bars(app) -> None:
         threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
 
     active_rsets = app._rep_sets_active()
+    # Keep the Display-popover toggles (notably "Pool Replicates", hidden until
+    # replicate sets exist) in sync on every redraw — covers the case where the
+    # user just created a replicate set, which otherwise never refreshed the
+    # button's visibility.
+    if hasattr(app, "_refresh_bar_layout_btn_state"):
+        app._refresh_bar_layout_btn_state()
     bar_selected = selected_bar_wells(app, active_rsets)
 
     _ch = app._app_state.channel.active_channel.upper()
@@ -703,7 +710,10 @@ def draw_per_cell_bar_mode(
     from well_viewer.core import debug_flags as _debug_flags
     from well_viewer.domain import fold_change as _fc
 
-    use_per_cell = app._bar_violin or app._bar_swarm
+    # The Properties "Show: All points" option also routes here so per-cell
+    # dots overlay the bars, reusing the beeswarm path.
+    show_mode = str(getattr(app._app_state.plot, "bar_show_mode", "mean_spread") or "mean_spread")
+    use_per_cell = app._bar_violin or app._bar_swarm or show_mode == "all_pts"
     if not use_per_cell:
         return False
     ordered_keys = app._bar_current_keys()
@@ -835,6 +845,11 @@ def draw_per_cell_bar_mode(
         cell_scale = None
 
     xs = cluster_x_for_group_keys(group_keys)
+    # Stash positions for the drag-reorder hit-test (aligned to the reorder
+    # keys; the hit-test guards on length+identity so a per-well expansion that
+    # doesn't match simply falls back to integer positions).
+    app._bar_xs = list(xs)
+    app._bar_xs_keys = list(ordered_keys)
     if app._bar_violin:
         draw_violin(
             app, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,

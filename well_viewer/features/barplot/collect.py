@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -1014,6 +1015,27 @@ def cluster_x_for_group_keys(group_keys: List[str]) -> List[float]:
         xs.append(cur_x)
         last_gk = gk
     return xs
+
+
+def drop_redundant_cluster_keys(items: List[BarItem]) -> None:
+    """Blank ``group_key`` for items whose cluster header would only duplicate
+    the bar's own tick label, in place.
+
+    A ``group_key`` that occurs on exactly one item AND already equals that
+    item's ``display`` carries no extra information (e.g. one pooled replicate
+    group per a single timepoint). Left in, ``_annotate_cluster_headers`` draws a
+    redundant bold label at the top of the Mean panel — overlapping the figure
+    title — and ``clustered_x_positions`` inserts a spurious inter-bar gap.
+
+    Genuine clusters are preserved: a header shared by ≥2 bars (e.g. a
+    single-timepoint *unpooled* replicate set with several wells), or a header
+    whose bars' ``display`` is something else (multi-timepoint, where ``display``
+    is the timepoint, not the group name), is left untouched.
+    """
+    counts = Counter(it.group_key for it in items if it.group_key)
+    for it in items:
+        if it.group_key and counts[it.group_key] == 1 and it.display == it.group_key:
+            it.group_key = ""
 
 
 def clustered_x_positions(items: List[BarItem]) -> List[float]:

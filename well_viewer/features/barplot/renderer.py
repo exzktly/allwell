@@ -494,9 +494,14 @@ def draw_grouped_bar_mode(
     _thr_q = threshold_qualifier(_metric_key)
     _fc_suffix = _fc.fold_change_suffix_for(app)
     _tp_suffix = _format_tp_title(target_ts, tp_str)
+    # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
+    # when any survive normalization, push the title up so it clears them rather
+    # than overlapping. items were normalized in place by render_bar_items.
+    _has_cluster_headers = any(getattr(it, "group_key", "") for it in items)
     ax_mean.set_title(
         f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}  —  {_tp_suffix}",
-        color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6,
+        color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold",
+        pad=18 if _has_cluster_headers else 6,
     )
     ax_mean.set_ylabel(f"{_ch} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(

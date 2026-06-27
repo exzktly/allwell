@@ -53,6 +53,7 @@ from well_viewer.features.barplot.collect import (  # noqa: E402,F401
     collect_bar_items_for_app,
     collect_bar_items_for_group,
     collect_bar_items_fov_pooled,
+    drop_redundant_cluster_keys,
 )
 
 
@@ -141,6 +142,11 @@ def render_bar_items(
     bars to differentiate visually from the per-well view.
     """
     n = len(items)
+    # Drop cluster headers that would only duplicate a single bar's own tick
+    # label (e.g. one pooled group per a single timepoint) before laying out —
+    # otherwise a redundant bold label renders atop the Mean panel, overlapping
+    # the figure title.
+    drop_redundant_cluster_keys(items)
     xlabels = [item.display for item in items]
     keys = [item.key for item in items]
     _bar_debug(

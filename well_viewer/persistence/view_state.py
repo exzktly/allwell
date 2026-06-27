@@ -720,6 +720,17 @@ def _apply_image_table(app, state: dict) -> None:
     The tab builder constructs widgets lazily; this only runs once the tab
     is on screen, so the widget references are guaranteed to exist.
     """
+    # One deferred feature import for the whole function (persistence stays
+    # feature-free at module scope — see test_layering / test_deferred_imports);
+    # both helpers are used below.
+    try:
+        from well_viewer.features.image_browser.image_table.controller import (
+            image_table_apply_dimensions,
+            image_table_set_zoom,
+        )
+    except Exception:  # pragma: no cover - import failure leaves these no-ops
+        image_table_apply_dimensions = image_table_set_zoom = None
+
     # Grid axes first (before the dimension rebuild), so the per-row channel/well
     # combos + labels are laid out on the same axes the plot was saved with. The
     # per-cell combos restored below remain authoritative for the actual values.
@@ -768,14 +779,8 @@ def _apply_image_table(app, state: dict) -> None:
                     changed = True
             except Exception:
                 swallowed()  # was: pass (silent except)
-        if changed:
+        if changed and image_table_apply_dimensions is not None:
             try:
-                # Function-local feature import keeps this persistence module
-                # data-only at module scope (see test_layering) — mirrors the
-                # deferred ``image_table_refresh_display_menu`` import below.
-                from well_viewer.features.image_browser.image_table.controller import (
-                    image_table_apply_dimensions,
-                )
                 image_table_apply_dimensions(app)
             except Exception:
                 _logger.debug("image_table: apply_dimensions failed", exc_info=True)
@@ -937,13 +942,9 @@ def _apply_image_table(app, state: dict) -> None:
         except Exception:
             swallowed()
 
-    # Zoom (display-only) via its feature setter. Function-local import keeps
-    # this persistence module data-only at module scope.
-    if isinstance(state.get("zoom"), (int, float)):
+    # Zoom (display-only) via its feature setter (imported once at the top).
+    if isinstance(state.get("zoom"), (int, float)) and image_table_set_zoom is not None:
         try:
-            from well_viewer.features.image_browser.image_table.controller import (
-                image_table_set_zoom,
-            )
             image_table_set_zoom(app, float(state["zoom"]))
         except Exception:
             _logger.debug("image_table: zoom restore failed", exc_info=True)

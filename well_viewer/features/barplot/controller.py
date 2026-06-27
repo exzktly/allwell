@@ -43,6 +43,12 @@ from well_viewer.features.barplot.collect import (  # noqa: E402,F401
     BarItem,
     FC_STATE_OFF,
     _bar_debug,
+    bar_drag_xs,
+    bar_err_settings,
+    bar_guide_x,
+    bar_idx_at_x,
+    cluster_x_for_group_keys,
+    clustered_x_positions,
     collect_bar_items,
     collect_bar_items_for_app,
     collect_bar_items_for_group,
@@ -75,55 +81,8 @@ def ordered_bar_keys(app) -> list:
     return ordered
 
 
-def cluster_x_for_group_keys(group_keys: List[str]) -> List[float]:
-    """Same cluster-position arithmetic as :func:`clustered_x_positions`
-    but from a parallel list of group_key strings rather than ``BarItem``s.
-
-    Used by the per-cell renderers (violin / beeswarm) and the batch
-    export to compute matching x positions for non-``BarItem`` callers.
-    """
-    xs: List[float] = []
-    cur_x = 0.0
-    last_gk: Optional[str] = None
-    for i, gk in enumerate(group_keys):
-        gk = gk or ""
-        if i == 0:
-            xs.append(cur_x)
-            last_gk = gk
-            continue
-        if gk and gk == last_gk:
-            cur_x += 1.0
-        else:
-            cur_x += 2.0 if gk and last_gk and gk != last_gk else 1.0
-        xs.append(cur_x)
-        last_gk = gk
-    return xs
-
-
-def clustered_x_positions(items: List[BarItem]) -> List[float]:
-    """Compute clustered integer x-positions from ``BarItem.group_key``.
-
-    Items sharing the same ``group_key`` get contiguous adjacent positions; a
-    one-unit gap is inserted between clusters. When every item has an empty
-    or unique ``group_key``, this reduces to ``list(range(len(items)))`` —
-    matching the legacy single-tp single-cluster layout exactly.
-    """
-    xs: List[float] = []
-    cur_x = 0.0
-    last_gk: Optional[str] = None
-    for i, item in enumerate(items):
-        gk = item.group_key or ""
-        if i == 0:
-            xs.append(cur_x)
-            last_gk = gk
-            continue
-        if gk and gk == last_gk:
-            cur_x += 1.0
-        else:
-            cur_x += 2.0 if gk and last_gk and gk != last_gk else 1.0
-        xs.append(cur_x)
-        last_gk = gk
-    return xs
+# ``cluster_x_for_group_keys`` / ``clustered_x_positions`` moved to
+# ``barplot/collect.py`` (Qt-free layout math) and re-exported above.
 
 
 def cluster_centers(items: List[BarItem], xs: List[float]):
@@ -195,7 +154,7 @@ def render_bar_items(
         app._bar_xs = list(xs)
         app._bar_xs_keys = list(keys)
     # Error-bar appearance from the Properties → Statistics controls.
-    err_kind, ci_scale, draw_err = _bar_err_settings(app)
+    err_kind, ci_scale, draw_err = bar_err_settings(app)
     has_clusters = bool(xs and any(_ != i for i, _ in enumerate(xs)))
     bar_w = min(0.65 if use_groups else 0.6, 5.0 / max(n, 1))
     for i, item in enumerate(items):
@@ -355,67 +314,8 @@ def bar_event_xdata(app, event) -> Optional[float]:
     return float(xdata)
 
 
-def bar_idx_at_x(xdata: float, n: int, xs: Optional[List[float]] = None) -> int:
-    """Return the bar index nearest to *xdata*, clamped to [0, n-1].
-
-    When ``xs`` (the actual on-screen x-positions from
-    :func:`clustered_x_positions`) is supplied and matches ``n``, the nearest
-    real position wins — clusters insert gaps so bars are NOT at integer x and
-    ``int(round(xdata))`` picks the wrong column. Falls back to integer
-    rounding only when ``xs`` is unavailable / length-mismatched.
-    """
-    if xs and len(xs) == n:
-        return min(range(n), key=lambda i: abs(xdata - xs[i]))
-    return max(0, min(n - 1, int(round(xdata))))
-
-
-def _bar_drag_xs(app, keys: List[str]) -> Optional[List[float]]:
-    """The on-screen x-positions for the current bars, aligned to ``keys``.
-
-    Stashed by the renderer (:func:`render_bar_items` and the per-cell path).
-    Returns None when absent or out of sync with the current key order, so the
-    hit-test safely falls back to integer positions rather than misaligning.
-    """
-    xs = getattr(app, "_bar_xs", None)
-    xs_keys = getattr(app, "_bar_xs_keys", None)
-    if xs and xs_keys == keys and len(xs) == len(keys):
-        return list(xs)
-    return None
-
-
-def _bar_guide_x(xs: Optional[List[float]], tgt: int, src: int, n: int) -> float:
-    """X for the drop-indicator guide line: the midpoint of the gap the bar
-    would land in (after ``tgt`` when moving right, before it when moving
-    left), using real cluster positions when available."""
-    if xs and len(xs) == n:
-        if tgt > src:
-            return (xs[tgt] + xs[tgt + 1]) / 2.0 if tgt + 1 < n else xs[tgt] + 0.5
-        return (xs[tgt - 1] + xs[tgt]) / 2.0 if tgt - 1 >= 0 else xs[tgt] - 0.5
-    # Fallback: legacy integer layout.
-    if tgt > src:
-        return min(tgt + 0.5, n - 0.5)
-    return max(tgt - 0.5, -0.5)
-
-
-def _bar_err_settings(app) -> tuple:
-    """``(err_kind, ci_scale, draw_err)`` for the bar error bars, derived from
-    the Properties → Statistics controls (``PlotState.bar_err_kind`` /
-    ``bar_show_mode``).
-
-    ``draw_err`` is False when the Show mode is "Mean" (bars only) or the
-    error-bar type is "None". ``ci_scale`` is 1.96 for the 95% CI option (a
-    normal-approx CI built from the SEM the spreads are already computed as),
-    else 1.0. With no ``app`` (e.g. unit tests calling the renderer directly)
-    the legacy behaviour — always draw — is preserved.
-    """
-    if app is None or not hasattr(app, "_app_state"):
-        return ("sem", 1.0, True)
-    plot = app._app_state.plot
-    err_kind = str(getattr(plot, "bar_err_kind", "sem") or "sem")
-    show_mode = str(getattr(plot, "bar_show_mode", "mean_spread") or "mean_spread")
-    draw_err = (show_mode != "mean") and (err_kind != "none")
-    ci_scale = 1.96 if err_kind == "ci95" else 1.0
-    return (err_kind, ci_scale, draw_err)
+# ``bar_idx_at_x`` / ``bar_drag_xs`` / ``bar_guide_x`` / ``bar_err_settings``
+# moved to ``barplot/collect.py`` (Qt-free) and re-exported above.
 
 
 def bar_reset_order(app) -> None:
@@ -438,7 +338,7 @@ def on_bar_drag_press(app, event) -> None:
     n = len(keys)
     if n < 2:
         return
-    idx = bar_idx_at_x(xdata, n, _bar_drag_xs(app, keys))
+    idx = bar_idx_at_x(xdata, n, bar_drag_xs(app, keys))
     app._bar_drag_state.update(active=True, src_idx=idx, cur_idx=idx)
 
 
@@ -454,13 +354,13 @@ def on_bar_drag_motion(app, event, *, accent_color: str) -> None:
     n = len(keys)
     if n < 2:
         return
-    xs = _bar_drag_xs(app, keys)
+    xs = bar_drag_xs(app, keys)
     tgt = bar_idx_at_x(xdata, n, xs)
     if tgt == ds["cur_idx"]:
         return
     ds["cur_idx"] = tgt
 
-    guide_x = _bar_guide_x(xs, tgt, ds["src_idx"], n)
+    guide_x = bar_guide_x(xs, tgt, ds["src_idx"], n)
     for ax in (app._ax_bar_mean, app._ax_bar_frac, getattr(app, "_ax_bar_n", None)):
         if ax is None:
             continue

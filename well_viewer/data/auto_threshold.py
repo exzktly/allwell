@@ -32,7 +32,7 @@ Two entry points share the algorithm:
 Logging
 -------
 The module uses ``logging.getLogger("well_viewer.data.auto_threshold")``.
-The runtime app's log drawer (``all_well._attach_log_ring_buffer``)
+The runtime app's log drawer (``allwell._attach_log_ring_buffer``)
 already captures every logger record, so streaming progress messages
 to the drawer is free — callers don't have to pass a logger in.
 """

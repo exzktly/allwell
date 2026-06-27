@@ -1205,7 +1205,7 @@ def cell_gating_auto_threshold(app) -> None:
     thresholds are never touched by this pass.
 
     Status streams to the log drawer via the standard logging API (the
-    ``logging.Handler`` installed by ``all_well._attach_log_ring_buffer``
+    ``logging.Handler`` installed by ``allwell._attach_log_ring_buffer``
     captures every record).
     """
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):

@@ -30,7 +30,7 @@ def pkg_dir(name: str) -> Path:
 
 # ---------------------------------------------------------------------------
 # Sibling scripts bundled as data files
-# PyInstaller cannot follow exec() calls in all_well.py, so these scripts
+# PyInstaller cannot follow exec() calls in allwell.py, so these scripts
 # are bundled explicitly and extracted to sys._MEIPASS at runtime.
 # ---------------------------------------------------------------------------
 
@@ -38,7 +38,7 @@ _here = Path(SPECPATH)               # _Docs/_Installation/ — directory of thi
 _parent = _here.parent.parent        # repository root (two levels up)
 
 sibling_scripts = [
-    (str(_parent / "all_well.py"),              "."),
+    (str(_parent / "allwell.py"),               "."),
     (str(_parent / "analyze_tab.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
@@ -561,13 +561,13 @@ app = BUNDLE(   # noqa: F821
     name="AllWell.app",
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
-    version="7.4.0",
+    version="7.4.1",
     info_plist={
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription":
             "AllWell needs access to open microscopy data files.",
-        "CFBundleShortVersionString": "7.4.0",
-        "CFBundleVersion": "7.4.0",
+        "CFBundleShortVersionString": "7.4.1",
+        "CFBundleVersion": "7.4.1",
         "CFBundleName": "AllWell",
         "CFBundleDisplayName": "All Well",
         "CFBundleExecutable": "AllWell",

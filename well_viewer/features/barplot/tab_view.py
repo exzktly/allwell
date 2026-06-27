@@ -176,7 +176,10 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_pool_reps_btn.clicked.connect(
         lambda _=False: toggle_bar_pool_replicates(ctx.app)
     )
-    ctx.app._bar_pool_reps_btn.setVisible(False)
+    # Always present in the Display ▾ popover; enable-gated on active replicate
+    # sets by refresh_bar_layout_btn_state. Toggling a child's visibility inside
+    # a closed QMenu widget-action does not surface reliably, so we keep it
+    # visible and gate usability with setEnabled instead.
     _disp_lay.addWidget(ctx.app._bar_pool_reps_btn)
 
     ctx.app._bar_pool_rset_cells_btn = QPushButton("Pool rset cells", shape_ctrl)
@@ -188,7 +191,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._bar_pool_rset_cells_btn.clicked.connect(
         lambda _=False: toggle_bar_pool_rset_cells(ctx.app)
     )
-    ctx.app._bar_pool_rset_cells_btn.setVisible(False)
+    # Always present; enable-gated on (violin/beeswarm AND active rsets).
     _disp_lay.addWidget(ctx.app._bar_pool_rset_cells_btn)
 
     ctx.app._swarm_btn = QPushButton("Beeswarm", shape_ctrl)

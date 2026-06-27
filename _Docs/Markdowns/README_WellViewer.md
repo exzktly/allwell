@@ -213,8 +213,8 @@ python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')
 Run it:
 
 ```sh
-python all_well.py
-python all_well.py --data_dir /path/to/results   # pre-load a dataset
+python allwell.py
+python allwell.py --data_dir /path/to/results   # pre-load a dataset
 ```
 
 The pipeline alone (no GUI) can be invoked directly — useful for CI or
@@ -292,8 +292,8 @@ python -c "import tensorflow as tf; print(tf.config.list_physical_devices('CPU')
 Run it:
 
 ```powershell
-python all_well.py
-python all_well.py --data_dir C:\path\to\results
+python allwell.py
+python allwell.py --data_dir C:\path\to\results
 ```
 
 To produce a distributable Windows bundle (optional — only if you want
@@ -535,7 +535,7 @@ kept **and** it passes QC.
 ## Review mode — exploring results
 
 Open a results folder with the Open button (or `Ctrl+O`, or
-`python all_well.py --data_dir <path>`). The viewer accepts:
+`python allwell.py --data_dir <path>`). The viewer accepts:
 
 - A folder of per-well CSVs (flat).
 - A folder containing an `out/` subfolder of CSVs.

@@ -92,9 +92,9 @@ def test_services_have_no_qt_imports():
 
 def test_widgets_do_not_import_the_app():
     """ARCHITECTURE §13 (widgets): reusable widgets carry no All-Well-specific
-    knowledge — they must not import `well_viewer`, `analyze_tab`, or `all_well`.
+    knowledge — they must not import `well_viewer`, `analyze_tab`, or `allwell`.
     (They may compose other `widgets.*` primitives.)"""
-    forbidden = {"well_viewer", "analyze_tab", "all_well"}
+    forbidden = {"well_viewer", "analyze_tab", "allwell"}
     offenders = []
     for path in _walk_py(REPO_ROOT / "widgets"):
         for node, top in _all_imports(_parse(path)):
@@ -102,7 +102,7 @@ def test_widgets_do_not_import_the_app():
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports {top}")
     assert not offenders, (
         "widgets/ must not couple to the app (well_viewer / analyze_tab / "
-        "all_well):\n  " + "\n  ".join(offenders)
+        "allwell):\n  " + "\n  ".join(offenders)
     )
 
 

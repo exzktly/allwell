@@ -485,7 +485,7 @@ hints render.
       the status-bar "Search ⌘K" hint (no global search exists) and the help drawer's
       "⌘W Close window". Fixed by making the claims true: wired `Ctrl+W` (close) and
       `Ctrl+/` (toggle help) in `_install_shortcuts`, replaced the phantom "Search ⌘K"
-      status hint with a real "Help ⌘/", and listed ⌘/ in the help drawer. `all_well.py`.
+      status hint with a real "Help ⌘/", and listed ⌘/ in the help drawer. `allwell.py`.
       Tested: `test_app_smoke.py` green.
 
 **Reuse.** `widgets/drawer.py`, `widgets/kbd_hint.py`. **Compliance.** G8, G2.

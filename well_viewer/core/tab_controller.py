@@ -435,7 +435,7 @@ def toggle_sidebar(app) -> None:
 
 
 def on_central_pane_changed(app, idx: int) -> None:
-    # Mode-seg lives in all_well's titlebar; emit modeChanged so the
+    # Mode-seg lives in allwell's titlebar; emit modeChanged so the
     # shell can re-sync its own seg without poking widgets here.
     mode = "analyze" if idx == 1 else "review"
     # Hide the section / well-picker sidebar when Analyze is active —

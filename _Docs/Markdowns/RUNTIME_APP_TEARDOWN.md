@@ -429,7 +429,7 @@ lines; final `ARCHITECTURE.md` / `README_WellViewer.md` reconciliation; set
 
 - **Per PR:** full `pytest tests/` green; characterization snapshots unchanged;
   `test_redraw_fanout` green from Phase 2 onward.
-- **Manual golden path:** `python all_well.py --data_dir <dataset>` — open a
+- **Manual golden path:** `python allwell.py --data_dir <dataset>` — open a
   dataset, drag-select wells, switch channels, toggle fold-change, visit every
   tab; one user action → one redraw per visible tab.
 - **Redundancy + documentation check:** the redundancy guardrails hold; all

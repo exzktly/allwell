@@ -133,7 +133,7 @@ echo "Checking source files ..."
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Script lives at _Docs/_Installation/build_all_well.sh — repo root is two
 # directory levels up, not one. Going only ``dirname`` deep made
-# REPO_ROOT == .../_Docs and PyInstaller looked for all_well.py inside
+# REPO_ROOT == .../_Docs and PyInstaller looked for allwell.py inside
 # _Docs/ instead of the project root.
 REPO_ROOT="$( dirname "$( dirname "$SCRIPT_DIR" )" )"
 
@@ -141,7 +141,7 @@ REPO_ROOT="$( dirname "$( dirname "$SCRIPT_DIR" )" )"
 cd "$REPO_ROOT" || exit 1
 
 REQUIRED=(
-    "all_well.py"
+    "allwell.py"
     "all_well_launcher.py"
     "analyze_tab.py"
     "process_microscopy.py"
@@ -176,7 +176,7 @@ if [ "$MISSING" -gt 0 ]; then
     echo "Repository root: $REPO_ROOT"
     echo ""
     echo "Ensure you:"
-    echo "  1. Have all core files in repository root: all_well.py, analyze_tab.py, etc."
+    echo "  1. Have all core files in repository root: allwell.py, analyze_tab.py, etc."
     echo "  2. Have _Docs/_Installation/hooks/ subdirectory with PyInstaller hooks"
     echo "  3. Have _Docs/requirements.txt with pip dependencies"
     exit 1

@@ -155,6 +155,17 @@ def render_bar_items(
         app._bar_xs_keys = list(keys)
     # Error-bar appearance from the Properties → Statistics controls.
     err_kind, ci_scale, draw_err = bar_err_settings(app)
+    # Opt-in diagnostic: with review_bar_debug on, dump per-item spreads so a
+    # single desktop retest tells us whether the Fraction/Events panels are
+    # blank because their spreads arrive zero (legitimate / data) vs a draw-gate
+    # bug. ``draw_err`` is shared across all three panels — if Mean draws error
+    # bars but the lower two don't, the lower spreads are zero here.
+    _bar_debug(
+        f"render_bar_items draw_err={draw_err} err_kind={err_kind} "
+        f"ci_scale={ci_scale} spreads="
+        + repr([(it.key, round(it.spread, 4), round(it.frac_spread, 4),
+                 round(it.n_above_spread, 4)) for it in items])
+    )
     has_clusters = bool(xs and any(_ != i for i, _ in enumerate(xs)))
     bar_w = min(0.65 if use_groups else 0.6, 5.0 / max(n, 1))
     for i, item in enumerate(items):
@@ -663,9 +674,12 @@ def refresh_bar_layout_btn_state(app) -> None:
     """Sync the bar-tab layout toggle buttons with PlotState.
 
     Updates the *Group by ...* and *Pool Replicates* button labels / checked
-    states. The pool-replicates button is hidden when there are no active
-    replicate sets. The *Pool rset cells* button is hidden unless violin /
-    beeswarm is on AND ≥1 rset is active.
+    states. Both replicate buttons stay visible in the Display ▾ popover and are
+    enable-gated instead of visibility-toggled (toggling a child's visibility
+    inside a closed QMenu widget-action does not surface reliably). The
+    pool-replicates button is enabled only when ≥1 replicate set is active; the
+    *Pool rset cells* button only when violin / beeswarm is on AND ≥1 rset is
+    active.
     """
     plot = app._app_state.plot
     group_btn = getattr(app, "_bar_group_mode_btn", None)
@@ -681,14 +695,20 @@ def refresh_bar_layout_btn_state(app) -> None:
         group_btn.setChecked(plot.bar_group_mode == "timepoint")
         group_btn.setEnabled(True)
     if pool_btn is not None:
-        pool_btn.setVisible(has_rsets)
-        pool_btn.setEnabled(True)
+        pool_btn.setVisible(True)
+        pool_btn.setEnabled(has_rsets)
         if plot.bar_pool_replicates:
             pool_btn.setText("Pool Replicates")
         else:
             pool_btn.setText("Show Wells Separately")
         pool_btn.setChecked(not plot.bar_pool_replicates)
+        pool_btn.setToolTip(
+            "Collapse each replicate set's wells into one pooled column "
+            "(off = one column per well)." if has_rsets
+            else "Define replicate groups (Sample Definitions → Groups) to "
+            "pool them.")
     if pool_cells_btn is not None:
-        pool_cells_btn.setVisible(use_per_cell and has_rsets)
+        pool_cells_btn.setVisible(True)
+        pool_cells_btn.setEnabled(use_per_cell and has_rsets)
         pool_cells_btn.setChecked(bool(plot.bar_pool_rset_cells))
 

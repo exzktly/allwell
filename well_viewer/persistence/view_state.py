@@ -244,6 +244,26 @@ def _snapshot_image_table(app) -> dict:
             row_out.append(slc)
         grid.append(row_out)
     out["cells"] = grid
+    # Grid axes (which dimension varies down rows vs across cols). Captured so a
+    # restore lays the selector grid out the same way before per-cell values are
+    # replayed — otherwise the per-row channel/well combos + labels can land on
+    # the wrong axis.
+    for key, fld in (("row_axis", "row_axis"), ("col_axis", "col_axis")):
+        v = getattr(app._app_state.image_table, fld, None)
+        if isinstance(v, str) and v:
+            out[key] = v
+    # Per-row channel / well convenience combos (one per grid row); their value
+    # is mirrored into each cell, but capturing them keeps the per-row UI in sync.
+    for key, attr in (
+        ("row_chans", "_image_table_row_chan_cbs"),
+        ("row_wells", "_image_table_row_well_cbs"),
+    ):
+        cbs = getattr(app, attr, None)
+        if cbs:
+            try:
+                out[key] = [str(cb.currentText()) for cb in cbs]
+            except Exception:
+                swallowed()
     for key, attr in (
         ("global_chan", "_image_table_global_chan_cb"),
         ("global_tp",   "_image_table_global_tp_cb"),
@@ -700,6 +720,42 @@ def _apply_image_table(app, state: dict) -> None:
     The tab builder constructs widgets lazily; this only runs once the tab
     is on screen, so the widget references are guaranteed to exist.
     """
+    # One deferred feature import for the whole function (persistence stays
+    # feature-free at module scope — see test_layering / test_deferred_imports);
+    # both helpers are used below.
+    try:
+        from well_viewer.features.image_browser.image_table.controller import (
+            image_table_apply_dimensions,
+            image_table_set_zoom,
+        )
+    except Exception:  # pragma: no cover - import failure leaves these no-ops
+        image_table_apply_dimensions = image_table_set_zoom = None
+
+    # Grid axes first (before the dimension rebuild), so the per-row channel/well
+    # combos + labels are laid out on the same axes the plot was saved with. The
+    # per-cell combos restored below remain authoritative for the actual values.
+    for key, which in (("row_axis", "row"), ("col_axis", "col")):
+        axis = state.get(key)
+        if not isinstance(axis, str) or not axis:
+            continue
+        cb = getattr(app, f"_image_table_{which}_axis_cb", None)
+        if cb is not None:
+            try:
+                idx = cb.findData(axis)
+                if idx >= 0:
+                    blocked = cb.blockSignals(True)
+                    try:
+                        cb.setCurrentIndex(idx)
+                    finally:
+                        cb.blockSignals(blocked)
+            except Exception:
+                swallowed()
+        try:
+            setattr(app._app_state.image_table, f"{which}_axis", axis)
+            setattr(app, f"_image_table_{which}_axis", axis)
+        except Exception:
+            swallowed()
+
     # Dimensions — set the spinners first; the apply_dimensions hook
     # rebuilds the selector grid + cells list against the new size.
     rows = state.get("rows")
@@ -723,14 +779,8 @@ def _apply_image_table(app, state: dict) -> None:
                     changed = True
             except Exception:
                 swallowed()  # was: pass (silent except)
-        if changed:
+        if changed and image_table_apply_dimensions is not None:
             try:
-                # Function-local feature import keeps this persistence module
-                # data-only at module scope (see test_layering) — mirrors the
-                # deferred ``image_table_refresh_display_menu`` import below.
-                from well_viewer.features.image_browser.image_table.controller import (
-                    image_table_apply_dimensions,
-                )
                 image_table_apply_dimensions(app)
             except Exception:
                 _logger.debug("image_table: apply_dimensions failed", exc_info=True)
@@ -769,6 +819,29 @@ def _apply_image_table(app, state: dict) -> None:
                                 w.blockSignals(blocked)
                     except Exception:
                         swallowed()  # was: pass (silent except)
+
+    # Per-row channel / well convenience combos — set to match (the per-cell
+    # values are already restored above and stay authoritative).
+    for key, attr in (
+        ("row_chans", "_image_table_row_chan_cbs"),
+        ("row_wells", "_image_table_row_well_cbs"),
+    ):
+        texts = state.get(key)
+        cbs = getattr(app, attr, None)
+        if not isinstance(texts, list) or not cbs:
+            continue
+        for cb, text in zip(cbs, texts):
+            if not isinstance(text, str) or not text or cb is None:
+                continue
+            try:
+                if cb.findText(text) >= 0:
+                    blocked = cb.blockSignals(True)
+                    try:
+                        cb.setCurrentText(text)
+                    finally:
+                        cb.blockSignals(blocked)
+            except Exception:
+                swallowed()
 
     for key, attr in (
         ("global_chan", "_image_table_global_chan_cb"),
@@ -869,13 +942,9 @@ def _apply_image_table(app, state: dict) -> None:
         except Exception:
             swallowed()
 
-    # Zoom (display-only) via its feature setter. Function-local import keeps
-    # this persistence module data-only at module scope.
-    if isinstance(state.get("zoom"), (int, float)):
+    # Zoom (display-only) via its feature setter (imported once at the top).
+    if isinstance(state.get("zoom"), (int, float)) and image_table_set_zoom is not None:
         try:
-            from well_viewer.features.image_browser.image_table.controller import (
-                image_table_set_zoom,
-            )
             image_table_set_zoom(app, float(state["zoom"]))
         except Exception:
             _logger.debug("image_table: zoom restore failed", exc_info=True)

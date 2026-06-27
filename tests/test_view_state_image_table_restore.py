@@ -14,6 +14,91 @@ from well_viewer.features.image_browser.image_table import controller as C  # no
 pytestmark = pytest.mark.qt
 
 
+# ── Fast-lane coverage (no full WellViewerApp → not auto-marked ``slow``) ─────
+# These exercise the snapshot/apply helpers against hand-built widgets so the
+# round-trip — and the "restore must not generate images on load" contract — run
+# in CI's ``-m "not slow"`` lane, not only the manual full pass.
+
+def test_apply_image_table_crop_restore_does_not_generate():
+    """Restoring a crop must NOT fire the CropTool's on_change
+    (image_table_generate) — otherwise dataset load composites the whole grid
+    off disk. Pure: no QApplication needed (CropTool builds no widgets)."""
+    from types import SimpleNamespace
+    from well_viewer.data.crop_tool import CropTool
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+
+    calls = []
+    ct = CropTool(on_change=lambda: calls.append(1))
+    app = SimpleNamespace(
+        _image_table_crop_tool=ct,
+        _image_table_cells=[],
+        _image_table_lut={},
+        _image_table_row_lut_color_cbs=[],
+        _app_state=SimpleNamespace(image_table=ImageTableState()),
+    )
+    vs._apply_image_table(app, {"crop": [3, 5, 40, 60], "crop_mode": False})
+    assert tuple(ct.crop) == (3, 5, 40, 60)
+    assert calls == [], "restore must not trigger image_table_generate on load"
+
+
+def _combo(items, *, data=None):
+    from PySide6.QtWidgets import QComboBox
+    cb = QComboBox()
+    if data is None:
+        cb.addItems(items)
+    else:
+        for label, key in zip(items, data):
+            cb.addItem(label, userData=key)
+    return cb
+
+
+def test_channel_and_source_round_trip_minimal_widgets(qapp):
+    """Channel (per-cell combo) and Source (per-row combo) round-trip through
+    snapshot → apply with hand-built widgets — fast-lane coverage of the path
+    Saved Plots replays, without constructing the full app."""
+    from types import SimpleNamespace
+    from PySide6.QtWidgets import QCheckBox, QLineEdit
+    from well_viewer.data.crop_tool import CropTool
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    from widgets.lut_selector import LutSelector
+
+    cell = {
+        "chan_cb": _combo(["GFP", "mCherry"]),
+        "well_cb": _combo(["A01"]),
+        "tp_cb": _combo(["0"]),
+        "fov_cb": _combo(["1"]),
+    }
+    lut0 = {
+        "min": QLineEdit(), "max": QLineEdit(), "auto": True,
+        "source": _combo(["Raw", "Corrected"], data=["raw", "corrected"]),
+        "boundaries": QCheckBox(),
+        "binary": _combo(["None", "Mask"], data=["", "mask"]),
+        "log": QCheckBox(), "chan": "GFP",
+    }
+    app = SimpleNamespace(
+        _image_table_cells=[[cell]],
+        _image_table_lut={0: lut0},
+        _image_table_row_lut_color_cbs=[LutSelector()],
+        _image_table_crop_tool=CropTool(on_change=lambda: None),
+        _app_state=SimpleNamespace(image_table=ImageTableState(rows=1, cols=1)),
+    )
+
+    cell["chan_cb"].setCurrentText("mCherry")
+    lut0["source"].setCurrentIndex(1)  # Corrected
+
+    snap = vs._snapshot_image_table(app)
+    assert snap["cells"][0][0]["chan"] == "mCherry"
+    assert snap["row_luts"]["0"]["source"] == "corrected"
+
+    # Wipe, then restore through the apply helper.
+    cell["chan_cb"].setCurrentText("GFP")
+    lut0["source"].setCurrentIndex(0)
+    vs._apply_image_table(app, snap)
+
+    assert cell["chan_cb"].currentText() == "mCherry"
+    assert lut0["source"].currentData() == "corrected"
+
+
 def _set_combo_by_data(cb, data) -> bool:
     for i in range(cb.count()):
         if cb.itemData(i) == data:

@@ -929,16 +929,19 @@ def _apply_image_table(app, state: dict) -> None:
                     swallowed()
 
     # Crop region: re-apply the saved rectangle (or clear it) + crop mode.
+    # notify=False so the CropTool's on_change (image_table_generate) does NOT
+    # fire here — restore must not composite the grid off disk during dataset
+    # load; the restored crop applies on the next user-triggered Generate.
     ct = getattr(app, "_image_table_crop_tool", None)
     if ct is not None and "crop" in state:
         try:
             crop = state.get("crop")
             if isinstance(crop, (list, tuple)) and len(crop) == 4:
-                ct.set_crop(tuple(int(v) for v in crop))
+                ct.set_crop(tuple(int(v) for v in crop), notify=False)
             else:
-                ct.clear()
+                ct.clear(notify=False)
             if bool(state.get("crop_mode", False)) != bool(ct.mode):
-                ct.toggle_mode()
+                ct.toggle_mode(notify=False)
         except Exception:
             swallowed()
 

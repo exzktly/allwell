@@ -85,20 +85,23 @@ class CropTool:
     def is_dragging(self) -> bool:
         return self._drag is not None
 
-    def set_crop(self, crop: Optional[CropRect]) -> None:
+    def set_crop(self, crop: Optional[CropRect], *, notify: bool = True) -> None:
         self._crop = crop
         self._refresh_indicator()
-        self._fire_change()
+        if notify:
+            self._fire_change()
 
-    def clear(self) -> None:
+    def clear(self, *, notify: bool = True) -> None:
         self._crop = None
         self._refresh_indicator()
-        self._fire_change()
+        if notify:
+            self._fire_change()
 
-    def toggle_mode(self) -> None:
+    def toggle_mode(self, *, notify: bool = True) -> None:
         self._mode = not self._mode
         self._refresh_indicator()
-        self._fire_change()
+        if notify:
+            self._fire_change()
 
     # ── UI builders ─────────────────────────────────────────────────────────
 

@@ -38,19 +38,6 @@ def build_ui(app) -> None:
         "panel-right-close", tooltip="Hide sidebar", checkable=True)
     app._sidebar_toggle_btn.clicked.connect(app._toggle_sidebar)
     top_layout.addWidget(app._sidebar_toggle_btn)
-    # Split View: show two different tabs side-by-side. The toggle turns it on
-    # (left pane = the current tab); the dropdown picks the right pane.
-    from PySide6.QtWidgets import QComboBox as _QComboBox
-    app._split_toggle_btn = _IconButton(
-        "columns-2", tooltip="Split view", checkable=True)
-    app._split_toggle_btn.clicked.connect(app._on_split_toggle_clicked)
-    top_layout.addWidget(app._split_toggle_btn)
-    app._split_pane_combo = _QComboBox()
-    app._split_pane_combo.setToolTip("Right pane")
-    app._split_pane_combo.setVisible(False)
-    app._split_pane_combo.currentIndexChanged.connect(
-        app._on_split_pane_combo_changed)
-    top_layout.addWidget(app._split_pane_combo)
     app._dir_label = QLabel("No data loaded")
     app._dir_label.setObjectName("Muted")
     top_layout.addWidget(app._dir_label)
@@ -155,6 +142,14 @@ def build_ui(app) -> None:
     app._h_pane.setChildrenCollapsible(False)
     app._h_pane.setSizes([340, 1200])
     app._build_centre(centre)
+
+    # ── Split View ────────────────────────────────────────────────────────
+    # Self-contained feature: this single call wires up the side-by-side
+    # double-pane view (toggle button + dropdown + reparenting). Comment it out
+    # to remove the feature entirely — the app falls back to single-tab with no
+    # other changes needed.
+    from well_viewer.core.split_view import install_split_view
+    install_split_view(app)
 
     # Phase 11 (A6 / B23): Properties rail as an OVERLAY on the centre
     # column. The rail floats over the right edge of the centre pane;

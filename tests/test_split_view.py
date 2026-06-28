@@ -1,12 +1,15 @@
-"""Split View: NamedPageStack detach/reattach + enter/exit reparenting.
+"""Split View — self-contained double-pane feature.
 
-Pins the load-bearing invariants behind the side-by-side Split View:
+Pins the load-bearing invariants:
 1. ``NamedPageStack.detachPage`` → ``reattachPage`` round-trips ``pageNames()``
-   (and name-keyed lookup) back to the original add order.
-2. ``enter_split`` reparents two top-level pages into ``app._split_pane`` and
-   hides the notebook; ``exit_split`` puts them back in order. While split,
-   ``visible_centre_tabs`` reports both panes and ``current_centre_tab`` the
-   focused one.
+   back to the original add order (the reparenting primitive).
+2. ``install_split_view`` registers the provider hooks + entry-UI widgets, and
+   ``enter_split`` / ``exit_split`` reparent two top-level pages into
+   ``app._split_pane`` and back. While split, ``visible_centre_tabs`` reports
+   both panes and ``current_centre_tab`` the focused one.
+3. **Removability:** without ``install_split_view`` the provider hooks stay
+   ``None`` and the resolvers collapse to single-tab — the app behaves exactly
+   as if the feature didn't exist (no toggle button, one visible tab).
 
 Qt is required, so the module skips when PySide6 isn't importable. ``offscreen``
 keeps it headless. ``on_tab_change`` (called by enter/exit) early-returns unless
@@ -25,6 +28,20 @@ import pytest
 pytest.importorskip("PySide6")
 
 
+@pytest.fixture(autouse=True)
+def _reset_split_providers():
+    """Isolate the module-global provider hooks across tests."""
+    from well_viewer.core import tab_controller as tc
+    saved = (tc.split_focus_provider, tc.split_visible_provider,
+             tc.split_nav_intercept)
+    tc.split_focus_provider = tc.split_visible_provider = tc.split_nav_intercept = None
+    try:
+        yield
+    finally:
+        (tc.split_focus_provider, tc.split_visible_provider,
+         tc.split_nav_intercept) = saved
+
+
 def _new_stack(names):
     from PySide6.QtWidgets import QApplication, QLabel
 
@@ -39,6 +56,8 @@ def _new_stack(names):
         widgets[n] = w
     return st, widgets
 
+
+# ── NamedPageStack reparenting primitive ─────────────────────────────────────
 
 def test_detach_reattach_roundtrips_order():
     names = ["A", "B", "C", "D"]
@@ -72,9 +91,12 @@ def test_detach_unknown_page_returns_none():
     assert st.pageNames() == ["A", "B"]
 
 
-def _split_app():
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QSplitter
+# ── Stub app + install ───────────────────────────────────────────────────────
+
+def _split_app(*, install=True):
+    from PySide6.QtWidgets import QHBoxLayout, QWidget
+
+    from well_viewer.core import split_view as sv
 
     st, widgets = _new_stack(["Plotting", "Statistics", "Saved Plots"])
 
@@ -83,19 +105,44 @@ def _split_app():
 
     app = _App()
     app._notebook = st
-    app._split_pane = QSplitter(Qt.Horizontal)
-    app._split_pane.hide()
-    app._split_active = False
-    app._split_tab_a = app._split_tab_b = app._split_focused = None
-    app._split_pane_widgets = {}
+    top = QWidget()
+    QHBoxLayout(top)
+    app._top_bar = top
+    if install:
+        sv.install_split_view(app)
     return app, st, widgets
 
 
+def test_not_installed_is_single_tab():
+    """Removability: with no install, the resolvers collapse to single-tab and
+    no toggle button exists — the feature is fully absent."""
+    from well_viewer.core import tab_controller as tc
+
+    app, _, _ = _split_app(install=False)
+    assert tc.split_visible_provider is None
+    assert tc.split_focus_provider is None
+    assert getattr(app, "_split_toggle_btn", None) is None
+    assert tc.visible_centre_tabs(app) == {tc.current_centre_tab(app)}
+    assert len(tc.visible_centre_tabs(app)) == 1
+
+
+def test_install_registers_hooks_and_widgets():
+    from well_viewer.core import tab_controller as tc
+
+    app, _, _ = _split_app()
+    assert tc.split_visible_provider is not None
+    assert tc.split_focus_provider is not None
+    assert tc.split_nav_intercept is not None
+    assert getattr(app, "_split_toggle_btn", None) is not None
+    assert getattr(app, "_split_pane", None) is not None
+
+
 def test_enter_split_reparents_and_reports_both_panes():
+    from well_viewer.core import split_view as sv
     from well_viewer.core import tab_controller as tc
 
     app, st, _ = _split_app()
-    tc.enter_split(app, "Plotting", "Saved Plots")
+    sv.enter_split(app, "Plotting", "Saved Plots")
 
     assert app._split_active is True
     assert app._split_pane.count() == 2
@@ -106,11 +153,11 @@ def test_enter_split_reparents_and_reports_both_panes():
 
 
 def test_exit_split_restores_notebook_order():
-    from well_viewer.core import tab_controller as tc
+    from well_viewer.core import split_view as sv
 
     app, st, _ = _split_app()
-    tc.enter_split(app, "Plotting", "Saved Plots")
-    tc.exit_split(app)
+    sv.enter_split(app, "Plotting", "Saved Plots")
+    sv.exit_split(app)
 
     assert app._split_active is False
     assert app._split_pane.count() == 0
@@ -119,21 +166,22 @@ def test_exit_split_restores_notebook_order():
 
 
 def test_enter_split_same_tab_is_noop():
-    from well_viewer.core import tab_controller as tc
+    from well_viewer.core import split_view as sv
 
     app, st, _ = _split_app()
-    tc.enter_split(app, "Plotting", "Plotting")
+    sv.enter_split(app, "Plotting", "Plotting")
     assert app._split_active is False
     assert st.pageNames() == ["Plotting", "Statistics", "Saved Plots"]
 
 
 def test_focus_split_switches_focused_pane():
+    from well_viewer.core import split_view as sv
     from well_viewer.core import tab_controller as tc
 
     app, _, _ = _split_app()
-    tc.enter_split(app, "Plotting", "Saved Plots")
+    sv.enter_split(app, "Plotting", "Saved Plots")
     assert tc.current_centre_tab(app) == "Plotting"
-    tc.focus_split(app, "Saved Plots")
+    sv.focus_split(app, "Saved Plots")
     assert app._split_focused == "Saved Plots"
     assert tc.current_centre_tab(app) == "Saved Plots"
 
@@ -144,23 +192,25 @@ _PLOT_LEAVES = {"Line Graphs", "Bar Plots", "Scatter Plot", "Distribution",
 
 
 def test_real_app_enter_exit_split(loaded_app):
-    """On a real app: splitting Plotting | Statistics force-builds Statistics,
-    detaches both top-level pages (Plotting's nested notebook moves whole), and
-    reports both leaves visible; exiting restores the notebook + order."""
+    """On a real app (install ran in build_ui): splitting Plotting | Statistics
+    force-builds Statistics, detaches both top-level pages (Plotting's nested
+    notebook moves whole), reports both leaves visible; exiting restores order."""
+    from well_viewer.core import split_view as sv
     from well_viewer.core import tab_controller as tc
 
     app = loaded_app
+    assert tc.split_visible_provider is not None  # install_split_view ran
     app._notebook.setCurrentByName("Plotting")
-    app._enter_split("Plotting", "Statistics")
+    sv.enter_split(app, "Plotting", "Statistics")
 
     assert app._split_active is True
     assert app._split_pane.count() == 2
     visible = tc.visible_centre_tabs(app)
     assert "Statistics" in visible
-    assert visible & _PLOT_LEAVES           # Plotting resolved to a plot leaf
+    assert visible & _PLOT_LEAVES               # Plotting resolved to a plot leaf
     assert app._current_centre_tab() in _PLOT_LEAVES  # pane A focused
 
-    app._exit_split()
+    sv.exit_split(app)
     assert app._split_active is False
     assert app._split_pane.count() == 0
     assert "Plotting" in app._notebook.pageNames()

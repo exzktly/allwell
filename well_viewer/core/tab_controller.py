@@ -16,10 +16,16 @@ from well_viewer.features.image_browser.playground.controller import playground_
 from well_viewer.features.scatter.controller import update_scatter_menus
 import logging
 from functools import partial
-from PySide6.QtCore import QObject
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer.runtime_app")
+
+# Split-View extension points. ``split_view.install_split_view`` sets these; while
+# they are None the resolvers below behave exactly as the single-tab original, so
+# the feature is fully absent until (and unless) it is installed.
+split_focus_provider = None     # fn(app) -> focused leaf name | None
+split_visible_provider = None   # fn(app) -> set[str] of visible leaves | None
+split_nav_intercept = None      # fn(app, key) -> bool (True = consume nav)
 
 
 def on_tab_change(app, _e=None) -> None:
@@ -325,10 +331,11 @@ def current_centre_tab(app) -> str:
 
     In Split View the notebook is hidden and two panes are on screen; the
     "current" tab is the *focused* pane's leaf so sidebar / per-tab dispatch
-    follow whichever pane the user last clicked.
+    follow whichever pane the user last clicked — supplied by
+    ``split_focus_provider`` (installed by ``split_view``; ``None`` otherwise).
     """
-    if getattr(app, "_split_active", False):
-        leaf = _resolve_leaf(app, getattr(app, "_split_focused", None))
+    if split_focus_provider is not None:
+        leaf = split_focus_provider(app)
         if leaf:
             return leaf
     nb = getattr(app, "_notebook", None)
@@ -344,18 +351,15 @@ def current_centre_tab(app) -> str:
 def visible_centre_tabs(app) -> "set[str]":
     """Leaf names of every centre tab currently on screen.
 
-    Normally ``{current_centre_tab(app)}``. In Split View it is the resolved
-    leaf of each pane, so live-refresh fan-out (selection / channel / plot
-    options) updates both panes even when only one is focused.
+    Normally ``{current_centre_tab(app)}``. When ``split_visible_provider`` is
+    installed (Split View) it returns both panes' leaves, so live-refresh fan-out
+    (selection / channel / plot options) updates both panes even when only one is
+    focused.
     """
-    if getattr(app, "_split_active", False):
-        out = {
-            leaf for top in (getattr(app, "_split_tab_a", None),
-                             getattr(app, "_split_tab_b", None))
-            if (leaf := _resolve_leaf(app, top))
-        }
-        if out:
-            return out
+    if split_visible_provider is not None:
+        tabs = split_visible_provider(app)
+        if tabs:
+            return set(tabs)
     cur = current_centre_tab(app)
     return {cur} if cur else set()
 
@@ -363,238 +367,6 @@ def visible_centre_tabs(app) -> "set[str]":
 def is_tab_visible(app, name: str) -> bool:
     """True when *name* (a leaf tab) is currently on screen in either pane."""
     return name in visible_centre_tabs(app)
-
-
-# ── Split View ──────────────────────────────────────────────────────────────
-# Two *different* top-level tabs side-by-side, both updating live. The notebook
-# is hidden and its two pages are reparented into ``app._split_pane`` (a
-# horizontal QSplitter built in centre_view). The focused pane drives the
-# sidebar (``current_centre_tab``); ``visible_centre_tabs`` reports both so the
-# live-refresh chokepoints fan out to each. Two instances of the *same* tab are
-# out of scope (the feature figures/state are singletons).
-
-
-def enter_split(app, tab_a: str, tab_b: str) -> None:
-    """Show *tab_a* and *tab_b* side-by-side, both live; *tab_a* is focused.
-
-    Both bodies are force-built if still deferred, detached from the hidden
-    notebook into ``app._split_pane``, and the focused pane drives the sidebar.
-    No-op if the names match or the centre isn't built.
-    """
-    if not tab_a or not tab_b or tab_a == tab_b:
-        return
-    nb = getattr(app, "_notebook", None)
-    split = getattr(app, "_split_pane", None)
-    if nb is None or split is None:
-        return
-    if getattr(app, "_split_active", False):
-        exit_split(app)
-    # Force-build deferred bodies before detaching so panes are never blank.
-    build = getattr(app, "_centre_build_pending", None)
-    if callable(build):
-        for t in (tab_a, tab_b):
-            try:
-                build(t)
-            except Exception:
-                _logger.exception("Split: deferred build for %r failed", t)
-    # Set state first so any notebook signal fired mid-detach resolves to the
-    # focused pane rather than a stale leaf.
-    app._split_active = True
-    app._split_tab_a = tab_a
-    app._split_tab_b = tab_b
-    app._split_focused = tab_a
-    blocked = nb.blockSignals(True)
-    try:
-        wa = nb.detachPage(tab_a)
-        wb = nb.detachPage(tab_b)
-    finally:
-        nb.blockSignals(blocked)
-    if wa is None or wb is None:
-        # Roll back a partial detach and bail.
-        blocked = nb.blockSignals(True)
-        try:
-            if wa is not None:
-                nb.reattachPage(tab_a, wa)
-            if wb is not None:
-                nb.reattachPage(tab_b, wb)
-        finally:
-            nb.blockSignals(blocked)
-        app._split_active = False
-        app._split_tab_a = app._split_tab_b = app._split_focused = None
-        return
-    app._split_pane_widgets = {tab_a: wa, tab_b: wb}
-    split.addWidget(wa)
-    split.addWidget(wb)
-    wa.show()
-    wb.show()
-    split.setSizes([1, 1])
-    split.setVisible(True)
-    nb.setVisible(False)
-    _install_split_focus_filter(app)
-    on_tab_change(app, None)
-
-
-def exit_split(app) -> None:
-    """Tear down Split View: reattach both panes (original order) and show the
-    notebook again, focused on the former pane A."""
-    if not getattr(app, "_split_active", False):
-        return
-    nb = getattr(app, "_notebook", None)
-    split = getattr(app, "_split_pane", None)
-    a = app._split_tab_a
-    b = app._split_tab_b
-    widgets = getattr(app, "_split_pane_widgets", {}) or {}
-    wa = widgets.get(a)
-    wb = widgets.get(b)
-    for w in (wa, wb):
-        if w is not None:
-            w.setParent(None)
-    app._split_active = False
-    app._split_tab_a = app._split_tab_b = app._split_focused = None
-    app._split_pane_widgets = {}
-    _remove_split_focus_filter(app)
-    if split is not None:
-        split.setVisible(False)
-    if nb is not None:
-        blocked = nb.blockSignals(True)
-        try:
-            if wa is not None:
-                nb.reattachPage(a, wa)
-            if wb is not None:
-                nb.reattachPage(b, wb)
-            nb.setVisible(True)
-            if a:
-                nb.setCurrentByName(a)
-        finally:
-            nb.blockSignals(blocked)
-    on_tab_change(app, None)
-
-
-def focus_split(app, top: str) -> None:
-    """Make pane *top* the focused one (drives the sidebar). No-op off split."""
-    if not getattr(app, "_split_active", False) or not top:
-        return
-    if getattr(app, "_split_focused", None) == top:
-        return
-    app._split_focused = top
-    on_tab_change(app, None)
-
-
-def _resolve_focused_pane(app, obj):
-    """Map a clicked widget to the top-level name of the pane that contains it."""
-    from PySide6.QtWidgets import QWidget
-    widgets = getattr(app, "_split_pane_widgets", {}) or {}
-    if not widgets:
-        return None
-    node = obj
-    while isinstance(node, QWidget):
-        for top, w in widgets.items():
-            if node is w:
-                return top
-        node = node.parentWidget()
-    return None
-
-
-class _SplitFocusFilter(QObject):
-    """App-wide click watcher: while Split View is on, a mouse press anywhere
-    inside a pane makes that pane the focused one. Installed once and left in
-    place — inert whenever ``_split_active`` is False."""
-
-    def __init__(self, app) -> None:
-        # No QObject parent: lifetime is held by ``app._split_focus_filter``.
-        # (Avoids requiring ``app`` itself to be a QObject.)
-        super().__init__()
-        self._app = app
-
-    def eventFilter(self, obj, event):  # noqa: N802
-        from PySide6.QtCore import QEvent
-        if event.type() != QEvent.MouseButtonPress:
-            return False
-        try:
-            active = bool(getattr(self._app, "_split_active", False))
-        except RuntimeError:
-            return False  # underlying C++ app already deleted — nothing to do
-        if active:
-            top = _resolve_focused_pane(self._app, obj)
-            if top is not None:
-                focus_split(self._app, top)
-        return False
-
-
-def _install_split_focus_filter(app) -> None:
-    from PySide6.QtWidgets import QApplication
-    filt = getattr(app, "_split_focus_filter", None)
-    if filt is None:
-        filt = _SplitFocusFilter(app)
-        app._split_focus_filter = filt
-    qapp = QApplication.instance()
-    if qapp is not None:
-        qapp.installEventFilter(filt)  # idempotent: Qt re-orders an existing one
-
-
-def _remove_split_focus_filter(app) -> None:
-    """Detach the click watcher from the app — called on exit so it never fires
-    against a torn-down app (the cause of a teardown crash under the full suite)."""
-    filt = getattr(app, "_split_focus_filter", None)
-    if filt is None:
-        return
-    from PySide6.QtWidgets import QApplication
-    qapp = QApplication.instance()
-    if qapp is not None:
-        qapp.removeEventFilter(filt)
-
-
-def sync_split_toggle_button(app, checked: bool) -> None:
-    """Reflect *checked* on the top-bar split toggle without re-firing it."""
-    btn = getattr(app, "_split_toggle_btn", None)
-    if btn is None:
-        return
-    blocked = btn.blockSignals(True)
-    try:
-        btn.setChecked(checked)
-    finally:
-        btn.blockSignals(blocked)
-    combo = getattr(app, "_split_pane_combo", None)
-    if combo is not None:
-        combo.setVisible(checked)
-
-
-def on_split_toggle_clicked(app) -> None:
-    """Top-bar split toggle: pane A = current tab, pane B = dropdown pick."""
-    btn = app._split_toggle_btn
-    combo = app._split_pane_combo
-    if btn.isChecked():
-        cur = app._notebook.currentName()
-        others = [n for n in app._notebook.pageNames() if n and n != cur]
-        if not others:
-            sync_split_toggle_button(app, False)
-            app._toast("Split view needs a second tab to show.", kind="warning")
-            return
-        blocked = combo.blockSignals(True)
-        try:
-            combo.clear()
-            combo.addItems(others)
-            combo.setCurrentIndex(0)
-        finally:
-            combo.blockSignals(blocked)
-        combo.setVisible(True)
-        enter_split(app, cur, others[0])
-    else:
-        combo.setVisible(False)
-        exit_split(app)
-
-
-def on_split_pane_combo_changed(app, _idx: int) -> None:
-    """Re-pair pane A with a newly chosen pane B from the dropdown."""
-    if not getattr(app, "_split_active", False):
-        return
-    new_b = app._split_pane_combo.currentText()
-    a = getattr(app, "_split_tab_a", None)
-    if not new_b or new_b == a:
-        return
-    exit_split(app)
-    enter_split(app, a, new_b)
-
 
 
 def sync_heatmap_well_drag_mode(app, enable: bool) -> None:
@@ -674,20 +446,30 @@ def tab_history_forward(app) -> None:
 
 
 def apply_sidebar_visibility(app) -> None:
-    """Apply the effective left-rail visibility.
+    """Apply the effective left-rail visibility for the active mode.
 
-    The rail is shown only when **both** conditions hold: the app is in
-    Review mode (Analyze carries no Review-only affordances) and the user
-    hasn't collapsed it via the toggle (``Ctrl+B`` / top-bar button). Routing
-    both the mode switch and the user toggle through this single helper keeps
+    The collapse toggle (``Ctrl+B`` / top-bar button) drives whichever left
+    sidebar belongs to the current mode, symmetrically:
+
+    * Review mode → the Review rail (``_sidebar_root``): shown unless collapsed.
+      The rail carries Review-only affordances, so it is always hidden in
+      Analyze regardless of the toggle.
+    * Analyze mode → the Analyze tab's own form sidebar (``_analyze_pane``):
+      shown unless collapsed.
+
+    Routing the mode switch and the user toggle through this one helper keeps
     them from fighting over ``setVisible``.
     """
-    sidebar = getattr(app, "_sidebar_root", None)
-    if sidebar is None:
-        return
+    collapsed = bool(getattr(app, "_sidebar_collapsed", False))
     mode = app.currentMode() if hasattr(app, "currentMode") else "review"
-    visible = (mode == "review") and not getattr(app, "_sidebar_collapsed", False)
-    sidebar.setVisible(visible)
+    sidebar = getattr(app, "_sidebar_root", None)
+    if sidebar is not None:
+        sidebar.setVisible(mode == "review" and not collapsed)
+    # The Analyze tab hosts its own left form sidebar; the same toggle hides it.
+    analyze = getattr(app, "_analyze_pane", None)
+    analyze_sb = getattr(analyze, "_left_sidebar", None)
+    if analyze_sb is not None:
+        analyze_sb.setVisible(not collapsed)
 
 
 def toggle_sidebar(app) -> None:
@@ -711,13 +493,9 @@ def toggle_sidebar(app) -> None:
 
 
 def on_central_pane_changed(app, idx: int) -> None:
-    # Switching the Review/Analyze mode tears down Split View — the panes are
-    # Review-mode centre tabs and the toggle button lives in the Review chrome.
-    if getattr(app, "_split_active", False):
-        exit_split(app)
-        app._sync_split_toggle_button(False)
     # Mode-seg lives in allwell's titlebar; emit modeChanged so the
-    # shell can re-sync its own seg without poking widgets here.
+    # shell can re-sync its own seg without poking widgets here. (Split View
+    # listens to modeChanged to tear itself down — see split_view.install.)
     mode = "analyze" if idx == 1 else "review"
     # Hide the section / well-picker sidebar when Analyze is active —
     # it carries Review-only affordances. Show it again on Review (unless

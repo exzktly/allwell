@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QComboBox, QSplitter, QWidget
 
 from well_viewer.core import tab_controller
@@ -160,7 +160,12 @@ def _resolve_focused_pane(app, obj):
         for top, w in widgets.items():
             if node is w:
                 return top
-        node = node.parentWidget()
+        try:
+            node = node.parentWidget()
+        except RuntimeError:
+            # ``node``'s C++ object was deleted mid-walk (a pane is being
+            # rebuilt / reparented). Stop rather than dereference it.
+            return None
     return None
 
 
@@ -182,9 +187,21 @@ class _SplitFocusFilter(QObject):
         except RuntimeError:
             return False  # underlying C++ app already deleted — nothing to do
         if active:
-            top = _resolve_focused_pane(self._app, obj)
+            try:
+                top = _resolve_focused_pane(self._app, obj)
+            except RuntimeError:
+                top = None
             if top is not None:
-                focus_split(self._app, top)
+                # Defer the focus switch off the event-filter call stack.
+                # ``focus_split`` → ``on_tab_change`` reparents the split panes
+                # and re-runs the visible-tab refresh; doing that *inside*
+                # delivery of a MouseButtonPress mutated the widget tree mid-
+                # dispatch (and could re-enter the very redraw that posted this
+                # event — e.g. Image Table "Generate" recompositing the focused
+                # pane), corrupting Qt's event delivery → access-violation crash.
+                # Running it on the next event-loop turn lets the click finish
+                # delivering first. Idempotent: a no-op when focus is unchanged.
+                QTimer.singleShot(0, lambda t=top: focus_split(self._app, t))
         return False
 
 

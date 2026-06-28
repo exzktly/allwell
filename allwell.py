@@ -111,7 +111,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v7.4.12")
+        self._version_pill = QLabel("v7.4.14")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "
@@ -1038,6 +1038,17 @@ def _install_combobox_popup_widener() -> None:
 
 
 def main() -> None:
+    # Dump a Python stack trace to stderr on a hard crash (segfault / fatal Qt
+    # error) so otherwise output-less native crashes are diagnosable from the
+    # terminal without a special launch flag. Guarded: a windowed PyInstaller
+    # build has no stderr, where faulthandler.enable() would raise.
+    try:
+        import faulthandler
+        if sys.stderr is not None and getattr(sys.stderr, "fileno", None) is not None:
+            faulthandler.enable()
+    except Exception:
+        swallowed()  # diagnostics-only; never block startup
+
     from well_viewer.core import debug_flags as _debug_flags
 
     _debug_flags.REVIEW_TAB_DEBUG = REVIEW_TAB_DEBUG

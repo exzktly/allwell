@@ -7,15 +7,9 @@ State is ``app._app_state.preview.selected_well`` (a token or ``None``).
 
 from __future__ import annotations
 
-import logging
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
-from well_viewer.core import debug_flags as _debug_flags
-from well_viewer.data.data_loading import extract_well_token as _extract_well_token
-from well_viewer.features.image_browser.review_image.renderer import stage_review_image
-
-_logger = logging.getLogger("well_viewer")
+from well_viewer.features.image_browser.review_image.renderer import update_preview
 
 
 def build_preview_picker(app, parent: QWidget) -> None:
@@ -47,22 +41,11 @@ def build_preview_picker(app, parent: QWidget) -> None:
 
     def _on_plate_changed(ids) -> None:
         tok = next((w for w in ids if w in app._app_state.dataset.well_paths), None)
-        if _debug_flags.review_image_load_debug_enabled():
-            _logger.debug(
-                "preview picker click: ids=%r -> tok=%r (prev selected=%r)",
-                list(ids), tok, app._app_state.preview.selected_well,
-            )
         if tok == app._app_state.preview.selected_well:
             return
         app._app_state.preview.selected_well = tok
         app._refresh_preview_picker()
-        # Deferred control model: stage the well change (and reflect it in the
-        # top-bar label) but don't reload/redraw — the image renders on the
-        # next Generate, which reloads this well's refs for the active channel.
-        if hasattr(app, "_review_image_well_lbl"):
-            app._review_image_well_lbl.setText(
-                (_extract_well_token(tok) or tok) if tok else "No well selected")
-        stage_review_image(app)
+        update_preview(app, tok)
     plate.selectionChanged.connect(_on_plate_changed)
 
     app._preview_sel_lbl = QLabel("No well selected", parent)

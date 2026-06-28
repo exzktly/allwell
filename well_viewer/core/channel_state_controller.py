@@ -447,15 +447,8 @@ def update_channel_selector(app) -> None:
             app._chan_var.setCurrentText(plot_label)
 
 
-def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = False,
-                             defer_render: bool = False) -> None:
-    """Switch image-display channel for Movie Montage and Review Image.
-
-    When ``defer_render`` is set (the Image Browser's deferred control model),
-    update only lightweight UI (channel label, LUT boxes, colormap combo) and
-    *stage* a render instead of reloading the well + redrawing — the canvas
-    redraws on the next Generate.
-    """
+def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = False) -> None:
+    """Switch image-display channel for Movie Montage and Review Image."""
     channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
     if channel_switch_debug:
         _logger.debug(
@@ -466,22 +459,12 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
         )
     if not channel or channel == "—":
         return
-    # One function-local import (core must not import features at module scope —
-    # ARCHITECTURE layering). Names are used conditionally across the branches.
-    from well_viewer.features.image_browser.review_image.renderer import (
-        refresh_review_image,
-        refresh_review_image_colormap_combo,
-        stage_review_image,
-        update_preview,
-    )
     if channel == app._app_state.channel.active_image_channel:
         if preserve_review_view:
             app._app_state.review_image.preserve_view_on_refresh = True
             if app._app_state.preview.selected_well:
-                if defer_render:
-                    stage_review_image(app)
-                else:
-                    refresh_review_image(app)
+                from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
+                refresh_review_image(app)
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
@@ -500,21 +483,16 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
     if saved_review_lut and hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
         app._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
         app._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
-    # Point the LUT editor's Color combo at the new channel's stored colormap.
-    if hasattr(app, "_review_image_colormap_cb"):
-        refresh_review_image_colormap_combo(app)
     if preserve_review_view:
         app._app_state.review_image.preserve_view_on_refresh = True
     if app._app_state.preview.selected_well:
-        if defer_render:
-            stage_review_image(app)
-        else:
-            if channel_switch_debug:
-                _logger.debug(
-                    "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
-                    app._app_state.preview.selected_well,
-                )
-            update_preview(app, app._app_state.preview.selected_well)
+        if channel_switch_debug:
+            _logger.debug(
+                "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
+                app._app_state.preview.selected_well,
+            )
+        from well_viewer.features.image_browser.review_image.renderer import update_preview
+        update_preview(app, app._app_state.preview.selected_well)
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",

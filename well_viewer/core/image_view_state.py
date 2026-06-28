@@ -27,11 +27,6 @@ class ImageViewState:
     """
 
     lut_by_channel: Dict[str, Tuple[float, float]] = field(default_factory=dict)
-    # Optional per-channel colormap override for the image viewers. Absent ⇒ the
-    # viewer's default look (the Review Image's per-channel tint). Maps a
-    # lower-cased channel token to a matplotlib colormap name + a reversed flag.
-    colormap_by_channel: Dict[str, str] = field(default_factory=dict)
-    colormap_reversed_by_channel: Dict[str, bool] = field(default_factory=dict)
 
     def get_lut(self, channel: str) -> Optional[Tuple[float, float]]:
         """Return the shared ``(lo, hi)`` for *channel*, or ``None`` if unset."""
@@ -43,26 +38,3 @@ class ImageViewState:
         """Record the shared display window for *channel*."""
         if channel:
             self.lut_by_channel[str(channel).strip().lower()] = (float(lo), float(hi))
-
-    def get_colormap(self, channel: str) -> Optional[Tuple[str, bool]]:
-        """Return ``(cmap_name, reversed)`` for *channel*, or ``None`` if unset."""
-        if not channel:
-            return None
-        ch = str(channel).strip().lower()
-        name = self.colormap_by_channel.get(ch)
-        if not name:
-            return None
-        return name, bool(self.colormap_reversed_by_channel.get(ch, False))
-
-    def set_colormap(self, channel: str, name: Optional[str],
-                     reversed: bool = False) -> None:  # noqa: A002
-        """Record (or clear, when *name* is falsy) the per-channel colormap."""
-        if not channel:
-            return
-        ch = str(channel).strip().lower()
-        if name:
-            self.colormap_by_channel[ch] = str(name)
-            self.colormap_reversed_by_channel[ch] = bool(reversed)
-        else:
-            self.colormap_by_channel.pop(ch, None)
-            self.colormap_reversed_by_channel.pop(ch, None)

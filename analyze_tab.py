@@ -166,18 +166,17 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         # Left — scrollable form
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll
         # Analyze form sidebar expanded 25% (280→350) per redesign-bug-batch-2:
         # the schema string + per-channel rows often clip at 280 px.
         # Further +25% (350→438) per user feedback — the per-fluor rows
         # were still tight when multiple channels were configured.
         scroll.setMinimumWidth(438)
         form_host = QWidget()
-        form_host
         self._form_layout = QVBoxLayout(form_host)
         self._form_layout.setContentsMargins(0, 8, 0, 8)
         self._form_layout.setSpacing(0)
         scroll.setWidget(form_host)
+        self._left_sidebar = scroll  # shell left-rail toggle hides/shows this
         splitter.addWidget(scroll)
         splitter.setStretchFactor(0, 0)
 

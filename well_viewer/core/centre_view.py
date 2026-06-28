@@ -146,21 +146,6 @@ def build_centre(app, parent: QWidget) -> None:
     app._notebook.setObjectName("CentreTabs")
     layout.addWidget(app._notebook, 1)
 
-    # Split View host: a hidden sibling of the notebook. enter_split detaches
-    # two pages into it and hides the notebook; exit_split reverses that. Shown
-    # XOR the notebook. (Review-Analyze / _central_pane_stack stay untouched.)
-    from PySide6.QtWidgets import QSplitter as _QSplitter
-    app._split_pane = _QSplitter(Qt.Horizontal, parent)
-    app._split_pane.setObjectName("CentreSplit")
-    app._split_pane.setChildrenCollapsible(False)
-    app._split_pane.hide()
-    layout.addWidget(app._split_pane, 1)
-    app._split_active = False
-    app._split_tab_a = None
-    app._split_tab_b = None
-    app._split_focused = None
-    app._split_pane_widgets = {}
-
     # Map tab title -> deferred builder. Populated below; drained after the
     # window paints. The tab-change handler also calls into this map so a
     # user who clicks an un-built tab forces its builder to run inline.

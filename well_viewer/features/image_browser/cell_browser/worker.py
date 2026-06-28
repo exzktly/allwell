@@ -36,6 +36,20 @@ _CHANNEL_TINTS = (
 _CROP_PAD_PX = 18
 
 
+def resolve_channel_tint(channel: str, index: int,
+                         tint_map: Optional[Dict[str, tuple]] = None) -> tuple:
+    """Additive tint for a channel as an ``(r, g, b)`` 0..1 float tuple.
+
+    An explicit per-channel override (the shared ``tint_by_channel``, 0–255)
+    wins; otherwise fall back to the fixed palette by channel index. Pure (no
+    Qt / app), so it's unit-testable on its own.
+    """
+    override = (tint_map or {}).get(str(channel).strip().lower())
+    if override is not None:
+        return tuple(max(0.0, min(1.0, float(c) / 255.0)) for c in override)
+    return _CHANNEL_TINTS[index % len(_CHANNEL_TINTS)]
+
+
 def _bbox_for(mask_arr, nucleus_id: int, pad: int) -> Optional[tuple]:
     """Padded (r0, c0, r1, c1) bounding box of ``mask == nucleus_id``; None if absent."""
     ys, xs = np.where(mask_arr == nucleus_id)
@@ -74,15 +88,20 @@ def _norm01(crop, bounds: Optional[tuple] = None) -> np.ndarray:
 
 def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
                      show_boundaries: bool, cache: Dict,
-                     lut_by_channel: Optional[Dict[str, tuple]] = None) -> Optional[np.ndarray]:
+                     lut_by_channel: Optional[Dict[str, tuple]] = None,
+                     tint_by_channel: Optional[Dict[str, tuple]] = None,
+                     use_tophat: bool = False) -> Optional[np.ndarray]:
     """Multi-channel composite RGB (uint8) of one cell, or None if unrenderable.
 
     *cache* is a per-page dict so each FOV's mask + channel arrays load once.
     *lut_by_channel* maps a lower-cased channel token to its shared ``(lo, hi)``
     display window (S4); a channel with an entry uses that fixed brightness,
-    others auto-scale per crop.
+    others auto-scale per crop. *tint_by_channel* overrides the additive display
+    colour per channel (else the fixed per-index palette). *use_tophat* selects
+    the corrected (top-hat) image instead of raw.
     """
     lut_by_channel = lut_by_channel or {}
+    tint_by_channel = tint_by_channel or {}
     try:
         nid = int(float(desc.nucleus_id))
     except (TypeError, ValueError):
@@ -92,7 +111,8 @@ def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
     # _load_mask_array depends on it. Calling _load_mask_array before any
     # _load_array always missed → every cell rendered as "—".
     chan_arrays = [
-        _load_array(app, cache, desc.well, ch, desc.tp_token, desc.fov)
+        _load_array(app, cache, desc.well, ch, desc.tp_token, desc.fov,
+                    use_tophat=use_tophat)
         for ch in channels
     ]
     mask_full = _load_mask_array(app, cache, desc.well, desc.tp_token, desc.fov)
@@ -115,7 +135,7 @@ def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
             continue
         bounds = lut_by_channel.get(str(channels[i]).strip().lower())
         norm = _norm01(arr[r0:r1, c0:c1], bounds=bounds)
-        tint = _CHANNEL_TINTS[i % len(_CHANNEL_TINTS)]
+        tint = resolve_channel_tint(channels[i], i, tint_by_channel)
         rgb = np.maximum(rgb, norm[..., None] * np.asarray(tint, dtype=np.float32))
         painted = True
     if not painted:
@@ -150,13 +170,15 @@ class CellImageLoader(QObject):
         self._app = app
 
     def load_page(self, descriptors: List[CellDescriptor], start_index: int,
-                  channels: List[str], show_boundaries: bool, gen: int) -> None:
+                  channels: List[str], show_boundaries: bool, gen: int,
+                  use_tophat: bool = False) -> None:
         """Spawn a daemon thread that composes *descriptors* and emits each."""
-        # Snapshot the shared per-channel LUT (S4) on the GUI thread so the
-        # daemon thread doesn't read app state concurrently; a copy is cheap and
-        # the page reloads whenever the LUT could matter.
+        # Snapshot the shared per-channel LUT + tint (S4) on the GUI thread so
+        # the daemon thread doesn't read app state concurrently; a copy is cheap
+        # and the page reloads whenever the LUT/tint/source could matter.
         _iv = getattr(self._app._app_state, "image_view", None)
         lut_map = dict(_iv.lut_by_channel) if _iv is not None else {}
+        tint_map = dict(_iv.tint_by_channel) if _iv is not None else {}
 
         def _run() -> None:
             cache: Dict[str, Any] = {}
@@ -164,7 +186,8 @@ class CellImageLoader(QObject):
             for offset, desc in enumerate(descriptors):
                 try:
                     rgb = compose_cell_rgb(self._app, desc, channels,
-                                           show_boundaries, cache, lut_map)
+                                           show_boundaries, cache, lut_map,
+                                           tint_map, use_tophat)
                 except Exception:
                     _logger.debug("cell_browser: compose failed for %r",
                                   desc, exc_info=True)

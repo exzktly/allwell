@@ -561,13 +561,13 @@ app = BUNDLE(   # noqa: F821
     name="AllWell.app",
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
-    version="7.4.9",
+    version="7.4.10",
     info_plist={
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription":
             "AllWell needs access to open microscopy data files.",
-        "CFBundleShortVersionString": "7.4.9",
-        "CFBundleVersion": "7.4.9",
+        "CFBundleShortVersionString": "7.4.10",
+        "CFBundleVersion": "7.4.10",
         "CFBundleName": "AllWell",
         "CFBundleDisplayName": "All Well",
         "CFBundleExecutable": "AllWell",

@@ -27,11 +27,11 @@ class ImageViewState:
     """
 
     lut_by_channel: Dict[str, Tuple[float, float]] = field(default_factory=dict)
-    # Optional per-channel colormap override for the image viewers. Absent ⇒ the
-    # viewer's default look (the Review Image's per-channel tint). Maps a
-    # lower-cased channel token to a matplotlib colormap name + a reversed flag.
-    colormap_by_channel: Dict[str, str] = field(default_factory=dict)
-    colormap_reversed_by_channel: Dict[str, bool] = field(default_factory=dict)
+    # Optional per-channel display colour (the additive tint the Cell Browser
+    # paints a channel with). Absent ⇒ the viewer's default look (the Cell
+    # Browser's fixed per-index tint). Maps a lower-cased channel token to an
+    # ``(r, g, b)`` 0–255 triple.
+    tint_by_channel: Dict[str, Tuple[int, int, int]] = field(default_factory=dict)
 
     def get_lut(self, channel: str) -> Optional[Tuple[float, float]]:
         """Return the shared ``(lo, hi)`` for *channel*, or ``None`` if unset."""
@@ -44,25 +44,18 @@ class ImageViewState:
         if channel:
             self.lut_by_channel[str(channel).strip().lower()] = (float(lo), float(hi))
 
-    def get_colormap(self, channel: str) -> Optional[Tuple[str, bool]]:
-        """Return ``(cmap_name, reversed)`` for *channel*, or ``None`` if unset."""
+    def get_tint(self, channel: str) -> Optional[Tuple[int, int, int]]:
+        """Return the per-channel display colour, or ``None`` if unset."""
         if not channel:
             return None
-        ch = str(channel).strip().lower()
-        name = self.colormap_by_channel.get(ch)
-        if not name:
-            return None
-        return name, bool(self.colormap_reversed_by_channel.get(ch, False))
+        return self.tint_by_channel.get(str(channel).strip().lower())
 
-    def set_colormap(self, channel: str, name: Optional[str],
-                     reversed: bool = False) -> None:  # noqa: A002
-        """Record (or clear, when *name* is falsy) the per-channel colormap."""
+    def set_tint(self, channel: str, rgb: Optional[Tuple[int, int, int]]) -> None:
+        """Record (or clear, when *rgb* is ``None``) the per-channel colour."""
         if not channel:
             return
         ch = str(channel).strip().lower()
-        if name:
-            self.colormap_by_channel[ch] = str(name)
-            self.colormap_reversed_by_channel[ch] = bool(reversed)
+        if rgb is None:
+            self.tint_by_channel.pop(ch, None)
         else:
-            self.colormap_by_channel.pop(ch, None)
-            self.colormap_reversed_by_channel.pop(ch, None)
+            self.tint_by_channel[ch] = tuple(max(0, min(255, int(c))) for c in rgb)

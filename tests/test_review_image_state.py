@@ -43,26 +43,18 @@ def test_image_view_state_per_channel_lut():
     assert a.get_lut("") is None
 
 
-def test_image_view_state_per_channel_colormap():
-    # Per-channel colormap override layered on top of the shared LUT (Image
-    # Browser LUT editor's Color picker). Mirrors the lut_by_channel API.
+def test_image_view_state_per_channel_tint():
+    # Per-channel display colour for the Cell Browser composite (mirrors the LUT
+    # API). Override is case-insensitive, clamped 0-255, per-instance, clearable.
     from well_viewer.core.image_view_state import ImageViewState
 
     a, b = ImageViewState(), ImageViewState()
-    a.set_colormap("GFP", "viridis")
-    assert a.get_colormap("gfp") == ("viridis", False)   # case-insensitive
-    assert b.get_colormap("gfp") is None                 # per-instance default
-    assert a.get_colormap("") is None
-
-    # Reversed flag round-trips.
-    a.set_colormap("rfp", "magma", reversed=True)
-    assert a.get_colormap("RFP") == ("magma", True)
-
-    # An empty/falsy name clears the override back to the tint default.
-    a.set_colormap("gfp", None)
-    assert a.get_colormap("gfp") is None
-    a.set_colormap("rfp", "")
-    assert a.get_colormap("rfp") is None
+    a.set_tint("GFP", (10, 300, -5))
+    assert a.get_tint("gfp") == (10, 255, 0)    # case-insensitive + clamped
+    assert b.get_tint("gfp") is None            # per-instance default
+    assert a.get_tint("") is None
+    a.set_tint("gfp", None)                      # clear → back to default
+    assert a.get_tint("gfp") is None
 
 
 def test_reset_view():

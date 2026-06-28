@@ -35,6 +35,7 @@ class CellBrowserState:
     sort_keys: List[SortKey] = field(default_factory=list)  # empty = natural order
     channels_on: List[str] = field(default_factory=list)    # channel tokens shown
     show_boundaries: bool = True
+    use_tophat: bool = False   # False = raw image, True = corrected (top-hat)
     page_size: int = DEFAULT_PAGE_SIZE
     cells: List[CellDescriptor] = field(default_factory=list)
     loaded: int = 0

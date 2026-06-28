@@ -180,81 +180,6 @@ def refresh_review_image(app) -> None:
         app._refresh_review_image_in_progress = False
 
 
-# Curated colormaps offered in the Review Image LUT editor's Color picker. An
-# empty pick means "use the channel's tint" (the default look), so it is not in
-# this list — the combo carries a separate "Tint (default)" item with empty data.
-REVIEW_IMAGE_COLORMAP_CHOICES = (
-    "viridis", "plasma", "inferno", "magma", "cividis", "turbo",
-    "gray", "Greys", "Greens", "Reds", "Blues", "Purples", "Oranges", "hot",
-)
-
-
-def stage_review_image(app) -> None:
-    """Mark the Review Image as needing a render without performing it.
-
-    The Image Browser's Segmentation controls (well / FOV / timepoint /
-    channel / LUT / colormap / source) *defer* rendering: changing one stages
-    its state and updates only lightweight UI. The image redraws only when the
-    user presses **Generate** (:func:`review_image_generate`). This keeps a
-    large dataset from re-decoding on every control twiddle.
-    """
-    app._review_image_pending = True
-    btn = getattr(app, "_review_image_generate_btn", None)
-    if btn is not None and hasattr(btn, "setText"):
-        btn.setText("Generate •")
-    status = getattr(app, "_review_image_status", None)
-    if status is not None and hasattr(status, "setText"):
-        status.setText("Settings changed — press Generate to update the image.")
-
-
-def review_image_generate(app) -> None:
-    """Render the Review Image with all staged settings (the Generate button).
-
-    Reloads the selected well's image refs for the active channel (a cheap
-    metadata scan) and then renders — mirroring tab entry, so a staged
-    well/channel change is picked up. A ``None`` selected well no-ops cleanly.
-    """
-    app._review_image_pending = False
-    btn = getattr(app, "_review_image_generate_btn", None)
-    if btn is not None and hasattr(btn, "setText"):
-        btn.setText("Generate")
-    update_preview(app, app._app_state.preview.selected_well)
-
-
-def refresh_review_image_colormap_combo(app) -> None:
-    """Point the LUT editor's Color combo at the active channel's colormap."""
-    cb = getattr(app, "_review_image_colormap_cb", None)
-    if cb is None:
-        return
-    cmap = app._app_state.image_view.get_colormap(
-        str(app._app_state.channel.active_image_channel or ""))
-    name = cmap[0] if cmap else ""
-    idx = cb.findData(name)
-    if idx < 0:
-        idx = 0
-    blocked = cb.blockSignals(True)
-    try:
-        cb.setCurrentIndex(idx)
-    finally:
-        cb.blockSignals(blocked)
-
-
-def review_image_commit_colormap(app) -> None:
-    """Stage the active channel's colormap from the Color combo (deferred).
-
-    An empty selection ("Tint (default)") clears the override so the channel
-    falls back to its tint. Renders on the next Generate.
-    """
-    cb = getattr(app, "_review_image_colormap_cb", None)
-    if cb is None:
-        return
-    name = cb.currentData()
-    app._app_state.image_view.set_colormap(
-        str(app._app_state.channel.active_image_channel or ""), name or None)
-    app._app_state.review_image.preserve_view_on_refresh = True
-    stage_review_image(app)
-
-
 def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: bool, image_load_debug: bool) -> None:
     from well_viewer.data.image_discovery import open_imgref_as_array
 
@@ -486,29 +411,18 @@ def draw_review_image(
             sel_boundary = boundary & (center == int(sel_nid))
             rgb[sel_boundary] = sel_color
     else:
-        # Per-channel colormap override (set via the LUT editor's colormap
-        # picker). When unset, fall back to the channel's tint (the default).
-        _cmap = app._app_state.image_view.get_colormap(
-            str(app._app_state.channel.active_image_channel or ""))
-        if _cmap is not None:
-            from well_viewer.core.ui_helpers import lut_colormap_to_rgb
-            _cname, _crev = _cmap
-            rgb = _np.ascontiguousarray(
-                lut_colormap_to_rgb(arr, lo, hi,
-                                    (_cname + "_r") if _crev else _cname))
+        tint = app._app_state.review_image.tint_color
+        tr, tg, tb = (max(0, min(255, int(c))) for c in tint)
+        rgb = _np.empty((h, w, 3), dtype=_np.uint8)
+        if (tr, tg, tb) == (255, 255, 255):
+            rgb[..., 0] = base
+            rgb[..., 1] = base
+            rgb[..., 2] = base
         else:
-            tint = app._app_state.review_image.tint_color
-            tr, tg, tb = (max(0, min(255, int(c))) for c in tint)
-            rgb = _np.empty((h, w, 3), dtype=_np.uint8)
-            if (tr, tg, tb) == (255, 255, 255):
-                rgb[..., 0] = base
-                rgb[..., 1] = base
-                rgb[..., 2] = base
-            else:
-                base_f = base.astype(_np.float32)
-                rgb[..., 0] = _np.clip(base_f * (tr / 255.0), 0, 255).astype(_np.uint8)
-                rgb[..., 1] = _np.clip(base_f * (tg / 255.0), 0, 255).astype(_np.uint8)
-                rgb[..., 2] = _np.clip(base_f * (tb / 255.0), 0, 255).astype(_np.uint8)
+            base_f = base.astype(_np.float32)
+            rgb[..., 0] = _np.clip(base_f * (tr / 255.0), 0, 255).astype(_np.uint8)
+            rgb[..., 1] = _np.clip(base_f * (tg / 255.0), 0, 255).astype(_np.uint8)
+            rgb[..., 2] = _np.clip(base_f * (tb / 255.0), 0, 255).astype(_np.uint8)
 
         included_ids = [int(nid) for nid, inc in include_by_nid.items() if inc]
         if included_ids:
@@ -761,7 +675,7 @@ def review_image_auto_lut(app) -> None:
         app._review_lmin_entry.setText(f"{lo:.0f}")
         app._review_lmax_entry.setText(f"{hi:.0f}")
     app._app_state.review_image.preserve_view_on_refresh = True
-    stage_review_image(app)
+    refresh_review_image(app)
 
 
 
@@ -800,7 +714,7 @@ def set_review_image_source(app, mode: str) -> None:
     app._app_state.image_view.lut_by_channel.pop(chan, None)
     app._refresh_review_image_source_btn()
     app._app_state.review_image.preserve_view_on_refresh = True
-    stage_review_image(app)
+    refresh_review_image(app)
 
 
 
@@ -837,7 +751,7 @@ def review_image_commit_lut(app) -> None:
         app._review_lmin_entry.setText(f"{lo:.0f}")
         app._review_lmax_entry.setText(f"{hi:.0f}")
     app._app_state.review_image.preserve_view_on_refresh = True
-    stage_review_image(app)
+    refresh_review_image(app)
 
 
 

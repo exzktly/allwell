@@ -57,18 +57,17 @@ from well_viewer.features.barplot.collect import (  # noqa: E402,F401
 )
 
 
-
-
-
-
-
-
-
 def ordered_bar_keys(app) -> list:
     """Return ordered bar keys for current mode, respecting custom drag order."""
     active_rsets = app._rep_sets_active()
     if active_rsets:
         keys = [r.name for r in active_rsets]
+    elif app._app_state.selection.selections:
+        # Group mode (replicate sets / groups defined) but every group hidden →
+        # no bars. Don't fall back to ``selected_wells`` here: in group mode the
+        # plate is passive and clicks toggle group visibility, so selected_wells
+        # is stale — falling back resurrected every well after "Deselect all".
+        keys = []
     else:
         keys = sorted(
             (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),

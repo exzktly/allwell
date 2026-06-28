@@ -733,10 +733,12 @@ def _apply_image_table(app, state: dict) -> None:
     try:
         from well_viewer.features.image_browser.image_table.controller import (
             image_table_apply_dimensions,
+            image_table_rebuild_lut_row,
             image_table_set_zoom,
         )
     except Exception:  # pragma: no cover - import failure leaves these no-ops
         image_table_apply_dimensions = image_table_set_zoom = None
+        image_table_rebuild_lut_row = None
 
     # Grid axes first (before the dimension rebuild), so the per-row channel/well
     # combos + labels are laid out on the same axes the plot was saved with. The
@@ -857,6 +859,19 @@ def _apply_image_table(app, state: dict) -> None:
     ):
         if key in state and isinstance(state[key], str):
             _set_combo_if_valid(app, attr, state[key])
+
+    # Rebuild the per-row levels & display table now that the channel combos are
+    # restored. The per-row labels ("Row N · CHAN") + colour selectors are
+    # derived from the channel combos when the table is built; restore set those
+    # combos with signals blocked, so the usual channel-change rebuild never
+    # fired and the labels showed the pre-restore channels. Rebuilding here (it
+    # preserves prior per-row values across rebuilds) makes the labels match the
+    # restored channels before the row_luts values are re-applied below.
+    if image_table_rebuild_lut_row is not None:
+        try:
+            image_table_rebuild_lut_row(app)
+        except Exception:
+            _logger.debug("image_table: per-row LUT table rebuild failed", exc_info=True)
 
     # Per-row LUT + display restore (row_luts keyed by str(row index)). Display
     # (top-hat / boundaries / binary) is per-row now, so it round-trips here

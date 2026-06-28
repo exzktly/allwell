@@ -94,11 +94,9 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     # ── sort builder (well / timepoint / metric, asc/desc) ───────────────────
     build_cell_browser_sort_section(app, lay)
 
-    apply_btn = QPushButton("Apply filters", parent)
-    apply_btn.setObjectName("Primary")
-    apply_btn.clicked.connect(lambda _=False: ctl.apply_filters(app))
-    lay.addWidget(apply_btn)
-    app._cell_browser_apply_btn = apply_btn
+    # No "Apply filters" button here: every Cell Browser control (filters +
+    # display) now defers to the single top-bar **Generate** button
+    # (tab_view.build_cell_browser_tab), so a second trigger is redundant.
 
     cell_browser_sidebar_refresh(app)
 

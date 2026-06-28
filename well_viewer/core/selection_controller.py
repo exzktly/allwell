@@ -289,6 +289,22 @@ def on_sidebar_plate_drag_finished(app) -> None:
     on_plate_sel_change(app)
 
 
+def on_sidebar_plate_corner_toggled(app, select_all_target: bool) -> None:
+    """Plate corner all/none toggle while the plate is passive (group mode).
+
+    In group mode the plate doesn't own per-well selection, so the corner acts
+    on group visibility: if any group is currently visible, hide them all;
+    otherwise show them all. (Falls back to the plain select/clear when no
+    groups are defined, though the corner only emits this in passive mode.)
+    """
+    sels = app._app_state.selection.selections
+    if sels:
+        any_visible = any(not s.get("hidden") for s in sels)
+        select_none(app) if any_visible else select_all(app)
+        return
+    select_all(app) if select_all_target else select_none(app)
+
+
 def on_sidebar_plate_well_activated(app, well_id: str) -> None:
     # On a plotting tab, a single click on a well "activates" that well
     # and (if it belongs to a saved group) every other well in the same

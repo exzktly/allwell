@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from functools import partial
 from well_viewer.core.selection_controller import on_sidebar_plate_col_activated
+from well_viewer.core.selection_controller import on_sidebar_plate_corner_toggled
 from well_viewer.core.selection_controller import on_sidebar_plate_drag_finished
 from well_viewer.core.selection_controller import on_sidebar_plate_row_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_selection_changed
@@ -79,6 +80,7 @@ def build_sidebar(app, parent: QWidget) -> None:
     # Wire the plate to the app's selection / replicate-set / heat-map handlers.
     plate.selectionChanged.connect(partial(on_sidebar_plate_selection_changed, app))
     plate.selectionDragFinished.connect(partial(on_sidebar_plate_drag_finished, app))
+    plate.cornerToggled.connect(partial(on_sidebar_plate_corner_toggled, app))
     plate.wellActivated.connect(partial(on_sidebar_plate_well_activated, app))
     plate.rowHeaderActivated.connect(partial(on_sidebar_plate_row_activated, app))
     plate.columnHeaderActivated.connect(partial(on_sidebar_plate_col_activated, app))

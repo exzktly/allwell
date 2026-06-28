@@ -234,11 +234,27 @@ def select_all(app) -> None:
 
 
 def select_none(app) -> None:
-    if app._app_state.selection.selections:  # rep-mode: hide every group
-        _set_groups_hidden(app, app._app_state.selection.selections, target=True)
+    sel = app._app_state.selection
+    # Clear any individually-activated (solo) wells regardless of mode, so
+    # "Deselect all" empties everything the plate is showing as active — not
+    # just the groups.
+    solo = getattr(sel, "active_solo_wells", None)
+    cleared_solo = bool(solo)
+    if cleared_solo:
+        solo.clear()
+    if sel.selections:  # group mode: hide every group
+        # _set_groups_hidden only refreshes when a group's hidden flag actually
+        # flips; if every group was already hidden (or there were none to flip)
+        # but we cleared solo wells, repaint + redraw explicitly so the button
+        # visibly does something instead of silently no-op'ing.
+        any_visible = any(not s.get("hidden") for s in sel.selections)
+        _set_groups_hidden(app, sel.selections, target=True)
+        if cleared_solo and not any_visible:
+            app._refresh_sidebar_map()
+            app._event_bus.selection_changed.emit(sel)
     else:
-        app._app_state.selection.clear_selection()
-        app._event_bus.selection_changed.emit(app._app_state.selection)
+        sel.clear_selection()
+        app._event_bus.selection_changed.emit(sel)
 
 
 def on_sidebar_plate_selection_changed(app, ids) -> None:

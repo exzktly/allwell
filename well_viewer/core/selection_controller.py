@@ -9,6 +9,14 @@ from well_viewer.features.grouping.view import rep_panel_refresh
 from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.safe import swallowed
 
+# Tabs that keep per-well plate selection even when replicate sets / stat groups
+# exist (rep-set mode otherwise makes the plate passive). Sample Definitions and
+# Review CSV need user-chosen wells for Cell Gating / Add Prefix / row-loading;
+# the Cell Browser draws its gallery from the active well selection, so single
+# replicate wells must be pickable there too (otherwise plate clicks are dropped
+# and "wells stay unselected").
+_PER_WELL_TABS = ("Sample Definitions", "Review CSV", "Cell Browser")
+
 
 def _active_tab(app) -> str:
     # Plot tabs (Line Graphs / Bar Plots / Scatter Plot) live inside a nested
@@ -249,7 +257,7 @@ def on_sidebar_plate_selection_changed(app, ids) -> None:
         tab_name = app._current_centre_tab()
     except Exception:
         tab_name = ""
-    per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
+    per_well_tab = tab_name in _PER_WELL_TABS
     if app._app_state.selection.selections and not per_well_tab:
         return  # rep-set mode: the plate is passive; its selection is unused
     # Keep the invariant _selected_wells ⊆ _well_paths.
@@ -272,7 +280,7 @@ def on_sidebar_plate_drag_finished(app) -> None:
         tab_name = app._current_centre_tab()
     except Exception:
         tab_name = ""
-    per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
+    per_well_tab = tab_name in _PER_WELL_TABS
     if app._app_state.selection.selections and not per_well_tab:
         return
     # Cancel any pending deferred commit from the paint events that
@@ -513,7 +521,7 @@ def refresh_sidebar_map_now(app) -> None:
         tab_name = app._current_centre_tab()
     except Exception:
         tab_name = ""
-    per_well_tab = tab_name in ("Sample Definitions", "Review CSV")
+    per_well_tab = tab_name in _PER_WELL_TABS
     rep_mode = bool(app._app_state.selection.selections) and not per_well_tab
 
     colors: Dict[str, object] = {}

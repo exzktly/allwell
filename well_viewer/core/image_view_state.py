@@ -27,6 +27,11 @@ class ImageViewState:
     """
 
     lut_by_channel: Dict[str, Tuple[float, float]] = field(default_factory=dict)
+    # Optional per-channel display colour (the additive tint the Cell Browser
+    # paints a channel with). Absent ⇒ the viewer's default look (the Cell
+    # Browser's fixed per-index tint). Maps a lower-cased channel token to an
+    # ``(r, g, b)`` 0–255 triple.
+    tint_by_channel: Dict[str, Tuple[int, int, int]] = field(default_factory=dict)
 
     def get_lut(self, channel: str) -> Optional[Tuple[float, float]]:
         """Return the shared ``(lo, hi)`` for *channel*, or ``None`` if unset."""
@@ -38,3 +43,19 @@ class ImageViewState:
         """Record the shared display window for *channel*."""
         if channel:
             self.lut_by_channel[str(channel).strip().lower()] = (float(lo), float(hi))
+
+    def get_tint(self, channel: str) -> Optional[Tuple[int, int, int]]:
+        """Return the per-channel display colour, or ``None`` if unset."""
+        if not channel:
+            return None
+        return self.tint_by_channel.get(str(channel).strip().lower())
+
+    def set_tint(self, channel: str, rgb: Optional[Tuple[int, int, int]]) -> None:
+        """Record (or clear, when *rgb* is ``None``) the per-channel colour."""
+        if not channel:
+            return
+        ch = str(channel).strip().lower()
+        if rgb is None:
+            self.tint_by_channel.pop(ch, None)
+        else:
+            self.tint_by_channel[ch] = tuple(max(0, min(255, int(c))) for c in rgb)

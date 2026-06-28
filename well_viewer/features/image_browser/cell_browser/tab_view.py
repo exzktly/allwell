@@ -23,7 +23,10 @@ from well_viewer.features.image_browser.cell_browser.criteria_view import (  # r
 )
 from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
 from well_viewer.features.image_browser.cell_browser.state import CellBrowserState
-from well_viewer.features.image_browser.cell_browser.worker import CellImageLoader
+from well_viewer.features.image_browser.cell_browser.worker import (
+    CellImageLoader,
+    resolve_channel_tint,
+)
 
 __all__ = [
     "build_cell_browser_tab",
@@ -76,6 +79,21 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(boundary_cb)
     ctx.app._cell_browser_boundary_cb = boundary_cb
 
+    # Source: which stage of the fluorescence image to crop from. Raw (default)
+    # or Corrected (top-hat). Staged like the rest — applied on Generate.
+    from widgets.segmented_control import SegmentedControl as _SegmentedControl
+    cl.addWidget(QLabel("Source:", ctrl))
+    source_seg = _SegmentedControl(ctrl)
+    for _lbl, _data in (("Raw", "raw"), ("Corrected", "corrected")):
+        source_seg.addSegment(_lbl, data=_data)
+    source_seg.setCurrentByData("raw")
+    source_seg.setToolTip(
+        "Image stage cropped for each cell:\n"
+        "• Raw — unprocessed fluorescence.\n"
+        "• Corrected — top-hat / background-subtracted image.")
+    cl.addWidget(source_seg)
+    ctx.app._cell_browser_source_seg = source_seg
+
     cl.addWidget(QLabel("Per page:", ctrl))
     pagesize_edit = QLineEdit("50", ctrl)
     pagesize_edit.setFixedWidth(48)
@@ -88,6 +106,18 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     load_more.setEnabled(False)
     cl.addWidget(load_more)
     ctx.app._cell_browser_load_more_btn = load_more
+
+    # Generate: the display controls (channels / LUT / color / source /
+    # boundaries) only *stage* their state; pressing Generate re-composites the
+    # gallery with everything staged (same gate as the sidebar "Apply filters").
+    generate_btn = QPushButton("Generate", ctrl)
+    generate_btn.setObjectName("Primary")
+    generate_btn.setToolTip(
+        "Re-render the gallery with the current channels / LUT / colors / "
+        "source. Display settings are staged until you press this.")
+    generate_btn.clicked.connect(lambda _=False: ctl.apply_filters(ctx.app))
+    cl.addWidget(generate_btn)
+    ctx.app._cell_browser_generate_btn = generate_btn
 
     count_lbl = QLabel("Showing 0 / 0 cells", ctrl)
     count_lbl.setObjectName("Muted")
@@ -160,10 +190,8 @@ def cell_browser_refresh(app) -> None:
     for tok in channels:
         cb = QCheckBox(tok.upper(), host)
         cb.setChecked(prev.get(tok, True))
-        # Toggling a channel re-composes the gallery so the choice takes effect
-        # immediately (connected after setChecked so the programmatic state
-        # above doesn't fire a reload).
-        cb.toggled.connect(lambda _on, _app=app: ctl.apply_filters(_app))
+        # Staged: the chip state is read on Generate (read_channels), so toggling
+        # a channel doesn't re-composite the gallery on its own.
         lay.addWidget(cb)
         chips[tok] = cb
     app._cell_browser_channel_chips = chips
@@ -189,8 +217,9 @@ def _cb_fmt(v) -> str:
 
 
 def _apply_cell_browser_lut(app, channel: str, lo_text: str, hi_text: str) -> None:
-    """Write a channel's bounds into the shared LUT (or clear → auto) and
-    re-composite the gallery so the change shows immediately."""
+    """Write a channel's bounds into the shared LUT (or clear → auto).
+
+    Staged only: the gallery re-composites on the next Generate, not on edit."""
     iv = getattr(app._app_state, "image_view", None)
     if iv is None:
         return
@@ -199,7 +228,50 @@ def _apply_cell_browser_lut(app, channel: str, lo_text: str, hi_text: str) -> No
         iv.set_lut(channel, lo, hi)
     else:
         iv.lut_by_channel.pop(str(channel).strip().lower(), None)  # back to auto
-    ctl.apply_filters(app)
+
+
+def _cb_effective_tint(iv, channel: str, index: int):
+    """The ``(r, g, b)`` 0–255 colour shown for a channel: override, else the
+    default per-index palette colour."""
+    override = iv.get_tint(channel) if iv is not None else None
+    if override is not None:
+        return tuple(int(c) for c in override)
+    r, g, b = resolve_channel_tint(channel, index, None)  # 0..1 default
+    return (int(round(r * 255)), int(round(g * 255)), int(round(b * 255)))
+
+
+def _paint_cb_swatch(btn, rgb) -> None:
+    r, g, b = rgb
+    btn.setStyleSheet(
+        f"QPushButton {{ background-color: rgb({r},{g},{b}); "
+        f"border: 1px solid #444; border-radius: 4px; "
+        f"min-width: 28px; min-height: 18px; padding: 0; }}")
+
+
+def _cb_pick_color(app, channel: str, index: int, swatch_btn) -> None:
+    """Open a colour popover for *channel*; picking stages the per-channel tint
+    (applied on the next Generate)."""
+    from PySide6.QtGui import QColor
+    from widgets.color_swatch_row import ColorSwatchRow
+    from widgets.popover import Popover
+
+    iv = getattr(app._app_state, "image_view", None)
+    if iv is None:
+        return
+    r, g, b = _cb_effective_tint(iv, channel, index)
+    pop = Popover(swatch_btn)
+    row = ColorSwatchRow(allow_custom=True)
+    row.setCurrentColor(QColor(r, g, b))
+
+    def _apply(c, _ch=channel, _btn=swatch_btn) -> None:
+        if not c.isValid():
+            return
+        iv.set_tint(_ch, (c.red(), c.green(), c.blue()))
+        _paint_cb_swatch(_btn, (c.red(), c.green(), c.blue()))
+
+    row.colorPicked.connect(_apply)
+    pop.setContentWidget(row)
+    pop.popup(swatch_btn, side="bottom", align="start")
 
 
 def cell_browser_refresh_lut_rows(app) -> None:
@@ -221,7 +293,7 @@ def cell_browser_refresh_lut_rows(app) -> None:
             w.deleteLater()
     iv = getattr(app._app_state, "image_view", None)
     rows = {}
-    for tok in channels:
+    for i, tok in enumerate(channels):
         row = QWidget(panel)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
@@ -244,6 +316,20 @@ def cell_browser_refresh_lut_rows(app) -> None:
         auto_btn.setProperty("variant", "secondary")
         rl.addWidget(auto_btn)
 
+        # Per-channel display colour: a swatch (opens a colour popover) + a reset
+        # back to the default palette colour. Staged → applied on Generate.
+        rl.addWidget(QLabel("color", row))
+        swatch = QPushButton("", row)
+        swatch.setFixedSize(28, 18)
+        swatch.setToolTip("Display colour for this channel. Applied on Generate.")
+        _paint_cb_swatch(swatch, _cb_effective_tint(iv, tok, i))
+        rl.addWidget(swatch)
+        reset_c = QPushButton("✕", row)
+        reset_c.setFixedWidth(22)
+        reset_c.setObjectName("Ghost")
+        reset_c.setToolTip("Reset this channel's colour to the default.")
+        rl.addWidget(reset_c)
+
         def _commit(_=None, _t=tok, _lo=lo_e, _hi=hi_e):
             _apply_cell_browser_lut(app, _t, _lo.text(), _hi.text())
 
@@ -252,9 +338,19 @@ def cell_browser_refresh_lut_rows(app) -> None:
             _hi.clear()
             _apply_cell_browser_lut(app, _t, "", "")
 
+        def _pick(_=None, _t=tok, _i=i, _sw=swatch):
+            _cb_pick_color(app, _t, _i, _sw)
+
+        def _reset_color(_=None, _t=tok, _i=i, _sw=swatch):
+            if iv is not None:
+                iv.set_tint(_t, None)
+            _paint_cb_swatch(_sw, _cb_effective_tint(iv, _t, _i))
+
         lo_e.editingFinished.connect(_commit)
         hi_e.editingFinished.connect(_commit)
         auto_btn.clicked.connect(_auto)
+        swatch.clicked.connect(_pick)
+        reset_c.clicked.connect(_reset_color)
         lay.addWidget(row)
         rows[tok] = (lo_e, hi_e)
     app._cell_browser_lut_rows = rows

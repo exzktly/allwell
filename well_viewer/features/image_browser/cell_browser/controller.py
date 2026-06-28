@@ -144,6 +144,8 @@ def apply_filters(app) -> None:
     st.channels_on = read_channels(app)
     bcb = getattr(app, "_cell_browser_boundary_cb", None)
     st.show_boundaries = bool(bcb.isChecked()) if bcb is not None else True
+    src = getattr(app, "_cell_browser_source_seg", None)
+    st.use_tophat = (src.currentData() == "corrected") if src is not None else False
     st.page_size = _page_size(app)
 
     # Sort happens inside collect_cells (before the MAX_TOTAL cap, so the cap
@@ -180,7 +182,8 @@ def load_next_page(app) -> None:
     start = st.loaded
     loader = app._cell_browser_loader
     loader.load_page(page, start, list(st.channels_on),
-                     st.show_boundaries, app._cell_browser_gen)
+                     st.show_boundaries, app._cell_browser_gen,
+                     use_tophat=st.use_tophat)
     # Optimistically advance; on_page_finished reconciles the count.
     st.loaded += len(page)
     _update_count(app)
@@ -229,6 +232,10 @@ def _set_apply_busy(app, busy: bool) -> None:
     if btn is not None:
         btn.setEnabled(not busy)
         btn.setText("Loading…" if busy else "Apply filters")
+    gen_btn = getattr(app, "_cell_browser_generate_btn", None)
+    if gen_btn is not None:
+        gen_btn.setEnabled(not busy)
+        gen_btn.setText("Loading…" if busy else "Generate")
     if busy:
         _set_status(app, "Loading cells…")
 

@@ -499,6 +499,17 @@ def get_remote(name: str, path: Path | None = None) -> RemoteHost | None:
     return load_remotes(path).get(name)
 
 
+def default_remote_index(n_combo_items: int) -> int:
+    """Default index for the Analyze "Run on:" combo.
+
+    The combo is ``Local`` (index 0) followed by one item per configured remote.
+    When at least one remote exists (``n_combo_items > 1``) the run defaults to
+    the first remote (index 1); otherwise it stays on ``Local`` (index 0). Pure
+    so it can be unit-tested without Qt.
+    """
+    return 1 if n_combo_items > 1 else 0
+
+
 def _toml_string(value: str) -> str:
     """Render ``value`` as a TOML basic string with proper escaping.
 

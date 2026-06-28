@@ -38,7 +38,7 @@ from services.pipeline_runner import (
     classify_log_line,
 )
 from services.pipeline_service import find_pipeline_script
-from services.remote_config import load_remotes
+from services.remote_config import default_remote_index, load_remotes
 from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
@@ -279,15 +279,15 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     "line",
                     f"[warn] could not reload remotes.toml: {exc}\n",
                 ))
-            # Try to re-select the previous remote; otherwise fall back
-            # to Local (index 0) which is always present.
-            if prev is not None:
-                for i in range(self._remote_cb.count()):
-                    if self._remote_cb.itemData(i) == prev:
-                        self._remote_cb.setCurrentIndex(i)
-                        break
-                else:
-                    self._remote_cb.setCurrentIndex(0)
+            # Re-select an explicit prior remote when it still exists; else use
+            # the default (first configured remote if any, else Local).
+            _default = default_remote_index(self._remote_cb.count())
+            for i in range(self._remote_cb.count()):
+                if prev is not None and self._remote_cb.itemData(i) == prev:
+                    self._remote_cb.setCurrentIndex(i)
+                    break
+            else:
+                self._remote_cb.setCurrentIndex(_default)
         finally:
             self._remote_cb.blockSignals(False)
         # Manually re-fire the dependent-control refresh since we

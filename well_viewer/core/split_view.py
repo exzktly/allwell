@@ -27,8 +27,11 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QComboBox, QSplitter, QWidget
+from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtWidgets import (
+    QAbstractButton, QApplication, QComboBox, QSplitter, QWidget,
+)
+from well_viewer.core.safe import swallowed
 
 from well_viewer.core import tab_controller
 from well_viewer.core.tab_controller import on_tab_change
@@ -169,59 +172,72 @@ def _resolve_focused_pane(app, obj):
     return None
 
 
-class _SplitFocusFilter(QObject):
-    """App-wide click watcher: while Split View is on, a mouse press anywhere
-    inside a pane makes that pane the focused one. Installed on enter, removed on
-    exit so it never fires against a torn-down app."""
+class _SplitFocusWatcher(QObject):
+    """Tracks the focused split pane via ``QApplication.focusChanged`` while
+    Split View is on, so clicking into a pane makes it the focused one.
+
+    This deliberately does **not** use a raw app-global ``installEventFilter``:
+    an event filter intercepts *every* ``QEvent``, and during the split-view
+    redraw / reparent churn Qt handed it a freed ``QEvent`` whose ``event.type()``
+    access-violated (a hard crash). ``focusChanged`` delivers only widget
+    pointers — never a raw ``QEvent`` — so it can't dangle the same way.
+    """
 
     def __init__(self, app) -> None:
         # No QObject parent: lifetime is held by ``app._split_focus_filter``.
         super().__init__()
         self._app = app
 
-    def eventFilter(self, obj, event):  # noqa: N802
-        if event.type() != QEvent.MouseButtonPress:
-            return False
+    def on_focus_changed(self, _old, new) -> None:  # noqa: N802 (Qt slot)
         try:
             active = bool(getattr(self._app, "_split_active", False))
         except RuntimeError:
-            return False  # underlying C++ app already deleted — nothing to do
-        if active:
-            try:
-                top = _resolve_focused_pane(self._app, obj)
-            except RuntimeError:
-                top = None
-            if top is not None:
-                # Defer the focus switch off the event-filter call stack.
-                # ``focus_split`` → ``on_tab_change`` reparents the split panes
-                # and re-runs the visible-tab refresh; doing that *inside*
-                # delivery of a MouseButtonPress mutated the widget tree mid-
-                # dispatch (and could re-enter the very redraw that posted this
-                # event — e.g. Image Table "Generate" recompositing the focused
-                # pane), corrupting Qt's event delivery → access-violation crash.
-                # Running it on the next event-loop turn lets the click finish
-                # delivering first. Idempotent: a no-op when focus is unchanged.
-                QTimer.singleShot(0, lambda t=top: focus_split(self._app, t))
-        return False
+            return  # underlying C++ app already deleted — nothing to do
+        if not active or new is None:
+            return
+        # Ignore focus landing on an action control (e.g. the Image Table
+        # "Generate" button): clicking a button inside a pane should not swap
+        # the shared sidebar away from the other pane. Only focus on pane
+        # *content* (plot canvas / table) switches the focused pane.
+        if isinstance(new, QAbstractButton):
+            return
+        try:
+            top = _resolve_focused_pane(self._app, new)
+        except RuntimeError:
+            top = None
+        if top is not None:
+            # Defer the focus switch: ``focus_split`` → ``on_tab_change``
+            # reparents the panes + re-runs the visible-tab refresh, which must
+            # not run synchronously inside focus delivery. Idempotent — a no-op
+            # when the focused pane is unchanged.
+            QTimer.singleShot(0, lambda t=top: focus_split(self._app, t))
 
 
 def _install_split_focus_filter(app) -> None:
-    filt = getattr(app, "_split_focus_filter", None)
-    if filt is None:
-        filt = _SplitFocusFilter(app)
-        app._split_focus_filter = filt
+    watcher = getattr(app, "_split_focus_filter", None)
+    if watcher is None:
+        watcher = _SplitFocusWatcher(app)
+        app._split_focus_filter = watcher
     qapp = QApplication.instance()
     if qapp is not None:
-        qapp.installEventFilter(filt)  # idempotent: Qt re-orders an existing one
+        # Idempotent: drop any prior connection before (re)connecting.
+        try:
+            qapp.focusChanged.disconnect(watcher.on_focus_changed)
+        except (RuntimeError, TypeError):
+            swallowed()  # not connected yet — fine
+        qapp.focusChanged.connect(watcher.on_focus_changed)
 
 
 def _remove_split_focus_filter(app) -> None:
-    filt = getattr(app, "_split_focus_filter", None)
-    if filt is None:
+    watcher = getattr(app, "_split_focus_filter", None)
+    if watcher is None:
         return
     qapp = QApplication.instance()
     if qapp is not None:
-        qapp.removeEventFilter(filt)
+        try:
+            qapp.focusChanged.disconnect(watcher.on_focus_changed)
+        except (RuntimeError, TypeError):
+            swallowed()  # already disconnected — fine
 
 
 # ── Entry-UI handlers ────────────────────────────────────────────────────────
@@ -360,9 +376,9 @@ def install_split_view(app) -> None:
         combo.currentIndexChanged.connect(lambda i: on_split_pane_combo_changed(app, i))
         app._split_toggle_btn = btn
         app._split_pane_combo = combo
-        # Sit just after the sidebar-collapse toggle (index 0).
-        top_layout.insertWidget(1, btn)
-        top_layout.insertWidget(2, combo)
+        # Sit at the right end of the top bar (after the stretch + Open).
+        top_layout.addWidget(btn)
+        top_layout.addWidget(combo)
 
     # 3. Make the centre resolvers split-aware.
     tab_controller.split_focus_provider = _focused_leaf

@@ -477,6 +477,17 @@ def restore(app, state: dict) -> None:
         except Exception:
             _logger.debug("view_state: metric combo sync failed", exc_info=True)
 
+    # Re-derive the value column from the *restored* channel + metric. The
+    # channel was restored above via set_active_channel, which derived
+    # active_val_col from the metric as it stood *before* this metric restore;
+    # the metric restore then field-set the metric (and synced combos) but left
+    # active_val_col stale. Without this the post-load redraw plots the wrong
+    # column until the user toggles the channel. sync_val_col skips ratio/shape.
+    try:
+        app._app_state.channel.sync_val_col()
+    except Exception:
+        _logger.debug("view_state: active_val_col re-derive failed", exc_info=True)
+
     # Stash per-tab state for deferred apply on first tab visit.
     tabs = state.get("tabs") or {}
     if isinstance(tabs, dict) and tabs:

@@ -215,3 +215,23 @@ def test_real_app_enter_exit_split(loaded_app):
     assert app._split_pane.count() == 0
     assert "Plotting" in app._notebook.pageNames()
     assert "Statistics" in app._notebook.pageNames()
+
+
+def test_dataset_reload_exits_split(loaded_app, mini_dataset):
+    """Loading a dataset while split is active must leave split first — the load
+    restores view-state + redraws against the single-notebook layout, which the
+    detached panes break (reported crash: Image Table | plot, then open dataset)."""
+    from well_viewer.core import split_view as sv
+
+    app = loaded_app
+    app._notebook.setCurrentByName("Plotting")
+    sv.enter_split(app, "Plotting", "Image Browser")
+    assert app._split_active is True
+
+    app._load_path(mini_dataset)  # reopen the same dataset
+
+    assert app._split_active is False
+    assert app._split_pane.count() == 0
+    # Notebook restored intact — no detached/dangling pages.
+    assert "Plotting" in app._notebook.pageNames()
+    assert "Image Browser" in app._notebook.pageNames()

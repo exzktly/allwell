@@ -154,6 +154,17 @@ def load_directory(app, d: Path, label=None) -> None:
         else:
             QMessageBox.warning(app, "No CSVs", f"No .csv files found in:\n{d}")
         return
+    # Leave Split View before swapping datasets: the load restores view-state
+    # (which navigates the notebook) and runs a full redraw, both of which assume
+    # the normal single-notebook layout — the detached split panes break it.
+    # Guarded so the feature stays one-line removable (``_split_active`` is never
+    # set when split_view isn't installed).
+    if getattr(app, "_split_active", False):
+        from well_viewer.core.split_view import (
+            exit_split, sync_split_toggle_button,
+        )
+        exit_split(app)
+        sync_split_toggle_button(app, False)
     # Save the outgoing dataset's view-state before swapping data dirs so
     # reopening it later restores tab / wells / channel selection.
     if app._app_state.dataset.data_dir is not None:

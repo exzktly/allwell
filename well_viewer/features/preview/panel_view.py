@@ -26,14 +26,15 @@ def _toolbar_separator(parent: QWidget) -> QFrame:
     sep.setFixedHeight(20)
     return sep
 
-from well_viewer.core.ui_helpers import btn_card, btn_danger, btn_secondary
+from well_viewer.core.ui_helpers import btn_card, btn_danger, btn_primary, btn_secondary
 from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
 from well_viewer.features.image_browser.review_image.controller import on_review_image_channel_selected
 from well_viewer.features.image_browser.review_image.renderer import (
-    refresh_review_image,
+    REVIEW_IMAGE_COLORMAP_CHOICES,
     render_review_image_display,
+    stage_review_image,
 )
 from widgets.stepper import Stepper
 from functools import partial
@@ -63,6 +64,18 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_well_lbl = QLabel("No well selected", ctrl)
     cl.addWidget(self._review_image_well_lbl)
 
+    # Generate: the controls below (well / FOV / timepoint / channel / LUT /
+    # colormap / source) only *stage* their state; pressing Generate renders
+    # the image with everything staged. This stops a large dataset from
+    # re-decoding on every twiddle. A trailing "•" marks pending changes.
+    self._review_image_generate_btn = btn_primary(
+        ctrl, "Generate", self._review_image_generate)
+    self._review_image_generate_btn.setToolTip(
+        "Render the image with the current well / FOV / timepoint / channel / "
+        "LUT / colormap / source. Settings are staged until you press this."
+    )
+    cl.addWidget(self._review_image_generate_btn)
+
     cl.addWidget(QLabel("Channel:", ctrl))
     self._review_image_chan_cb = QComboBox(ctrl)
     self._review_image_chan_cb.addItems(["GFP"])
@@ -76,7 +89,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_fov_menu = QComboBox(ctrl)
     self._review_image_fov_menu.addItems(["—"])
     self._review_image_fov_menu.currentIndexChanged.connect(
-        lambda _i: refresh_review_image(self)
+        lambda _i: stage_review_image(self)
     )
     cl.addWidget(self._review_image_fov_menu)
 
@@ -84,7 +97,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_tp_menu = QComboBox(ctrl)
     self._review_image_tp_menu.addItems(["—"])
     self._review_image_tp_menu.currentIndexChanged.connect(
-        lambda _i: refresh_review_image(self)
+        lambda _i: stage_review_image(self)
     )
     cl.addWidget(self._review_image_tp_menu)
     self._review_image_tp_var = self._review_image_tp_menu
@@ -197,6 +210,25 @@ def build_review_image_panel(self, parent: QWidget) -> None:
 
     lr.addWidget(btn_secondary(lut_row, "Auto LUT", self._review_image_auto_lut))
 
+    # Per-channel colormap override. "Tint (default)" (empty data) keeps the
+    # channel's tint look; any other choice renders the channel through that
+    # matplotlib colormap. Staged like the rest of the row — applied on Generate.
+    lr.addSpacing(12)
+    lr.addWidget(QLabel("Color:", lut_row))
+    self._review_image_colormap_cb = QComboBox(lut_row)
+    self._review_image_colormap_cb.addItem("Tint (default)", "")
+    for _cmap_name in REVIEW_IMAGE_COLORMAP_CHOICES:
+        self._review_image_colormap_cb.addItem(_cmap_name, _cmap_name)
+    self._review_image_colormap_cb.setToolTip(
+        "Colormap for the active channel. 'Tint (default)' keeps the channel's "
+        "tint; any other choice renders the channel through that colormap.\n"
+        "Applied on Generate."
+    )
+    self._review_image_colormap_cb.currentIndexChanged.connect(
+        lambda _i: self._review_image_commit_colormap()
+    )
+    lr.addWidget(self._review_image_colormap_cb)
+
     # ON/OFF intensity threshold quick-edit (the editor this row used to host;
     # see the comment above). Edits the active channel's ThreshFracOn — the same
     # value the Cell Gating tab and the Plotting quick-edit own — and re-renders,
@@ -219,7 +251,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # with Cell Gating / the plot quick-edit) and re-render so the binary
     # overlay updates live.
     self._review_thresh_frac_stepper.valueChanged.connect(
-        lambda v: (self._set_thresh_frac_on(v), refresh_review_image(self))
+        lambda v: (self._set_thresh_frac_on(v), stage_review_image(self))
     )
     lr.addWidget(self._review_thresh_frac_stepper)
     lr.addStretch(1)

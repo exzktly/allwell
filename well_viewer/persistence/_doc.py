@@ -41,6 +41,27 @@ def path_for(app) -> Optional[Path]:
     return None
 
 
+def delete(app) -> bool:
+    """Delete the dataset's ``persistence.json`` and drop the in-memory cache.
+
+    This wipes every persistence.json-backed domain (view state, per-row LUTs,
+    crop, plot groups, heatmap layouts, cell overrides, line order, ratios, QC
+    params) for the active data dir. The dataset's own files — including
+    ``pipeline_info.json`` (sample-definition labels) — are left untouched.
+    Returns ``True`` when a file was removed. Caller reloads the dataset.
+    """
+    p = path_for(app)
+    app._app_state.dataset.persistence_doc = None
+    if p is None or not p.exists():
+        return False
+    try:
+        p.unlink()
+        return True
+    except OSError:
+        _logger.warning("Failed to delete %s", p, exc_info=True)
+        return False
+
+
 def read(app) -> dict:
     """Return the cached persistence doc, populating from disk on first call.
 

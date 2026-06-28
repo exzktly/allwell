@@ -111,7 +111,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v7.4.11")
+        self._version_pill = QLabel("v7.4.12")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "
@@ -164,6 +164,18 @@ class AllWellApp(QMainWindow):
         self._present_btn.setToolTip("Presentation mode: toggle all plots screen ↔ publication")
         self._present_btn.toggled.connect(self._on_present_toggled)
         hl.addWidget(self._present_btn)
+
+        # Reset ALL persisted state for the dataset (more aggressive than the
+        # rotate-ccw "reset view"): deletes persistence.json and reloads, for
+        # when saved state gets into a bad state. Confirmed; data left intact.
+        self._reset_saves_btn = IconButton("trash-2")
+        self._reset_saves_btn.setToolTip(
+            "Reset all saved state for this dataset (selections, LUTs, crops, "
+            "plot groups, heatmap layouts, cell overrides, ratios, QC params) "
+            "and reload. Your data files and sample labels are left intact."
+        )
+        self._reset_saves_btn.clicked.connect(self._on_reset_saves_clicked)
+        hl.addWidget(self._reset_saves_btn)
 
         self._open_btn = IconButton("home")
         self._open_btn.setToolTip(
@@ -728,6 +740,40 @@ class AllWellApp(QMainWindow):
             return
         try:
             review._view_state_reset()
+        except Exception:
+            swallowed()  # was: pass (silent except)
+
+    def _on_reset_saves_clicked(self) -> None:
+        """Confirm, delete persistence.json, and reload the dataset fresh."""
+        review = self._review
+        if review is None:
+            return
+        cur = getattr(review, "_data_dir", None)
+        if not cur:
+            QMessageBox.information(
+                self, "No dataset", "Load a dataset before resetting saved state.")
+            return
+        resp = QMessageBox.question(
+            self,
+            "Reset all saved state?",
+            "This deletes ALL saved view/analysis state for this dataset — "
+            "selections, per-row LUTs, crop regions, plot groups, heatmap "
+            "layouts, cell overrides, ratios, and QC params — then reloads it "
+            "fresh.\n\nYour data files and sample-definition labels are left "
+            "untouched. This cannot be undone.\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if resp != QMessageBox.Yes:
+            return
+        try:
+            from well_viewer.persistence import _doc as _persist_doc
+            _persist_doc.delete(review)
+        except Exception:
+            swallowed()  # was: pass (silent except)
+        try:
+            if hasattr(review, "_load_path"):
+                review._load_path(Path(cur))
         except Exception:
             swallowed()  # was: pass (silent except)
 

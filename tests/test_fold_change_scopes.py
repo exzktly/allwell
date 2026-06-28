@@ -135,6 +135,35 @@ def test_flush_dirty_scopes_on_unrelated_tab_is_noop():
     assert app.redraws == []
 
 
+def test_redraw_scopes_or_defer_split_redraws_both_visible():
+    """Split View: with two scope tabs on screen, both redraw and neither is
+    left dirty — even though only one is the 'focused' tab."""
+    app = _TabbedApp(current_tab="Bar Plots")
+    app._visible_centre_tabs = lambda: {"Bar Plots", "Line Graphs"}
+    redraw_scopes_or_defer(app)
+    assert sorted(app.redraws) == ["bar", "line"]
+    assert app._app_state.plot.fc_dirty_scopes == set()
+
+
+def test_flush_dirty_scopes_split_drains_both_visible():
+    """A deferred redraw for each pane flushes when both panes are visible."""
+    app = _TabbedApp(current_tab="Batch Export")  # nothing visible yet
+    redraw_scopes_or_defer(app)
+    assert app._app_state.plot.fc_dirty_scopes == {"bar", "line"}
+    app._visible_centre_tabs = lambda: {"Bar Plots", "Line Graphs"}
+    flush_dirty_scopes(app)
+    assert sorted(app.redraws) == ["bar", "line"]
+    assert app._app_state.plot.fc_dirty_scopes == set()
+
+
+def test_visible_centre_tabs_falls_back_to_single_tab():
+    """Without ``_visible_centre_tabs`` the resolver uses the single active tab,
+    so non-split fan-out is byte-identical."""
+    from well_viewer.domain.fold_change_scopes import visible_scope_names
+    app = _TabbedApp(current_tab="Bar Plots")
+    assert visible_scope_names(app) == {"bar"}
+
+
 def test_register_fold_change_scope_replaces_existing():
     """Re-registering a scope updates its descriptor in place."""
     original = next(s for s in registered_scopes() if s.name == "bar")

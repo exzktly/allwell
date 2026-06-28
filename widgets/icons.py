@@ -74,6 +74,8 @@ _GLYPHS: dict[str, str] = {
                       '<circle cx="15" cy="14.5" r="0.5"/>'
                       '<circle cx="12" cy="11.5" r="0.5"/>'),
     "sigma":         '<path d="M18 7V5H6l6 7-6 7h12v-2"/>',
+    "columns-2":     ('<rect x="3" y="3" width="18" height="18" rx="2"/>'
+                      '<path d="M12 3v18"/>'),
     "layout-grid":   ('<rect x="3" y="3" width="7" height="7" rx="1"/>'
                       '<rect x="14" y="3" width="7" height="7" rx="1"/>'
                       '<rect x="3" y="14" width="7" height="7" rx="1"/>'

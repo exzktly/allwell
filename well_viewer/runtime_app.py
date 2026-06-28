@@ -199,7 +199,7 @@ from well_viewer.features.scatter.callbacks import open_scatter_cell_viewer
 from well_viewer.features.scatter.controller import col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display
 from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
 from well_viewer.features.stats.controller import stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change
-from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks, apply_sidebar_visibility, toggle_sidebar
+from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks, apply_sidebar_visibility, toggle_sidebar, visible_centre_tabs, is_tab_visible, enter_split, exit_split, sync_split_toggle_button, on_split_toggle_clicked, on_split_pane_combo_changed
 from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.features.preview.panel_view import refresh_fov_btn_state
@@ -424,7 +424,18 @@ class WellViewerApp(QWidget):
     def _on_section_nav_changed(self, key: str) -> None:
         if self._section_nav_building:
             return
+        # Navigating the rail leaves Split View (the panes are detached pages).
+        if getattr(self, "_split_active", False):
+            self._exit_split()
+            self._sync_split_toggle_button(False)
         self._notebook.setCurrentByName(key)
+
+    # ── Split View entry UI (bodies live in tab_controller) ───────────────
+    def _sync_split_toggle_button(self, checked: bool) -> None: return sync_split_toggle_button(self, checked)
+
+    def _on_split_toggle_clicked(self) -> None: return on_split_toggle_clicked(self)
+
+    def _on_split_pane_combo_changed(self, idx: int) -> None: return on_split_pane_combo_changed(self, idx)
 
 
     def _tab_history_back(self) -> None: return tab_history_back(self)
@@ -1000,6 +1011,14 @@ class WellViewerApp(QWidget):
     # ── Bar plot tab ──────────────────────────────────────────────────────────
 
     def _current_centre_tab(self) -> str: return current_centre_tab(self)
+
+    def _visible_centre_tabs(self) -> "set[str]": return visible_centre_tabs(self)
+
+    def _is_tab_visible(self, name: str) -> bool: return is_tab_visible(self, name)
+
+    def _enter_split(self, tab_a: str, tab_b: str) -> None: return enter_split(self, tab_a, tab_b)
+
+    def _exit_split(self) -> None: return exit_split(self)
 
 
     def _sync_heatmap_well_drag_mode(self, enable: bool) -> None: return sync_heatmap_well_drag_mode(self, enable)

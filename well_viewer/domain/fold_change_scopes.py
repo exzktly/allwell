@@ -67,22 +67,58 @@ def _dirty_set(app) -> "set[str]":
     return app._app_state.plot.fc_dirty_scopes
 
 
-def current_scope_name(app) -> "str | None":
-    """Name of the registered scope whose tab is currently visible.
+def _visible_tab_names(app) -> "frozenset[str]":
+    """Leaf tab names currently on screen.
 
-    Returns ``None`` when no fold-change tab is in focus (e.g. the
-    user is on Batch Export). In that case ``redraw_scopes_or_defer``
-    marks every scope dirty.
+    Prefers ``app._visible_centre_tabs`` (Split View shows two leaves at
+    once); falls back to the single ``app._current_centre_tab`` so non-split
+    behaviour — and the pure unit tests that only stub the latter — are
+    byte-identical.
     """
-    tab_getter = getattr(app, "_current_centre_tab", None)
-    if not callable(tab_getter):
+    multi = getattr(app, "_visible_centre_tabs", None)
+    if callable(multi):
+        try:
+            tabs = multi()
+            if tabs:
+                return frozenset(tabs)
+        except Exception:
+            from well_viewer.core.safe import swallowed
+            swallowed("fold_change_scopes: _visible_centre_tabs failed")
+    single = getattr(app, "_current_centre_tab", None)
+    if callable(single):
+        try:
+            tab = single()
+            if tab:
+                return frozenset((tab,))
+        except Exception:
+            return frozenset()
+    return frozenset()
+
+
+def visible_scope_names(app) -> "set[str]":
+    """Names of every registered scope whose tab is currently visible.
+
+    Normally a 0- or 1-element set; in Split View it can hold both a plot
+    scope and another pane's scope when each pane shows a fold-change tab.
+    """
+    tabs = _visible_tab_names(app)
+    if not tabs:
+        return set()
+    return {s.name for s in registered_scopes() if tabs.intersection(s.tab_names)}
+
+
+def current_scope_name(app) -> "str | None":
+    """Name of a registered scope whose tab is currently visible (or ``None``).
+
+    Retained for callers/tests that want a single scope; Split-View-aware
+    fan-out uses :func:`visible_scope_names` instead.
+    """
+    names = visible_scope_names(app)
+    if not names:
         return None
-    try:
-        tab_name = tab_getter()
-    except Exception:
-        return None
+    # Deterministic pick: registry order, so single-tab behaviour is stable.
     for scope in registered_scopes():
-        if tab_name in scope.tab_names:
+        if scope.name in names:
             return scope.name
     return None
 
@@ -120,10 +156,10 @@ def redraw_scopes_or_defer(app) -> None:
     ``flush_dirty_scopes`` is wired into the app's tab-change handler
     so a deferred redraw runs as soon as the user looks at the tab.
     """
-    visible = current_scope_name(app)
+    visible = visible_scope_names(app)
     dirty = _dirty_set(app)
     for scope in registered_scopes():
-        if scope.name == visible:
+        if scope.name in visible:
             _call_redraw(app, scope)
             dirty.discard(scope.name)
         else:
@@ -145,12 +181,12 @@ def redraw_scopes_after_load(app, *, default_redraw=None) -> None:
     * Every other scope is marked dirty, so it flushes the moment its tab is
       next viewed — the same defer-until-viewed contract as any other action.
     """
-    visible = current_scope_name(app)
+    visible = visible_scope_names(app)
     dirty = _dirty_set(app)
     for scope in registered_scopes():
         if default_redraw is not None and scope.redraw is default_redraw:
             dirty.discard(scope.name)
-        elif scope.name == visible:
+        elif scope.name in visible:
             _call_redraw(app, scope)
             dirty.discard(scope.name)
         else:
@@ -165,14 +201,15 @@ def flush_dirty_scopes(app) -> None:
     currently-visible leaf, and runs their redraw method if they're
     marked dirty.
     """
-    visible = current_scope_name(app)
-    if visible is None:
+    visible = visible_scope_names(app)
+    if not visible:
         return
     dirty = _dirty_set(app)
-    if visible not in dirty:
-        return
-    descriptor = get_scope(visible)
-    if descriptor is None:
-        return
-    dirty.discard(visible)
-    _call_redraw(app, descriptor)
+    for name in list(visible):
+        if name not in dirty:
+            continue
+        descriptor = get_scope(name)
+        if descriptor is None:
+            continue
+        dirty.discard(name)
+        _call_redraw(app, descriptor)

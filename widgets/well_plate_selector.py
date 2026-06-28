@@ -112,6 +112,7 @@ class _PlateGrid(QWidget):
     columnHeaderActivated = Signal(str)    # zero-padded column, e.g. "01"
     wellActivated = Signal(str)            # well id, e.g. "A07" (passive mode)
     wellDropped = Signal(str, str)         # (well id under cursor, payload token)
+    cornerToggled = Signal(bool)           # corner all/none in passive mode (True=all)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -190,7 +191,11 @@ class _PlateGrid(QWidget):
         return QRectF(cx - d / 2.0, cy - d / 2.0, d, d)
 
     def _corner_active(self) -> bool:
-        return self._mode == "select" and not self._single_select
+        # Shown in multi-select ("select") mode, and also in "passive" mode
+        # (replicate-set / group plotting) where it emits ``cornerToggled`` for
+        # the host to show/hide all groups — so the all/none toggle stays
+        # available even when per-well plate selection is disabled.
+        return self._mode in ("select", "passive") and not self._single_select
 
     def _enabled_keys(self) -> set[tuple[int, int]]:
         if self._enabled is None:
@@ -515,12 +520,16 @@ class _PlateGrid(QWidget):
             return
         kind = hit[0]
         if kind == "corner":
-            if self._mode != "select":
-                return
-            self.set_all(not self._corner_all_selected())
-            # Mirror the redraw-trigger semantics of a click-finish drag so
-            # downstream consumers re-render immediately.
-            self.selectionDragFinished.emit()
+            target = not self._corner_all_selected()
+            if self._mode == "select":
+                self.set_all(target)
+                # Mirror the redraw-trigger semantics of a click-finish drag so
+                # downstream consumers re-render immediately.
+                self.selectionDragFinished.emit()
+            elif self._mode == "passive":
+                # Group mode: the plate is passive, so let the host toggle group
+                # visibility (it decides all-vs-none from the actual groups).
+                self.cornerToggled.emit(target)
             return
         if kind == "row":
             if not self._rc_selectable:
@@ -924,6 +933,7 @@ class WellPlateSelector(QWidget):
     columnHeaderActivated = Signal(str)
     wellActivated = Signal(str)
     wellDropped = Signal(str, str)         # (well id under cursor, payload token)
+    cornerToggled = Signal(bool)           # corner all/none in passive mode (True=all)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -942,6 +952,7 @@ class WellPlateSelector(QWidget):
         self._grid.columnHeaderActivated.connect(self.columnHeaderActivated)
         self._grid.wellActivated.connect(self.wellActivated)
         self._grid.wellDropped.connect(self.wellDropped)
+        self._grid.cornerToggled.connect(self.cornerToggled)
         root.addWidget(self._grid, 1)
 
         self._actions = QHBoxLayout()

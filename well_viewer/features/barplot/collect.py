@@ -824,6 +824,10 @@ def _pooled_wells_for_fov_mode(app) -> List[str]:
                 seen.add(w)
                 out.append(w)
         return out
+    if app._app_state.selection.selections:
+        # Group mode but all groups hidden → no wells (don't resurrect the stale
+        # plate selection; see ordered_bar_keys).
+        return out
     for label in app._app_state.selection.selected_wells:
         if label in seen or label not in app._app_state.dataset.well_paths:
             continue

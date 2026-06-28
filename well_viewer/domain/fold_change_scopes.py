@@ -82,7 +82,8 @@ def _visible_tab_names(app) -> "frozenset[str]":
             if tabs:
                 return frozenset(tabs)
         except Exception:
-            pass
+            from well_viewer.core.safe import swallowed
+            swallowed("fold_change_scopes: _visible_centre_tabs failed")
     single = getattr(app, "_current_centre_tab", None)
     if callable(single):
         try:

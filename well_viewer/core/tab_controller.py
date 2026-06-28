@@ -452,6 +452,7 @@ def exit_split(app) -> None:
     app._split_active = False
     app._split_tab_a = app._split_tab_b = app._split_focused = None
     app._split_pane_widgets = {}
+    _remove_split_focus_filter(app)
     if split is not None:
         split.setVisible(False)
     if nb is not None:
@@ -507,8 +508,13 @@ class _SplitFocusFilter(QObject):
 
     def eventFilter(self, obj, event):  # noqa: N802
         from PySide6.QtCore import QEvent
-        if (event.type() == QEvent.MouseButtonPress
-                and getattr(self._app, "_split_active", False)):
+        if event.type() != QEvent.MouseButtonPress:
+            return False
+        try:
+            active = bool(getattr(self._app, "_split_active", False))
+        except RuntimeError:
+            return False  # underlying C++ app already deleted — nothing to do
+        if active:
             top = _resolve_focused_pane(self._app, obj)
             if top is not None:
                 focus_split(self._app, top)
@@ -516,14 +522,26 @@ class _SplitFocusFilter(QObject):
 
 
 def _install_split_focus_filter(app) -> None:
-    if getattr(app, "_split_focus_filter", None) is not None:
-        return
     from PySide6.QtWidgets import QApplication
-    filt = _SplitFocusFilter(app)
+    filt = getattr(app, "_split_focus_filter", None)
+    if filt is None:
+        filt = _SplitFocusFilter(app)
+        app._split_focus_filter = filt
     qapp = QApplication.instance()
     if qapp is not None:
-        qapp.installEventFilter(filt)
-    app._split_focus_filter = filt
+        qapp.installEventFilter(filt)  # idempotent: Qt re-orders an existing one
+
+
+def _remove_split_focus_filter(app) -> None:
+    """Detach the click watcher from the app — called on exit so it never fires
+    against a torn-down app (the cause of a teardown crash under the full suite)."""
+    filt = getattr(app, "_split_focus_filter", None)
+    if filt is None:
+        return
+    from PySide6.QtWidgets import QApplication
+    qapp = QApplication.instance()
+    if qapp is not None:
+        qapp.removeEventFilter(filt)
 
 
 def sync_split_toggle_button(app, checked: bool) -> None:

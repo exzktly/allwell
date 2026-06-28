@@ -559,11 +559,9 @@ def toggle_fov_replicates(app) -> None:
     app._refresh_fov_btn_state()
     app._refresh_bar_layout_btn_state()
     app._redraw()
-    # Redraw the bar pane too whenever it is on screen — in Split View it can be
-    # visible alongside another pane without being the focused tab.
+    # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
     _vis = getattr(app, "_is_tab_visible", None)
-    if (_vis("Bar Plots") if callable(_vis)
-            else app._current_centre_tab() == "Bar Plots"):
+    if _vis("Bar Plots") if callable(_vis) else app._current_centre_tab() == "Bar Plots":
         redraw_bars(app)
 
 

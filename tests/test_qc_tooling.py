@@ -510,7 +510,12 @@ def test_analyze_qc_section_present_and_gated():
     tab._qc_remove_debris_cb.setChecked(False)
     assert ra.isHidden()
 
-    # Background well still gates on the empty_well flat-field mode.
+    # Background well gates on the empty_well flat-field / background modes.
+    # Flat-field now defaults to empty_well, so the field starts enabled; drop to
+    # a non-empty_well pair to confirm the gate still disables it, then back.
+    assert tab._background_well_edit.isEnabled() is True
+    tab._flatfield_cb.setCurrentText("none")
+    tab._background_cb.setCurrentText("sliding_disk")
     assert tab._background_well_edit.isEnabled() is False
     tab._flatfield_cb.setCurrentText("empty_well")
     assert tab._background_well_edit.isEnabled() is True
@@ -531,20 +536,19 @@ def test_analyze_qc_section_present_and_gated():
     assert all(not r.isHidden() for r in tab._bg_radius_rows)
 
 
-def test_analyze_default_background_is_sliding_disk_end_to_end(qapp):
-    """Regression: the dropdown defaults to the isotropic sliding_disk (not the
-    square top_hat) and that selection survives all the way to the CLI args — so
-    a default run can't silently use the square method ("selected sliding-disk,
-    ran top_hat")."""
+def test_analyze_default_background_is_robust_mesh_end_to_end(qapp):
+    """Regression: the dropdown defaults to robust_mesh (sigma-clipped local
+    background on a coarse grid) and that selection survives all the way to the
+    CLI args — so a default run uses the configured default, not a stale one."""
     from analyze_tab import AnalyzeTab
     from services.pipeline_service import build_pipeline_args
     tab = AnalyzeTab()
-    assert tab._background_cb.currentText() == "sliding_disk"
+    assert tab._background_cb.currentText() == "robust_mesh"
     opts = tab._collect_run_options()
-    assert opts.get("background") == "sliding_disk"
+    assert opts.get("background") == "robust_mesh"
     a = build_pipeline_args(Path("/x/process_microscopy.py"),
                             Path("/in"), Path("/out"), opts)
-    assert a[a.index("--background") + 1] == "sliding_disk"
+    assert a[a.index("--background") + 1] == "robust_mesh"
 
 
 # ── background-well presence (empty_well requires a real, existing well) ──────

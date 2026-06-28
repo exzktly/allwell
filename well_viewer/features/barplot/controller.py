@@ -215,10 +215,11 @@ def render_bar_items(
                          linewidth=1, edgecolor=disabled_well_color,
                          linestyle="--", zorder=3)
 
-    ax_frac.axhline(0.5, color=border_color, lw=0.8, ls="--", alpha=0.5, zorder=1)
-    # Add threshold context label to fraction axis
-    ax_frac.text(0.02, 0.98, f"threshold={threshold:.2f}", transform=ax_frac.transAxes,
-                 fontsize=8, va="top", ha="left", color=warn_color, alpha=0.7)
+    if app is not None and getattr(app._app_state.plot, "show_threshold_line", False):
+        ax_frac.axhline(0.5, color=border_color, lw=0.8, ls="--", alpha=0.5, zorder=1)
+        # Add threshold context label to fraction axis
+        ax_frac.text(0.02, 0.98, f"threshold={threshold:.2f}", transform=ax_frac.transAxes,
+                     fontsize=8, va="top", ha="left", color=warn_color, alpha=0.7)
 
     axes_to_label = [ax_mean, ax_frac]
     if ax_n is not None:

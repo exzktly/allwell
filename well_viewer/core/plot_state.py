@@ -34,6 +34,11 @@ class PlotState:
     use_sem: bool = True
     use_fov_replicates: bool = False
     legend_visible: dict[str, bool] = field(default_factory=_default_legend)
+    # Show the ON/OFF threshold marker overlaid on plots (the vertical line /
+    # shaded band at ThreshFracOn on the Distribution, line-plot CDF, and smFISH
+    # plots, and the 0.5 reference + "threshold=" label on the bar Fraction
+    # panel). Off by default — opt in via the Properties sidebar.
+    show_threshold_line: bool = False
 
     bar_order: list | None = None
     line_order_rsets: list[str] = field(default_factory=list)

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.safe import swallowed
 
-from services.remote_config import load_remotes
+from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.run_dashboard import RunDashboard
 from widgets.wrap_checkbox import WrapCheckBox
@@ -438,6 +438,10 @@ class AnalyzeTabFormMixin:
         r = self._row(sec, "Flat-field correction")
         self._flatfield_cb = QComboBox(r)
         self._flatfield_cb.addItems(["none", "empty_well", "gaussian", "basic"])
+        # Default to empty_well (illumination from the Background well). The
+        # dropdown doesn't persist, so this build default is what fresh runs use;
+        # reprocessing a dataset still restores its saved pipeline_info value.
+        self._flatfield_cb.setCurrentText("empty_well")
         self._flatfield_cb.setToolTip(
             "Illumination (flat-field) correction — divides each channel by a "
             "mean-1 illumination field F (corrected = image / F) to even out "
@@ -462,10 +466,13 @@ class AnalyzeTabFormMixin:
         self._background_cb.addItems(
             ["none", "top_hat", "sliding_disk", "fov_median", "empty_well",
              "robust_mesh", "fft_bandpass"])
-        # Default to the isotropic sliding_disk: top_hat's square footprint leaves
-        # telltale square halos, and since the dropdown doesn't persist, a top_hat
-        # default meant runs silently used the square method unless re-selected.
-        self._background_cb.setCurrentText("sliding_disk")
+        # Default to robust_mesh: a sigma-clipped local background on a coarse
+        # grid (SExtractor/Background2D style), robust to bright/confluent objects
+        # on uneven background where morphological methods (top_hat's square
+        # halos, sliding_disk) struggle. The dropdown doesn't persist, so this
+        # build default is what fresh runs use; reprocessing restores the saved
+        # pipeline_info value.
+        self._background_cb.setCurrentText("robust_mesh")
         self._background_cb.setToolTip(
             "How background is subtracted (per channel, where enabled below):\n"
             "• none — no background subtraction.\n"
@@ -929,6 +936,9 @@ class AnalyzeTabFormMixin:
                 "line",
                 f"[warn] could not load remotes.toml: {exc}\n",
             ))
+        # Default to the first configured remote when any exist (else Local).
+        self._remote_cb.setCurrentIndex(
+            default_remote_index(self._remote_cb.count()))
         rl.addWidget(self._remote_cb)
         self._manage_remotes_btn = QPushButton("Manage…", remote_widget)
         self._manage_remotes_btn.setProperty("variant", "secondary")

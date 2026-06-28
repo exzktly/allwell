@@ -654,7 +654,11 @@ def toggle_sem(app) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
     app._redraw()
-    if app._current_centre_tab() == "Bar Plots":
+    # Redraw the bar pane too whenever it is on screen — in Split View it can be
+    # visible alongside another pane without being the focused tab.
+    _vis = getattr(app, "_is_tab_visible", None)
+    if (_vis("Bar Plots") if callable(_vis)
+            else app._current_centre_tab() == "Bar Plots"):
         from well_viewer.features.barplot.renderer import redraw_bars
         redraw_bars(app)
 

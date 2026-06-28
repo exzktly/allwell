@@ -31,29 +31,48 @@ def _active_tab(app) -> str:
         return ""
 
 
-def apply_selection_refresh(app) -> None:
-    """Refresh the sidebar and the active tab's view after a selection change.
+def _visible_tabs(app) -> "list[str]":
+    """Leaf names of every centre tab on screen (Split View shows two).
 
-    The subscriber body for the ``selection_changed`` bus signal: every
-    selection mutator emits the signal, and ``SelectionRefreshCoordinator``
-    runs this in response. It does more than a plot redraw — the sidebar
-    plate-map plus a per-tab view refresh — which is why it has its own
-    coordinator rather than sharing ``RedrawCoordinator``.
+    Prefers ``app._visible_centre_tabs``; falls back to the single active tab
+    so the non-split path is unchanged.
     """
-    app._refresh_sidebar_map()
+    getter = getattr(app, "_visible_centre_tabs", None)
+    if callable(getter):
+        try:
+            tabs = list(getter())
+            if tabs:
+                return tabs
+        except Exception:
+            swallowed()  # was: pass (silent except)
     tab = _active_tab(app)
+    return [tab] if tab else []
+
+
+def _refresh_tab_view(app, tab: str, *, redrew: bool) -> bool:
+    """Refresh one visible tab's view after a selection change.
+
+    ``redrew`` carries whether the generic line/distribution/heat-map redraw
+    (``app._redraw``) already ran this pass; the return value updates it so two
+    generic-redraw panes split side-by-side don't redraw the shared figures
+    twice. Non-generic branches return ``redrew`` unchanged.
+    """
     if tab == "Bar Plots":
         app._update_bar_tp_menu()
         redraw_bars(app)
+        return redrew
     elif tab == "Scatter Plot":
         update_scatter_menus(app)
         from well_viewer.features.scatter.tab_view import scatter_redraw_active
         scatter_redraw_active(app)
+        return redrew
     elif tab == "Review CSV":
         app._refresh_review_csv()
+        return redrew
     elif tab == "smFISH":
         from well_viewer.features.smfish.tab_view import smfish_sync_from_app
         smfish_sync_from_app(app)
+        return redrew
     elif tab == "Sample Definitions":
         # Cell Gating is a sub-tab here; refresh its CDF if the user has
         # opened it at least once.
@@ -62,8 +81,30 @@ def apply_selection_refresh(app) -> None:
             cell_gating_load_cell_areas(app)
         # Don't fall through to _redraw — labels-and-groups edits don't
         # require a plot redraw.
+        return redrew
     else:
-        app._redraw()
+        if not redrew:
+            app._redraw()
+        return True
+
+
+def apply_selection_refresh(app) -> None:
+    """Refresh the sidebar and every visible tab's view after a selection change.
+
+    The subscriber body for the ``selection_changed`` bus signal: every
+    selection mutator emits the signal, and ``SelectionRefreshCoordinator``
+    runs this in response. It does more than a plot redraw — the sidebar
+    plate-map plus a per-tab view refresh — which is why it has its own
+    coordinator rather than sharing ``RedrawCoordinator``.
+
+    With Split View a single change can touch two panes, so the per-tab
+    refresh runs for each visible leaf; off split this is exactly one tab and
+    the behaviour is unchanged.
+    """
+    app._refresh_sidebar_map()
+    redrew = False
+    for tab in _visible_tabs(app):
+        redrew = _refresh_tab_view(app, tab, redrew=redrew)
 
 
 class SelectionRefreshCoordinator(QObject):

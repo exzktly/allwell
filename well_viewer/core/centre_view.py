@@ -52,19 +52,58 @@ class NamedPageStack(QStackedWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # ``_names`` is rebuilt to track the live stack order; ``_by_name`` holds
+        # only currently-attached pages; ``_page_order`` is the canonical add
+        # order (kept across detach/reattach so Split View can restore it).
         self._names: list[str] = []
         self._by_name: dict[str, QWidget] = {}
+        self._page_order: list[str] = []
         super().currentChanged.connect(self._emit_name)
+
+    def _rebuild_names(self) -> None:
+        """Resync ``_names`` to the live stack order (after add/detach/reattach)."""
+        names = []
+        for i in range(self.count()):
+            w = self.widget(i)
+            names.append(next((n for n, wid in self._by_name.items() if wid is w), ""))
+        self._names = names
 
     def addPage(self, name: str, widget: QWidget) -> int:  # noqa: N802
         idx = self.addWidget(widget)
-        # Pad / overwrite the name list to keep indices aligned with the
-        # underlying QStackedWidget order.
-        while len(self._names) <= idx:
-            self._names.append("")
-        self._names[idx] = name
         self._by_name[name] = widget
+        if name not in self._page_order:
+            self._page_order.append(name)
+        self._rebuild_names()
         return idx
+
+    def detachPage(self, name: str) -> "QWidget | None":  # noqa: N802
+        """Remove a page from the stack and return its widget (kept alive).
+
+        Used by Split View to move a page into the side-by-side splitter. The
+        canonical add order is preserved in ``_page_order`` so ``reattachPage``
+        can restore the original position.
+        """
+        w = self._by_name.pop(name, None)
+        if w is None:
+            return None
+        self.removeWidget(w)
+        w.setParent(None)
+        self._rebuild_names()
+        return w
+
+    def reattachPage(self, name: str, widget: QWidget) -> None:  # noqa: N802
+        """Re-insert a previously detached page at its original relative slot."""
+        insert_at = 0
+        for nm in self._page_order:
+            if nm == name:
+                break
+            if nm in self._by_name:
+                insert_at += 1
+        self.insertWidget(insert_at, widget)
+        self._by_name[name] = widget
+        if name not in self._page_order:
+            self._page_order.append(name)
+        self._rebuild_names()
 
     def setCurrentByName(self, name: str) -> bool:  # noqa: N802
         w = self._by_name.get(name)
@@ -106,6 +145,21 @@ def build_centre(app, parent: QWidget) -> None:
     app._notebook = NamedPageStack(parent)
     app._notebook.setObjectName("CentreTabs")
     layout.addWidget(app._notebook, 1)
+
+    # Split View host: a hidden sibling of the notebook. enter_split detaches
+    # two pages into it and hides the notebook; exit_split reverses that. Shown
+    # XOR the notebook. (Review-Analyze / _central_pane_stack stay untouched.)
+    from PySide6.QtWidgets import QSplitter as _QSplitter
+    app._split_pane = _QSplitter(Qt.Horizontal, parent)
+    app._split_pane.setObjectName("CentreSplit")
+    app._split_pane.setChildrenCollapsible(False)
+    app._split_pane.hide()
+    layout.addWidget(app._split_pane, 1)
+    app._split_active = False
+    app._split_tab_a = None
+    app._split_tab_b = None
+    app._split_focused = None
+    app._split_pane_widgets = {}
 
     # Map tab title -> deferred builder. Populated below; drained after the
     # window paints. The tab-change handler also calls into this map so a

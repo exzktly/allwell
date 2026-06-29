@@ -35,10 +35,15 @@ from well_viewer.core.plot_style import figure_prefs
 import theme
 from widgets.collapsible_section import CollapsibleSection
 from widgets.toggle_switch import ToggleSwitch
-from well_viewer.features.barplot.renderer import redraw_bars
-from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
-from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
-from well_viewer.features.scatter.gating import clear_gates, rename_gate, set_gate_draw_mode
+from well_viewer.core.lazy import lazy as _lazy
+# Lazy so the Export Style sidebar imports without barplot / scatter present
+# (keeps those features deletable); resolves on first call.
+redraw_bars = _lazy("well_viewer.features.barplot.renderer", "redraw_bars")
+redraw_scatter_agg_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_agg_orchestrate")
+redraw_scatter_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_orchestrate")
+clear_gates = _lazy("well_viewer.features.scatter.gating", "clear_gates")
+rename_gate = _lazy("well_viewer.features.scatter.gating", "rename_gate")
+set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw_mode")
 from well_viewer.core.safe import swallowed
 
 

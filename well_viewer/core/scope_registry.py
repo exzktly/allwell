@@ -12,25 +12,34 @@ Called once from ``core/bus_wiring.wire_event_bus``.
 from __future__ import annotations
 
 
-def register_default_scopes() -> None:
-    """Register the bar + line fold-change scopes.
+def register_default_scopes(app=None) -> None:
+    """Register the fold-change redraw scopes.
 
-    Idempotent — re-registering replaces the prior descriptor, so calling
-    this twice (e.g. in tests) is safe.
+    The *feature-owned* scopes (currently just ``bar``) are sourced from the
+    feature registry's ``fold_change_scope_factory`` descriptors — so a feature
+    removed from ``features.registry.FEATURES`` drops its scope automatically and
+    this module imports no feature. The remaining scopes (line / distribution /
+    heat map) use the core ``redraw_app`` default and stay inline.
+
+    Idempotent — re-registering replaces the prior descriptor, so calling this
+    twice (e.g. in tests) is safe.
     """
     from well_viewer.domain.fold_change_scopes import (
         FoldChangeScope, register_fold_change_scope,
     )
-    from well_viewer.features.barplot.renderer import redraw_bars
     from well_viewer.core.plot_orchestrator import redraw_app
 
-    register_fold_change_scope(FoldChangeScope(
-        name="bar",
-        ctrl_combo_attr="_fc_ctrl_combo_bar",
-        baseline_combo_attr="_fc_baseline_combo_bar",
-        redraw=redraw_bars,
-        tab_names=("Bar Plots",),
-    ))
+    # Feature-contributed scopes (e.g. bar). Resolve from the app's registry
+    # when available; otherwise build a transient one so direct callers (tests)
+    # still get the feature scopes registered.
+    feats = getattr(app, "_features", None) if app is not None else None
+    if feats is None:
+        from well_viewer.features.registry import build_feature_registry
+        feats = build_feature_registry()
+    for _desc in feats.all():
+        if _desc.fold_change_scope_factory is not None:
+            register_fold_change_scope(_desc.fold_change_scope_factory())
+
     register_fold_change_scope(FoldChangeScope(
         name="line",
         ctrl_combo_attr="_fc_ctrl_combo_line",

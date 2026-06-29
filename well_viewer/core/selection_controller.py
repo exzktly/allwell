@@ -3,19 +3,35 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject
-from well_viewer.features.barplot.renderer import redraw_bars
-from well_viewer.features.scatter.controller import update_scatter_menus
-from well_viewer.features.grouping.view import rep_panel_refresh
-from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.safe import swallowed
 
-# Tabs that keep per-well plate selection even when replicate sets / stat groups
-# exist (rep-set mode otherwise makes the plate passive). Sample Definitions and
-# Review CSV need user-chosen wells for Cell Gating / Add Prefix / row-loading;
-# the Cell Browser draws its gallery from the active well selection, so single
-# replicate wells must be pickable there too (otherwise plate clicks are dropped
-# and "wells stay unselected").
-_PER_WELL_TABS = ("Sample Definitions", "Review CSV", "Cell Browser")
+# Selection-behaviour fallbacks for registry-less callers (e.g. lightweight test
+# mocks). The real app always resolves these from the feature registry's
+# ``per_well_selection`` / ``single_well_selection`` descriptor flags — see the
+# helpers below; these tuples only seed the fallback.
+#
+# Per-well tabs keep per-well plate selection even when replicate sets / stat
+# groups exist (rep-set mode otherwise makes the plate passive): Sample
+# Definitions / Review CSV need user-chosen wells for Cell Gating / Add Prefix /
+# row-loading, and the Cell Browser draws its gallery from the active selection.
+_PER_WELL_TAB_NAMES = ("Sample Definitions", "Review CSV", "Cell Browser")
+_SINGLE_WELL_TAB_NAMES = ("smFISH",)
+
+
+def _is_per_well_tab(app, tab_name: str) -> bool:
+    feats = getattr(app, "_features", None)
+    if feats is not None:
+        d = feats.get(tab_name)
+        return bool(d and d.per_well_selection)
+    return tab_name in _PER_WELL_TAB_NAMES
+
+
+def _is_single_well_tab(app, tab_name: str) -> bool:
+    feats = getattr(app, "_features", None)
+    if feats is not None:
+        d = feats.get(tab_name)
+        return bool(d and d.single_well_selection)
+    return tab_name in _SINGLE_WELL_TAB_NAMES
 
 
 def _active_tab(app) -> str:
@@ -65,35 +81,18 @@ def _refresh_tab_view(app, tab: str, *, redrew: bool) -> bool:
     generic-redraw panes split side-by-side don't redraw the shared figures
     twice. Non-generic branches return ``redrew`` unchanged.
     """
-    if tab == "Bar Plots":
-        app._update_bar_tp_menu()
-        redraw_bars(app)
+    # Per-tab selection refresh is dispatched through the feature registry's
+    # ``on_selection_changed`` hooks (bodies relocated from this ladder, see
+    # ``features/registry.py``). A hook returns without a generic redraw (the
+    # feature refreshed its own view), so ``redrew`` is unchanged; tabs with no
+    # hook fall through to the shared ``app._redraw()``.
+    desc = app._features.get(tab) if hasattr(app, "_features") else None
+    if desc is not None and desc.on_selection_changed is not None:
+        desc.on_selection_changed(app)
         return redrew
-    elif tab == "Scatter Plot":
-        update_scatter_menus(app)
-        from well_viewer.features.scatter.tab_view import scatter_redraw_active
-        scatter_redraw_active(app)
-        return redrew
-    elif tab == "Review CSV":
-        app._refresh_review_csv()
-        return redrew
-    elif tab == "smFISH":
-        from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-        smfish_sync_from_app(app)
-        return redrew
-    elif tab == "Sample Definitions":
-        # Cell Gating is a sub-tab here; refresh its CDF if the user has
-        # opened it at least once.
-        if hasattr(app, "_cell_gating_fluor_gate_edits"):
-            from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
-            cell_gating_load_cell_areas(app)
-        # Don't fall through to _redraw — labels-and-groups edits don't
-        # require a plot redraw.
-        return redrew
-    else:
-        if not redrew:
-            app._redraw()
-        return True
+    if not redrew:
+        app._redraw()
+    return True
 
 
 def apply_selection_refresh(app) -> None:
@@ -141,7 +140,7 @@ def on_plate_sel_change(app) -> None:
     sel.commit_plate_change()
     if hasattr(app, "_notebook"):
         tab = app._notebook.currentName()
-        if tab == "smFISH" and len(sel.selected_wells) > 1:
+        if _is_single_well_tab(app, tab) and len(sel.selected_wells) > 1:
             keep = (sel.last_sel if sel.last_sel in sel.selected_wells
                     else next(iter(sel.selected_wells)))
             sel.selected_wells = {keep}
@@ -273,7 +272,7 @@ def on_sidebar_plate_selection_changed(app, ids) -> None:
         tab_name = app._current_centre_tab()
     except Exception:
         tab_name = ""
-    per_well_tab = tab_name in _PER_WELL_TABS
+    per_well_tab = _is_per_well_tab(app, tab_name)
     if app._app_state.selection.selections and not per_well_tab:
         return  # rep-set mode: the plate is passive; its selection is unused
     # Keep the invariant _selected_wells ⊆ _well_paths.
@@ -296,7 +295,7 @@ def on_sidebar_plate_drag_finished(app) -> None:
         tab_name = app._current_centre_tab()
     except Exception:
         tab_name = ""
-    per_well_tab = tab_name in _PER_WELL_TABS
+    per_well_tab = _is_per_well_tab(app, tab_name)
     if app._app_state.selection.selections and not per_well_tab:
         return
     # Cancel any pending deferred commit from the paint events that
@@ -445,6 +444,7 @@ def labels_apply_affix(app, *, where: str) -> None:
     sidebar's plate selection is used as a fallback.
     """
     from well_viewer.core.ui_helpers import ask_name_dialog
+    from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 
     grid = getattr(app, "_lbl_grid", None)
     grid_sel: list[str] = []
@@ -553,7 +553,7 @@ def refresh_sidebar_map_now(app) -> None:
         tab_name = app._current_centre_tab()
     except Exception:
         tab_name = ""
-    per_well_tab = tab_name in _PER_WELL_TABS
+    per_well_tab = _is_per_well_tab(app, tab_name)
     rep_mode = bool(app._app_state.selection.selections) and not per_well_tab
 
     colors: Dict[str, object] = {}
@@ -578,7 +578,7 @@ def refresh_sidebar_map_now(app) -> None:
             # sub-tabs of "Image Browser". Either way the top-level current name
             # isn't the leaf, so descend via ``_current_centre_tab`` to recover
             # the leaf name.
-            smfish = app._current_centre_tab() == "smFISH"
+            smfish = _is_single_well_tab(app, app._current_centre_tab())
         except Exception:
             smfish = False
 
@@ -742,6 +742,8 @@ def groups_centre_refresh(app) -> None:
             swallowed()  # was: pass (silent except)
 
     if tab_visible:
+        from well_viewer.features.grouping.label_grid_view import label_grid_refresh
+        from well_viewer.features.grouping.view import rep_panel_refresh
         rep_panel_refresh(app)
         label_grid_refresh(app)
     app._rep_refresh_map()
@@ -800,6 +802,7 @@ def rebuild_all(app) -> None:
     Always synchronous — no debounce — because it is only called on
     explicit user actions (button clicks / dialog OK), never during drag.
     """
+    from well_viewer.features.barplot.renderer import redraw_bars
     app._invalidate_stats_cache()
     app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
@@ -890,7 +893,7 @@ def select_invert(app) -> None:
 
 def invalidate_stats_cache(app) -> None:
     """Discard cached group statistics. Call whenever group definitions change."""
-    app._app_state.stats.cache: dict = {}
+    app._app_state.stats_cache.invalidate()
     # Replicate-set visibility may have shifted, so re-check whether the
     # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
     if hasattr(app, "_refresh_fov_btn_state"):
@@ -899,7 +902,10 @@ def invalidate_stats_cache(app) -> None:
     # the Review Image include map mirrors. Bumping the version key
     # forces the next refresh to recompute the include map (cheap)
     # while reusing the cached image arrays + boundary mask (expensive).
-    app._app_state.review_image.override_version += 1
+    # No-op when Image Browser is disabled (no review_image slice).
+    _review_image = app._app_state.feature_slice("review_image")
+    if _review_image is not None:
+        _review_image.override_version += 1
 
 
 
@@ -1009,6 +1015,7 @@ def plate_commit_deferred(app) -> None:
 
 def labels_clear_all(app) -> None:
     if app._app_state.dataset.well_labels:
+        from well_viewer.features.grouping.label_grid_view import label_grid_refresh
         app._app_state.dataset.well_labels.clear()
         label_grid_refresh(app)
         app._invalidate_stats_cache()

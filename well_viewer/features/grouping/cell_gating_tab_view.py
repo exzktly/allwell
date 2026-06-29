@@ -49,10 +49,13 @@ from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll,
 )
 from well_viewer.data.data_loading import resolve_value_series
-from well_viewer.features.image_browser.review_image.controller import apply_review_overrides_to_cache
-from well_viewer.features.scatter.gating import compute_gate_inclusion
 from well_viewer.features.qc.tab_view import build_qc_gate_controls
 from well_viewer.core.safe import swallowed
+from well_viewer.core.lazy import lazy as _lazy
+# Lazy so Cell Gating imports without Image Browser / scatter present (keeps both
+# deletable); resolves on first call.
+apply_review_overrides_to_cache = _lazy("well_viewer.features.image_browser.review_image.controller", "apply_review_overrides_to_cache")
+compute_gate_inclusion = _lazy("well_viewer.features.scatter.gating", "compute_gate_inclusion")
 
 
 logger = logging.getLogger("well_viewer.gating_worker")

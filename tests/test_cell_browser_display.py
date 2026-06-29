@@ -29,10 +29,13 @@ def test_resolve_channel_tint_override_and_default():
 
 
 def test_per_well_tabs_includes_cell_browser():
-    from well_viewer.core.selection_controller import _PER_WELL_TABS
+    from well_viewer.features.registry import build_feature_registry
 
     # Cell Browser must allow per-well plate selection even with replicate sets;
-    # the pre-existing per-well tabs stay in the list.
-    assert "Cell Browser" in _PER_WELL_TABS
-    assert "Sample Definitions" in _PER_WELL_TABS
-    assert "Review CSV" in _PER_WELL_TABS
+    # the per-well behaviour now lives on each feature's descriptor
+    # (``per_well_selection``) rather than a hard-coded tab-name set.
+    reg = build_feature_registry()
+    per_well = {d.name for d in reg.all() if d.per_well_selection}
+    assert "Cell Browser" in per_well
+    assert "Sample Definitions" in per_well
+    assert "Review CSV" in per_well

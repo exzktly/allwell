@@ -147,6 +147,93 @@ def test_nothing_imports_wellviewerapp_at_runtime():
     )
 
 
+# ── no module-scope import of a removable feature, anywhere (removability) ────
+
+# Support libs under features/ that are always present (not removable rail tabs):
+# importing THEM at module scope is fine. Everything else under features/ is a
+# removable feature whose package must be importable-on-demand only.
+_SUPPORT_LIBS = {"export", "preview", "crop", "qc"}
+
+
+def _feature_pkg_of(path: Path):
+    """The ``features/<pkg>`` package a file belongs to, or None if not under
+    features/."""
+    parts = path.relative_to(WELL_VIEWER).parts
+    if len(parts) >= 2 and parts[0] == "features":
+        return parts[1]
+    return None
+
+
+def _removable_feature_imports(tree: ast.Module, importer_pkg):
+    """``(lineno, target_pkg)`` for every module-scope ``from
+    well_viewer.features.<F>`` where F is a *removable* feature and the import is
+    not intra-feature (importer already lives in F). Function-local imports and
+    ``if TYPE_CHECKING:`` blocks are allowed (not module-body children)."""
+    out = []
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        mod = node.module or ""
+        if not mod.startswith("well_viewer.features."):
+            continue
+        target = mod.split(".")[2]
+        if target == "registry" or target in _SUPPORT_LIBS:
+            continue
+        if target == importer_pkg:  # intra-feature import — allowed
+            continue
+        out.append((node.lineno, target))
+    return out
+
+
+def test_no_module_scope_imports_of_removable_features():
+    """Every removable feature (every ``features/<X>`` except the support libs
+    ``export`` / ``preview`` / ``crop`` / ``qc`` and the assembly module
+    ``registry.py``) must be importable on demand only: nothing may
+    ``from well_viewer.features.<X> import …`` at module scope, except inside
+    ``features/registry.py`` (the sanctioned lazy-wrapper assembly point) and
+    intra-feature imports. This is what makes a feature removable by commenting
+    its descriptor out — AND deletable from disk — without breaking startup."""
+    offenders = []
+    for path in _walk_py(WELL_VIEWER):
+        if path.name == "__init__.py" and _feature_pkg_of(path) is None:
+            pass  # well_viewer/__init__.py — still scanned below
+        # features/registry.py is the one allowed module-scope importer.
+        if path == WELL_VIEWER / "features" / "registry.py":
+            continue
+        importer_pkg = _feature_pkg_of(path)
+        for lineno, target in _removable_feature_imports(_parse(path), importer_pkg):
+            offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno} -> well_viewer.features.{target}")
+    assert not offenders, (
+        "Module-scope import of a removable feature — make it function-local "
+        "(lazy), use the existing runtime_app `_lazy(...)` proxy, or move shared "
+        "code to a lower layer (core/data). This import would break the feature's "
+        "removal/deletion:\n  " + "\n  ".join(sorted(offenders))
+    )
+
+
+def test_disabling_a_leaf_feature_drops_it_everywhere():
+    """Commenting a descriptor out of ``FEATURES`` removes the feature's rail
+    entry, dispatch, and state slice — with no dangling references. Exercised on
+    a leaf feature (Review CSV) by filtering the registry and asserting it
+    vanishes from every surface the core consults."""
+    from well_viewer.core.app_state import AppState
+    from well_viewer.core.feature_registry import FeatureRegistry
+    from well_viewer.features.registry import attach_feature_state, build_feature_registry
+
+    full = build_feature_registry()
+    assert full.get("Review CSV") is not None  # present by default
+
+    pruned = FeatureRegistry(d for d in full.all() if d.name != "Review CSV")
+    # Gone from lookup, group enumeration, and every hook fan-out.
+    assert pruned.get("Review CSV") is None
+    assert "Review CSV" not in {d.name for d in pruned.in_group("Data")}
+    assert "Review CSV" not in {d.name for d in pruned.with_hook("on_activate")}
+    # State attach still works and contributes the same non-Review slices.
+    state = AppState()
+    attach_feature_state(state, pruned)
+    assert hasattr(state, "bar") and hasattr(state, "stats")
+
+
 # ── EventBus signal catalogue is capped ───────────────────────────────────────
 
 def test_event_bus_signal_catalogue_is_capped():
@@ -191,6 +278,10 @@ FEATURE_NAME_EXCEPTIONS = {
     # image_table row/column add+remove helpers (and the Add-column dialog),
     # paired with image_table/controller.py.
     "grid_ops.py",
+    # the feature registry: the single assembly point for FeatureDescriptors and
+    # the sole sanctioned importer of well_viewer.features.* (the import-inversion
+    # seam) — not a per-feature module, so it sits outside the naming scheme.
+    "registry.py",
 }
 
 

@@ -22,4 +22,4 @@ def wire_event_bus(app, bus) -> None:
 
     RedrawCoordinator(app, bus)
     SelectionRefreshCoordinator(app, bus)
-    register_default_scopes()
+    register_default_scopes(app)

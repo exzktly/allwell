@@ -23,9 +23,12 @@ from typing import List, Tuple
 
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.batch_models import BarGroup
-from well_viewer.features.lineplot.controller import (
-    LineSeries, _aggpoint_to_linepoint,
-)
+from well_viewer.core.lazy import lazy as _lazy
+# Lazy so batch export imports without lineplot present (keeps it deletable).
+# LineSeries is a class — the proxy is callable so constructor calls work; the
+# annotations are strings under ``from __future__ import annotations`` above.
+LineSeries = _lazy("well_viewer.features.lineplot.controller", "LineSeries")
+_aggpoint_to_linepoint = _lazy("well_viewer.features.lineplot.controller", "_aggpoint_to_linepoint")
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group
 

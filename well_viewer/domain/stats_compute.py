@@ -154,8 +154,8 @@ def compute_rep_stats(
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
                   app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())))
-    if cache_key in app._app_state.stats.cache:
-        return app._app_state.stats.cache[cache_key]
+    if cache_key in app._app_state.stats_cache.cache:
+        return app._app_state.stats_cache.cache[cache_key]
 
     gm, gerr, gf, ferr = well_aggregate_stats(
         app,
@@ -167,7 +167,7 @@ def compute_rep_stats(
     )
 
     result = (gm, gerr, gf, ferr)
-    app._app_state.stats.cache[cache_key] = result
+    app._app_state.stats_cache.cache[cache_key] = result
     return result
 
 
@@ -190,8 +190,8 @@ def compute_rep_per_fov_stats(
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
                  use_sem, app._app_state.channel.active_val_col,
                  tuple(sorted(fluor_gates.items())))
-    if cache_key in app._app_state.stats.cache:
-        return app._app_state.stats.cache[cache_key]
+    if cache_key in app._app_state.stats_cache.cache:
+        return app._app_state.stats_cache.cache[cache_key]
 
     frames = []
     for lbl in rset.wells:
@@ -210,7 +210,7 @@ def compute_rep_per_fov_stats(
 
     if not frames:
         result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
-        app._app_state.stats.cache[cache_key] = result
+        app._app_state.stats_cache.cache[cache_key] = result
         return result
 
     pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
@@ -237,7 +237,7 @@ def compute_rep_per_fov_stats(
         )
     else:
         result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
-    app._app_state.stats.cache[cache_key] = result
+    app._app_state.stats_cache.cache[cache_key] = result
     return result
 
 
@@ -254,8 +254,8 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
     cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
                  app._app_state.channel.active_val_col,
                  tuple(sorted(fluor_gates.items())))
-    if cache_key in app._app_state.stats.cache:
-        return app._app_state.stats.cache[cache_key]
+    if cache_key in app._app_state.stats_cache.cache:
+        return app._app_state.stats_cache.cache[cache_key]
 
     total = 0
     for lbl in rset.wells:
@@ -271,7 +271,7 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
         if matched:
             # AggPoint index 4 = n_above; index 5 = n_total.
             total += int(matched[0][4])
-    app._app_state.stats.cache[cache_key] = total
+    app._app_state.stats_cache.cache[cache_key] = total
     return total
 
 
@@ -291,8 +291,8 @@ def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
     cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
                  threshold, use_sem, app._app_state.channel.active_val_col,
                  tuple(sorted(fluor_gates.items())))
-    if cache_key in app._app_state.stats.cache:
-        return app._app_state.stats.cache[cache_key]
+    if cache_key in app._app_state.stats_cache.cache:
+        return app._app_state.stats_cache.cache[cache_key]
 
     vals: List[float] = []
     for lbl in rset.wells:
@@ -316,7 +316,7 @@ def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
     else:
         mean, spread = 0.0, 0.0
     result = (mean, spread)
-    app._app_state.stats.cache[cache_key] = result
+    app._app_state.stats_cache.cache[cache_key] = result
     return result
 
 

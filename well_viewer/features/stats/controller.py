@@ -326,7 +326,10 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         err: Optional[str] = None
         try:
             if test.startswith("t-test"):
-                res = _st.ttest_ind(vals_a, vals_b, equal_var=False)
+                # "pooled" / "Student" → equal-variance (pooled) t-test;
+                # otherwise Welch's unequal-variance t-test (the default).
+                pooled = ("pooled" in test.lower()) or ("student" in test.lower())
+                res = _st.ttest_ind(vals_a, vals_b, equal_var=pooled)
                 stat_name = "t"
             elif test.startswith("Wilcoxon"):
                 res = _st.ranksums(vals_a, vals_b)
@@ -392,7 +395,11 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
 
     # N7: store structured pairwise results so the Bar plot can draw significance
     # brackets from the same comparison (text output above is unchanged). The
-    # BH-adjusted p is preferred where available, else the raw p.
+    # BH-adjusted p is preferred where available, else the raw p. We also store
+    # each group's WELLS so the bar plot can match a comparison to a bar by
+    # membership — robust to the Statistics groups and the bar replicate-sets
+    # having different names (matching by name alone silently drew nothing).
+    group_wells = {g.name: sorted(g.wells) for g in app._app_state.stats.groups}
     stats_pairwise: list[dict] = []
     for idx, (name_a, name_b, _sname, _sval, p, err) in enumerate(pair_results):
         if err is not None or p is None:
@@ -400,6 +407,8 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         stats_pairwise.append({
             "a": name_a,
             "b": name_b,
+            "a_wells": group_wells.get(name_a, []),
+            "b_wells": group_wells.get(name_b, []),
             "p": float(p),
             "p_adj": float(adjusted.get(idx, p)),
             "test": str(test),

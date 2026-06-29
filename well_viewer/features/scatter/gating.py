@@ -553,13 +553,32 @@ def set_gate_draw_mode(app, on: bool) -> None:
         return
     sel = getattr(app, "_scatter_gate_selector", None)
     if on:
-        if sel is None:
+        # Always rebuild the selector against the CURRENT axes. A cached selector
+        # is bound to whatever ``_ax_scatter`` was when it was made, and an
+        # intervening redraw (``ax.clear()`` on overlay, or a full ``fig.clear()``
+        # rebuild in "Separate axes" mode) leaves it stale — useblit keeps a
+        # background snapshot of the old axes and its drag artists were removed.
+        # Reusing it captured drag coordinates against the dead axes, so the
+        # FIRST gate (fresh selector) was correct but every later gate (and any
+        # gate in faceted mode, where the figure is rebuilt) came out wrong.
+        # Discarding + recreating each arm guarantees a clean selector on the
+        # live axes.
+        if sel is not None:
             try:
-                sel = _make_selector(app, ax)
+                sel.set_active(False)
             except Exception:
                 swallowed()
-                return
-            app._scatter_gate_selector = sel
+            try:
+                sel.disconnect_events()
+            except Exception:
+                swallowed()
+        try:
+            sel = _make_selector(app, ax)
+        except Exception:
+            swallowed()
+            app._scatter_gate_selector = None
+            return
+        app._scatter_gate_selector = sel
         try:
             sel.set_active(True)
         except Exception:

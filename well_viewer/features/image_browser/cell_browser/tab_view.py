@@ -79,6 +79,16 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(boundary_cb)
     ctx.app._cell_browser_boundary_cb = boundary_cb
 
+    # N9: caption each crop with the active channel's smFISH spot count. Staged
+    # like the other display controls — applied on Generate.
+    label_spot_cb = QCheckBox("Spot counts", ctrl)
+    label_spot_cb.setChecked(False)
+    label_spot_cb.setToolTip(
+        "Label each cell with the active channel's smFISH spot count "
+        "(its <channel>_smfish_count). Sort by that metric to rank cells by count.")
+    cl.addWidget(label_spot_cb)
+    ctx.app._cell_browser_label_spot_cb = label_spot_cb
+
     # Source: which stage of the fluorescence image to crop from. Raw (default)
     # or Corrected (top-hat). Staged like the rest — applied on Generate.
     from widgets.segmented_control import SegmentedControl as _SegmentedControl

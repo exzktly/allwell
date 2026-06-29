@@ -154,6 +154,7 @@ well_viewer/
 │   ├── load_controller.py, tab_controller.py, selection_controller.py,
 │   │   channel_state_controller.py
 │   ├── plot_orchestrator.py, plot_style.py
+│   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs (N5)
 │   ├── ui_helpers.py, debug_flags.py, status_signal.py
 ├── data/                          ← IO + decode
 │   ├── data_loading.py, image_discovery.py, image_resolver.py,
@@ -769,8 +770,8 @@ owning its own invariants (behaviour lives *in* the type, not just data):
 | `ChannelState` | active channel / metric / ratio catalogue / threshold range — `set_active_channel` keeps `active_val_col` consistent | `core/channel_state.py` |
 | `SelectionState` | plate selection + the saved-selections ("v2") model; composes `selections_model` | `core/selection_state.py` |
 | `DatasetState` | data dir, well paths, row cache, canonical timepoint / FOV lists, `pipeline_info` | `core/dataset_state.py` |
-| `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization | `core/plot_state.py` |
-| `StatsState` | Statistics-tab comparison groups + result cache | `features/stats/state.py` |
+| `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization, the bar **significance-bracket** toggle (`show_significance`, N7), and the shared **focus timepoint** (`focus_timepoint`, N5 — the one cross-tab timepoint the Heat Map slider / Distribution combo read/write, synced via `core/timepoint_sync.py`) | `core/plot_state.py` |
+| `StatsState` | Statistics-tab comparison groups + the structured **pairwise** results (`pairwise`, N7 — fed to the Bar plot's significance brackets). The group-statistics result cache lives in core (`AppState.stats_cache`), not here. | `features/stats/state.py` |
 | `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview image maps (`fluor` / `overlay` / `mask`) shared by the Segmentation review-image and Image Table | `features/image_browser/review_image/state.py` |
 | `ImageViewState` | Cross-view image display shared by the image viewers. The per-channel display LUT (`lut_by_channel`), so a brightness tuned in Review Image is the default an *auto* Image Table row inherits (per-row edits override). The **Cell Browser** participates too: its `LUT ▾` popover edits the same `lut_by_channel` (blank = auto per crop), and a per-channel **display colour** (`tint_by_channel`, `get_tint`/`set_tint`) overrides the additive composite tint a channel is painted with (`worker.resolve_channel_tint` — override wins, else the fixed per-index palette) | `core/image_view_state.py` |
 | `PlaygroundState` | Playground frame selection + chosen correction method/params, per-source LUT memory, frame-local binary threshold, QC size cleanup, and zoom/pan + caches | `features/image_browser/playground/state.py` |

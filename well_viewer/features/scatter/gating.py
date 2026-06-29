@@ -432,11 +432,14 @@ def _notify_gates_changed(app) -> None:
     """Tell listeners the gate set changed so their gate-count UI stays accurate
     after a gate is drawn / cleared / deleted.
 
-    Two independent listeners may register: the Properties sidebar's
-    ``_scatter_gate_count_cb`` (the "N gate(s)" label) and the Cell Gating tab's
-    ``_scatter_gates_changed_cb`` (its scatter-gate summary). Both are optional.
+    Three independent listeners may register: the Properties sidebar's
+    ``_scatter_gate_count_cb`` (the "N gate(s)" label), the Cell Gating tab's
+    ``_scatter_gates_changed_cb`` (its scatter-gate summary), and the Cell
+    Browser's ``_cell_browser_gates_changed_cb`` (the live gate-sourced gallery,
+    N1). All are optional.
     """
-    for attr in ("_scatter_gate_count_cb", "_scatter_gates_changed_cb"):
+    for attr in ("_scatter_gate_count_cb", "_scatter_gates_changed_cb",
+                 "_cell_browser_gates_changed_cb"):
         cb = getattr(app, attr, None)
         if callable(cb):
             try:

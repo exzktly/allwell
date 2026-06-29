@@ -1069,7 +1069,11 @@ class BatchExportPanel(QWidget):
         self._groups = self._groups_from_rep_sets()
         self._auto_named_group_ids.clear()
         self._active_grp = 0 if self._groups else -1
-        self._refresh_group_list()
+        # In sidebar-groups mode there is no local group editor list to refresh
+        # (the left panel is skipped in _build_ui); groups are resolved live
+        # from the rep-sets at export time via _groups_for_export().
+        if not self._use_sidebar_groups:
+            self._refresh_group_list()
 
     def _groups_from_rep_sets(self) -> List[BarGroup]:
         return [BarGroup(r.name, members=[r]) for r in self._app._rep_sets_loaded()]

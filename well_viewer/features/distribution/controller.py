@@ -187,6 +187,34 @@ def _setup_axes(app, n_axes: int):
     return axes
 
 
+def _sync_distribution_tp_to_focus(app) -> None:
+    """Move the timepoint combo to the shared focus timepoint (N5) when one is
+    set and present, so a timepoint chosen on another plotting tab (Heat Map)
+    drives this redraw. Signals blocked so the silent sync never re-fires the
+    combo handler. No-op when no focus is set."""
+    from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
+    focus = current_focus_tp(app)
+    if focus is None:
+        return
+    cb = getattr(app, "_distribution_tp_cb", None)
+    if cb is None:
+        return
+    items = [cb.itemText(i) for i in range(cb.count())]
+    tps = []
+    for t in items:
+        try:
+            tps.append(float(t))
+        except (ValueError, TypeError):
+            tps.append(float("nan"))
+    i = nearest_index(tps, focus)
+    if i is not None and 0 <= i < cb.count() and cb.currentIndex() != i:
+        blocked = cb.blockSignals(True)
+        try:
+            cb.setCurrentIndex(i)
+        finally:
+            cb.blockSignals(blocked)
+
+
 def redraw_distribution(app) -> None:
     """Redraw the Distribution tab."""
     canvas = getattr(app, "_distribution_canvas", None)
@@ -198,6 +226,7 @@ def redraw_distribution(app) -> None:
     fluor_gates = app._get_all_fluor_gates()
     ratios = app._app_state.channel.ratio_index
 
+    _sync_distribution_tp_to_focus(app)
     tp_str = (getattr(app, "_distribution_tp_var", None).currentText()
               if getattr(app, "_distribution_tp_var", None) is not None else "")
     try:

@@ -390,11 +390,37 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
 
     app._stats_write_result("\n".join(lines))
 
+    # N7: store structured pairwise results so the Bar plot can draw significance
+    # brackets from the same comparison (text output above is unchanged). The
+    # BH-adjusted p is preferred where available, else the raw p.
+    stats_pairwise: list[dict] = []
+    for idx, (name_a, name_b, _sname, _sval, p, err) in enumerate(pair_results):
+        if err is not None or p is None:
+            continue
+        stats_pairwise.append({
+            "a": name_a,
+            "b": name_b,
+            "p": float(p),
+            "p_adj": float(adjusted.get(idx, p)),
+            "test": str(test),
+        })
+    app._app_state.stats.pairwise = stats_pairwise
+
     if is_ks:
         draw_ks_cdf_fn(group_vals, tp_str)
         app._stats_fig_frame.setVisible(True)
     else:
         app._stats_fig_frame.setVisible(False)
+
+    # If significance brackets are enabled, nudge the Bar plot to repaint with
+    # the fresh results (live in a Stats+Bar Split View; otherwise the bar scope
+    # is marked dirty and repaints when next shown). Bus-only — no feature import
+    # from this controller (keeps the deferred-import budget intact, G5/§5.9).
+    if app._app_state.plot.show_significance:
+        try:
+            app._event_bus.plot_options_changed.emit(app._app_state.plot)
+        except Exception:
+            swallowed()
 
 
 # ── Stats tab group-editor helpers (extracted from runtime_app) ──────────────

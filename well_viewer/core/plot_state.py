@@ -66,6 +66,19 @@ class PlotState:
     # beeswarm path).
     bar_err_kind: str = "sem"
     bar_show_mode: str = "mean_spread"
+    # Draw significance brackets (from the Statistics tab's pairwise results)
+    # between bars on the Bar plot. Off by default; toggled from the bar
+    # Display popover. Only rendered when the plot is in grouped/pooled mode and
+    # the bar keys match the compared group names. (N7)
+    show_significance: bool = False
+
+    # Shared "focus timepoint" across the plotting tabs (N5). The single
+    # cross-tab timepoint the single-timepoint tabs (Heat Map slider,
+    # Distribution combo) read/write, and the default the multi-select tabs
+    # (Bar / Scatter) seed from. ``None`` means "not yet chosen" — each tab
+    # falls back to its own default (earliest / first available). Stored as the
+    # dataset's timepoint-hours float so it is comparable across tabs.
+    focus_timepoint: float | None = None
 
     fc_vs_control_on: bool = False
     fc_control_label: str = ""

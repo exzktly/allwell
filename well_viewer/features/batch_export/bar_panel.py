@@ -51,6 +51,9 @@ class BarBatchExportPanel(BatchExportPanel):
     ) -> None:
         super().__init__(app, parent, use_sidebar_groups=use_sidebar_groups)
 
+    def _compute_persist_key(self) -> str:
+        return "bar"
+
     def _build_output_panel(self, layout: QVBoxLayout) -> None:
         self._build_output_header_and_io(layout)
         self._build_channel_row(layout, attr="_bar_channel_cb")

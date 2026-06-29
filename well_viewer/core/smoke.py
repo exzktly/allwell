@@ -8,11 +8,13 @@ under-cover for the real GUI:
   * a mis-wired lazy import proxy (``core/lazy.py``) — a typo'd target name or a
     moved symbol only surfaces on first click otherwise.
 
-It builds the app, force-builds every top-level tab + the Plotting and Image
-Browser sub-tabs, then resolves every registered lazy proxy and confirms each is
-an importable callable. Prints ``[PASS]`` / ``[FAIL]`` per check and returns a
-process exit code (0 = all passed). Runs under the offscreen Qt platform, so it
-works in CI and over SSH with no display.
+It takes an already-constructed ``WellViewerApp`` (the composition root
+``allwell.py`` builds it and passes it in — this module never imports the app
+itself, which the ``test_nothing_imports_wellviewerapp_at_runtime`` guardrail
+forbids under ``well_viewer/``). It force-builds every top-level tab + the
+Plotting and Image Browser sub-tabs, then resolves every registered lazy proxy
+and confirms each is an importable callable. Prints ``[PASS]`` / ``[FAIL]`` per
+check and returns a process exit code (0 = all passed).
 
 Invoke via ``python allwell.py --smoke`` (optionally ``--data_dir <dir>`` to load
 a dataset first and exercise the data paths too).
@@ -25,16 +27,17 @@ import traceback
 from pathlib import Path
 
 
-def _force_offscreen() -> None:
-    # Only when no display is configured — respect an explicit platform choice.
+def force_offscreen() -> None:
+    """Default to the offscreen Qt platform when no display is configured, so
+    ``--smoke`` works in CI / over SSH. Call before constructing QApplication."""
     if not os.environ.get("QT_QPA_PLATFORM") and not os.environ.get("DISPLAY") \
             and not os.environ.get("WAYLAND_DISPLAY"):
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 
-def run_smoke(data_dir: "str | Path | None" = None) -> int:
-    """Run the smoke checks; return 0 if all pass, else 1."""
-    _force_offscreen()
+def run_smoke(app, data_dir: "str | Path | None" = None) -> int:
+    """Run the smoke checks against *app* (a built ``WellViewerApp``); return 0
+    if all pass, else 1."""
     from PySide6.QtWidgets import QApplication
 
     qapp = QApplication.instance() or QApplication([])
@@ -52,16 +55,7 @@ def run_smoke(data_dir: "str | Path | None" = None) -> int:
             record(name, False, traceback.format_exc(limit=3).strip().splitlines()[-1])
             return False
 
-    # 1. Construct the Review app (registry build + state attach + UI).
-    holder: dict = {}
-
-    def _construct():
-        from well_viewer.runtime_app import WellViewerApp
-        holder["app"] = WellViewerApp()
-
-    if not step("construct WellViewerApp", _construct):
-        return _report(checks)
-    app = holder["app"]
+    record("construct WellViewerApp", app is not None)
 
     # Optional: load a dataset so data-dependent build paths run for real.
     if data_dir:

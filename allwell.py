@@ -1069,8 +1069,14 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.smoke:
-        from well_viewer.core.smoke import run_smoke
-        sys.exit(run_smoke(args.data_dir))
+        # Composition root builds the app and hands it to the self-test (the
+        # smoke module must not import WellViewerApp itself — see the
+        # test_nothing_imports_wellviewerapp_at_runtime guardrail).
+        from well_viewer.core.smoke import force_offscreen, run_smoke
+        force_offscreen()
+        QApplication.instance() or QApplication(sys.argv)
+        from well_viewer import WellViewerApp
+        sys.exit(run_smoke(WellViewerApp(), args.data_dir))
 
     app = QApplication.instance() or QApplication(sys.argv)
     _install_combobox_popup_widener()

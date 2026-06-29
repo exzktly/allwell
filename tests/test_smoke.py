@@ -13,7 +13,10 @@ import pytest
 @pytest.mark.slow
 def test_smoke_self_test_passes(qtbot):
     from well_viewer.core.smoke import run_smoke
-    assert run_smoke() == 0
+    from well_viewer.runtime_app import WellViewerApp
+    app = WellViewerApp()
+    qtbot.addWidget(app)
+    assert run_smoke(app) == 0
 
 
 def test_verify_lazy_imports_detects_broken_proxy():

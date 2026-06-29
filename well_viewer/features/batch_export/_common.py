@@ -6,7 +6,9 @@ import logging
 
 from ui.theme import PLOT_BG, PLOT_SPN, WARN, get_color
 from well_viewer.domain.batch_models import BarGroup
-from well_viewer.features.barplot.controller import render_bar_items as _bar_render_items
+from well_viewer.core.lazy import lazy as _lazy
+# Lazy so batch export imports without barplot present (keeps it deletable).
+_bar_render_items = _lazy("well_viewer.features.barplot.controller", "render_bar_items")
 from well_viewer.data.data_loading import (
     _all_fluor_values,
     extract_well_token as _extract_well_token,

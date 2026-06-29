@@ -493,11 +493,32 @@ so building the registry pulls no heavy deps.
 **To remove a feature, comment out its line in `FEATURES`.** Its rail entry,
 dispatch, state slice, fold-change scope, and persistence drop out together, with
 no other edit and no startup error — the same one-line-removable property §5.10
-gives Split View, now generalized. (Leaf features — Review CSV, Distribution,
-Saved Plots, the smFISH tab — are cleanly removable today;
-`test_disabling_a_leaf_feature_drops_it_everywhere` guards Review CSV. Image
-Browser is not yet leaf-removable: `load_controller` still reads its
-`preview` / `review_image` state slices unconditionally — tracked as follow-up.)
+gives Split View, generalized to **every** Review feature.
+
+Every removable feature also tolerates having its package **deleted** from disk,
+not just commented out. Three mechanisms make this hold (and three guards keep it
+from regressing):
+
+- **Incidental feature-state access from core** is read through
+  `AppState.feature_slice(name)`, which returns `None` when the feature is
+  disabled (the slice was never attached) — so e.g. Image Browser's
+  `preview` / `review_image` / `image_table` accesses in dataset-load,
+  stats-cache-invalidation, and channel-switch no-op cleanly.
+- **Genuinely-shared state / utilities don't live on a feature slice.** The
+  group-statistics result cache is core (`core/stats_cache_state.py`,
+  `AppState.stats_cache`), not the Statistics feature's `StatsState`; the
+  dataset-level `get_all_timepoints` lives in `data/data_loading.py`, not
+  `scatter`.
+- **No module-scope import of a removable feature exists** outside
+  `features/registry.py`. Core/`runtime_app`/inter-feature delegates are bound
+  through the `core/lazy.py` proxy (resolves on first call) or imported
+  function-locally, so importing any module never imports a removable feature.
+  Support libs (`export`, `preview`, `crop`, `qc`) are always present.
+
+Guards: `test_no_module_scope_imports_of_removable_features` (repo-wide import
+rule), `test_disabling_a_leaf_feature_drops_it_everywhere`, and
+`tests/test_feature_removal.py` (full-app boot+load comment-out *and*
+`sys.meta_path` deletion tests for Image Browser, Statistics, scatter, barplot).
 
 One module sits in `domain/` rather than under a feature package:
 `domain/fold_change_controls.py` exposes

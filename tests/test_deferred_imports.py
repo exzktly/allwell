@@ -49,7 +49,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # _refresh_tab_view ladder, and channel_state_controller's channel fan-out all
 # moved their deferred feature imports into features/registry.py (excluded above),
 # net-dropping the core count.
-MAX_DEFERRED_FEATURE_IMPORTS = 124
+# Raised to 131 making every feature deletable: the six plot tabs + distribution
+# now defer their saved_plots `wire_save_to_gallery` import (Saved Plots is a
+# removable feature, so it can't be imported at module scope). The other
+# inter-feature decouplings use the core/lazy.py proxy (a call, not an import
+# statement), so they add nothing here.
+MAX_DEFERRED_FEATURE_IMPORTS = 131
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

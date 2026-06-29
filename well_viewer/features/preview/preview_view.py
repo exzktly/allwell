@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
-from well_viewer.features.image_browser.review_image.renderer import update_preview
+from well_viewer.core.lazy import lazy as _lazy
+# Lazy so the preview picker imports without Image Browser present (keeps it deletable).
+update_preview = _lazy("well_viewer.features.image_browser.review_image.renderer", "update_preview")
 
 
 def build_preview_picker(app, parent: QWidget) -> None:
@@ -40,10 +42,13 @@ def build_preview_picker(app, parent: QWidget) -> None:
     app._sidebar_preview_plate = plate
 
     def _on_plate_changed(ids) -> None:
-        tok = next((w for w in ids if w in app._app_state.dataset.well_paths), None)
-        if tok == app._app_state.preview.selected_well:
+        _preview = app._app_state.feature_slice("preview")
+        if _preview is None:
             return
-        app._app_state.preview.selected_well = tok
+        tok = next((w for w in ids if w in app._app_state.dataset.well_paths), None)
+        if tok == _preview.selected_well:
+            return
+        _preview.selected_well = tok
         app._refresh_preview_picker()
         update_preview(app, tok)
     plate.selectionChanged.connect(_on_plate_changed)
@@ -64,8 +69,11 @@ def build_preview_picker(app, parent: QWidget) -> None:
 
 
 def refresh_preview_picker(app, **_kw) -> None:
+    _preview = app._app_state.feature_slice("preview")
+    if _preview is None:  # Image Browser disabled — no preview state
+        return
     plate = getattr(app, "_sidebar_preview_plate", None)
-    sel = app._app_state.preview.selected_well
+    sel = _preview.selected_well
     if plate is not None:
         plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
         plate.setSelectedWellIds([sel] if sel and sel in app._app_state.dataset.well_paths else [])

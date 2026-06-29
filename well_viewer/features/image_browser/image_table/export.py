@@ -27,7 +27,6 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     _row_cmap_name,
     _row_log_scale,
 )
-from well_viewer.features.saved_plots.controller import save_plot_from_card
 
 
 def _export_opts(app) -> Dict[str, Any]:
@@ -455,5 +454,6 @@ def image_table_save_to_gallery(app) -> None:
     cols = len(cells[0]) if rows and cells[0] else 0
     label = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
 
+    from well_viewer.features.saved_plots.controller import save_plot_from_card
     status = save_plot_from_card(app, "Image Table", buf.getvalue(), label)
     app._set_status(status)

@@ -44,20 +44,10 @@ def timepoint_color_map(timepoints) -> Dict[float, Any]:
     return {tp: cmap(v) for tp, v in zip(tps, np.linspace(0, 1, len(tps)))}
 
 
-def get_all_timepoints(app) -> List[float]:
-    """Extract all unique included timepoints across loaded wells."""
-    timepoints: set = set()
-    for label in app._app_state.dataset.well_paths:
-        df = app._get_rows(label)
-        if df is None or df.empty or "timepoint_hours" not in df.columns:
-            continue
-        # include_gate=False: the per-cell scatter is where gates are drawn, so it
-        # must keep showing the full cloud (+ the gates) instead of filtering
-        # itself by Gate_Pass. Every other view applies the gate via the default.
-        mask = df_included_mask(df, include_gate=False)
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
-        timepoints.update(float(t) for t in tp.dropna().unique())
-    return sorted(timepoints)
+# ``get_all_timepoints`` is a dataset-level helper shared by scatter /
+# distribution / heat map, so it lives in the data layer now; re-exported here
+# for the existing ``scatter.collect`` / ``scatter.controller`` import paths.
+from well_viewer.data.data_loading import get_all_timepoints  # noqa: F401
 
 
 def collect_scatter_data(

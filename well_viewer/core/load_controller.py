@@ -187,7 +187,12 @@ def load_directory(app, d: Path, label=None) -> None:
     if _image_table is not None:
         _image_table.image_cache = {}
         _image_table.last_render = {}
-    if hasattr(app, "_invalidate_review_image_frame_cache"):
+    # Gate on the review_image slice, not hasattr(method): runtime_app defines
+    # _invalidate_review_image_frame_cache unconditionally (a lazy shim), so the
+    # hasattr is always true — the slice is the real "Image Browser present" test.
+    if app._app_state.feature_slice("review_image") is not None and hasattr(
+        app, "_invalidate_review_image_frame_cache"
+    ):
         app._invalidate_review_image_frame_cache()
     # Drop every cached ZipFile handle on dataset swap so the new
     # dataset's per-well zips aren't read through a previous

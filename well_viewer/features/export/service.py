@@ -9,15 +9,12 @@ from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
-# Scatter data collection lives in the pure-data ``scatter.collect`` module, so
-# the CSV export imports it *downward* at module scope (T2). Before the collectors
-# were split out of ``scatter.controller`` this had to be a function-local import
-# to dodge the scatter↔export cycle.
-from well_viewer.features.scatter.collect import (
-    collect_scatter_agg_data as _scatter_collect_agg_data,
-    collect_scatter_data as _scatter_collect_data,
-)
-from well_viewer.features.barplot.renderer import resolve_bar_timepoints
+from well_viewer.core.lazy import lazy as _lazy
+# Bound lazily so export imports without scatter / barplot present — keeps those
+# features deletable. Each proxy resolves its target on first call.
+_scatter_collect_agg_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_agg_data")
+_scatter_collect_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_data")
+resolve_bar_timepoints = _lazy("well_viewer.features.barplot.renderer", "resolve_bar_timepoints")
 
 
 _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"

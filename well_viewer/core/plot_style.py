@@ -356,6 +356,11 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             for cap in (cap_lines or ()):
                 cap_ids.add(id(cap))
         for ln in ax.lines:
+            if getattr(ln, "_aw_no_style_override", False):
+                # Decorative annotation lines (e.g. significance brackets) opt
+                # out entirely — stamping the data marker/linestyle on them turns
+                # a flat bracket into a row of circles.
+                continue
             if id(ln) in cap_ids:
                 # Error-bar cap markers have their own intrinsic capsize-
                 # based sizing + a default "_" / "|" marker that signals

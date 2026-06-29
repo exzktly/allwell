@@ -647,11 +647,19 @@ def _on_gate_drawn(app, eclick, erelease) -> None:
     # this to turn a gate into an inclusion mask). The active columns are already
     # cached on the last redraw — see scatter.controller.redraw_scatter.
     cache = getattr(app, "_scatter_interaction_cache", None) or {}
+    # Snapshot the wells the scatter was showing when the gate was drawn, so a
+    # downstream consumer (the Cell Browser gate-source gallery) can honour the
+    # gate's well context instead of an independent selection. Empty ⇒ "all".
+    try:
+        drawn_wells = sorted(app._app_state.selection.selected_wells)
+    except Exception:
+        drawn_wells = []
     # Auto-name silently (Gate 1, Gate 2, …); rename via the sidebar gate list.
     app._scatter_gates.append({
         "x0": x0, "y0": y0, "x1": x1, "y1": y1,
         "x_col": cache.get("col_x"), "y_col": cache.get("col_y"),
         "name": _next_gate_name(app),
+        "wells": drawn_wells,
     })
     _notify_gates_changed(app)
     # One gate per arming: exit create mode so the next press edits/clicks

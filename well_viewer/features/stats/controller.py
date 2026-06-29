@@ -412,6 +412,10 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             "p": float(p),
             "p_adj": float(adjusted.get(idx, p)),
             "test": str(test),
+            # Which measure was tested, so the bar plot draws the brackets on the
+            # matching panel ("fraction" → the On-fraction panel, else the Mean
+            # panel) rather than always on the Mean panel.
+            "stat": str(statistic),
         })
     app._app_state.stats.pairwise = stats_pairwise
 

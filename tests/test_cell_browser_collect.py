@@ -228,3 +228,37 @@ def test_scatter_gate_mode_empty_timepoints_relax_to_all():
         label_spot_count=False, scatter_gate_mode=True)
     cells = collect_cells(app, [], timepoints=[])
     assert len(cells) == 4
+
+
+def test_scatter_gate_choices_filter_to_named_gates():
+    # Two gates drawn; the sidebar picks only "G1" → only G1's cells appear.
+    app = _app(_df())
+    app._scatter_gates = [
+        _gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0, name="G1"),
+        _gate("gfp_mean_intensity", "area_px", 0.0, 60.0, 0.0, 1000.0, name="G2"),
+    ]
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=True)
+    app._cell_browser_gate_choices = {"G1"}  # exclude G2 (which would add nid 13, gfp 50)
+    cells = collect_cells(app, [])
+    assert sorted(c.nucleus_id for c in cells) == ["11", "12"]  # G1 only, not 13
+    # None ⇒ all gates → G1 ∪ G2 brings in nid 13 (gfp 50) and 10 (gfp 100? no, 100>60)
+    app._cell_browser_gate_choices = None
+    cells = collect_cells(app, [])
+    assert "13" in {c.nucleus_id for c in cells}  # G2 contributes the low-gfp cell
+
+
+def test_gate_mode_sources_from_stamped_wells_not_selection():
+    # Gate stamped with well A01; the live selection includes B02 too, but the
+    # gallery must honour the gate's wells (A01 only).
+    app = _app(_df())
+    app._app_state.dataset.well_paths = {"A01": None, "B02": None}
+    app._app_state.selection.selected_wells = ["A01", "B02"]
+    g = _gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)
+    g["wells"] = ["A01"]
+    app._scatter_gates = [g]
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=True)
+    app._cell_browser_gate_choices = None
+    cells = collect_cells(app, [])
+    assert {c.well for c in cells} == {"A01"}  # B02 excluded despite being selected

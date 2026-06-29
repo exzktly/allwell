@@ -93,7 +93,10 @@ def test_set_groups_empty_resets_cursor():
     assert ss.active_grp == -1
 
 
-def test_invalidate_cache():
-    ss = StatsState(cache={"k": 1})
-    ss.invalidate_cache()
-    assert ss.cache == {}
+def test_stats_cache_invalidate():
+    # The group-statistics result cache moved off StatsState into the core
+    # StatsCacheState slice (so plotting works without the Statistics feature).
+    from well_viewer.core.stats_cache_state import StatsCacheState
+    sc = StatsCacheState(cache={"k": 1})
+    sc.invalidate()
+    assert sc.cache == {}

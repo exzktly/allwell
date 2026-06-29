@@ -1,7 +1,8 @@
 """Statistics-tab domain state.
 
-The user-defined comparison groups, the active-group cursor, the result cache,
-and the transient plate-drag bookkeeping for the Statistics tab.
+The user-defined comparison groups, the active-group cursor, and the transient
+plate-drag bookkeeping for the Statistics tab. (The group-statistics result
+cache is core, not feature, state — see ``core/stats_cache_state.py``.)
 
 Composes ``well_viewer/batch_models.py`` — a statistics group is a ``BarGroup``.
 Qt-free: imports only stdlib and ``batch_models``.
@@ -25,7 +26,6 @@ class StatsState:
 
     groups: list[BarGroup] = field(default_factory=list)
     active_grp: int = -1
-    cache: dict = field(default_factory=dict)
     drag_adding: bool = False
     drag_visited: set = field(default_factory=set)
 
@@ -79,8 +79,3 @@ class StatsState:
         group (or -1 when the new list is empty)."""
         self.groups = list(groups)
         self.active_grp = 0 if self.groups else -1
-
-    # ── result cache ─────────────────────────────────────────────────────────
-
-    def invalidate_cache(self) -> None:
-        self.cache.clear()

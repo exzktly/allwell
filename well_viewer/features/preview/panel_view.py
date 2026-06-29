@@ -30,18 +30,22 @@ from well_viewer.core.ui_helpers import btn_card, btn_danger, btn_secondary
 from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
-from well_viewer.features.image_browser.review_image.controller import on_review_image_channel_selected
-from well_viewer.features.image_browser.review_image.renderer import (
-    refresh_review_image,
-    render_review_image_display,
-)
 from widgets.stepper import Stepper
 from functools import partial
-from well_viewer.features.image_browser.review_image.controller import on_review_image_move
-from well_viewer.features.image_browser.review_image.controller import on_review_image_press
-from well_viewer.features.image_browser.review_image.controller import on_review_image_release
-from well_viewer.features.image_browser.review_image.controller import pick_review_image_color
 from well_viewer.core.safe import swallowed
+from well_viewer.core.lazy import lazy as _lazy
+# This panel builds the Image Browser review-image canvas, so it is only ever
+# imported by image_browser/controller; bind its review_image delegates lazily
+# so importing this module never imports image_browser (keeps it deletable).
+_RI_CTRL = "well_viewer.features.image_browser.review_image.controller"
+_RI_RENDER = "well_viewer.features.image_browser.review_image.renderer"
+on_review_image_channel_selected = _lazy(_RI_CTRL, "on_review_image_channel_selected")
+on_review_image_move = _lazy(_RI_CTRL, "on_review_image_move")
+on_review_image_press = _lazy(_RI_CTRL, "on_review_image_press")
+on_review_image_release = _lazy(_RI_CTRL, "on_review_image_release")
+pick_review_image_color = _lazy(_RI_CTRL, "pick_review_image_color")
+refresh_review_image = _lazy(_RI_RENDER, "refresh_review_image")
+render_review_image_display = _lazy(_RI_RENDER, "render_review_image_display")
 
 
 def build_review_image_panel(self, parent: QWidget) -> None:

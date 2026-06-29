@@ -463,6 +463,64 @@ tab-builder, the controller, the renderer (where applicable), and any
 panel-shaped sub-views the tab embeds. `centre_view` (under `core/`) just
 calls the per-feature `build_<name>_tab` from a single registration loop.
 
+#### The feature registry (`core/feature_registry.py` + `features/registry.py`)
+
+Core never imports a feature directly. Every feature is declared once as a
+`FeatureDescriptor` in the `FEATURES` list in `features/registry.py` — the
+**single sanctioned importer** of `well_viewer.features.*` (enforced by
+`tests/test_architecture_contracts.py::
+test_core_does_not_import_features_at_module_scope`). A descriptor bundles
+everything core used to hard-code:
+
+- `build(ctx, frame)` — the tab body (a lazy wrapper over `build_<name>_tab`);
+- `group` / `lazy_only` — placement + drain policy the page-stack reads;
+- `states` — the `AppState` slices the feature owns (`StateSpec(attr, factory)`),
+  attached at construction by `attach_feature_state` so `core/app_state.py`
+  imports no feature state class (the import-inversion);
+- `on_activate` / `on_selection_changed` / `on_channel_changed` — dispatch hooks
+  (the bodies that used to live in `tab_controller.on_tab_change`,
+  `selection_controller._refresh_tab_view`, and
+  `channel_state_controller.recalculate_threshold`'s fan-out);
+- `fold_change_scope_factory` — the feature's fold-change redraw scope
+  (`core/scope_registry` registers these from the descriptors);
+- `per_well_selection` / `single_well_selection` — selection-behaviour flags
+  that replaced the hard-coded tab-name sets in `selection_controller`.
+
+`WellViewerApp.__init__` builds the registry (`app._features`) before `AppState`;
+`centre_view`, `tab_controller`, `selection_controller`, `channel_state_controller`,
+and `scope_registry` all read it. Every hook callable imports its feature lazily,
+so building the registry pulls no heavy deps.
+
+**To remove a feature, comment out its line in `FEATURES`.** Its rail entry,
+dispatch, state slice, fold-change scope, and persistence drop out together, with
+no other edit and no startup error — the same one-line-removable property §5.10
+gives Split View, generalized to **every** Review feature.
+
+Every removable feature also tolerates having its package **deleted** from disk,
+not just commented out. Three mechanisms make this hold (and three guards keep it
+from regressing):
+
+- **Incidental feature-state access from core** is read through
+  `AppState.feature_slice(name)`, which returns `None` when the feature is
+  disabled (the slice was never attached) — so e.g. Image Browser's
+  `preview` / `review_image` / `image_table` accesses in dataset-load,
+  stats-cache-invalidation, and channel-switch no-op cleanly.
+- **Genuinely-shared state / utilities don't live on a feature slice.** The
+  group-statistics result cache is core (`core/stats_cache_state.py`,
+  `AppState.stats_cache`), not the Statistics feature's `StatsState`; the
+  dataset-level `get_all_timepoints` lives in `data/data_loading.py`, not
+  `scatter`.
+- **No module-scope import of a removable feature exists** outside
+  `features/registry.py`. Core/`runtime_app`/inter-feature delegates are bound
+  through the `core/lazy.py` proxy (resolves on first call) or imported
+  function-locally, so importing any module never imports a removable feature.
+  Support libs (`export`, `preview`, `crop`, `qc`) are always present.
+
+Guards: `test_no_module_scope_imports_of_removable_features` (repo-wide import
+rule), `test_disabling_a_leaf_feature_drops_it_everywhere`, and
+`tests/test_feature_removal.py` (full-app boot+load comment-out *and*
+`sys.meta_path` deletion tests for Image Browser, Statistics, scatter, barplot).
+
 One module sits in `domain/` rather than under a feature package:
 `domain/fold_change_controls.py` exposes
 `install_fold_change_controls(app, parent, layout, scope=…)` — the
@@ -713,7 +771,7 @@ owning its own invariants (behaviour lives *in* the type, not just data):
 | `SelectionState` | plate selection + the saved-selections ("v2") model; composes `selections_model` | `core/selection_state.py` |
 | `DatasetState` | data dir, well paths, row cache, canonical timepoint / FOV lists, `pipeline_info` | `core/dataset_state.py` |
 | `PlotState` | SEM/SD, per-FOV, legend, draw order, fold-change normalization, the bar **significance-bracket** toggle (`show_significance`, N7), and the shared **focus timepoint** (`focus_timepoint`, N5 — the one cross-tab timepoint the Heat Map slider / Distribution combo read/write, synced via `core/timepoint_sync.py`) | `core/plot_state.py` |
-| `StatsState` | Statistics-tab comparison groups + result cache + the structured **pairwise** results (`pairwise`, N7 — fed to the Bar plot's significance brackets) | `features/stats/state.py` |
+| `StatsState` | Statistics-tab comparison groups + the structured **pairwise** results (`pairwise`, N7 — fed to the Bar plot's significance brackets). The group-statistics result cache lives in core (`AppState.stats_cache`), not here. | `features/stats/state.py` |
 | `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview image maps (`fluor` / `overlay` / `mask`) shared by the Segmentation review-image and Image Table | `features/image_browser/review_image/state.py` |
 | `ImageViewState` | Cross-view image display shared by the image viewers. The per-channel display LUT (`lut_by_channel`), so a brightness tuned in Review Image is the default an *auto* Image Table row inherits (per-row edits override). The **Cell Browser** participates too: its `LUT ▾` popover edits the same `lut_by_channel` (blank = auto per crop), and a per-channel **display colour** (`tint_by_channel`, `get_tint`/`set_tint`) overrides the additive composite tint a channel is painted with (`worker.resolve_channel_tint` — override wins, else the fixed per-index palette) | `core/image_view_state.py` |
 | `PlaygroundState` | Playground frame selection + chosen correction method/params, per-source LUT memory, frame-local binary threshold, QC size cleanup, and zoom/pan + caches | `features/image_browser/playground/state.py` |

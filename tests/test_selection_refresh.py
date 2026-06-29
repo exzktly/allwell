@@ -63,11 +63,17 @@ def test_on_plate_sel_change_triggers_refresh(loaded_app):
 # ── Per-tab dispatch branches ────────────────────────────────────────────────
 
 def test_bar_plots_branch_redraws_bars(loaded_app, monkeypatch):
+    # Dispatch now routes through the registry's on_selection_changed hook
+    # (_sel_bar_plots), which imports redraw_bars from the renderer at call
+    # time — so patch the canonical renderer symbol. Both the tab-show and the
+    # selection paths use it now, so reset after the tab switch (as the scatter
+    # test below does) to count only the selection-driven redraw.
     calls = {"bars": 0, "redraw": 0}
-    monkeypatch.setattr("well_viewer.core.selection_controller.redraw_bars",
+    monkeypatch.setattr("well_viewer.features.barplot.renderer.redraw_bars",
                         lambda app: calls.__setitem__("bars", calls["bars"] + 1))
-    counter = _CallCounter(loaded_app, ["_redraw"])
     _show_plotting_tab(loaded_app, "Bar Plots")
+    calls["bars"] = 0  # drop the redraw the tab switch itself triggered
+    counter = _CallCounter(loaded_app, ["_redraw"])
     select_none(loaded_app)
     assert calls["bars"] == 1
     assert counter.counts["_redraw"] == 0
@@ -75,7 +81,7 @@ def test_bar_plots_branch_redraws_bars(loaded_app, monkeypatch):
 
 def test_line_graphs_branch_redraws_line(loaded_app, monkeypatch):
     calls = {"bars": 0}
-    monkeypatch.setattr("well_viewer.core.selection_controller.redraw_bars",
+    monkeypatch.setattr("well_viewer.features.barplot.renderer.redraw_bars",
                         lambda app: calls.__setitem__("bars", calls["bars"] + 1))
     _show_plotting_tab(loaded_app, "Line Graphs")
     counter = _CallCounter(loaded_app, ["_redraw"])

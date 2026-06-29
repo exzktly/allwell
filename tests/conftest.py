@@ -176,7 +176,9 @@ class MockApp:
         ``fc_vs_control_on``) is reflected the next time a controller reads it.
         """
         from well_viewer.core.app_state import AppState
+        from well_viewer.features.registry import attach_feature_state
         st = AppState()
+        attach_feature_state(st)
         st.channel.active_channel = "gfp"
         st.channel.active_val_col = "gfp_mean_intensity"
         st.channel.active_metric = "mean_intensity"

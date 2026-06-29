@@ -7,11 +7,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
-from well_viewer.features.image_browser.image_table.controller import image_table_refresh_picker
-from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
-from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.channel_state_controller import recalculate_threshold
-from well_viewer.features.image_browser.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.safe import swallowed
 
@@ -185,10 +181,18 @@ def load_directory(app, d: Path, label=None) -> None:
     app._app_state.channel.threshold_range_cache.clear()
     # Drop the Image Table's persistent decoded-image cache + last render — the
     # new dataset's pixels differ, so the cross-Generate cache must not carry
-    # over (it is keyed only by well/channel/variant, not by data dir).
-    app._app_state.image_table.image_cache = {}
-    app._app_state.image_table.last_render = {}
-    if hasattr(app, "_invalidate_review_image_frame_cache"):
+    # over (it is keyed only by well/channel/variant, not by data dir). Skipped
+    # when Image Browser is disabled (no image_table slice).
+    _image_table = app._app_state.feature_slice("image_table")
+    if _image_table is not None:
+        _image_table.image_cache = {}
+        _image_table.last_render = {}
+    # Gate on the review_image slice, not hasattr(method): runtime_app defines
+    # _invalidate_review_image_frame_cache unconditionally (a lazy shim), so the
+    # hasattr is always true — the slice is the real "Image Browser present" test.
+    if app._app_state.feature_slice("review_image") is not None and hasattr(
+        app, "_invalidate_review_image_frame_cache"
+    ):
         app._invalidate_review_image_frame_cache()
     # Drop every cached ZipFile handle on dataset swap so the new
     # dataset's per-well zips aren't read through a previous
@@ -246,6 +250,9 @@ def load_directory(app, d: Path, label=None) -> None:
     # when no patch file exists.
     try:
         app._persistence.load("cell_overrides")
+        from well_viewer.features.image_browser.review_image.controller import (
+            apply_review_overrides_to_cache,
+        )
         apply_review_overrides_to_cache(app)
     except Exception:
         swallowed()  # was: pass (silent except)
@@ -279,16 +286,21 @@ def load_directory(app, d: Path, label=None) -> None:
     except Exception:
         swallowed()  # was: pass (silent except)
     app._refresh_sidebar_map()
-    if app._app_state.preview.selected_well not in app._app_state.dataset.well_paths:
-        app._app_state.preview.selected_well = None
+    _preview = app._app_state.feature_slice("preview")
+    if _preview is not None and _preview.selected_well not in app._app_state.dataset.well_paths:
+        _preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
     if hasattr(app, "_image_table_refresh_picker"):
         try:
+            from well_viewer.features.image_browser.image_table.controller import (
+                image_table_refresh_picker, image_table_repopulate_dropdowns,
+            )
             image_table_repopulate_dropdowns(app)
             image_table_refresh_picker(app)
         except Exception:
             swallowed()  # was: pass (silent except)
+    from well_viewer.features.grouping.label_grid_view import label_grid_refresh
     label_grid_refresh(app)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
     # appear without requiring a tab switch.

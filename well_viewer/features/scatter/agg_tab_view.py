@@ -12,7 +12,6 @@ from well_viewer.core.ui_helpers import (
     make_band_controls, make_plot_with_right_dock, make_popover_button,
     make_plot_view_switcher)
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
-from well_viewer.features.saved_plots.controller import wire_save_to_gallery
 
 
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
@@ -115,6 +114,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
+    from well_viewer.features.saved_plots.controller import wire_save_to_gallery
     wire_save_to_gallery(ctx.app, card, "Scatter Plot")
     _sw = make_plot_view_switcher(ctx.app, 'Scatter Plot')
     if _sw is not None:

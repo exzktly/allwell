@@ -24,7 +24,14 @@ from well_viewer.data.data_loading import (
 )
 from well_viewer.data.metric_labels import split_metric_col
 from well_viewer.domain.metric_registry import intensity_keys
-from well_viewer.features.scatter.gating import compute_gate_inclusion
+from well_viewer.core.lazy import lazy as _lazy
+
+# Scatter is a removable feature, so reach its gate-inclusion helper through the
+# lazy proxy (a call, not a module-scope import) — keeps cell_browser importable
+# when scatter is disabled, satisfying the removability contract. Resolves on
+# first use (N1's gate-source mode, which needs scatter anyway).
+compute_gate_inclusion = _lazy(
+    "well_viewer.features.scatter.gating", "compute_gate_inclusion")
 
 
 @dataclass(frozen=True)

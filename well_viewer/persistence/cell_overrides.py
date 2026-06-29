@@ -160,4 +160,8 @@ def load_from_data_dir(app) -> None:
         return
     app._review_included_overrides.clear()
     app._review_included_overrides.update(new_map)
-    app._app_state.review_image.override_version += 1
+    # Bump the include-map version so Review Image recomputes; skipped when
+    # Image Browser is disabled (no review_image slice).
+    _review_image = app._app_state.feature_slice("review_image")
+    if _review_image is not None:
+        _review_image.override_version += 1

@@ -48,6 +48,37 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     lay.addWidget(gate_cb)
     app._cell_browser_gate_mode_cb = gate_cb
 
+    # Which gate(s) to source from — several may be drawn. ``None`` ⇒ all.
+    app._cell_browser_gate_choices = None
+    gate_pick_row = QWidget(parent)
+    gpl = QHBoxLayout(gate_pick_row)
+    gpl.setContentsMargins(16, 0, 0, 0)
+    gate_pick_btn = QPushButton("Gate", gate_pick_row)
+    gate_pick_btn.setProperty("variant", "secondary")
+    gate_pick_btn.setToolTip("Choose which scatter gate(s) define the cells.")
+    gate_pick_btn.clicked.connect(lambda _=False: _open_gate_select(app))
+    gpl.addWidget(gate_pick_btn)
+    gate_pick_lbl = QLabel("(all)", gate_pick_row)
+    gate_pick_lbl.setObjectName("Muted")
+    gpl.addWidget(gate_pick_lbl)
+    gpl.addStretch(1)
+    lay.addWidget(gate_pick_row)
+    app._cell_browser_gate_pick_row = gate_pick_row
+    app._cell_browser_gate_pick_btn = gate_pick_btn
+    app._cell_browser_gate_pick_label = gate_pick_lbl
+
+    # Clarify how the gate composes with the other filters while it's active.
+    gate_hint = QLabel(
+        "Cells inside the selected gate, from the wells the gate was drawn on. "
+        "Timepoints / FOVs below narrow further (optional).", parent)
+    gate_hint.setObjectName("Muted")
+    gate_hint.setWordWrap(True)
+    lay.addWidget(gate_hint)
+    app._cell_browser_gate_hint = gate_hint
+
+    gate_pick_row.setVisible(False)
+    gate_hint.setVisible(False)
+
     # ── criteria rows (scrollable) ───────────────────────────────────────────
     rows_scroll = QScrollArea(parent)
     rows_scroll.setWidgetResizable(True)
@@ -115,15 +146,23 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     # drawn / edited / cleared (only acts in gate mode + when this tab is
     # visible — see controller.cell_browser_sync_scatter_gates).
     app._cell_browser_gates_changed_cb = (
-        lambda _app=app: ctl.cell_browser_sync_scatter_gates(_app))
+        lambda _app=app: (_refresh_gate_choices(_app),
+                          ctl.cell_browser_sync_scatter_gates(_app)))
 
     cell_browser_sidebar_refresh(app)
 
 
 def _on_gate_mode_toggled(app, on: bool) -> None:
     """Switch the gallery source between the scatter gate and the criteria (N1).
-    Disables the criteria editor in gate mode and re-collects immediately."""
+    Disables the criteria editor in gate mode, reveals the gate picker + hint,
+    and re-collects immediately."""
     _set_criteria_enabled(app, not on)
+    for attr in ("_cell_browser_gate_pick_row", "_cell_browser_gate_hint"):
+        w = getattr(app, attr, None)
+        if w is not None:
+            w.setVisible(on)
+    if on:
+        _refresh_gate_choices(app)
     ctl.apply_filters(app)
 
 
@@ -135,6 +174,70 @@ def _set_criteria_enabled(app, on: bool) -> None:
     btn = getattr(app, "_cell_browser_add_criterion_btn", None)
     if btn is not None:
         btn.setEnabled(on)
+
+
+def _gate_names(app) -> list:
+    """Names of the gates currently drawn on the scatter (in draw order)."""
+    out = []
+    for g in getattr(app, "_scatter_gates", None) or []:
+        nm = str(g.get("name") or "").strip()
+        if nm:
+            out.append(nm)
+    return out
+
+
+def _refresh_gate_choices(app) -> None:
+    """Drop any chosen gate names that no longer exist; update the picker label."""
+    names = set(_gate_names(app))
+    chosen = getattr(app, "_cell_browser_gate_choices", None)
+    if isinstance(chosen, set):
+        pruned = chosen & names
+        # Collapse "everything selected" back to None (= all, auto-includes new).
+        app._cell_browser_gate_choices = None if pruned == names else pruned
+    _refresh_gate_pick_label(app)
+
+
+def _refresh_gate_pick_label(app) -> None:
+    lbl = getattr(app, "_cell_browser_gate_pick_label", None)
+    if lbl is None:
+        return
+    chosen = getattr(app, "_cell_browser_gate_choices", None)
+    total = len(_gate_names(app))
+    if chosen is None:
+        lbl.setText(f"(all {total})" if total else "(none drawn)")
+    else:
+        lbl.setText(f"({len(chosen)}/{total})")
+
+
+def _open_gate_select(app) -> None:
+    """Checkbox menu over the drawn gate names; ``None`` selection ⇒ all."""
+    btn = getattr(app, "_cell_browser_gate_pick_btn", None)
+    if btn is None:
+        return
+    names = _gate_names(app)
+    if not names:
+        return
+    chosen = getattr(app, "_cell_browser_gate_choices", None)
+    selected = set(names) if chosen is None else set(chosen)
+    menu = QMenu(btn)
+    checks = {}
+    for nm in names:
+        cb = QCheckBox(nm, menu)
+        cb.setChecked(nm in selected)
+        checks[nm] = cb
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(cb)
+        menu.addAction(wa)
+
+    def _commit() -> None:
+        picked = {nm for nm, c in checks.items() if c.isChecked()}
+        # All picked (or none) ⇒ None (= all gates, auto-includes new ones).
+        app._cell_browser_gate_choices = None if picked == set(names) or not picked else picked
+        _refresh_gate_pick_label(app)
+        ctl.apply_filters(app)
+
+    menu.aboutToHide.connect(_commit)
+    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
 def _add_row(app, column: str = "") -> None:
@@ -242,6 +345,9 @@ def cell_browser_sidebar_refresh(app) -> None:
 
     # sort-key field combos (well / timepoint / fov / metrics)
     cell_browser_sort_refresh(app)
+
+    # gate picker (prune removed gates, refresh the count label)
+    _refresh_gate_choices(app)
 
     # timepoints (union across the dataset)
     tp_sel = app._cell_browser_tp_selections

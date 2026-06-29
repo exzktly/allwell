@@ -353,6 +353,19 @@ def _sel_sample_definitions(app) -> None:
         cell_gating_load_cell_areas(app)
 
 
+def _sel_cell_browser(app) -> None:
+    # Keep the gallery in sync with the live well selection when both panes are
+    # live in Split View — the user expects the Scatter and Cell Browser to track
+    # each other. Outside split the gallery stays Generate-gated (deferred) so a
+    # selection change doesn't trigger a heavy re-composite unprompted.
+    if not getattr(app, "_split_active", False):
+        return
+    from well_viewer.features.image_browser.cell_browser.controller import (
+        apply_filters,
+    )
+    apply_filters(app)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # on_channel_changed hooks — relocated from
 # ``channel_state_controller.recalculate_threshold``'s per-feature refresh block.
@@ -516,6 +529,7 @@ def _features() -> "list[FeatureDescriptor]":
         FeatureDescriptor(name="Segmentation", on_activate=_activate_segmentation),
         FeatureDescriptor(name="Image Table", on_activate=_activate_image_table),
         FeatureDescriptor(name="Cell Browser", on_activate=_activate_cell_browser,
+                          on_selection_changed=_sel_cell_browser,
                           per_well_selection=True),
         FeatureDescriptor(name="Playground", on_activate=_activate_playground),
 

@@ -209,16 +209,31 @@ def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
 
 
 def cell_browser_source_wells(app) -> List[str]:
-    """Wells the Cell Browser draws from: the explicit selection, else *every*
-    loaded well.
+    """Wells the Cell Browser draws from.
 
-    Mirrors the Cell Gating tab's ``_cell_gating_source_wells`` fallback so the
-    gallery (and the FOV picker) populate on first open, before the user has
-    picked wells on the plate — otherwise an empty selection silently yields no
-    candidates."""
+    Mirrors *exactly* the well-resolution the plotting tabs use (see
+    ``scatter/collect.py``): the visible replicate-set groups when any are
+    defined, otherwise the explicit individual plate selection, otherwise every
+    loaded well. Using the same rule is what keeps a Split View Scatter + Cell
+    Browser pairing in sync — when sample-definition groups exist the Scatter
+    draws from the group wells, so the Cell Browser must too (it previously only
+    looked at ``selected_wells``, which is passive/empty in group mode, so the
+    gallery silently fell back to *all* wells and the two panes diverged).
+
+    The all-wells fallback still populates the gallery (and the FOV picker) on
+    first open, before the user has defined groups or picked wells."""
     paths = app._app_state.dataset.well_paths
-    selected = [lbl for lbl in app._app_state.selection.selected_wells if lbl in paths]
-    wells = selected or list(paths.keys())
+    wells: List[str] = []
+    seen: set = set()
+    for rset in app._rep_sets_active():
+        for w in rset.wells:
+            if w in paths and w not in seen:
+                seen.add(w)
+                wells.append(w)
+    if not wells:
+        wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in paths]
+    if not wells:
+        wells = list(paths.keys())
     key = getattr(app, "_parse_rc", None) or (lambda s: s)
     return sorted(wells, key=key)
 

@@ -576,7 +576,13 @@ def refresh_sidebar_map_now(app) -> None:
             for tok in (s.get("wells") or []):
                 if tok in app._app_state.dataset.well_paths:
                     colors[tok] = shade
-    else:
+    elif tab_name in app._PLOTTING_TABS:
+        # Rank colours tint each selected well to match its per-well *plot
+        # series* colour — only meaningful on the plotting tabs. On other
+        # per-well tabs (Cell Browser / Review CSV / Sample Definitions) these
+        # position-rank colours are noise (there are no per-well series), and
+        # read as "wrong" well colouring; there, selection is shown by the
+        # accent highlight alone (``setSelectedWellIds`` below), no tint.
         for tok in app._app_state.selection.selected_wells:
             if tok in app._app_state.dataset.well_paths:
                 colors[tok] = app._rank_color_well(tok)

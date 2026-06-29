@@ -225,7 +225,8 @@ def cell_browser_source_wells(app) -> List[str]:
     paths = app._app_state.dataset.well_paths
     wells: List[str] = []
     seen: set = set()
-    for rset in app._rep_sets_active():
+    rep_active = getattr(app, "_rep_sets_active", None)
+    for rset in (rep_active() if callable(rep_active) else ()):
         for w in rset.wells:
             if w in paths and w not in seen:
                 seen.add(w)

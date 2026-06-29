@@ -41,6 +41,9 @@ def _app(df):
     )
     app._get_rows = lambda label: df
     app._parse_rc = lambda s: (s, 0, 0)
+    # No replicate-set groups by default → Cell Browser falls back to the
+    # individual well selection (then to all loaded wells).
+    app._rep_sets_active = lambda: []
     return app
 
 
@@ -120,6 +123,32 @@ def test_no_selection_falls_back_to_all_loaded_wells():
     app._app_state.selection.selected_wells = []
     cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=0.0)])
     assert len(cells) == 4  # all rows of the one loaded well (A01)
+
+
+def test_source_wells_follow_replicate_groups():
+    # When sample-definition groups exist, the Cell Browser must draw from the
+    # SAME wells the Scatter plots (the visible group wells), not from the
+    # passive individual selection — otherwise the two panes diverge in Split
+    # View. Here the group covers only B02, while selected_wells points at A01.
+    from well_viewer.features.image_browser.cell_browser.collect import (
+        cell_browser_source_wells,
+    )
+    app = _app(_df())
+    app._app_state.dataset.well_paths = {"A01": None, "B02": None}
+    app._app_state.selection.selected_wells = ["A01"]
+    app._rep_sets_active = lambda: [SimpleNamespace(name="grp", wells=["B02"])]
+    assert cell_browser_source_wells(app) == ["B02"]  # follows the group, not A01
+
+
+def test_source_wells_use_selection_when_no_groups():
+    from well_viewer.features.image_browser.cell_browser.collect import (
+        cell_browser_source_wells,
+    )
+    app = _app(_df())
+    app._app_state.dataset.well_paths = {"A01": None, "B02": None}
+    app._app_state.selection.selected_wells = ["A01"]
+    app._rep_sets_active = lambda: []
+    assert cell_browser_source_wells(app) == ["A01"]
 
 
 def test_timepoint_filter_is_strict_include_list():

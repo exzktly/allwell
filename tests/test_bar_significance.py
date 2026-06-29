@@ -25,8 +25,10 @@ def test_significance_marker_thresholds():
 
 
 def _bars():
-    return [SimpleNamespace(key="CTRL", has_mean=True, mean=5.0, spread=0.5),
-            SimpleNamespace(key="DRUG", has_mean=True, mean=6.0, spread=0.5)]
+    return [SimpleNamespace(key="CTRL", has_mean=True, mean=5.0, spread=0.5,
+                            has_frac=True, frac=0.4, frac_spread=0.05),
+            SimpleNamespace(key="DRUG", has_mean=True, mean=6.0, spread=0.5,
+                            has_frac=True, frac=0.6, frac_spread=0.05)]
 
 
 def _app(pairwise, *, rsets=()):
@@ -46,46 +48,57 @@ def _artists(ax):
     return len(ax.lines) + len(ax.texts)
 
 
-def test_brackets_draw_on_name_match():
-    fig, ax = plt.subplots(); ax.set_ylim(0, 10)
-    app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001}])
-    before = _artists(ax)
-    draw_significance_brackets(app, ax, _bars())
-    assert _artists(ax) > before
+def _axes():
+    fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
+    ax_mean.set_ylim(0, 10)
+    ax_frac.set_ylim(0, 1)
+    return ax_mean, ax_frac
+
+
+def test_brackets_draw_on_mean_panel_by_default():
+    ax_mean, ax_frac = _axes()
+    app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001, "stat": "mean"}])
+    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    assert _artists(ax_mean) > 0
+    assert _artists(ax_frac) == 0
+
+
+def test_fraction_test_brackets_the_fraction_panel():
+    # A "fraction" statistic must draw on the On-fraction panel, not the mean one.
+    ax_mean, ax_frac = _axes()
+    app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.01, "p_adj": 0.01, "stat": "fraction"}])
+    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    assert _artists(ax_frac) > 0
+    assert _artists(ax_mean) == 0
 
 
 def test_brackets_draw_on_wells_match_when_names_differ():
-    # Statistics groups named differently from the bar replicate sets, but the
-    # WELLS line up → the comparison still maps onto the right bars (the fix).
-    fig, ax = plt.subplots(); ax.set_ylim(0, 10)
+    ax_mean, ax_frac = _axes()
     rsets = [SimpleNamespace(name="CTRL", wells=["A01", "A02"]),
              SimpleNamespace(name="DRUG", wells=["B01", "B02"])]
     pairwise = [{"a": "Group 1", "b": "Group 2",
                  "a_wells": ["A01", "A02"], "b_wells": ["B01", "B02"],
-                 "p": 0.0001, "p_adj": 0.0001}]
+                 "p": 0.0001, "p_adj": 0.0001, "stat": "mean"}]
     app = _app(pairwise, rsets=rsets)
-    before = _artists(ax)
-    draw_significance_brackets(app, ax, _bars())
-    assert _artists(ax) > before
+    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    assert _artists(ax_mean) > 0
 
 
 def test_no_match_sets_status_and_draws_nothing():
-    fig, ax = plt.subplots(); ax.set_ylim(0, 10)
+    ax_mean, ax_frac = _axes()
     msgs = []
     pairwise = [{"a": "X", "b": "Y", "a_wells": ["Z01"], "b_wells": ["Z02"],
-                 "p": 0.001, "p_adj": 0.001}]
+                 "p": 0.001, "p_adj": 0.001, "stat": "mean"}]
     app = _app(pairwise)
     app._set_status = lambda m, *_a, **_k: msgs.append(m)
-    before = _artists(ax)
-    draw_significance_brackets(app, ax, _bars())
-    assert _artists(ax) == before
+    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    assert _artists(ax_mean) == 0 and _artists(ax_frac) == 0
     assert msgs and "no comparison matches" in msgs[0]
 
 
 def test_off_toggle_draws_nothing():
-    fig, ax = plt.subplots(); ax.set_ylim(0, 10)
-    app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001}])
+    ax_mean, ax_frac = _axes()
+    app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001, "stat": "mean"}])
     app._app_state.plot.show_significance = False
-    before = _artists(ax)
-    draw_significance_brackets(app, ax, _bars())
-    assert _artists(ax) == before
+    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    assert _artists(ax_mean) == 0 and _artists(ax_frac) == 0

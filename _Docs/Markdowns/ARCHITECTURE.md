@@ -462,6 +462,43 @@ tab-builder, the controller, the renderer (where applicable), and any
 panel-shaped sub-views the tab embeds. `centre_view` (under `core/`) just
 calls the per-feature `build_<name>_tab` from a single registration loop.
 
+#### The feature registry (`core/feature_registry.py` + `features/registry.py`)
+
+Core never imports a feature directly. Every feature is declared once as a
+`FeatureDescriptor` in the `FEATURES` list in `features/registry.py` — the
+**single sanctioned importer** of `well_viewer.features.*` (enforced by
+`tests/test_architecture_contracts.py::
+test_core_does_not_import_features_at_module_scope`). A descriptor bundles
+everything core used to hard-code:
+
+- `build(ctx, frame)` — the tab body (a lazy wrapper over `build_<name>_tab`);
+- `group` / `lazy_only` — placement + drain policy the page-stack reads;
+- `states` — the `AppState` slices the feature owns (`StateSpec(attr, factory)`),
+  attached at construction by `attach_feature_state` so `core/app_state.py`
+  imports no feature state class (the import-inversion);
+- `on_activate` / `on_selection_changed` / `on_channel_changed` — dispatch hooks
+  (the bodies that used to live in `tab_controller.on_tab_change`,
+  `selection_controller._refresh_tab_view`, and
+  `channel_state_controller.recalculate_threshold`'s fan-out);
+- `fold_change_scope_factory` — the feature's fold-change redraw scope
+  (`core/scope_registry` registers these from the descriptors);
+- `per_well_selection` / `single_well_selection` — selection-behaviour flags
+  that replaced the hard-coded tab-name sets in `selection_controller`.
+
+`WellViewerApp.__init__` builds the registry (`app._features`) before `AppState`;
+`centre_view`, `tab_controller`, `selection_controller`, `channel_state_controller`,
+and `scope_registry` all read it. Every hook callable imports its feature lazily,
+so building the registry pulls no heavy deps.
+
+**To remove a feature, comment out its line in `FEATURES`.** Its rail entry,
+dispatch, state slice, fold-change scope, and persistence drop out together, with
+no other edit and no startup error — the same one-line-removable property §5.10
+gives Split View, now generalized. (Leaf features — Review CSV, Distribution,
+Saved Plots, the smFISH tab — are cleanly removable today;
+`test_disabling_a_leaf_feature_drops_it_everywhere` guards Review CSV. Image
+Browser is not yet leaf-removable: `load_controller` still reads its
+`preview` / `review_image` state slices unconditionally — tracked as follow-up.)
+
 One module sits in `domain/` rather than under a feature package:
 `domain/fold_change_controls.py` exposes
 `install_fold_change_controls(app, parent, layout, scope=…)` — the

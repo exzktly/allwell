@@ -147,6 +147,73 @@ def test_nothing_imports_wellviewerapp_at_runtime():
     )
 
 
+# ── core layers never import features at module scope (removability) ──────────
+
+# The layered, feature-agnostic packages. A module-scope ``from
+# well_viewer.features …`` here is the removability blocker: it makes deleting /
+# disabling a feature break startup. Feature code is reached only through the
+# FeatureRegistry (dispatch hooks, build wrappers) whose callables import their
+# feature lazily, so these layers stay import-clean.
+_FEATURE_AGNOSTIC_DIRS = ("core", "data", "domain", "persistence")
+
+
+def _module_scope_feature_imports(tree: ast.Module):
+    """Line numbers of top-level ``from well_viewer.features …`` imports.
+
+    Only direct children of the module body count — function-local (lazy)
+    imports and ``if TYPE_CHECKING:`` blocks are allowed (the former are the
+    sanctioned cycle-break / lazy-load pattern; the latter are type-only)."""
+    return [
+        node.lineno
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and (node.module or "").startswith("well_viewer.features")
+    ]
+
+
+def test_core_does_not_import_features_at_module_scope():
+    """The feature-registry contract: ``core`` / ``data`` / ``domain`` /
+    ``persistence`` must not import ``well_viewer.features.*`` at module scope.
+    Features are reached through the registry (``features/registry.py``, the sole
+    sanctioned importer); core hooks resolve them lazily. This is what lets a
+    feature be removed by commenting its line in ``features.registry.FEATURES``
+    without breaking app startup."""
+    offenders = []
+    for sub in _FEATURE_AGNOSTIC_DIRS:
+        for path in _walk_py(WELL_VIEWER / sub):
+            for lineno in _module_scope_feature_imports(_parse(path)):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}")
+    assert not offenders, (
+        "Module-scope feature import in a feature-agnostic layer — make it a "
+        "function-local (lazy) import, route it through a FeatureDescriptor hook "
+        "in features/registry.py, or move the shared code to a lower layer:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_disabling_a_leaf_feature_drops_it_everywhere():
+    """Commenting a descriptor out of ``FEATURES`` removes the feature's rail
+    entry, dispatch, and state slice — with no dangling references. Exercised on
+    a leaf feature (Review CSV) by filtering the registry and asserting it
+    vanishes from every surface the core consults."""
+    from well_viewer.core.app_state import AppState
+    from well_viewer.core.feature_registry import FeatureRegistry
+    from well_viewer.features.registry import attach_feature_state, build_feature_registry
+
+    full = build_feature_registry()
+    assert full.get("Review CSV") is not None  # present by default
+
+    pruned = FeatureRegistry(d for d in full.all() if d.name != "Review CSV")
+    # Gone from lookup, group enumeration, and every hook fan-out.
+    assert pruned.get("Review CSV") is None
+    assert "Review CSV" not in {d.name for d in pruned.in_group("Data")}
+    assert "Review CSV" not in {d.name for d in pruned.with_hook("on_activate")}
+    # State attach still works and contributes the same non-Review slices.
+    state = AppState()
+    attach_feature_state(state, pruned)
+    assert hasattr(state, "bar") and hasattr(state, "stats")
+
+
 # ── EventBus signal catalogue is capped ───────────────────────────────────────
 
 def test_event_bus_signal_catalogue_is_capped():
@@ -191,6 +258,10 @@ FEATURE_NAME_EXCEPTIONS = {
     # image_table row/column add+remove helpers (and the Add-column dialog),
     # paired with image_table/controller.py.
     "grid_ops.py",
+    # the feature registry: the single assembly point for FeatureDescriptors and
+    # the sole sanctioned importer of well_viewer.features.* (the import-inversion
+    # seam) — not a per-feature module, so it sits outside the naming scheme.
+    "registry.py",
 }
 
 

@@ -326,7 +326,10 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         err: Optional[str] = None
         try:
             if test.startswith("t-test"):
-                res = _st.ttest_ind(vals_a, vals_b, equal_var=False)
+                # "pooled" / "Student" → equal-variance (pooled) t-test;
+                # otherwise Welch's unequal-variance t-test (the default).
+                pooled = ("pooled" in test.lower()) or ("student" in test.lower())
+                res = _st.ttest_ind(vals_a, vals_b, equal_var=pooled)
                 stat_name = "t"
             elif test.startswith("Wilcoxon"):
                 res = _st.ranksums(vals_a, vals_b)

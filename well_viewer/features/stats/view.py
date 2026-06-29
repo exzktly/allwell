@@ -151,12 +151,13 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
 
     app._stats_test_cb = QComboBox(app._stats_ctrl)
     app._stats_test_cb.addItems([
-        "t-test (Fisher)",
+        "t-test (Welch, unequal var)",
+        "t-test (Student, pooled var)",
         "Wilcoxon rank-sum",
         "Mann-Whitney U",
         "KS test (2 wells only)",
     ])
-    app._stats_test_cb.setCurrentText("t-test (Fisher)")
+    app._stats_test_cb.setCurrentText("t-test (Welch, unequal var)")
     app._stats_test_cb.currentIndexChanged.connect(
         lambda _i: stats_on_test_change(app)
     )

@@ -93,17 +93,20 @@ def _show_batch_mode(app, mode: str) -> None:
     host_layout = host.layout()
     panels = state["panels"]
     if mode not in panels:
+        # Batch Export defines its OWN export groups (the left-panel editor).
+        # It deliberately does NOT default to the sidebar replicate sets —
+        # replicate groups are not the right unit for batch exports (reverts N10).
         if mode == "line":
-            panel = BatchExportPanel(app, host, use_sidebar_groups=True)
+            panel = BatchExportPanel(app, host, use_sidebar_groups=False)
         elif mode == "bar":
-            panel = BarBatchExportPanel(app, host, use_sidebar_groups=True)
+            panel = BarBatchExportPanel(app, host, use_sidebar_groups=False)
         elif mode == "scatter_cells":
             panel = ScatterBatchExportPanel(
-                app, host, scatter_mode="cells", use_sidebar_groups=True,
+                app, host, scatter_mode="cells", use_sidebar_groups=False,
             )
         else:
             panel = ScatterBatchExportPanel(
-                app, host, scatter_mode="aggregate", use_sidebar_groups=True,
+                app, host, scatter_mode="aggregate", use_sidebar_groups=False,
             )
         host_layout.addWidget(panel)
         panels[mode] = panel

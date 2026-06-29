@@ -893,7 +893,7 @@ def select_invert(app) -> None:
 
 def invalidate_stats_cache(app) -> None:
     """Discard cached group statistics. Call whenever group definitions change."""
-    app._app_state.stats.cache: dict = {}
+    app._app_state.stats_cache.invalidate()
     # Replicate-set visibility may have shifted, so re-check whether the
     # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
     if hasattr(app, "_refresh_fov_btn_state"):
@@ -902,7 +902,10 @@ def invalidate_stats_cache(app) -> None:
     # the Review Image include map mirrors. Bumping the version key
     # forces the next refresh to recompute the include map (cheap)
     # while reusing the cached image arrays + boundary mask (expensive).
-    app._app_state.review_image.override_version += 1
+    # No-op when Image Browser is disabled (no review_image slice).
+    _review_image = app._app_state.feature_slice("review_image")
+    if _review_image is not None:
+        _review_image.override_version += 1
 
 
 

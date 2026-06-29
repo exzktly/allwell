@@ -25,6 +25,7 @@ from well_viewer.core.dataset_state import DatasetState
 from well_viewer.core.image_view_state import ImageViewState
 from well_viewer.core.plot_state import PlotState
 from well_viewer.core.selection_state import SelectionState
+from well_viewer.core.stats_cache_state import StatsCacheState
 
 # Feature-owned slices and the feature that contributes each — used only to
 # produce a helpful error when a disabled feature's slice is accessed.
@@ -51,6 +52,20 @@ class AppState:
     dataset: DatasetState = field(default_factory=DatasetState)
     plot: PlotState = field(default_factory=PlotState)
     image_view: ImageViewState = field(default_factory=ImageViewState)
+    # Group-statistics memoization cache — core, not the Statistics feature's
+    # slice (it backs every plot's aggregation; see StatsCacheState).
+    stats_cache: StatsCacheState = field(default_factory=StatsCacheState)
+
+    def feature_slice(self, name: str):
+        """Return the feature-owned slice *name*, or ``None`` when its feature is
+        disabled (descriptor not in ``features.registry.FEATURES``).
+
+        Core code that may run without a feature reads its slice through this
+        instead of attribute access, which raises (see ``__getattr__``). Feature
+        slices are attached via ``setattr`` so they live in ``__dict__``; a
+        disabled feature's slice is simply absent → ``None``.
+        """
+        return self.__dict__.get(name)
 
     def __getattr__(self, name: str):
         # Only reached when normal lookup fails — i.e. a feature slice that was

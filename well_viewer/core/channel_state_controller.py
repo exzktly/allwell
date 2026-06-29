@@ -440,10 +440,13 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
         )
     if not channel or channel == "—":
         return
+    # review_image / preview are Image Browser slices — None when it is disabled.
+    _review_image = app._app_state.feature_slice("review_image")
+    _preview = app._app_state.feature_slice("preview")
     if channel == app._app_state.channel.active_image_channel:
-        if preserve_review_view:
-            app._app_state.review_image.preserve_view_on_refresh = True
-            if app._app_state.preview.selected_well:
+        if preserve_review_view and _review_image is not None:
+            _review_image.preserve_view_on_refresh = True
+            if _preview is not None and _preview.selected_well:
                 from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
                 refresh_review_image(app)
         if channel_switch_debug:
@@ -464,16 +467,16 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
     if saved_review_lut and hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
         app._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
         app._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
-    if preserve_review_view:
-        app._app_state.review_image.preserve_view_on_refresh = True
-    if app._app_state.preview.selected_well:
+    if preserve_review_view and _review_image is not None:
+        _review_image.preserve_view_on_refresh = True
+    if _preview is not None and _preview.selected_well:
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
-                app._app_state.preview.selected_well,
+                _preview.selected_well,
             )
         from well_viewer.features.image_browser.review_image.renderer import update_preview
-        update_preview(app, app._app_state.preview.selected_well)
+        update_preview(app, _preview.selected_well)
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",

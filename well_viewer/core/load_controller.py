@@ -181,9 +181,12 @@ def load_directory(app, d: Path, label=None) -> None:
     app._app_state.channel.threshold_range_cache.clear()
     # Drop the Image Table's persistent decoded-image cache + last render — the
     # new dataset's pixels differ, so the cross-Generate cache must not carry
-    # over (it is keyed only by well/channel/variant, not by data dir).
-    app._app_state.image_table.image_cache = {}
-    app._app_state.image_table.last_render = {}
+    # over (it is keyed only by well/channel/variant, not by data dir). Skipped
+    # when Image Browser is disabled (no image_table slice).
+    _image_table = app._app_state.feature_slice("image_table")
+    if _image_table is not None:
+        _image_table.image_cache = {}
+        _image_table.last_render = {}
     if hasattr(app, "_invalidate_review_image_frame_cache"):
         app._invalidate_review_image_frame_cache()
     # Drop every cached ZipFile handle on dataset swap so the new
@@ -278,8 +281,9 @@ def load_directory(app, d: Path, label=None) -> None:
     except Exception:
         swallowed()  # was: pass (silent except)
     app._refresh_sidebar_map()
-    if app._app_state.preview.selected_well not in app._app_state.dataset.well_paths:
-        app._app_state.preview.selected_well = None
+    _preview = app._app_state.feature_slice("preview")
+    if _preview is not None and _preview.selected_well not in app._app_state.dataset.well_paths:
+        _preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
     if hasattr(app, "_image_table_refresh_picker"):

@@ -241,7 +241,19 @@ def select_none(app) -> None:
     cleared_solo = bool(solo)
     if cleared_solo:
         solo.clear()
-    if sel.selections:  # group mode: hide every group
+    # Mirror the sidebar's mode decision: group ("rep") mode applies only when
+    # saved selections exist AND the current tab isn't a per-well tab. On a
+    # per-well tab (Cell Browser / Sample Definitions / Review CSV) the plate
+    # selects individual wells, so "Deselect all" must clear ``selected_wells``
+    # — even when saved groups also exist. Branching on ``sel.selections`` alone
+    # (the old behaviour) only hid the groups and left the per-well selection,
+    # so the button looked broken on those tabs.
+    try:
+        _tab = app._current_centre_tab()
+    except Exception:
+        _tab = ""
+    rep_mode = bool(sel.selections) and not _is_per_well_tab(app, _tab)
+    if rep_mode:  # group mode: hide every group
         # _set_groups_hidden only refreshes when a group's hidden flag actually
         # flips; if every group was already hidden (or there were none to flip)
         # but we cleared solo wells, repaint + redraw explicitly so the button

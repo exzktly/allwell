@@ -449,7 +449,8 @@ def _significance_marker(p: float) -> str:
     return "ns"
 
 
-def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None) -> None:
+def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
+                               target_ts=None) -> None:
     """Draw significance brackets from the Statistics tab's pairwise results (N7).
 
     Only acts when the user enabled "Significance" (``PlotState.show_significance``)
@@ -457,19 +458,40 @@ def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None) -> None:
     drawn on the panel matching the **measure that was tested**: a "Fraction
     above threshold" test brackets the On-fraction panel (using each bar's
     fraction height); every other statistic (mean / mean-all / median) brackets
-    the Mean panel. A bracket is drawn for every compared pair whose both groups
-    map to a bar — by replicate-set name, else by well membership; pairs that
-    don't line up with the current bars are skipped (with a status hint). The
-    BH-adjusted p drives the asterisk where available. No-op in per-cell mode
-    (this is only called from the aggregate bar path)."""
+    the Mean panel.
+
+    The results are also **context-gated**: they only render when the bar plot is
+    showing the same value column (channel + metric) and timepoint the test was
+    run on — otherwise a comparison computed for one channel would be drawn over
+    a different channel's bars. A bracket is drawn for every compared pair whose
+    both groups map to a bar — by replicate-set name, else by well membership;
+    pairs that don't line up with the current bars are skipped (with a status
+    hint). The BH-adjusted p drives the asterisk where available. No-op in
+    per-cell mode (this is only called from the aggregate bar path)."""
     if not getattr(app._app_state.plot, "show_significance", False):
         return
     pairwise = list(getattr(app._app_state.stats, "pairwise", []) or [])
     if not pairwise:
         return
+    rec0 = pairwise[0]
+    # Context gate: don't overlay a test computed for a different channel/metric
+    # (or timepoint) than the bars currently show. Legacy entries without the
+    # context keys are not gated (drawn as before).
+    rec_val_col = rec0.get("val_col")
+    if rec_val_col is not None:
+        cur_val_col = str(getattr(app._app_state.channel, "active_val_col", "") or "")
+        if str(rec_val_col) != cur_val_col:
+            return
+    rec_tp = rec0.get("target_t")
+    if rec_tp is not None and target_ts:
+        try:
+            if not any(abs(float(t) - float(rec_tp)) <= 1e-6 for t in target_ts):
+                return
+        except (TypeError, ValueError):
+            pass
     # Route to the panel for the tested measure. All entries in one run share the
     # same statistic, so the first entry decides the target panel + value field.
-    stat = str(pairwise[0].get("stat", "mean"))
+    stat = str(rec0.get("stat", "mean"))
     if stat == "fraction":
         ax, val_attr, spread_attr, has_attr = ax_frac, "frac", "frac_spread", "has_frac"
     else:
@@ -634,7 +656,8 @@ def draw_grouped_bar_mode(
     _apply_bar_ylims(app, ax_mean, ax_frac, ax_n=ax_n)
     # Significance brackets (N7) — after ylims so the bracket headroom isn't
     # clipped; the helper extends the Mean panel's top to fit.
-    draw_significance_brackets(app, items, ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app, items, ax_mean=ax_mean, ax_frac=ax_frac,
+                               target_ts=target_ts)
     if fc_misses:
         _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
         app._set_status(

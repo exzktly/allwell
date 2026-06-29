@@ -1,0 +1,557 @@
+"""The single assembly point for every Review-side feature descriptor.
+
+This is the **only** module permitted to import ``well_viewer.features.*`` from
+outside the features tree — the guardrail in
+``tests/test_architecture_contracts.py`` enforces that core (``core/`` /
+``data/`` / ``domain/`` / ``persistence/``) never does. Core reads features
+exclusively through the ``FeatureRegistry`` this module builds.
+
+Every callable here is a thin, *lazy* wrapper: it imports its feature module on
+call, so importing this module (and building the registry at app startup) does
+not eagerly pull heavy feature deps (TF / skimage / matplotlib-QtAgg). The hook
+bodies are faithful relocations of the branches that previously lived in
+``core/tab_controller.py``, ``core/selection_controller.py``, and
+``core/channel_state_controller.py``.
+
+To remove a feature: comment out its entry in ``FEATURES``. Its tab disappears
+from the rail, its dispatch hooks stop firing, its persistence/fold-change
+contributions drop out, and its ``AppState`` slice is no longer attached — with
+no other edits and no startup error.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from well_viewer.core.feature_registry import (
+    FeatureDescriptor,
+    FeatureRegistry,
+    StateSpec,
+)
+
+_logger = logging.getLogger("well_viewer.runtime_app")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tab builders — uniform ``build(ctx, frame)`` adapters over each feature's
+# entry point (some take ``ctx``, some take the legacy ``app``; Review CSV is an
+# app method). Mirrors the former ``_build_*`` closures in ``centre_view``.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_lineplot(ctx, frame) -> None:
+    from well_viewer.features.lineplot.tab_view import build_line_graphs_tab
+    build_line_graphs_tab(ctx, frame)
+
+
+def _build_barplot(ctx, frame) -> None:
+    from well_viewer.features.barplot.tab_view import build_bar_plots_tab
+    build_bar_plots_tab(ctx, frame)
+
+
+def _build_scatter(ctx, frame) -> None:
+    from well_viewer.features.scatter.tab_view import build_scatter_tab
+    build_scatter_tab(ctx, frame)
+
+
+def _build_distribution(ctx, frame) -> None:
+    from well_viewer.features.distribution.tab_view import build_distribution_tab
+    build_distribution_tab(ctx, frame)
+
+
+def _build_heatmap(ctx, frame) -> None:
+    from well_viewer.features.heatmap.tab_view import build_heatmap_tab
+    build_heatmap_tab(ctx, frame)
+
+
+def _build_image_browser(ctx, frame) -> None:
+    from well_viewer.features.image_browser.tab_view import build_image_browser_tab
+    build_image_browser_tab(ctx, frame)
+
+
+def _build_smfish(ctx, frame) -> None:
+    from PySide6.QtWidgets import QVBoxLayout
+    if frame.layout() is None:
+        QVBoxLayout(frame).setContentsMargins(0, 0, 0, 0)
+    try:
+        from well_viewer.features.smfish.tab_view import build_smfish_tab
+        build_smfish_tab(ctx, frame)
+    except Exception:
+        _logger.exception("Build for smFISH tab failed")
+
+
+def _build_stats(ctx, frame) -> None:
+    from well_viewer.features.stats.view import (
+        build_stats_group_editor, build_stats_tab,
+    )
+    app = ctx.app
+    build_stats_tab(app, frame)
+    build_stats_group_editor(app, app._sidebar_stats_frame)
+
+
+def _build_review_csv(ctx, frame) -> None:
+    ctx.app._build_review_csv_tab(frame)
+
+
+def _build_sample_definitions(ctx, frame) -> None:
+    from well_viewer.features.grouping.replicate_panel_view import (
+        build_sample_definitions_centre,
+    )
+    build_sample_definitions_centre(ctx.app, frame)
+
+
+def _build_saved_plots(ctx, frame) -> None:
+    from well_viewer.features.saved_plots.tab_view import build_saved_plots_tab
+    build_saved_plots_tab(ctx, frame)
+
+
+def _build_batch_export(ctx, frame) -> None:
+    from well_viewer.features.batch_export.tab_view import build_batch_export_tab
+    build_batch_export_tab(ctx, frame)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# State factories — lazy constructors for each feature-owned ``AppState`` slice.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _state_bar():
+    from well_viewer.features.barplot.state import BarPlotState
+    return BarPlotState()
+
+
+def _state_stats():
+    from well_viewer.features.stats.state import StatsState
+    return StatsState()
+
+
+def _state_review_image():
+    from well_viewer.features.image_browser.review_image.state import ReviewImageState
+    return ReviewImageState()
+
+
+def _state_preview():
+    from well_viewer.features.image_browser.review_image.state import PreviewState
+    return PreviewState()
+
+
+def _state_image_table():
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+    return ImageTableState()
+
+
+def _state_playground():
+    from well_viewer.features.image_browser.playground.state import PlaygroundState
+    return PlaygroundState()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# on_activate hooks — relocated from ``tab_controller.on_tab_change``. Each does
+# the per-tab sidebar-visibility + refresh its branch did; the generic
+# scaffolding (hide-all, post-dispatch drains) stays in ``on_tab_change``.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _activate_segmentation(app) -> None:
+    from well_viewer.features.image_browser.review_image.renderer import (
+        refresh_review_image, update_preview,
+    )
+    app._sync_preview_well_for_image_tabs()
+    app._sidebar_preview_frame.setVisible(True)
+    app._refresh_preview_picker()
+    update_preview(app, app._app_state.preview.selected_well)
+    refresh_review_image(app)
+
+
+def _activate_image_table(app) -> None:
+    from well_viewer.features.image_browser.image_table.controller import (
+        image_table_refresh_picker, image_table_repopulate_dropdowns,
+    )
+    if hasattr(app, "_sidebar_image_table_frame"):
+        app._sidebar_image_table_frame.setVisible(True)
+    image_table_repopulate_dropdowns(app)
+    image_table_refresh_picker(app)
+
+
+def _activate_sample_definitions(app) -> None:
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        cell_gating_sync_scatter_gates,
+    )
+    app._sidebar_sample_frame.setVisible(True)
+    app._groups_centre_refresh()
+    # Cell Gating leads this tab; pick up any scatter gates drawn since the
+    # last visit (refresh the summary + recompute Included if they changed).
+    cell_gating_sync_scatter_gates(app)
+
+
+def _activate_statistics(app) -> None:
+    from well_viewer.features.stats.controller import (
+        stats_sync_from_app, stats_update_tp_menu,
+    )
+    app._sidebar_stats_frame.setVisible(True)
+    # Auto-populate from rep-sets on first visit
+    if not app._app_state.stats.groups and hasattr(app, "_stats_grp_inner"):
+        stats_sync_from_app(app)
+    if hasattr(app, "_stats_tp_cb"):
+        stats_update_tp_menu(app)
+
+
+def _activate_batch_export(app) -> None:
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    if hasattr(app, "_batch_export_set_mode"):
+        mode = getattr(app, "_batch_export_inline_state", {}).get("mode", "line")
+        app._batch_export_set_mode(mode)
+
+
+def _activate_review_csv(app) -> None:
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    app._refresh_review_csv()
+
+
+def _activate_smfish(app) -> None:
+    from well_viewer.features.smfish.tab_view import smfish_sync_from_app
+    app._sidebar_main_frame.setVisible(True)
+    if len(app._app_state.selection.selected_wells) > 1:
+        keep = (
+            app._app_state.selection.last_sel
+            if app._app_state.selection.last_sel in app._app_state.selection.selected_wells
+            else next(iter(app._app_state.selection.selected_wells))
+        )
+        # Route through the central mutator so _prev_sel is snapshotted
+        # properly -- bypassing it leaves the next selection diff
+        # mis-attributing cross-tab additions / removals.
+        app._set_selected_wells({keep}, commit=False)
+    app._refresh_sidebar_map()
+    smfish_sync_from_app(app)
+
+
+def _activate_cell_gating(app) -> None:
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        cell_gating_load_cell_areas, cell_gating_sync_scatter_gates,
+    )
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    if hasattr(app, "_cell_gating_fluor_gate_edits"):
+        cell_gating_load_cell_areas(app)
+        cell_gating_sync_scatter_gates(app)
+
+
+def _activate_cell_browser(app) -> None:
+    # Show the canonical well selector (plate) above the Cell Browser's own
+    # filter sidebar — its gallery is scoped to the selected wells, so it
+    # needs the same well picker every other tab has.
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    if hasattr(app, "_sidebar_cell_browser_frame"):
+        app._sidebar_cell_browser_frame.setVisible(True)
+    for _refresh in getattr(app, "_cell_browser_refreshers", ()):
+        _refresh(app)
+
+
+def _activate_playground(app) -> None:
+    from well_viewer.core.safe import swallowed
+    from well_viewer.features.image_browser.playground.controller import (
+        playground_repopulate_dropdowns,
+    )
+    # Playground picks its own well/channel/tp/FOV via in-tab dropdowns; show
+    # the canonical plate selector for parity, then refresh its selectors for
+    # any dataset loaded since it last built.
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    try:
+        playground_repopulate_dropdowns(app)
+    except Exception:
+        swallowed()
+
+
+def _activate_saved_plots(app) -> None:
+    from well_viewer.core.safe import swallowed
+    # Gallery of previously saved plots — no plate selection needed; just
+    # repaint from the (per-dataset) store on each visit.
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    try:
+        from well_viewer.features.saved_plots.controller import (
+            refresh_saved_plots_gallery,
+        )
+        refresh_saved_plots_gallery(app)
+    except Exception:
+        swallowed()
+
+
+def _activate_bar_plots(app) -> None:
+    from well_viewer.features.barplot.renderer import redraw_bars
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    app._update_bar_tp_menu()
+    redraw_bars(app)
+
+
+def _activate_scatter(app) -> None:
+    from well_viewer.features.scatter.controller import update_scatter_menus
+    from well_viewer.features.scatter.tab_view import scatter_redraw_active
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    update_scatter_menus(app)
+    scatter_redraw_active(app)
+
+
+def _activate_heatmap(app) -> None:
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    if hasattr(app, "_heatmap_sidebar_frame"):
+        try:
+            from well_viewer.features.heatmap.sidebar_view import (
+                refresh_heatmap_layout_sidebar,
+            )
+            refresh_heatmap_layout_sidebar(app)
+        except Exception:
+            _logger.exception("Heatmap sidebar refresh failed")
+    app._redraw()
+
+
+def _activate_default_plot(app) -> None:
+    # Line Graphs / Distribution — unified picker shown, generic redraw.
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    app._redraw()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# on_selection_changed hooks — relocated from
+# ``selection_controller._refresh_tab_view`` (the branches that ``return redrew``
+# without a generic ``_redraw``). Tabs with no hook fall through to the generic
+# ``app._redraw()`` in the controller.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _sel_bar_plots(app) -> None:
+    from well_viewer.features.barplot.renderer import redraw_bars
+    app._update_bar_tp_menu()
+    redraw_bars(app)
+
+
+def _sel_scatter(app) -> None:
+    from well_viewer.features.scatter.controller import update_scatter_menus
+    from well_viewer.features.scatter.tab_view import scatter_redraw_active
+    update_scatter_menus(app)
+    scatter_redraw_active(app)
+
+
+def _sel_review_csv(app) -> None:
+    app._refresh_review_csv()
+
+
+def _sel_smfish(app) -> None:
+    from well_viewer.features.smfish.tab_view import smfish_sync_from_app
+    smfish_sync_from_app(app)
+
+
+def _sel_sample_definitions(app) -> None:
+    # Cell Gating is a sub-tab here; refresh its CDF if the user has opened it.
+    if hasattr(app, "_cell_gating_fluor_gate_edits"):
+        from well_viewer.features.grouping.cell_gating_tab_view import (
+            cell_gating_load_cell_areas,
+        )
+        cell_gating_load_cell_areas(app)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# on_channel_changed hooks — relocated from
+# ``channel_state_controller.recalculate_threshold``'s per-feature refresh block.
+# Each is ``hasattr``-guarded exactly as before, so it no-ops until the feature's
+# widgets exist.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _channel_bar(app) -> None:
+    if hasattr(app, "_bar_tp_cb"):
+        app._update_bar_tp_menu()
+
+
+def _channel_stats(app) -> None:
+    if hasattr(app, "_stats_tp_cb"):
+        from well_viewer.features.stats.controller import stats_update_tp_menu
+        stats_update_tp_menu(app)
+
+
+def _channel_distribution(app) -> None:
+    if hasattr(app, "_distribution_tp_cb"):
+        try:
+            from well_viewer.features.distribution.tab_view import (
+                refresh_distribution_timepoints,
+            )
+            refresh_distribution_timepoints(app)
+        except Exception:
+            _logger.exception("Distribution timepoint refresh failed")
+
+
+def _channel_heatmap(app) -> None:
+    if hasattr(app, "_heatmap_tp_slider"):
+        try:
+            from well_viewer.features.heatmap.tab_view import (
+                refresh_heatmap_timepoints,
+            )
+            refresh_heatmap_timepoints(app)
+        except Exception:
+            _logger.exception("Heatmap timepoint refresh failed")
+
+
+def _channel_scatter(app) -> None:
+    if hasattr(app, "_scatter_ch_x_cb"):
+        try:
+            from well_viewer.features.scatter.controller import (
+                redraw_scatter_agg_orchestrate,
+                redraw_scatter_orchestrate,
+                update_scatter_menus,
+            )
+            update_scatter_menus(app)
+            redraw_scatter_orchestrate(app)
+            redraw_scatter_agg_orchestrate(app)
+        except Exception:
+            _logger.exception("Scatter menu refresh failed")
+
+
+def _channel_cell_gating(app) -> None:
+    # Hydrate persisted gating params onto the rebuilt cell-gating rows. The
+    # caller has already run ``app._load_gating_from_pipeline_info()`` once;
+    # ``cell_gating_load_cell_areas`` rebuilds the rows as fresh edits, so we
+    # re-apply the persisted params afterwards (see the original note in
+    # recalculate_threshold).
+    if hasattr(app, "_cell_gating_fluor_gate_edits"):
+        from well_viewer.features.grouping.cell_gating_tab_view import (
+            cell_gating_load_cell_areas, cell_gating_load_threshold_frac_on,
+        )
+        cell_gating_load_cell_areas(app)
+        app._load_gating_from_pipeline_info()
+        cell_gating_load_threshold_frac_on(app)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fold-change scope contributions (relocated from core/scope_registry.py).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fold_change_scope_bar():
+    from well_viewer.domain.fold_change_scopes import FoldChangeScope
+    from well_viewer.features.barplot.renderer import redraw_bars
+    return FoldChangeScope(
+        name="bar",
+        ctrl_combo_attr="_fc_ctrl_combo_bar",
+        baseline_combo_attr="_fc_baseline_combo_bar",
+        redraw=redraw_bars,
+        tab_names=("Bar Plots",),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The descriptor list — the single source of truth. Comment a line to remove
+# a feature.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _features() -> "list[FeatureDescriptor]":
+    return [
+        # ── Analysis ──────────────────────────────────────────────────────
+        # "Plotting" is a bespoke composite container (built by
+        # centre_view._build_plotting); build=None → the page-stack resolves
+        # its builder from its local fallback map. Its plot sub-tabs are the
+        # sub-leaf descriptors below.
+        FeatureDescriptor(name="Plotting", group="Analysis"),
+        FeatureDescriptor(
+            name="Statistics", group="Analysis", build=_build_stats,
+            states=(StateSpec("stats", _state_stats),),
+            on_activate=_activate_statistics,
+            on_channel_changed=_channel_stats,
+        ),
+        # ── Images ────────────────────────────────────────────────────────
+        FeatureDescriptor(
+            name="Image Browser", group="Images", build=_build_image_browser,
+            lazy_only=True,
+            states=(
+                StateSpec("review_image", _state_review_image),
+                StateSpec("preview", _state_preview),
+                StateSpec("image_table", _state_image_table),
+                StateSpec("playground", _state_playground),
+            ),
+        ),
+        FeatureDescriptor(
+            name="smFISH", group="Images", build=_build_smfish, lazy_only=True,
+            on_activate=_activate_smfish,
+            on_selection_changed=_sel_smfish,
+            single_well_selection=True,
+        ),
+        # ── Data ──────────────────────────────────────────────────────────
+        FeatureDescriptor(
+            name="Review CSV", group="Data", build=_build_review_csv,
+            on_activate=_activate_review_csv,
+            on_selection_changed=_sel_review_csv,
+            per_well_selection=True,
+        ),
+        FeatureDescriptor(
+            name="Sample Definitions", group="Data",
+            build=_build_sample_definitions,
+            on_activate=_activate_sample_definitions,
+            on_selection_changed=_sel_sample_definitions,
+            per_well_selection=True,
+        ),
+        FeatureDescriptor(
+            name="Saved Plots", group="Data", build=_build_saved_plots,
+            lazy_only=True,
+            on_activate=_activate_saved_plots,
+        ),
+        FeatureDescriptor(
+            name="Batch Export", group="Data", build=_build_batch_export,
+            on_activate=_activate_batch_export,
+        ),
+
+        # ── Plotting sub-leaves (no rail entry; dispatch hooks only) ───────
+        FeatureDescriptor(
+            name="Bar Plots",
+            states=(StateSpec("bar", _state_bar),),
+            on_activate=_activate_bar_plots,
+            on_selection_changed=_sel_bar_plots,
+            on_channel_changed=_channel_bar,
+            fold_change_scope_factory=_fold_change_scope_bar,
+        ),
+        FeatureDescriptor(name="Line Graphs", on_activate=_activate_default_plot),
+        FeatureDescriptor(
+            name="Scatter Plot",
+            on_activate=_activate_scatter,
+            on_selection_changed=_sel_scatter,
+            on_channel_changed=_channel_scatter,
+        ),
+        FeatureDescriptor(
+            name="Distribution", on_activate=_activate_default_plot,
+            on_channel_changed=_channel_distribution,
+        ),
+        FeatureDescriptor(
+            name="Heat Map", on_activate=_activate_heatmap,
+            on_channel_changed=_channel_heatmap,
+        ),
+
+        # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────
+        FeatureDescriptor(name="Segmentation", on_activate=_activate_segmentation),
+        FeatureDescriptor(name="Image Table", on_activate=_activate_image_table),
+        FeatureDescriptor(name="Cell Browser", on_activate=_activate_cell_browser,
+                          per_well_selection=True),
+        FeatureDescriptor(name="Playground", on_activate=_activate_playground),
+
+        # ── Sample Definitions sub-leaf ────────────────────────────────────
+        FeatureDescriptor(name="Cell Gating", on_activate=_activate_cell_gating,
+                          on_channel_changed=_channel_cell_gating),
+    ]
+
+
+def build_feature_registry() -> FeatureRegistry:
+    """Assemble the registry. Called once from ``WellViewerApp.__init__``."""
+    return FeatureRegistry(_features())
+
+
+def attach_feature_state(state, registry: "FeatureRegistry | None" = None) -> None:
+    """Attach every feature-owned slice onto *state* (an ``AppState``).
+
+    Called at app construction (and by test fixtures that build an ``AppState``
+    directly). Idempotent. With a feature removed from ``FEATURES`` its slice is
+    simply never attached.
+    """
+    if registry is None:
+        registry = build_feature_registry()
+    for descriptor in registry.all():
+        for spec in descriptor.states:
+            setattr(state, spec.attr, spec.factory())

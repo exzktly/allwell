@@ -248,17 +248,17 @@ def test_scatter_gate_choices_filter_to_named_gates():
     assert "13" in {c.nucleus_id for c in cells}  # G2 contributes the low-gfp cell
 
 
-def test_gate_mode_sources_from_stamped_wells_not_selection():
-    # Gate stamped with well A01; the live selection includes B02 too, but the
-    # gallery must honour the gate's wells (A01 only).
+def test_gate_mode_sources_from_live_selection():
+    # Gate mode sources from the LIVE shared selection (so the Cell Browser and
+    # Scatter stay synced in Split View) — NOT a frozen per-gate well stamp.
     app = _app(_df())
     app._app_state.dataset.well_paths = {"A01": None, "B02": None}
     app._app_state.selection.selected_wells = ["A01", "B02"]
     g = _gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)
-    g["wells"] = ["A01"]
+    g["wells"] = ["A01"]  # stale stamp must be ignored
     app._scatter_gates = [g]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     app._cell_browser_gate_choices = None
     cells = collect_cells(app, [])
-    assert {c.well for c in cells} == {"A01"}  # B02 excluded despite being selected
+    assert {c.well for c in cells} == {"A01", "B02"}  # follows the live selection

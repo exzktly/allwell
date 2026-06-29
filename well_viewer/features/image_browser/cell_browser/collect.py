@@ -285,26 +285,13 @@ def collect_cells(
     # One parallel value list per sort key (aligned with ``out``), filled per
     # well so the cross-well sort below has a value for every cell.
     sort_cols: List[list] = [[] for _ in keys]
-    # In gate mode, source from the wells the gate(s) were drawn on (stamped at
-    # draw time) so the gallery honours the scatter's well selection rather than
-    # an independent one. Falls back to the live source wells for legacy gates
-    # with no stamp.
-    if gate_mode and gates:
-        loaded = app._app_state.dataset.well_paths
-        stamped: set = set()
-        any_stamp = False
-        for g in gates:
-            gw = g.get("wells")
-            if gw:
-                any_stamp = True
-                stamped.update(gw)
-        if any_stamp:
-            key_fn = getattr(app, "_parse_rc", None) or (lambda s: s)
-            selected = sorted((w for w in stamped if w in loaded), key=key_fn)
-        else:
-            selected = cell_browser_source_wells(app)
-    else:
-        selected = cell_browser_source_wells(app)
+    # Source from the LIVE well selection (shared app state) in every mode,
+    # including gate mode. The selection is global, so in Split View the Cell
+    # Browser and the Scatter stay in sync — changing the wells on either pane
+    # drives both. (An earlier attempt froze the gallery to the wells stamped on
+    # the gate at draw time; that decoupled the panes, which is the opposite of
+    # what's wanted.)
+    selected = cell_browser_source_wells(app)
     for well in selected:
         df = app._get_rows(well)
         if df is None or df.empty:

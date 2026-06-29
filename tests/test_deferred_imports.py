@@ -44,7 +44,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # not import features at module scope) — two standard core → feature defers, not
 # new inter-feature cycles. The six plot tabs wire the save button via a
 # module-level import, so they add nothing here.
-MAX_DEFERRED_FEATURE_IMPORTS = 137
+# Lowered to 124 in the feature-registry migration: centre_view's per-tab build
+# closures, tab_controller's on_tab_change ladder, selection_controller's
+# _refresh_tab_view ladder, and channel_state_controller's channel fan-out all
+# moved their deferred feature imports into features/registry.py (excluded above),
+# net-dropping the core count.
+MAX_DEFERRED_FEATURE_IMPORTS = 124
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:
@@ -66,10 +71,18 @@ def _deferred_feature_imports(tree: ast.Module):
             yield node.lineno, node.module
 
 
+# ``features/registry.py`` is the single sanctioned feature-importer (the
+# import-inversion seam): every build/hook callable lazily imports its feature
+# module on call so the registry pulls no heavy deps at import time. Those lazy
+# imports are *intentional* lazy-loading, not cycle workarounds, so they are
+# excluded from this budget.
+_EXCLUDED = {ROOT / "features" / "registry.py"}
+
+
 def _collect():
     hits = []
     for path in sorted(ROOT.rglob("*.py")):
-        if "__pycache__" in path.parts:
+        if "__pycache__" in path.parts or path in _EXCLUDED:
             continue
         tree = ast.parse(path.read_text(), filename=str(path))
         for lineno, module in _deferred_feature_imports(tree):

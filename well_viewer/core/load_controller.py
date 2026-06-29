@@ -7,11 +7,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
-from well_viewer.features.image_browser.image_table.controller import image_table_refresh_picker
-from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
-from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 from well_viewer.core.channel_state_controller import recalculate_threshold
-from well_viewer.features.image_browser.review_image.controller import apply_review_overrides_to_cache
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.safe import swallowed
 
@@ -246,6 +242,9 @@ def load_directory(app, d: Path, label=None) -> None:
     # when no patch file exists.
     try:
         app._persistence.load("cell_overrides")
+        from well_viewer.features.image_browser.review_image.controller import (
+            apply_review_overrides_to_cache,
+        )
         apply_review_overrides_to_cache(app)
     except Exception:
         swallowed()  # was: pass (silent except)
@@ -285,10 +284,14 @@ def load_directory(app, d: Path, label=None) -> None:
         app._refresh_preview_picker()
     if hasattr(app, "_image_table_refresh_picker"):
         try:
+            from well_viewer.features.image_browser.image_table.controller import (
+                image_table_refresh_picker, image_table_repopulate_dropdowns,
+            )
             image_table_repopulate_dropdowns(app)
             image_table_refresh_picker(app)
         except Exception:
             swallowed()  # was: pass (silent except)
+    from well_viewer.features.grouping.label_grid_view import label_grid_refresh
     label_grid_refresh(app)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
     # appear without requiring a tab switch.

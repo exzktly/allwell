@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
-from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
 from well_viewer.core.safe import swallowed
 
 
@@ -172,7 +171,7 @@ def build_centre(app, parent: QWidget) -> None:
     # Browser" is the unified image-review rail entry (Segmentation / Image
     # Table / Cell Browser / Playground sub-tabs) — its sub-tab bodies pull the
     # image-table loaders, so it (and each sub-tab inside it) builds on demand.
-    lazy_only: Set[str] = {"smFISH", "Image Browser", "Saved Plots"}
+    lazy_only: Set[str] = {d.name for d in app._features.top_level() if d.lazy_only}
     app._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
@@ -197,6 +196,7 @@ def build_centre(app, parent: QWidget) -> None:
     # Sidebars referenced by data-load + tab-switch logic must exist
     # immediately even though the centre tab bodies that depend on them
     # are deferred.
+    from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
     from well_viewer.features.preview.preview_view import build_preview_picker
     build_replicate_panel(app, app._sidebar_sample_frame)
     build_preview_picker(app, app._sidebar_preview_frame)
@@ -216,35 +216,19 @@ def build_centre(app, parent: QWidget) -> None:
     # ``eager_flag`` means build the tab body immediately; otherwise the
     # builder is registered in ``pending`` and drained later. The first
     # tab in the first group is the initial active tab and is built eagerly.
-    def _line_graphs_eager() -> None:
-        from well_viewer.features.lineplot.tab_view import build_line_graphs_tab
-        build_line_graphs_tab(app._ctx, tab_frames["Line Graphs"])
+    # Plot sub-tab + top-level builders are sourced from the feature registry:
+    # each descriptor's ``build(ctx, frame)`` wraps the feature's entry point,
+    # so centre_view no longer imports any feature tab module directly. The
+    # frame is resolved at call time from ``tab_frames`` (populated by the plot
+    # sub-tab pre-allocation above / ``_new_tab`` for top-level tabs).
+    def _registry_builder(title: str) -> Callable[[], None]:
+        return lambda: app._features.get(title).build(app._ctx, tab_frames[title])
 
-    def _build_bar() -> None:
-        from well_viewer.features.barplot.tab_view import build_bar_plots_tab
-        build_bar_plots_tab(app._ctx, tab_frames["Bar Plots"])
-
-    def _build_scatter() -> None:
-        from well_viewer.features.scatter.tab_view import build_scatter_tab
-        build_scatter_tab(app._ctx, tab_frames["Scatter Plot"])
-
-    def _build_distribution() -> None:
-        from well_viewer.features.distribution.tab_view import build_distribution_tab
-        build_distribution_tab(app._ctx, tab_frames["Distribution"])
-
-    def _build_heatmap() -> None:
-        from well_viewer.features.heatmap.tab_view import build_heatmap_tab
-        build_heatmap_tab(app._ctx, tab_frames["Heat Map"])
-
-    # Register plot sub-tab builders in pending now so the background drain
-    # can populate their frames while the app is starting up.  _build_plotting
-    # (below) calls _build_pending("Line Graphs") eagerly and the drain
-    # handles the rest.
-    pending["Line Graphs"] = _line_graphs_eager
-    pending["Bar Plots"] = _build_bar
-    pending["Scatter Plot"] = _build_scatter
-    pending["Distribution"] = _build_distribution
-    pending["Heat Map"] = _build_heatmap
+    # Register plot sub-tab builders in pending now so the background drain can
+    # populate their frames while the app is starting up. _build_plotting
+    # (below) builds the first sub-tab eagerly and the drain handles the rest.
+    for _sub in _PLOT_SUBTABS:
+        pending[_sub] = _registry_builder(_sub)
 
     def _build_plotting() -> None:
         """Build the Plotting section: mockup-style ctxbar above a tab-bar-hidden
@@ -673,83 +657,22 @@ def build_centre(app, parent: QWidget) -> None:
 
         _refresh_channel_chip(_PLOT_SUBTABS[0])
 
-    def _build_image_browser() -> None:
-        """Build the unified Image Browser page — a QTabWidget hosting the
-        Segmentation / Image Table / Cell Browser / Playground sub-tabs.
+    # Top-level rail entries are enumerated from the feature registry. Each
+    # group's tabs come from ``app._features.in_group(...)`` in declaration
+    # order; the builder is the descriptor's registry builder, except the
+    # bespoke "Plotting" composite (built by ``_build_plotting`` above, which
+    # owns the nested plot sub-tab notebook + ctxbar). Commenting a descriptor
+    # out of ``features.registry.FEATURES`` removes its rail entry here — and
+    # its dispatch / state / persistence — with no other edit.
+    _bespoke_builders = {"Plotting": _build_plotting}
 
-        Each sub-tab body (and its sidebar) builds lazily on first show; see
-        ``features/image_browser/tab_view.py``.
-        """
-        from well_viewer.features.image_browser.tab_view import build_image_browser_tab
-        build_image_browser_tab(app._ctx, tab_frames["Image Browser"])
-
-    def _build_smfish() -> None:
-        """Build the smFISH tab (its own top-level rail entry).
-
-        Lazy-only (see ``lazy_only``) because it pulls heavy deps
-        (tifffile / skimage / matplotlib-QtAgg) — it constructs on first
-        click rather than during the background drain.
-        """
-        parent = tab_frames["smFISH"]
-        if parent.layout() is None:
-            QVBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
-        try:
-            from well_viewer.features.smfish.tab_view import build_smfish_tab
-            build_smfish_tab(app._ctx, parent)
-        except Exception:
-            _logger.exception("Build for smFISH tab failed")
-
-    def _build_stats() -> None:
-        from well_viewer.features.stats.view import (
-            build_stats_group_editor, build_stats_tab,
-        )
-        build_stats_tab(app, tab_frames["Statistics"])
-        build_stats_group_editor(app, app._sidebar_stats_frame)
-
-    def _build_review_csv() -> None:
-        app._build_review_csv_tab(tab_frames["Review CSV"])
-
-    def _build_sample_definitions() -> None:
-        from well_viewer.features.grouping.replicate_panel_view import (
-            build_sample_definitions_centre,
-        )
-        build_sample_definitions_centre(app, tab_groups)
-
-    def _build_batch_export() -> None:
-        from well_viewer.features.batch_export.tab_view import build_batch_export_tab
-        build_batch_export_tab(app._ctx, tab_frames["Batch Export"])
-
-    def _build_saved_plots() -> None:
-        from well_viewer.features.saved_plots.tab_view import build_saved_plots_tab
-        build_saved_plots_tab(app._ctx, tab_frames["Saved Plots"])
+    def _top_level_builder(title: str) -> Callable[[], None]:
+        return _bespoke_builders.get(title) or _registry_builder(title)
 
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
-        ("Analysis", [
-            # "Plotting" is a single top-level tab that contains Line Graphs,
-            # Bar Plots, Scatter Plot, Distribution, and Heat Map as sub-tabs.
-            ("Plotting", _build_plotting),
-            # Cell Gating moved into the Sample Definitions tab (Cell Gating
-            # sub-tab) — that's the new home for global per-cell config.
-            ("Statistics", _build_stats),
-        ]),
-        ("Images", [
-            # Image Browser unifies the disparate image-review surfaces under
-            # one rail entry: Segmentation (review-image canvas), Image Table
-            # (per-cell grid; Movie Montage was folded in here), Cell Browser
-            # (filterable single-cell gallery), and Playground (single-frame
-            # correction testbed) as sibling sub-tabs. Lazy-only — its sub-tab
-            # bodies pull the image-table loaders (tifffile / zipfile cache).
-            ("Image Browser", _build_image_browser),
-            # smFISH keeps its own rail entry (it is not an image-*review*
-            # surface). Lazy-only — heavy deps build on first click.
-            ("smFISH", _build_smfish),
-        ]),
-        ("Data", [
-            ("Review CSV", _build_review_csv),
-            ("Sample Definitions", _build_sample_definitions),
-            ("Saved Plots", _build_saved_plots),
-            ("Batch Export", _build_batch_export),
-        ]),
+        (group, [(d.name, _top_level_builder(d.name))
+                 for d in app._features.in_group(group)])
+        for group in ("Analysis", "Images", "Data")
     ]
 
     def _new_tab(title: str) -> QWidget:

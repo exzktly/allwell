@@ -102,35 +102,16 @@ def recalculate_threshold(app) -> None:
 
     # Always refresh timepoint menus regardless of whether intensity
     # values exist — single-timepoint experiments still need the bar menu.
-    if hasattr(app, "_bar_tp_cb"):
-        app._update_bar_tp_menu()
-    if hasattr(app, "_stats_tp_cb"):
-        from well_viewer.features.stats.controller import stats_update_tp_menu
-        stats_update_tp_menu(app)
-    if hasattr(app, "_distribution_tp_cb"):
-        try:
-            from well_viewer.features.distribution.tab_view import refresh_distribution_timepoints
-            refresh_distribution_timepoints(app)
-        except Exception:
-            _logger.exception("Distribution timepoint refresh failed")
-    if hasattr(app, "_heatmap_tp_slider"):
-        try:
-            from well_viewer.features.heatmap.tab_view import refresh_heatmap_timepoints
-            refresh_heatmap_timepoints(app)
-        except Exception:
-            _logger.exception("Heatmap timepoint refresh failed")
-    if hasattr(app, "_scatter_ch_x_cb"):
-        try:
-            from well_viewer.features.scatter.controller import (
-                update_scatter_menus,
-                redraw_scatter_orchestrate,
-                redraw_scatter_agg_orchestrate,
-            )
-            update_scatter_menus(app)
-            redraw_scatter_orchestrate(app)
-            redraw_scatter_agg_orchestrate(app)
-        except Exception:
-            _logger.exception("Scatter menu refresh failed")
+    # Per-feature channel-change refresh (timepoint menus + scatter redraw) is
+    # dispatched through the registry's ``on_channel_changed`` hooks — each hook
+    # body (and its ``hasattr`` guard) is the relocated block that used to sit
+    # here; see ``features/registry.py``. Cell-gating reload stays inline below
+    # (it is interleaved with the core ``_load_gating_from_pipeline_info`` call
+    # and runs only after the no-data early return).
+    feats = getattr(app, "_features", None)
+    if feats is not None:
+        for _desc in feats.with_hook("on_channel_changed"):
+            _desc.on_channel_changed(app)
 
     # Per-channel (min, max) cache — keyed on val_col so a channel toggle
     # reuses the previous channel's range when the user flips back. Audit

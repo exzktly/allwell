@@ -86,7 +86,9 @@ class _FovApp:
     def __init__(self, rows_by_well: dict[str, pd.DataFrame]):
         self._rows = rows_by_well
         from well_viewer.core.app_state import AppState
+        from well_viewer.features.registry import attach_feature_state
         st = AppState()
+        attach_feature_state(st)
         st.dataset.well_paths = {w: w for w in rows_by_well}
         st.channel.active_val_col = "gfp_mean_intensity"
         self.__app_state = st

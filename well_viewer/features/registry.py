@@ -83,9 +83,8 @@ def _build_stats(ctx, frame) -> None:
     from well_viewer.features.stats.view import (
         build_stats_group_editor, build_stats_tab,
     )
-    app = ctx.app
-    build_stats_tab(app, frame)
-    build_stats_group_editor(app, app._sidebar_stats_frame)
+    build_stats_tab(ctx.app, frame)
+    build_stats_group_editor(ctx.app, ctx.app._sidebar_stats_frame)
 
 
 def _build_review_csv(ctx, frame) -> None:
@@ -409,21 +408,6 @@ def _channel_scatter(app) -> None:
             _logger.exception("Scatter menu refresh failed")
 
 
-def _channel_cell_gating(app) -> None:
-    # Hydrate persisted gating params onto the rebuilt cell-gating rows. The
-    # caller has already run ``app._load_gating_from_pipeline_info()`` once;
-    # ``cell_gating_load_cell_areas`` rebuilds the rows as fresh edits, so we
-    # re-apply the persisted params afterwards (see the original note in
-    # recalculate_threshold).
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
-        from well_viewer.features.grouping.cell_gating_tab_view import (
-            cell_gating_load_cell_areas, cell_gating_load_threshold_frac_on,
-        )
-        cell_gating_load_cell_areas(app)
-        app._load_gating_from_pipeline_info()
-        cell_gating_load_threshold_frac_on(app)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Fold-change scope contributions (relocated from core/scope_registry.py).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -502,26 +486,29 @@ def _features() -> "list[FeatureDescriptor]":
 
         # ── Plotting sub-leaves (no rail entry; dispatch hooks only) ───────
         FeatureDescriptor(
-            name="Bar Plots",
+            name="Bar Plots", build=_build_barplot,
             states=(StateSpec("bar", _state_bar),),
             on_activate=_activate_bar_plots,
             on_selection_changed=_sel_bar_plots,
             on_channel_changed=_channel_bar,
             fold_change_scope_factory=_fold_change_scope_bar,
         ),
-        FeatureDescriptor(name="Line Graphs", on_activate=_activate_default_plot),
+        FeatureDescriptor(name="Line Graphs", build=_build_lineplot,
+                          on_activate=_activate_default_plot),
         FeatureDescriptor(
-            name="Scatter Plot",
+            name="Scatter Plot", build=_build_scatter,
             on_activate=_activate_scatter,
             on_selection_changed=_sel_scatter,
             on_channel_changed=_channel_scatter,
         ),
         FeatureDescriptor(
-            name="Distribution", on_activate=_activate_default_plot,
+            name="Distribution", build=_build_distribution,
+            on_activate=_activate_default_plot,
             on_channel_changed=_channel_distribution,
         ),
         FeatureDescriptor(
-            name="Heat Map", on_activate=_activate_heatmap,
+            name="Heat Map", build=_build_heatmap,
+            on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
         ),
 
@@ -533,8 +520,7 @@ def _features() -> "list[FeatureDescriptor]":
         FeatureDescriptor(name="Playground", on_activate=_activate_playground),
 
         # ── Sample Definitions sub-leaf ────────────────────────────────────
-        FeatureDescriptor(name="Cell Gating", on_activate=_activate_cell_gating,
-                          on_channel_changed=_channel_cell_gating),
+        FeatureDescriptor(name="Cell Gating", on_activate=_activate_cell_gating),
     ]
 
 

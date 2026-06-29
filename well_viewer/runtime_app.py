@@ -54,6 +54,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.core.app_state import AppState
+from well_viewer.features.registry import attach_feature_state, build_feature_registry
 from well_viewer.core.event_bus import EventBus
 from well_viewer.core.bus_wiring import wire_event_bus
 from well_viewer.persistence.registry import build_persistence_registry
@@ -220,7 +221,13 @@ class WellViewerApp(QWidget):
         # The legacy attribute names survive as @property shims (search
         # "Phase 1 ChannelState shims" below) — ChannelState is the single
         # source of truth, so no call site needed to change.
+        # Feature registry — the seam that makes tab-features removable. Built
+        # before AppState so the feature-owned state slices can be attached
+        # onto it (the import-inversion: core/app_state.py no longer imports
+        # any feature state class; the registry contributes them here).
+        self._features = build_feature_registry()
         self._app_state = AppState()
+        attach_feature_state(self._app_state, self._features)
         self._event_bus = EventBus()
         # Name-keyed store for Qt widget handles. Tab builders register their
         # figures / canvases / axes here; ``__getattr__`` (below) forwards

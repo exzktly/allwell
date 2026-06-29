@@ -1062,7 +1062,15 @@ def main() -> None:
     )
     ap.add_argument("--data_dir", type=Path, default=None,
                     help="Pre-load a results directory into the Review tab on startup.")
+    ap.add_argument("--smoke", action="store_true",
+                    help="Self-test: build every Review tab and resolve every lazy "
+                         "import proxy, print PASS/FAIL, then exit (0 = all passed). "
+                         "Runs headless; combine with --data_dir to also load data.")
     args = ap.parse_args()
+
+    if args.smoke:
+        from well_viewer.core.smoke import run_smoke
+        sys.exit(run_smoke(args.data_dir))
 
     app = QApplication.instance() or QApplication(sys.argv)
     _install_combobox_popup_widener()

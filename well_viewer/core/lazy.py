@@ -17,8 +17,15 @@ from __future__ import annotations
 
 from typing import Callable
 
+# Every (module_path, attr) a lazy proxy was created for, in creation order.
+# Lets the ``--smoke`` self-test resolve all of them and confirm none is
+# mis-wired (a typo'd name or a moved target only surfaces on first call in the
+# real GUI otherwise). Populated as the defining modules import.
+_REGISTRY: "list[tuple[str, str]]" = []
+
 
 def lazy(module_path: str, attr: str) -> Callable:
+    _REGISTRY.append((module_path, attr))
     cache: list = []
 
     def _proxy(*args, **kwargs):
@@ -34,3 +41,30 @@ def lazy(module_path: str, attr: str) -> Callable:
 def lazy_names(module_path: str, *names: str):
     """Tuple of ``lazy`` proxies for several callables from one module."""
     return tuple(lazy(module_path, n) for n in names)
+
+
+def verify_lazy_imports() -> "list[tuple[str, bool, str | None]]":
+    """Resolve every registered lazy proxy once.
+
+    Returns ``(target, ok, error)`` per distinct proxy: ``ok`` is True when the
+    target imports and is callable. Covers only proxies whose defining module
+    has been imported — the smoke runner builds every tab first so they all are.
+    """
+    from importlib import import_module
+    seen: set = set()
+    results: list = []
+    for module_path, attr in list(_REGISTRY):
+        key = (module_path, attr)
+        if key in seen:
+            continue
+        seen.add(key)
+        target = f"{module_path}.{attr}"
+        try:
+            obj = getattr(import_module(module_path), attr)
+            if callable(obj):
+                results.append((target, True, None))
+            else:
+                results.append((target, False, "resolved but not callable"))
+        except Exception as exc:  # noqa: BLE001 — report, don't raise
+            results.append((target, False, f"{type(exc).__name__}: {exc}"))
+    return results

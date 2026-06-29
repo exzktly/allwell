@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
-from well_viewer.features.scatter.gating import paint_gates, render_scatter_points
+from well_viewer.features.scatter.gating import (
+    paint_gates, refresh_gate_selector, render_scatter_points,
+)
 
 #: Minimum on-screen height (px) per stacked panel in "Separate axes" mode.
 #: Below this, panels squish to unreadable slivers; instead the card grows
@@ -169,4 +171,9 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
             app, app._scatter_fig, getattr(app, "_scatter_canvas", None))
     except Exception:
         swallowed()
+    # Re-arm the gate selector against the new top panel (axes[0]). The figure
+    # was just rebuilt, so a previously-armed selector is bound to a dead axis;
+    # mirror the overlay redraw's refresh so drawing in "Separate axes" mode
+    # captures coordinates on the live panel. No-op when draw mode is off.
+    refresh_gate_selector(app)
     app._scatter_canvas.draw()

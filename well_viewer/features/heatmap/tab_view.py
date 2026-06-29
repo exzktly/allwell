@@ -283,16 +283,22 @@ def refresh_heatmap_timepoints(app) -> None:
     except Exception:
         tps = []
     app._heatmap_tp_values = tps
+    # Seed the slider from the shared focus timepoint (N5) when one is set and
+    # present, so opening Heat Map after picking a timepoint on Distribution
+    # lands on the same point; else default to the first timepoint.
+    from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
+    focus_idx = nearest_index(tps, current_focus_tp(app)) if tps else None
+    start_idx = focus_idx if focus_idx is not None else 0
     blocked = slider.blockSignals(True)
     try:
         slider.setMinimum(0)
         slider.setMaximum(max(0, len(tps) - 1))
-        slider.setValue(0)
+        slider.setValue(start_idx)
     finally:
         slider.blockSignals(blocked)
     if label is not None:
         if tps:
-            label.setText(f"t = {tps[0]:g} h")
+            label.setText(f"t = {tps[start_idx]:g} h")
         else:
             label.setText("—")
     _redraw(app)
@@ -307,7 +313,16 @@ def _on_tp_changed(app) -> None:
     idx = max(0, min(slider.value(), len(tps) - 1))
     if label is not None:
         label.setText(f"t = {tps[idx]:g} h")
-    _redraw(app)
+    # Publish the shared focus timepoint (N5). In Split View, emit so the other
+    # pane (Distribution) redraws live; otherwise update the value silently and
+    # redraw only this tab — keeps slider scrubbing as cheap as before (no
+    # offscreen fan-out). Other tabs pick the value up on next show.
+    from well_viewer.core.timepoint_sync import set_focus_tp
+    if getattr(app, "_split_active", False):
+        set_focus_tp(app, tps[idx])
+    else:
+        set_focus_tp(app, tps[idx], emit=False)
+        _redraw(app)
 
 
 def _on_scale_changed(app) -> None:

@@ -12,7 +12,7 @@ from typing import List
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.cell_browser.collect import (
@@ -64,6 +64,19 @@ def make_cell_thumb(app, rgb, desc) -> QWidget:
         pm = rgb_to_pixmap(rgb).scaled(
             THUMB_PX - 2, THUMB_PX - 2, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         thumb.setPixmap(pm)
+    # N9: caption the crop with the active-channel spot count when present.
+    spot = getattr(desc, "spot_count", None)
+    if spot is not None:
+        container = QWidget()
+        col = QVBoxLayout(container)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(2)
+        col.addWidget(thumb, 0, Qt.AlignHCenter)
+        cap = QLabel(f"{spot} spot" + ("" if spot == 1 else "s"), container)
+        cap.setObjectName("Muted")
+        cap.setAlignment(Qt.AlignCenter)
+        col.addWidget(cap, 0, Qt.AlignHCenter)
+        return container
     return thumb
 
 
@@ -146,6 +159,10 @@ def apply_filters(app) -> None:
     st.show_boundaries = bool(bcb.isChecked()) if bcb is not None else True
     src = getattr(app, "_cell_browser_source_seg", None)
     st.use_tophat = (src.currentData() == "corrected") if src is not None else False
+    lcb = getattr(app, "_cell_browser_label_spot_cb", None)
+    st.label_spot_count = bool(lcb.isChecked()) if lcb is not None else False
+    gcb = getattr(app, "_cell_browser_gate_mode_cb", None)
+    st.scatter_gate_mode = bool(gcb.isChecked()) if gcb is not None else False
     st.page_size = _page_size(app)
 
     # Sort happens inside collect_cells (before the MAX_TOTAL cap, so the cap
@@ -218,11 +235,30 @@ def on_page_finished(app, payload: dict) -> None:
 
 def _empty_gallery_hint(st) -> str:
     """Name the most likely reason the filtered set is empty (and the fix)."""
+    if getattr(st, "scatter_gate_mode", False):
+        return ("No cells in the scatter gate — draw or adjust a gate on the "
+                "Scatter Plot, or turn off “From scatter gate”.")
     if st.timepoints == []:
         return "No timepoints selected — click Timepoints to choose which to show."
     if st.fovs == []:
         return "No FOVs selected — click FOVs to choose which to show."
     return "No cells match the current filters — relax the criteria above."
+
+
+def cell_browser_sync_scatter_gates(app) -> None:
+    """Re-collect the gallery from the active scatter gate(s) when gate-source
+    mode is on and the Cell Browser is visible — the live half of the
+    Scatter ⇄ Cell Browser brushing (N1). Wired from the scatter gating module's
+    ``_notify_gates_changed`` via ``app._cell_browser_gates_changed_cb``; a no-op
+    when the mode is off or the tab isn't on screen (so it costs nothing in the
+    common case)."""
+    st = getattr(app, "_cell_browser_state", None)
+    if st is None or not getattr(st, "scatter_gate_mode", False):
+        return
+    from well_viewer.core.tab_controller import is_tab_visible
+    if not is_tab_visible(app, "Cell Browser"):
+        return
+    apply_filters(app)
 
 
 def _set_apply_busy(app, busy: bool) -> None:

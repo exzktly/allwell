@@ -1,5 +1,16 @@
 # Synergy recommendations: leveraging Split View + cross-tab data
 
+> **Implementation status.** Shipped on `claude/architecture-tab-synergy-ljefhs`:
+> **N10** (Batch Export defaults to the shared sidebar groups), **N5** (shared
+> focus timepoint across Heat Map / Distribution, via `core/timepoint_sync.py`),
+> **N7** (significance brackets on the Bar plot from the Statistics tab),
+> **N9** (Cell Browser "Spot counts" label mode — captions each crop with the
+> active channel's `<channel>_smfish_count`), **N1** (Scatter gate → Cell Browser
+> linked brushing, with the gate overriding the criteria), and **N11** (Split View
+> reconciles the well-picker constraints least-restrictively so a single-well pane
+> no longer collapses a multi-well pane's selection). The remaining items
+> (N2/N3/N4/N6/N8/N12) are not yet built.
+
 ## Context
 
 After reading `ARCHITECTURE.md`, the question raised was whether there are ways to

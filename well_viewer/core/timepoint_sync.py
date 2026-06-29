@@ -1,0 +1,67 @@
+"""Shared "focus timepoint" sync across the plotting tabs (N5).
+
+Channel / property / threshold are already shared across the plotting tabs via
+the context bar; timepoint was the one axis each tab tracked on its own. This
+module is the small cross-cutting seam that lets the single-timepoint tabs (the
+Heat Map slider and the Distribution combo) agree on **one** timepoint:
+``PlotState.focus_timepoint`` (the dataset's timepoint-hours float).
+
+Writing it emits the existing ``plot_options_changed`` signal so visible scopes
+redraw — in Split View that updates both panes live; otherwise the other tab
+picks the value up on its next show (the tab-change refreshers call
+:func:`apply_focus_to_*`). No new EventBus signal is added (G5); state lives on
+``PlotState`` (G3/G4).
+
+Qt-free: stdlib only.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Optional, Sequence
+
+from well_viewer.core.safe import swallowed
+
+
+def current_focus_tp(app) -> Optional[float]:
+    """The shared focus timepoint, or ``None`` when not yet chosen."""
+    return app._app_state.plot.focus_timepoint
+
+
+def set_focus_tp(app, tp, *, emit: bool = True) -> None:
+    """Set the shared focus timepoint and (by default) notify the other tabs.
+
+    ``tp`` is coerced to ``float`` (``None`` clears it). When *emit* is True the
+    ``plot_options_changed`` signal fires so visible plot scopes redraw."""
+    try:
+        val: Optional[float] = None if tp is None else float(tp)
+    except (TypeError, ValueError):
+        val = None
+    if val == app._app_state.plot.focus_timepoint:
+        return
+    app._app_state.plot.focus_timepoint = val
+    if emit:
+        try:
+            app._event_bus.plot_options_changed.emit(app._app_state.plot)
+        except Exception:
+            swallowed()
+
+
+def nearest_index(tps: Sequence[float], tp) -> Optional[int]:
+    """Index of the timepoint in *tps* closest to *tp*, or ``None`` when *tps*
+    is empty / *tp* is unset. Tolerates float drift between tabs."""
+    if not tps or tp is None:
+        return None
+    try:
+        target = float(tp)
+    except (TypeError, ValueError):
+        return None
+    best_i, best_d = 0, math.inf
+    for i, t in enumerate(tps):
+        try:
+            d = abs(float(t) - target)
+        except (TypeError, ValueError):
+            continue
+        if d < best_d:
+            best_i, best_d = i, d
+    return best_i

@@ -29,6 +29,12 @@ class StatsState:
     drag_adding: bool = False
     drag_visited: set = field(default_factory=set)
 
+    # Structured pairwise results from the most recent run (N7), so the Bar plot
+    # can draw significance brackets without re-running the tests. Each entry is
+    # ``{"a": group_name, "b": group_name, "p": float, "p_adj": float,
+    # "test": str}``. Populated by ``run_stats``; the text output is unchanged.
+    pairwise: list[dict] = field(default_factory=list)
+
     # ── group management ─────────────────────────────────────────────────────
 
     def active_group(self) -> BarGroup | None:

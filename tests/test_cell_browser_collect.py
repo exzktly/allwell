@@ -161,3 +161,70 @@ def test_channels_coerced_to_str():
     app._app_state.channel.fluor_channels = [1, "gfp"]
     from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
     assert cell_browser_channels(app) == ["1", "gfp"]
+
+
+# ── N9: spot-count label population ──────────────────────────────────────────
+
+def test_label_spot_count_populates_active_channel_count():
+    app = _app(_df())
+    app._app_state.channel.active_channel = "cy5"
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=True, scatter_gate_mode=False)
+    cells = collect_cells(app, [])
+    assert {c.nucleus_id: c.spot_count for c in cells} == {
+        "10": 0, "11": 5, "12": 9, "13": 1}
+
+
+def test_label_spot_count_off_leaves_none():
+    app = _app(_df())
+    app._app_state.channel.active_channel = "cy5"
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=False)
+    cells = collect_cells(app, [])
+    assert all(c.spot_count is None for c in cells)
+
+
+def test_label_spot_count_none_when_channel_has_no_smfish_column():
+    app = _app(_df())
+    app._app_state.channel.active_channel = "gfp"  # no gfp_smfish_count column
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=True, scatter_gate_mode=False)
+    cells = collect_cells(app, [])
+    assert all(c.spot_count is None for c in cells)
+
+
+# ── N1: scatter-gate source mode ─────────────────────────────────────────────
+
+def _gate(x_col, y_col, x0, x1, y0, y1, name="G1"):
+    return {"x_col": x_col, "y_col": y_col,
+            "x0": x0, "x1": x1, "y0": y0, "y1": y1, "name": name}
+
+
+def test_scatter_gate_mode_sources_from_gate_and_ignores_criteria():
+    app = _app(_df())
+    app._scatter_gates = [_gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0)]
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=True)
+    # A criterion that would exclude everything is ignored in gate mode.
+    cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=0.0, hi=1.0)])
+    # gate keeps gfp in [500,800] → nids 11 (600) and 12 (700).
+    assert sorted(c.nucleus_id for c in cells) == ["11", "12"]
+
+
+def test_scatter_gate_mode_empty_when_no_gates_drawn():
+    app = _app(_df())
+    app._scatter_gates = []
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=True)
+    assert collect_cells(app, []) == []
+
+
+def test_scatter_gate_mode_empty_timepoints_relax_to_all():
+    # Outside gate mode an empty timepoint include-list yields nothing; in gate
+    # mode it relaxes to "all" so the gated cells aren't hidden by the default.
+    app = _app(_df())
+    app._scatter_gates = [_gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=True)
+    cells = collect_cells(app, [], timepoints=[])
+    assert len(cells) == 4

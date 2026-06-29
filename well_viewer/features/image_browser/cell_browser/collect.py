@@ -24,6 +24,7 @@ from well_viewer.data.data_loading import (
 )
 from well_viewer.data.metric_labels import split_metric_col
 from well_viewer.domain.metric_registry import intensity_keys
+from well_viewer.features.scatter.gating import compute_gate_inclusion
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,9 @@ class CellDescriptor:
     row_idx: int
     centroid_row: Optional[float]
     centroid_col: Optional[float]
+    # Active-channel smFISH spot count for the caption (N9); None when the
+    # label mode is off or the channel has no ``_smfish_count`` column.
+    spot_count: Optional[int] = None
 
 
 def _sample_df(app):
@@ -243,6 +247,26 @@ def collect_cells(
     fov_set = None if fovs is None else {str(f) for f in fovs}
     keys = list(sort_keys or [])
 
+    # N9: caption each crop with the active channel's smFISH spot count.
+    st = getattr(app, "_cell_browser_state", None)
+    label_spot = bool(getattr(st, "label_spot_count", False))
+    active_ch = str(getattr(app._app_state.channel, "active_channel", "") or "").strip().lower()
+    spot_col = f"{active_ch}_smfish_count" if active_ch else ""
+
+    # N1: source cells from the active scatter gate(s) instead of the criteria.
+    # The gate is the numeric filter (criteria are ignored — "gate overrides
+    # criteria"); timepoint/FOV still narrow, but an empty include-list relaxes
+    # to "all" in gate mode so the gated cells aren't hidden by the deselected
+    # default. With the mode on but no gate drawn, no cells match (the caller
+    # shows a "draw a gate" hint).
+    gate_mode = bool(getattr(st, "scatter_gate_mode", False))
+    gates = list(getattr(app, "_scatter_gates", []) or []) if gate_mode else []
+    if gate_mode:
+        if target is not None and target.size == 0:
+            target = None
+        if fov_set is not None and not fov_set:
+            fov_set = None
+
     out: List[CellDescriptor] = []
     # One parallel value list per sort key (aligned with ``out``), filled per
     # well so the cross-well sort below has a value for every cell.
@@ -252,7 +276,11 @@ def collect_cells(
         df = app._get_rows(well)
         if df is None or df.empty:
             continue
-        mask = _passes_criteria(df, criteria, ratios)
+        if gate_mode:
+            mask = (compute_gate_inclusion(df, gates, ratios) if gates
+                    else np.zeros(len(df), dtype=bool))
+        else:
+            mask = _passes_criteria(df, criteria, ratios)
         if target is not None and "timepoint_hours" in df.columns:
             if target.size == 0:
                 mask &= False  # options exist, none selected → no cells
@@ -286,6 +314,8 @@ def collect_cells(
                 if "shape_centroid_row" in cols else np.full(len(sel), np.nan))
         ccol = (pd.to_numeric(sel["shape_centroid_col"], errors="coerce").to_numpy()
                 if "shape_centroid_col" in cols else np.full(len(sel), np.nan))
+        spots = (pd.to_numeric(sel[spot_col], errors="coerce").to_numpy()
+                 if (label_spot and spot_col in cols) else None)
         ridx = sel.index.to_numpy()
         # Per-key sort values for this well's cells (aligned with the appends
         # below). Intrinsic dimensions are read off the arrays we already have;
@@ -310,6 +340,8 @@ def collect_cells(
                 row_idx=int(ridx[i]),
                 centroid_row=float(crow[i]) if np.isfinite(crow[i]) else None,
                 centroid_col=float(ccol[i]) if np.isfinite(ccol[i]) else None,
+                spot_count=(int(spots[i]) if spots is not None and np.isfinite(spots[i])
+                            else None),
             ))
             for k in range(len(keys)):
                 sort_cols[k].append(key_vals[k][i])

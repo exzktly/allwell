@@ -52,7 +52,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("t (h):", ctrl))
     ctx.app._distribution_tp_cb = QComboBox(ctrl)
     ctx.app._distribution_tp_cb.setMinimumContentsLength(8)
-    ctx.app._distribution_tp_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx.app))
+    ctx.app._distribution_tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx.app))
     cl.addWidget(ctx.app._distribution_tp_cb)
     ctx.app._distribution_tp_var = ctx.app._distribution_tp_cb
 
@@ -166,6 +166,24 @@ def _on_changed(app) -> None:
     redraw_distribution(app)
 
 
+def _on_tp_changed_dist(app) -> None:
+    """Timepoint combo changed — publish the shared focus timepoint (N5). In
+    Split View, emit so the Heat Map pane redraws live; otherwise update the
+    value silently and redraw only this tab. Other tabs pick it up on next show."""
+    from well_viewer.core.timepoint_sync import set_focus_tp
+    cb = getattr(app, "_distribution_tp_cb", None)
+    txt = cb.currentText() if cb is not None else ""
+    try:
+        tp = float(txt) if txt not in ("", "—", None) else None
+    except (ValueError, TypeError):
+        tp = None
+    if getattr(app, "_split_active", False):
+        set_focus_tp(app, tp)
+    else:
+        set_focus_tp(app, tp, emit=False)
+        _on_changed(app)
+
+
 def refresh_distribution_timepoints(app) -> None:
     """Populate the timepoint dropdown from the loaded data."""
     cb = getattr(app, "_distribution_tp_cb", None)
@@ -183,5 +201,10 @@ def refresh_distribution_timepoints(app) -> None:
             cb.addItems(items)
         else:
             cb.addItem("—")
+        # Seed from the shared focus timepoint (N5) when one is set and present.
+        from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
+        i = nearest_index(tps, current_focus_tp(app)) if tps else None
+        if i is not None:
+            cb.setCurrentIndex(i)
     finally:
         cb.blockSignals(blocked)

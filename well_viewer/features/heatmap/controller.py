@@ -27,6 +27,7 @@ from well_viewer.domain.ratio_models import is_ratio_key
 from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
 
 
 METRIC_MEAN = "Mean above threshold"
@@ -82,6 +83,30 @@ def _selected_tp(app) -> Optional[float]:
         return None
     idx = max(0, min(slider.value(), len(tps) - 1))
     return tps[idx]
+
+
+def sync_heatmap_slider_to_focus(app) -> None:
+    """Move the slider + label to the shared focus timepoint (N5) when one is set
+    and present in this tab's timepoints — so a timepoint chosen on another
+    plotting tab (Distribution) is reflected here. Signals are blocked so this
+    silent sync never re-fires ``_on_tp_changed``. No-op when no focus is set."""
+    focus = current_focus_tp(app)
+    if focus is None:
+        return
+    tps: List[float] = list(getattr(app, "_heatmap_tp_values", []) or [])
+    i = nearest_index(tps, focus)
+    if i is None:
+        return
+    slider = getattr(app, "_heatmap_tp_slider", None)
+    if slider is not None and slider.value() != i:
+        blocked = slider.blockSignals(True)
+        try:
+            slider.setValue(i)
+        finally:
+            slider.blockSignals(blocked)
+    label = getattr(app, "_heatmap_tp_label", None)
+    if label is not None:
+        label.setText(f"t = {tps[i]:g} h")
 
 
 def _expand_repset_wells(app, wells: Iterable[str]) -> List[str]:
@@ -355,6 +380,7 @@ def redraw_heatmap(app) -> None:
         return
 
     layout = active_layout(app)
+    sync_heatmap_slider_to_focus(app)
     tp = _selected_tp(app)
     if tp is None:
         # Try to derive from the data; if still none, leave the canvas blank.

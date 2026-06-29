@@ -94,16 +94,16 @@ def _show_batch_mode(app, mode: str) -> None:
     panels = state["panels"]
     if mode not in panels:
         if mode == "line":
-            panel = BatchExportPanel(app, host, use_sidebar_groups=False)
+            panel = BatchExportPanel(app, host, use_sidebar_groups=True)
         elif mode == "bar":
-            panel = BarBatchExportPanel(app, host, use_sidebar_groups=False)
+            panel = BarBatchExportPanel(app, host, use_sidebar_groups=True)
         elif mode == "scatter_cells":
             panel = ScatterBatchExportPanel(
-                app, host, scatter_mode="cells", use_sidebar_groups=False,
+                app, host, scatter_mode="cells", use_sidebar_groups=True,
             )
         else:
             panel = ScatterBatchExportPanel(
-                app, host, scatter_mode="aggregate", use_sidebar_groups=False,
+                app, host, scatter_mode="aggregate", use_sidebar_groups=True,
             )
         host_layout.addWidget(panel)
         panels[mode] = panel

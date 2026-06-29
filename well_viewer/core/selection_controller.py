@@ -570,22 +570,24 @@ def refresh_sidebar_map_now(app) -> None:
                 colors[tok] = app._rank_color_well(tok)
 
     # smFISH suppresses row/col header selection and forces single-well.
-    smfish = False
-    nb = getattr(app, "_notebook", None)
-    if nb is not None:
-        try:
-            # smFISH is its own rail entry; the image-review surfaces are now
-            # sub-tabs of "Image Browser". Either way the top-level current name
-            # isn't the leaf, so descend via ``_current_centre_tab`` to recover
-            # the leaf name.
-            smfish = app._current_centre_tab() == "smFISH"
-        except Exception:
-            smfish = False
+    #
+    # N11 — in Split View the one sidebar plate serves BOTH visible panes, so a
+    # single-well constraint is reconciled **least-restrictively** across them:
+    # smFISH only forces single-well / hides row-col headers when EVERY visible
+    # leaf is smFISH. Otherwise focusing an smFISH pane next to a multi-well pane
+    # (Heat Map / plots) would collapse the shared selection to one well. Outside
+    # split, ``visible`` is just the current leaf, so behaviour is unchanged.
+    try:
+        from well_viewer.core.tab_controller import visible_centre_tabs
+        visible = set(visible_centre_tabs(app)) or {tab_name}
+    except Exception:
+        visible = {tab_name}
+    smfish_all = bool(visible) and all(t == "smFISH" for t in visible)
 
     plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
     plate.setSelectionMode("passive" if rep_mode else "select")
-    plate.setRowColumnSelectable(not smfish)
-    plate.setSingleSelectionMode(smfish and not rep_mode)
+    plate.setRowColumnSelectable(not smfish_all)
+    plate.setSingleSelectionMode(smfish_all and not rep_mode)
     plate.clearWellColors()
     plate.setWellColors(colors)
     # Plotting tabs in rep-mode still honour ``_selected_wells`` so a

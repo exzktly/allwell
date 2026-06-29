@@ -228,6 +228,25 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ctx.app._violin_slider.setEnabled(False)
     _disp_lay.addWidget(ctx.app._violin_slider)
 
+    # Significance brackets (N7): draw the Statistics tab's pairwise results onto
+    # the Mean panel. Toggle stages PlotState.show_significance and redraws.
+    ctx.app._bar_significance_btn = QPushButton("Significance: Off", shape_ctrl)
+    ctx.app._bar_significance_btn.setProperty("variant", "toggle")
+    ctx.app._bar_significance_btn.setCheckable(True)
+    ctx.app._bar_significance_btn.setChecked(bool(ctx.app._app_state.plot.show_significance))
+    ctx.app._bar_significance_btn.setToolTip(
+        "Draw significance brackets between group bars from the Statistics tab's "
+        "pairwise tests. Run a test in Statistics first; brackets appear for the "
+        "compared groups that match the current bars (grouped / pooled mode).")
+
+    def _toggle_bar_significance(_=False, _app=ctx.app):
+        on = bool(_app._bar_significance_btn.isChecked())
+        _app._app_state.plot.show_significance = on
+        _app._bar_significance_btn.setText(f"Significance: {'On' if on else 'Off'}")
+        redraw_bars(_app)
+    ctx.app._bar_significance_btn.clicked.connect(_toggle_bar_significance)
+    _disp_lay.addWidget(ctx.app._bar_significance_btn)
+
     # Error band (SEM/SD + Spread) joins the same Display popover (C1) instead
     # of a separate card-controls row.
     _band_sep = QFrame(_disp_panel)

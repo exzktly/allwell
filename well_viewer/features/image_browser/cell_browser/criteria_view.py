@@ -37,6 +37,17 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     title.setObjectName("Heading")
     lay.addWidget(title)
 
+    # ── source: scatter gate vs criteria (N1) ────────────────────────────────
+    gate_cb = QCheckBox("From scatter gate", parent)
+    gate_cb.setToolTip(
+        "Show exactly the cells inside the gate(s) drawn on the Scatter Plot.\n"
+        "Best with Scatter + Cell Browser in Split View — drawing or resizing a "
+        "gate updates this gallery live. Disables the criteria filter while on "
+        "(the gate is the numeric filter).")
+    gate_cb.toggled.connect(lambda on: _on_gate_mode_toggled(app, bool(on)))
+    lay.addWidget(gate_cb)
+    app._cell_browser_gate_mode_cb = gate_cb
+
     # ── criteria rows (scrollable) ───────────────────────────────────────────
     rows_scroll = QScrollArea(parent)
     rows_scroll.setWidgetResizable(True)
@@ -48,12 +59,14 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     rows_scroll.setWidget(rows_host)
     lay.addWidget(rows_scroll, 1)
     app._cell_browser_criteria_host = rows_lay
+    app._cell_browser_criteria_rows_host = rows_host
     app._cell_browser_criteria_rows = []
 
     add_btn = QPushButton("+ Add criterion", parent)
     add_btn.setProperty("variant", "secondary")
     add_btn.clicked.connect(lambda _=False: _add_row(app))
     lay.addWidget(add_btn)
+    app._cell_browser_add_criterion_btn = add_btn
 
     # ── timepoint / FOV multi-select ─────────────────────────────────────────
     app._cell_browser_tp_selections = {}
@@ -98,7 +111,30 @@ def build_cell_browser_sidebar(app, parent: QWidget) -> None:
     # display) now defers to the single top-bar **Generate** button
     # (tab_view.build_cell_browser_tab), so a second trigger is redundant.
 
+    # N1: let the scatter gating module drive a live re-collect when a gate is
+    # drawn / edited / cleared (only acts in gate mode + when this tab is
+    # visible — see controller.cell_browser_sync_scatter_gates).
+    app._cell_browser_gates_changed_cb = (
+        lambda _app=app: ctl.cell_browser_sync_scatter_gates(_app))
+
     cell_browser_sidebar_refresh(app)
+
+
+def _on_gate_mode_toggled(app, on: bool) -> None:
+    """Switch the gallery source between the scatter gate and the criteria (N1).
+    Disables the criteria editor in gate mode and re-collects immediately."""
+    _set_criteria_enabled(app, not on)
+    ctl.apply_filters(app)
+
+
+def _set_criteria_enabled(app, on: bool) -> None:
+    """Enable/disable the criteria editor (rows + add button)."""
+    host = getattr(app, "_cell_browser_criteria_rows_host", None)
+    if host is not None:
+        host.setEnabled(on)
+    btn = getattr(app, "_cell_browser_add_criterion_btn", None)
+    if btn is not None:
+        btn.setEnabled(on)
 
 
 def _add_row(app, column: str = "") -> None:

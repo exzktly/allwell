@@ -36,6 +36,13 @@ class CellBrowserState:
     channels_on: List[str] = field(default_factory=list)    # channel tokens shown
     show_boundaries: bool = True
     use_tophat: bool = False   # False = raw image, True = corrected (top-hat)
+    # Caption each crop with the active channel's smFISH spot count (N9). The
+    # count is read into CellDescriptor.spot_count at collect time.
+    label_spot_count: bool = False
+    # Source cells from the active scatter gate(s) instead of the criteria (N1).
+    # When True, collect_cells uses the scatter gate inclusion mask and the
+    # criteria editor is disabled (the gate is the numeric filter).
+    scatter_gate_mode: bool = False
     page_size: int = DEFAULT_PAGE_SIZE
     cells: List[CellDescriptor] = field(default_factory=list)
     loaded: int = 0

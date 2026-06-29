@@ -438,6 +438,74 @@ def draw_beeswarm(
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
+def _significance_marker(p: float) -> str:
+    """Asterisk code for a p-value (matches the Statistics-tab text output)."""
+    if p < 0.001:
+        return "***"
+    if p < 0.01:
+        return "**"
+    if p < 0.05:
+        return "*"
+    return "ns"
+
+
+def draw_significance_brackets(app, ax_mean, items) -> None:
+    """Draw significance brackets on the Mean panel from the Statistics tab's
+    pairwise results (N7).
+
+    Only acts when the user enabled "Significance" (``PlotState.show_significance``)
+    and a test has been run (``StatsState.pairwise`` populated). A bracket is
+    drawn for every compared pair whose **both** group names match a bar key
+    (the grouped/pooled mode's keys are the replicate-set names Statistics
+    compares); pairs that don't line up with the current bars are skipped. The
+    BH-adjusted p drives the asterisk where available. No-op in per-cell mode
+    (this is only called from the aggregate bar path)."""
+    if not getattr(app._app_state.plot, "show_significance", False):
+        return
+    pairwise = list(getattr(app._app_state.stats, "pairwise", []) or [])
+    if not pairwise:
+        return
+    keys = list(getattr(app, "_bar_xs_keys", []) or [])
+    xs = list(getattr(app, "_bar_xs", []) or [])
+    if not keys or len(keys) != len(xs):
+        return
+    x_by_key = {k: xs[i] for i, k in enumerate(keys)}
+    top_by_key: Dict[str, float] = {}
+    for it in items:
+        if getattr(it, "has_mean", False) and not math.isnan(it.mean):
+            spread = it.spread if (it.spread and it.spread > 0) else 0.0
+            top_by_key[it.key] = max(top_by_key.get(it.key, it.mean + spread),
+                                     it.mean + spread)
+    present = [
+        r for r in pairwise
+        if r.get("a") in x_by_key and r.get("b") in x_by_key
+        and r.get("a") in top_by_key and r.get("b") in top_by_key
+    ]
+    if not present:
+        return
+    # Shortest spans lowest so nested brackets stack cleanly.
+    present.sort(key=lambda r: abs(x_by_key[r["a"]] - x_by_key[r["b"]]))
+    y0, y1 = ax_mean.get_ylim()
+    span = (y1 - y0) or 1.0
+    step = span * 0.08
+    base = max(top_by_key.values())
+    fg = tokens_for(ax_mean)[1]
+    for level, r in enumerate(present):
+        xa, xb = x_by_key[r["a"]], x_by_key[r["b"]]
+        if xa > xb:
+            xa, xb = xb, xa
+        y = base + step * (level + 1)
+        h = step * 0.25
+        ax_mean.plot([xa, xa, xb, xb], [y, y + h, y + h, y],
+                     lw=1.0, color=fg, zorder=6, clip_on=False)
+        p_show = float(r.get("p_adj", r.get("p", 1.0)))
+        ax_mean.text((xa + xb) / 2.0, y + h, _significance_marker(p_show),
+                     ha="center", va="bottom", fontsize=8, color=fg,
+                     zorder=6, clip_on=False)
+    # Grow the y-limit so the top bracket clears the panel (keeps the floor).
+    ax_mean.set_ylim(y0, base + step * (len(present) + 1))
+
+
 def draw_grouped_bar_mode(
     app,
     *,
@@ -523,6 +591,9 @@ def draw_grouped_bar_mode(
         )
         ax_n.set_ylabel(n_ylabel, fontsize=8, labelpad=5)
     _apply_bar_ylims(app, ax_mean, ax_frac, ax_n=ax_n)
+    # Significance brackets (N7) — after ylims so the bracket headroom isn't
+    # clipped; the helper extends the Mean panel's top to fit.
+    draw_significance_brackets(app, ax_mean, items)
     if fc_misses:
         _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
         app._set_status(

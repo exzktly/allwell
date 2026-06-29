@@ -416,6 +416,12 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             # matching panel ("fraction" → the On-fraction panel, else the Mean
             # panel) rather than always on the Mean panel.
             "stat": str(statistic),
+            # The CONTEXT the test was run in — value column (channel + metric)
+            # and timepoint — so the bar plot only overlays these brackets when
+            # it is actually showing that channel/timepoint, not whatever is on
+            # screen now.
+            "val_col": str(val_col),
+            "target_t": float(target_t),
         })
     app._app_state.stats.pairwise = stats_pairwise
 

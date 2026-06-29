@@ -476,34 +476,63 @@ def draw_significance_brackets(app, ax_mean, items) -> None:
             spread = it.spread if (it.spread and it.spread > 0) else 0.0
             top_by_key[it.key] = max(top_by_key.get(it.key, it.mean + spread),
                                      it.mean + spread)
-    present = [
-        r for r in pairwise
-        if r.get("a") in x_by_key and r.get("b") in x_by_key
-        and r.get("a") in top_by_key and r.get("b") in top_by_key
-    ]
-    if not present:
+
+    # Map each compared group to a bar. Prefer a name match (Statistics groups
+    # auto-seeded from the replicate sets share their names); fall back to a
+    # WELLS match so a comparison still lands on the right bar when the
+    # Statistics group and the bar's replicate set are named differently.
+    wells_to_key: Dict[frozenset, str] = {}
+    get_active = getattr(app, "_rep_sets_active", None)
+    for rset in (get_active() if callable(get_active) else []):
+        fw = frozenset(getattr(rset, "wells", []) or [])
+        if fw:
+            wells_to_key.setdefault(fw, rset.name)
+
+    def _bar_key_for(name, wells):
+        if name in top_by_key:
+            return name
+        fw = frozenset(wells or [])
+        if fw:
+            return wells_to_key.get(fw)
+        return None
+
+    matched = []  # (p_show, key_a, key_b)
+    for r in pairwise:
+        ka = _bar_key_for(r.get("a"), r.get("a_wells"))
+        kb = _bar_key_for(r.get("b"), r.get("b_wells"))
+        if ka and kb and ka != kb and ka in top_by_key and kb in top_by_key:
+            matched.append((float(r.get("p_adj", r.get("p", 1.0))), ka, kb))
+
+    if not matched:
+        # Significance is on and a test has run, but no comparison lines up with
+        # the current bars (e.g. per-well bars, or groups spanning several bars).
+        # Say so rather than silently drawing nothing.
+        setter = getattr(app, "_set_status", None)
+        if callable(setter):
+            setter("Significance: no comparison matches the current bars — "
+                   "pool replicates so each compared group is a single bar.")
         return
+
     # Shortest spans lowest so nested brackets stack cleanly.
-    present.sort(key=lambda r: abs(x_by_key[r["a"]] - x_by_key[r["b"]]))
+    matched.sort(key=lambda m: abs(x_by_key[m[1]] - x_by_key[m[2]]))
     y0, y1 = ax_mean.get_ylim()
     span = (y1 - y0) or 1.0
     step = span * 0.08
     base = max(top_by_key.values())
     fg = tokens_for(ax_mean)[1]
-    for level, r in enumerate(present):
-        xa, xb = x_by_key[r["a"]], x_by_key[r["b"]]
+    for level, (p_show, ka, kb) in enumerate(matched):
+        xa, xb = x_by_key[ka], x_by_key[kb]
         if xa > xb:
             xa, xb = xb, xa
         y = base + step * (level + 1)
         h = step * 0.25
         ax_mean.plot([xa, xa, xb, xb], [y, y + h, y + h, y],
                      lw=1.0, color=fg, zorder=6, clip_on=False)
-        p_show = float(r.get("p_adj", r.get("p", 1.0)))
         ax_mean.text((xa + xb) / 2.0, y + h, _significance_marker(p_show),
                      ha="center", va="bottom", fontsize=8, color=fg,
                      zorder=6, clip_on=False)
     # Grow the y-limit so the top bracket clears the panel (keeps the floor).
-    ax_mean.set_ylim(y0, base + step * (len(present) + 1))
+    ax_mean.set_ylim(y0, base + step * (len(matched) + 1))
 
 
 def draw_grouped_bar_mode(

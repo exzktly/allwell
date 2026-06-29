@@ -187,6 +187,12 @@ class _SplitFocusWatcher(QObject):
         # No QObject parent: lifetime is held by ``app._split_focus_filter``.
         super().__init__()
         self._app = app
+        # Whether ``on_focus_changed`` is currently connected to
+        # ``QApplication.focusChanged``. Tracked so we never call ``disconnect``
+        # on a connection that isn't there — PySide emits a noisy
+        # ``RuntimeWarning: Failed to disconnect`` in that case (the try/except
+        # only catches the exception, not the warning).
+        self._connected = False
 
     def on_focus_changed(self, _old, new) -> None:  # noqa: N802 (Qt slot)
         try:
@@ -219,13 +225,12 @@ def _install_split_focus_filter(app) -> None:
         watcher = _SplitFocusWatcher(app)
         app._split_focus_filter = watcher
     qapp = QApplication.instance()
-    if qapp is not None:
-        # Idempotent: drop any prior connection before (re)connecting.
-        try:
-            qapp.focusChanged.disconnect(watcher.on_focus_changed)
-        except (RuntimeError, TypeError):
-            swallowed()  # not connected yet — fine
+    if qapp is not None and not watcher._connected:
+        # Idempotent via the tracked flag: connect once. We deliberately do NOT
+        # disconnect-first — calling disconnect on a not-yet-connected signal is
+        # exactly what triggered the spurious "Failed to disconnect" warning.
         qapp.focusChanged.connect(watcher.on_focus_changed)
+        watcher._connected = True
 
 
 def _remove_split_focus_filter(app) -> None:
@@ -233,11 +238,12 @@ def _remove_split_focus_filter(app) -> None:
     if watcher is None:
         return
     qapp = QApplication.instance()
-    if qapp is not None:
+    if qapp is not None and watcher._connected:
         try:
             qapp.focusChanged.disconnect(watcher.on_focus_changed)
         except (RuntimeError, TypeError):
-            swallowed()  # already disconnected — fine
+            swallowed()  # Qt already tore the connection down — fine
+        watcher._connected = False
 
 
 # ── Entry-UI handlers ────────────────────────────────────────────────────────

@@ -9,7 +9,6 @@ from well_viewer.features.batch_export import (
     BarBatchExportPanel,
     ScatterBatchExportPanel,
 )
-from well_viewer.core.safe import swallowed
 
 
 def _refresh_mode_buttons(app, mode: str) -> None:
@@ -113,18 +112,11 @@ def _show_batch_mode(app, mode: str) -> None:
     for key, panel in panels.items():
         panel.setVisible(key == mode)
 
-    # Resync the visible panel's groups from the live Sample Definitions
-    # selections. The panel's __init__ snapshots app._rep_sets_loaded(),
-    # which is empty when the user opens the line-plot sub-mode before
-    # they've defined any selections; without this refresh the line panel
-    # never picks up groups added later, while bar/scatter happened to work
-    # because they were always opened after some selections existed.
-    active_panel = panels.get(mode)
-    if active_panel is not None and hasattr(active_panel, "_sync_from_app"):
-        try:
-            active_panel._sync_from_app()
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    # Note: we deliberately do NOT auto-resync the panel's groups from the live
+    # Sample Definitions on every tab show. Batch-export groups are export-
+    # specific and start empty; re-seeding here used to wipe the user's export
+    # groups with the replicate sets on each visit. Users pull in the replicate
+    # groups explicitly via the panel's "Sync from app" button or Quick Setup.
 
     # The Error-Band / per-FOV row only affects line & bar exports — hide it on
     # the scatter modes so it doesn't read as an applicable (but inert) control.

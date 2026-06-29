@@ -115,7 +115,12 @@ class BatchExportPanel(QWidget):
         self._fc_control_label: str = str(app._app_state.plot.fc_control_label or "")
         self._fc_vs_t0_on: bool = bool(app._app_state.plot.fc_vs_t0_on)
 
-        self._groups: List[BarGroup] = self._groups_from_rep_sets()
+        # Start empty: batch-export groups are export-specific, not the
+        # Sample-Definition replicate sets. The user opts in to seeding from the
+        # app via the "Sync from app" button or the Quick Setup menu. (Auto-
+        # seeding here, and on every tab show via _sync_from_app, used to blow
+        # away export-specific groups with the replicate sets on each visit.)
+        self._groups: List[BarGroup] = []
         self._auto_named_group_ids: set[int] = set()
         self._map_btns: Dict[str, _WellGridButton] = {}
         self._drag_adding = True

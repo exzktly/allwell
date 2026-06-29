@@ -132,3 +132,24 @@ def test_off_toggle_draws_nothing():
     app._app_state.plot.show_significance = False
     draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) == 0 and _artists(ax_frac) == 0
+
+
+def test_export_style_skips_tagged_bracket_lines():
+    # Regression: the export-style pass used to stamp the per-plot data marker
+    # onto *every* Line2D in ``ax.lines`` — including the significance bracket —
+    # turning the flat bracket into a row of circles. Tagged lines must opt out.
+    from well_viewer.core.plot_style import apply_export_style_prefs
+
+    fig, ax = plt.subplots()
+    (data_line,) = ax.plot([0, 1], [0, 1], marker="None", linestyle="-")
+    (bracket,) = ax.plot([0, 0, 1, 1], [2, 2.1, 2.1, 2],
+                         marker="None", linestyle="-")
+    bracket._aw_no_style_override = True
+
+    apply_export_style_prefs(fig, {"marker_style": "o", "line_style": "-"})
+
+    # The ordinary data line picks up the chosen data marker...
+    assert data_line.get_marker() == "o"
+    # ...but the tagged bracket keeps its flat, marker-free shape.
+    assert bracket.get_marker() == "None"
+    plt.close(fig)

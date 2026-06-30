@@ -209,22 +209,27 @@ def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
 
 
 def cell_browser_source_wells(app) -> List[str]:
-    """Wells the Cell Browser draws from, in precedence order:
+    """Wells the Cell Browser draws from — it MIRRORS what the plotting tabs draw.
 
-    1. the **explicit individual plate selection** (``selected_wells``) when
-       non-empty — so clicking wells on the plate drives the gallery, even with
-       sample-definition groups defined (the user's expectation in Split View);
-    2. else the **visible replicate-set groups** (``_rep_sets_active``) — so with
-       no explicit selection the gallery still follows exactly what the Scatter
-       plots (keeps the Split View panes in sync);
-    3. else **every loaded well** — populates the gallery / FOV picker on first
-       open before any selection or groups exist.
-
-    (Earlier this preferred groups over ``selected_wells``, which meant an
-    explicit well click was silently ignored whenever a group was defined.)"""
+    * **Group mode** (sample-definition groups exist): the union of the visible
+      (non-hidden) replicate-set groups (``_rep_sets_active``) + the active solo
+      wells — exactly the set the Scatter plots and the sidebar plate paints. So
+      the gallery follows the scatter live (toggling a group on the plate updates
+      both), and focus changes never "lose" wells because both panes read the
+      same source. May be empty when every group is hidden — mirroring the
+      (also-empty) scatter.
+    * **No groups**: the explicit individual plate selection (``selected_wells``).
+    * **Neither** (first open): every loaded well, so the gallery / FOV picker
+      still populate before anything is defined.
+    """
     paths = app._app_state.dataset.well_paths
-    wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in paths]
-    if not wells:
+    sel = app._app_state.selection
+    # ``getattr`` guards keep this importable for lightweight test stubs that
+    # only populate ``selected_wells`` — the real app always provides all three.
+    selections = getattr(sel, "selections", None)
+    selected_wells = getattr(sel, "selected_wells", None) or ()
+    if selections:
+        wells: List[str] = []
         seen: set = set()
         rep_active = getattr(app, "_rep_sets_active", None)
         for rset in (rep_active() if callable(rep_active) else ()):
@@ -232,7 +237,13 @@ def cell_browser_source_wells(app) -> List[str]:
                 if w in paths and w not in seen:
                     seen.add(w)
                     wells.append(w)
-    if not wells:
+        for w in (getattr(sel, "active_solo_wells", None) or ()):
+            if w in paths and w not in seen:
+                seen.add(w)
+                wells.append(w)
+    elif selected_wells:
+        wells = [lbl for lbl in selected_wells if lbl in paths]
+    else:
         wells = list(paths.keys())
     key = getattr(app, "_parse_rc", None) or (lambda s: s)
     return sorted(wells, key=key)

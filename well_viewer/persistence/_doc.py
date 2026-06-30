@@ -2,8 +2,9 @@
 
 Holds one section per viewer-owned persistence domain so the data directory
 carries a single file instead of a pile of small sidecars. Houses ``ratios``,
-``heatmap_layouts``, ``line_order``, ``plot_groups``, ``view_state`` (added by
-``view_state.py`` for live UI selections), and ``qc_params``.
+``heatmap_layouts``, ``line_order``, ``plot_groups``, ``export_groups`` (the
+Batch Export tab's per-panel groups), ``view_state`` (added by ``view_state.py``
+for live UI selections), and ``qc_params``.
 ``cell_overrides`` stays in its own file (size + write-frequency);
 ``pipeline_info.json`` is owned by the batch pipeline and is left alone.
 

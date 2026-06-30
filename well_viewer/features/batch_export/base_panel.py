@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import math
 import re
 from contextlib import contextmanager
@@ -59,6 +58,13 @@ from well_viewer.features.batch_export.well_grid_button import _WellGridButton
 _FIELD_LABEL_W = 108
 
 
+def _norm_well_token(tok: str) -> str:
+    """Canonicalise a well token (``a1`` → ``A01``) for membership tests."""
+    tok = tok.strip().upper()
+    m = re.match(r"^([A-H])(\d{1,2})$", tok, re.I)
+    return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else tok
+
+
 def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
                    vs_control: bool, vs_t0: bool, control_label: str) -> None:
     """Add the four fold-change columns to a per-timepoint CSV row.
@@ -94,6 +100,15 @@ class BatchExportPanel(QWidget):
         super().__init__(parent)
         self._app = app
         self._use_sidebar_groups = bool(use_sidebar_groups)
+        # Which slot in app._export_groups_doc this panel reads/writes. Resolved
+        # via a method so subclasses (bar / scatter) pick their own key; safe to
+        # call here because the subclass state it needs (e.g. _scatter_mode) is
+        # set before super().__init__.
+        self._persist_key: str = self._compute_persist_key()
+        # Suppress the persistence write-back while we build the UI and hydrate
+        # groups from disk (otherwise the initial _refresh_group_list would echo
+        # the just-loaded groups straight back to a scheduled save).
+        self._suppress_persist: bool = True
 
         default_out = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
         export_prefs = getattr(app, "_export_style_prefs", {}) or {}
@@ -105,7 +120,6 @@ class BatchExportPanel(QWidget):
         self._out_dir_value: str = default_out
         self._fmt_value: str = default_fmt
         self._export_profile_value: str = default_profile
-        self._active_grp = -1
 
         # Panel-local fold-change normalization state. Independent of the
         # plot-tab state so a batch run isn't tied to whatever the on-screen
@@ -115,12 +129,12 @@ class BatchExportPanel(QWidget):
         self._fc_control_label: str = str(app._app_state.plot.fc_control_label or "")
         self._fc_vs_t0_on: bool = bool(app._app_state.plot.fc_vs_t0_on)
 
-        # Start empty: batch-export groups are export-specific, not the
-        # Sample-Definition replicate sets. The user opts in to seeding from the
-        # app via the "Sync from app" button or the Quick Setup menu. (Auto-
-        # seeding here, and on every tab show via _sync_from_app, used to blow
-        # away export-specific groups with the replicate sets on each visit.)
-        self._groups: List[BarGroup] = []
+        # Hydrate from the persisted export groups (persistence.json), else start
+        # empty. Batch-export groups are export-specific, not the Sample-
+        # Definition replicate sets — the user opts in to seeding from the app
+        # via the "Sync from app" button or the Quick Setup menu.
+        self._groups: List[BarGroup] = self._groups_from_persistence()
+        self._active_grp = 0 if self._groups else -1
         self._auto_named_group_ids: set[int] = set()
         self._map_btns: Dict[str, _WellGridButton] = {}
         self._drag_adding = True
@@ -129,6 +143,11 @@ class BatchExportPanel(QWidget):
         self._build_ui()
         if not self._use_sidebar_groups:
             self._refresh_group_list()
+        self._suppress_persist = False
+
+    def _compute_persist_key(self) -> str:
+        """Slot key in ``app._export_groups_doc`` for this panel (line plot)."""
+        return "line"
 
     def _build_ui(self) -> None:
         outer = QHBoxLayout(self)
@@ -188,12 +207,11 @@ class BatchExportPanel(QWidget):
         hdr1.addWidget(qs_btn)
         layout.addLayout(hdr1)
 
-        # Row 2: persistence (Save / Load / Sync) on the left; the destructive
-        # Clear All isolated on the right so it isn't fat-fingered next to Add.
+        # Row 2: Sync on the left; the destructive Clear All isolated on the
+        # right so it isn't fat-fingered next to Add. Groups autosave to the
+        # dataset's persistence.json, so there is no manual Save/Load route.
         hdr2 = QHBoxLayout()
         hdr2.setContentsMargins(8, 2, 8, 2)
-        hdr2.addWidget(btn_secondary(None, "Save\u2026", self._save_groups))
-        hdr2.addWidget(btn_secondary(None, "Load\u2026", self._load_groups))
         hdr2.addWidget(btn_secondary(None, "Sync from app", self._sync_from_app))
         hdr2.addStretch(1)
         hdr2.addWidget(btn_secondary(None, "Clear All", self._grp_clear_all))
@@ -877,6 +895,9 @@ class BatchExportPanel(QWidget):
         _clear_layout_helper(layout)
 
     def _refresh_group_list(self) -> None:
+        # Groups changed → mirror them into persistence.json (no-op while the
+        # panel is still building or hydrating from disk).
+        self._persist_groups()
         # Remove everything except the trailing stretch
         while self._grp_inner_layout.count() > 1:
             item = self._grp_inner_layout.takeAt(0)
@@ -1083,106 +1104,74 @@ class BatchExportPanel(QWidget):
     def _groups_from_rep_sets(self) -> List[BarGroup]:
         return [BarGroup(r.name, members=[r]) for r in self._app._rep_sets_loaded()]
 
-    def _save_groups(self) -> None:
-        if not self._groups:
-            QMessageBox.warning(self, "Nothing to save", "No groups defined yet.")
-            return
-        rep_set_names: List[str] = []
-        seen_sets: set = set()
-        grp_list = []
+    # \u2500\u2500 Export-group persistence (persistence.json["export_groups"]) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    def _serialize_groups(self) -> List[dict]:
+        """Plain-dict form of the current export groups for persistence.json."""
+        out: List[dict] = []
         for grp in self._groups:
-            members_names = []
-            for rset in grp.members:
-                members_names.append(rset.name)
-                if rset.name not in seen_sets:
-                    seen_sets.add(rset.name)
-                    rep_set_names.append(rset.name)
-            grp_list.append({
+            out.append({
                 "name": grp.name,
                 "hidden": grp.hidden,
-                "members": members_names,
+                "members": [rset.name for rset in grp.members],
                 "solo_wells": list(grp.solo_wells),
             })
-        rep_list = []
-        for rset in self._app._rep_sets_loaded():
-            rep_list.append({"name": rset.name, "wells": list(rset.wells)})
-        data = {"rep_sets": rep_list, "groups": grp_list}
+        return out
 
-        path_str, _ = QFileDialog.getSaveFileName(
-            self, "Save export groups",
-            "export_groups.json",
-            "JSON (*.json);;All files (*.*)",
-        )
-        if not path_str:
-            return
-        try:
-            with open(path_str, "w") as fh:
-                json.dump(data, fh, indent=2)
-            self._prog_lbl.setText(f"Saved \u2192 {Path(path_str).name}")
-        except OSError as exc:
-            QMessageBox.critical(self, "Save failed", str(exc))
+    def _deserialize_groups(self, grp_list) -> List[BarGroup]:
+        """Rebuild BarGroups from persisted dicts, matched to the live dataset.
 
-    def _load_groups(self) -> None:
-        path_str, _ = QFileDialog.getOpenFileName(
-            self, "Load export groups", "",
-            "JSON (*.json);;All files (*.*)",
-        )
-        if not path_str:
-            return
-        try:
-            with open(path_str) as fh:
-                data = json.load(fh)
-        except Exception as exc:
-            QMessageBox.critical(self, "Load failed", str(exc))
-            return
-
-        def _norm(tok: str) -> str:
-            tok = tok.strip().upper()
-            m = re.match(r"^([A-H])(\d{1,2})$", tok, re.I)
-            return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else tok
-
-        def _valid_tok(raw: str) -> Optional[str]:
-            n = _norm(raw)
-            return n if n in self._app._app_state.dataset.well_paths else None
-
+        Group members are matched by replicate-set name against the currently
+        loaded rep-sets, and solo wells are kept only when the token resolves to
+        a loaded well \u2014 so a stale persisted set degrades gracefully rather than
+        referencing wells/groups that no longer exist."""
         rep_by_name = {r.name: r for r in self._app._rep_sets_loaded()}
-
+        paths = self._app._app_state.dataset.well_paths
         new_groups: List[BarGroup] = []
-        if isinstance(data, dict):
-            for item in data.get("groups", []):
-                grp = BarGroup(item.get("name", "Group"),
-                               hidden=bool(item.get("hidden", False)))
-                for rname in item.get("members", []):
-                    if rname in rep_by_name:
-                        grp.members.append(rep_by_name[rname])
-                for raw_tok in item.get("solo_wells", []):
-                    n = _valid_tok(raw_tok)
-                    if n:
-                        grp.solo_wells.append(n)
-                new_groups.append(grp)
-        elif isinstance(data, list):
-            for item in data:
-                name = str(item.get("name", "Group"))
-                grp = BarGroup(name, hidden=bool(item.get("hidden", False)))
-                for rdata in item.get("replicates", []):
-                    rname = rdata.get("name", "R")
-                    if rname in rep_by_name:
-                        grp.members.append(rep_by_name[rname])
-                new_groups.append(grp)
+        for item in grp_list or []:
+            if not isinstance(item, dict):
+                continue
+            grp = BarGroup(str(item.get("name", "Group")),
+                           hidden=bool(item.get("hidden", False)))
+            for rname in item.get("members", []):
+                if rname in rep_by_name:
+                    grp.members.append(rep_by_name[rname])
+            for raw_tok in item.get("solo_wells", []):
+                tok = _norm_well_token(str(raw_tok))
+                if tok in paths:
+                    grp.solo_wells.append(tok)
+            new_groups.append(grp)
+        return new_groups
 
-        if not new_groups:
-            QMessageBox.warning(
-                self, "No groups loaded",
-                "The file contained no groups that could be matched to the "
-                "currently loaded wells and replicate sets.",
-            )
+    def _groups_from_persistence(self) -> List[BarGroup]:
+        """Hydrate this panel's groups from ``app._export_groups_doc``."""
+        doc = getattr(self._app, "_export_groups_doc", None) or {}
+        return self._deserialize_groups(doc.get(self._persist_key))
+
+    def _persist_groups(self) -> None:
+        """Mirror the editor into ``app._export_groups_doc`` and schedule a save."""
+        if getattr(self, "_suppress_persist", False):
             return
+        app = self._app
+        doc = getattr(app, "_export_groups_doc", None)
+        if doc is None:
+            doc = {}
+            app._export_groups_doc = doc
+        doc[self._persist_key] = self._serialize_groups()
+        persistence = getattr(app, "_persistence", None)
+        if persistence is not None:
+            persistence.schedule_save("export_groups")
 
-        self._groups = new_groups
-        self._auto_named_group_ids.clear()
-        self._active_grp = 0
-        self._refresh_group_list()
-        self._prog_lbl.setText(f"Loaded {len(self._groups)} group(s) from {Path(path_str).name}")
+    def _reload_persisted_groups(self) -> None:
+        """Re-hydrate from persistence (called after a dataset (re)load)."""
+        self._suppress_persist = True
+        try:
+            self._groups = self._groups_from_persistence()
+            self._auto_named_group_ids.clear()
+            self._active_grp = 0 if self._groups else -1
+            if not self._use_sidebar_groups:
+                self._refresh_group_list()
+        finally:
+            self._suppress_persist = False
 
     def _resolve_out_dir(self) -> Optional[Path]:
         val = self._out_dir_edit.text().strip()

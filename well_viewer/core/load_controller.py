@@ -239,6 +239,10 @@ def load_directory(app, d: Path, label=None) -> None:
         app._persistence.load("plot_groups")
     except Exception:
         swallowed()
+    try:
+        app._persistence.load("export_groups")
+    except Exception:
+        swallowed()
     if hasattr(app, "_plot_groups_refresh"):
         try:
             app._plot_groups_refresh()

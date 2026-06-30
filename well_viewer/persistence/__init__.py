@@ -16,6 +16,8 @@ Modules:
                        + the one shared debounced-save path.
     _doc               Shared ``persistence.json`` reader/writer + migration.
     bar_groups         JSON file picker for the bar/replicate-group state.
+    export_groups      ``persistence.json["export_groups"]`` — Batch Export
+                       tab's per-panel (line/bar/scatter) export groups.
     ratios             ``persistence.json["ratios"]``.
     heatmap_layouts    ``persistence.json["heatmap_layouts"]``.
     cell_overrides     ``cell_overrides.json`` (Segmentation tab patch).

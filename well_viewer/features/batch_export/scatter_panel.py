@@ -44,6 +44,9 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self._scatter_mode = "aggregate" if scatter_mode == "aggregate" else "cells"
         super().__init__(app, parent, use_sidebar_groups=use_sidebar_groups)
 
+    def _compute_persist_key(self) -> str:
+        return "scatter_agg" if self._scatter_mode == "aggregate" else "scatter_cells"
+
     def _build_output_panel(self, layout: QVBoxLayout) -> None:
         title = ("OUTPUT SETTINGS \u2014 SCATTER CELLS"
                  if self._scatter_mode == "cells"

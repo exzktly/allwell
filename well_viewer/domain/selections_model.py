@@ -563,15 +563,3 @@ def to_block(selections: Sequence[dict], well_labels: Any = None, notes: Any = "
         "notes": str(notes or ""),
         "plot_groups": validate_repair_plot_groups(plot_groups),
     }
-
-
-def to_bar_groups_payload(selections: Sequence[dict], current_id: Any = None) -> dict:
-    """v2 payload for the standalone ``bar_groups.json`` (no labels/notes)."""
-    sels = validate_repair(list(selections or []))
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "selections": sels,
-        "current_id": (current_id if isinstance(current_id, str) and
-                       any(s["id"] == current_id for s in sels)
-                       else (sels[0]["id"] if sels else "")),
-    }

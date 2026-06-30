@@ -631,14 +631,6 @@ class WellViewerApp(QWidget):
 
     # ── Bar group persistence (delegates to well_viewer.persistence.bar_groups)
 
-    def _bar_groups_from_dict(self, data) -> None:
-        from well_viewer.persistence import bar_groups as _bg_persist
-        _bg_persist.from_dict(self, data)
-
-    def _bar_save_groups(self) -> None:
-        from well_viewer.persistence import bar_groups as _bg_persist
-        _bg_persist.save_via_dialog(self)
-
     def _bar_load_groups(self) -> None:
         from well_viewer.persistence import bar_groups as _bg_persist
         _bg_persist.load_via_dialog(self)

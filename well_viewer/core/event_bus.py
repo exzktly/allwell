@@ -2,8 +2,7 @@
 
 A ``QObject`` carrying the small, fixed catalogue of cross-cutting signals the
 viewer needs. Each signal carries the relevant *state object* — never ``app`` —
-so a subscriber cannot reach back into the god-object through the bus. Modelled
-on the existing Qt-free pub-sub in ``well_viewer/status_signal.py``.
+so a subscriber cannot reach back into the god-object through the bus.
 
 The catalogue is deliberately capped: an event bus that accumulates dozens of
 signals has just become a new god-object. Keep it to the cross-cutting few.
@@ -35,8 +34,7 @@ class EventBus(QObject):
       payload the scope name (``"bar"`` / ``"line"`` / …).
 
     The catalogue is deliberately capped at these five: an event bus that
-    accumulates dozens of signals has just become a new god-object. Status-bar
-    messages are *not* here — ``well_viewer/status_signal.py`` owns those.
+    accumulates dozens of signals has just become a new god-object.
     """
 
     channel_changed = Signal(object)       # ChannelState

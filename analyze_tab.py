@@ -733,14 +733,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         self._run_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._dashboard.set_status("Running…")
-        # Status light goes yellow (warn) for the lifetime of the pipeline
-        # run. ``finished`` (in ``_poll_log``) pops the count.
-        try:
-            from well_viewer import status_signal as _status_signal
-            _status_signal.warn_push()
-            self._status_signal_pushed = True
-        except Exception:
-            self._status_signal_pushed = False
 
     def _collect_run_options(self) -> dict:
         method = self._seg_method()
@@ -1125,13 +1117,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
                     self._refresh_last_run_summary()  # C4: show the just-finished run
-                    if getattr(self, "_status_signal_pushed", False):
-                        try:
-                            from well_viewer import status_signal as _status_signal
-                            _status_signal.warn_pop()
-                        except Exception:
-                            swallowed()  # was: pass (silent except)
-                        self._status_signal_pushed = False
         except queue.Empty:
             pass
         except Exception:  # noqa: BLE001 — a bad event must not kill the poller
@@ -1141,17 +1126,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
     def closeEvent(self, event) -> None:
         if self._runner.is_running:
             self._runner.stop()
-        # Mirror the cleanup branch in _poll_log so closing the app
-        # mid-run doesn't leave the status_signal warn-scope
-        # unbalanced (the in-memory ref count would otherwise carry
-        # across a re-build of the tab without a fresh QApplication).
-        if getattr(self, "_status_signal_pushed", False):
-            try:
-                from well_viewer import status_signal as _status_signal
-                _status_signal.warn_pop()
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            self._status_signal_pushed = False
         super().closeEvent(event)
 
 

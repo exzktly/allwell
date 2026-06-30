@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QObject, QTimer, Signal, QRectF
+from PySide6.QtCore import Qt, QTimer, Signal, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
 import theme as theme_v2
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
-from widgets.status_dot import StatusDot
 from well_viewer.core.safe import swallowed
 
 # Global tab-scoped debug toggles.
@@ -35,21 +34,6 @@ REVIEW_TAB_DEBUG = False
 ANALYZE_TAB_DEBUG = False
 REVIEW_BAR_DEBUG = False
 REVIEW_SCATTER_DEBUG = False
-
-
-class _StatusDotBridge(QObject):
-    """Marshals status-dot updates onto the GUI thread.
-
-    ``status_signal`` is Qt-free and invokes its driver on whatever thread
-    calls ``refresh()`` — including background workers and the error-logging
-    handler (``signal_failed``). Poking the StatusDot widget (a ``QWidget``)
-    from a non-GUI thread schedules a repaint off-thread, which trips Qt's
-    timer machinery ("QObject::killTimer: timers cannot be stopped from another
-    thread") and can crash the app. Emitting this signal is thread-safe; the
-    connected slot runs on the GUI thread (queued for cross-thread emits).
-    """
-
-    statusChanged = Signal(str)
 
 
 class AllWellApp(QMainWindow):
@@ -111,7 +95,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v8.1.3")
+        self._version_pill = QLabel("v8.1.4")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "
@@ -122,13 +106,6 @@ class AllWellApp(QMainWindow):
         hl.addWidget(self._version_pill)
 
         hl.addSpacing(theme_v2.Spacing.md)
-        # Titlebar StatusDot retired — the bottom statusbar's StatusDot
-        # (rendered bottom-left of the window) is now the single source of
-        # dataset-load truth. _update_dataset_chip writes to it directly.
-        # Kept as a hidden widget so any caller that still pokes at
-        # _dataset_status doesn't AttributeError.
-        self._dataset_status = StatusDot("neutral")
-        self._dataset_status.hide()
         # Mode segmented control (Review / Analyze) lives in the titlebar
         # strip where the redundant dataset chip used to sit. The dataset
         # name is set on the OS window title instead.
@@ -258,29 +235,6 @@ class AllWellApp(QMainWindow):
         sb_layout.setContentsMargins(theme_v2.Spacing.md, 4,
                                      theme_v2.Spacing.md, 4)
         sb_layout.setSpacing(theme_v2.Spacing.sm)
-        self._status_dot = StatusDot("neutral")
-        sb_layout.addWidget(self._status_dot)
-        # Wire the status-signal registry to this dot so every long-running
-        # operation in the package (workers, redraws, dataset loads) can
-        # flip the colour without taking a hard dependency on this module.
-        from well_viewer.core import status_signal as _status_signal
-        # Drive the dot through a signal so updates from background threads
-        # (workers, the error-logging handler's signal_failed) are marshalled
-        # onto the GUI thread — a direct widget poke off-thread trips Qt's timer
-        # machinery and can quit the app (see _StatusDotBridge).
-        self._status_dot_bridge = _StatusDotBridge()
-        self._status_dot_bridge.statusChanged.connect(self._status_dot.setStatus)
-        _status_signal.register_driver(
-            self._status_dot_bridge.statusChanged.emit,
-            initial_state="neutral",
-        )
-        # The danger pulse auto-clears after DANGER_HOLD_SECS seconds —
-        # use a single recurring QTimer to recompute the effective state
-        # so the red doesn't stick.
-        self._status_dot_tick = QTimer(self)
-        self._status_dot_tick.setInterval(500)
-        self._status_dot_tick.timeout.connect(_status_signal.refresh)
-        self._status_dot_tick.start()
         self._status_lbl_app = QLabel("Ready.")
         self._status_lbl_app.setStyleSheet(
             f"color: {theme_v2.Colors.text_secondary}; "
@@ -486,15 +440,12 @@ class AllWellApp(QMainWindow):
 
     def _update_dataset_chip(self, path) -> None:
         """The titlebar's dataset chip + stats labels were retired (the OS
-        window title now carries that information). This setter survives
-        as a back-compat shim — every call updates the StatusDot, sets the
-        QMainWindow title (which the host OS renders at the top of the
-        window), and refreshes the in-window status bar string.
+        window title now carries that information). This setter survives as a
+        back-compat shim — every call sets the QMainWindow title (which the host
+        OS renders at the top of the window) and refreshes the in-window status
+        bar string.
         """
-        from well_viewer.core import status_signal as _status_signal
         if path is None:
-            self._dataset_status.setStatus("neutral")
-            _status_signal.set_idle_state("neutral")
             self.setWindowTitle("All-Well")
             if hasattr(self, "_status_lbl_app"):
                 self._status_lbl_app.setText("Ready.")
@@ -523,8 +474,6 @@ class AllWellApp(QMainWindow):
         # OS window title — visible at the top of the window, which is
         # exactly where the in-titlebar chip used to be redundant with.
         self.setWindowTitle(f"All-Well — {name}{tail}")
-        self._dataset_status.setStatus("success")
-        _status_signal.set_idle_state("success")
         if hasattr(self, "_status_lbl_app"):
             self._status_lbl_app.setText(f"Loaded: {name}{tail}")
 
@@ -820,20 +769,12 @@ class AllWellApp(QMainWindow):
 
         ring = self._log_ring
 
-        # Trip the bottom-left StatusDot red on any logged ERROR record —
-        # workers that catch + log exceptions don't have to call
-        # ``signal_failed`` themselves. Auto-clears after the configured
-        # DANGER_HOLD_SECS in well_viewer.status_signal.
-        from well_viewer.core import status_signal as _status_signal
-
         class _RingHandler(_logging.Handler):
             def emit(self, record):  # noqa: N802
                 try:
                     ring.append(self.format(record))
                     if len(ring) > 1000:
                         del ring[:500]
-                    if record.levelno >= _logging.ERROR:
-                        _status_signal.signal_failed()
                 except Exception:
                     swallowed()  # was: pass (silent except)
 

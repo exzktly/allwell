@@ -96,15 +96,7 @@ class GatingWorker(QThread):
         self._cancelled = True
 
     def run(self) -> None:
-        from well_viewer.core import status_signal as _status_signal
-        _status_signal.busy_push()
-        try:
-            self._run_inner()
-        except Exception:
-            _status_signal.signal_failed()
-            raise
-        finally:
-            _status_signal.busy_pop()
+        self._run_inner()
 
     def _run_inner(self) -> None:
         debug = _debug_flags.cell_gating_debug_enabled()
@@ -1170,8 +1162,6 @@ class _AutoThresholdWorker(QThread):
         import logging as _logging
         import traceback as _tb
         _log = _logging.getLogger("well_viewer.data.auto_threshold")
-        from well_viewer.core import status_signal as _status_signal
-        _status_signal.busy_push()
         try:
             from well_viewer.data.auto_threshold import compute_auto_thresholds
             result = compute_auto_thresholds(
@@ -1186,12 +1176,9 @@ class _AutoThresholdWorker(QThread):
                 "Auto-threshold worker failed: %s\n%s",
                 exc, _tb.format_exc(),
             )
-            _status_signal.signal_failed()
             self.failed.emit(str(exc))
             self.done.emit({})
             return
-        finally:
-            _status_signal.busy_pop()
         self.done.emit(result or {})
 
 

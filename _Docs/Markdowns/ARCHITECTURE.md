@@ -60,8 +60,8 @@ they're shell-wide:
 - **Stylesheet.** `theme.qss()` is set as the application-wide QSS string in
   `AllWellApp._apply_stylesheet`. All chrome reads from it.
 - **Help drawer + keyboard shortcuts** (`Ctrl+O`, `Ctrl+E`, `Ctrl+←`/`→`).
-- **Status bar** (bottom of the window) with a `StatusDot` and key-hint
-  chips.
+- **Status bar** (bottom of the window) with a status-message label and
+  key-hint chips.
 - **App icon, window geometry persistence.**
 
 ---
@@ -155,7 +155,7 @@ well_viewer/
 │   │   channel_state_controller.py
 │   ├── plot_orchestrator.py, plot_style.py
 │   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs (N5)
-│   ├── ui_helpers.py, debug_flags.py, status_signal.py
+│   ├── ui_helpers.py, debug_flags.py
 ├── data/                          ← IO + decode
 │   ├── data_loading.py, image_discovery.py, image_resolver.py,
 │   │   zipfile_cache.py, auto_threshold.py, crop_tool.py, metric_labels.py
@@ -324,7 +324,7 @@ layers:
 │           ── plot dispatch / styling: plot_orchestrator, plot_style  │
 │           ── runtime plumbing: event_bus, app_state, bus_wiring,     │
 │              redraw_coordinator, scope_registry, widget_registry,    │
-│              status_signal, debug_flags, ui_helpers                  │
+│              debug_flags, ui_helpers                                 │
 │           ── cross-cutting typed state: channel_state,               │
 │              dataset_state, plot_state, selection_state              │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -787,8 +787,7 @@ catalogue of exactly five cross-cutting signals — `channel_changed`,
 `selection_changed`, `dataset_loaded`, `plot_options_changed`, and
 `redraw_requested`. Signal payloads are the relevant *state object*, never
 `app` (`redraw_requested` carries a scope name). The catalogue and its contract
-are documented in the module docstring; status-bar messages are deliberately
-*not* on the bus — `status_signal.py` owns those. The bus is **load-bearing**:
+are documented in the module docstring. The bus is **load-bearing**:
 every signal has a real subscriber. Subscribers are
 constructed and connected by `bus_wiring.py`'s `wire_event_bus`, called once
 from `WellViewerApp.__init__`:
@@ -1544,15 +1543,7 @@ remote UTF-8 stream is decoded on a cp1252 Windows client).
   buffer that the Help drawer's log tab and the Analyze tab's live log
   view both read from.
 
-### 10.2 Status signal
-
-`well_viewer/core/status_signal.py` is a tiny pub-sub for the bottom status
-bar's `StatusDot`. Long-running operations call
-`with status_signal.warn_scope(): …` so the dot turns amber while they run,
-and call `status_signal.signal_failed()` on exceptions so it turns red and
-auto-clears after `DANGER_HOLD_SECS`.
-
-### 10.3 Debug flags
+### 10.2 Debug flags
 
 `well_viewer/core/debug_flags.py` exposes module-level booleans
 (`REVIEW_TAB_DEBUG`, `REVIEW_BAR_DEBUG`, `REVIEW_SCATTER_DEBUG`,
@@ -1561,7 +1552,7 @@ auto-clears after `DANGER_HOLD_SECS`.
 these flags so toggling them is a one-line edit. Each flag gates `logger.debug`
 calls inside its domain; off by default.
 
-### 10.4 Build / packaging
+### 10.3 Build / packaging
 
 - **Source run:** `python allwell.py [--data_dir …]`.
 - **macOS .app:** `_Docs/_Installation/build_all_well.sh` (mamba env +
@@ -1810,8 +1801,8 @@ assets — for visual reference only.
 - **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`
-  pattern). Streaming progress messages route through `logging` →
-  `status_signal` → the bottom `StatusDot`.
+  pattern). Streaming progress messages route through `logging` and the
+  status-bar label.
 - **Plate selections are well IDs (strings), not (row, col) tuples.**
   `_selected_wells: set[str]`. Convert to / from tuples at the
   edge with `data_loading.parse_well_token`.

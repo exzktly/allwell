@@ -304,12 +304,6 @@ def _build_reference_then_render(app, chan_lower: str) -> None:
     st = _st(app)
     _set_status(app, f"Building {st.flatfield_mode}/{st.background_method} model "
                      f"from well {st.background_well}…")
-    try:
-        from well_viewer.core.status_signal import warn_push
-        warn_push()
-        app._playground_warn_pushed = True
-    except Exception:
-        app._playground_warn_pushed = False
 
     def _on_done(well, chan, ff_field, bg_field):
         if ff_field is not None:
@@ -317,21 +311,9 @@ def _build_reference_then_render(app, chan_lower: str) -> None:
         if bg_field is not None:
             st.bg_field_by_chan[chan] = bg_field
         st.model_well = st.background_well
-        if getattr(app, "_playground_warn_pushed", False):
-            try:
-                from well_viewer.core.status_signal import warn_pop
-                warn_pop()
-            finally:
-                app._playground_warn_pushed = False
         playground_on_change(app)
 
     def _on_failed(msg):
-        if getattr(app, "_playground_warn_pushed", False):
-            try:
-                from well_viewer.core.status_signal import warn_pop
-                warn_pop()
-            finally:
-                app._playground_warn_pushed = False
         _set_status(app, f"Model build failed: {msg}")
 
     app._playground_ref_bridge = request_reference_fields(

@@ -191,7 +191,6 @@ def redraw_app(app) -> None:
     # is hidden behind the EmptyState page, so we can skip the actual
     # redraw — but ``redraw`` still tolerates the empty state via its
     # own no-data branch.
-    from well_viewer.core import status_signal as _status_signal
     from well_viewer.features.lineplot.controller import redraw_line_plots
     from well_viewer.data.data_loading import _all_fluor_values, _all_fluor_values_filtered
 
@@ -199,19 +198,14 @@ def redraw_app(app) -> None:
     # ``redraw`` fans out across the default-scope tabs (line /
     # distribution / heat map). Bar / scatter / scatter-aggregate are
     # scope-specific and re-render through their own per-tab shims.
-    with _status_signal.warn_scope():
-        try:
-            redraw(
-                app,
-                lineplot_redraw=redraw_line_plots,
-                apply_ax_style=apply_ax_style,
-                all_fluor_values=_all_fluor_values,
-                all_fluor_values_filtered=_all_fluor_values_filtered,
-                warn=WARN,
-            )
-        except Exception:
-            _status_signal.signal_failed()
-            raise
+    redraw(
+        app,
+        lineplot_redraw=redraw_line_plots,
+        apply_ax_style=apply_ax_style,
+        all_fluor_values=_all_fluor_values,
+        all_fluor_values_filtered=_all_fluor_values_filtered,
+        warn=WARN,
+    )
     apply_export_style_to_current(app, app._line_fig, getattr(app, "_line_canvas", None))
 
     # Keep the Export Configurator's line-order lists in sync with the

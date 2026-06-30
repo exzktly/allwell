@@ -443,16 +443,8 @@ def load_path_shim(app, path):
     # Drain any pending deferred tab builds so post-load redraw paths
     # (e.g., the bar redraw in _recalculate_threshold call sites) hit
     # fully-constructed tabs instead of unbuilt placeholders.
-    from well_viewer.core import status_signal as _status_signal
     app._drain_pending_centre_builders()
-    _status_signal.busy_push()
-    try:
-        load_path(app, path)
-    except Exception:
-        _status_signal.signal_failed()
-        raise
-    finally:
-        _status_signal.busy_pop()
+    load_path(app, path)
     refresh_plot_empty_states(app)
     # Surface the status-bar threshold / band chips now a dataset is loaded (F1).
     refresh_chips = getattr(app, "_refresh_status_chips", None)

@@ -834,6 +834,22 @@ def rebuild_all(app) -> None:
         scatter_redraw_active(app)
     except Exception:
         __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
+    # Group edits change which wells the plots draw from, and the Cell Browser
+    # gallery follows the same wells (rep_sets_active). Selection-change events
+    # already fan out to it, but group mutations come through here and never
+    # emit selection_changed — so without this the Scatter pane updates while a
+    # side-by-side Cell Browser pane goes stale. Routed through the feature
+    # registry so core stays decoupled from the removable Cell Browser feature;
+    # the hook self-guards on _split_active (a no-op outside Split View, where
+    # the gallery stays Generate-gated).
+    desc = app._features.get("Cell Browser") if hasattr(app, "_features") else None
+    if (desc is not None and desc.on_selection_changed is not None
+            and app._is_tab_visible("Cell Browser")):
+        try:
+            desc.on_selection_changed(app)
+        except Exception:
+            __import__("logging").getLogger("well_viewer.runtime_app").exception(
+                "Cell Browser refresh after group edit failed")
     if hasattr(app, "_notebook"):
         if app._current_centre_tab() == "Line Graphs":
             app._show_line_sidebar()

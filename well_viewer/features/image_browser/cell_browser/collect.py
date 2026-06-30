@@ -224,7 +224,11 @@ def cell_browser_source_wells(app) -> List[str]:
     """
     paths = app._app_state.dataset.well_paths
     sel = app._app_state.selection
-    if sel.selections:
+    # ``getattr`` guards keep this importable for lightweight test stubs that
+    # only populate ``selected_wells`` — the real app always provides all three.
+    selections = getattr(sel, "selections", None)
+    selected_wells = getattr(sel, "selected_wells", None) or ()
+    if selections:
         wells: List[str] = []
         seen: set = set()
         rep_active = getattr(app, "_rep_sets_active", None)
@@ -233,12 +237,12 @@ def cell_browser_source_wells(app) -> List[str]:
                 if w in paths and w not in seen:
                     seen.add(w)
                     wells.append(w)
-        for w in (sel.active_solo_wells or ()):
+        for w in (getattr(sel, "active_solo_wells", None) or ()):
             if w in paths and w not in seen:
                 seen.add(w)
                 wells.append(w)
-    elif sel.selected_wells:
-        wells = [lbl for lbl in sel.selected_wells if lbl in paths]
+    elif selected_wells:
+        wells = [lbl for lbl in selected_wells if lbl in paths]
     else:
         wells = list(paths.keys())
     key = getattr(app, "_parse_rc", None) or (lambda s: s)

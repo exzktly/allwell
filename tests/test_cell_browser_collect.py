@@ -36,7 +36,8 @@ def _app(df):
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(well_paths={"A01": None}),
-        selection=SimpleNamespace(selected_wells=["A01"]),
+        selection=SimpleNamespace(selected_wells=["A01"], selections=[],
+                                  active_solo_wells=set()),
         channel=SimpleNamespace(ratio_index={}),
     )
     app._get_rows = lambda label: df
@@ -125,31 +126,33 @@ def test_no_selection_falls_back_to_all_loaded_wells():
     assert len(cells) == 4  # all rows of the one loaded well (A01)
 
 
-def test_source_wells_explicit_selection_wins_over_groups():
-    # Precedence: an EXPLICIT individual plate selection drives the gallery even
-    # when groups exist — so clicking wells works (the user's expectation). Here
-    # selected_wells=[A01] must win over the group covering B02.
+def test_source_wells_mirror_groups_when_groups_exist():
+    # When groups exist the gallery MIRRORS the plotting layer (visible groups +
+    # solos) — NOT the individual selection. So even with selected_wells=[A01],
+    # a group covering B02 makes the source [B02] (what the Scatter plots).
     from well_viewer.features.image_browser.cell_browser.collect import (
         cell_browser_source_wells,
     )
     app = _app(_df())
     app._app_state.dataset.well_paths = {"A01": None, "B02": None}
-    app._app_state.selection.selected_wells = ["A01"]
+    app._app_state.selection.selected_wells = ["A01"]      # stale individual sel
+    app._app_state.selection.selections = [{"name": "grp", "wells": ["B02"]}]
     app._rep_sets_active = lambda: [SimpleNamespace(name="grp", wells=["B02"])]
-    assert cell_browser_source_wells(app) == ["A01"]  # explicit click wins
+    assert cell_browser_source_wells(app) == ["B02"]       # group mirror wins
 
 
-def test_source_wells_follow_groups_when_no_explicit_selection():
-    # With NO explicit selection, fall back to the visible group wells so the
-    # gallery still mirrors what the Scatter plots in Split View.
+def test_source_wells_include_active_solo_wells():
+    # Solo wells (not in any group) are part of what the plotting layer draws, so
+    # the gallery includes them alongside the visible group wells.
     from well_viewer.features.image_browser.cell_browser.collect import (
         cell_browser_source_wells,
     )
     app = _app(_df())
     app._app_state.dataset.well_paths = {"A01": None, "B02": None}
-    app._app_state.selection.selected_wells = []
+    app._app_state.selection.selections = [{"name": "grp", "wells": ["B02"]}]
+    app._app_state.selection.active_solo_wells = {"A01"}
     app._rep_sets_active = lambda: [SimpleNamespace(name="grp", wells=["B02"])]
-    assert cell_browser_source_wells(app) == ["B02"]
+    assert cell_browser_source_wells(app) == ["A01", "B02"]
 
 
 def test_source_wells_use_selection_when_no_groups():

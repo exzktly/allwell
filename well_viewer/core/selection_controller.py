@@ -34,15 +34,29 @@ def _is_single_well_tab(app, tab_name: str) -> bool:
     return tab_name in _SINGLE_WELL_TAB_NAMES
 
 
+# Tabs that EDIT individual wells (cell-gating / add-prefix / row-load) and so
+# need the plate ACTIVE as a per-well selector even when groups exist. The Cell
+# Browser is deliberately NOT here: it MIRRORS the plotting layer's active wells
+# (the visible groups + solo wells), so in a Scatter + Cell Browser split the
+# plate stays group-driven and clicking a well toggles its group (driving both
+# panes), instead of the plate flipping to a per-well selector that ignored the
+# groups and stopped affecting the scatter.
+_WELL_EDITING_TAB_NAMES = ("Sample Definitions", "Review CSV")
+
+
+def _is_well_editing_tab(app, tab_name: str) -> bool:
+    return tab_name in _WELL_EDITING_TAB_NAMES
+
+
 def _plate_passive_in_group_mode(app) -> bool:
     """Whether the sidebar plate runs in passive (group-visibility) mode.
 
-    The plate is passive only in rep-set (group) mode AND when no per-well
-    consumer is on screen. In Split View a visible per-well pane (Cell Browser /
-    Sample Definitions / Review CSV) keeps the plate ACTIVE as a per-well
-    selector even when the focused pane is a plotting tab in group mode — so the
-    user can click wells to drive that pane, and the shared plate paints the same
-    selection regardless of which pane is focused (no focus-driven "toggle").
+    Passive in rep-set (group) mode unless a *well-editing* pane (Sample
+    Definitions / Review CSV) is on screen — those need the plate as a per-well
+    selector. The Cell Browser does NOT force the plate active: it mirrors the
+    plotting layer's group wells, so a Scatter + Cell Browser split keeps the
+    plate group-driven (no focus-dependent flip; clicking toggles a group and
+    updates both panes).
 
     Outside Split View ``visible_centre_tabs`` collapses to the current leaf, so
     a single plotting tab in group mode stays passive exactly as before."""
@@ -53,7 +67,7 @@ def _plate_passive_in_group_mode(app) -> bool:
         visible = set(visible_centre_tabs(app)) or {_active_tab(app)}
     except Exception:
         visible = {_active_tab(app)}
-    return not any(_is_per_well_tab(app, t) for t in visible)
+    return not any(_is_well_editing_tab(app, t) for t in visible)
 
 
 def _active_tab(app) -> str:
@@ -623,21 +637,21 @@ def refresh_sidebar_map_now(app) -> None:
     plate.setSingleSelectionMode(smfish and not rep_mode)
     plate.clearWellColors()
     plate.setWellColors(colors)
-    # Plotting tabs in rep-mode still honour ``_selected_wells`` so a
-    # click on a well in a saved group promotes that group's wells to
-    # the raised + bright (``_paint_lit``) look. Other rep-mode tabs
-    # (Image Table / smFISH / etc) keep the legacy "no per-well
-    # selection" override.
+    # Plotting tabs in rep-mode paint the visible group wells (clicks toggle a
+    # group's ``hidden`` flag). The Cell Browser MIRRORS that group set — it must
+    # paint the same wells (not the legacy empty plate), so the highlight is
+    # identical whether the Scatter or the Cell Browser pane is focused (no
+    # focus-driven flip / apparent "loss"). Other rep-mode tabs (Image Table /
+    # smFISH / etc) keep the legacy "no per-well selection" override.
     plotting_tab = tab_name in app._PLOTTING_TABS
-    if rep_mode and not plotting_tab:
+    mirror_tab = plotting_tab or tab_name == "Cell Browser"
+    if rep_mode and not mirror_tab:
         plate.setSelectedWellIds([])
-    elif rep_mode and plotting_tab:
-        # In rep-mode on a plotting tab the "active" set is exactly the
-        # union of every non-hidden group's wells. ``_selected_wells``
-        # is not used here — clicks toggle each group's ``hidden`` flag
-        # so the visual state and the plot's ``_rep_sets_active()``
-        # filter stay in lock-step. Solo wells (not in any group) live
-        # in ``_active_solo_wells``.
+    elif rep_mode and mirror_tab:
+        # In rep-mode the "active" set is exactly the union of every non-hidden
+        # group's wells (+ solo wells). ``_selected_wells`` is not used here —
+        # clicks toggle each group's ``hidden`` flag so the visual state and the
+        # plot's ``_rep_sets_active()`` filter stay in lock-step.
         visible_wells = {
             w for s in app._app_state.selection.selections if not s.get("hidden")
             for w in (s.get("wells") or []) if w in app._app_state.dataset.well_paths

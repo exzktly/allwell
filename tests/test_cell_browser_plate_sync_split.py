@@ -94,3 +94,44 @@ def test_plate_click_registers_in_group_mode_when_cellbrowser_visible(loaded_app
     assert app._app_state.selection.selected_wells == {wells[1]}, (
         "plate click should register a per-well selection when the Cell Browser "
         "is a visible consumer, even with groups defined")
+
+
+def test_gate_stays_live_as_wells_are_added_and_removed(loaded_app):
+    # Combined model: the scatter gate filters cells, the well selection scopes
+    # which wells, and add/remove updates the gallery live WITHOUT dropping the
+    # gate. (gate admits everything so we isolate the well-scope effect.)
+    from well_viewer.features.image_browser.cell_browser.collect import collect_cells
+    app = loaded_app
+    wells = list(app._app_state.dataset.well_paths.keys())
+    assert len(wells) >= 3
+    _enter_split(app)
+    app._cell_browser_state.scatter_gate_mode = True
+    app._scatter_gates = [{"x_col": "gfp_mean_intensity", "y_col": "gfp_mean_intensity",
+                           "x0": -1e12, "x1": 1e12, "y0": -1e12, "y1": 1e12, "name": "G1"}]
+    app._cell_browser_gate_choices = None
+
+    def scope():
+        return sorted({c.well for c in collect_cells(app, [], live_sync=True)})
+
+    app._app_state.selection.selected_wells = {wells[0]}
+    assert scope() == [wells[0]]
+    app._app_state.selection.selected_wells = {wells[0], wells[1]}
+    assert scope() == sorted([wells[0], wells[1]])          # added a well, gate live
+    app._app_state.selection.selected_wells = {wells[0]}
+    assert scope() == [wells[0]]                            # removed a well, gate live
+
+
+def test_inspecting_a_cell_does_not_rescope_wells(loaded_app):
+    # Clicking a gallery thumbnail to inspect a cell must NOT change the well
+    # scope — otherwise looking at a cell would collapse the gated view.
+    from well_viewer.features.image_browser.cell_browser import controller as ctl
+    from well_viewer.features.image_browser.cell_browser.collect import collect_cells
+    app = loaded_app
+    wells = list(app._app_state.dataset.well_paths.keys())
+    _enter_split(app)
+    app._app_state.selection.selected_wells = set(wells[:2])
+    cells = collect_cells(app, [], live_sync=True)
+    assert cells, "expected some cells to inspect"
+    before = set(app._app_state.selection.selected_wells)
+    ctl.on_cell_clicked(app, cells[0])  # navigates to Segmentation; read-only for scope
+    assert app._app_state.selection.selected_wells == before

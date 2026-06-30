@@ -209,30 +209,29 @@ def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
 
 
 def cell_browser_source_wells(app) -> List[str]:
-    """Wells the Cell Browser draws from.
+    """Wells the Cell Browser draws from, in precedence order:
 
-    Mirrors *exactly* the well-resolution the plotting tabs use (see
-    ``scatter/collect.py``): the visible replicate-set groups when any are
-    defined, otherwise the explicit individual plate selection, otherwise every
-    loaded well. Using the same rule is what keeps a Split View Scatter + Cell
-    Browser pairing in sync — when sample-definition groups exist the Scatter
-    draws from the group wells, so the Cell Browser must too (it previously only
-    looked at ``selected_wells``, which is passive/empty in group mode, so the
-    gallery silently fell back to *all* wells and the two panes diverged).
+    1. the **explicit individual plate selection** (``selected_wells``) when
+       non-empty — so clicking wells on the plate drives the gallery, even with
+       sample-definition groups defined (the user's expectation in Split View);
+    2. else the **visible replicate-set groups** (``_rep_sets_active``) — so with
+       no explicit selection the gallery still follows exactly what the Scatter
+       plots (keeps the Split View panes in sync);
+    3. else **every loaded well** — populates the gallery / FOV picker on first
+       open before any selection or groups exist.
 
-    The all-wells fallback still populates the gallery (and the FOV picker) on
-    first open, before the user has defined groups or picked wells."""
+    (Earlier this preferred groups over ``selected_wells``, which meant an
+    explicit well click was silently ignored whenever a group was defined.)"""
     paths = app._app_state.dataset.well_paths
-    wells: List[str] = []
-    seen: set = set()
-    rep_active = getattr(app, "_rep_sets_active", None)
-    for rset in (rep_active() if callable(rep_active) else ()):
-        for w in rset.wells:
-            if w in paths and w not in seen:
-                seen.add(w)
-                wells.append(w)
+    wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in paths]
     if not wells:
-        wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in paths]
+        seen: set = set()
+        rep_active = getattr(app, "_rep_sets_active", None)
+        for rset in (rep_active() if callable(rep_active) else ()):
+            for w in rset.wells:
+                if w in paths and w not in seen:
+                    seen.add(w)
+                    wells.append(w)
     if not wells:
         wells = list(paths.keys())
     key = getattr(app, "_parse_rc", None) or (lambda s: s)
@@ -245,6 +244,8 @@ def collect_cells(
     timepoints: Optional[List[float]] = None,
     fovs: Optional[List[str]] = None,
     sort_keys: Optional[List[SortKey]] = None,
+    *,
+    live_sync: bool = False,
 ) -> List[CellDescriptor]:
     """Ordered list of cells (across selected wells) matching *criteria* within
     the selected *timepoints* and *fovs*.
@@ -292,6 +293,13 @@ def collect_cells(
             gates = all_gates
         else:
             gates = [g for g in all_gates if str(g.get("name") or "") in chosen]
+
+    # Relax an empty timepoint/FOV include-list to "all" on the live auto-sync
+    # path (and in gate mode), so a Split View selection change shows the cells
+    # immediately instead of a silently-blank gallery — the tp/FOV pickers start
+    # fully deselected. The explicit Generate button keeps the strict tri-state
+    # (empty → "pick timepoints" hint) so its deliberate affordance is unchanged.
+    if gate_mode or live_sync:
         if target is not None and target.size == 0:
             target = None
         if fov_set is not None and not fov_set:

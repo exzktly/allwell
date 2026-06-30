@@ -363,7 +363,7 @@ def _sel_cell_browser(app) -> None:
     from well_viewer.features.image_browser.cell_browser.controller import (
         apply_filters,
     )
-    apply_filters(app)
+    apply_filters(app, live_sync=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

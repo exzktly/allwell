@@ -34,6 +34,28 @@ def _is_single_well_tab(app, tab_name: str) -> bool:
     return tab_name in _SINGLE_WELL_TAB_NAMES
 
 
+def _plate_passive_in_group_mode(app) -> bool:
+    """Whether the sidebar plate runs in passive (group-visibility) mode.
+
+    The plate is passive only in rep-set (group) mode AND when no per-well
+    consumer is on screen. In Split View a visible per-well pane (Cell Browser /
+    Sample Definitions / Review CSV) keeps the plate ACTIVE as a per-well
+    selector even when the focused pane is a plotting tab in group mode — so the
+    user can click wells to drive that pane, and the shared plate paints the same
+    selection regardless of which pane is focused (no focus-driven "toggle").
+
+    Outside Split View ``visible_centre_tabs`` collapses to the current leaf, so
+    a single plotting tab in group mode stays passive exactly as before."""
+    if not app._app_state.selection.selections:
+        return False
+    try:
+        from well_viewer.core.tab_controller import visible_centre_tabs
+        visible = set(visible_centre_tabs(app)) or {_active_tab(app)}
+    except Exception:
+        visible = {_active_tab(app)}
+    return not any(_is_per_well_tab(app, t) for t in visible)
+
+
 def _active_tab(app) -> str:
     # Plot tabs (Line Graphs / Bar Plots / Scatter Plot) live inside a nested
     # "Plotting" QTabWidget. Use the app's centre-tab resolver so callers see
@@ -280,13 +302,8 @@ def on_sidebar_plate_selection_changed(app, ids) -> None:
     # _refresh_sidebar_map_now mirrors the same exception so the painted
     # selection doesn't get wiped on the next refresh tick.
     from PySide6.QtCore import QTimer
-    try:
-        tab_name = app._current_centre_tab()
-    except Exception:
-        tab_name = ""
-    per_well_tab = _is_per_well_tab(app, tab_name)
-    if app._app_state.selection.selections and not per_well_tab:
-        return  # rep-set mode: the plate is passive; its selection is unused
+    if _plate_passive_in_group_mode(app):
+        return  # rep-set mode, no per-well pane visible: the plate is passive
     # Keep the invariant _selected_wells ⊆ _well_paths.
     new_set = {w for w in ids if w in app._app_state.dataset.well_paths}
     if new_set == app._app_state.selection.selected_wells:
@@ -303,12 +320,7 @@ def on_sidebar_plate_selection_changed(app, ids) -> None:
 
 
 def on_sidebar_plate_drag_finished(app) -> None:
-    try:
-        tab_name = app._current_centre_tab()
-    except Exception:
-        tab_name = ""
-    per_well_tab = _is_per_well_tab(app, tab_name)
-    if app._app_state.selection.selections and not per_well_tab:
+    if _plate_passive_in_group_mode(app):
         return
     # Cancel any pending deferred commit from the paint events that
     # led here -- we're committing right now.
@@ -565,8 +577,10 @@ def refresh_sidebar_map_now(app) -> None:
         tab_name = app._current_centre_tab()
     except Exception:
         tab_name = ""
-    per_well_tab = _is_per_well_tab(app, tab_name)
-    rep_mode = bool(app._app_state.selection.selections) and not per_well_tab
+    # Passive (group-visibility) only when no per-well pane is on screen — must
+    # stay in lock-step with the plate handlers, or the next refresh tick would
+    # repaint passive and wipe the per-well selection the handler just committed.
+    rep_mode = _plate_passive_in_group_mode(app)
 
     colors: Dict[str, object] = {}
     if rep_mode:

@@ -125,11 +125,10 @@ def test_no_selection_falls_back_to_all_loaded_wells():
     assert len(cells) == 4  # all rows of the one loaded well (A01)
 
 
-def test_source_wells_follow_replicate_groups():
-    # When sample-definition groups exist, the Cell Browser must draw from the
-    # SAME wells the Scatter plots (the visible group wells), not from the
-    # passive individual selection — otherwise the two panes diverge in Split
-    # View. Here the group covers only B02, while selected_wells points at A01.
+def test_source_wells_explicit_selection_wins_over_groups():
+    # Precedence: an EXPLICIT individual plate selection drives the gallery even
+    # when groups exist — so clicking wells works (the user's expectation). Here
+    # selected_wells=[A01] must win over the group covering B02.
     from well_viewer.features.image_browser.cell_browser.collect import (
         cell_browser_source_wells,
     )
@@ -137,7 +136,20 @@ def test_source_wells_follow_replicate_groups():
     app._app_state.dataset.well_paths = {"A01": None, "B02": None}
     app._app_state.selection.selected_wells = ["A01"]
     app._rep_sets_active = lambda: [SimpleNamespace(name="grp", wells=["B02"])]
-    assert cell_browser_source_wells(app) == ["B02"]  # follows the group, not A01
+    assert cell_browser_source_wells(app) == ["A01"]  # explicit click wins
+
+
+def test_source_wells_follow_groups_when_no_explicit_selection():
+    # With NO explicit selection, fall back to the visible group wells so the
+    # gallery still mirrors what the Scatter plots in Split View.
+    from well_viewer.features.image_browser.cell_browser.collect import (
+        cell_browser_source_wells,
+    )
+    app = _app(_df())
+    app._app_state.dataset.well_paths = {"A01": None, "B02": None}
+    app._app_state.selection.selected_wells = []
+    app._rep_sets_active = lambda: [SimpleNamespace(name="grp", wells=["B02"])]
+    assert cell_browser_source_wells(app) == ["B02"]
 
 
 def test_source_wells_use_selection_when_no_groups():
@@ -166,6 +178,16 @@ def test_fov_filter_is_strict_include_list():
     assert len(collect_cells(app, [], fovs=None)) == 4
     assert collect_cells(app, [], fovs=[]) == []
     assert len(collect_cells(app, [], fovs=["1"])) == 2
+
+
+def test_live_sync_relaxes_empty_timepoints_and_fovs():
+    # On the live auto-sync path an empty include-list relaxes to "all" so a
+    # Split View selection change shows cells instead of a blank gallery; the
+    # default (Generate) path keeps the strict tri-state.
+    app = _app(_df())
+    assert collect_cells(app, [], timepoints=[]) == []                  # Generate: strict
+    assert len(collect_cells(app, [], timepoints=[], live_sync=True)) == 4
+    assert len(collect_cells(app, [], fovs=[], live_sync=True)) == 4
 
 
 def test_channels_prefer_app_list():

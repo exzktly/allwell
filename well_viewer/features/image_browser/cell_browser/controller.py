@@ -147,8 +147,13 @@ def _num(text: str):
 
 # ── run / page ───────────────────────────────────────────────────────────────
 
-def apply_filters(app) -> None:
-    """Collect the filtered cell set and load the first page of thumbnails."""
+def apply_filters(app, *, live_sync: bool = False) -> None:
+    """Collect the filtered cell set and load the first page of thumbnails.
+
+    ``live_sync`` marks the automatic Split-View / gate re-collect paths (vs the
+    explicit Generate button): on those, an empty timepoint/FOV include-list
+    relaxes to "all" so a selection change isn't met with a silently-blank
+    gallery (see ``collect_cells``)."""
     st = app._cell_browser_state
     st.criteria = read_criteria(app)
     st.timepoints = read_timepoints(app)
@@ -167,7 +172,8 @@ def apply_filters(app) -> None:
 
     # Sort happens inside collect_cells (before the MAX_TOTAL cap, so the cap
     # keeps the top-ordered cells).
-    cells = collect_cells(app, st.criteria, st.timepoints, st.fovs, st.sort_keys)
+    cells = collect_cells(app, st.criteria, st.timepoints, st.fovs, st.sort_keys,
+                          live_sync=live_sync)
     if len(cells) > MAX_TOTAL:
         cells = cells[:MAX_TOTAL]
     st.cells = cells
@@ -258,7 +264,7 @@ def cell_browser_sync_scatter_gates(app) -> None:
     from well_viewer.core.tab_controller import is_tab_visible
     if not is_tab_visible(app, "Cell Browser"):
         return
-    apply_filters(app)
+    apply_filters(app, live_sync=True)
 
 
 def _set_apply_busy(app, busy: bool) -> None:

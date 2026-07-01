@@ -697,6 +697,14 @@ class _PlateGrid(QWidget):
 
     def event(self, ev) -> bool:  # noqa: N802
         if ev.type() == QEvent.ToolTip:
+            # A ToolTip can be delivered while a *modal* dialog (e.g. the
+            # Open-directory picker) owns the event loop. Driving QToolTip from a
+            # widget whose window isn't the active one then crashes with a native
+            # access violation on Windows. Only handle the tooltip when this
+            # plate's window is the active window; otherwise defer to the base
+            # handler (which shows nothing).
+            if not self.isVisible() or self.window() is not QApplication.activeWindow():
+                return super().event(ev)
             pos = ev.pos()
             hit = self._hit(pos.x(), pos.y())
             if hit is not None and hit[0] == "well":

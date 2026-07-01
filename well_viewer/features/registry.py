@@ -192,7 +192,7 @@ def _activate_sample_definitions(app) -> None:
 
 def _activate_statistics(app) -> None:
     from well_viewer.features.stats.controller import (
-        stats_sync_from_app, stats_update_tp_menu,
+        stats_sync_from_app, stats_update_tp_menu, stats_refresh_fov_indicator,
     )
     app._sidebar_stats_frame.setVisible(True)
     # Auto-populate from rep-sets on first visit
@@ -200,6 +200,8 @@ def _activate_statistics(app) -> None:
         stats_sync_from_app(app)
     if hasattr(app, "_stats_tp_cb"):
         stats_update_tp_menu(app)
+    # Reflect the current FOV-replicate mode (may have been toggled on a plot tab).
+    stats_refresh_fov_indicator(app)
 
 
 def _activate_multivariate(app) -> None:

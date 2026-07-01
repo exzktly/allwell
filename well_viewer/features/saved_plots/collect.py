@@ -107,6 +107,9 @@ def _capture_stats_config(app) -> dict | None:
         "val_col": val_col,
         "statistic": str(ctx.get("stat", "mean") or "mean"),
         "threshold": threshold,
+        # The FOV-replicate mode governs the test's replicate unit; capture it so
+        # a restored plot re-runs with the same n and redraws identical brackets.
+        "use_fov": bool(_safe(lambda: app._use_fov_spread_active())),
     }
 
 
@@ -150,6 +153,11 @@ def build_summary(app, tab: str, params: dict, thresholds: dict) -> str:
         band = "SEM" if params.get("use_sem") else "SD"
         fov = " · per-FOV" if params.get("use_fov_replicates") else ""
         lines.append(f"Error band: {band}{fov}")
+
+    stats_cfg = params.get("stats")
+    if isinstance(stats_cfg, dict):
+        unit = "per-FOV (FOV mode)" if stats_cfg.get("use_fov") else "per-well"
+        lines.append(f"Stats replicates: {unit}")
 
     tab_combos = (params.get("tabs") or {}).get(tab) or {}
     if tab_combos:

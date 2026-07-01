@@ -70,7 +70,8 @@ they're shell-wide:
 
 ```
 allwell/
-├── allwell.py                  ← app entry point + title bar shell
+├── allwell.py                  ← app entry point + title bar shell (+ version pill)
+├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
@@ -136,6 +137,16 @@ gains `.get`-defaulted keys (`shape_features` / `qc_options` / `phase_token` /
 empirical resolution: `_Docs/Markdowns/TODO_segmentation_qc_shape_tracking.md`
 Part 1.
 
+**Multivariate (Review-side) dependencies.** The Multivariate tab's UMAP / t-SNE
+projections add `scikit-learn==1.3.2` + `umap-learn==0.5.5` to `_Docs/requirements.txt`
+(GUI-only — **not** `requirements-remote.txt`; the headless pipeline never runs Review
+analysis). Pinned to coexist with the binding caps above (they hold `numpy` at 1.24.3
+and `typing-extensions` at 4.5.0 — verified by a full `pip install` resolution). PCA
+(numpy SVD), correlation, and k-means / hierarchical clustering (`scipy.cluster`) need
+nothing beyond the existing numpy+scipy; UMAP / t-SNE are imported lazily and gated by a
+`MethodUnavailable` probe, so the tab still runs (PCA + correlation + clustering) if
+those libs are absent.
+
 The Review side (`well_viewer/`) is organised per-feature: one package per
 visible tab / functional area, with cross-cutting infrastructure split out
 by role. Inside `well_viewer/`:
@@ -163,6 +174,7 @@ well_viewer/
 │   ├── batch_models.py, ratio_models.py, selections_model.py, plate_layout.py
 │   ├── fold_change.py, fold_change_scopes.py, fold_change_controls.py
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
+│   ├── multivariate_compute.py       ← PCA/correlation/clustering/faceting math (Qt-free)
 ├── features/                      ← one package per UI feature
 │   ├── barplot/      controller.py, renderer.py, tab_view.py
 │   ├── lineplot/     controller.py, tab_view.py
@@ -171,6 +183,10 @@ well_viewer/
 │   ├── heatmap/      controller.py, models.py, sidebar_view.py, tab_view.py
 │   ├── distribution/ controller.py, tab_view.py
 │   ├── stats/        controller.py, state.py, view.py
+│   ├── multivariate/ controller.py, collect.py, renderer.py, state.py,
+│   │                 tab_view.py, feature_picker_view.py   ← higher-dimensional analysis
+│   │                 (correlation / PCA·UMAP·t-SNE / clustering / faceting over the
+│   │                  per-cell feature space; math in domain/multivariate_compute.py)
 │   ├── image_browser/ tab_view.py, controller.py   ← unified image-review shell
 │   │   │             (one rail entry → Segmentation / Image Table / Cell Browser
 │   │   │              / Playground sub-tabs; descends like the Plotting stack)
@@ -259,6 +275,10 @@ all_well_launcher.main()                       (PyInstaller bundle only)
     │
     ▼ regular Python run jumps in here:
 allwell.main()
+    ├── mpl_bootstrap.configure()   ← FIRST, before anything imports matplotlib:
+    │       restricts font_manager.findSystemFonts to the bundled fonts (+ DejaVu)
+    │       and pins MPLCONFIGDIR, so the system-font scan (minutes on a Windows 365
+    │       Cloud PC) never runs. Defensive — failure leaves matplotlib untouched.
     ├── QApplication(sys.argv)
     ├── app_fonts.register_qt_fonts() → theme_v2.Typography.family/_mono
     │       ← register bundled Inter / JetBrains Mono (static instances),

@@ -191,7 +191,13 @@ def _render_dimred(fig, res) -> None:
     coords = res["coords"]
     axis_labels = res["axis_labels"]
     data = res["data"]
-    ax = fig.add_subplot(111)
+    loadings = res.get("loadings")
+    # PCA carries loadings → split the panel: scatter left, loading heatmap right.
+    if loadings is not None:
+        ax, ax_load = fig.subplots(1, 2, gridspec_kw={"width_ratios": [2.2, 1.0]})
+    else:
+        ax = fig.add_subplot(111)
+        ax_load = None
     apply_ax_style(ax, "2-D projection", axis_labels[1])
     ax.set_xlabel(axis_labels[0], fontsize=8)
     colors, legend = _point_colors(data, res.get("color_by", "group"),
@@ -202,7 +208,40 @@ def _render_dimred(fig, res) -> None:
     _legend(ax, legend, muted_fg,
             title={"group": "Group", "well": "Well", "timepoint": "Time",
                    "cluster": "Cluster"}.get(res.get("color_by", "group"), ""))
-    fig.subplots_adjust(left=0.12, bottom=0.11, right=0.97, top=0.94)
+    if ax_load is not None:
+        _draw_loadings(fig, ax_load, loadings)
+        fig.subplots_adjust(left=0.09, bottom=0.11, right=0.98, top=0.94, wspace=0.55)
+    else:
+        fig.subplots_adjust(left=0.12, bottom=0.11, right=0.97, top=0.94)
+
+
+def _draw_loadings(fig, ax, loadings) -> None:
+    """Heatmap of feature loadings (rows) on PC1 / PC2 (cols), value-annotated —
+    reads which features drive each principal component."""
+    import numpy as np
+
+    comps = np.asarray(loadings["components"], dtype=float)   # n_comp x n_feat
+    labels = list(loadings["feature_labels"])
+    mat = comps.T                                            # n_feat x n_comp
+    n_pc = mat.shape[1]
+    apply_ax_style(ax, "PCA loadings", "")
+    ax.grid(False)
+    _bg, _t, muted_fg, _g, _s = tokens_for(ax)
+    vmax = float(np.nanmax(np.abs(mat))) if mat.size else 1.0
+    vmax = vmax if vmax > 0 else 1.0
+    ax.imshow(mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(n_pc))
+    ax.set_xticklabels([f"PC{i + 1}" for i in range(n_pc)], fontsize=7,
+                       color=muted_fg)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, fontsize=7, color=muted_fg)
+    if len(labels) <= 20:
+        for i in range(mat.shape[0]):
+            for j in range(n_pc):
+                v = mat[i, j]
+                if np.isfinite(v):
+                    ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=6,
+                            color="white" if abs(v) > 0.5 * vmax else muted_fg)
 
 
 # ── clustering / phenotyping ─────────────────────────────────────────────────

@@ -581,6 +581,7 @@ The left-rail "SECTION" navigator selects one of the centre tabs:
 |-----|---------------|
 | **Plotting** | Five sub-tabs (default **Bar Plots**): **Bar Plots** (bar / beeswarm / violin, drag-to-reorder), **Line Graphs** (mean ± SD/SEM + fraction above threshold + CDF), **Scatter Plot** (per-cell scatter and aggregate scatter; per-cell points can be coloured by well or, via the **Color by time** toggle, by timepoint), **Distribution** (histogram / KDE / violin of per-cell values at one timepoint), **Heat Map** (custom layout heatmap). Bar Plots and Line Graphs additionally support **Fold-change normalization** — divide every bar / curve by a control well or replicate set, by each member's own t0, or both (see [Fold-change normalization](#fold-change-normalization)). |
 | **Statistics** | Pairwise tests across saved selections (t-test, Mann-Whitney, KS) with KS CDF. |
+| **Multivariate** | Higher-dimensional / per-cell analysis of many features at once: feature correlation, PCA / UMAP / t-SNE projection, k-means / hierarchical clustering (phenotyping), and multi-factor faceting. See [Multivariate analysis](#multivariate-analysis). |
 | **Image Table** | Grid of per-FOV image thumbnails; configurable rows/columns/channels; bulk export. Hosts a read-only mirror of the **Plot Groups** drawer so a saved well set can drive the image grid (loads also propagate to the plotting selection). Per-row LUT defaults to grayscale; recolor via the row's LutSelector. |
 | **Segmentation** | Two sub-tabs. **Review Image** — per-FOV overlay viewer: click a nucleus to flag/unflag it for inclusion in stats; draw a **crop rectangle** to keep only cells whose centroid is inside (applied dataset-wide across all FOVs/timepoints/channels/wells, with a Reset that restores every cell and a Clear crop that removes just the box); a Raw / Flat-field / Corrected source toggle; tune the LUT and the QC debris gate. **Playground** — an interactive testbed to try any background-flattening / subtraction method (with adjustable parameters) on a single chosen raw frame, with Raw/Flat-field/Corrected, LUT/colormap, binary + precomputed-mask overlay, pan/zoom, per-source LUT memory, a frame-local threshold, a hover intensity readout, and a QC size-cleanup preview — no re-run needed. |
 | **smFISH** | Spot detection, parameter sweep, and **Apply to All** threshold. Its own rail tab (formerly a Segmentation sub-tab). |
@@ -708,6 +709,86 @@ points. The bar and line batch panels also expose the same
 [Fold-change normalization](#fold-change-normalization) dropdowns, with
 panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
+
+### Multivariate analysis
+
+The **Multivariate** tab analyses *many* per-cell features together, on the
+cells in your current well selection (honouring the same inclusion + gating +
+crop masks as every other plot). Where the plotting tabs show one metric at a
+time, this tab is for questions like "which features move together?", "do the
+cells fall into distinct phenotypes?", and "what separates my conditions in
+high-dimensional space?".
+
+**Workflow.** Select wells (and optionally replicate sets) as usual, open the
+tab, then:
+
+1. **Features** — click **Features…** and tick the columns to analyse
+   (intensity/count metrics per channel, `shape_*` morphology features, and any
+   ratio channels). This feature set is the matrix every mode operates on.
+2. **Timepoint** — restrict to one or more timepoints, or leave as *all*.
+3. Pick a **mode** (segmented control): **Correlation**, **Dim-reduction**,
+   **Clustering**, or **Faceting**.
+4. **Export** / **Copy** / **Save** (row-1 buttons) write the data / figure out
+   (see below).
+
+**Standardize (z-score).** The **Standardize** checkbox z-scores every feature
+column — subtract its mean, divide by its standard deviation — *before* PCA and
+clustering. This is on by default and almost always what you want: multivariate
+features live on wildly different scales (raw intensities in the thousands next
+to solidity in `[0, 1]`), and both PCA and Euclidean-distance clustering are
+dominated by whichever feature has the largest raw numbers unless you put them
+on a common scale first. Turn it **off** only when your features are already
+comparable and you deliberately want the high-variance ones to dominate.
+Constant features (identical in every cell) collapse to zero rather than
+divide-by-zero.
+
+**The four modes.**
+
+- **Correlation** — a feature×feature Pearson correlation heatmap (scale
+  invariant, so unaffected by Standardize), or a scatter-plot matrix (SPLOM)
+  via the view toggle.
+- **Dim-reduction** — project every cell to 2-D. **PCA** (default, always
+  available), or **UMAP** / **t-SNE** if `umap-learn` / `scikit-learn` are
+  installed. Colour the points **by group / well / timepoint / cluster**. For
+  PCA the axis captions report each PC's explained-variance %, and a **PCA
+  loadings** panel is drawn beside the scatter (see below).
+- **Clustering** — **k-means** or **hierarchical** clustering into **k** groups
+  (the `k` spinbox). Left panel: a PCA scatter coloured by cluster; right panel:
+  a stacked bar of each well/group's **phenotype composition** (fraction of its
+  cells in each cluster). Hierarchical clustering on large selections is fit on
+  a random subsample and the rest assigned to the nearest cluster (a footnote
+  says how many cells were sampled).
+- **Faceting** — pivot one feature into a row-factor × column-factor grid
+  (e.g. well × timepoint), aggregated by mean / median / count / std.
+
+#### Extracting PCA weightings (loadings)
+
+A PCA score plot shows *where* cells land but not *why*. The **loadings** are the
+answer: each principal component is a weighted combination of your original
+features, and the loading is that weight — a feature with a large-magnitude
+loading on PC1 is one of the things PC1 is measuring; same-sign features move
+together along that axis, opposite-sign features trade off.
+
+- **On screen** — in **Dim-reduction → PCA** mode, the panel to the right of the
+  scatter is a **PCA loadings** heatmap: rows are your features, columns are
+  PC1 / PC2, and each cell is that feature's loading (value-annotated,
+  red = positive, blue = negative).
+- **In a file** — click **Export** and, alongside the per-cell matrix CSV, a
+  companion **`<name>_pca_loadings.csv`** is written whenever the matrix supports
+  PCA (≥ 2 features, ≥ 2 cells). It has one row per feature, one column per
+  principal component (`PC1`, `PC2`, …), and a final `explained_variance_ratio`
+  row giving the share of total variance each PC captures. Loading vectors are
+  unit-norm per PC (they're the SVD right-singular directions).
+
+#### Which cluster each cell belongs to
+
+In **Clustering** mode, click **Export** to write the per-cell feature matrix
+with a **`cluster`** column appended — one row per cell, giving its `well`,
+`group`, `timepoint_hours`, every feature value, and its integer cluster id
+(`0 … k-1`). That's the raw phenotype assignment for downstream analysis (count
+cells per cluster per condition, cross-tabulate against treatment, etc.). The
+cluster ids match the colours in the on-screen scatter and the phenotype-
+composition bars.
 
 ---
 

@@ -55,6 +55,43 @@ def test_correlation_requires_two_features():
         mvc.correlation_matrix(np.arange(10.0).reshape(-1, 1))
 
 
+# ── PCA loadings CSV companion ────────────────────────────────────────────────
+
+def test_pca_loadings_csv_companion(tmp_path):
+    """Export writes a feature×PC loadings table + explained-variance row next to
+    the matrix, so PCA weightings are extractable for downstream analysis."""
+    from types import SimpleNamespace
+    import pandas as pd
+    from well_viewer.features.multivariate.controller import _write_pca_loadings_csv
+
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(60, 3))
+    data = {"X": X, "feature_labels": ["f1", "f2", "f3"]}
+    matrix = tmp_path / "mat.csv"
+    matrix.write_text("stub")
+
+    out = _write_pca_loadings_csv(None, SimpleNamespace(standardize=True),
+                                  data, str(matrix))
+    assert out and out.endswith("mat_pca_loadings.csv")
+    df = pd.read_csv(out, index_col=0)
+    assert list(df.index)[:3] == ["f1", "f2", "f3"]
+    assert "explained_variance_ratio" in df.index
+    assert df.columns[0] == "PC1"
+    # Each PC's loading vector is a unit-norm SVD right-singular direction.
+    pc1 = df.loc[["f1", "f2", "f3"], "PC1"].to_numpy(dtype=float)
+    assert np.isclose(np.linalg.norm(pc1), 1.0, atol=1e-6)
+
+
+def test_pca_loadings_csv_skipped_when_matrix_too_small(tmp_path):
+    from types import SimpleNamespace
+    from well_viewer.features.multivariate.controller import _write_pca_loadings_csv
+
+    data = {"X": np.zeros((5, 1)), "feature_labels": ["only"]}  # < 2 features
+    out = _write_pca_loadings_csv(None, SimpleNamespace(standardize=True),
+                                  data, str(tmp_path / "m.csv"))
+    assert out is None
+
+
 # ── PCA ──────────────────────────────────────────────────────────────────────
 
 def test_pca_explained_variance_ratio_sums_to_one_when_full_rank():

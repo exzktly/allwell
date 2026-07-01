@@ -15,6 +15,7 @@ import importlib.util
 import logging
 
 from well_viewer.core.safe import swallowed
+from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.domain import multivariate_compute as mvc
 from well_viewer.features.multivariate import state as mv_state
 from well_viewer.features.multivariate.collect import (
@@ -96,6 +97,10 @@ def mv_recompute(app) -> None:
     st = _state(app)
     if st is None or not hasattr(app, "_mv_canvas"):
         return
+    # Flip the empty-state stack off its placeholder now that this lazily-built
+    # tab exists — the global refresh at load time ran before the tab was built,
+    # so its stack would otherwise stay on the "load a directory" page.
+    refresh_plot_empty_states(app)
     st.reset_result()
     data = collect_feature_matrix(
         app, feature_cols=st.feature_cols, timepoints=st.timepoints,

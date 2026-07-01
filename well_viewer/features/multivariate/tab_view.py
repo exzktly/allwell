@@ -16,8 +16,13 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.safe import swallowed
+from well_viewer.features.export.style import copy_figure_to_clipboard
 from well_viewer.features.multivariate import state as mv_state
 from well_viewer.features.multivariate import controller as mv_ctrl
+from well_viewer.features.multivariate.collect import (
+    available_feature_columns, column_display_label,
+)
+from well_viewer.features.multivariate.feature_picker_view import build_feature_picker
 
 _FIG_W, _FIG_H, _DPI = 7.6, 6.6, 100
 
@@ -38,7 +43,6 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.icon_button import IconButton
     from widgets.segmented_control import SegmentedControl
     from well_viewer.core.ui_helpers import make_popover_button, wrap_with_empty_state
-    from well_viewer.features.multivariate.feature_picker_view import build_feature_picker
 
     st = ctx.app._app_state.feature_slice("multivariate")
 
@@ -257,9 +261,6 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
             tp_cb.blockSignals(blocked)
 
     def _refresh_facet_values() -> None:
-        from well_viewer.features.multivariate.collect import (
-            available_feature_columns, column_display_label,
-        )
         blocked = fvalue_cb.blockSignals(True)
         try:
             fvalue_cb.clear()
@@ -308,7 +309,6 @@ def _copy_figure(app) -> None:
     card = getattr(app, "_mv_card", None)
     if card is None:
         return
-    from well_viewer.features.export.style import copy_figure_to_clipboard
     fig = getattr(card, "figure", None)
     if fig is None:
         return

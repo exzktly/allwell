@@ -17,7 +17,9 @@ import logging
 from well_viewer.core.safe import swallowed
 from well_viewer.domain import multivariate_compute as mvc
 from well_viewer.features.multivariate import state as mv_state
-from well_viewer.features.multivariate.collect import collect_feature_matrix
+from well_viewer.features.multivariate.collect import (
+    collect_feature_matrix, column_display_label,
+)
 from well_viewer.features.multivariate.renderer import render_multivariate
 
 _logger = logging.getLogger("well_viewer")
@@ -185,7 +187,6 @@ def _compute_for_mode(app, st, data) -> dict:
         row_factor = _factor_array(fdata, st.facet_row)
         col_factor = _factor_array(fdata, st.facet_col)
         pivot = mvc.pivot_facets(value, row_factor, col_factor, agg=st.facet_agg)
-        from well_viewer.features.multivariate.collect import column_display_label
         return {
             "kind": mode, "pivot": pivot, "value_label": column_display_label(app, col),
             "row_factor": st.facet_row, "col_factor": st.facet_col,

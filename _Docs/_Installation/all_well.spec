@@ -391,6 +391,16 @@ hiddenimports += collect_submodules("h5py")
 hiddenimports += collect_submodules("scipy")
 datas       += collect_data_files("scipy")
 
+# scikit-learn + umap-learn — the Multivariate tab's UMAP / t-SNE projections.
+# Both have submodules loaded lazily (sklearn's manifold/decomposition, umap's
+# numba-compiled layout functions, pynndescent) that the static analyzer misses,
+# plus sklearn ships data files. numba/llvmlite/scipy are already collected
+# above (umap/pynndescent depend on them).
+hiddenimports += collect_submodules("sklearn")
+datas       += collect_data_files("sklearn")
+hiddenimports += collect_submodules("umap")
+hiddenimports += collect_submodules("pynndescent")
+
 # setuptools — TF's eager import of tensorflow._api.v2.compat.v1.lite
 # walks through tensorflow.lite.python.convert, which pulls in
 # setuptools._distutils.spawn and setuptools._distutils.errors. In

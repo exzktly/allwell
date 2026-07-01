@@ -406,6 +406,7 @@ and registers every centre page. The current page-list:
 |---------|-----|-----------|
 | Analysis | **Plotting** | Bar Plots / Line Graphs / Scatter Plot / Distribution / Heat Map |
 | Analysis | **Statistics** | — |
+| Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
 | Images | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |

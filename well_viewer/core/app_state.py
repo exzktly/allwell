@@ -32,6 +32,7 @@ from well_viewer.core.stats_cache_state import StatsCacheState
 _FEATURE_STATE_OWNERS = {
     "bar": "Bar Plots",
     "stats": "Statistics",
+    "multivariate": "Multivariate",
     "review_image": "Image Browser",
     "preview": "Image Browser",
     "image_table": "Image Browser",

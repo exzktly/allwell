@@ -261,10 +261,15 @@ def _compute_for_mode(app, st, data) -> dict:
         names, cids, fractions = mvc.cluster_fractions(
             clusters.labels, data["group"], n_clusters=clusters.n_clusters,
         )
+        prof_ids, profile = mvc.cluster_feature_profiles(
+            X, clusters.labels, n_clusters=clusters.n_clusters,
+        )
         return {
             "kind": mode, "clusters": clusters, "coords": coords,
             "axis_labels": axis_labels, "group_names": names,
             "cluster_ids": cids, "fractions": fractions, "data": data,
+            "profile": {"cluster_ids": prof_ids, "matrix": profile,
+                        "feature_labels": data["feature_labels"]},
         }
 
     if mode == mv_state.MODE_FACET:
@@ -389,10 +394,22 @@ def mv_export_csv(app) -> None:
     """Write the current feature matrix (+ any cluster labels) to a CSV file."""
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+    import numpy as np
+
     st = _state(app)
     if st is None:
         return
-    data = collect_feature_matrix(app, feature_cols=st.feature_cols, timepoints=st.timepoints)
+    # Prefer the currently displayed dim-red / clustering result so the exported
+    # embedding coordinates + cluster labels match the plot exactly (including any
+    # t-SNE/UMAP subsample). Other modes export a freshly collected matrix.
+    res = st.last_result if isinstance(st.last_result, dict) else {}
+    kind = res.get("kind")
+    if kind in (mv_state.MODE_DIMRED, mv_state.MODE_CLUSTERING) and res.get("data"):
+        data = res["data"]
+    else:
+        res = {}
+        data = collect_feature_matrix(app, feature_cols=st.feature_cols,
+                                      timepoints=st.timepoints)
     if data["n_cells"] == 0 or not data["feature_cols"]:
         QMessageBox.information(app, "Nothing to export",
                                "The current selection produced no feature matrix.")
@@ -403,30 +420,74 @@ def mv_export_csv(app) -> None:
     if not path:
         return
     try:
-        import numpy as np
         import pandas as pd
 
-        frame = pd.DataFrame(data["X"], columns=data["feature_cols"])
+        X = np.asarray(data["X"], dtype=float)
+        frame = pd.DataFrame(X, columns=data["feature_cols"])
         frame.insert(0, "well", data["well"])
         frame.insert(1, "group", data["group"])
         frame.insert(2, "timepoint_hours", data["timepoint"])
-        # Attach cluster labels when the clustering view is active.
-        if st.mode == mv_state.MODE_CLUSTERING and st.feature_cols:
+
+        # Embedding coordinates for the displayed projection (pca_1/2, tsne_1/2,
+        # umap_1/2) — each cell's position travels with its features so the map is
+        # quantifiable downstream.
+        coords = res.get("coords")
+        if coords is not None and len(coords) == len(frame):
+            method = st.dimred_method if kind == mv_state.MODE_DIMRED else "pca"
+            frame[f"{method}_1"] = np.asarray(coords)[:, 0]
+            frame[f"{method}_2"] = np.asarray(coords)[:, 1]
+
+        # Cluster label per cell — from the displayed result when it clustered,
+        # else run the current clustering config on the exported matrix.
+        clusters = res.get("clusters")
+        if clusters is not None and len(clusters.labels) == len(frame):
+            frame["cluster"] = clusters.labels
+        elif st.mode == mv_state.MODE_CLUSTERING and st.feature_cols:
             try:
-                clusters = _run_clustering(st, np.asarray(data["X"], dtype=float))
-                frame["cluster"] = clusters.labels
+                frame["cluster"] = _run_clustering(st, X).labels
             except Exception:
                 swallowed()
+
         frame.to_csv(path, index=False)
-        msg = f"Exported feature matrix → {path}"
-        # Companion PCA loadings (feature weightings per PC) — the "how to read
-        # each PC" table that the on-screen scatter can't give you numerically.
+        msg = f"Exported {len(frame):,} cells → {path}"
         loadings_path = _write_pca_loadings_csv(app, st, data, path)
         if loadings_path:
             msg += f"  ·  PCA loadings → {loadings_path}"
+        # Cluster feature-profile companion (what each cluster/region represents).
+        prof_path = _write_cluster_profile_csv(app, st, res, path)
+        if prof_path:
+            msg += f"  ·  cluster profiles → {prof_path}"
         app._set_status(msg)
     except Exception as exc:
         QMessageBox.critical(app, "Export failed", f"Could not write CSV:\n{exc}")
+
+
+def _write_cluster_profile_csv(app, st, res, matrix_path: str):
+    """Write ``<stem>_cluster_profiles.csv`` — the mean (z-scored) value of each
+    feature within each cluster, the interpretable "what does each cluster mean"
+    table. Returns the path, or None when the displayed result carries no
+    clustering."""
+    import numpy as np
+    import pandas as pd
+    from pathlib import Path
+
+    prof = res.get("profile") if isinstance(res, dict) else None
+    if not prof:
+        return None
+    try:
+        matrix = np.asarray(prof["matrix"], dtype=float)
+        if matrix.size == 0:
+            return None
+        df = pd.DataFrame(matrix, columns=list(prof["feature_labels"]),
+                          index=[f"cluster_{c}" for c in prof["cluster_ids"]])
+        df.index.name = "cluster"
+        out = str(Path(matrix_path).with_name(
+            Path(matrix_path).stem + "_cluster_profiles.csv"))
+        df.to_csv(out)
+        return out
+    except Exception:
+        swallowed()
+        return None
 
 
 def _write_pca_loadings_csv(app, st, data, matrix_path: str):

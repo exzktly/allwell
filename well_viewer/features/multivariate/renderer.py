@@ -254,7 +254,12 @@ def _render_clustering(fig, res) -> None:
     clusters = res["clusters"]
     coords = res["coords"]
     axis_labels = res["axis_labels"]
-    ax1, ax2 = fig.subplots(1, 2)
+    profile = res.get("profile")
+    if profile is not None:
+        ax1, ax2, ax3 = fig.subplots(1, 3, gridspec_kw={"width_ratios": [1.4, 1.1, 1.2]})
+    else:
+        ax1, ax2 = fig.subplots(1, 2)
+        ax3 = None
 
     # Left: PCA scatter coloured by cluster.
     apply_ax_style(ax1, "Clusters (PCA projection)", axis_labels[1])
@@ -284,10 +289,40 @@ def _render_clustering(fig, res) -> None:
     ax2.set_xticklabels(names, rotation=45, ha="right", fontsize=7, color=muted_fg)
     ax2.set_ylim(0, 1)
 
+    # Far right (optional): cluster feature-profile heatmap — what each cluster
+    # IS, in feature space (the interpretable substitute for t-SNE/PCA axes).
+    if ax3 is not None:
+        _draw_cluster_profile(ax3, profile)
+
     if clusters.subsampled:
         _footnote(fig, f"Hierarchical clustering fit on {clusters.n_sampled} "
                        f"sampled cells (of {data['n_cells']}).")
-    fig.subplots_adjust(left=0.08, bottom=0.20, right=0.97, top=0.92, wspace=0.25)
+    fig.subplots_adjust(left=0.06, bottom=0.22, right=0.98, top=0.92, wspace=0.45)
+
+
+def _draw_cluster_profile(ax, profile) -> None:
+    """Heatmap of each cluster's mean (z-scored) feature value — rows = clusters,
+    cols = features, red = above-population-mean, blue = below."""
+    mat = np.asarray(profile["matrix"], dtype=float)          # n_clusters x n_feat
+    cids = list(profile["cluster_ids"])
+    labels = list(profile["feature_labels"])
+    apply_ax_style(ax, "Cluster feature profile", "")
+    ax.grid(False)
+    _bg, _t, muted_fg, _g, _s = tokens_for(ax)
+    vmax = float(np.nanmax(np.abs(mat))) if mat.size else 1.0
+    vmax = vmax if vmax > 0 else 1.0
+    ax.imshow(mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7, color=muted_fg)
+    ax.set_yticks(range(len(cids)))
+    ax.set_yticklabels([f"C{c}" for c in cids], fontsize=7, color=muted_fg)
+    if mat.shape[0] * mat.shape[1] <= 120:
+        for i in range(mat.shape[0]):
+            for j in range(mat.shape[1]):
+                v = mat[i, j]
+                if np.isfinite(v):
+                    ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=6,
+                            color="white" if abs(v) > 0.5 * vmax else muted_fg)
 
 
 # ── multi-factor faceting ────────────────────────────────────────────────────

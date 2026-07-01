@@ -87,6 +87,11 @@ def _build_stats(ctx, frame) -> None:
     build_stats_group_editor(ctx.app, ctx.app._sidebar_stats_frame)
 
 
+def _build_multivariate(ctx, frame) -> None:
+    from well_viewer.features.multivariate.tab_view import build_multivariate_tab
+    build_multivariate_tab(ctx, frame)
+
+
 def _build_review_csv(ctx, frame) -> None:
     ctx.app._build_review_csv_tab(frame)
 
@@ -120,6 +125,11 @@ def _state_bar():
 def _state_stats():
     from well_viewer.features.stats.state import StatsState
     return StatsState()
+
+
+def _state_multivariate():
+    from well_viewer.features.multivariate.state import MultivariateState
+    return MultivariateState()
 
 
 def _state_review_image():
@@ -190,6 +200,13 @@ def _activate_statistics(app) -> None:
         stats_sync_from_app(app)
     if hasattr(app, "_stats_tp_cb"):
         stats_update_tp_menu(app)
+
+
+def _activate_multivariate(app) -> None:
+    from well_viewer.features.multivariate.controller import mv_on_activate
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    mv_on_activate(app)
 
 
 def _activate_batch_export(app) -> None:
@@ -339,6 +356,12 @@ def _sel_review_csv(app) -> None:
     app._refresh_review_csv()
 
 
+def _sel_multivariate(app) -> None:
+    from well_viewer.features.multivariate.controller import mv_recompute
+    if hasattr(app, "_mv_canvas"):
+        mv_recompute(app)
+
+
 def _sel_smfish(app) -> None:
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
     smfish_sync_from_app(app)
@@ -406,6 +429,12 @@ def _channel_heatmap(app) -> None:
             _logger.exception("Heatmap timepoint refresh failed")
 
 
+def _channel_multivariate(app) -> None:
+    from well_viewer.features.multivariate.controller import mv_on_channel_changed
+    if hasattr(app, "_mv_canvas"):
+        mv_on_channel_changed(app)
+
+
 def _channel_scatter(app) -> None:
     if hasattr(app, "_scatter_ch_x_cb"):
         try:
@@ -455,6 +484,15 @@ def _features() -> "list[FeatureDescriptor]":
             states=(StateSpec("stats", _state_stats),),
             on_activate=_activate_statistics,
             on_channel_changed=_channel_stats,
+        ),
+        FeatureDescriptor(
+            name="Multivariate", group="Analysis", build=_build_multivariate,
+            lazy_only=True,
+            states=(StateSpec("multivariate", _state_multivariate),),
+            on_activate=_activate_multivariate,
+            on_selection_changed=_sel_multivariate,
+            on_channel_changed=_channel_multivariate,
+            per_well_selection=True,
         ),
         # ── Images ────────────────────────────────────────────────────────
         FeatureDescriptor(

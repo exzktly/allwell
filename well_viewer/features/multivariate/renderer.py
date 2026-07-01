@@ -1,0 +1,279 @@
+"""Multivariate feature renderer — pure matplotlib drawing.
+
+``render_multivariate(app)`` repaints ``app._mv_fig`` from the snapshot the
+controller cached on the state slice (``last_result`` / ``last_error``). Each of
+the four modes draws its own figure layout. No Qt beyond the final
+``canvas.draw_idle()``; no compute — the controller has already run it.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import numpy as np
+
+from well_viewer.core.plot_style import apply_ax_style, tokens_for
+
+_logger = logging.getLogger("well_viewer")
+
+_CLUSTER_CMAP = "tab10"
+
+
+def render_multivariate(app) -> None:
+    st = app._app_state.feature_slice("multivariate")
+    fig = getattr(app, "_mv_fig", None)
+    if st is None or fig is None:
+        return
+    fig.clear()
+    try:
+        if st.last_error:
+            _draw_message(fig, st.last_error)
+        elif not st.last_result:
+            _draw_message(fig, "Select wells and feature columns to begin.")
+        else:
+            kind = st.last_result.get("kind")
+            if kind == "correlation":
+                _render_correlation(fig, st.last_result)
+            elif kind == "dimred":
+                _render_dimred(fig, st.last_result)
+            elif kind == "clustering":
+                _render_clustering(fig, st.last_result)
+            elif kind == "facet":
+                _render_facet(fig, st.last_result)
+            else:  # pragma: no cover - defensive
+                _draw_message(fig, "Nothing to display.")
+    except Exception as exc:  # pragma: no cover - defensive
+        _logger.exception("Multivariate render failed")
+        _draw_message(fig, f"Render failed: {exc}")
+    canvas = getattr(app, "_mv_canvas", None)
+    if canvas is not None:
+        canvas.draw_idle()
+
+
+# ── shared helpers ───────────────────────────────────────────────────────────
+
+def _draw_message(fig, text: str) -> None:
+    ax = fig.add_subplot(111)
+    bg, title_fg, muted_fg, _grid, _spine = tokens_for(ax)
+    fig.set_facecolor(bg)
+    ax.set_facecolor(bg)
+    ax.axis("off")
+    ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True,
+            transform=ax.transAxes, color=muted_fg, fontsize=10)
+
+
+def _footnote(fig, text: str) -> None:
+    ax = fig.axes[0] if fig.axes else None
+    _bg, _t, muted_fg, _g, _s = tokens_for(ax) if ax is not None else (None,) * 5
+    fig.text(0.5, 0.005, text, ha="center", va="bottom", fontsize=7,
+             color=muted_fg or "#888")
+
+
+def _point_colors(data, color_by: str, clusters=None):
+    """Return (per-cell colour array, list of (label, colour) legend entries)."""
+    if color_by == "cluster" and clusters is not None:
+        import matplotlib
+        cmap = matplotlib.colormaps[_CLUSTER_CMAP]
+        labels = clusters.labels
+        colors = [cmap(int(c) % cmap.N) for c in labels]
+        legend = [(f"Cluster {c}", cmap(int(c) % cmap.N))
+                  for c in sorted(set(int(v) for v in labels))]
+        return colors, legend
+    if color_by == "timepoint":
+        import matplotlib
+        tps = data["timepoint"]
+        uniq = sorted(set(float(t) for t in tps.tolist()))
+        cmap = matplotlib.colormaps["viridis"]
+        pos = {t: cmap(v) for t, v in zip(uniq, np.linspace(0, 1, max(len(uniq), 1)))}
+        colors = [pos[float(t)] for t in tps.tolist()]
+        legend = [(f"{t:g} h", pos[t]) for t in uniq]
+        return colors, legend
+    # group or well: use the collected per-group colours.
+    key = "well" if color_by == "well" else "group"
+    labels = data[key]
+    gcolors = data["group_colors"] if key == "group" else {}
+    if key == "well":
+        # well colours weren't precomputed; fall back to group_colors keyed by well
+        gcolors = data["group_colors"]
+    order = []
+    seen = set()
+    for lbl in labels.tolist():
+        if lbl not in seen:
+            seen.add(lbl)
+            order.append(lbl)
+    default = "#4C78A8"
+    colors = [gcolors.get(lbl, default) for lbl in labels.tolist()]
+    legend = [(str(lbl), gcolors.get(lbl, default)) for lbl in order]
+    return colors, legend
+
+
+def _legend(ax, legend_entries, muted_fg, title=""):
+    if not legend_entries or len(legend_entries) > 24:
+        return
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], marker="o", linestyle="", markersize=6,
+                      markerfacecolor=c, markeredgecolor="none", label=lbl)
+               for lbl, c in legend_entries]
+    leg = ax.legend(handles=handles, title=title, fontsize=7, framealpha=0.3,
+                    loc="best")
+    if leg is not None:
+        leg.get_title().set_color(muted_fg)
+        leg.get_title().set_fontsize(7)
+        for txt in leg.get_texts():
+            txt.set_color(muted_fg)
+
+
+# ── correlation / pair-matrix ────────────────────────────────────────────────
+
+def _render_correlation(fig, res) -> None:
+    corr = res["corr"]
+    labels = res["data"]["feature_labels"]
+    if res.get("view") == "splom":
+        _render_splom(fig, res)
+        return
+    ax = fig.add_subplot(111)
+    apply_ax_style(ax, "Feature correlation", "")
+    ax.grid(False)
+    im = ax.imshow(corr, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
+    _bg, _t, muted_fg, _g, _s = tokens_for(ax)
+    ax.set_xticks(range(len(labels)))
+    ax.set_yticks(range(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7, color=muted_fg)
+    ax.set_yticklabels(labels, fontsize=7, color=muted_fg)
+    # Annotate r values when the matrix is small enough to stay legible.
+    if len(labels) <= 12:
+        for i in range(len(labels)):
+            for j in range(len(labels)):
+                v = corr[i, j]
+                if np.isfinite(v):
+                    ax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                            fontsize=6,
+                            color="white" if abs(v) > 0.5 else muted_fg)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.ax.tick_params(labelsize=7, colors=muted_fg)
+    fig.subplots_adjust(left=0.28, bottom=0.30, right=0.98, top=0.94)
+
+
+def _render_splom(fig, res) -> None:
+    data = res["data"]
+    X = data["X"]
+    labels = data["feature_labels"]
+    n = min(X.shape[1], 6)  # cap grid size for legibility / performance
+    colors, _legend_entries = _point_colors(data, "group")
+    axes = fig.subplots(n, n, sharex="col")
+    if n == 1:
+        axes = np.array([[axes]])
+    _bg, _t, muted_fg, _g, _s = tokens_for(axes.flat[0])
+    for i in range(n):
+        for j in range(n):
+            ax = axes[i, j]
+            ax.tick_params(labelsize=6, colors=muted_fg)
+            for sp in ax.spines.values():
+                sp.set_color(_s)
+            if i == j:
+                ax.hist(X[:, i], bins=30, color="#4C78A8", alpha=0.8)
+            else:
+                ax.scatter(X[:, j], X[:, i], s=3, c=colors, alpha=0.4,
+                           edgecolors="none", rasterized=True)
+            if i == n - 1:
+                ax.set_xlabel(labels[j], fontsize=6, color=muted_fg)
+            if j == 0:
+                ax.set_ylabel(labels[i], fontsize=6, color=muted_fg)
+    fig.suptitle("Feature pair matrix (SPLOM)", fontsize=9, color=_t,
+                 fontweight="bold")
+    fig.subplots_adjust(left=0.10, bottom=0.10, right=0.98, top=0.94,
+                        hspace=0.15, wspace=0.15)
+
+
+# ── dimensionality reduction ─────────────────────────────────────────────────
+
+def _render_dimred(fig, res) -> None:
+    coords = res["coords"]
+    axis_labels = res["axis_labels"]
+    data = res["data"]
+    ax = fig.add_subplot(111)
+    apply_ax_style(ax, "2-D projection", axis_labels[1])
+    ax.set_xlabel(axis_labels[0], fontsize=8)
+    colors, legend = _point_colors(data, res.get("color_by", "group"),
+                                   res.get("clusters"))
+    _bg, _t, muted_fg, _g, _s = tokens_for(ax)
+    ax.scatter(coords[:, 0], coords[:, 1], s=8, c=colors, alpha=0.6,
+               edgecolors="none", rasterized=True)
+    _legend(ax, legend, muted_fg,
+            title={"group": "Group", "well": "Well", "timepoint": "Time",
+                   "cluster": "Cluster"}.get(res.get("color_by", "group"), ""))
+    fig.subplots_adjust(left=0.12, bottom=0.11, right=0.97, top=0.94)
+
+
+# ── clustering / phenotyping ─────────────────────────────────────────────────
+
+def _render_clustering(fig, res) -> None:
+    data = res["data"]
+    clusters = res["clusters"]
+    coords = res["coords"]
+    axis_labels = res["axis_labels"]
+    ax1, ax2 = fig.subplots(1, 2)
+
+    # Left: PCA scatter coloured by cluster.
+    apply_ax_style(ax1, "Clusters (PCA projection)", axis_labels[1])
+    ax1.set_xlabel(axis_labels[0], fontsize=8)
+    colors, legend = _point_colors(data, "cluster", clusters)
+    _bg, _t, muted_fg, _g, _s = tokens_for(ax1)
+    ax1.scatter(coords[:, 0], coords[:, 1], s=8, c=colors, alpha=0.6,
+                edgecolors="none", rasterized=True)
+    _legend(ax1, legend, muted_fg, title="Cluster")
+
+    # Right: stacked bar of cluster fractions per group.
+    apply_ax_style(ax2, "Phenotype composition", "Fraction of cells")
+    ax2.grid(False)
+    import matplotlib
+    cmap = matplotlib.colormaps[_CLUSTER_CMAP]
+    names = res["group_names"]
+    cids = res["cluster_ids"]
+    fractions = res["fractions"]
+    x = np.arange(len(names))
+    bottom = np.zeros(len(names))
+    for ci, cid in enumerate(cids):
+        vals = fractions[:, ci]
+        ax2.bar(x, vals, bottom=bottom, color=cmap(int(cid) % cmap.N),
+                width=0.8, label=f"Cluster {cid}")
+        bottom += vals
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(names, rotation=45, ha="right", fontsize=7, color=muted_fg)
+    ax2.set_ylim(0, 1)
+
+    if clusters.subsampled:
+        _footnote(fig, f"Hierarchical clustering fit on {clusters.n_sampled} "
+                       f"sampled cells (of {data['n_cells']}).")
+    fig.subplots_adjust(left=0.08, bottom=0.20, right=0.97, top=0.92, wspace=0.25)
+
+
+# ── multi-factor faceting ────────────────────────────────────────────────────
+
+def _render_facet(fig, res) -> None:
+    pivot = res["pivot"]
+    values = pivot.values
+    ax = fig.add_subplot(111)
+    apply_ax_style(ax, f"{res['value_label']} — {res['agg']} "
+                       f"by {res['row_factor']} x {res['col_factor']}", "")
+    ax.grid(False)
+    _bg, _t, muted_fg, _g, _s = tokens_for(ax)
+    masked = np.ma.masked_invalid(values)
+    im = ax.imshow(masked, cmap="viridis", aspect="auto")
+    ax.set_xticks(range(len(pivot.col_labels)))
+    ax.set_yticks(range(len(pivot.row_labels)))
+    ax.set_xticklabels(pivot.col_labels, rotation=45, ha="right", fontsize=7,
+                       color=muted_fg)
+    ax.set_yticklabels(pivot.row_labels, fontsize=7, color=muted_fg)
+    ax.set_xlabel(res["col_factor"], fontsize=8, color=muted_fg)
+    ax.set_ylabel(res["row_factor"], fontsize=8, color=muted_fg)
+    if values.size <= 200:
+        for i in range(values.shape[0]):
+            for j in range(values.shape[1]):
+                v = values[i, j]
+                if np.isfinite(v):
+                    ax.text(j, i, f"{v:.3g}", ha="center", va="center",
+                            fontsize=6, color="white")
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.ax.tick_params(labelsize=7, colors=muted_fg)
+    fig.subplots_adjust(left=0.20, bottom=0.28, right=0.98, top=0.92)

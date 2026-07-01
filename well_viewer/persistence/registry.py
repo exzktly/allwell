@@ -69,7 +69,8 @@ def build_persistence_registry(app) -> PersistenceRegistry:
     """Create the registry and register every data-dir persistence domain."""
     from well_viewer.persistence import (
         cell_overrides, crop_region, export_groups, heatmap_layouts, line_order,
-        qc_params, plot_groups, ratios, sample_definitions, view_state,
+        multivariate, qc_params, plot_groups, ratios, sample_definitions,
+        view_state,
     )
 
     registry = PersistenceRegistry(app)
@@ -103,4 +104,7 @@ def build_persistence_registry(app) -> PersistenceRegistry:
     registry.register("export_groups",
                       save=export_groups.save_to_data_dir,
                       load=export_groups.load_from_data_dir)
+    registry.register("multivariate",
+                      save=multivariate.save_to_data_dir,
+                      load=multivariate.load_from_data_dir)
     return registry

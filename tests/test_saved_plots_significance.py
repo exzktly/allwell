@@ -155,6 +155,45 @@ def test_restore_accepts_legacy_name_only_member_format(loaded_app):
     assert pw and pw[0]["a_wells"] == ["A01", "A02"] and pw[0]["b_wells"] == ["B01", "B02"]
 
 
+def test_capture_params_includes_live_selections(loaded_app):
+    """The group-driven plot's replicate sets must be saved so Restore can
+    reproduce the exact bars (view_state doesn't snapshot ``selections``)."""
+    app = loaded_app
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
+    params, _thresholds = capture_params(app, "Bar Plots")
+    assert "selections" in params
+    assert [s["name"] for s in params["selections"]] == ["CTRL", "DRUG"]
+
+
+def test_restore_selections_replaces_live_groups(loaded_app):
+    """Regression: restoring a saved group-driven plot must show the SAVED groups,
+    not whatever the sidebar holds now. Save 2 groups, add a third live, restore →
+    the third is gone and the saved two are back."""
+    from well_viewer.features.saved_plots.controller import _restore_selections
+    app = loaded_app
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
+    saved = [dict(s) for s in app._app_state.selection.selections]
+
+    # User adds an EXTRA group after saving.
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"]),
+                          ("EXTRA", ["A01", "B02"])])
+    assert len(app._rep_sets_active()) == 3
+
+    _restore_selections(app, saved)
+    assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG"]
+
+
+def test_restore_selections_noop_without_block(loaded_app):
+    """Older saved plots have no ``selections`` block → restore leaves the live
+    groups untouched (backward compatible)."""
+    from well_viewer.features.saved_plots.controller import _restore_selections
+    app = loaded_app
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
+    _restore_selections(app, None)
+    _restore_selections(app, [])
+    assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG"]
+
+
 def test_restore_without_stats_block_is_noop(loaded_app):
     """Backward compatibility: an older saved plot has no ``stats`` block; restore
     must not raise and must leave ``pairwise`` empty (no brackets)."""

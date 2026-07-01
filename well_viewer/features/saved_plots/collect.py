@@ -36,6 +36,14 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     if tab:
         params["active_centre_tab"] = tab
 
+    # The bar / line / scatter plots are group-driven — their traces come from
+    # the replicate-set *selections*, which ``view_state`` does NOT snapshot. Save
+    # them so Restore reproduces the exact groups on the plot (not whatever the
+    # sidebar happens to hold at restore time).
+    sels = _capture_selections(app)
+    if sels:
+        params["selections"] = sels
+
     # Significance brackets (Bar plot) are recomputed on Restore by re-running the
     # same stats test, so capture the test CONFIG (groups + context). Only when a
     # test has actually been run (``pairwise`` non-empty) and ≥2 groups exist.
@@ -51,6 +59,19 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     if isinstance(tfo, dict) and tfo:
         thresholds["thresh_frac_on"] = {str(k): float(v) for k, v in tfo.items()}
     return params, thresholds
+
+
+def _capture_selections(app) -> list | None:
+    """A JSON-safe deep copy of the live replicate-set selections (the group
+    definitions that drive the group-based plots), or None when there are none."""
+    try:
+        import copy
+        sels = getattr(app._app_state.selection, "selections", None) or []
+        if not sels:
+            return None
+        return copy.deepcopy(list(sels))
+    except Exception:
+        return None
 
 
 def _capture_stats_config(app) -> dict | None:

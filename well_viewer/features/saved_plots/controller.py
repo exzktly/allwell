@@ -70,15 +70,36 @@ def restore_saved_plot(app, plot_id: str) -> None:
     rec = get_store(app).get(plot_id)
     if rec is None:
         return
-    # Re-run the saved stats test FIRST (if any) so ``stats.pairwise`` is
-    # repopulated before ``view_state.restore`` activates the Bar tab and redraws
-    # — that redraw calls ``draw_significance_brackets``, which needs the fresh
-    # results + the restored ``show_significance`` flag.
+    # Restore the group-driven selections FIRST so the plot's bars/traces match
+    # the saved figure (view_state doesn't snapshot them), THEN re-run the saved
+    # stats test so ``stats.pairwise`` is repopulated against those groups. Both
+    # happen before ``view_state.restore`` activates the tab and does the final
+    # redraw — which draws the significance brackets from the fresh results.
+    _restore_selections(app, rec.params.get("selections"))
     _restore_stats(app, rec.params.get("stats"))
     try:
         view_state.restore(app, dict(rec.params))
     except Exception:
         _logger.debug("saved_plots: restore failed for %r", plot_id, exc_info=True)
+
+
+def _restore_selections(app, sels) -> None:
+    """Replace the live replicate-set selections with the saved ones and refresh
+    the sidebar + plots, so a restored group-driven plot shows the exact groups it
+    was saved with. No-op for saved plots without a ``selections`` block (older
+    plots) or on any error."""
+    if not isinstance(sels, list) or not sels:
+        return
+    try:
+        import copy
+        sel_state = app._app_state.selection
+        sel_state.selections = copy.deepcopy(sels)
+        sel_state.validate()  # re-mint ids / repair, and fix current_selection_id
+        first = sel_state.selections[0] if sel_state.selections else None
+        sel_state.current_selection_id = first.get("id") if first else None
+        app._rebuild_all()  # authoritative refresh: sidebar map + groups + redraw
+    except Exception:
+        _logger.debug("saved_plots: selection restore failed", exc_info=True)
 
 
 def _restore_stats(app, cfg) -> None:

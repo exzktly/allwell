@@ -149,13 +149,30 @@ def _compute_for_mode(app, st, data) -> dict:
     if mode == mv_state.MODE_DIMRED:
         if X.shape[0] < _MIN_CELLS:
             raise ValueError("Not enough cells to project (need at least 3).")
-        coords, axis_labels = mvc.project_2d(
-            X, method=st.dimred_method, standardize_data=st.standardize,
-        )
         result = {
-            "kind": mode, "coords": coords, "axis_labels": axis_labels,
-            "color_by": st.color_by, "data": data,
+            "kind": mode, "color_by": st.color_by, "data": data,
         }
+        if st.dimred_method == "pca":
+            # PCA is a linear projection, so we can surface the loadings (how each
+            # feature weights onto each PC) — UMAP / t-SNE have no such mapping.
+            pca = mvc.pca_svd(X, n_components=2, standardize_data=st.standardize)
+            evr = pca.explained_variance_ratio
+            result["coords"] = pca.scores[:, :2]
+            result["axis_labels"] = [
+                f"PC{i + 1} ({(evr[i] * 100 if i < len(evr) else 0):.1f}%)"
+                for i in range(2)
+            ]
+            result["loadings"] = {
+                "components": pca.components,        # n_components x n_features
+                "evr": evr,
+                "feature_labels": data["feature_labels"],
+            }
+        else:
+            coords, axis_labels = mvc.project_2d(
+                X, method=st.dimred_method, standardize_data=st.standardize,
+            )
+            result["coords"] = coords
+            result["axis_labels"] = axis_labels
         if st.color_by == "cluster":
             result["clusters"] = _run_clustering(st, X)
         return result
@@ -331,6 +348,43 @@ def mv_export_csv(app) -> None:
             except Exception:
                 swallowed()
         frame.to_csv(path, index=False)
-        app._set_status(f"Exported feature matrix → {path}")
+        msg = f"Exported feature matrix → {path}"
+        # Companion PCA loadings (feature weightings per PC) — the "how to read
+        # each PC" table that the on-screen scatter can't give you numerically.
+        loadings_path = _write_pca_loadings_csv(app, st, data, path)
+        if loadings_path:
+            msg += f"  ·  PCA loadings → {loadings_path}"
+        app._set_status(msg)
     except Exception as exc:
         QMessageBox.critical(app, "Export failed", f"Could not write CSV:\n{exc}")
+
+
+def _write_pca_loadings_csv(app, st, data, matrix_path: str):
+    """Write a ``<stem>_pca_loadings.csv`` next to the feature matrix.
+
+    Rows are features; columns are PC1..PCk (each cell = that feature's loading
+    on that PC), followed by an ``explained_variance_ratio`` row. Skipped (returns
+    ``None``) when the matrix can't support PCA (< 2 features or < 2 cells)."""
+    import numpy as np
+    import pandas as pd
+    from pathlib import Path
+
+    X = np.asarray(data["X"], dtype=float)
+    if X.ndim != 2 or X.shape[1] < 2 or X.shape[0] < 2:
+        return None
+    try:
+        n_comp = int(min(X.shape[0], X.shape[1]))
+        pca = mvc.pca_svd(X, n_components=n_comp, standardize_data=st.standardize)
+        comps = np.asarray(pca.components, dtype=float)   # k x n_features
+        k = comps.shape[0]
+        cols = [f"PC{i + 1}" for i in range(k)]
+        loadings = pd.DataFrame(comps.T, index=data["feature_labels"], columns=cols)
+        loadings.index.name = "feature"
+        evr = np.asarray(pca.explained_variance_ratio, dtype=float)
+        loadings.loc["explained_variance_ratio"] = list(evr[:k])
+        out = str(Path(matrix_path).with_name(Path(matrix_path).stem + "_pca_loadings.csv"))
+        loadings.to_csv(out)
+        return out
+    except Exception:
+        swallowed()
+        return None

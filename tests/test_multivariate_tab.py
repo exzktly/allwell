@@ -53,6 +53,31 @@ def test_multivariate_tab_runs_all_modes(loaded_app_shape):
 
 
 @pytest.mark.slow
+def test_multivariate_dimred_pca_exposes_loadings(loaded_app_shape):
+    """PCA dim-red must attach loadings (feature weights per PC) to the result so
+    the renderer can draw the loadings panel and the export can write them."""
+    app = loaded_app_shape
+    from well_viewer.features.multivariate import controller as mvctl
+    from well_viewer.features.multivariate.collect import available_feature_columns
+
+    app._set_selected_wells(set(app._app_state.dataset.well_paths))
+    assert app._notebook.setCurrentByName("Multivariate")
+    fams = available_feature_columns(app)
+    cols = fams.get("Intensity", [])[:2] + fams.get("Shape", [])[:1]
+    assert len(cols) >= 2
+    mvctl.mv_set_features(app, cols)
+    mvctl.mv_set_mode(app, "dimred")
+    mvctl.mv_set_dimred_method(app, "pca")
+
+    st = app._app_state.feature_slice("multivariate")
+    assert not st.last_error
+    ld = st.last_result.get("loadings")
+    assert ld is not None
+    assert ld["components"].shape == (2, len(cols))
+    assert len(ld["feature_labels"]) == len(cols)
+
+
+@pytest.mark.slow
 def test_multivariate_tab_flips_off_empty_state_with_dataset(loaded_app_shape):
     app = loaded_app_shape
     assert app._app_state.dataset.well_paths          # dataset is loaded

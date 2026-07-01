@@ -68,10 +68,20 @@ def configure() -> None:
     except Exception:
         return
 
-    # Never enumerate system fonts again — only the bundled set. matplotlib adds
-    # its own mpl-data fonts (DejaVu, the default fallback) separately, so text
-    # still renders even if a bundled family is missing a glyph.
-    fm.findSystemFonts = lambda *a, **k: list(bundled)
+    # Suppress only the system-wide font enumeration — the expensive call
+    # matplotlib makes with no explicit paths. Calls that pass ``fontpaths``
+    # (matplotlib loading its own mpl-data fonts — DejaVu, the default fallback)
+    # are honoured, so text still renders. Idempotent: don't double-wrap.
+    if not getattr(fm.findSystemFonts, "_allwell_limited", False):
+        _orig_find = fm.findSystemFonts
+
+        def _limited_find(fontpaths=None, fontext="ttf"):
+            if fontpaths is not None:
+                return _orig_find(fontpaths, fontext)   # explicit dirs (mpl-data)
+            return list(bundled)                          # system-wide → bundled only
+
+        _limited_find._allwell_limited = True
+        fm.findSystemFonts = _limited_find
 
     try:
         allowed = [_FONTS_DIR, os.path.join(matplotlib.get_data_path(), "fonts")]

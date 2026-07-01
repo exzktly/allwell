@@ -13,6 +13,18 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _restore_font_manager():
+    """configure() rebuilds matplotlib's global font manager; snapshot and
+    restore it so this module can't pollute other tests' font lookups."""
+    fm = pytest.importorskip("matplotlib.font_manager")
+    saved = (fm.findSystemFonts, fm.fontManager)
+    try:
+        yield
+    finally:
+        fm.findSystemFonts, fm.fontManager = saved
+
+
 def test_configure_restricts_font_discovery_to_bundled():
     pytest.importorskip("matplotlib")
     import mpl_bootstrap

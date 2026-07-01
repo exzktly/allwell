@@ -105,6 +105,56 @@ def test_save_then_restore_repopulates_pairwise_and_flag(loaded_app):
     assert app._app_state.plot.show_significance is True
 
 
+def _set_selections(app, pairs):
+    app._app_state.selection.selections = [
+        {"name": n, "wells": list(w), "hidden": False} for n, w in pairs]
+
+
+def test_restore_reproduces_groups_when_replicate_set_renamed(loaded_app):
+    """Regression: a saved stats plot must reproduce the same groups even if the
+    replicate set was later renamed/deleted. The serialized member carries its
+    wells, so the group is rebuilt by composition rather than dropped when the
+    name no longer resolves."""
+    app = loaded_app
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
+    rep_by = {r.name: r for r in app._rep_sets_loaded()}
+    groups = [BarGroup("CTRL", members=[rep_by["CTRL"]]),
+              BarGroup("DRUG", members=[rep_by["DRUG"]])]
+    app._app_state.stats.groups = groups
+    app._app_state.stats.pairwise = _pairwise(app, groups)
+    cfg = _capture_stats_config(app)
+    assert cfg["groups"][1]["members"] == [{"name": "DRUG", "wells": ["B01", "B02"]}]
+
+    # User renames DRUG → TREATED (same wells) after saving.
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("TREATED", ["B01", "B02"])])
+    app._app_state.stats.pairwise = []
+    app._app_state.stats.groups = []
+    _restore_stats(app, cfg)
+
+    pw = app._app_state.stats.pairwise
+    assert pw and pw[0]["a_wells"] == ["A01", "A02"] and pw[0]["b_wells"] == ["B01", "B02"]
+    drug = app._app_state.stats.groups[1]
+    assert drug.wells == ["B01", "B02"]  # reconstructed by wells, not dropped
+
+
+def test_restore_accepts_legacy_name_only_member_format(loaded_app):
+    """Plots saved before member wells were stored used ``members: [name]``;
+    those still restore by resolving the name against live replicate sets."""
+    app = loaded_app
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
+    from well_viewer.features.stats.controller import threshold_for_val_col
+    legacy = {
+        "groups": [{"name": "CTRL", "members": ["CTRL"], "solo_wells": []},
+                   {"name": "DRUG", "members": ["DRUG"], "solo_wells": []}],
+        "test": _TEST, "target_t": 0.0, "val_col": _VAL_COL, "statistic": "mean",
+        "threshold": float(threshold_for_val_col(app, _VAL_COL)),
+    }
+    app._app_state.stats.pairwise = []
+    _restore_stats(app, legacy)
+    pw = app._app_state.stats.pairwise
+    assert pw and pw[0]["a_wells"] == ["A01", "A02"] and pw[0]["b_wells"] == ["B01", "B02"]
+
+
 def test_restore_without_stats_block_is_noop(loaded_app):
     """Backward compatibility: an older saved plot has no ``stats`` block; restore
     must not raise and must leave ``pairwise`` empty (no brackets)."""

@@ -71,7 +71,6 @@ def _footnote(fig, text: str) -> None:
 
 def _point_colors(data, color_by: str, clusters=None):
     """Return (per-cell colour array, list of (label, colour) legend entries)."""
-    n = data["n_cells"]
     if color_by == "cluster" and clusters is not None:
         import matplotlib
         cmap = matplotlib.colormaps[_CLUSTER_CMAP]

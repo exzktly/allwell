@@ -78,6 +78,29 @@ def test_multivariate_dimred_pca_exposes_loadings(loaded_app_shape):
 
 
 @pytest.mark.slow
+def test_multivariate_clustering_exposes_feature_profile(loaded_app_shape):
+    """Clustering must attach a per-cluster feature profile (the interpretable
+    'what is each cluster' table) so the renderer + export can surface it."""
+    app = loaded_app_shape
+    from well_viewer.features.multivariate import controller as mvctl
+    from well_viewer.features.multivariate.collect import available_feature_columns
+
+    app._set_selected_wells(set(app._app_state.dataset.well_paths))
+    assert app._notebook.setCurrentByName("Multivariate")
+    fams = available_feature_columns(app)
+    cols = fams.get("Intensity", [])[:2] + fams.get("Shape", [])[:1]
+    mvctl.mv_set_features(app, cols)
+    mvctl.mv_set_mode(app, "clustering")
+
+    st = app._app_state.feature_slice("multivariate")
+    assert not st.last_error
+    prof = st.last_result.get("profile")
+    assert prof is not None
+    assert prof["matrix"].shape == (st.cluster_count, len(cols))
+    assert len(prof["feature_labels"]) == len(cols)
+
+
+@pytest.mark.slow
 def test_multivariate_tab_flips_off_empty_state_with_dataset(loaded_app_shape):
     app = loaded_app_shape
     assert app._app_state.dataset.well_paths          # dataset is loaded

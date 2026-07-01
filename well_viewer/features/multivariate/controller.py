@@ -27,6 +27,34 @@ _logger = logging.getLogger("well_viewer")
 
 _MIN_CELLS = 3
 
+# t-SNE / UMAP are O(n^2)-ish and run on the UI thread, so on a large selection
+# they freeze the app for a long time. Cap the cells fed to them (a seeded random
+# subsample) so the projection stays interactive; PCA is cheap and never capped.
+# Mirrors the subsample the hierarchical clusterer already uses.
+_MAX_PROJECTION_CELLS = 2500
+
+
+def _subsample_for_projection(X, data, method: str):
+    """For the slow projections (t-SNE / UMAP), return a seeded random subsample
+    of at most ``_MAX_PROJECTION_CELLS`` cells — ``X`` and every parallel per-cell
+    array in ``data`` sliced by the same indices — plus the original cell count
+    (or 0 when no subsampling happened). PCA and small selections pass through."""
+    import numpy as np
+
+    n = X.shape[0]
+    if method not in ("tsne", "umap") or n <= _MAX_PROJECTION_CELLS:
+        return X, data, 0
+    rng = np.random.default_rng(0)  # deterministic so the view is reproducible
+    idx = np.sort(rng.choice(n, size=_MAX_PROJECTION_CELLS, replace=False))
+    sub = dict(data)
+    sub["X"] = X[idx]
+    for key in ("group", "well", "timepoint"):
+        arr = data.get(key)
+        if arr is not None:
+            sub[key] = np.asarray(arr)[idx]
+    sub["n_cells"] = int(len(idx))
+    return sub["X"], sub, int(n)
+
 
 # ── optional-method availability ─────────────────────────────────────────────
 
@@ -114,6 +142,13 @@ def mv_recompute(app) -> None:
     elif st.n_cells == 0:
         st.last_error = "No cells in the current selection (check wells / gating / timepoints)."
     else:
+        # t-SNE / UMAP block the UI thread for a while; show a wait cursor +
+        # status so the app reads as "working", not "frozen". Repaint once before
+        # the blocking compute so both actually appear.
+        slow = (st.mode == mv_state.MODE_DIMRED
+                and st.dimred_method in ("tsne", "umap"))
+        if slow:
+            _begin_busy(app, f"Computing {st.dimred_method.upper()}…")
         try:
             st.last_result = _compute_for_mode(app, st, data)
         except mvc.MethodUnavailable as exc:
@@ -126,7 +161,31 @@ def mv_recompute(app) -> None:
         except Exception as exc:  # pragma: no cover - defensive
             _logger.exception("Multivariate compute failed")
             st.last_error = f"Analysis failed: {exc}"
+        finally:
+            if slow:
+                _end_busy(app)
     render_multivariate(app)
+
+
+def _begin_busy(app, message: str) -> None:
+    """Show a wait cursor + status and force one repaint so they appear before a
+    blocking compute freezes the event loop."""
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        app._set_status(message)
+        QApplication.processEvents()  # paint the cursor + status before blocking
+    except Exception:
+        swallowed()
+
+
+def _end_busy(app) -> None:
+    try:
+        from PySide6.QtWidgets import QApplication
+        QApplication.restoreOverrideCursor()
+    except Exception:
+        swallowed()
 
 
 def _compute_for_mode(app, st, data) -> dict:
@@ -168,11 +227,22 @@ def _compute_for_mode(app, st, data) -> dict:
                 "feature_labels": data["feature_labels"],
             }
         else:
+            # t-SNE / UMAP: cap the cell count so the (main-thread) projection
+            # doesn't freeze the app; subset the parallel arrays used for colour.
+            Xp, data_p, n_total = _subsample_for_projection(X, data, st.dimred_method)
             coords, axis_labels = mvc.project_2d(
-                X, method=st.dimred_method, standardize_data=st.standardize,
+                Xp, method=st.dimred_method, standardize_data=st.standardize,
             )
             result["coords"] = coords
             result["axis_labels"] = axis_labels
+            result["data"] = data_p
+            if n_total:
+                result["sampled_note"] = (
+                    f"{st.dimred_method.upper()} on {Xp.shape[0]:,} sampled "
+                    f"cells (of {n_total:,})")
+            if st.color_by == "cluster":
+                result["clusters"] = _run_clustering(st, Xp)
+            return result
         if st.color_by == "cluster":
             result["clusters"] = _run_clustering(st, X)
         return result
@@ -191,10 +261,15 @@ def _compute_for_mode(app, st, data) -> dict:
         names, cids, fractions = mvc.cluster_fractions(
             clusters.labels, data["group"], n_clusters=clusters.n_clusters,
         )
+        prof_ids, profile = mvc.cluster_feature_profiles(
+            X, clusters.labels, n_clusters=clusters.n_clusters,
+        )
         return {
             "kind": mode, "clusters": clusters, "coords": coords,
             "axis_labels": axis_labels, "group_names": names,
             "cluster_ids": cids, "fractions": fractions, "data": data,
+            "profile": {"cluster_ids": prof_ids, "matrix": profile,
+                        "feature_labels": data["feature_labels"]},
         }
 
     if mode == mv_state.MODE_FACET:
@@ -319,10 +394,22 @@ def mv_export_csv(app) -> None:
     """Write the current feature matrix (+ any cluster labels) to a CSV file."""
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+    import numpy as np
+
     st = _state(app)
     if st is None:
         return
-    data = collect_feature_matrix(app, feature_cols=st.feature_cols, timepoints=st.timepoints)
+    # Prefer the currently displayed dim-red / clustering result so the exported
+    # embedding coordinates + cluster labels match the plot exactly (including any
+    # t-SNE/UMAP subsample). Other modes export a freshly collected matrix.
+    res = st.last_result if isinstance(st.last_result, dict) else {}
+    kind = res.get("kind")
+    if kind in (mv_state.MODE_DIMRED, mv_state.MODE_CLUSTERING) and res.get("data"):
+        data = res["data"]
+    else:
+        res = {}
+        data = collect_feature_matrix(app, feature_cols=st.feature_cols,
+                                      timepoints=st.timepoints)
     if data["n_cells"] == 0 or not data["feature_cols"]:
         QMessageBox.information(app, "Nothing to export",
                                "The current selection produced no feature matrix.")
@@ -333,30 +420,74 @@ def mv_export_csv(app) -> None:
     if not path:
         return
     try:
-        import numpy as np
         import pandas as pd
 
-        frame = pd.DataFrame(data["X"], columns=data["feature_cols"])
+        X = np.asarray(data["X"], dtype=float)
+        frame = pd.DataFrame(X, columns=data["feature_cols"])
         frame.insert(0, "well", data["well"])
         frame.insert(1, "group", data["group"])
         frame.insert(2, "timepoint_hours", data["timepoint"])
-        # Attach cluster labels when the clustering view is active.
-        if st.mode == mv_state.MODE_CLUSTERING and st.feature_cols:
+
+        # Embedding coordinates for the displayed projection (pca_1/2, tsne_1/2,
+        # umap_1/2) — each cell's position travels with its features so the map is
+        # quantifiable downstream.
+        coords = res.get("coords")
+        if coords is not None and len(coords) == len(frame):
+            method = st.dimred_method if kind == mv_state.MODE_DIMRED else "pca"
+            frame[f"{method}_1"] = np.asarray(coords)[:, 0]
+            frame[f"{method}_2"] = np.asarray(coords)[:, 1]
+
+        # Cluster label per cell — from the displayed result when it clustered,
+        # else run the current clustering config on the exported matrix.
+        clusters = res.get("clusters")
+        if clusters is not None and len(clusters.labels) == len(frame):
+            frame["cluster"] = clusters.labels
+        elif st.mode == mv_state.MODE_CLUSTERING and st.feature_cols:
             try:
-                clusters = _run_clustering(st, np.asarray(data["X"], dtype=float))
-                frame["cluster"] = clusters.labels
+                frame["cluster"] = _run_clustering(st, X).labels
             except Exception:
                 swallowed()
+
         frame.to_csv(path, index=False)
-        msg = f"Exported feature matrix → {path}"
-        # Companion PCA loadings (feature weightings per PC) — the "how to read
-        # each PC" table that the on-screen scatter can't give you numerically.
+        msg = f"Exported {len(frame):,} cells → {path}"
         loadings_path = _write_pca_loadings_csv(app, st, data, path)
         if loadings_path:
             msg += f"  ·  PCA loadings → {loadings_path}"
+        # Cluster feature-profile companion (what each cluster/region represents).
+        prof_path = _write_cluster_profile_csv(app, st, res, path)
+        if prof_path:
+            msg += f"  ·  cluster profiles → {prof_path}"
         app._set_status(msg)
     except Exception as exc:
         QMessageBox.critical(app, "Export failed", f"Could not write CSV:\n{exc}")
+
+
+def _write_cluster_profile_csv(app, st, res, matrix_path: str):
+    """Write ``<stem>_cluster_profiles.csv`` — the mean (z-scored) value of each
+    feature within each cluster, the interpretable "what does each cluster mean"
+    table. Returns the path, or None when the displayed result carries no
+    clustering."""
+    import numpy as np
+    import pandas as pd
+    from pathlib import Path
+
+    prof = res.get("profile") if isinstance(res, dict) else None
+    if not prof:
+        return None
+    try:
+        matrix = np.asarray(prof["matrix"], dtype=float)
+        if matrix.size == 0:
+            return None
+        df = pd.DataFrame(matrix, columns=list(prof["feature_labels"]),
+                          index=[f"cluster_{c}" for c in prof["cluster_ids"]])
+        df.index.name = "cluster"
+        out = str(Path(matrix_path).with_name(
+            Path(matrix_path).stem + "_cluster_profiles.csv"))
+        df.to_csv(out)
+        return out
+    except Exception:
+        swallowed()
+        return None
 
 
 def _write_pca_loadings_csv(app, st, data, matrix_path: str):

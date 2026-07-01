@@ -263,6 +263,31 @@ def hierarchical_cluster(X: np.ndarray, k: int, method: str = "ward",
                          n_clusters=int(len(uniq)), n_sampled=int(max_samples))
 
 
+def cluster_feature_profiles(X: np.ndarray, labels: np.ndarray,
+                             n_clusters: int | None = None):
+    """Mean of each feature within each cluster, on z-scored features.
+
+    Because t-SNE / UMAP axes aren't interpretable (and even k-means clusters need
+    characterising), the actionable readout is *what each cluster looks like*: the
+    per-feature mean over its cells. Features are :func:`standardize`-d first so the
+    profile reads as "high / low vs the population" on a common scale, independent
+    of raw units. Returns ``(cluster_ids, profile)`` where ``profile`` is
+    ``n_clusters x n_features`` (a row is ``NaN`` for an empty cluster).
+    """
+    X = standardize(np.asarray(X, dtype=float))
+    labels = np.asarray(labels, dtype=int)
+    if X.ndim != 2 or labels.shape[0] != X.shape[0]:
+        raise ValueError("X and labels must share the number of cells")
+    cluster_ids = (list(range(int(n_clusters))) if n_clusters is not None
+                   else sorted(set(int(v) for v in labels)))
+    rows = []
+    for cid in cluster_ids:
+        mask = labels == cid
+        rows.append(X[mask].mean(axis=0) if mask.any()
+                    else np.full(X.shape[1], np.nan))
+    return cluster_ids, (np.vstack(rows) if rows else np.empty((0, X.shape[1])))
+
+
 def cluster_fractions(labels: np.ndarray, groups: Sequence,
                       n_clusters: int | None = None):
     """Per-group fraction of cells in each cluster.

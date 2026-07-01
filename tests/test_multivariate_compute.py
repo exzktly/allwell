@@ -82,6 +82,59 @@ def test_pca_loadings_csv_companion(tmp_path):
     assert np.isclose(np.linalg.norm(pc1), 1.0, atol=1e-6)
 
 
+def test_cluster_feature_profiles_capture_cluster_identity():
+    """Each cluster's z-scored feature means read as high/low vs the population —
+    the interpretable 'what is this cluster' readout. Plant two blobs that differ
+    on feature 0 and check the profile separates them on that feature."""
+    rng = np.random.default_rng(11)
+    low = rng.normal(loc=[-5, 0], scale=0.2, size=(80, 2))
+    high = rng.normal(loc=[5, 0], scale=0.2, size=(80, 2))
+    X = np.vstack([low, high])
+    labels = np.array([0] * 80 + [1] * 80)
+    ids, profile = mvc.cluster_feature_profiles(X, labels, n_clusters=2)
+    assert ids == [0, 1]
+    assert profile.shape == (2, 2)
+    # Feature 0 separates the clusters (opposite signs); feature 1 is ~0 for both.
+    assert profile[0, 0] < 0 < profile[1, 0]
+    assert abs(profile[0, 1]) < 0.5 and abs(profile[1, 1]) < 0.5
+
+
+def test_cluster_feature_profiles_empty_cluster_is_nan():
+    X = np.random.default_rng(1).normal(size=(20, 3))
+    labels = np.zeros(20, dtype=int)  # cluster 1 requested but never used
+    _ids, profile = mvc.cluster_feature_profiles(X, labels, n_clusters=2)
+    assert profile.shape == (2, 3)
+    assert np.all(np.isnan(profile[1]))  # empty cluster row is NaN, not a crash
+
+
+def test_subsample_for_projection_caps_slow_methods_only():
+    """t-SNE / UMAP get capped (so the main-thread projection can't hang on a big
+    selection) with the parallel per-cell arrays sliced to match; PCA and small
+    selections pass through untouched."""
+    from well_viewer.features.multivariate.controller import (
+        _subsample_for_projection, _MAX_PROJECTION_CELLS,
+    )
+    n = _MAX_PROJECTION_CELLS + 1000
+    X = np.random.default_rng(2).normal(size=(n, 4))
+    data = {"X": X, "group": np.array(["g"] * n, dtype=object),
+            "well": np.array(["A01"] * n, dtype=object),
+            "timepoint": np.arange(n, dtype=float), "n_cells": n}
+
+    Xp, dp, total = _subsample_for_projection(X, data, "tsne")
+    assert Xp.shape[0] == _MAX_PROJECTION_CELLS == dp["group"].shape[0] \
+        == dp["timepoint"].shape[0] == dp["n_cells"]
+    assert total == n  # original count reported for the footnote
+
+    # PCA is cheap → never capped; a small t-SNE selection also passes through.
+    assert _subsample_for_projection(X, data, "pca")[2] == 0
+    small = X[:50]
+    assert _subsample_for_projection(small, {**data, "X": small,
+                                             "group": data["group"][:50],
+                                             "well": data["well"][:50],
+                                             "timepoint": data["timepoint"][:50]},
+                                     "tsne")[2] == 0
+
+
 def test_pca_loadings_csv_skipped_when_matrix_too_small(tmp_path):
     from types import SimpleNamespace
     from well_viewer.features.multivariate.controller import _write_pca_loadings_csv

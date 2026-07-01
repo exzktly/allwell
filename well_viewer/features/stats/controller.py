@@ -625,7 +625,15 @@ def stats_grp_clear_all(app) -> None:
 
 
 def stats_sync_from_app(app) -> None:
-    app._app_state.stats.set_groups(_copy.deepcopy(app._groups_from_rep_sets()))
+    # In Split View, seed the comparison groups from only the rep-sets currently
+    # *visible* on the plots (non-hidden) rather than every defined grouping, so
+    # the auto-populated comparison matches what the user is looking at. Falls
+    # back to all groups outside Split View, or when nothing is visible.
+    if getattr(app, "_split_active", False):
+        groups = app._groups_from_visible_rep_sets() or app._groups_from_rep_sets()
+    else:
+        groups = app._groups_from_rep_sets()
+    app._app_state.stats.set_groups(_copy.deepcopy(groups))
     stats_refresh_group_list(app)
 
 

@@ -18,7 +18,7 @@ from well_viewer.core.channel_state_controller import populate_metric_combo
 from well_viewer.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
-from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.core.plot_style import apply_export_style_to_current, style_legend
 from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
     collect_scatter_agg_data,
     collect_scatter_data,
@@ -185,12 +185,13 @@ def redraw_scatter(
         # Transparent frame keeps the legend off the plot background. Density and
         # color-by-time supply explicit handles; plain solid mode uses labels.
         if legend_handles:
-            app._ax_scatter.legend(
+            _leg = app._ax_scatter.legend(
                 handles=legend_handles, loc='best', fontsize=8,
                 framealpha=0.0, facecolor="none",
             )
         else:
-            app._ax_scatter.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+            _leg = app._ax_scatter.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+        style_legend(_leg, app._ax_scatter)
 
     # Draw stored rectangular gates + their percentage labels on top of the
     # points. Gate coords are data-space, so they track log scale / limits.
@@ -352,7 +353,8 @@ def redraw_scatter_agg(
             color=_title_fg,
         )
         app._ax_scatter_agg.grid(True, alpha=0.3, color=_grid)
-        app._ax_scatter_agg.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+        _leg_agg = app._ax_scatter_agg.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+        style_legend(_leg_agg, app._ax_scatter_agg)
 
     # Redraw canvas
     try:

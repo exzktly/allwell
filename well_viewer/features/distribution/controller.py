@@ -14,7 +14,7 @@ import numpy as np
 
 from well_viewer.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
 from well_viewer.core.safe import swallowed
-from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.core.plot_style import apply_export_style_to_current, style_legend
 
 
 NO_DATA_MSG = (
@@ -396,7 +396,7 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
             ax.set_ylim(-0.02, 1.05)
         if any(name for name, _, _ in groups):
             try:
-                ax.legend(fontsize=7, loc="best", framealpha=0.0, facecolor="none")
+                style_legend(ax.legend(fontsize=7, loc="best", framealpha=0.0, facecolor="none"), ax)
             except Exception:
                 swallowed()  # was: pass (silent except)
     else:
@@ -429,7 +429,7 @@ def _render_overlay(app, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
         ax.set_ylabel("Density")
         if any(name for name, _, _ in groups):
             try:
-                ax.legend(fontsize=7, loc="best", framealpha=0.0, facecolor="none")
+                style_legend(ax.legend(fontsize=7, loc="best", framealpha=0.0, facecolor="none"), ax)
             except Exception:
                 swallowed()  # was: pass (silent except)
 

@@ -1089,6 +1089,12 @@ class WellViewerApp(QWidget):
         """One BarGroup per loaded selection (each wrapping its ReplicateSet)."""
         return [BarGroup(r.name, members=[r]) for r in self._rep_sets_loaded()]
 
+    def _groups_from_visible_rep_sets(self) -> "List[BarGroup]":
+        """One BarGroup per *visible* (non-hidden) rep-set — the traces actually
+        drawn on the plots. Seeds Statistics in Split View so the comparison
+        groups mirror what's shown rather than every defined grouping."""
+        return [BarGroup(r.name, members=[r]) for r in self._rep_sets_active()]
+
     def _rep_sets_active(self) -> 'List[ReplicateSet]': return rep_sets_active(self)
 
 

@@ -103,6 +103,33 @@ def apply_ax_style(ax, title: str, ylabel: str) -> None:
     ax.grid(True, color=grid, linewidth=0.7, linestyle="-")
 
 
+def style_legend(leg, ax) -> None:
+    """Recolour a legend's entry + title text to the axes' primary foreground.
+
+    matplotlib legends default their label colour to ``text.color`` (black),
+    which is illegible on the dark *screen* theme (black text over a dark, often
+    transparent-framed legend reads as grey-on-grey). Setting the label + title
+    colour to the theme's primary foreground — recomputed per draw via
+    :func:`tokens_for` — keeps legends legible on both the dark screen and the
+    light publication background. No-op for a missing legend.
+    """
+    if leg is None:
+        return
+    _bg, title_fg, _muted, _grid, _spine = tokens_for(ax)
+    for txt in leg.get_texts():
+        txt.set_color(title_fg)
+    title = leg.get_title()
+    if title is not None and title.get_text():
+        title.set_color(title_fg)
+    # Transparent background everywhere — the legend floats over the plot instead
+    # of masking it with an opaque panel (belt-and-suspenders with the rcParam
+    # default, so a legend created with an explicit opaque framealpha is fixed
+    # up here too).
+    frame = leg.get_frame()
+    frame.set_alpha(0.0)
+    frame.set_facecolor("none")
+
+
 # ── export-style prefs → figure application ──────────────────────────────────
 # These were relocated from ``features/export/style.py`` (T2). They are neutral
 # matplotlib figure styling — applying a prefs dict to a figure's axes — and are

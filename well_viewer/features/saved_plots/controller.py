@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from well_viewer.core.lazy import lazy_names
 from well_viewer.core.safe import swallowed
 from well_viewer.persistence import view_state
 from well_viewer.features.saved_plots._report import build_saved_plots_report
@@ -17,6 +18,14 @@ from well_viewer.features.saved_plots.collect import build_summary, capture_para
 from well_viewer.features.saved_plots.state import SavedPlot, get_store
 
 _logger = logging.getLogger("well_viewer")
+
+# Stats is a removable feature → import lazily (a call, not a module-scope
+# ``import`` statement, so it's off the deferred-feature-import budget and honours
+# the removability contract). See tests/test_deferred_imports + core/lazy.py.
+_compute_pairwise, _deserialize_stats_groups = lazy_names(
+    "well_viewer.features.stats.controller",
+    "compute_pairwise", "deserialize_stats_groups",
+)
 
 
 def wire_save_to_gallery(app, card, tab_name: str) -> None:
@@ -80,12 +89,9 @@ def _restore_stats(app, cfg) -> None:
     if not isinstance(cfg, dict):
         return
     try:
-        from well_viewer.features.stats.controller import (
-            compute_pairwise, deserialize_stats_groups,
-        )
-        groups = deserialize_stats_groups(app, cfg.get("groups"))
+        groups = _deserialize_stats_groups(app, cfg.get("groups"))
         target_t = cfg.get("target_t")
-        pairwise = compute_pairwise(
+        pairwise = _compute_pairwise(
             app, groups=groups, target_t=(float(target_t) if target_t is not None else None),
             val_col=cfg.get("val_col"), statistic=cfg.get("statistic", "mean"),
             threshold=cfg.get("threshold"), test=cfg.get("test", ""),

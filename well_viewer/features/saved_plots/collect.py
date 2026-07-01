@@ -11,7 +11,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from well_viewer.core.lazy import lazy_names
 from well_viewer.persistence import view_state
+
+# Stats is a removable feature, so it can't be imported at module scope; the lazy
+# proxies defer the import to first call (a call, not an ``import`` statement, so
+# it stays off the deferred-feature-import budget — see tests/test_deferred_imports).
+_serialize_stats_groups, _threshold_for_val_col = lazy_names(
+    "well_viewer.features.stats.controller",
+    "serialize_stats_groups", "threshold_for_val_col",
+)
 
 
 def capture_params(app, tab: str) -> tuple[dict, dict]:
@@ -58,11 +67,8 @@ def _capture_stats_config(app) -> dict | None:
     ctx = pairwise[0]  # test/val_col/target_t/stat are constant across the run
     val_col = str(ctx.get("val_col", "") or "")
     try:
-        from well_viewer.features.stats.controller import (
-            serialize_stats_groups, threshold_for_val_col,
-        )
-        threshold = float(threshold_for_val_col(app, val_col))
-        grp_data = serialize_stats_groups(groups)
+        threshold = float(_threshold_for_val_col(app, val_col))
+        grp_data = _serialize_stats_groups(groups)
     except Exception:
         return None
     return {

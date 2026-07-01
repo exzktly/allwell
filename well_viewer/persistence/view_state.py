@@ -49,6 +49,7 @@ def snapshot(app) -> dict:
         "use_sem": bool(app._app_state.plot.use_sem),
         "use_fov_replicates": bool(app._app_state.plot.use_fov_replicates),
         "show_threshold_line": bool(app._app_state.plot.show_threshold_line),
+        "show_significance": bool(app._app_state.plot.show_significance),
         "fold_change": {
             "vs_control_on": bool(app._app_state.plot.fc_vs_control_on),
             "control_label": str(app._app_state.plot.fc_control_label or ""),
@@ -368,6 +369,12 @@ def restore(app, state: dict) -> None:
     if "show_threshold_line" in state:
         try:
             app._app_state.plot.show_threshold_line = bool(state["show_threshold_line"])
+        except Exception:
+            swallowed()
+
+    if "show_significance" in state:
+        try:
+            app._app_state.plot.show_significance = bool(state["show_significance"])
         except Exception:
             swallowed()
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from well_viewer.core.lazy import lazy_names
 from well_viewer.core.safe import swallowed
 from well_viewer.persistence import view_state
 from well_viewer.features.saved_plots._report import build_saved_plots_report
@@ -17,6 +18,14 @@ from well_viewer.features.saved_plots.collect import build_summary, capture_para
 from well_viewer.features.saved_plots.state import SavedPlot, get_store
 
 _logger = logging.getLogger("well_viewer")
+
+# Stats is a removable feature → import lazily (a call, not a module-scope
+# ``import`` statement, so it's off the deferred-feature-import budget and honours
+# the removability contract). See tests/test_deferred_imports + core/lazy.py.
+_compute_pairwise, _deserialize_stats_groups = lazy_names(
+    "well_viewer.features.stats.controller",
+    "compute_pairwise", "deserialize_stats_groups",
+)
 
 
 def wire_save_to_gallery(app, card, tab_name: str) -> None:
@@ -61,10 +70,36 @@ def restore_saved_plot(app, plot_id: str) -> None:
     rec = get_store(app).get(plot_id)
     if rec is None:
         return
+    # Re-run the saved stats test FIRST (if any) so ``stats.pairwise`` is
+    # repopulated before ``view_state.restore`` activates the Bar tab and redraws
+    # — that redraw calls ``draw_significance_brackets``, which needs the fresh
+    # results + the restored ``show_significance`` flag.
+    _restore_stats(app, rec.params.get("stats"))
     try:
         view_state.restore(app, dict(rec.params))
     except Exception:
         _logger.debug("saved_plots: restore failed for %r", plot_id, exc_info=True)
+
+
+def _restore_stats(app, cfg) -> None:
+    """Re-run the saved stats config to regenerate ``stats.pairwise`` + groups.
+
+    Deterministic re-run (same config + data → same brackets). No-op for saved
+    plots without a ``stats`` block (backward compatible) or on any error."""
+    if not isinstance(cfg, dict):
+        return
+    try:
+        groups = _deserialize_stats_groups(app, cfg.get("groups"))
+        target_t = cfg.get("target_t")
+        pairwise = _compute_pairwise(
+            app, groups=groups, target_t=(float(target_t) if target_t is not None else None),
+            val_col=cfg.get("val_col"), statistic=cfg.get("statistic", "mean"),
+            threshold=cfg.get("threshold"), test=cfg.get("test", ""),
+        )
+        app._app_state.stats.groups = groups
+        app._app_state.stats.pairwise = pairwise
+    except Exception:
+        _logger.debug("saved_plots: stats re-run failed", exc_info=True)
 
 
 def delete_saved_plot(app, plot_id: str) -> None:

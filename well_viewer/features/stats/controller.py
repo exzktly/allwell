@@ -183,6 +183,118 @@ def draw_ks_cdf(app, group_vals: List[Tuple[str, List[float]]], tp_str: str, wel
     app._stats_canvas_widget.draw_idle()
 
 
+def _bh_adjust(pair_results) -> dict:
+    """Benjamini-Hochberg FDR-adjusted p-values keyed by pair index.
+
+    ``pair_results`` items are ``(name_a, name_b, stat_name, stat_value, p, err)``
+    (``p`` at index 4). Returns ``{}`` when fewer than two valid p-values exist."""
+    valid_idx = [i for i, r in enumerate(pair_results) if r[4] is not None]
+    adjusted: dict = {}
+    if len(valid_idx) >= 2:
+        ranked = sorted(valid_idx, key=lambda i: pair_results[i][4])
+        m = len(ranked)
+        prev = 1.0
+        for rank_from_top, idx in enumerate(reversed(ranked)):
+            k = m - rank_from_top  # 1-based rank, largest p first
+            raw_p = pair_results[idx][4]
+            cand = raw_p * m / k
+            prev = min(prev, cand)
+            adjusted[idx] = min(1.0, prev)
+    return adjusted
+
+
+def _run_pair_tests(group_vals, test, is_ks):
+    """Run the chosen scipy test over every group pair.
+
+    Returns ``[(name_a, name_b, stat_name, stat_value, p, err), ...]``. Pure /
+    deterministic — no widgets, no app state. ``group_vals`` is ``[(name, [values]), ...]``."""
+    import scipy.stats as _st
+    pairs = [(group_vals[i], group_vals[j])
+             for i in range(len(group_vals)) for j in range(i + 1, len(group_vals))]
+    out = []
+    for (name_a, vals_a), (name_b, vals_b) in pairs:
+        stat_name = "?"
+        stat_value = None
+        p = None
+        err = None
+        try:
+            if test.startswith("t-test"):
+                pooled = ("pooled" in test.lower()) or ("student" in test.lower())
+                res = _st.ttest_ind(vals_a, vals_b, equal_var=pooled)
+                stat_name = "t"
+            elif test.startswith("Wilcoxon"):
+                res = _st.ranksums(vals_a, vals_b)
+                stat_name = "W"
+            elif test.startswith("Mann"):
+                res = _st.mannwhitneyu(vals_a, vals_b, alternative="two-sided")
+                stat_name = "U"
+            elif is_ks:
+                res = _st.ks_2samp(vals_a, vals_b)
+                stat_name = "D"
+            else:
+                out.append((name_a, name_b, stat_name, stat_value, p, "Unknown test."))
+                continue
+            p = float(res.pvalue)
+            stat_value = float(res.statistic)
+        except Exception as exc:
+            err = str(exc)
+        out.append((name_a, name_b, stat_name, stat_value, p, err))
+    return out
+
+
+def compute_pairwise(app, *, groups, target_t, val_col, statistic, threshold, test) -> list:
+    """Widget-free computation of the structured pairwise results that drive the
+    Bar-plot significance brackets (``StatsState.pairwise``).
+
+    Deterministic given the same config + underlying data (scipy tests + BH-FDR;
+    no randomness), so it reproduces the exact brackets. Returns ``[]`` when a
+    result can't be produced (fewer than 2 non-empty groups, a group with no
+    samples, invalid KS config, or scipy missing). Used by both ``run_stats``
+    (live) and Saved-Plot restore (re-run)."""
+    groups = [g for g in (groups or []) if g.wells]
+    if len(groups) < 2:
+        return []
+    test = str(test)
+    is_ks = test.startswith("KS")
+    if is_ks and (len(groups) != 2 or any(len(g.wells) != 1 for g in groups)):
+        return []
+    try:
+        import scipy.stats  # noqa: F401  (availability probe)
+    except ImportError:
+        return []
+    group_vals: List[Tuple[str, List[float]]] = []
+    for g in groups:
+        if is_ks:
+            vals = collect_group_per_cell_values(app, g, target_t,
+                                                 val_col=val_col, threshold=threshold)
+        else:
+            vals = collect_group_values(app, g, target_t, val_col=val_col,
+                                        threshold=threshold, statistic=statistic)
+        if not vals:
+            return []
+        group_vals.append((g.name, vals))
+    pair_results = _run_pair_tests(group_vals, test, is_ks)
+    adjusted = _bh_adjust(pair_results)
+    group_wells = {g.name: sorted(g.wells) for g in groups}
+    out: list[dict] = []
+    for idx, (name_a, name_b, _sname, _sval, p, err) in enumerate(pair_results):
+        if err is not None or p is None:
+            continue
+        out.append({
+            "a": name_a,
+            "b": name_b,
+            "a_wells": group_wells.get(name_a, []),
+            "b_wells": group_wells.get(name_b, []),
+            "p": float(p),
+            "p_adj": float(adjusted.get(idx, p)),
+            "test": test,
+            "stat": str(statistic),
+            "val_col": str(val_col),
+            "target_t": float(target_t),
+        })
+    return out
+
+
 def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     """Run the selected statistical test across all group pairs."""
     tp_str = app._stats_tp_cb.currentText()
@@ -260,7 +372,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         group_vals.append((g.name, vals))
 
     try:
-        import scipy.stats as _st
+        import scipy.stats  # noqa: F401  (availability probe; tests run in _run_pair_tests)
     except ImportError:
         app._stats_write_result("scipy is required.\nInstall with: pip install scipy")
         return
@@ -311,62 +423,11 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         )
     lines.append("")
 
-    pairs = [(group_vals[i], group_vals[j]) for i in range(len(group_vals)) for j in range(i + 1, len(group_vals))]
-
-    # Two-pass: collect all raw p-values first so we can compute
-    # multiple-comparison adjustments (Benjamini-Hochberg) before
-    # emitting per-pair lines. With ≥3 groups (≥3 pairs) reporting
-    # raw p alone overstates significance — BH-FDR is the most common
-    # control for that.
-    pair_results: list = []  # [(name_a, name_b, stat_name, stat_value, p, err)]
-    for (name_a, vals_a), (name_b, vals_b) in pairs:
-        stat_name = "?"
-        stat_value: Optional[float] = None
-        p: Optional[float] = None
-        err: Optional[str] = None
-        try:
-            if test.startswith("t-test"):
-                # "pooled" / "Student" → equal-variance (pooled) t-test;
-                # otherwise Welch's unequal-variance t-test (the default).
-                pooled = ("pooled" in test.lower()) or ("student" in test.lower())
-                res = _st.ttest_ind(vals_a, vals_b, equal_var=pooled)
-                stat_name = "t"
-            elif test.startswith("Wilcoxon"):
-                res = _st.ranksums(vals_a, vals_b)
-                stat_name = "W"
-            elif test.startswith("Mann"):
-                res = _st.mannwhitneyu(vals_a, vals_b, alternative="two-sided")
-                stat_name = "U"
-            elif is_ks:
-                res = _st.ks_2samp(vals_a, vals_b)
-                stat_name = "D"
-            else:
-                err = "Unknown test."
-                pair_results.append((name_a, name_b, stat_name, stat_value, p, err))
-                continue
-            p = float(res.pvalue)
-            stat_value = float(res.statistic)
-        except Exception as exc:
-            err = str(exc)
-        pair_results.append((name_a, name_b, stat_name, stat_value, p, err))
-
-    # Benjamini-Hochberg adjusted p-values (FDR control). Applied across
-    # all valid p-values in this report.
-    valid_idx = [i for i, r in enumerate(pair_results) if r[4] is not None]
-    adjusted: dict[int, float] = {}
-    if len(valid_idx) >= 2:
-        ranked = sorted(valid_idx, key=lambda i: pair_results[i][4])
-        m = len(ranked)
-        # Walk in descending order so the monotonic-decreasing step
-        # function for BH-FDR can be propagated forward.
-        prev = 1.0
-        for rank_from_top, idx in enumerate(reversed(ranked)):
-            k = m - rank_from_top  # 1-based rank, largest p first
-            raw_p = pair_results[idx][4]
-            assert raw_p is not None
-            cand = raw_p * m / k
-            prev = min(prev, cand)
-            adjusted[idx] = min(1.0, prev)
+    # Run every pair, then apply Benjamini-Hochberg FDR across all valid
+    # p-values (shared with ``compute_pairwise`` so the live results and a
+    # Saved-Plot re-run are computed by the exact same code).
+    pair_results = _run_pair_tests(group_vals, test, is_ks)
+    adjusted = _bh_adjust(pair_results)
 
     show_adjusted = len(adjusted) >= 2
 
@@ -394,36 +455,14 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     app._stats_write_result("\n".join(lines))
 
     # N7: store structured pairwise results so the Bar plot can draw significance
-    # brackets from the same comparison (text output above is unchanged). The
-    # BH-adjusted p is preferred where available, else the raw p. We also store
-    # each group's WELLS so the bar plot can match a comparison to a bar by
-    # membership — robust to the Statistics groups and the bar replicate-sets
-    # having different names (matching by name alone silently drew nothing).
-    group_wells = {g.name: sorted(g.wells) for g in app._app_state.stats.groups}
-    stats_pairwise: list[dict] = []
-    for idx, (name_a, name_b, _sname, _sval, p, err) in enumerate(pair_results):
-        if err is not None or p is None:
-            continue
-        stats_pairwise.append({
-            "a": name_a,
-            "b": name_b,
-            "a_wells": group_wells.get(name_a, []),
-            "b_wells": group_wells.get(name_b, []),
-            "p": float(p),
-            "p_adj": float(adjusted.get(idx, p)),
-            "test": str(test),
-            # Which measure was tested, so the bar plot draws the brackets on the
-            # matching panel ("fraction" → the On-fraction panel, else the Mean
-            # panel) rather than always on the Mean panel.
-            "stat": str(statistic),
-            # The CONTEXT the test was run in — value column (channel + metric)
-            # and timepoint — so the bar plot only overlays these brackets when
-            # it is actually showing that channel/timepoint, not whatever is on
-            # screen now.
-            "val_col": str(val_col),
-            "target_t": float(target_t),
-        })
-    app._app_state.stats.pairwise = stats_pairwise
+    # brackets from the same comparison (text output above is unchanged). Built by
+    # the shared ``compute_pairwise`` so the live results are byte-identical to a
+    # later Saved-Plot re-run of the same config. Each dict carries the compared
+    # groups' WELLS (bar matching by membership), the tested measure (``stat`` →
+    # which panel), and the run CONTEXT (``val_col`` / ``target_t``).
+    app._app_state.stats.pairwise = compute_pairwise(
+        app, groups=app._app_state.stats.groups, target_t=target_t,
+        val_col=val_col, statistic=statistic, threshold=threshold, test=test)
 
     if is_ks:
         draw_ks_cdf_fn(group_vals, tp_str)
@@ -710,13 +749,12 @@ def stats_refresh_colors(app) -> None:
         app._stats_canvas_widget.draw()
 
 
-def stats_active_threshold(app) -> float:
-    """Use the per-channel ThreshFracOn from the Cell Gating tab.
+def threshold_for_val_col(app, val_col: str) -> float:
+    """The ThreshFracOn cutoff for a value column (per-channel Cell-Gating cut).
 
-    For ratio columns the channel-specific threshold doesn't apply; fall
-    back to the global threshold so a sensible cutoff still exists.
-    """
-    val_col = app._stats_active_val_col()
+    Ratio columns have no per-channel cut → the global threshold. Keyed off the
+    passed ``val_col`` (not the live widget) so it's reusable at Saved-Plot
+    re-run time."""
     if is_ratio_key(val_col):
         return float(app._app_state.channel.threshold)
     # val_col is "<channel>_mean_intensity" or "<channel>_smfish_count".
@@ -724,6 +762,43 @@ def stats_active_threshold(app) -> float:
         channel = val_col.split("_", 1)[0]
         return float(app._get_thresh_frac_on(channel))
     return float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
+
+
+def stats_active_threshold(app) -> float:
+    """The per-channel ThreshFracOn for the currently-selected stats value column."""
+    return threshold_for_val_col(app, app._stats_active_val_col())
+
+
+def serialize_stats_groups(groups) -> list:
+    """Serialise a list of stats ``BarGroup`` for a saved plot: each group's name,
+    its member replicate-set NAMES, and its solo wells (resolved on restore
+    against the live Sample-Definition sets)."""
+    out = []
+    for g in groups or []:
+        out.append({
+            "name": g.name,
+            "members": [rs.name for rs in getattr(g, "members", []) or []],
+            "solo_wells": list(getattr(g, "solo_wells", []) or []),
+        })
+    return out
+
+
+def deserialize_stats_groups(app, data) -> list:
+    """Rebuild stats ``BarGroup`` objects from :func:`serialize_stats_groups`
+    output, matching member names against the live replicate sets (a set that no
+    longer exists is dropped) and keeping solo wells that still load."""
+    from well_viewer.domain.batch_models import BarGroup
+    rep_by_name = {r.name: r for r in app._rep_sets_loaded()}
+    paths = app._app_state.dataset.well_paths
+    out = []
+    for item in data or []:
+        if not isinstance(item, dict):
+            continue
+        members = [rep_by_name[n] for n in item.get("members", []) if n in rep_by_name]
+        solos = [w for w in item.get("solo_wells", []) if w in paths]
+        out.append(BarGroup(str(item.get("name", "Group")),
+                            members=members, solo_wells=solos))
+    return out
 
 
 

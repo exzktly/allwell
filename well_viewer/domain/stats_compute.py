@@ -17,7 +17,199 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from well_viewer.data.data_loading import aggregate_with_threshold_df
+from dataclasses import dataclass
+
+from well_viewer.data.data_loading import (
+    aggregate_with_threshold_df,
+    df_included_mask,
+    resolve_value_series,
+)
+
+
+# ── Unified replicate model (single source of truth for BOTH stats and plots) ──
+
+def replicate_unit(n_wells: int, use_fov: bool) -> str:
+    """What counts as one replicate for a group, given its loaded well count and
+    the per-FOV toggle. The ONE rule shared by the Statistics test and the bar/
+    line error bars so the test's ``n`` and the plotted spread never disagree.
+
+    - ``>=2`` wells -> ``"well"``: each well is a replicate (its FOVs pooled).
+    - ``1`` well + FOV mode on -> ``"fov"``: each FOV within the well is a replicate.
+    - ``1`` well + FOV mode off -> ``"well"`` (a single replicate; no spread, and
+      the stats test — needing ``n>=2`` — will decline it).
+    - ``0`` wells -> ``"none"``.
+    """
+    if n_wells <= 0:
+        return "none"
+    if n_wells == 1:
+        return "fov" if use_fov else "well"
+    return "well"
+
+
+@dataclass
+class ReplicateStat:
+    """Per-replicate summaries — one record per well (or per FOV) — that every
+    consumer reduces. Carries what both the plots and the stats test need."""
+
+    mean: float          # mean of above-threshold values
+    median: float        # median of above-threshold values
+    mean_all: float      # mean of all included cells (no threshold filter)
+    frac: float          # fraction above threshold (or gate-on when on_col set)
+    n_above: int
+    n_total: int
+
+    def summary(self, statistic: str) -> float:
+        """The scalar the Statistics test uses for the chosen statistic."""
+        if statistic == "fraction":
+            return self.frac
+        if statistic == "median":
+            return self.median
+        if statistic == "mean_all":
+            return self.mean_all
+        return self.mean
+
+
+def _norm_fov(df: "pd.DataFrame") -> np.ndarray:
+    """Normalized FOV id per row (empty -> "1"), matching the plot aggregator."""
+    if "fov" in df.columns:
+        s = df["fov"].fillna("1").astype(str).str.strip().replace("", "1")
+    else:
+        s = pd.Series(["1"] * len(df), index=df.index)
+    return s.to_numpy()
+
+
+def _safe_rows(app, lbl):
+    """The well's raw DataFrame, or None when the backend exposes only
+    pre-aggregated points (the pure-logic MockApp has no ``_get_rows``)."""
+    getter = getattr(app, "_get_rows", None)
+    return getter(lbl) if callable(getter) else None
+
+
+def _point_at(pts, target_t):
+    """The AggPoint at *target_t* (``(t, mean, spread, frac, n_above, n_total,…)``)
+    or None. Shared by every consumer so mean/frac/n come from the one aggregator
+    the plots already use (delegate-aware via :func:`aggregate_well`)."""
+    for pt in pts or []:
+        if abs(pt[0] - target_t) < 1e-6:
+            return pt
+    return None
+
+
+def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
+    """``(median_above, mean_all)`` from raw cells for the stats-only median /
+    mean_all statistics, using the SAME gating chokepoint as the aggregator.
+    Returns ``(nan, nan)`` when raw rows aren't available (e.g. the pure-logic
+    MockApp, which only exposes pre-aggregated points)."""
+    if df is None or len(df) == 0 or "area_px" not in df.columns \
+            or "timepoint_hours" not in df.columns:
+        return float("nan"), float("nan")
+    mask = df_included_mask(df).to_numpy(copy=True)
+    area = pd.to_numeric(df["area_px"], errors="coerce").to_numpy()
+    with np.errstate(invalid="ignore"):
+        mask &= np.isfinite(area)
+    for channel, gate in (fluor_gates or {}).items():
+        col = f"{channel}_mean_intensity"
+        if col not in df.columns:
+            return float("nan"), float("nan")
+        gv = pd.to_numeric(df[col], errors="coerce").to_numpy()
+        mask &= np.isfinite(gv) & (gv > gate)
+    tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+    val = resolve_value_series(df, val_col, ratios).to_numpy()
+    with np.errstate(invalid="ignore"):
+        mask &= np.isfinite(tp) & (np.abs(tp - target_t) <= 1e-6) & np.isfinite(val)
+    if not mask.any():
+        return float("nan"), float("nan")
+    all_vals = val[mask]
+    if on_col and on_col in df.columns:
+        above = all_vals[(pd.to_numeric(df[on_col], errors="coerce")
+                          .fillna(0).to_numpy() > 0.5)[mask]]
+    else:
+        above = all_vals[all_vals > threshold]
+    return ((float(np.median(above)) if above.size else float("nan")),
+            (float(all_vals.mean()) if all_vals.size else float("nan")))
+
+
+def _rep_from(app, df, pts, target_t, threshold, val_col, fluor_gates, ratios,
+              on_col) -> "Optional[ReplicateStat]":
+    """Build a ReplicateStat: mean/frac/n from the aggregator point *pts* (plot-
+    identical, delegate-aware), median/mean_all from raw *df* when available."""
+    pt = _point_at(pts, target_t)
+    if pt is None:
+        return None
+    median, mean_all = _raw_extra(df, target_t, threshold, val_col, fluor_gates,
+                                  ratios, on_col)
+    return ReplicateStat(
+        mean=float(pt[1]), median=median, mean_all=mean_all,
+        frac=float(pt[3]), n_above=int(pt[4]), n_total=int(pt[5]),
+    )
+
+
+def group_replicate_stats(app, wells, target_t, *, use_fov, val_col, threshold,
+                          fluor_gates=None) -> "List[ReplicateStat]":
+    """THE canonical producer of per-replicate summaries for a group at a
+    timepoint. One record per replicate (per well, or per FOV of the single well
+    when ``replicate_unit`` is ``"fov"``); ``[]`` when there are no loaded wells.
+    Statistics and both plot error-bar paths reduce this same list, so they can
+    never describe different units of replication. Mean / fraction / n come from
+    :func:`aggregate_well` (the same aggregator the plots use, honoring the
+    MockApp delegate)."""
+    loaded = [w for w in wells if w in app._app_state.dataset.well_paths]
+    unit = replicate_unit(len(loaded), use_fov)
+    if unit == "none":
+        return []
+    if fluor_gates is None:
+        fluor_gates = app._get_all_fluor_gates()
+    ratios = app._app_state.channel.ratio_index
+    on_col = _thresh_on_col(app)
+    reps: "List[ReplicateStat]" = []
+    if unit == "well":
+        for lbl in loaded:
+            pts = aggregate_well(app, lbl, threshold=threshold, use_sem=False,
+                                 val_col=val_col, fluor_gates=fluor_gates)
+            rs = _rep_from(app, _safe_rows(app, lbl), pts, target_t, threshold,
+                           val_col, fluor_gates, ratios, on_col)
+            if rs is not None:
+                reps.append(rs)
+    else:  # "fov": exactly one loaded well; each of its FOVs is a replicate
+        lbl = loaded[0]
+        df = _safe_rows(app, lbl)
+        if df is None or len(df) == 0:
+            # Pre-aggregated backends (MockApp) have no raw rows to split — the
+            # well is its own single replicate.
+            rs = _rep_from(app, None,
+                           aggregate_well(app, lbl, threshold=threshold,
+                                          use_sem=False, val_col=val_col,
+                                          fluor_gates=fluor_gates),
+                           target_t, threshold, val_col, fluor_gates, ratios, on_col)
+            if rs is not None:
+                reps.append(rs)
+        else:
+            fov = _norm_fov(df)
+            for fov_id in pd.unique(fov):
+                sub = df[fov == fov_id]
+                pts = aggregate_with_threshold_df(
+                    sub, threshold=threshold, use_sem=False, val_col=val_col,
+                    fluor_gates=fluor_gates, per_fov_spread=False,
+                    ratios=ratios, on_col=on_col)
+                rs = _rep_from(app, sub, pts, target_t, threshold, val_col,
+                               fluor_gates, ratios, on_col)
+                if rs is not None:
+                    reps.append(rs)
+    return reps
+
+
+def _reduce_reps(reps, field: str, use_sem: bool) -> tuple[float, float]:
+    """Mean and SD/SEM (ddof=1) across a per-replicate field — the shared
+    reducer behind every rep-set error bar and the stats spread."""
+    vals = [getattr(r, field) for r in reps
+            if math.isfinite(getattr(r, field))]
+    if not vals:
+        return float("nan"), 0.0
+    arr = np.asarray(vals, dtype=float)
+    n = arr.size
+    m = float(arr.mean())
+    sd = float(arr.std(ddof=1)) if n > 1 else 0.0
+    return m, (sd / math.sqrt(n) if (use_sem and n > 1) else sd)
 
 
 def _thresh_on_col(app) -> Optional[str]:
@@ -157,14 +349,13 @@ def compute_rep_stats(
     if cache_key in app._app_state.stats_cache.cache:
         return app._app_state.stats_cache.cache[cache_key]
 
-    gm, gerr, gf, ferr = well_aggregate_stats(
-        app,
-        rset.wells, target_t,
-        threshold=threshold,
+    reps = group_replicate_stats(
+        app, rset.wells, target_t, use_fov=False,
         val_col=app._app_state.channel.active_val_col,
-        fluor_gates=fluor_gates,
-        use_sem=use_sem,
+        threshold=threshold, fluor_gates=fluor_gates,
     )
+    gm, gerr = _reduce_reps(reps, "mean", use_sem)
+    gf, ferr = _reduce_reps(reps, "frac", use_sem)
 
     result = (gm, gerr, gf, ferr)
     app._app_state.stats_cache.cache[cache_key] = result
@@ -193,50 +384,20 @@ def compute_rep_per_fov_stats(
     if cache_key in app._app_state.stats_cache.cache:
         return app._app_state.stats_cache.cache[cache_key]
 
-    frames = []
-    for lbl in rset.wells:
-        if lbl not in app._app_state.dataset.well_paths:
-            continue
-        df = app._get_rows(lbl)
-        if df is None or len(df) == 0:
-            continue
-        if "fov" in df.columns:
-            fov_str = (df["fov"].fillna("1").astype(str)
-                       .str.strip().replace("", "1"))
-        else:
-            fov_str = pd.Series(["1"] * len(df), index=df.index)
-        df = df.assign(fov=(lbl + "::" + fov_str).to_numpy())
-        frames.append(df)
-
-    if not frames:
-        result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
-        app._app_state.stats_cache.cache[cache_key] = result
-        return result
-
-    pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
-    pts = aggregate_with_threshold_df(
-        pooled,
-        threshold=threshold,
-        use_sem=use_sem,
+    # Per-FOV replicates come from the shared producer (``use_fov=True``), so the
+    # spread here is taken across the exact same FOV replicate values the Stats
+    # tab tests. For a single-well set that's the well's FOVs; the call site only
+    # routes here when ``replicate_unit`` is "fov".
+    reps = group_replicate_stats(
+        app, rset.wells, target_t, use_fov=True,
         val_col=app._app_state.channel.active_val_col,
-        fluor_gates=fluor_gates,
-        per_fov_spread=True,
-        ratios=app._app_state.channel.ratio_index,
-        on_col=_thresh_on_col(app),
+        threshold=threshold, fluor_gates=fluor_gates,
     )
-    matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
-    if matched:
-        pt = matched[0]
-        result = (
-            float(pt[1]),
-            float(pt[2]),
-            float(pt[3]),
-            float(pt[6]) if len(pt) >= 7 else 0.0,
-            float(pt[7]) if len(pt) >= 8 else 0.0,
-            float(pt[8]) if len(pt) >= 9 else 0.0,
-        )
-    else:
-        result = (float("nan"), 0.0, float("nan"), 0.0, 0.0, 0.0)
+    gm, gerr = _reduce_reps(reps, "mean", use_sem)
+    gf, ferr = _reduce_reps(reps, "frac", use_sem)
+    nm, ns = _reduce_reps(reps, "n_above", use_sem)
+    result = (gm, gerr, gf, ferr,
+              (nm if math.isfinite(nm) else 0.0), ns)
     app._app_state.stats_cache.cache[cache_key] = result
     return result
 
@@ -294,28 +455,13 @@ def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
     if cache_key in app._app_state.stats_cache.cache:
         return app._app_state.stats_cache.cache[cache_key]
 
-    vals: List[float] = []
-    for lbl in rset.wells:
-        if lbl not in app._app_state.dataset.well_paths:
-            continue
-        pts = aggregate_well(
-            app, lbl, threshold=threshold, use_sem=False,
-            val_col=app._app_state.channel.active_val_col,
-            fluor_gates=fluor_gates,
-        )
-        matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
-        if matched:
-            vals.append(float(matched[0][4]))
-
-    if vals:
-        arr = np.asarray(vals, dtype=float)
-        mean = float(arr.mean())
-        nn = arr.size
-        sd = float(arr.std(ddof=1)) if nn > 1 else 0.0
-        spread = sd / math.sqrt(nn) if (use_sem and nn > 1) else sd
-    else:
-        mean, spread = 0.0, 0.0
-    result = (mean, spread)
+    reps = group_replicate_stats(
+        app, rset.wells, target_t, use_fov=False,
+        val_col=app._app_state.channel.active_val_col,
+        threshold=threshold, fluor_gates=fluor_gates,
+    )
+    mean, spread = _reduce_reps(reps, "n_above", use_sem)
+    result = ((mean if math.isfinite(mean) else 0.0), spread)
     app._app_state.stats_cache.cache[cache_key] = result
     return result
 

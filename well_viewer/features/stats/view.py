@@ -15,6 +15,7 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.features.stats.controller import stats_apply_drag
 from well_viewer.features.stats.controller import stats_on_test_change
 from well_viewer.features.stats.controller import stats_refresh_group_list
+from well_viewer.features.stats.controller import stats_refresh_fov_indicator
 from well_viewer.features.stats.controller import stats_update_tp_menu
 from well_viewer.features.stats.controller import stats_refresh_map
 from functools import partial
@@ -225,6 +226,13 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     run_btn = btn_primary(run_row, "Run test", app._stats_run)
     rrl.addWidget(run_btn)
     rrl.addStretch(1)
+    # Acknowledge the replicate mode the test will use (driven by the shared
+    # per-FOV toggle) so the tab is explicit about the unit of replication.
+    app._stats_fov_indicator = QLabel("", run_row)
+    app._stats_fov_indicator.setObjectName("MutedCaption")
+    app._stats_fov_indicator.setWordWrap(True)
+    rrl.addWidget(app._stats_fov_indicator)
+    stats_refresh_fov_indicator(app)
     layout.addWidget(run_row)
 
     app._stats_sep = QFrame(parent)

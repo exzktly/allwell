@@ -11,6 +11,7 @@ from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import compute_rep_n_above
+from well_viewer.domain.stats_compute import replicate_unit
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
 
@@ -245,6 +246,9 @@ def collect_line_series(
         for rset in ordered_rsets:
             color = app._rank_color_rset(rset)
             valid_wells = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+            # Unified replicate rule: per-FOV only for a single-well set with FOV
+            # mode on; a replicate set (>=2 wells) is per-well, matching the stats n.
+            rset_per_fov = replicate_unit(len(valid_wells), rep_per_fov) == "fov"
             all_tps: set = set()
             cdf_vals: list = []
             for lbl in valid_wells:
@@ -263,7 +267,7 @@ def collect_line_series(
                     ))
             _raw_pts: list = []
             for t in sorted(all_tps):
-                if rep_per_fov:
+                if rset_per_fov:
                     gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(app,
                         rset, t, threshold, use_sem,
                     )
@@ -279,7 +283,7 @@ def collect_line_series(
                     # per-FOV n-above mean/spread. These were previously dropped,
                     # so the "fraction above threshold" subplot had no FOV error
                     # to draw and fell back to shading the area under the line.
-                    _raw_pts.append((t, gm, gerr, gf, _n_above_val if not rep_per_fov else 0, 0, gfe, gnpf_m, gnpf_s))
+                    _raw_pts.append((t, gm, gerr, gf, _n_above_val if not rset_per_fov else 0, 0, gfe, gnpf_m, gnpf_s))
             if _raw_pts and (fc_control_stats or fc_vs_t0):
                 _raw_pts = _fc.normalize_pts(
                     _raw_pts,

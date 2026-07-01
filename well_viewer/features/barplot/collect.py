@@ -25,6 +25,7 @@ from well_viewer.domain.stats_compute import (
     compute_rep_n_above_stats,
     compute_rep_per_fov_stats,
     compute_rep_stats,
+    replicate_unit,
 )
 from well_viewer.core import debug_flags as debug_flags
 
@@ -225,7 +226,14 @@ def collect_bar_items(
                     display = f"t={tp_str}"
                 else:
                     display = rset_disp
-                if per_fov_spread:
+                # Unified replicate rule (shared with the Statistics tab): FOVs are
+                # replicates ONLY for a single-well set with FOV mode on; a
+                # replicate set (>=2 wells) is always per-well, so its spread
+                # matches the stats test's n.
+                n_loaded = sum(1 for w in rset.wells
+                               if w in app._app_state.dataset.well_paths)
+                rset_per_fov = replicate_unit(n_loaded, per_fov_spread) == "fov"
+                if rset_per_fov:
                     gm, g_err_m, gf, g_err_f, n_above_pf_mean, n_above_pf_spread = (
                         compute_rep_per_fov_stats(app, rset, target_t, threshold, use_sem)
                     )
@@ -258,7 +266,7 @@ def collect_bar_items(
                     stats = _fc.member_first_tp_stats_resolved(
                         app, rset.name,
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
-                        use_sem=use_sem, per_fov_spread=per_fov_spread,
+                        use_sem=use_sem, per_fov_spread=rset_per_fov,
                         fluor_gates=fluor_gates,
                         baseline_tp=fc_baseline_tp,
                     )

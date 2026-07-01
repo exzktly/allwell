@@ -163,6 +163,10 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     clf.addWidget(QLabel("k:", cl_frame))
     kspin = QSpinBox(cl_frame)
     kspin.setRange(2, 20)
+    # Reserve room for two digits + the up/down arrows; without a minimum the
+    # crowded horizontal row squeezes this (width-less) spinbox until the value
+    # clips.
+    kspin.setMinimumWidth(64)
     kspin.setValue(int(st.cluster_count))
     kspin.valueChanged.connect(lambda v: mv_ctrl.mv_set_cluster_count(ctx.app, v))
     ctx.app._mv_kspin = kspin

@@ -90,6 +90,19 @@ def test_multivariate_tab_flips_off_empty_state_with_dataset(loaded_app_shape):
 
 
 @pytest.mark.slow
+def test_multivariate_k_spinbox_has_room_for_value(loaded_app_shape):
+    """Regression: the cluster ``k`` spinbox sits in a crowded horizontal row and
+    used to be squeezed until its value clipped. Pin a minimum width that leaves
+    room for two digits + the up/down arrows."""
+    app = loaded_app_shape
+    assert app._notebook.setCurrentByName("Multivariate")
+    kspin = app._mv_kspin
+    assert kspin.minimumWidth() >= 64
+    # The natural size the widget asks for must fit inside what it's guaranteed.
+    assert kspin.sizeHint().width() <= kspin.minimumWidth() + 40
+
+
+@pytest.mark.slow
 def test_multivariate_empty_selection_shows_message(loaded_app_shape):
     app = loaded_app_shape
     from well_viewer.features.multivariate import controller as mvctl

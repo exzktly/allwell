@@ -979,6 +979,16 @@ def _install_combobox_popup_widener() -> None:
 
 
 def main() -> None:
+    # Restrict matplotlib to the bundled fonts BEFORE anything imports it (the
+    # first plot pulls matplotlib.figure -> font_manager). Skips matplotlib's
+    # full system-font enumeration, which can cost minutes on first launch on a
+    # Windows 365 Cloud PC. Defensive: never blocks startup.
+    try:
+        import mpl_bootstrap
+        mpl_bootstrap.configure()
+    except Exception:
+        swallowed()
+
     # Dump a Python stack trace to stderr on a hard crash (segfault / fatal Qt
     # error) so otherwise output-less native crashes are diagnosable from the
     # terminal without a special launch flag. Guarded: a windowed PyInstaller

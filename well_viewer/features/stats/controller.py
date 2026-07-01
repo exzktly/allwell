@@ -625,12 +625,14 @@ def stats_grp_clear_all(app) -> None:
     stats_refresh_group_list(app)
 
 
-def stats_sync_from_app(app) -> None:
-    # In Split View, seed the comparison groups from only the rep-sets currently
-    # *visible* on the plots (non-hidden) rather than every defined grouping, so
-    # the auto-populated comparison matches what the user is looking at. Falls
-    # back to all groups outside Split View, or when nothing is visible.
-    if getattr(app, "_split_active", False):
+def stats_sync_from_app(app, *, visible_only_in_split: bool = True) -> None:
+    # On *auto-populate* (first visit) in Split View, seed the comparison groups
+    # from only the rep-sets currently *visible* on the plots (non-hidden) so the
+    # comparison matches what the user is looking at. The explicit "Load from
+    # Sample Definitions" action passes visible_only_in_split=False to load every
+    # defined grouping regardless of visibility. Falls back to all groups outside
+    # Split View, or when nothing is visible.
+    if visible_only_in_split and getattr(app, "_split_active", False):
         groups = app._groups_from_visible_rep_sets() or app._groups_from_rep_sets()
     else:
         groups = app._groups_from_rep_sets()
@@ -664,7 +666,9 @@ def stats_resync_from_sample_defs(app) -> None:
         )
         if resp != QMessageBox.Yes:
             return
-    stats_sync_from_app(app)
+    # Explicit "load all from Sample Definitions" — never filter to the
+    # split-visible subset (the dialog above promised all rsets groups).
+    stats_sync_from_app(app, visible_only_in_split=False)
     app._set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
 
 

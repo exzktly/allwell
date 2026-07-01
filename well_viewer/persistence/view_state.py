@@ -444,20 +444,19 @@ def restore(app, state: dict) -> None:
             str(k): dict(v) for k, v in axis_in.items() if isinstance(v, dict)
         }
 
-    # Active channel — validated against the canonical list. Fall through
-    # silently when the saved channel no longer exists in the new dataset.
-    # Direct field assignment mirrors the active_metric path below: the combos
-    # may not exist yet, but ``recalculate_threshold`` (which runs right after
-    # view_state.load in load_controller) calls ``update_channel_selector``,
-    # which picks the active label off the field we just set, so every plot
-    # tab's channel combo ends up on the restored value. The previous
-    # ``hasattr(app, "_set_active_channel")`` guard always failed
-    # (``_set_active_channel`` is never bound onto the app) so channel
-    # restoration silently no-op'd — every reopen reverted to the default
-    # first fluor channel.
+    # Active channel. Direct field assignment mirrors the active_metric path
+    # below: the combos may not exist yet, but ``recalculate_threshold`` (which
+    # runs right after view_state.load in load_controller) calls
+    # ``update_channel_selector``, which picks the active label off the field we
+    # just set — and validates it against the dataset's channels, falling back
+    # when the saved channel is stale. We must NOT gate on
+    # ``ch in fluor_channels`` here: at view_state.load time ``fluor_channels`` is
+    # still EMPTY (populated only later by ``recalculate_threshold``), so that
+    # guard dropped every restored channel and each reopen reverted to the default
+    # first fluor channel. Setting the field also covers ratio / shape channels,
+    # which never appear in ``fluor_channels``.
     ch = state.get("active_channel")
-    fluor = list(app._app_state.channel.fluor_channels or [])
-    if isinstance(ch, str) and ch and ch in fluor:
+    if isinstance(ch, str) and ch:
         try:
             app._app_state.channel.active_channel = ch
             set_active_channel(app, ch)

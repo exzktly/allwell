@@ -44,6 +44,11 @@ from widgets.mpl_toolbar import MplToolbar  # noqa: E402
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
     import matplotlib  # noqa: E402
     matplotlib.use("QtAgg", force=False)
+    # Transparent legend backgrounds everywhere by default — legends sit over the
+    # plot rather than masking it with an opaque panel. Individual call sites may
+    # still override, but the app-wide default is transparent.
+    matplotlib.rcParams["legend.framealpha"] = 0.0
+    matplotlib.rcParams["legend.facecolor"] = "none"
     from matplotlib.backends.backend_qtagg import (  # noqa: E402
         FigureCanvasQTAgg as _FigureCanvas, NavigationToolbar2QT as _NavToolbar,
     )

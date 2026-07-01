@@ -121,6 +121,13 @@ def style_legend(leg, ax) -> None:
     title = leg.get_title()
     if title is not None and title.get_text():
         title.set_color(title_fg)
+    # Transparent background everywhere — the legend floats over the plot instead
+    # of masking it with an opaque panel (belt-and-suspenders with the rcParam
+    # default, so a legend created with an explicit opaque framealpha is fixed
+    # up here too).
+    frame = leg.get_frame()
+    frame.set_alpha(0.0)
+    frame.set_facecolor("none")
 
 
 # ── export-style prefs → figure application ──────────────────────────────────

@@ -57,35 +57,39 @@ def cell_area_px(cell: int) -> float:
     return 200.0 + cell * 10.0
 
 
-def _rows_for_well(well: str, *, with_shape: bool = False) -> list[dict]:
+def _rows_for_well(well: str, *, with_shape: bool = False, n_fovs: int = 1) -> list[dict]:
     rows: list[dict] = []
     for tp_label, tp_hours in TIMEPOINTS:
-        for cell in range(1, CELLS_PER_TP + 1):
-            row = {
-                "well": well,
-                "fov": "1",
-                "timepoint": tp_label,
-                "timepoint_hours": tp_hours,
-                "channel": NUCLEAR_TOKEN,
-                "nucleus_id": cell,
-                "area_px": cell_area_px(cell),
-                "gfp_mean_intensity": round(cell_gfp(well, tp_hours, cell), 4),
-                "mcherry_mean_intensity": round(cell_mcherry(well, tp_hours, cell), 4),
-                "dapi_mean_intensity": round(cell_dapi(well, tp_hours, cell), 4),
-            }
-            if with_shape:
-                row.update({
-                    "shape_area": round(150.0 + cell * 5.0, 4),
-                    "shape_eccentricity": round(0.1 * cell, 4),
-                    "shape_solidity": 0.9,
-                    "shape_centroid_row": float(cell * 2),
-                    "shape_centroid_col": float(cell * 3),
-                })
-            rows.append(row)
+        for fov in range(1, n_fovs + 1):
+            for cell in range(1, CELLS_PER_TP + 1):
+                # A per-FOV offset so per-FOV means differ (finite p when FOVs
+                # are the replicates) while staying a closed-form function.
+                fov_bump = (fov - 1) * 3.0
+                row = {
+                    "well": well,
+                    "fov": str(fov),
+                    "timepoint": tp_label,
+                    "timepoint_hours": tp_hours,
+                    "channel": NUCLEAR_TOKEN,
+                    "nucleus_id": cell,
+                    "area_px": cell_area_px(cell),
+                    "gfp_mean_intensity": round(cell_gfp(well, tp_hours, cell) + fov_bump, 4),
+                    "mcherry_mean_intensity": round(cell_mcherry(well, tp_hours, cell) + fov_bump, 4),
+                    "dapi_mean_intensity": round(cell_dapi(well, tp_hours, cell), 4),
+                }
+                if with_shape:
+                    row.update({
+                        "shape_area": round(150.0 + cell * 5.0, 4),
+                        "shape_eccentricity": round(0.1 * cell, 4),
+                        "shape_solidity": 0.9,
+                        "shape_centroid_row": float(cell * 2),
+                        "shape_centroid_col": float(cell * 3),
+                    })
+                rows.append(row)
     return rows
 
 
-def build_mini_dataset(dest: Path, *, with_shape: bool = False) -> Path:
+def build_mini_dataset(dest: Path, *, with_shape: bool = False, n_fovs: int = 1) -> Path:
     """Materialise the mini dataset into *dest* and return it.
 
     Writes one ``mini_<WELL>.csv`` per well (the trailing well token is what
@@ -102,7 +106,7 @@ def build_mini_dataset(dest: Path, *, with_shape: bool = False) -> Path:
         with path.open("w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=columns)
             writer.writeheader()
-            writer.writerows(_rows_for_well(well, with_shape=with_shape))
+            writer.writerows(_rows_for_well(well, with_shape=with_shape, n_fovs=n_fovs))
 
     pipeline_info = {
         "schema": "mini",

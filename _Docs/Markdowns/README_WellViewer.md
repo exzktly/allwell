@@ -753,11 +753,17 @@ divide-by-zero.
   PCA the axis captions report each PC's explained-variance %, and a **PCA
   loadings** panel is drawn beside the scatter (see below).
 - **Clustering** — **k-means** or **hierarchical** clustering into **k** groups
-  (the `k` spinbox). Left panel: a PCA scatter coloured by cluster; right panel:
-  a stacked bar of each well/group's **phenotype composition** (fraction of its
-  cells in each cluster). Hierarchical clustering on large selections is fit on
-  a random subsample and the rest assigned to the nearest cluster (a footnote
-  says how many cells were sampled).
+  (the `k` spinbox). Three panels: a PCA scatter coloured by cluster; a stacked
+  bar of each well/group's **phenotype composition** (fraction of its cells in
+  each cluster); and a **cluster feature-profile** heatmap (see below).
+  Hierarchical clustering on large selections is fit on a random subsample and
+  the rest assigned to the nearest cluster (a footnote says how many cells were
+  sampled).
+
+> **t-SNE / UMAP performance.** These run on the UI thread and scale poorly, so
+> on a large selection they're capped to a seeded random subsample of the cells
+> (a footnote reports "N sampled cells (of M)"); a wait cursor shows while they
+> compute. PCA is exact and never capped.
 - **Faceting** — pivot one feature into a row-factor × column-factor grid
   (e.g. well × timepoint), aggregated by mean / median / count / std.
 
@@ -780,15 +786,34 @@ together along that axis, opposite-sign features trade off.
   row giving the share of total variance each PC captures. Loading vectors are
   unit-norm per PC (they're the SVD right-singular directions).
 
+#### Making t-SNE / UMAP actionable
+
+t-SNE and UMAP are *non-linear* embeddings, so — unlike PCA — they have **no
+loadings**: the axes aren't a weighted combination of features, and "tSNE-1 =
+high GFP" has no meaning. You read them a different way:
+
+- **Interpret the clusters, not the axes.** In **Clustering** mode the far-right
+  **cluster feature-profile** heatmap shows each cluster's mean value per feature
+  (z-scored across the population: red = above average, blue = below). That's the
+  interpretable substitute for loadings — it tells you *what each region/cluster
+  actually is* ("cluster 2 = high GFP, low area"). Exported as a companion
+  **`<name>_cluster_profiles.csv`** (rows = clusters, columns = features).
+- **Export the coordinates.** In **Dim-reduction** (or Clustering) mode, **Export**
+  adds each cell's embedding coordinates as `pca_1/pca_2`, `tsne_1/tsne_2`, or
+  `umap_1/umap_2` columns — matching exactly what's plotted (including any t-SNE /
+  UMAP subsample) — so the map is quantifiable downstream.
+- **Colour by cluster** and read the **phenotype-composition** bars to see what
+  fraction of each condition falls in each region.
+
 #### Which cluster each cell belongs to
 
 In **Clustering** mode, click **Export** to write the per-cell feature matrix
 with a **`cluster`** column appended — one row per cell, giving its `well`,
-`group`, `timepoint_hours`, every feature value, and its integer cluster id
-(`0 … k-1`). That's the raw phenotype assignment for downstream analysis (count
-cells per cluster per condition, cross-tabulate against treatment, etc.). The
-cluster ids match the colours in the on-screen scatter and the phenotype-
-composition bars.
+`group`, `timepoint_hours`, every feature value, its embedding coordinates, and
+its integer cluster id (`0 … k-1`). That's the raw phenotype assignment for
+downstream analysis (count cells per cluster per condition, cross-tabulate
+against treatment, etc.). The cluster ids match the colours in the on-screen
+scatter and the phenotype-composition bars.
 
 ---
 

@@ -1,0 +1,36 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# PyInstaller
+*.spec.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Local test run logs (not for commit)
+_pytest*.log
+
+# Coverage data
+.coverage
+htmlcov/
+
+# CI fast-lane JUnit report (gates on this instead of the segfault-prone exit code)
+.pytest-report.xml

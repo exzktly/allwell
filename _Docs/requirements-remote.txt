@@ -1,0 +1,77 @@
+# requirements-remote.txt
+# ------------------------
+# Pipeline-only Python dependencies for the AllWell *remote* execution
+# host (a Linux machine the user SSHes into). The bootstrap script
+# (scripts/_bootstrap_lib.py) pip-installs this file inside the
+# ``allwell`` conda env on the remote.
+#
+# Why a separate file from requirements.txt? The GUI side ships PySide6,
+# pyobjc, and pyinstaller — none of which the headless pipeline needs.
+# Trying to pip-install PySide6 on certain Pythons / architectures
+# (notably Linux aarch64) fails outright because PySide6 doesn't ship
+# wheels for those platforms. v5.2.1 splits the GUI superset off so the
+# remote install never touches PySide6.
+#
+# All version pins below are identical to the GUI requirements file so
+# the pipeline's scientific output is bit-identical across the local and
+# remote hosts (StarDist segmentation determinism depends on it).
+
+# ── TensorFlow (Apple Silicon, GPU via Metal) ────────────────────────────────
+tensorflow-macos==2.13.0 ; sys_platform == "darwin" and platform_machine == "arm64"
+tensorflow-metal==1.1.0  ; sys_platform == "darwin" and platform_machine == "arm64"
+
+# ── TensorFlow (Linux x86_64 + Windows, CPU-only) ────────────────────────────
+# Pin 2.13.0 to keep keras / protobuf / StarDist identical across platforms.
+tensorflow==2.13.0 ; sys_platform != "darwin"
+
+# Shared by both TF lines (cross-platform pins)
+keras==2.13.1
+protobuf==3.20.3
+
+# ── StarDist segmentation pipeline ───────────────────────────────────────────
+csbdeep==0.8.0
+stardist==0.9.1
+numba==0.57.1
+llvmlite==0.40.1
+
+# ── Image I/O ────────────────────────────────────────────────────────────────
+tifffile==2023.9.26
+imagecodecs==2023.9.18
+
+# ── Data analysis ────────────────────────────────────────────────────────────
+# Used by post-pipeline CSV assembly; minimal footprint compared to the
+# scientific stack.
+pandas==2.2.3
+
+# ── Label-free segmentation + cell tracking (v5.3) ───────────────────────────
+# Empirically resolved (pip --dry-run, full set) to coexist with the
+# TF 2.13 / numpy 1.24.3 / numba 0.57 / StarDist stack. The binding constraint
+# is typing-extensions: TF 2.13 caps it <4.6, while Torch >=2.2 requires >=4.8 —
+# so the entire ML stack is pinned to the Torch 2.0.1 line with
+# typing-extensions==4.5.0. pydantic stays on v1 (pulled by btrack), so there is
+# no typing-extensions clash. CUDA wheels are pulled by torch on Linux x86_64;
+# the macOS arm64 (MPS) and Windows (CPU) targets get the appropriate wheels by
+# platform. For a CPU-only Linux remote, install torch from the +cpu index.
+#
+# laptrack is intentionally NOT included: every laptrack >=0.16.1 requires
+# numpy>=1.26 (conflicts with TF 2.13's numpy<=1.24.3) and <=0.16.0 requires
+# pandas<2.0 (conflicts with pandas==2.2.3 / btrack). btrack is the in-core
+# lightweight + lineage tracker; trackastra is the deep-learning option.
+typing-extensions==4.5.0   # ceiling under TF 2.13's <4.6; satisfies torch 2.0.1
+torch==2.0.1
+torchvision==0.15.2
+cellpose==3.1.1.2          # label-free segmentation (cyto3); numpy<2.1,>=1.20
+btrack==0.6.5              # cell tracking (Bayesian + lineage); uses pydantic v1
+trackastra==0.3.2          # transformer-based cell tracking
+kornia==0.7.0              # pinned for trackastra on the torch 2.0.1 line
+lightning==2.0.9.post0     # pinned for trackastra on the torch 2.0.1 line
+# motile (ILP linking for trackastra) is the sole optional extra — it needs a
+# SCIP/Gurobi solver; trackastra defaults to greedy linking without it.
+
+# ── TOML config (used by services/remote_config.py on Python 3.10) ───────────
+tomli ; python_version < "3.11"
+
+# ── Test environment guard (same as the GUI requirements) ────────────────────
+# typing-extensions pin protection — see _Docs/requirements.txt header
+# comment for the gory details.
+exceptiongroup<1.3

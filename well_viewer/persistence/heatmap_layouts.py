@@ -1,0 +1,168 @@
+"""Heatmap layout persistence — ``heatmap_layouts`` section of ``persistence.json``.
+
+The section wraps the layouts in an object so visual settings (cmap, scale
+mode, vmin/vmax, rep-set average toggle) persist alongside. Legacy
+``heatmap_layouts.json`` sidecars are migrated on first load by ``_doc``.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+
+from well_viewer.persistence import _doc
+from well_viewer.core.safe import swallowed
+
+_logger = logging.getLogger("well_viewer")
+
+
+def _collect_settings(app) -> dict:
+    def _f(name):
+        v = getattr(app, name, None)
+        if isinstance(v, (int, float)) and math.isfinite(float(v)):
+            return float(v)
+        return None
+    slider = getattr(app, "_heatmap_tp_slider", None)
+    return {
+        "cmap": str(getattr(app, "_heatmap_cmap_name", "") or ""),
+        "scale_mode": str(getattr(app, "_heatmap_scale_mode", "Auto") or "Auto"),
+        "vmin": _f("_heatmap_vmin"),
+        "vmax": _f("_heatmap_vmax"),
+        "repset_avg": bool(getattr(app, "_heatmap_repset_avg", False)),
+        "log_scale": bool(getattr(app, "_heatmap_log_scale", False)),
+        # Timepoint-slider position so the scrubbed timepoint restores between
+        # sessions (clamped to the live slider range on restore).
+        "tp_index": int(slider.value()) if slider is not None else 0,
+    }
+
+
+def save_to_data_dir(app) -> None:
+    if not app._app_state.dataset.data_dir:
+        return
+    layouts = list(getattr(app, "_heatmap_layouts", []) or [])
+    payload = {
+        "layouts": [lay.to_dict() for lay in layouts],
+        "settings": _collect_settings(app),
+    }
+    _doc.set_section(app, "heatmap_layouts", payload)
+
+
+def load_from_data_dir(app) -> None:
+    if not app._app_state.dataset.data_dir:
+        return
+    data = _doc.get_section(app, "heatmap_layouts")
+    if not isinstance(data, dict):
+        return
+    from well_viewer.features.heatmap.models import layouts_from_dict
+    app._heatmap_layouts = layouts_from_dict(data.get("layouts", []) or [])
+    settings = data.get("settings", {}) or {}
+    if isinstance(settings, dict):
+        app._heatmap_persisted_settings = settings
+    if hasattr(app, "_heatmap_sidebar_table"):
+        try:
+            from well_viewer.features.heatmap.sidebar_view import (
+                refresh_heatmap_layout_sidebar,
+            )
+            refresh_heatmap_layout_sidebar(app)
+        except Exception:
+            swallowed()  # was: pass (silent except)
+    apply_persisted_settings(app)
+
+
+def apply_persisted_settings(app) -> None:
+    """Push any settings loaded from disk into the heatmap UI widgets.
+
+    Safe to call before the heatmap tab is built — does nothing in that case.
+    """
+    settings = getattr(app, "_heatmap_persisted_settings", None)
+    if not isinstance(settings, dict) or not settings:
+        return
+    cmap_cb = getattr(app, "_heatmap_cmap_cb", None)
+    scale_cb = getattr(app, "_heatmap_scale_cb", None)
+    vmin_edit = getattr(app, "_heatmap_vmin_edit", None)
+    vmax_edit = getattr(app, "_heatmap_vmax_edit", None)
+    rs_cb = getattr(app, "_heatmap_repset_avg_cb", None)
+    # Bail until the tab is built; init/build will call us again.
+    if cmap_cb is None and scale_cb is None and rs_cb is None:
+        return
+
+    cmap = str(settings.get("cmap") or "")
+    if cmap and cmap_cb is not None:
+        # ``_heatmap_cmap_cb`` is a LutSelector, not a QComboBox — use its
+        # setLut(name, reversed) API and split the trailing "_r" convention
+        # that the heatmap tab uses for reversed colormaps.
+        base = cmap[:-2] if cmap.endswith("_r") else cmap
+        rev = cmap.endswith("_r")
+        blocked = cmap_cb.blockSignals(True)
+        try:
+            cmap_cb.setLut(base, rev)
+        finally:
+            cmap_cb.blockSignals(blocked)
+        app._heatmap_cmap_name = cmap
+
+    scale_mode = str(settings.get("scale_mode") or "Auto")
+    if scale_cb is not None:
+        idx = scale_cb.findText(scale_mode)
+        if idx >= 0:
+            blocked = scale_cb.blockSignals(True)
+            try:
+                scale_cb.setCurrentIndex(idx)
+            finally:
+                scale_cb.blockSignals(blocked)
+    app._heatmap_scale_mode = scale_mode
+
+    def _set_edit(edit, key):
+        v = settings.get(key)
+        if edit is not None and isinstance(v, (int, float)) and math.isfinite(float(v)):
+            blocked = edit.blockSignals(True)
+            try:
+                edit.setText(f"{float(v):g}")
+            finally:
+                edit.blockSignals(blocked)
+            setattr(app, f"_heatmap_{key}", float(v))
+
+    _set_edit(vmin_edit, "vmin")
+    _set_edit(vmax_edit, "vmax")
+
+    repset_avg = bool(settings.get("repset_avg", False))
+    app._heatmap_repset_avg = repset_avg
+    if rs_cb is not None:
+        blocked = rs_cb.blockSignals(True)
+        try:
+            rs_cb.setChecked(repset_avg)
+        finally:
+            rs_cb.blockSignals(blocked)
+
+    log_scale = bool(settings.get("log_scale", False))
+    app._heatmap_log_scale = log_scale
+    log_cb = getattr(app, "_heatmap_log_scale_cb", None)
+    if log_cb is not None:
+        blocked = log_cb.blockSignals(True)
+        try:
+            log_cb.setChecked(log_scale)
+        finally:
+            log_cb.blockSignals(blocked)
+
+    # Timepoint slider position. The slider's range is populated by
+    # ``refresh_heatmap_timepoints`` (called just before this on tab build), so
+    # clamp to the live maximum; the caller's ``_redraw`` then renders the
+    # restored timepoint. Signals are blocked so we don't re-enter the redraw
+    # path here.
+    tp_idx = settings.get("tp_index")
+    if isinstance(tp_idx, int):
+        slider = getattr(app, "_heatmap_tp_slider", None)
+        if slider is not None:
+            clamped = max(0, min(tp_idx, slider.maximum()))
+            blocked = slider.blockSignals(True)
+            try:
+                slider.setValue(clamped)
+            finally:
+                slider.blockSignals(blocked)
+            tps = list(getattr(app, "_heatmap_tp_values", []) or [])
+            label = getattr(app, "_heatmap_tp_label", None)
+            if label is not None and tps and clamped < len(tps):
+                label.setText(f"t = {tps[clamped]:g} h")
+
+    # Successfully applied — keep the dict around in case the tab rebuilds.
+    # (No need to clear it; a subsequent save_to_data_dir overwrites the file
+    # with current widget state anyway.)

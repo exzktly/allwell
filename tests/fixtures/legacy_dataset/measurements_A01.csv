@@ -1,0 +1,4 @@
+experiment,channel,well,fov,timepoint,nucleus_id,area_px,nir_total_intensity,nir_mean_intensity,nir_max_intensity,nir_min_intensity,nir_std_intensity,gfp_total_intensity,gfp_mean_intensity,gfp_max_intensity,gfp_min_intensity,gfp_std_intensity
+exp,GFP,A01,F001,24h,1,150,30000,200.0,255,10,40.0,12000,80.0,180,5,22.0
+exp,GFP,A01,F001,24h,2,180,39600,220.0,255,12,38.0,9000,50.0,120,4,18.0
+exp,GFP,A01,F002,24h,1,160,33600,210.0,250,11,39.0,11200,70.0,160,6,20.0

@@ -151,9 +151,17 @@ def test_collect_line_series_fov_spread_populates_frac_spread(mock_app, monkeypa
     into ``LinePoint.frac_spread``. It used to drop it (hardcoded 0.0), so the
     "fraction above threshold" subplot had no error band and fell back to shading
     the area under the line.
+
+    Per the unified replicate rule, per-FOV spread applies only to a SINGLE-well
+    set (FOVs are its replicates); a multi-well set is per-well. So this uses a
+    single-well active set to exercise the per-FOV path.
     """
     import well_viewer.features.lineplot.controller as lp
+    from well_viewer.domain.batch_models import ReplicateSet
 
+    # Single-well active set → replicate_unit == "fov" when FOV mode is on.
+    monkeypatch.setattr(mock_app, "_rep_sets_active",
+                        lambda: [ReplicateSet("SOLO", ["A01"])], raising=False)
     # Force FOV-spread mode and stub the per-FOV stats with a known non-zero
     # fraction error (idx 3) + per-FOV n-above mean/spread (idx 4/5).
     monkeypatch.setattr(mock_app, "_use_fov_spread_active", lambda: True, raising=False)

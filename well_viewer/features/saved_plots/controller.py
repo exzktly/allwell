@@ -124,6 +124,7 @@ def _restore_stats(app, cfg) -> None:
             app, groups=groups, target_t=(float(target_t) if target_t is not None else None),
             val_col=cfg.get("val_col"), statistic=cfg.get("statistic", "mean"),
             threshold=cfg.get("threshold"), test=cfg.get("test", ""),
+            use_fov=bool(cfg.get("use_fov", True)),
         )
         app._app_state.stats.groups = groups
         app._app_state.stats.pairwise = pairwise

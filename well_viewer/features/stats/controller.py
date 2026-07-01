@@ -13,6 +13,7 @@ from well_viewer.data.data_loading import (
     is_ratio_key,
     resolve_value_series,
 )
+from well_viewer.domain.stats_compute import group_replicate_stats
 
 
 _STAT_LABELS = {
@@ -50,8 +51,17 @@ def collect_group_values(
     val_col: Optional[str] = None,
     threshold: Optional[float] = None,
     statistic: str = "mean",
+    use_fov: bool = True,
 ) -> List[float]:
-    """Return one summary value per well (or per-FOV when the group has 1 well)."""
+    """Return one summary value per replicate for the group's test.
+
+    The replicate unit is decided by the SHARED :func:`replicate_unit` rule and
+    the values come from the SHARED :func:`group_replicate_stats` producer — the
+    exact same per-replicate values the bar/line error bars reduce — so the test's
+    ``n`` and the plotted spread can never disagree. Returns ``[]`` when there are
+    no loaded wells; a single-well group with FOV mode off yields a single value
+    (``n=1``), which the caller declines as untestable.
+    """
     val_col = val_col or app._app_state.channel.active_val_col
     if threshold is None:
         try:
@@ -59,47 +69,17 @@ def collect_group_values(
         except Exception:
             threshold = float(app._app_state.channel.threshold)
     threshold = float(threshold)
-    ratios = app._app_state.channel.ratio_index
 
-    wells = [w for w in grp.wells if w in app._app_state.dataset.well_paths]
-    if not wells:
-        return []
-    aggregate_per_fov = (len(wells) == 1)
-
-    samples: List[float] = []
-    for lbl in wells:
-        df = app._get_rows(lbl)
-        if df is None or df.empty:
-            continue
-        mask = df_included_mask(df).to_numpy(copy=True)
-        if "timepoint_hours" not in df.columns:
-            continue
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-        with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(tp) & (np.abs(tp - target_t) <= 1e-6)
-        val = resolve_value_series(df, val_col, ratios).to_numpy()
-        mask &= np.isfinite(val)
-        if not mask.any():
-            continue
-
-        if aggregate_per_fov:
-            fov_raw = (df["fov"].fillna("").astype(str).str.strip()
-                       if "fov" in df.columns
-                       else pd.Series([""] * len(df), index=df.index))
-            # Empty FOV → "1" to match aggregate_with_threshold_df. The
-            # earlier "_" sentinel bucketed missing-FOV cells differently
-            # from the bar / line aggregator on the same dataset.
-            fov = fov_raw.where(fov_raw != "", "1").to_numpy()
-            sub = pd.DataFrame({"key": fov[mask], "v": val[mask]})
-            for _, group_vals in sub.groupby("key", sort=False)["v"]:
-                stat = _compute_statistic_arr(group_vals.to_numpy(), statistic, threshold)
-                if stat is not None:
-                    samples.append(stat)
-        else:
-            stat = _compute_statistic_arr(val[mask], statistic, threshold)
-            if stat is not None:
-                samples.append(stat)
-    return samples
+    reps = group_replicate_stats(
+        app, grp.wells, target_t, use_fov=use_fov,
+        val_col=val_col, threshold=threshold,
+    )
+    out: List[float] = []
+    for r in reps:
+        s = r.summary(statistic)
+        if s is not None and np.isfinite(s):
+            out.append(float(s))
+    return out
 
 
 def collect_group_per_cell_values(
@@ -242,7 +222,8 @@ def _run_pair_tests(group_vals, test, is_ks):
     return out
 
 
-def compute_pairwise(app, *, groups, target_t, val_col, statistic, threshold, test) -> list:
+def compute_pairwise(app, *, groups, target_t, val_col, statistic, threshold, test,
+                     use_fov: bool = True) -> list:
     """Widget-free computation of the structured pairwise results that drive the
     Bar-plot significance brackets (``StatsState.pairwise``).
 
@@ -269,8 +250,11 @@ def compute_pairwise(app, *, groups, target_t, val_col, statistic, threshold, te
                                                  val_col=val_col, threshold=threshold)
         else:
             vals = collect_group_values(app, g, target_t, val_col=val_col,
-                                        threshold=threshold, statistic=statistic)
-        if not vals:
+                                        threshold=threshold, statistic=statistic,
+                                        use_fov=use_fov)
+        # A meaningful test needs >=2 replicate values; a single-well group with
+        # FOV mode off yields only 1 (no replicates) and is declined here.
+        if not vals or (not is_ks and len(vals) < 2):
             return []
         group_vals.append((g.name, vals))
     pair_results = _run_pair_tests(group_vals, test, is_ks)
@@ -339,6 +323,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         statistic = app._stats_active_statistic()
     except Exception:
         statistic = "mean"
+    use_fov = bool(app._use_fov_spread_active())
     channel_lbl = _channel_label_for_val_col(val_col)
     stat_lbl = _STAT_LABELS.get(statistic, statistic)
 
@@ -348,27 +333,35 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             vals = collect_group_per_cell_values(
                 app, g, target_t, val_col=val_col, threshold=threshold,
             )
-            empty_msg = (
-                f"Group '{g.name}' has no per-cell {channel_lbl} data "
-                f"at t={tp_str} h above threshold ({threshold:.2f})."
-            )
+            if not vals:
+                app._stats_write_result(
+                    f"Group '{g.name}' has no per-cell {channel_lbl} data "
+                    f"at t={tp_str} h above threshold ({threshold:.2f})."
+                )
+                return
         else:
             vals = collect_group_values_fn(g, target_t)
             n_wells = len([w for w in g.wells if w in app._app_state.dataset.well_paths])
-            if n_wells == 1:
-                empty_msg = (
-                    f"Group '{g.name}' (1 well, FOV-aggregated) has no "
-                    f"{channel_lbl} samples at t={tp_str} h "
-                    f"(threshold {threshold:.2f})."
-                )
-            else:
-                empty_msg = (
-                    f"Group '{g.name}' has no {channel_lbl} per-well "
-                    f"samples at t={tp_str} h (threshold {threshold:.2f})."
-                )
-        if not vals:
-            app._stats_write_result(empty_msg)
-            return
+            # A test needs >=2 replicate values. The replicate unit is per-well
+            # (replicate sets) or per-FOV (single-well + FOV mode on).
+            if len(vals) < 2:
+                if n_wells <= 1 and not use_fov:
+                    app._stats_write_result(
+                        f"Group '{g.name}' is a single well and FOV mode is off "
+                        f"— enable FOV mode (FOVs become replicates) or add "
+                        f"replicate wells to run a test."
+                    )
+                elif n_wells <= 1:
+                    app._stats_write_result(
+                        f"Group '{g.name}' (single well, per-FOV) has fewer than "
+                        f"2 FOV samples at t={tp_str} h (threshold {threshold:.2f})."
+                    )
+                else:
+                    app._stats_write_result(
+                        f"Group '{g.name}' has fewer than 2 {channel_lbl} per-well "
+                        f"samples at t={tp_str} h (threshold {threshold:.2f})."
+                    )
+                return
         group_vals.append((g.name, vals))
 
     try:
@@ -377,9 +370,8 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         app._stats_write_result("scipy is required.\nInstall with: pip install scipy")
         return
 
-    # Detect solo-well groups (variance computed across FOVs because there's
-    # only one well per "group") so the output can note the change in unit
-    # of replication.
+    # Single-well groups test across FOVs (FOV mode is on, else they'd have been
+    # declined above); replicate sets test across wells. Note the replicate unit.
     solo_groups = [
         g.name for g in groups
         if len([w for w in g.wells if w in app._app_state.dataset.well_paths]) == 1
@@ -387,7 +379,8 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     if is_ks:
         sample_units = "per-cell values"
     elif solo_groups:
-        sample_units = "per-FOV samples (solo-well groups — see note below)"
+        sample_units = ("per-well (replicate sets) · per-FOV (single-well "
+                        "groups, FOV mode on)")
     else:
         sample_units = "per-well samples"
     header_lines: List[str] = [
@@ -401,9 +394,9 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     ]
     if solo_groups and not is_ks:
         header_lines.insert(-1,
-            "Note:       solo-well group(s) " + ", ".join(solo_groups)
-            + " — variance computed across FOVs (one sample per FOV) since "
-            "no replicate wells were defined for them.")
+            "Note:       single-well group(s) " + ", ".join(solo_groups)
+            + " — tested across FOVs (one sample per FOV) because FOV mode is "
+            "ON and no replicate wells are defined for them.")
         header_lines.insert(-1, "")
     lines: List[str] = list(header_lines)
     for name_a, vals_a in group_vals:
@@ -462,7 +455,9 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     # which panel), and the run CONTEXT (``val_col`` / ``target_t``).
     app._app_state.stats.pairwise = compute_pairwise(
         app, groups=app._app_state.stats.groups, target_t=target_t,
-        val_col=val_col, statistic=statistic, threshold=threshold, test=test)
+        val_col=val_col, statistic=statistic, threshold=threshold, test=test,
+        use_fov=use_fov)
+    stats_refresh_fov_indicator(app)
 
     if is_ks:
         draw_ks_cdf_fn(group_vals, tp_str)
@@ -824,6 +819,23 @@ def deserialize_stats_groups(app, data) -> list:
 
 
 
+def stats_refresh_fov_indicator(app) -> None:
+    """Update the Statistics tab's replicate-mode label from the FOV toggle, so
+    the tab acknowledges which unit of replication the test will use."""
+    lbl = getattr(app, "_stats_fov_indicator", None)
+    if lbl is None:
+        return
+    try:
+        on = bool(app._use_fov_spread_active())
+    except Exception:
+        return
+    lbl.setText(
+        "Replicates: per-well · single-well groups use FOVs (FOV mode ON)"
+        if on else
+        "Replicates: per-well · single-well groups need FOV mode (OFF)"
+    )
+
+
 def stats_collect_group_values_shim(
     app, grp: BarGroup, target_t: float
 ) -> List[float]:
@@ -832,6 +844,7 @@ def stats_collect_group_values_shim(
         val_col=app._stats_active_val_col(),
         threshold=app._stats_active_threshold(),
         statistic=app._stats_active_statistic(),
+        use_fov=app._use_fov_spread_active(),
     )
 
 

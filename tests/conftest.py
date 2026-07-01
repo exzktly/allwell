@@ -316,6 +316,21 @@ def loaded_app_shape(viewer_app, mini_dataset_shape):
     return viewer_app
 
 
+@pytest.fixture
+def mini_dataset_multifov(tmp_path):
+    """Mini dataset with 3 FOVs per well/timepoint (per-FOV means differ) so the
+    FOV-as-replicate stats path can be exercised."""
+    from tests.fixtures.mini_dataset import build_mini_dataset
+    return build_mini_dataset(tmp_path / "mini_dataset_multifov", n_fovs=3)
+
+
+@pytest.fixture
+def loaded_app_multifov(viewer_app, mini_dataset_multifov):
+    """``WellViewerApp`` loaded with the multi-FOV mini dataset."""
+    viewer_app._load_path(mini_dataset_multifov)
+    return viewer_app
+
+
 def pytest_collection_modifyitems(config, items):
     """Auto-mark full-app Qt tests ``slow``.
 

@@ -183,6 +183,35 @@ def test_restore_selections_replaces_live_groups(loaded_app):
     assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG"]
 
 
+def test_capture_and_restore_active_solo_wells(loaded_app):
+    """Regression: the individual wells soloed onto a group-driven plot
+    (``active_solo_wells``) must survive save→restore — they were previously
+    dropped, so a restored figure lost part of its well selection."""
+    from well_viewer.features.saved_plots.controller import _restore_selections
+    app = loaded_app
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
+    app._app_state.selection.active_solo_wells = {"A01", "B01"}
+
+    params, _thresholds = capture_params(app, "Bar Plots")
+    assert params.get("active_solo_wells") == ["A01", "B01"]
+
+    # Simulate a diverged live state, then restore.
+    app._app_state.selection.active_solo_wells = {"B02"}
+    _restore_selections(app, params.get("selections"), params.get("active_solo_wells"))
+    assert app._app_state.selection.active_solo_wells == {"A01", "B01"}
+
+
+def test_restore_clears_solo_wells_when_saved_empty(loaded_app):
+    """A plot saved with no soloed wells restores to an empty solo set (clears any
+    stale solo wells), so the figure is reproduced exactly."""
+    from well_viewer.features.saved_plots.controller import _restore_selections
+    app = loaded_app
+    _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
+    app._app_state.selection.active_solo_wells = {"A01"}  # diverged live state
+    _restore_selections(app, [dict(s) for s in app._app_state.selection.selections], [])
+    assert app._app_state.selection.active_solo_wells == set()
+
+
 def test_restore_selections_noop_without_block(loaded_app):
     """Older saved plots have no ``selections`` block → restore leaves the live
     groups untouched (backward compatible)."""

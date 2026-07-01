@@ -1585,7 +1585,7 @@ def _cell_gating_show_opt_curve_popup(
         f"— scan {lo:g}…{hi:g}, {int(steps)} points",
         color=txt_pri, fontsize=11,
     )
-    leg = ax.legend(loc="upper right", framealpha=0.85, fontsize=9)
+    leg = ax.legend(loc="upper right", framealpha=0.0, facecolor="none", fontsize=9)
     if leg is not None:
         for txt in leg.get_texts():
             txt.set_color(txt_pri)

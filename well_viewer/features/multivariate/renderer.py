@@ -12,7 +12,7 @@ import logging
 
 import numpy as np
 
-from well_viewer.core.plot_style import apply_ax_style, tokens_for
+from well_viewer.core.plot_style import apply_ax_style, style_legend, tokens_for
 
 _logger = logging.getLogger("well_viewer")
 
@@ -114,13 +114,14 @@ def _legend(ax, legend_entries, muted_fg, title=""):
     handles = [Line2D([0], [0], marker="o", linestyle="", markersize=6,
                       markerfacecolor=c, markeredgecolor="none", label=lbl)
                for lbl, c in legend_entries]
-    leg = ax.legend(handles=handles, title=title, fontsize=7, framealpha=0.3,
-                    loc="best")
+    # Transparent frame + primary-foreground text (via style_legend) so labels
+    # stay legible on the dark screen theme — the old muted grey over the
+    # semi-opaque frame read as grey-on-grey.
+    leg = ax.legend(handles=handles, title=title, fontsize=7, framealpha=0.0,
+                    facecolor="none", loc="best")
     if leg is not None:
-        leg.get_title().set_color(muted_fg)
         leg.get_title().set_fontsize(7)
-        for txt in leg.get_texts():
-            txt.set_color(muted_fg)
+    style_legend(leg, ax)
 
 
 # ── correlation / pair-matrix ────────────────────────────────────────────────

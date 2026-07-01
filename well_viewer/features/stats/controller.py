@@ -153,7 +153,8 @@ def draw_ks_cdf(app, group_vals: List[Tuple[str, List[float]]], tp_str: str, wel
     ax.set_xlabel(_channel_label_for_val_col(val_col) or "value", fontsize=8)
     ax.set_ylabel("Cumulative fraction", fontsize=8)
     ax.set_title(f"Empirical CDF  —  t = {tp_str} h", fontsize=9)
-    ax.legend(fontsize=8, framealpha=0.0, facecolor="none")
+    from well_viewer.core.plot_style import style_legend
+    style_legend(ax.legend(fontsize=8, framealpha=0.0, facecolor="none"), ax)
     ax.tick_params(labelsize=7)
     ax.set_ylim(-0.02, 1.05)
     try:
@@ -625,7 +626,15 @@ def stats_grp_clear_all(app) -> None:
 
 
 def stats_sync_from_app(app) -> None:
-    app._app_state.stats.set_groups(_copy.deepcopy(app._groups_from_rep_sets()))
+    # In Split View, seed the comparison groups from only the rep-sets currently
+    # *visible* on the plots (non-hidden) rather than every defined grouping, so
+    # the auto-populated comparison matches what the user is looking at. Falls
+    # back to all groups outside Split View, or when nothing is visible.
+    if getattr(app, "_split_active", False):
+        groups = app._groups_from_visible_rep_sets() or app._groups_from_rep_sets()
+    else:
+        groups = app._groups_from_rep_sets()
+    app._app_state.stats.set_groups(_copy.deepcopy(groups))
     stats_refresh_group_list(app)
 
 

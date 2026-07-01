@@ -27,6 +27,34 @@ _logger = logging.getLogger("well_viewer")
 
 _MIN_CELLS = 3
 
+# t-SNE / UMAP are O(n^2)-ish and run on the UI thread, so on a large selection
+# they freeze the app for a long time. Cap the cells fed to them (a seeded random
+# subsample) so the projection stays interactive; PCA is cheap and never capped.
+# Mirrors the subsample the hierarchical clusterer already uses.
+_MAX_PROJECTION_CELLS = 2500
+
+
+def _subsample_for_projection(X, data, method: str):
+    """For the slow projections (t-SNE / UMAP), return a seeded random subsample
+    of at most ``_MAX_PROJECTION_CELLS`` cells — ``X`` and every parallel per-cell
+    array in ``data`` sliced by the same indices — plus the original cell count
+    (or 0 when no subsampling happened). PCA and small selections pass through."""
+    import numpy as np
+
+    n = X.shape[0]
+    if method not in ("tsne", "umap") or n <= _MAX_PROJECTION_CELLS:
+        return X, data, 0
+    rng = np.random.default_rng(0)  # deterministic so the view is reproducible
+    idx = np.sort(rng.choice(n, size=_MAX_PROJECTION_CELLS, replace=False))
+    sub = dict(data)
+    sub["X"] = X[idx]
+    for key in ("group", "well", "timepoint"):
+        arr = data.get(key)
+        if arr is not None:
+            sub[key] = np.asarray(arr)[idx]
+    sub["n_cells"] = int(len(idx))
+    return sub["X"], sub, int(n)
+
 
 # ── optional-method availability ─────────────────────────────────────────────
 
@@ -114,6 +142,13 @@ def mv_recompute(app) -> None:
     elif st.n_cells == 0:
         st.last_error = "No cells in the current selection (check wells / gating / timepoints)."
     else:
+        # t-SNE / UMAP block the UI thread for a while; show a wait cursor +
+        # status so the app reads as "working", not "frozen". Repaint once before
+        # the blocking compute so both actually appear.
+        slow = (st.mode == mv_state.MODE_DIMRED
+                and st.dimred_method in ("tsne", "umap"))
+        if slow:
+            _begin_busy(app, f"Computing {st.dimred_method.upper()}…")
         try:
             st.last_result = _compute_for_mode(app, st, data)
         except mvc.MethodUnavailable as exc:
@@ -126,7 +161,31 @@ def mv_recompute(app) -> None:
         except Exception as exc:  # pragma: no cover - defensive
             _logger.exception("Multivariate compute failed")
             st.last_error = f"Analysis failed: {exc}"
+        finally:
+            if slow:
+                _end_busy(app)
     render_multivariate(app)
+
+
+def _begin_busy(app, message: str) -> None:
+    """Show a wait cursor + status and force one repaint so they appear before a
+    blocking compute freezes the event loop."""
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        app._set_status(message)
+        QApplication.processEvents()  # paint the cursor + status before blocking
+    except Exception:
+        swallowed()
+
+
+def _end_busy(app) -> None:
+    try:
+        from PySide6.QtWidgets import QApplication
+        QApplication.restoreOverrideCursor()
+    except Exception:
+        swallowed()
 
 
 def _compute_for_mode(app, st, data) -> dict:
@@ -168,11 +227,22 @@ def _compute_for_mode(app, st, data) -> dict:
                 "feature_labels": data["feature_labels"],
             }
         else:
+            # t-SNE / UMAP: cap the cell count so the (main-thread) projection
+            # doesn't freeze the app; subset the parallel arrays used for colour.
+            Xp, data_p, n_total = _subsample_for_projection(X, data, st.dimred_method)
             coords, axis_labels = mvc.project_2d(
-                X, method=st.dimred_method, standardize_data=st.standardize,
+                Xp, method=st.dimred_method, standardize_data=st.standardize,
             )
             result["coords"] = coords
             result["axis_labels"] = axis_labels
+            result["data"] = data_p
+            if n_total:
+                result["sampled_note"] = (
+                    f"{st.dimred_method.upper()} on {Xp.shape[0]:,} sampled "
+                    f"cells (of {n_total:,})")
+            if st.color_by == "cluster":
+                result["clusters"] = _run_clustering(st, Xp)
+            return result
         if st.color_by == "cluster":
             result["clusters"] = _run_clustering(st, X)
         return result

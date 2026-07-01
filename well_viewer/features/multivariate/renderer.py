@@ -213,6 +213,9 @@ def _render_dimred(fig, res) -> None:
         fig.subplots_adjust(left=0.09, bottom=0.11, right=0.98, top=0.94, wspace=0.55)
     else:
         fig.subplots_adjust(left=0.12, bottom=0.11, right=0.97, top=0.94)
+    note = res.get("sampled_note")
+    if note:
+        _footnote(fig, note)
 
 
 def _draw_loadings(fig, ax, loadings) -> None:

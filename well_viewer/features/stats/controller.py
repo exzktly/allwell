@@ -770,14 +770,20 @@ def stats_active_threshold(app) -> float:
 
 
 def serialize_stats_groups(groups) -> list:
-    """Serialise a list of stats ``BarGroup`` for a saved plot: each group's name,
-    its member replicate-set NAMES, and its solo wells (resolved on restore
-    against the live Sample-Definition sets)."""
+    """Serialise a list of stats ``BarGroup`` for a saved plot.
+
+    Each member replicate set stores BOTH its name and its wells so the group is
+    self-contained: a restored plot reproduces the exact same well composition
+    even if the live replicate set was later renamed or deleted (matching by name
+    alone would silently drop it). Solo wells are stored directly."""
     out = []
     for g in groups or []:
         out.append({
             "name": g.name,
-            "members": [rs.name for rs in getattr(g, "members", []) or []],
+            "members": [
+                {"name": rs.name, "wells": list(getattr(rs, "wells", []) or [])}
+                for rs in getattr(g, "members", []) or []
+            ],
             "solo_wells": list(getattr(g, "solo_wells", []) or []),
         })
     return out
@@ -785,16 +791,32 @@ def serialize_stats_groups(groups) -> list:
 
 def deserialize_stats_groups(app, data) -> list:
     """Rebuild stats ``BarGroup`` objects from :func:`serialize_stats_groups`
-    output, matching member names against the live replicate sets (a set that no
-    longer exists is dropped) and keeping solo wells that still load."""
-    from well_viewer.domain.batch_models import BarGroup
+    output.
+
+    Each member is reconstructed by name when a live replicate set still matches,
+    otherwise from the wells stored alongside it (so a renamed/deleted set is
+    reproduced by composition, not dropped). Only wells that still load are kept;
+    a member with no loaded wells is dropped. Accepts the legacy name-only member
+    format (``members: [name, ...]``) for plots saved before wells were stored."""
+    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
     rep_by_name = {r.name: r for r in app._rep_sets_loaded()}
     paths = app._app_state.dataset.well_paths
     out = []
     for item in data or []:
         if not isinstance(item, dict):
             continue
-        members = [rep_by_name[n] for n in item.get("members", []) if n in rep_by_name]
+        members = []
+        for m in item.get("members", []) or []:
+            if isinstance(m, dict):
+                name = str(m.get("name", "") or "")
+                wells = [w for w in (m.get("wells") or []) if w in paths]
+            else:  # legacy: bare replicate-set name, resolved against live sets
+                name, wells = str(m), None
+            live = rep_by_name.get(name)
+            if live is not None:
+                members.append(live)
+            elif wells:
+                members.append(ReplicateSet(name, wells))
         solos = [w for w in item.get("solo_wells", []) if w in paths]
         out.append(BarGroup(str(item.get("name", "Group")),
                             members=members, solo_wells=solos))

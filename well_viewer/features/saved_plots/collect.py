@@ -27,6 +27,13 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     if tab:
         params["active_centre_tab"] = tab
 
+    # Significance brackets (Bar plot) are recomputed on Restore by re-running the
+    # same stats test, so capture the test CONFIG (groups + context). Only when a
+    # test has actually been run (``pairwise`` non-empty) and ≥2 groups exist.
+    stats_cfg = _capture_stats_config(app)
+    if stats_cfg is not None:
+        params["stats"] = stats_cfg
+
     thresholds: dict[str, Any] = {}
     fluor = _safe(lambda: app._get_all_fluor_gates())
     if isinstance(fluor, dict) and fluor:
@@ -35,6 +42,37 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     if isinstance(tfo, dict) and tfo:
         thresholds["thresh_frac_on"] = {str(k): float(v) for k, v in tfo.items()}
     return params, thresholds
+
+
+def _capture_stats_config(app) -> dict | None:
+    """Config to re-run the current stats test on Restore (or None if there's
+    nothing to reproduce). Derives the run context from the live ``pairwise``
+    results (test / val_col / target_t / statistic) so it matches exactly what
+    produced the on-screen brackets; the threshold is resolved from that val_col.
+    """
+    st = getattr(app._app_state, "stats", None)
+    pairwise = list(getattr(st, "pairwise", []) or []) if st else []
+    groups = [g for g in (getattr(st, "groups", []) or []) if getattr(g, "wells", None)]
+    if not pairwise or len(groups) < 2:
+        return None
+    ctx = pairwise[0]  # test/val_col/target_t/stat are constant across the run
+    val_col = str(ctx.get("val_col", "") or "")
+    try:
+        from well_viewer.features.stats.controller import (
+            serialize_stats_groups, threshold_for_val_col,
+        )
+        threshold = float(threshold_for_val_col(app, val_col))
+        grp_data = serialize_stats_groups(groups)
+    except Exception:
+        return None
+    return {
+        "groups": grp_data,
+        "test": str(ctx.get("test", "") or ""),
+        "target_t": ctx.get("target_t"),
+        "val_col": val_col,
+        "statistic": str(ctx.get("stat", "mean") or "mean"),
+        "threshold": threshold,
+    }
 
 
 def _safe(fn):

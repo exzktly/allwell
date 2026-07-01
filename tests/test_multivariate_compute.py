@@ -82,6 +82,34 @@ def test_pca_loadings_csv_companion(tmp_path):
     assert np.isclose(np.linalg.norm(pc1), 1.0, atol=1e-6)
 
 
+def test_subsample_for_projection_caps_slow_methods_only():
+    """t-SNE / UMAP get capped (so the main-thread projection can't hang on a big
+    selection) with the parallel per-cell arrays sliced to match; PCA and small
+    selections pass through untouched."""
+    from well_viewer.features.multivariate.controller import (
+        _subsample_for_projection, _MAX_PROJECTION_CELLS,
+    )
+    n = _MAX_PROJECTION_CELLS + 1000
+    X = np.random.default_rng(2).normal(size=(n, 4))
+    data = {"X": X, "group": np.array(["g"] * n, dtype=object),
+            "well": np.array(["A01"] * n, dtype=object),
+            "timepoint": np.arange(n, dtype=float), "n_cells": n}
+
+    Xp, dp, total = _subsample_for_projection(X, data, "tsne")
+    assert Xp.shape[0] == _MAX_PROJECTION_CELLS == dp["group"].shape[0] \
+        == dp["timepoint"].shape[0] == dp["n_cells"]
+    assert total == n  # original count reported for the footnote
+
+    # PCA is cheap → never capped; a small t-SNE selection also passes through.
+    assert _subsample_for_projection(X, data, "pca")[2] == 0
+    small = X[:50]
+    assert _subsample_for_projection(small, {**data, "X": small,
+                                             "group": data["group"][:50],
+                                             "well": data["well"][:50],
+                                             "timepoint": data["timepoint"][:50]},
+                                     "tsne")[2] == 0
+
+
 def test_pca_loadings_csv_skipped_when_matrix_too_small(tmp_path):
     from types import SimpleNamespace
     from well_viewer.features.multivariate.controller import _write_pca_loadings_csv

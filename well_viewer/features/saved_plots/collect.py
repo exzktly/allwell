@@ -44,6 +44,14 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     if sels:
         params["selections"] = sels
 
+    # The group-driven plots draw the rep-set groups PLUS any individual wells the
+    # user soloed onto the plot (``active_solo_wells``) — also absent from the
+    # view_state snapshot. Always store it (even empty) so Restore reproduces the
+    # exact plotting selection, clearing stale solo wells when the saved plot had
+    # none.
+    params["active_solo_wells"] = sorted(
+        getattr(app._app_state.selection, "active_solo_wells", None) or [])
+
     # Significance brackets (Bar plot) are recomputed on Restore by re-running the
     # same stats test, so capture the test CONFIG (groups + context). Only when a
     # test has actually been run (``pairwise`` non-empty) and ≥2 groups exist.

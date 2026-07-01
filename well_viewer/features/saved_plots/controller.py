@@ -75,7 +75,8 @@ def restore_saved_plot(app, plot_id: str) -> None:
     # stats test so ``stats.pairwise`` is repopulated against those groups. Both
     # happen before ``view_state.restore`` activates the tab and does the final
     # redraw — which draws the significance brackets from the fresh results.
-    _restore_selections(app, rec.params.get("selections"))
+    _restore_selections(app, rec.params.get("selections"),
+                        rec.params.get("active_solo_wells"))
     _restore_stats(app, rec.params.get("stats"))
     try:
         view_state.restore(app, dict(rec.params))
@@ -83,21 +84,28 @@ def restore_saved_plot(app, plot_id: str) -> None:
         _logger.debug("saved_plots: restore failed for %r", plot_id, exc_info=True)
 
 
-def _restore_selections(app, sels) -> None:
-    """Replace the live replicate-set selections with the saved ones and refresh
-    the sidebar + plots, so a restored group-driven plot shows the exact groups it
-    was saved with. No-op for saved plots without a ``selections`` block (older
-    plots) or on any error."""
-    if not isinstance(sels, list) or not sels:
-        return
+def _restore_selections(app, sels, solo_wells=None) -> None:
+    """Reproduce the saved group-driven plotting selection: the replicate-set
+    ``selections`` AND the soloed individual wells (``active_solo_wells``), then
+    refresh the sidebar + plots. Each part is optional (older saved plots omit
+    them); a no-op on any error. Applied together so the single ``_rebuild_all``
+    redraw sees the full restored selection."""
     try:
         import copy
         sel_state = app._app_state.selection
-        sel_state.selections = copy.deepcopy(sels)
-        sel_state.validate()  # re-mint ids / repair, and fix current_selection_id
-        first = sel_state.selections[0] if sel_state.selections else None
-        sel_state.current_selection_id = first.get("id") if first else None
-        app._rebuild_all()  # authoritative refresh: sidebar map + groups + redraw
+        changed = False
+        if isinstance(sels, list) and sels:
+            sel_state.selections = copy.deepcopy(sels)
+            sel_state.validate()  # re-mint ids / repair, and fix current_selection_id
+            first = sel_state.selections[0] if sel_state.selections else None
+            sel_state.current_selection_id = first.get("id") if first else None
+            changed = True
+        if isinstance(solo_wells, (list, set, tuple)):
+            paths = app._app_state.dataset.well_paths
+            sel_state.active_solo_wells = {w for w in solo_wells if w in paths}
+            changed = True
+        if changed:
+            app._rebuild_all()  # authoritative refresh: sidebar map + groups + redraw
     except Exception:
         _logger.debug("saved_plots: selection restore failed", exc_info=True)
 

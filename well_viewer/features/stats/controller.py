@@ -153,7 +153,8 @@ def draw_ks_cdf(app, group_vals: List[Tuple[str, List[float]]], tp_str: str, wel
     ax.set_xlabel(_channel_label_for_val_col(val_col) or "value", fontsize=8)
     ax.set_ylabel("Cumulative fraction", fontsize=8)
     ax.set_title(f"Empirical CDF  —  t = {tp_str} h", fontsize=9)
-    ax.legend(fontsize=8, framealpha=0.0, facecolor="none")
+    from well_viewer.core.plot_style import style_legend
+    style_legend(ax.legend(fontsize=8, framealpha=0.0, facecolor="none"), ax)
     ax.tick_params(labelsize=7)
     ax.set_ylim(-0.02, 1.05)
     try:

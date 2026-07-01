@@ -43,6 +43,16 @@ def snapshot(app) -> dict:
     return {
         "schema_version": 1,
         "selected_wells": sorted(app._app_state.selection.selected_wells or []),
+        # Rep-set visibility (which groups are shown on the plots) + solo wells —
+        # in group/replicate mode this, not ``selected_wells``, is what drives the
+        # plate and the plot, so a plot saved in that mode restores what was shown.
+        "selection_visibility": {
+            "hidden_ids": [
+                str(s.get("id")) for s in (app._app_state.selection.selections or [])
+                if s.get("id") is not None and s.get("hidden")
+            ],
+            "solo_wells": sorted(app._app_state.selection.active_solo_wells or []),
+        },
         "active_centre_tab": _current_leaf_tab(app),
         "active_channel": str(app._app_state.channel.active_channel or ""),
         "active_metric": str(app._app_state.channel.active_metric or ""),
@@ -359,6 +369,27 @@ def restore(app, state: dict) -> None:
                 app._set_selected_wells(valid, commit=False)
             except Exception:
                 _logger.debug("view_state: _set_selected_wells failed", exc_info=True)
+
+    # Rep-set visibility (group mode) — re-apply each selection's hidden flag and
+    # the solo-well set so a plot saved in replicate mode restores the groups it
+    # was showing. Matched by selection id; absent (older saved plots) → skipped.
+    vis = state.get("selection_visibility")
+    if isinstance(vis, dict):
+        hidden_ids = {str(x) for x in (vis.get("hidden_ids") or [])}
+        for sel in (app._app_state.selection.selections or []):
+            if sel.get("id") is not None:
+                sel["hidden"] = str(sel.get("id")) in hidden_ids
+        solo = vis.get("solo_wells")
+        if isinstance(solo, list):
+            wp = set(app._app_state.dataset.well_paths or {})
+            app._app_state.selection.active_solo_wells = {
+                str(w) for w in solo if str(w) in wp
+            }
+        if hasattr(app, "_refresh_sidebar_map"):
+            try:
+                app._refresh_sidebar_map()
+            except Exception:
+                swallowed()
 
     if "use_sem" in state:
         try:

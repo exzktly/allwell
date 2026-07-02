@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 
-from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.cell_browser.collect import CellDescriptor
 from well_viewer.features.image_browser.image_table.image_compose import _load_array, _load_mask_array
 

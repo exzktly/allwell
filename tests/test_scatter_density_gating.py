@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from well_viewer.features.scatter.gating import (
     compute_gate_stats,

@@ -44,9 +44,10 @@ ignore = [
     "E741",  # ambiguous variable name (l/I/O): a handful, stylistic.
 
     # --- Pyflakes subcodes that are noise in THIS codebase ------------------
-    "F401",  # unused-import: many are intentional side-effect imports
-             # (e.g. `import tifffile  # codec registration`); removing them
-             # en masse is unsafe. Re-export modules rely on this too.
+    # F401 (unused-import) is now ENFORCED (audit G5): the 56 genuinely-unused
+    # imports were dropped, and the intentional side-effect / re-export imports
+    # (availability probes, `__init__` re-exports) carry an explicit
+    # `# noqa: F401` with a reason. Keep new unused imports out of the tree.
     "F811",  # redefinition-while-unused: harmless local re-imports inside
              # functions that also import at module scope.
     "F821",  # undefined-name: false positives from quoted forward-reference

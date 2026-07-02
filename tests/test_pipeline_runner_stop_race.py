@@ -8,7 +8,6 @@ orphans a subprocess because stop() read _proc as None.
 """
 from __future__ import annotations
 
-import threading
 
 from services.pipeline_runner import PipelineRunner
 

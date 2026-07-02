@@ -5,17 +5,10 @@ from __future__ import annotations
 import logging
 import math
 import re
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.core import debug_flags as debug_flags
-from well_viewer.domain import fold_change as _fc
-from well_viewer.domain.stats_compute import compute_rep_stats
-from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
-from well_viewer.domain.stats_compute import compute_rep_n_above
-from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import parse_float_edit as _parse_float_edit
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token

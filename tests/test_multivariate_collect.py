@@ -12,7 +12,6 @@ import types
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from well_viewer.features.multivariate import collect as mv_collect
 from well_viewer.domain import multivariate_compute as mvc

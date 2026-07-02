@@ -9,7 +9,7 @@ matplotlib rendering, click handling, and combo wiring.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List
 
 _logger = logging.getLogger(__name__)
 

@@ -13,7 +13,6 @@ process_microscopy.py must live alongside this file.
 from __future__ import annotations
 
 import queue
-import sys as _sys
 import time as _time
 from pathlib import Path
 from typing import Callable, Optional
@@ -21,9 +20,8 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
 from services.input_resolution_service import (
@@ -38,18 +36,14 @@ from services.pipeline_runner import (
     classify_log_line,
 )
 from services.pipeline_service import find_pipeline_script
-from services.remote_config import default_remote_index, load_remotes
+from services.remote_config import default_remote_index
 from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
-from widgets.checkable_dropdown import CheckableDropdown
-from widgets.run_dashboard import RunDashboard
-from widgets.wrap_checkbox import WrapCheckBox
-import pipeline.shape_features as _sfc
 from well_viewer.core.safe import swallowed
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
-    DEFAULT_SCHEMA, DEFAULT_SEP, SCHEMA_FIELDS,
+    DEFAULT_SEP, SCHEMA_FIELDS,
     _FIELD_TO_LABEL, _LABEL_TO_FIELD, _SCHEMA_LABELS,
 )
 

@@ -1,7 +1,6 @@
 """Saved Plots PDF report builder + image-grid downsample dpi."""
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib

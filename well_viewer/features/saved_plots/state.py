@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from well_viewer.persistence import _doc
 from well_viewer.core.safe import swallowed

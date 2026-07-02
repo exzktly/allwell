@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
-import pytest
 
 from well_viewer.features.image_browser.cell_browser.collect import (
     Criterion,

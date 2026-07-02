@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 
 from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore, get_store
 

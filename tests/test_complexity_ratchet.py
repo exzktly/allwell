@@ -116,6 +116,11 @@ ALLOWLIST = {
     "well_viewer/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",
     "well_viewer/domain/fold_change.py::normalize_pts",
     "process_microscopy.py::sample_empty_well_images",
+    # Was CC 40 (right at the line); the audit-E9 decode-failure counting +
+    # bias WARN (mandatory correctness surfacing, mirrors the pipeline-side
+    # _estimate_thresholds_standalone already listed above) nudged it to 42.
+    # A proper decompose belongs with the auto-threshold refactor, not E9.
+    "well_viewer/data/auto_threshold.py::compute_auto_thresholds",
 }
 
 

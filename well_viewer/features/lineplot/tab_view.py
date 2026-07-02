@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea,
     QVBoxLayout, QWidget,
 )
 

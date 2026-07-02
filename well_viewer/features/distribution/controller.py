@@ -225,9 +225,9 @@ def redraw_distribution(app) -> None:
     mode = (getattr(app, "_distribution_mode_var", None).currentText()
             if getattr(app, "_distribution_mode_var", None) is not None
             else "Histogram + KDE")
-    bins = int(getattr(app, "_distribution_bins", 40) or 40)
-    log_x = bool(getattr(app, "_distribution_log_x", False))
-    log_y = bool(getattr(app, "_distribution_log_y", False))
+    bins = int(app._app_state.distribution.bins or 40)
+    log_x = bool(app._app_state.distribution.log_x)
+    log_y = bool(app._app_state.distribution.log_y)
     layout_choice = (
         getattr(app, "_distribution_layout_var", None).currentText()
         if getattr(app, "_distribution_layout_var", None) is not None

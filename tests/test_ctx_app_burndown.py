@@ -46,7 +46,9 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #     which also deletes their god-object builder inits (each was a ctx.app stash):
 #   408 → 405  barplot swarm/violin  → BarPlotState
 #   405 → 402  heatmap scale_mode/repset_avg/log_scale  → HeatmapState
-CTX_APP_BUDGET = 402
+#   402 → 396  distribution bins/log_x/log_y  → DistributionState (builder inits
+#              deleted + callback writes moved to ctx.state)
+CTX_APP_BUDGET = 396
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -79,10 +79,9 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     # supports.
     bins_spin.setRange(2, 2_147_483_647)
     bins_spin.setValue(40)
-    ctx.app._distribution_bins = 40
 
     def _on_bins_changed(val: int) -> None:
-        ctx.app._distribution_bins = int(val)
+        ctx.state.distribution.bins = int(val)
         _on_changed(ctx.app)
     bins_spin.valueChanged.connect(_on_bins_changed)
     cl.addWidget(bins_spin)
@@ -101,19 +100,17 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_layout_var", layout_cb)   # legacy alias → same widget
 
     log_x_cb = reg.register("_distribution_log_x_cb", QCheckBox("log x", ctrl))
-    ctx.app._distribution_log_x = False
 
     def _on_log_changed(state: int) -> None:
-        ctx.app._distribution_log_x = bool(state)
+        ctx.state.distribution.log_x = bool(state)
         _on_changed(ctx.app)
     log_x_cb.stateChanged.connect(_on_log_changed)
     cl.addWidget(log_x_cb)
 
     log_y_cb = reg.register("_distribution_log_y_cb", QCheckBox("log y", ctrl))
-    ctx.app._distribution_log_y = False
 
     def _on_log_y_changed(state: int) -> None:
-        ctx.app._distribution_log_y = bool(state)
+        ctx.state.distribution.log_y = bool(state)
         _on_changed(ctx.app)
     log_y_cb.stateChanged.connect(_on_log_y_changed)
     cl.addWidget(log_y_cb)

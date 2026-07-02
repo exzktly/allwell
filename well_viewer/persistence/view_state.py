@@ -239,12 +239,11 @@ def _snapshot_distribution(app) -> dict:
     layout = _combo_text(app, "_distribution_layout_cb")
     if layout is not None:
         out["layout"] = layout
-    if hasattr(app, "_distribution_bins"):
-        out["bins"] = int(app._distribution_bins)
-    if hasattr(app, "_distribution_log_x"):
-        out["log_x"] = bool(app._distribution_log_x)
-    if hasattr(app, "_distribution_log_y"):
-        out["log_y"] = bool(app._distribution_log_y)
+    _dist = app._app_state.feature_slice("distribution")
+    if _dist is not None:
+        out["bins"] = int(_dist.bins)
+        out["log_x"] = bool(_dist.log_x)
+        out["log_y"] = bool(_dist.log_y)
     return out
 
 
@@ -760,6 +759,7 @@ def _apply_distribution(app, state: dict) -> None:
         _set_combo_if_valid(app, "_distribution_mode_cb", str(state["mode"]))
     if "layout" in state:
         _set_combo_if_valid(app, "_distribution_layout_cb", str(state["layout"]))
+    _dist = app._app_state.feature_slice("distribution")
     if "bins" in state:
         try:
             bins = int(state["bins"])
@@ -771,9 +771,11 @@ def _apply_distribution(app, state: dict) -> None:
                 spin.setValue(bins)
             except Exception:
                 swallowed()  # was: pass (silent except)
-        app._distribution_bins = bins
+        if _dist is not None:
+            _dist.bins = bins
     if "log_x" in state:
-        app._distribution_log_x = bool(state["log_x"])
+        if _dist is not None:
+            _dist.log_x = bool(state["log_x"])
         cb = getattr(app, "_distribution_log_x_cb", None)
         if cb is not None:
             try:
@@ -781,7 +783,8 @@ def _apply_distribution(app, state: dict) -> None:
             except Exception:
                 swallowed()  # was: pass (silent except)
     if "log_y" in state:
-        app._distribution_log_y = bool(state["log_y"])
+        if _dist is not None:
+            _dist.log_y = bool(state["log_y"])
         cb = getattr(app, "_distribution_log_y_cb", None)
         if cb is not None:
             try:
@@ -1219,15 +1222,17 @@ def _reset_distribution(app) -> None:
             spin.setValue(40)
         except Exception:
             swallowed()  # was: pass (silent except)
-    app._distribution_bins = 40
-    app._distribution_log_x = False
+    _dist = app._app_state.feature_slice("distribution")
+    if _dist is not None:
+        _dist.bins = 40
+        _dist.log_x = False
+        _dist.log_y = False
     cb = getattr(app, "_distribution_log_x_cb", None)
     if cb is not None:
         try:
             cb.setChecked(False)
         except Exception:
             swallowed()  # was: pass (silent except)
-    app._distribution_log_y = False
     cb = getattr(app, "_distribution_log_y_cb", None)
     if cb is not None:
         try:

@@ -5,21 +5,27 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from well_viewer.features.distribution.state import DistributionState
 from well_viewer.persistence import view_state as vs
 
 
+def _fake_app_with_distribution(**overrides):
+    """A SimpleNamespace app whose ``_app_state`` exposes a distribution slice
+    via ``feature_slice`` — matches the typed-state contract (A8 migration)."""
+    slice_ = DistributionState(**overrides)
+    state = SimpleNamespace(distribution=slice_,
+                            feature_slice=lambda name: slice_ if name == "distribution" else None)
+    return SimpleNamespace(_app_state=state)
+
+
 def test_distribution_log_y_snapshot_and_restore():
-    app = SimpleNamespace(
-        _distribution_bins=40,
-        _distribution_log_x=False,
-        _distribution_log_y=True,
-    )
+    app = _fake_app_with_distribution(bins=40, log_x=False, log_y=True)
     snap = vs._snapshot_distribution(app)
     assert snap["log_y"] is True
 
-    restored = SimpleNamespace()
+    restored = _fake_app_with_distribution()
     vs._apply_distribution(restored, snap)
-    assert restored._distribution_log_y is True
+    assert restored._app_state.distribution.log_y is True
 
 
 def test_render_overlay_sets_log_y_scale():

@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **20 / 77 items resolved** (19 done + 1 dropped). Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **21 / 77 items resolved** (20 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -79,7 +79,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 ### L — Lifecycle / teardown (Pass 2.4)
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
-| L1 | `MainWindow.closeEvent` never stops runner → orphan + remote leak | C | `[ ]` TODO | |
+| L1 | `MainWindow.closeEvent` never stops runner → orphan + remote leak | C | `[x]` DONE | #597 |
 | L2 | `_poll_log` self-reschedules forever, no stop/teardown | M | `[ ]` TODO | |
 | L3 | `runtime_app` no closeEvent → smFISH cancel unset, threads unjoined | M | `[ ]` TODO | |
 | L4 | app-global `focusChanged` not disconnected on teardown | L | `[ ]` TODO | |
@@ -301,7 +301,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 
 ### 2.4 State lifecycle / teardown
 **Root cause:** `AnalyzeTab` is mounted as a *child* widget (`allwell.py:225-229`); in Qt, `closeEvent` reaches only top-level windows, so **`AnalyzeTab.closeEvent` never fires**.
-- **Critical — `allwell.py:918`**: `MainWindow.closeEvent` only saves geometry + cleans the review temp dir; it **never stops the runner**. Quitting mid-run orphans the local `subprocess.Popen`; for remote runs the `finally` teardown in `pipeline_runner._run_pipeline_remote:646-663` runs on a daemon thread killed abruptly → **remote SLURM allocation, remote staging dir, and local scratch all leak**. *Fix: in `MainWindow.closeEvent`, `self._analyze._runner.stop()` (and briefly wait) before `super().closeEvent`.* — **L1** `[ ]` TODO
+- **Critical — `allwell.py:918`**: `MainWindow.closeEvent` only saves geometry + cleans the review temp dir; it **never stops the runner**. Quitting mid-run orphans the local `subprocess.Popen`; for remote runs the `finally` teardown in `pipeline_runner._run_pipeline_remote:646-663` runs on a daemon thread killed abruptly → **remote SLURM allocation, remote staging dir, and local scratch all leak**. *Fix: in `MainWindow.closeEvent`, `self._analyze._runner.stop()` (and briefly wait) before `super().closeEvent`.* — **L1** `[x]` DONE (`_stop_analyze_runner` called from `AllWellApp.closeEvent`; `tests/test_close_stops_analyze_runner.py`)
 - **Medium —** `analyze_tab.py:1035` `_poll_log` self-reschedules `singleShot(80,…)` forever with no stop condition. *Fix: stop re-arming when `not self._running`.* — **L2** `[ ]` TODO
 - **Medium —** `runtime_app.py` has no `closeEvent`, so the smfish cancel event is never set on close and worker threads aren't joined at shutdown. *Fix: on close, set the cancel event + signal loaders to stop.* — **L3** `[ ]` TODO
 - **Low —** `core/split_view.py:222-246` disconnects the app-global `focusChanged` only when Split View is toggled off, not on teardown. — **L4** `[ ]` TODO
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch G (lifecycle)** — **L1** (`AllWellApp.closeEvent` now calls `_stop_analyze_runner`, so quitting mid-run stops the pipeline runner instead of orphaning the local subprocess / leaking the remote SLURM allocation + scratch — AnalyzeTab's own closeEvent never fires as a child widget). **All 5 Critical items are now fixed.** +4 tests. Fast lane green (1251). 21/77 resolved.
+
 - 2026-07-02 **Batch F (scientific)** — **S4** (`stats_cache` keys now fold in `_gate_cache_sig` — the active gates' full definition + thresh choices — and `_notify_gates_changed` invalidates the cache, so a gate resize/rename can no longer return a stale cached statistic). +5 tests. Fast lane green (1247). 20/77 resolved.
 
 - 2026-07-02 **Batch E (guardrail hardening)** — **G2** (added `FOLDER` to the retry gate so a FOLDER+FULL run's missing out-zip is re-pulled and verify→retry converges), **G4** (extended `test_no_silent_except` to the 3 unscanned Qt-free pipeline files; broader tuple/return-None extension deferred pending a baseline), **G6** (new `test_complexity_ratchet.py` — a shrink-only CC>40 allowlist of 29 functions, so a new high-complexity function fails CI). +3 tests. Fast lane green (1242). **G3 deferred** — `filter_debris` is tested (not dead) and the `qc_*` params thread through `**kwargs`; removing them safely needs the slow e2e env. 19/77 resolved.
@@ -436,4 +438,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch F merged (S4 stale-stats fix + tests); **20 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch G merged (L1 teardown fix + tests); **21 / 77 resolved; all 5 Criticals done.**

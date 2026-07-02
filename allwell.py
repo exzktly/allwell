@@ -36,6 +36,29 @@ REVIEW_BAR_DEBUG = False
 REVIEW_SCATTER_DEBUG = False
 
 
+def _stop_analyze_runner(analyze) -> None:
+    """Stop an in-flight pipeline run on the Analyze pane at app close.
+
+    ``AnalyzeTab`` is mounted as a *child* widget, so in Qt its own
+    ``closeEvent`` never fires — quitting mid-run therefore orphaned the local
+    pipeline subprocess (and its process group) and, for a remote run, killed
+    the worker thread before its cleanup ``finally`` could ``scancel`` the SLURM
+    job / remove the remote staging + local scratch (audit L1). The app root's
+    ``closeEvent`` calls this so the runner is stopped from a live top-level
+    window instead.
+    """
+    if analyze is None:
+        return
+    runner = getattr(analyze, "_runner", None)
+    if runner is None:
+        return
+    try:
+        if getattr(runner, "is_running", False):
+            runner.stop()
+    except Exception:
+        swallowed()
+
+
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
 
@@ -927,6 +950,10 @@ class AllWellApp(QMainWindow):
                 self._review._cleanup_tmp()
             except Exception:
                 swallowed()  # was: pass (silent except)
+        # Stop any in-flight Analyze run — AnalyzeTab's own closeEvent never
+        # fires (it's a child widget), so without this a mid-run quit leaks the
+        # local subprocess / remote SLURM allocation + scratch (audit L1).
+        _stop_analyze_runner(self._analyze)
         super().closeEvent(event)
 
     # ── Cross-tab threshold ───────────────────────────────────────────────

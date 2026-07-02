@@ -33,6 +33,7 @@ _FEATURE_STATE_OWNERS = {
     "bar": "Bar Plots",
     "stats": "Statistics",
     "multivariate": "Multivariate",
+    "spatial": "Spatial",
     "review_image": "Image Browser",
     "preview": "Image Browser",
     "image_table": "Image Browser",

@@ -21,7 +21,6 @@ from process_microscopy import (
     subtract_background,
     combined_empty_well_correct,
     BACKGROUND_METHODS,
-    filter_debris,
     compute_region_areas,
     build_flatfield_models,
     build_background_models,
@@ -143,30 +142,36 @@ def test_basic_flatfield_tracks_shading():
     assert estimate_basic_flatfield([]) is None
 
 
-# ── debris removal (reuses §C regionprops) ───────────────────────────────────
+# ── G3: dead in-module debris gating removed ─────────────────────────────────
 
-def test_filter_debris_bounds():
-    lab = np.zeros((40, 40), np.int32)
-    lab[2:5, 2:5] = 1          # 9 px  → debris
-    lab[10:30, 10:30] = 2      # 400 px → keep
-    cleaned, n = filter_debris(lab, min_area=50)
-    assert n == 1 and not np.any(cleaned == 1) and np.any(cleaned == 2)
+def test_filter_debris_removed_and_params_not_forwarded():
+    """G3 — ``filter_debris`` was never called and ``process_image_group``'s
+    ``qc_min_area``/``qc_max_area``/``qc_min_solidity`` were never read (QC is
+    deferred to the Review layer via the ``qc_options`` sidecar). Both were
+    deleted; lock that in so they aren't re-added as no-ops."""
+    import inspect
 
-    cleaned2, n2 = filter_debris(lab, max_area=100)
-    assert n2 == 1 and np.any(cleaned2 == 1) and not np.any(cleaned2 == 2)
+    import process_microscopy as pm
 
-    assert filter_debris(lab)[1] == 0                                  # no bounds
-    assert filter_debris(np.zeros((5, 5), np.int32), min_area=10)[1] == 0  # empty
+    assert not hasattr(pm, "filter_debris")
+    params = inspect.signature(pm.process_image_group).parameters
+    for dead in ("qc_min_area", "qc_max_area", "qc_min_solidity"):
+        assert dead not in params
+    # The Review-layer knob stays — it's read (logs) and written to the sidecar.
+    assert "qc_remove_debris" in params
 
 
-def test_filter_debris_solidity():
-    # solid square (solidity≈1) kept; a sparse cross (low solidity) removed
-    lab = np.zeros((30, 30), np.int32)
-    lab[2:12, 2:12] = 1
-    lab[20, 0:30] = 2
-    lab[0:30, 20] = 2          # plus-shaped label 2 → low solidity
-    cleaned, n = filter_debris(lab, min_solidity=0.5)
-    assert np.any(cleaned == 1) and not np.any(cleaned == 2) and n == 1
+def test_qc_bounds_still_reach_the_sidecar():
+    """The CLI ``--qc_*`` bounds are NOT dead: ``build_parser`` still accepts
+    them so they flow into ``pipeline_info``'s ``qc_options`` for the Review
+    QC layer."""
+    import process_microscopy as pm
+
+    args = pm.build_parser().parse_args([
+        "--input_dir", ".", "--output_dir", ".",
+        "--qc_min_area", "12", "--qc_max_area", "34", "--qc_min_solidity", "0.5",
+    ])
+    assert (args.qc_min_area, args.qc_max_area, args.qc_min_solidity) == (12.0, 34.0, 0.5)
 
 
 # ── per-channel model precompute (basic / empty_well) ────────────────────────

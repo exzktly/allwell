@@ -801,8 +801,16 @@ def channel_key_for_label(app, label: str) -> str:
     mapping = getattr(app, "_label_to_channel_key", None) or {}
     if label in mapping:
         return mapping[label]
-    # Fallback when the dropdown was populated before the mapping was
-    # built — assume real channel and lowercase the label.
+    # Fallback when the dropdown was populated before ``_label_to_channel_key``
+    # was built. Resolve a ratio label to its ``ratio:<name>`` key straight from
+    # the ratio metrics (the same label the map is keyed on, disambiguation
+    # included) BEFORE assuming a real channel — otherwise a ratio read in this
+    # window is lossily lowercased into a bogus real-channel token like
+    # ``"gfp/mcherry"`` (audit X5).
+    for r in getattr(app._app_state.channel, "ratio_metrics", None) or []:
+        if label == ratio_label_for(app, r):
+            return r.key()
+    # Otherwise assume a real channel and lowercase the label.
     return str(label or "").lower()
 
 

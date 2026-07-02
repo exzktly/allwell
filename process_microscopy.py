@@ -1221,42 +1221,6 @@ from pipeline.flatfield import (  # noqa: E402,F401
 )
 
 
-def filter_debris(
-    labels: np.ndarray,
-    *,
-    min_area: "float | None" = None,
-    max_area: "float | None" = None,
-    min_solidity: "float | None" = None,
-) -> "tuple[np.ndarray, int]":
-    """Zero out label regions outside the size / solidity bounds (debris, merged
-    blobs, fragments). Reuses the §C ``regionprops`` pass. Returns
-    ``(cleaned_labels, n_removed)``; a no-op (returns the input) when nothing
-    matches or no bounds are given.
-    """
-    if labels is None or not np.any(labels):
-        return labels, 0
-    if min_area is None and max_area is None and min_solidity is None:
-        return labels, 0
-    from skimage.measure import regionprops_table
-    props = ["label", "area"]
-    if min_solidity is not None:
-        props.append("solidity")
-    table = regionprops_table(labels, properties=tuple(props))
-    remove = np.zeros(len(table["label"]), dtype=bool)
-    if min_area is not None:
-        remove |= table["area"] < float(min_area)
-    if max_area is not None:
-        remove |= table["area"] > float(max_area)
-    if min_solidity is not None:
-        remove |= table["solidity"] < float(min_solidity)
-    bad_ids = [int(lbl) for lbl, rm in zip(table["label"], remove) if rm]
-    if not bad_ids:
-        return labels, 0
-    cleaned = labels.copy()
-    cleaned[np.isin(labels, bad_ids)] = 0
-    return cleaned, len(bad_ids)
-
-
 def compute_region_areas(
     image: np.ndarray,
     labels: np.ndarray,
@@ -2084,9 +2048,6 @@ def process_image_group(
     background_method: str = "sliding_disk",
     background_models: "dict | None" = None,
     qc_remove_debris: bool = False,
-    qc_min_area: "float | None" = None,
-    qc_max_area: "float | None" = None,
-    qc_min_solidity: "float | None" = None,
     cellpose_diameter: float = 0.0,
     cellpose_model: str = "cyto3",
     cellpose_flow_threshold: float = 0.4,
@@ -3640,7 +3601,7 @@ def _run_well_worker_pool(
     if not to_process:
         log.info("All wells already complete.")
         log.info("%s mode complete. %d skipped.", mode_label, n_skipped)
-        return
+        return []
 
     _ensure_stardist_runtime_deps()
 
@@ -3686,6 +3647,10 @@ def _run_well_worker_pool(
         log.warning("Failed wells/pairs:")
         for name in all_failed:
             log.warning("  %s", name)
+    # Surfaced to main() so a run with per-well failures sets a non-zero exit
+    # code — otherwise an all-failed run exits 0 and the remote layer treats it
+    # as success and cleans up the inputs (audit E5).
+    return all_failed
 
 
 def process_well_zips(
@@ -3704,7 +3669,7 @@ def process_well_zips(
     threads_per_worker: int = 0,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
-) -> None:
+) -> "list[str]":
     """
     Dispatch one worker process per well zip.
 
@@ -3728,7 +3693,7 @@ def process_well_zips(
             incremental, incremental_prior_dir,
         )
 
-    _run_well_worker_pool(
+    return _run_well_worker_pool(
         items=well_zips, output_dir=output_dir, workers=workers,
         force=force, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
@@ -3759,7 +3724,7 @@ def process_well_folders(
     threads_per_worker: int = 0,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
-) -> None:
+) -> "list[str]":
     """
     Dispatch one worker process per well folder (uncompressed input).
 
@@ -3783,7 +3748,7 @@ def process_well_folders(
             schema, sep, incremental, incremental_prior_dir,
         )
 
-    _run_well_worker_pool(
+    return _run_well_worker_pool(
         items=well_folders, output_dir=output_dir, workers=workers,
         force=force, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
@@ -4520,9 +4485,6 @@ def main() -> None:
         background_method=args.background,
         background_models={},
         qc_remove_debris=args.qc_remove_debris,
-        qc_min_area=(args.qc_min_area or None),
-        qc_max_area=(args.qc_max_area or None),
-        qc_min_solidity=(args.qc_min_solidity or None),
         cellpose_diameter=args.cellpose_diameter,
         cellpose_model=args.cellpose_model,
         cellpose_flow_threshold=args.cellpose_flow_threshold,
@@ -4568,9 +4530,12 @@ def main() -> None:
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
 
+    # Per-well failures are surfaced here so main() can signal them via the
+    # process exit code (audit E5) rather than always exiting 0.
+    failed_wells: "list[str]" = []
     if well_zips:
         log.info("Zip mode: %d well zip(s) detected.", len(well_zips))
-        process_well_zips(
+        failed_wells = process_well_zips(
             input_dir=input_dir,
             output_dir=output_dir,
             well_zips=well_zips,
@@ -4592,7 +4557,7 @@ def main() -> None:
         )
     elif well_folders:
         log.info("Folder mode: %d well folder(s) detected.", len(well_folders))
-        process_well_folders(
+        failed_wells = process_well_folders(
             input_dir=input_dir,
             output_dir=output_dir,
             well_folders=well_folders,
@@ -4650,6 +4615,7 @@ def main() -> None:
         if not all_records and not failed:
             log.error("No valid image pairs found. Exiting.")
             return
+        failed_wells = failed
         write_csvs_per_well(all_records, output_dir, args.csv_prefix)
         log.info("=" * 60)
         log.info("Total rows : %d", len(all_records))
@@ -4681,26 +4647,38 @@ def main() -> None:
     # the runner re-runs it once locally after all batches drain).
     if args.no_auto_threshold:
         log.info("Auto-threshold skipped (--no_auto_threshold).")
-        return
-    try:
-        thresholds = _estimate_thresholds_standalone(
-            output_dir,
-            fluor_channels=fluor_tokens_for_quant,
-            filename_schema=args.filename_schema,
-            filename_sep=args.filename_sep,
-            log=log,
-        )
-        written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
-        if written:
-            log.info(
-                "Auto-threshold defaults written for %d channel(s): %s",
-                len(written),
-                ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
+    else:
+        try:
+            thresholds = _estimate_thresholds_standalone(
+                output_dir,
+                fluor_channels=fluor_tokens_for_quant,
+                filename_schema=args.filename_schema,
+                filename_sep=args.filename_sep,
+                log=log,
             )
-        else:
-            log.info("Auto-threshold pass produced no new defaults.")
-    except Exception as exc:
-        log.warning("Auto-threshold pass failed: %s", exc)
+            written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
+            if written:
+                log.info(
+                    "Auto-threshold defaults written for %d channel(s): %s",
+                    len(written),
+                    ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
+                )
+            else:
+                log.info("Auto-threshold pass produced no new defaults.")
+        except Exception as exc:
+            log.warning("Auto-threshold pass failed: %s", exc)
+
+    # audit E5: a run with per-well failures must not exit 0 — otherwise the
+    # remote layer reads success and deletes the inputs for wells that never
+    # produced output. Auto-threshold (informational) still runs above so a
+    # partly-successful run keeps its thresholds; the exit code reflects the
+    # failures.
+    if failed_wells:
+        import sys as _sys
+        log.error(
+            "%d well(s)/pair(s) failed — exiting non-zero.", len(failed_wells)
+        )
+        _sys.exit(1)
 
 
 if __name__ == "__main__":

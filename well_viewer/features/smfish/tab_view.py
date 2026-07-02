@@ -80,8 +80,13 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
 
+    # A8 burn-down: Qt widget handles go through the WidgetRegistry
+    # (``ctx.widgets``), which stamps ``app._smfish_*`` so legacy readers resolve.
+    # The (many) non-widget state fields below stay on the app — a later layer.
+    reg = ctx.widgets
+
     # ── state init ────────────────────────────────────────────────────────
-    ctx.app._smfish_frame = parent
+    reg.register("_smfish_frame", parent)
     ctx.app._smfish_out_dir = None
     ctx.app._smfish_separator = "_"
     ctx.app._smfish_fov_tp_extractor = None
@@ -126,43 +131,43 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cl.setContentsMargins(0, 0, 0, 6)
 
     cl.addWidget(QLabel("Channel:", ctrl))
-    ctx.app._smfish_channel_cb = QComboBox(ctrl)
-    ctx.app._smfish_channel_cb.currentIndexChanged.connect(
+    channel_cb = reg.register("_smfish_channel_cb", QComboBox(ctrl))
+    channel_cb.currentIndexChanged.connect(
         lambda _i: _smfish_on_channel_changed(ctx.app)
     )
-    cl.addWidget(ctx.app._smfish_channel_cb)
+    cl.addWidget(channel_cb)
 
     cl.addWidget(QLabel("FOV:", ctrl))
-    ctx.app._smfish_fov_cb = QComboBox(ctrl)
-    ctx.app._smfish_fov_cb.currentIndexChanged.connect(
+    fov_cb = reg.register("_smfish_fov_cb", QComboBox(ctrl))
+    fov_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx.app)
     )
-    cl.addWidget(ctx.app._smfish_fov_cb)
+    cl.addWidget(fov_cb)
 
     cl.addWidget(QLabel("Timepoint:", ctrl))
-    ctx.app._smfish_tp_cb = QComboBox(ctrl)
-    ctx.app._smfish_tp_cb.currentIndexChanged.connect(
+    tp_cb = reg.register("_smfish_tp_cb", QComboBox(ctrl))
+    tp_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx.app)
     )
-    cl.addWidget(ctx.app._smfish_tp_cb)
+    cl.addWidget(tp_cb)
 
     cl.addWidget(QLabel("smFISH_Thresh:", ctrl))
-    ctx.app._smfish_threshold_edit = QLineEdit("1500", ctrl)
-    ctx.app._smfish_threshold_edit.setFixedWidth(90)
-    ctx.app._smfish_threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
-    cl.addWidget(ctx.app._smfish_threshold_edit)
+    threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500", ctrl))
+    threshold_edit.setFixedWidth(90)
+    threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
+    cl.addWidget(threshold_edit)
 
     cl.addWidget(QLabel("LUT Min:", ctrl))
-    ctx.app._smfish_lut_min_edit = QLineEdit("", ctrl)
-    ctx.app._smfish_lut_min_edit.setFixedWidth(70)
-    ctx.app._smfish_lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
-    cl.addWidget(ctx.app._smfish_lut_min_edit)
+    lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit("", ctrl))
+    lut_min_edit.setFixedWidth(70)
+    lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
+    cl.addWidget(lut_min_edit)
 
     cl.addWidget(QLabel("LUT Max:", ctrl))
-    ctx.app._smfish_lut_max_edit = QLineEdit("", ctrl)
-    ctx.app._smfish_lut_max_edit.setFixedWidth(70)
-    ctx.app._smfish_lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
-    cl.addWidget(ctx.app._smfish_lut_max_edit)
+    lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit("", ctrl))
+    lut_max_edit.setFixedWidth(70)
+    lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
+    cl.addWidget(lut_max_edit)
     cl.addStretch(1)
     root.addWidget(ctrl)
 
@@ -182,10 +187,10 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx.app))
     bl.addWidget(refresh_btn)
 
-    ctx.app._smfish_overlay_btn = QPushButton("Hide Overlays", btn_row)
-    ctx.app._smfish_overlay_btn.setProperty("variant", "secondary")
-    ctx.app._smfish_overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx.app))
-    bl.addWidget(ctx.app._smfish_overlay_btn)
+    overlay_btn = reg.register("_smfish_overlay_btn", QPushButton("Hide Overlays", btn_row))
+    overlay_btn.setProperty("variant", "secondary")
+    overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx.app))
+    bl.addWidget(overlay_btn)
 
     cdf_btn = QPushButton("This Frame CDF", btn_row)
     cdf_btn.setProperty("variant", "secondary")
@@ -195,38 +200,38 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     root.addWidget(btn_row)
 
     # Status row
-    ctx.app._smfish_status_label = QLabel(
+    status_label = reg.register("_smfish_status_label", QLabel(
         "Select a single well from the global picker.", parent
-    )
-    ctx.app._smfish_status_label.setObjectName("Muted")
-    root.addWidget(ctx.app._smfish_status_label)
+    ))
+    status_label.setObjectName("Muted")
+    root.addWidget(status_label)
 
     # Matplotlib image
-    ctx.app._smfish_fig_img = Figure(figsize=(6, 5), dpi=100)
-    ctx.app._smfish_ax_img = ctx.app._smfish_fig_img.add_subplot(111)
-    ctx.app._smfish_canvas_img = FigureCanvas(ctx.app._smfish_fig_img)
-    root.addWidget(ctx.app._smfish_canvas_img, 1)
+    fig_img = reg.register("_smfish_fig_img", Figure(figsize=(6, 5), dpi=100))
+    reg.register("_smfish_ax_img", fig_img.add_subplot(111))
+    canvas_img = reg.register("_smfish_canvas_img", FigureCanvas(fig_img))
+    root.addWidget(canvas_img, 1)
     # Theme the canvas immediately so it's never a bare white figure before the
     # first refresh paints data or an empty-state message.
     _smfish_paint_empty(ctx.app, "Select a well to view smFISH images.")
 
     from widgets.mpl_toolbar import MplToolbar
-    ctx.app._smfish_toolbar = MplToolbar(ctx.app._smfish_canvas_img, parent)
-    root.addWidget(ctx.app._smfish_toolbar)
+    toolbar = reg.register("_smfish_toolbar", MplToolbar(canvas_img, parent))
+    root.addWidget(toolbar)
 
-    ctx.app._smfish_canvas_img.mpl_connect(
+    canvas_img.mpl_connect(
         "motion_notify_event", lambda ev: _smfish_on_img_hover(ctx.app, ev)
     )
-    ctx.app._smfish_canvas_img.mpl_connect(
+    canvas_img.mpl_connect(
         "scroll_event", lambda ev: _smfish_on_img_scroll(ctx.app, ev)
     )
-    ctx.app._smfish_canvas_img.mpl_connect(
+    canvas_img.mpl_connect(
         "button_press_event", lambda ev: _smfish_on_img_press(ctx.app, ev)
     )
-    ctx.app._smfish_canvas_img.mpl_connect(
+    canvas_img.mpl_connect(
         "button_release_event", lambda ev: _smfish_on_img_release(ctx.app, ev)
     )
-    ctx.app._smfish_canvas_img.mpl_connect(
+    canvas_img.mpl_connect(
         "motion_notify_event", lambda ev: _smfish_on_img_drag(ctx.app, ev)
     )
 

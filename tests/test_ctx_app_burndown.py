@@ -33,7 +33,8 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   768 → 668  scatter (cells + agg)
 #   668 → 624  lineplot + multivariate
 #   624 → 587  image_table + cell_browser
-CTX_APP_BUDGET = 587
+#   587 → 544  smfish
+CTX_APP_BUDGET = 544
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

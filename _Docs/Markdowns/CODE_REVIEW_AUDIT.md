@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **41 / 77 items resolved** (40 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **42 / 77 items resolved** (41 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -131,7 +131,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | X9 | unlink `tmp_zip` on incomplete fetch (`try/finally`) | M | `[x]` DONE | #597 |
 | X10 | enqueue stdout sentinel before `flush_and_join` (stop reader hang) | M | `[x]` DONE | #597 |
 | X11 | offer optional SSH key passphrase (or document risk) | M | `[ ]` TODO | |
-| X12 | `services/env.py` startup validation of `ALLWELL_*` | M | `[ ]` TODO | |
+| X12 | `services/env.py` startup validation of `ALLWELL_*` | M | `[x]` DONE | `test_env_validation.py` |
 | X13 | delete dead state `_bar_quick_*`, `_montage_chan_cb` | L | `[x]` DONE | #597 |
 | X14 | preserve absent saved wells (don't prune-then-persist) | L | `[ ]` TODO | |
 | X15 | bootstrap-log retention cap / "clear logs" | L | `[ ]` TODO | |
@@ -398,7 +398,7 @@ No credential/token literals are logged anywhere; `ssh_key_setup.py` delegates p
 - **Low —** full `traceback.format_exc()` written to per-well error files and debug panels (`process_microscopy.py:209`, `scatter/callbacks.py:313/1145`, `cell_gating_tab_view.py:1177`). *Fix: keep full tracebacks in dev-gated sinks; show users a short message.* — **X16** `[ ]` TODO
 
 ### 5.5 Environment configuration
-No central startup validation exists, but this is **Low risk**: every env *read* uses `.get(...)` with a default or is `if`-guarded. The residual weakness is that misconfiguration surfaces as a **silent fallback** rather than a clear error, with reads scattered across 10 files. *Fix: a small `services/env.py` that reads the ~6 `ALLWELL_*`/config vars once at startup, logs active overrides, and validates provided paths exist.* — **X12** `[ ]` TODO
+No central startup validation exists, but this is **Low risk**: every env *read* uses `.get(...)` with a default or is `if`-guarded. The residual weakness is that misconfiguration surfaces as a **silent fallback** rather than a clear error, with reads scattered across 10 files. *Fix: a small `services/env.py` that reads the ~6 `ALLWELL_*`/config vars once at startup, logs active overrides, and validates provided paths exist.* — **X12** `[x]` DONE — new pure `services/env.py::validate_env` returns `(warnings, active)`; `log_env_validation()` wired into `allwell.main()` logs active overrides at INFO and set-but-unusable scratch/remotes paths at WARNING. `test_env_validation.py`.
 
 ---
 
@@ -422,6 +422,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 ## Status log
 
 > Append a dated line whenever a status box changes. Newest first.
+
+- 2026-07-02 **Batch Q (env validation)** — **X12** (new pure `services/env.py::validate_env(env) -> (warnings, active)`; `log_env_validation()` wired into `allwell.main()` early startup: logs active `ALLWELL_*` overrides at INFO and set-but-unusable scratch/remotes paths at WARNING instead of letting a mistyped path fall back silently and only misbehave mid-run). +8 tests. Fast lane green. 42/77 resolved.
 
 - 2026-07-02 **Batch P (smFISH robustness)** — **E8** (worker wrapped so any `_run` crash routes through `done_cb` instead of hanging "Apply Global Threshold" forever), **E18** (re-entrancy busy-flag `_smfish_apply_running` rejects a second concurrent run — which also stops the double-launch from clobbering the shared cancel event — cleared on every terminal path). +2 tests. Fast lane green (1282). 41/77 resolved.
 
@@ -456,4 +458,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch P merged (smFISH E8/E18 + tests); **41 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch Q merged (X12 env validation + tests); **42 / 77 resolved.**

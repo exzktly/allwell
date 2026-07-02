@@ -1041,6 +1041,15 @@ def main() -> None:
     except Exception:
         swallowed()  # diagnostics-only; never block startup
 
+    # Surface any misconfigured ALLWELL_* overrides once at startup (audit
+    # X12) instead of letting a mistyped scratch/remotes path fall back
+    # silently and only misbehave much later, mid-run.
+    try:
+        from services.env import log_env_validation
+        log_env_validation()
+    except Exception:
+        swallowed()  # diagnostics-only; never block startup
+
     from well_viewer.core import debug_flags as _debug_flags
 
     _debug_flags.REVIEW_TAB_DEBUG = REVIEW_TAB_DEBUG

@@ -30,7 +30,14 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, ctx.app._scatter_export_dock = make_plot_with_right_dock(parent)
+    # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``),
+    # which also stamps ``app._<name>`` so legacy ``app._scatter_*`` readers keep
+    # resolving. Non-widget state (gates / color-by-tp flag / selections) and
+    # behaviour calls still reach the app — a later layer.
+    reg = ctx.widgets
+
+    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
+    reg.register("_scatter_export_dock", export_dock)
     parent = plot_area
 
     ctrl = QWidget(parent)
@@ -45,50 +52,50 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     cl.addWidget(QLabel("X-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
-    ctx.app._scatter_ch_x_cb = QComboBox(ctrl)
-    ctx.app._scatter_ch_x_cb.addItems(["GFP"])
-    ctx.app._scatter_ch_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("x"))
-    cl.addWidget(ctx.app._scatter_ch_x_cb)
-    ctx.app._scatter_ch_x_var = ctx.app._scatter_ch_x_cb
+    ch_x_cb = reg.register("_scatter_ch_x_cb", QComboBox(ctrl))
+    ch_x_cb.addItems(["GFP"])
+    ch_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("x"))
+    cl.addWidget(ch_x_cb)
+    reg.register("_scatter_ch_x_var", ch_x_cb)
 
     cl.addWidget(QLabel("Property:", ctrl))
-    ctx.app._scatter_metric_x_cb = QComboBox(ctrl)
-    ctx.app._scatter_metric_x_cb.addItems(_METRIC_ORDER)
-    ctx.app._scatter_metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx.app))
-    cl.addWidget(ctx.app._scatter_metric_x_cb)
-    ctx.app._scatter_metric_x_var = ctx.app._scatter_metric_x_cb
+    metric_x_cb = reg.register("_scatter_metric_x_cb", QComboBox(ctrl))
+    metric_x_cb.addItems(_METRIC_ORDER)
+    metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx.app))
+    cl.addWidget(metric_x_cb)
+    reg.register("_scatter_metric_x_var", metric_x_cb)
 
     cl.addWidget(QLabel("Y-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
-    ctx.app._scatter_ch_y_cb = QComboBox(ctrl)
-    ctx.app._scatter_ch_y_cb.addItems(["GFP"])
-    ctx.app._scatter_ch_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("y"))
-    cl.addWidget(ctx.app._scatter_ch_y_cb)
-    ctx.app._scatter_ch_y_var = ctx.app._scatter_ch_y_cb
+    ch_y_cb = reg.register("_scatter_ch_y_cb", QComboBox(ctrl))
+    ch_y_cb.addItems(["GFP"])
+    ch_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_axis_change("y"))
+    cl.addWidget(ch_y_cb)
+    reg.register("_scatter_ch_y_var", ch_y_cb)
 
     cl.addWidget(QLabel("Property:", ctrl))
-    ctx.app._scatter_metric_y_cb = QComboBox(ctrl)
-    ctx.app._scatter_metric_y_cb.addItems(_METRIC_ORDER)
-    ctx.app._scatter_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx.app))
-    cl.addWidget(ctx.app._scatter_metric_y_cb)
-    ctx.app._scatter_metric_y_var = ctx.app._scatter_metric_y_cb
+    metric_y_cb = reg.register("_scatter_metric_y_cb", QComboBox(ctrl))
+    metric_y_cb.addItems(_METRIC_ORDER)
+    metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx.app))
+    cl.addWidget(metric_y_cb)
+    reg.register("_scatter_metric_y_var", metric_y_cb)
 
     cl.addWidget(QLabel("Timepoints:", ctrl))
-    ctx.app._scatter_tp_button = QPushButton("Select Timepoints", ctrl)
-    ctx.app._scatter_tp_button.setProperty("variant", "secondary")
-    ctx.app._scatter_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx.app))
-    cl.addWidget(ctx.app._scatter_tp_button)
-    ctx.app._scatter_tp_label = QLabel("(0 selected)", ctrl)
-    ctx.app._scatter_tp_label.setObjectName("Muted")
-    cl.addWidget(ctx.app._scatter_tp_label)
-    # Hidden legacy single-tp combo — kept on ctx.app so export / save-figure
-    # paths that still read ``_scatter_tp_var.currentText()`` see a valid
-    # timepoint string (the first selected one).
-    ctx.app._scatter_tp_cb = QComboBox(ctrl)
-    ctx.app._scatter_tp_cb.addItems(["0"])
-    ctx.app._scatter_tp_cb.hide()
-    ctx.app._scatter_tp_var = ctx.app._scatter_tp_cb
-    ctx.app._scatter_tp_selections: dict[str, bool] = {}
+    tp_button = reg.register("_scatter_tp_button", QPushButton("Select Timepoints", ctrl))
+    tp_button.setProperty("variant", "secondary")
+    tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx.app))
+    cl.addWidget(tp_button)
+    tp_label = reg.register("_scatter_tp_label", QLabel("(0 selected)", ctrl))
+    tp_label.setObjectName("Muted")
+    cl.addWidget(tp_label)
+    # Hidden legacy single-tp combo — kept so export / save-figure paths that
+    # still read ``_scatter_tp_var.currentText()`` see a valid timepoint string
+    # (the first selected one).
+    tp_cb = reg.register("_scatter_tp_cb", QComboBox(ctrl))
+    tp_cb.addItems(["0"])
+    tp_cb.hide()
+    reg.register("_scatter_tp_var", tp_cb)
+    ctx.app._scatter_tp_selections = {}
 
     # Secondary display options (Layout + Colour-by-time) collapse into a
     # "Display ▾" popover so the per-cell scatter control row stays readable —
@@ -101,22 +108,23 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # one group per axis below the other (view-only comparison) — mirrors the
     # Distribution tab's Overlay / Faceted choice.
     _disp_lay.addWidget(QLabel("Layout:", _disp_panel))
-    ctx.app._scatter_layout_cb = QComboBox(_disp_panel)
-    ctx.app._scatter_layout_cb.addItems(["Overlay", "Separate axes"])
-    ctx.app._scatter_layout_cb.currentIndexChanged.connect(
+    layout_cb = reg.register("_scatter_layout_cb", QComboBox(_disp_panel))
+    layout_cb.addItems(["Overlay", "Separate axes"])
+    layout_cb.currentIndexChanged.connect(
         lambda _i: redraw_scatter_orchestrate(ctx.app))
-    _disp_lay.addWidget(ctx.app._scatter_layout_cb)
-    ctx.app._scatter_layout_var = ctx.app._scatter_layout_cb
+    _disp_lay.addWidget(layout_cb)
+    reg.register("_scatter_layout_var", layout_cb)
 
     # "Color by time": colour each point by its timepoint instead of by well
     # identity, so a well's cloud shows its evolution over time. With more than
     # one well selected the view auto-stacks into one panel per well (overlaying
     # several time-coloured clouds on one axis would be unreadable).
     ctx.app._scatter_color_by_tp = False
-    ctx.app._scatter_color_by_tp_btn = QPushButton("Color by time: Off", ctrl)
-    ctx.app._scatter_color_by_tp_btn.setProperty("variant", "toggle")
-    ctx.app._scatter_color_by_tp_btn.setCheckable(True)
-    ctx.app._scatter_color_by_tp_btn.setToolTip(
+    color_by_tp_btn = reg.register(
+        "_scatter_color_by_tp_btn", QPushButton("Color by time: Off", ctrl))
+    color_by_tp_btn.setProperty("variant", "toggle")
+    color_by_tp_btn.setCheckable(True)
+    color_by_tp_btn.setToolTip(
         "Colour each point by its timepoint. With multiple wells selected, "
         "wells are shown as stacked panels.")
 
@@ -124,12 +132,12 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
         on = bool(checked)
         ctx.app._scatter_color_by_tp = on
         # State-label + matching highlight (label and accent always agree).
-        ctx.app._scatter_color_by_tp_btn.setText(
+        color_by_tp_btn.setText(
             "Color by time: On" if on else "Color by time: Off")
         redraw_scatter_orchestrate(ctx.app)
 
-    ctx.app._scatter_color_by_tp_btn.clicked.connect(_toggle_color_by_tp)
-    _disp_lay.addWidget(ctx.app._scatter_color_by_tp_btn)
+    color_by_tp_btn.clicked.connect(_toggle_color_by_tp)
+    _disp_lay.addWidget(color_by_tp_btn)
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).
@@ -175,11 +183,11 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")
-    ctx.app._scatter_card = card
-    ctx.app._scatter_fig = card.figure
-    ctx.app._ax_scatter = ctx.app._scatter_fig.add_subplot(1, 1, 1)
-    ctx.app._scatter_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.16, right=0.97)
-    ctx.app._scatter_canvas = card.canvas
+    reg.register("_scatter_card", card)
+    fig = reg.register("_scatter_fig", card.figure)
+    reg.register("_ax_scatter", fig.add_subplot(1, 1, 1))
+    fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.16, right=0.97)
+    canvas = reg.register("_scatter_canvas", card.canvas)
     # No error-band controls here: the per-cell scatter draws individual points,
     # so SEM/SD has no meaning (it belongs only on the aggregate scatter).
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_orchestrate(ctx.app))
@@ -198,12 +206,12 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     _scroll.setWidget(wrap_with_empty_state(ctx.app, card, icon="scatter-chart"))
     layout.addWidget(_scroll, 1)
 
-    ctx.app._scatter_canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx.app))
-    ctx.app._scatter_canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx.app))
+    canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx.app))
+    canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx.app))
     # Gate edge/corner editing: drag handles of existing gates to resize them.
-    ctx.app._scatter_canvas.mpl_connect("button_press_event", partial(on_gate_edit_press, ctx.app))
-    ctx.app._scatter_canvas.mpl_connect("motion_notify_event", partial(on_gate_edit_motion, ctx.app))
-    ctx.app._scatter_canvas.mpl_connect("button_release_event", partial(on_gate_edit_release, ctx.app))
+    canvas.mpl_connect("button_press_event", partial(on_gate_edit_press, ctx.app))
+    canvas.mpl_connect("motion_notify_event", partial(on_gate_edit_motion, ctx.app))
+    canvas.mpl_connect("button_release_event", partial(on_gate_edit_release, ctx.app))
 
 
 def _open_timepoint_selector(app) -> None:

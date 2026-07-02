@@ -17,13 +17,20 @@ from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestra
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
 
+    # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``),
+    # which also stamps ``app._<name>`` so legacy ``app._scatter_agg_*`` readers
+    # keep resolving. Non-widget state (tp selections) and behaviour calls still
+    # reach the app — a later layer.
+    reg = ctx.widgets
+
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, ctx.app._scatter_agg_export_dock = make_plot_with_right_dock(parent)
+    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
+    reg.register("_scatter_agg_export_dock", export_dock)
     parent = plot_area
 
     ctrl = QWidget(parent)
@@ -43,47 +50,47 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     cl.addWidget(QLabel("X-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
-    ctx.app._scatter_agg_ch_x_cb = QComboBox(ctrl)
-    ctx.app._scatter_agg_ch_x_cb.addItems(["GFP"])
-    ctx.app._scatter_agg_ch_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_agg_axis_change("x"))
-    cl.addWidget(ctx.app._scatter_agg_ch_x_cb)
+    agg_ch_x_cb = reg.register("_scatter_agg_ch_x_cb", QComboBox(ctrl))
+    agg_ch_x_cb.addItems(["GFP"])
+    agg_ch_x_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_agg_axis_change("x"))
+    cl.addWidget(agg_ch_x_cb)
 
     cl.addWidget(QLabel("Property:", ctrl))
-    ctx.app._scatter_agg_metric_x_cb = QComboBox(ctrl)
-    ctx.app._scatter_agg_metric_x_cb.addItems(AGG_METRIC_ORDER)
-    ctx.app._scatter_agg_metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx.app))
-    cl.addWidget(ctx.app._scatter_agg_metric_x_cb)
+    agg_metric_x_cb = reg.register("_scatter_agg_metric_x_cb", QComboBox(ctrl))
+    agg_metric_x_cb.addItems(AGG_METRIC_ORDER)
+    agg_metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx.app))
+    cl.addWidget(agg_metric_x_cb)
 
     cl.addWidget(QLabel("Y-axis:", ctrl))
     cl.addWidget(QLabel("Channel:", ctrl))
-    ctx.app._scatter_agg_ch_y_cb = QComboBox(ctrl)
-    ctx.app._scatter_agg_ch_y_cb.addItems(["GFP"])
-    ctx.app._scatter_agg_ch_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_agg_axis_change("y"))
-    cl.addWidget(ctx.app._scatter_agg_ch_y_cb)
+    agg_ch_y_cb = reg.register("_scatter_agg_ch_y_cb", QComboBox(ctrl))
+    agg_ch_y_cb.addItems(["GFP"])
+    agg_ch_y_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_scatter_agg_axis_change("y"))
+    cl.addWidget(agg_ch_y_cb)
 
     cl.addWidget(QLabel("Property:", ctrl))
-    ctx.app._scatter_agg_metric_y_cb = QComboBox(ctrl)
-    ctx.app._scatter_agg_metric_y_cb.addItems(AGG_METRIC_ORDER)
-    ctx.app._scatter_agg_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx.app))
-    cl.addWidget(ctx.app._scatter_agg_metric_y_cb)
+    agg_metric_y_cb = reg.register("_scatter_agg_metric_y_cb", QComboBox(ctrl))
+    agg_metric_y_cb.addItems(AGG_METRIC_ORDER)
+    agg_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx.app))
+    cl.addWidget(agg_metric_y_cb)
 
     # Legacy stat combos — hidden, kept in sync for back-compat. Export
-    # / save-figure code still reads from these by name.
-    ctx.app._scatter_agg_stat_x_cb = QComboBox(ctrl)
-    ctx.app._scatter_agg_stat_x_cb.hide()
-    ctx.app._scatter_agg_stat_x_var = ctx.app._scatter_agg_stat_x_cb
-    ctx.app._scatter_agg_stat_y_cb = QComboBox(ctrl)
-    ctx.app._scatter_agg_stat_y_cb.hide()
-    ctx.app._scatter_agg_stat_y_var = ctx.app._scatter_agg_stat_y_cb
+    # / save-figure code still reads from these by name (+ ``_var`` aliases).
+    stat_x_cb = reg.register("_scatter_agg_stat_x_cb", QComboBox(ctrl))
+    stat_x_cb.hide()
+    reg.register("_scatter_agg_stat_x_var", stat_x_cb)
+    stat_y_cb = reg.register("_scatter_agg_stat_y_cb", QComboBox(ctrl))
+    stat_y_cb.hide()
+    reg.register("_scatter_agg_stat_y_var", stat_y_cb)
 
     cl.addWidget(QLabel("Timepoints:", ctrl))
-    ctx.app._scatter_agg_tp_button = QPushButton("Select Timepoints", ctrl)
-    ctx.app._scatter_agg_tp_button.setProperty("variant", "secondary")
-    ctx.app._scatter_agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx.app))
-    cl.addWidget(ctx.app._scatter_agg_tp_button)
-    ctx.app._scatter_agg_tp_label = QLabel("(0 selected)", ctrl)
-    ctx.app._scatter_agg_tp_label.setObjectName("Muted")
-    cl.addWidget(ctx.app._scatter_agg_tp_label)
+    agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Select Timepoints", ctrl))
+    agg_tp_button.setProperty("variant", "secondary")
+    agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx.app))
+    cl.addWidget(agg_tp_button)
+    agg_tp_label = reg.register("_scatter_agg_tp_label", QLabel("(0 selected)", ctrl))
+    agg_tp_label.setObjectName("Muted")
+    cl.addWidget(agg_tp_label)
     ctx.app._scatter_agg_tp_selections = {}
 
     # Error band (SEM/SD) for the aggregate's mean±spread points collapses into
@@ -122,11 +129,11 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")
-    ctx.app._scatter_agg_card = card
-    ctx.app._scatter_agg_fig = card.figure
-    ctx.app._ax_scatter_agg = ctx.app._scatter_agg_fig.add_subplot(1, 1, 1)
-    ctx.app._scatter_agg_fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
-    ctx.app._scatter_agg_canvas = card.canvas
+    reg.register("_scatter_agg_card", card)
+    fig = reg.register("_scatter_agg_fig", card.figure)
+    reg.register("_ax_scatter_agg", fig.add_subplot(1, 1, 1))
+    fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
+    reg.register("_scatter_agg_canvas", card.canvas)
     # Error band now lives in the "Display ▾" popover on the control row above.
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_agg_orchestrate(ctx.app))
     card.setStatsChipVisible(False)

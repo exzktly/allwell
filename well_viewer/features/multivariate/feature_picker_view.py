@@ -48,7 +48,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
     listw.itemChanged.connect(_on_item_changed)
 
     def refresh() -> None:
-        st = ctx.app._app_state.feature_slice("multivariate")
+        st = ctx.state.feature_slice("multivariate")
         if st is None:
             return
         ctx.app._mv_picker_refreshing = True

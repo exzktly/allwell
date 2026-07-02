@@ -52,7 +52,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
         lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
     )
     chan_cb.hide()
-    if not hasattr(ctx.app, "_plot_chan_var"):
+    if not ctx.widgets.has("_plot_chan_var"):
         reg.register("_plot_chan_var", chan_cb)   # legacy aliases → same widget
         reg.register("_chan_var", chan_cb)
 

@@ -238,7 +238,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     sig_btn = reg.register("_bar_significance_btn", QPushButton("Significance: Off", shape_ctrl))
     sig_btn.setProperty("variant", "toggle")
     sig_btn.setCheckable(True)
-    sig_btn.setChecked(bool(ctx.app._app_state.plot.show_significance))
+    sig_btn.setChecked(bool(ctx.state.plot.show_significance))
     sig_btn.setToolTip(
         "Draw significance brackets between group bars from the Statistics tab's "
         "pairwise tests. Run a test in Statistics first; brackets appear for the "

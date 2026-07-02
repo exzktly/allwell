@@ -52,7 +52,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              inits deleted + mode/color callback writes moved to ctx.state)
 #   390 → 386  smfish separator/show_overlays/fit_on_next_redraw  → SmfishState
 #              (builder inits deleted + classifier-seed read moved to ctx.state)
-CTX_APP_BUDGET = 386
+# --- Phase 3: the behaviour-call + runtime-object layer (ctx accessors / method
+#     extraction / feature-function signature migration). Not typed-state moves.
+#   386 → 376  P3.1 ctx.app._app_state → ctx.state (identical object) across the
+#              image_table/barplot/multivariate builders + one registered-widget
+#              probe (lineplot _plot_chan_var → ctx.widgets.has)
+CTX_APP_BUDGET = 376
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

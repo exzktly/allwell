@@ -44,7 +44,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.segmented_control import SegmentedControl
     from well_viewer.core.ui_helpers import make_popover_button, wrap_with_empty_state
 
-    st = ctx.app._app_state.feature_slice("multivariate")
+    st = ctx.state.feature_slice("multivariate")
     # A8 burn-down: widget handles go through the WidgetRegistry
     # (``ctx.widgets``), which stamps ``app._mv_*`` so legacy readers resolve.
     reg = ctx.widgets

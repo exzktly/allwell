@@ -85,7 +85,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     # State defaults — controller methods read these.
     # Image Table data/options/caches live on the typed ImageTableState
-    # (``ctx.app._app_state.image_table``), constructed with AppState — no
+    # (``ctx.state.image_table``), constructed with AppState — no
     # loose-attr defaults needed here. Only widget-handle containers and the
     # CropTool helper are seeded on the app below.
     if not hasattr(ctx.app, "_image_table_cells"):
@@ -144,12 +144,12 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ar.setSpacing(6)
 
     ar.addWidget(QLabel("Rows:", axes_row))
-    row_axis_cb = _axis_combo(ctx.app._app_state.image_table.row_axis)
+    row_axis_cb = _axis_combo(ctx.state.image_table.row_axis)
     ar.addWidget(row_axis_cb)
     reg.register("_image_table_row_axis_cb", row_axis_cb)
 
     ar.addWidget(QLabel("×  Columns:", axes_row))
-    col_axis_cb = _axis_combo(ctx.app._app_state.image_table.col_axis)
+    col_axis_cb = _axis_combo(ctx.state.image_table.col_axis)
     ar.addWidget(col_axis_cb)
     reg.register("_image_table_col_axis_cb", col_axis_cb)
 
@@ -238,7 +238,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     orow.addWidget(QLabel("Grid:", opts_row))
     rows_spin = QSpinBox(opts_row)
     rows_spin.setRange(1, 12)
-    rows_spin.setValue(int(ctx.app._app_state.image_table.rows))
+    rows_spin.setValue(int(ctx.state.image_table.rows))
     # Wide enough that a two-digit value (up to 12) clears the up/down arrows
     # instead of being clipped against them.
     rows_spin.setFixedWidth(70)
@@ -249,7 +249,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     orow.addWidget(QLabel("×", opts_row))
     cols_spin = QSpinBox(opts_row)
     cols_spin.setRange(1, 12)
-    cols_spin.setValue(int(ctx.app._app_state.image_table.cols))
+    cols_spin.setValue(int(ctx.state.image_table.cols))
     cols_spin.setFixedWidth(70)
     cols_spin.setToolTip("Grid columns (Build sets this automatically).")
     cols_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
@@ -409,7 +409,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1 / 1.25, relative=True))
     tr.addWidget(zoom_out)
 
-    zoom_lbl = QPushButton(f"{ctx.app._app_state.image_table.zoom * 100:.0f}%", action_row)
+    zoom_lbl = QPushButton(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
     zoom_lbl.setFlat(True)
     zoom_lbl.setFixedWidth(52)
     zoom_lbl.setToolTip("Click to reset zoom to 100%")

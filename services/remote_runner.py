@@ -4011,10 +4011,16 @@ class RemoteRunner:
         # rsync --timeout=120 (I/O-idle) + ssh ConnectTimeout bound real stalls,
         # so timeout=None is safe; stop_event makes Stop interrupt an in-flight
         # re-pull.
+        # FOLDER must be included: _verify_local_manifest requires the
+        # {well}_out.zip for *any* FULL run (including FOLDER input), so the
+        # retry re-pull has to be able to fetch it too — otherwise a
+        # FOLDER+FULL run whose out-zip failed to land loops verify→retry
+        # forever and remote cleanup never happens (audit G2).
         want_zip = (
             run.output_filter is OutputFilter.FULL
             and run.local_input_mode in (
-                LocalInputMode.ZIP, LocalInputMode.FLAT, LocalInputMode.MIXED)
+                LocalInputMode.ZIP, LocalInputMode.FLAT,
+                LocalInputMode.MIXED, LocalInputMode.FOLDER)
         )
 
         def _pull(remote_src: str) -> None:

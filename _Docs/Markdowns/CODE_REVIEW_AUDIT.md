@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **16 / 77 items resolved** (15 done + 1 dropped). Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **19 / 77 items resolved** (18 done + 1 dropped). Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -88,11 +88,11 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
 | G1 | `sys` used but never imported → local auto-threshold pass dead | H | `[x]` DONE | #597 |
-| G2 | FOLDER-mode verify requires out-zip retry can't re-pull → no converge | M | `[ ]` TODO | |
+| G2 | FOLDER-mode verify requires out-zip retry can't re-pull → no converge | M | `[x]` DONE | #597 |
 | G3 | `qc_*` params ignored; `filter_debris` dead | M | `[ ]` TODO | |
-| G4 | extend `test_no_silent_except` (tuple/typed pass + broad return None) | M | `[ ]` TODO | |
+| G4 | extend `test_no_silent_except` (added 3 pipeline files; tuple/return-None ext. deferred) | M | `[x]` DONE | #597 |
 | G5 | re-enable ruff `F401` with targeted `# noqa`; drop 55 unused imports | M | `[ ]` TODO | |
-| G6 | add a function-level complexity ratchet | M | `[ ]` TODO | |
+| G6 | add a function-level complexity ratchet | M | `[x]` DONE | #597 |
 | G7 | phantom guards / no-op handlers (5 sites) | L | `[x]` DONE | #597 |
 | G8 | latent NameError (missing `typing` import) + dead `prefix` param | L | `[x]` DONE | #597 |
 
@@ -249,7 +249,7 @@ Key finding: the codebase has **no ABCs and no `typing.Protocol` at all** — so
 
 ### 1.5 Dead code paths
 - **High — `services/remote_runner.py:2835`: the entire local auto-threshold pass is dead.** `_run_local_auto_threshold()` starts with `sys.path.insert(0, str(repo_root()))`, but **`import sys` appears nowhere in the file** (verified). It raises `NameError` on its first line every time; the whole body is wrapped in a broad `except` (~`:2880`) that logs "local auto-threshold pass failed" and continues. Because per-batch passes are deliberately suppressed (`--no_auto_threshold`, `:2755`) on the assumption this pass runs, **batched remote runs never compute/write auto-threshold defaults**. *Fix: add `import sys`.* — **G1** `[x]` DONE
-- **Medium — `services/remote_runner.py:3983` vs `:4077`: FOLDER-mode out-zip can never converge.** `_verify_local_manifest` requires `{well}_out.zip` for any FULL run *including FOLDER mode* (`want_zip_artifact = output_filter is FULL`), but `_retry_missing_wells` gates the zip re-pull on `local_input_mode in (ZIP, FLAT, MIXED)` — **FOLDER is omitted** (verified). A FOLDER+FULL run whose out-zip failed to land loops verify→retry→verify forever and remote cleanup is skipped permanently. *Fix: make the two conditions consistent.* — **G2** `[ ]` TODO
+- **Medium — `services/remote_runner.py:3983` vs `:4077`: FOLDER-mode out-zip can never converge.** `_verify_local_manifest` requires `{well}_out.zip` for any FULL run *including FOLDER mode* (`want_zip_artifact = output_filter is FULL`), but `_retry_missing_wells` gates the zip re-pull on `local_input_mode in (ZIP, FLAT, MIXED)` — **FOLDER is omitted** (verified). A FOLDER+FULL run whose out-zip failed to land loops verify→retry→verify forever and remote cleanup is skipped permanently. *Fix: make the two conditions consistent.* — **G2** `[x]` DONE (added FOLDER to the retry gate; `tests/test_remote_runner.py::test_retry_repulls_out_zip_for_folder_mode`)
 - **Medium — `process_microscopy.py:2063-2065`: `qc_min_area`/`qc_max_area`/`qc_min_solidity` are structurally ignored.** Declared and forwarded from `main()` (`:4512-4514`) but never read; the helper `filter_debris` (`:1222`) is never called in-module (QC is deferred to the Review layer). *Fix: drop the dead params + `filter_debris`, or wire them in.* — **G3** `[ ]` TODO
 - **Low — latent `NameError` in `features/grouping/controller.py:190`**: `Dict`/`Optional`/`List` are used in annotations with no `typing` import — safe only because `from __future__ import annotations` stringifies signatures. Also `make_replicate_pairs(toks, prefix)` (`:24`) never uses `prefix`. *Fix: add the import; drop the dead param.* — **G8** `[x]` DONE (`tests/test_make_replicate_pairs_signature.py`)
 - **Low — phantom guards / redundant branches (verified):** `process_microscopy.py:554` (`not in exclude_exts` can never fire — whitelist and blacklist are disjoint); `:3915` (`isinstance(h, float)` always True, `else 0.0` unreachable); `:4430-4431` (redundant `else` recomputes identical `workers`/`threads_per_worker`); `remote_runner.py:2086` (`if not line: continue` unreachable); `remote_runner.py:671` (`except OSError: raise` is a no-op handler). *Fix: remove each.* — **G7** `[x]` DONE
@@ -288,7 +288,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **Medium —** `remote_runner.py:80` (`ALLWELL_SCRATCH_DIR` silently ignored on `OSError` → later ENOSPC). — **E14** `[ ]` TODO
 - **Medium —** `image_table/image_compose.py:485/516/523` (corrupt mask → "no overlay" → user misreads QC). — **E15** `[ ]` TODO
 - **Medium —** `persistence/view_state.py` (~25 `swallowed()` sites) + `sample_definitions.py` (persistence fails invisibly). — **E16** `[ ]` TODO
-- **Top recommendation:** extend `test_no_silent_except.py` to flag tuple/typed `pass` and broad `return None` in `pipeline/`, `well_viewer/data/`, `well_viewer/persistence/`, add the missing pipeline files, and route data-integrity failures to at least WARNING. — **G4** `[ ]` TODO
+- **Top recommendation:** extend `test_no_silent_except.py` to flag tuple/typed `pass` and broad `return None` in `pipeline/`, `well_viewer/data/`, `well_viewer/persistence/`, add the missing pipeline files, and route data-integrity failures to at least WARNING. — **G4** `[x]` DONE (partial: added the 3 unscanned pipeline files; tuple/typed-`pass` + broad-`return None` extension needs a frozen offender baseline — noted in-test as remaining scope)
 
 ### 2.3 Race conditions
 - **High — `features/smfish/tab_view.py:752`** (`_smfish_apply_to_all`): launches a thread + `ThreadPoolExecutor` with **no re-entrancy guard**; a double-click runs two workers writing the **same per-well CSVs**, and the 2nd launch `.clear()`s the shared `app._smfish_cancel_event`. *Fix: single busy flag + per-run cancel event.* — **E18** `[ ]` TODO
@@ -386,7 +386,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 The monolith budgets constrain *file size* but not *function complexity*.
 - **Priority — characterization tests for CC-98 `find_well_images_and_masks`, then decompose.** — **A4** `[ ]` TODO
 - **Characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats`, then decompose.** — **A5** `[ ]` TODO
-- **Add an intra-file function-complexity ratchet alongside the line-budget ratchets.** — **G6** `[ ]` TODO
+- **Add an intra-file function-complexity ratchet alongside the line-budget ratchets.** — **G6** `[x]` DONE (`tests/test_complexity_ratchet.py` — CC>40 shrink-only allowlist of 29 functions)
 
 ### 5.3 Test quality — **a strength**
 ~75% behavioral / ~20% presence-or-structural / ~5% weak. Enforcement tests are genuine (`test_monolith_budgets`, `test_architecture_contracts`). **Under-tested:** `batch_export` render path + the CC-52/69/98 functions above (tracked under A4/A5). → see Non-goals.
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch E (guardrail hardening)** — **G2** (added `FOLDER` to the retry gate so a FOLDER+FULL run's missing out-zip is re-pulled and verify→retry converges), **G4** (extended `test_no_silent_except` to the 3 unscanned Qt-free pipeline files; broader tuple/return-None extension deferred pending a baseline), **G6** (new `test_complexity_ratchet.py` — a shrink-only CC>40 allowlist of 29 functions, so a new high-complexity function fails CI). +3 tests. Fast lane green (1242). **G3 deferred** — `filter_debris` is tested (not dead) and the `qc_*` params thread through `**kwargs`; removing them safely needs the slow e2e env. 19/77 resolved.
+
 - 2026-07-02 **Batch D (persistence)** — **X8** (`snapshot` persists only export prefs that differ from the defaults via `_nondefault_export_prefs`, so a future default change is no longer frozen by a stale saved value). +4 tests. Fast lane green (1239 passed). 16/77 resolved. (E5 deferred — best verified with the slow StarDist e2e env + would bump the monolith budget a third time; X7 deferred — schema-migration scaffolding is speculative until a v2 schema exists.)
 
 - 2026-07-02 **Batch C (High error/race surfacing)** — **E6** (pipeline setup crash now emits `("error", …)` not just `("finished")`), **E7** (`GatingWorker` gains a `failed` signal + wired handler so a crash releases the UI instead of hanging), **E12** (`Fetcher._loop` survives a per-well fetch crash and continues instead of silently abandoning the rest). +3 regression tests (`tests/test_worker_error_surfacing.py`). Fast lane green (1235 passed). 15/77 resolved.
@@ -432,4 +434,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch D merged (+ regression tests); **16 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch E merged (guardrail hardening + tests); **19 / 77 resolved.**

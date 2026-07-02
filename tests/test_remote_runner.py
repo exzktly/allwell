@@ -2949,3 +2949,35 @@ def test_close_remote_job_swallows_ssh_errors():
         side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10),
     ):
         r.close_remote_job()  # must not raise
+
+
+def test_retry_repulls_out_zip_for_folder_mode(host, tmp_path, monkeypatch):
+    """Audit G2 — a FOLDER + FULL run whose out-zip failed to land must still
+    be re-pulled. ``_verify_local_manifest`` requires ``{well}_out.zip`` for
+    every FULL run (FOLDER included), so if ``_retry_missing_wells`` skips the
+    zip re-pull for FOLDER, verify→retry→verify never converges and remote
+    cleanup is skipped forever."""
+    import services.remote_runner as rr
+    run = _make_run(tmp_path)
+    run.local_input_mode = rr.LocalInputMode.FOLDER
+    run.output_filter = rr.OutputFilter.FULL
+    run.expected_wells = {"A01"}
+    runner = rr.RemoteRunner(host)
+    runner._run = run
+
+    pulled: list[str] = []
+
+    def _fake_rsync(argv, *, log_fn=None, timeout=300, stop_event=None, **kw):
+        pulled.append(" ".join(map(str, argv)))
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr(rr, "_rsync_with_retry", _fake_rsync)
+    monkeypatch.setattr(rr, "resolve_rsync_binary", lambda: "rsync")
+    monkeypatch.setattr(rr, "_rsync_ssh_transport", lambda h: [])
+    monkeypatch.setattr(rr, "to_rsync_path", lambda p: str(p))
+
+    (tmp_path / "data_A01.csv").write_text("x")   # CSV present; out-zip absent
+    runner._retry_missing_wells(["missing A01_out.zip locally"], log=lambda _m: None)
+
+    assert any("A01_out.zip" in p for p in pulled), \
+        "FOLDER-mode out-zip must be re-pulled (was silently skipped)"

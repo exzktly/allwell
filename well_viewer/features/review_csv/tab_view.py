@@ -13,6 +13,14 @@ on_review_csv_row_double_click = _lazy("well_viewer.features.image_browser.revie
 
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
+    # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``)
+    # instead of being stashed on the app god-object. ``register`` also stamps
+    # ``app._<name>`` via setattr, so the legacy ``app._review_*`` readers in
+    # review_image/controller.py keep resolving unchanged. Only the residual
+    # behaviour calls (refresh / double-click) still reach the app — a separate
+    # later layer.
+    reg = ctx.widgets
+
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -25,27 +33,27 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     cl.setContentsMargins(0, 0, 0, 6)
 
     cl.addWidget(QLabel("Well:", ctrl))
-    ctx.app._review_well_lbl = QLabel("(select one well)", ctrl)
-    ctx.app._review_well_lbl.setObjectName("Muted")
-    cl.addWidget(ctx.app._review_well_lbl)
+    well_lbl = reg.register("_review_well_lbl", QLabel("(select one well)", ctrl))
+    well_lbl.setObjectName("Muted")
+    cl.addWidget(well_lbl)
 
     cl.addSpacing(8)
     cl.addWidget(QLabel("FOV:", ctrl))
-    ctx.app._review_fov_cb = QComboBox(ctrl)
-    ctx.app._review_fov_cb.setFixedWidth(120)
-    ctx.app._review_fov_cb.currentIndexChanged.connect(
+    fov_cb = reg.register("_review_fov_cb", QComboBox(ctrl))
+    fov_cb.setFixedWidth(120)
+    fov_cb.currentIndexChanged.connect(
         lambda _i: ctx.app._refresh_review_csv_rows()
     )
-    cl.addWidget(ctx.app._review_fov_cb)
+    cl.addWidget(fov_cb)
 
     cl.addSpacing(8)
     cl.addWidget(QLabel("Timepoint:", ctrl))
-    ctx.app._review_tp_cb = QComboBox(ctrl)
-    ctx.app._review_tp_cb.setFixedWidth(140)
-    ctx.app._review_tp_cb.currentIndexChanged.connect(
+    tp_cb = reg.register("_review_tp_cb", QComboBox(ctrl))
+    tp_cb.setFixedWidth(140)
+    tp_cb.currentIndexChanged.connect(
         lambda _i: ctx.app._refresh_review_csv_rows()
     )
-    cl.addWidget(ctx.app._review_tp_cb)
+    cl.addWidget(tp_cb)
 
     refresh_btn = QPushButton("Refresh", ctrl)
     refresh_btn.setProperty("variant", "secondary")
@@ -54,25 +62,24 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     cl.addStretch(1)
     layout.addWidget(ctrl)
 
-    ctx.app._review_csv_table = QTableWidget(0, 0, parent)
-    ctx.app._review_csv_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-    ctx.app._review_csv_table.horizontalHeader().setHighlightSections(False)
+    table = reg.register("_review_csv_table", QTableWidget(0, 0, parent))
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+    table.horizontalHeader().setHighlightSections(False)
     # Left-align header labels so text columns (well, channel) read in line with
     # their left-read values instead of looking right-/spread-aligned.
-    ctx.app._review_csv_table.horizontalHeader().setDefaultAlignment(
-        Qt.AlignLeft | Qt.AlignVCenter)
-    ctx.app._review_csv_table.verticalHeader().setVisible(False)
-    ctx.app._review_csv_table.setAlternatingRowColors(True)
-    ctx.app._review_csv_table.setShowGrid(False)
-    ctx.app._review_csv_table.setSelectionBehavior(QTableWidget.SelectRows)
-    ctx.app._review_csv_table.setEditTriggers(QTableWidget.NoEditTriggers)
-    ctx.app._review_csv_table.itemDoubleClicked.connect(
+    table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    table.verticalHeader().setVisible(False)
+    table.setAlternatingRowColors(True)
+    table.setShowGrid(False)
+    table.setSelectionBehavior(QTableWidget.SelectRows)
+    table.setEditTriggers(QTableWidget.NoEditTriggers)
+    table.itemDoubleClicked.connect(
         lambda item: on_review_csv_row_double_click(ctx.app, item)
     )
-    layout.addWidget(ctx.app._review_csv_table, 1)
+    layout.addWidget(table, 1)
 
-    ctx.app._review_csv_msg_lbl = QLabel(
+    msg_lbl = reg.register("_review_csv_msg_lbl", QLabel(
         "Select a single well to inspect CSV rows.", parent,
-    )
-    ctx.app._review_csv_msg_lbl.setObjectName("Muted")
-    layout.addWidget(ctx.app._review_csv_msg_lbl)
+    ))
+    msg_lbl.setObjectName("Muted")
+    layout.addWidget(msg_lbl)

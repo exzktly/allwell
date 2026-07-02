@@ -419,6 +419,33 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 ---
 
+## A8 burn-down — tracked follow-up
+
+**A8** shipped the *guard* (`test_ctx_app_burndown.py` freezes the `ctx.app` reference count so it can only fall). This section tracks the actual **burn-down**: migrating each feature's Qt widget-handle stashing off the `WellViewerApp` god-object and into the sanctioned `ctx.widgets` (`WidgetRegistry`). `register("_x", w)` also stamps `app._x`, so legacy `app._x` readers keep resolving — the migration is confined to each tab builder, no reader rewrites. Residual `ctx.app.method()` *behaviour* calls (not handles) are a separate, later layer. Lower `CTX_APP_BUDGET` by the measured drop in the same commit.
+
+> `[ ]` TODO · `[x]` DONE. Count = `ctx.app` refs in that file at start (mostly widget stashes). Newest-migrated first.
+
+- `[ ]` **barplot/tab_view.py** (128)
+- `[ ]` **grouping/cell_gating_tab_view.py** (124)
+- `[ ]` **scatter/cells_tab_view.py** (92)
+- `[ ]` **heatmap/tab_view.py** (91)
+- `[ ]` **smfish/tab_view.py** (83)
+- `[ ]` **distribution/tab_view.py** (65)
+- `[ ]` **image_browser/image_table/tab_view.py** (63)
+- `[ ]` **scatter/agg_tab_view.py** (53)
+- `[ ]` **lineplot/tab_view.py** (46)
+- `[ ]` **multivariate/tab_view.py** (44)
+- `[ ]` **image_browser/cell_browser/tab_view.py** (24)
+- `[ ]` **saved_plots/tab_view.py** (10)
+- `[ ]` **scatter/tab_view.py** (9)
+- `[ ]` **batch_export/tab_view.py** (9)
+- `[x]` **review_csv/tab_view.py** (29 → 4) — **pilot / proof-of-pattern**; 5 widgets registered via `ctx.widgets`, budget 894 → 869, readers unchanged. `test_review_csv_widget_registry_a8.py`.
+- `[ ]` remaining smaller stashers (`core/*`, `persistence/*`, per-feature `sidebar_view.py`) to reach 0.
+
+**Target:** drive `CTX_APP_BUDGET` from 894 → the residual behaviour-call floor. Each row: register handles via `ctx.widgets`, drop the budget, verify the tab still builds + its feature tests pass.
+
+---
+
 ## Status log
 
 > Append a dated line whenever a status box changes. Newest first.

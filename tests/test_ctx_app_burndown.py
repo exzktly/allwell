@@ -25,8 +25,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _CTX_APP = re.compile(r"\bctx\.app\b")
 
-# Frozen baseline (894 as of the code-review remediation). ONLY MOVES DOWN.
-CTX_APP_BUDGET = 894
+# Frozen baseline (894 as of the code-review remediation; 869 after the
+# review_csv widget handles moved into the WidgetRegistry). ONLY MOVES DOWN.
+CTX_APP_BUDGET = 869
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

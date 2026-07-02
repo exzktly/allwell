@@ -438,6 +438,16 @@ def _notify_gates_changed(app) -> None:
     Browser's ``_cell_browser_gates_changed_cb`` (the live gate-sourced gallery,
     N1). All are optional.
     """
+    # A gate change alters the scatter-gate on-population, so cached stats keyed
+    # off it are stale — drop the cache (audit S4). The cache key also folds in
+    # the gate signature; invalidating here keeps the cache from accumulating
+    # dead entries per edit.
+    inv = getattr(app, "_invalidate_stats_cache", None)
+    if callable(inv):
+        try:
+            inv()
+        except Exception:
+            swallowed()
     for attr in ("_scatter_gate_count_cb", "_scatter_gates_changed_cb",
                  "_cell_browser_gates_changed_cb"):
         cb = getattr(app, attr, None)

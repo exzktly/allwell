@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **45 / 77 items resolved** (44 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **46 / 77 items resolved** (45 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -60,7 +60,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E18 | smFISH Apply-to-All re-entrancy → dup workers + clobbered cancel | H | `[x]` DONE | #597 |
 | E19 | smFISH worker TOCTOU: dataset swap during write loop | M | `[x]` DONE | `test_smfish_write_toctou.py` |
 | E20 | `_current_proc` read without lock → Stop can miss child | M | `[x]` DONE | #597 |
-| E21 | `pipeline_runner.stop()` reads worker-assigned `_proc` unsynced | M | `[ ]` TODO | |
+| E21 | `pipeline_runner.stop()` reads worker-assigned `_proc` unsynced | M | `[x]` DONE | `test_pipeline_runner_stop_race.py` |
 | E22 | cell_browser unbounded threads read invalidated zip cache | M | `[ ]` TODO | |
 | E23 | playground `_ReferenceBridge` never disconnected | L | `[ ]` TODO | |
 
@@ -294,7 +294,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **High — `features/smfish/tab_view.py:752`** (`_smfish_apply_to_all`): launches a thread + `ThreadPoolExecutor` with **no re-entrancy guard**; a double-click runs two workers writing the **same per-well CSVs**, and the 2nd launch `.clear()`s the shared `app._smfish_cancel_event`. *Fix: single busy flag + per-run cancel event.* — **E18** `[x]` DONE (`_smfish_apply_running` guard cleared in `_done`; `tests/test_smfish_apply_robustness.py`)
 - **Medium —** smfish `worker.py:265-279` TOCTOU (dataset swap during the write loop is never re-checked → late wells written into the swapped dataset). — **E19** `[x]` DONE — `_write_counts_to_csvs` gained a `should_abort` callback re-checked at the top of every well iteration (cancel-event or `expected != out_dir`); it stops mid-loop and WARNs with the count already written, so a swap that lands during the write no longer bleeds into the wrong dataset. `test_smfish_write_toctou.py`.
 - **Medium —** `remote_runner.py:2557-2571` (`_current_proc` read without a lock → Stop can miss the running child). — **E20** `[x]` DONE (lock-snapshot `_current_proc`; `tests/test_batched_remote_teardown.py`)
-- **Medium —** `pipeline_runner.py:364-387` (`stop()` reads `_proc` assigned on the worker thread with no sync). — **E21** `[ ]` TODO
+- **Medium —** `pipeline_runner.py:364-387` (`stop()` reads `_proc` assigned on the worker thread with no sync). — **E21** `[x]` DONE — added `_proc_lock`; the launch path (`_spawn_tracked`) checks `_stop_requested` and assigns `_proc` under the lock, and `stop()` sets the flag then snapshots `_proc`/`_zipper_proc` under the same lock. Either stop wins (subprocess never launches) or the launch wins and stop signals the handle it sees — closing the launch-after-stop orphan race. `test_pipeline_runner_stop_race.py`.
 - **Medium —** `cell_browser/worker.py:202` (unbounded threads read a `zipfile_cache` a dataset swap can `invalidate()`). — **E22** `[ ]` TODO
 - **Low —** playground `_ReferenceBridge` connected per call, never disconnected. — **E23** `[ ]` TODO
 - **Verified correct:** the plate-selection debounce; `channel_state_controller` `blockSignals` discipline. → see Non-goals.
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch U (stop/launch race)** — **E21** (new `_proc_lock` makes the pipeline-subprocess launch atomic against `stop()`: `_spawn_tracked` checks `_stop_requested` and assigns `_proc` under the lock; `stop()` sets the flag then snapshots the handles under the same lock. Closes the launch-after-stop race that could orphan a subprocess when a Stop click read `_proc` as None mid-launch). +4 tests. Fast lane green. 46/77 resolved.
+
 - 2026-07-02 **Batch T (smFISH write TOCTOU)** — **E19** (`_write_counts_to_csvs` now takes a `should_abort` callback re-checked at the top of every well iteration — cancel-event or `expected != out_dir` — so a dataset swap landing *during* the multi-well write loop stops immediately with a WARN instead of writing late wells into the swapped dataset). +2 tests. Fast lane green. 45/77 resolved.
 
 - 2026-07-02 **Batch S (persistence surfacing)** — **E16** (`PersistenceRegistry._flush` now logs a raise from a debounced autosave instead of letting it vanish into the Qt event loop, so a `view_state`/`sample_definitions` write failure is diagnosable; `sample_definitions.autosave_to_pipeline_info` except broadened `(OSError, FileNotFoundError)`→`Exception`; the ~25 `swallowed()` sites already DEBUG-log the traceback). +2 tests. Fast lane green. 44/77 resolved.
@@ -464,4 +466,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch T merged (E19 smFISH write TOCTOU + tests); **45 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch U merged (E21 stop/launch race + tests); **46 / 77 resolved.**

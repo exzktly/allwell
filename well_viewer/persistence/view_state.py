@@ -38,6 +38,24 @@ _IMAGE_BROWSER_SUBTABS = (
 
 # ── snapshot ───────────────────────────────────────────────────────────────
 
+def _nondefault_export_prefs(app) -> dict:
+    """Only the export-style prefs the user actually changed.
+
+    Persisting the *full* dict (defaults included) froze the old default into
+    ``persistence.json``: a later app version that changed a default would be
+    silently overridden by the stale saved value for users who never touched
+    it (audit X8). Saving only the diff lets unset keys track future defaults —
+    on restore they merge onto the fresh ``DEFAULT_EXPORT_STYLE_PREFS`` copy the
+    app is constructed with.
+    """
+    from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
+    cur = getattr(app, "_export_style_prefs", None) or {}
+    return {
+        k: v for k, v in cur.items()
+        if k not in DEFAULT_EXPORT_STYLE_PREFS or v != DEFAULT_EXPORT_STYLE_PREFS[k]
+    }
+
+
 def snapshot(app) -> dict:
     """Build a JSON-serialisable view-state dict from current app state."""
     return {
@@ -69,7 +87,7 @@ def snapshot(app) -> dict:
             "op_t0": str(getattr(app._app_state.plot, "fc_op_t0", "ratio") or "ratio"),
             "order": str(getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first"),
         },
-        "export_style_prefs": dict(getattr(app, "_export_style_prefs", {}) or {}),
+        "export_style_prefs": _nondefault_export_prefs(app),
         "export_axis_prefs": {
             str(k): dict(v)
             for k, v in (getattr(app, "_export_axis_prefs", {}) or {}).items()

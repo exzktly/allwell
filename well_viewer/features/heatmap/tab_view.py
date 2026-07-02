@@ -269,7 +269,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # before the tab was fully built (data load timing can leave the
     # global colormap range cache populated with NaNs, which produced
     # empty cells until the user wiggled the channel).
-    ctx.app._heatmap_global_range_cache = None
+    ctx.runtime.heatmap.global_range_cache = None
     if hasattr(ctx.app, "_invalidate_stats_cache"):
         try:
             ctx.app._invalidate_stats_cache()

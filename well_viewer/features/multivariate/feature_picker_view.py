@@ -51,7 +51,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
         st = ctx.state.feature_slice("multivariate")
         if st is None:
             return
-        ctx.app._mv_picker_refreshing = True
+        ctx.runtime.multivariate.picker_refreshing = True
         try:
             listw.clear()
             families = available_feature_columns(ctx.app)
@@ -77,7 +77,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
             if kept != st.feature_cols:
                 st.feature_cols = kept
         finally:
-            ctx.app._mv_picker_refreshing = False
+            ctx.runtime.multivariate.picker_refreshing = False
 
     ctx.app._mv_refresh_feature_picker = refresh
     refresh()

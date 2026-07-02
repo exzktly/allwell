@@ -86,7 +86,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   279 -> 274  T2 scatter gate-interaction live objects (selector/edit/
 #              render/redraw_cb/draw_mode) -> ctx.runtime.scatter; gate
 #              geometry (_scatter_gates) is persisted and stays put.
-CTX_APP_BUDGET = 274
+#   274 -> 258  T2 pure-runtime objects across 6 features -> ctx.runtime.<f>:
+#              cell_browser (state/chips/lut_rows/loader/refreshers),
+#              image_browser (built), heatmap (global_range_cache), barplot
+#              (drag_state), cell_gating (cell_areas/fluor_data/ratio_data/
+#              ax/axes_stack/worker), multivariate (picker_refreshing).
+#              Persisted fields (edits/choices/selections/cells/lut) excluded.
+CTX_APP_BUDGET = 258
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

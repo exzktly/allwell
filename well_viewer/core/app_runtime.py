@@ -45,7 +45,8 @@ class AppRuntime:
     through ``ctx.runtime.<feature>`` instead of ``ctx.app._<feature>_*``.
     """
 
-    __slots__ = ("_app", "smfish", "scatter")
+    __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
+                 "heatmap", "barplot", "cell_gating", "multivariate")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -54,3 +55,11 @@ class AppRuntime:
         # edit, per-panel render context, redraw callback, draw-arm flag). Gate
         # *geometry* (``_scatter_gates``) is persisted and stays typed state.
         object.__setattr__(self, "scatter", _FeatureRuntime(app, "_scatter_"))
+        # Live objects only — persisted fields (edits dicts, choices, selections)
+        # stay on the app / typed state; see each feature's migration notes.
+        object.__setattr__(self, "cell_browser", _FeatureRuntime(app, "_cell_browser_"))
+        object.__setattr__(self, "image_browser", _FeatureRuntime(app, "_image_browser_"))
+        object.__setattr__(self, "heatmap", _FeatureRuntime(app, "_heatmap_"))
+        object.__setattr__(self, "barplot", _FeatureRuntime(app, "_bar_"))
+        object.__setattr__(self, "cell_gating", _FeatureRuntime(app, "_cell_gating_"))
+        object.__setattr__(self, "multivariate", _FeatureRuntime(app, "_mv_"))

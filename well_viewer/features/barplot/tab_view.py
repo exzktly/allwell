@@ -306,7 +306,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     ), 1)
 
     # Drag-to-reorder bars
-    ctx.app._bar_drag_state = {"active": False, "src_idx": -1, "cur_idx": -1}
+    ctx.runtime.barplot.drag_state = {"active": False, "src_idx": -1, "cur_idx": -1}
     canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx.app))
     canvas.mpl_connect("motion_notify_event", ctx.app._on_bar_drag_motion)
     canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx.app))

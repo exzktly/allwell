@@ -209,14 +209,14 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     reg = ctx.widgets
 
     reg.register("_cell_gating_frame", parent)
-    ctx.app._cell_gating_cell_areas = []
+    ctx.runtime.cell_gating.cell_areas = []
     ctx.app._cell_gating_fluor_gate_edits = {}
     ctx.app._cell_gating_thresh_frac_edits = {}
-    ctx.app._cell_gating_fluor_data = {}
-    ctx.app._cell_gating_ratio_data = {}
-    ctx.app._cell_gating_ax = None
-    ctx.app._cell_gating_axes_stack = []
-    ctx.app._cell_gating_worker = None
+    ctx.runtime.cell_gating.fluor_data = {}
+    ctx.runtime.cell_gating.ratio_data = {}
+    ctx.runtime.cell_gating.ax = None
+    ctx.runtime.cell_gating.axes_stack = []
+    ctx.runtime.cell_gating.worker = None
     # Scatter-gate inclusion mode: when on, the Scatter Plot's rectangular gates
     # define Included instead of the per-channel FluorGating. The gating and
     # thresholding layers each pick their OWN set of gates (a set of names, or

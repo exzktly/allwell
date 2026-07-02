@@ -47,7 +47,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    ctx.app._cell_browser_state = CellBrowserState()
+    ctx.runtime.cell_browser.state = CellBrowserState()
 
     # ── controls row ────────────────────────────────────────────────────────
     ctrl = QWidget(parent)
@@ -61,7 +61,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     QHBoxLayout(chan_host).setContentsMargins(0, 0, 0, 0)
     cl.addWidget(chan_host)
     reg.register("_cell_browser_channel_host", chan_host)
-    ctx.app._cell_browser_channel_chips = {}
+    ctx.runtime.cell_browser.channel_chips = {}
 
     # Per-channel LUT editor (min/max) in a popover. Edits the SHARED
     # per-channel display LUT (AppState.image_view, S4), so brightness tuned
@@ -76,7 +76,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_browser_lut_btn", lut_btn)
     reg.register("_cell_browser_lut_panel", lut_panel)
     reg.register("_cell_browser_lut_layout", lut_lay)
-    ctx.app._cell_browser_lut_rows = {}
+    ctx.runtime.cell_browser.lut_rows = {}
 
     boundary_cb = QCheckBox("Boundaries", ctrl)
     boundary_cb.setChecked(True)
@@ -158,12 +158,12 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     loader = CellImageLoader(ctx.app)
     loader.cell_ready.connect(partial(_dispatch_cell_ready, ctx.app))
     loader.page_finished.connect(partial(_dispatch_page_finished, ctx.app))
-    ctx.app._cell_browser_loader = loader
+    ctx.runtime.cell_browser.loader = loader
 
     # Expose the on-show refreshers so ``tab_controller.on_tab_change`` can
     # repopulate channels/criteria/timepoints on every visit without a
     # function-local feature import (keeps the deferred-import budget flat).
-    ctx.app._cell_browser_refreshers = (
+    ctx.runtime.cell_browser.refreshers = (
         cell_browser_refresh,
         cell_browser_sidebar_refresh,
     )

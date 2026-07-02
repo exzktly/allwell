@@ -84,12 +84,16 @@ def _functions_over_threshold() -> dict[str, int]:
 
 
 # Frozen baseline (CC > 40 as of the code-review remediation). SHRINK ONLY.
-# Prime decomposition targets: A4 (find_well_images_and_masks) and A5
-# (redraw_line_plots, run_stats). Remove an entry when you take it under 40.
+# Prime decomposition targets: A5 (redraw_line_plots, run_stats). A4
+# (find_well_images_and_masks) was decomposed — see below. Remove an entry when
+# you take it under 40.
 ALLOWLIST = {
     "well_viewer/features/barplot/collect.py::collect_bar_items",
     "well_viewer/features/barplot/collect.py::collect_bar_items._items_for_tp",
-    "well_viewer/data/image_discovery.py::find_well_images_and_masks",
+    # A4 DONE: find_well_images_and_masks (was CC 98) decomposed into
+    # _merge_scan / _discover_from_layouts / _scan_raw_disk_files /
+    # _raw_file_well_passes / _log_find_result — main orchestrator now CC 13,
+    # every helper < 40. Removed from the allowlist.
     "well_viewer/persistence/view_state.py::_apply_image_table",
     "well_viewer/core/plot_style.py::apply_export_style_prefs",
     "well_viewer/core/centre_view.py::build_centre",

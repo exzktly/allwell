@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **28 / 77 items resolved** (27 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **31 / 77 items resolved** (30 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -49,14 +49,14 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E7 | `GatingWorker.run` no except + no error signal → UI hang | H | `[x]` DONE | #597 |
 | E8 | smFISH `_run` no try/except → "Apply Global Threshold" hangs | H | `[ ]` TODO | |
 | E9 | auto-threshold DEBUG-skip → silently biased threshold | H | `[ ]` TODO | |
-| E10 | saved-plot capture `return None` → silently loses groups/stats | H | `[ ]` TODO | |
+| E10 | saved-plot capture `return None` → silently loses groups/stats | H | `[x]` DONE | #597 |
 | E11 | corrupt input zip silently uploaded whole | H | `[x]` DONE | #597 |
 | E12 | `Fetcher._loop` no except → wells silently not downloaded | M | `[x]` DONE | #597 |
 | E13 | failed `scancel`/`kill` unreported → lingering SLURM alloc | M | `[x]` DONE | #597 |
 | E14 | `ALLWELL_SCRATCH_DIR` silently ignored → ENOSPC | M | `[x]` DONE | #597 |
-| E15 | corrupt mask → "no overlay" → misread QC | M | `[ ]` TODO | |
+| E15 | corrupt mask → "no overlay" → misread QC | M | `[x]` DONE | #597 |
 | E16 | view_state `swallowed()` + sample_defs persistence fail invisibly | M | `[ ]` TODO | |
-| E17 | unguarded remote-dialog `_runner` → QTimer poll spins forever | L | `[ ]` TODO | |
+| E17 | unguarded remote-dialog `_runner` → QTimer poll spins forever | L | `[x]` DONE | #597 |
 | E18 | smFISH Apply-to-All re-entrancy → dup workers + clobbered cancel | H | `[ ]` TODO | |
 | E19 | smFISH worker TOCTOU: dataset swap during write loop | M | `[ ]` TODO | |
 | E20 | `_current_proc` read without lock → Stop can miss child | M | `[x]` DONE | #597 |
@@ -272,7 +272,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **High — `features/grouping/cell_gating_tab_view.py:98`** (`GatingWorker.run`): calls `_run_inner()` with no try/except and the class has **no error signal**; a pandas error terminates the QThread, `finished_ok` never fires, UI hangs. *Fix: add `failed = Signal(str)`, wrap, always release the UI.* — **E7** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
 - **High — `features/smfish/worker.py:227`**: `_run` has no try/except; a `pd.read_csv` `ParserError` kills the thread so `done_cb` never fires → "Apply Global Threshold" hangs. *Fix: wrap `_run`, route failure through `done_cb`.* — **E8** `[ ]` TODO
 - **Medium — `services/remote_runner.py:3035/3091`** (`Fetcher._loop`→`_fetch_one`): `_fetch_one` called with no try/except; an unexpected exception kills the fetcher, **remaining wells never downloaded**, with only a misleading "N/M downloaded" line. *Fix: wrap the call, log, continue.* — **E12** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
-- **Low —** `analyze_remote_dialog.py:590/676` unguarded `_runner`s → `QTimer` poll spins forever; `cell_browser/worker.py:191` DEBUG-only blank cell. *Fix: wrap runners, put a failure tuple on the queue.* — **E17** `[ ]` TODO
+- **Low —** `analyze_remote_dialog.py:590/676` unguarded `_runner`s → `QTimer` poll spins forever; `cell_browser/worker.py:191` DEBUG-only blank cell. *Fix: wrap runners, put a failure tuple on the queue.* — **E17** `[x]` DONE (both `_runner`s always enqueue a result; Qt-closure, inspection-verified)
 - **Verified correct:** `_RemoteProcess._pump`, `_run_pipeline_subprocess`/`_run_pipeline_remote`, `subprocess_kill.signal_subprocess`, `_AutoThresholdWorker`. → see Non-goals.
 
 ### 2.2 Error propagation
@@ -282,11 +282,11 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **Critical — `process_microscopy.py:4015`**: `except (OSError, JSONDecodeError): pass` while merging into existing `metadata.json` → a corrupt file silently drops preserved user blocks and overwrites on re-run → **irreversible loss**. *Fix: distinguish absent vs present-but-unreadable; abort the write and surface an error.* — **E3** `[x]` DONE (backs up corrupt sidecar + logs ERROR; `tests/test_write_pipeline_info_corrupt.py`)
 - **Critical — `services/pipeline_service.py:93/97`** (+ `fft_*` blocks): CLI arg assembly `except (TypeError, ValueError, KeyError): pass` → a malformed option is silently omitted → **pipeline runs with different parameters than configured**. *Fix: validate up front; a bad value must raise/warn.* — **E4** `[x]` DONE (`_emit_num_flag` raises on invalid; `tests/test_pipeline_arg_validation.py`)
 - **High —** `process_microscopy.py:1561` (auto-threshold per-channel DEBUG-skip → silently biased threshold from a subset) + `data/auto_threshold.py:70` (same, viewer-side). *Fix: WARNING + report skipped counts.* — **E9** `[ ]` TODO
-- **High —** `features/saved_plots/collect.py:81/101/119` (`return None` → saved plot silently loses its groups/stats config). *Fix: log ERROR; fail the save visibly.* — **E10** `[ ]` TODO
+- **High —** `features/saved_plots/collect.py:81/101/119` (`return None` → saved plot silently loses its groups/stats config). *Fix: log ERROR; fail the save visibly.* — **E10** `[x]` DONE (`tests/test_saved_plot_capture_logs.py`)
 - **High —** `services/remote_runner.py:1153` (corrupt input zip silently treated as "upload whole well"). *Fix: WARNING naming the bad zip.* — **E11** `[x]` DONE (WARN names the bad zip)
 - **Medium —** `remote_runner.py:4178/4228` (failed `scancel`/`kill` → lingering SLURM allocation unreported). — **E13** `[x]` DONE (WARN on failed scancel/kill; `tests/test_remote_runner.py`)
 - **Medium —** `remote_runner.py:80` (`ALLWELL_SCRATCH_DIR` silently ignored on `OSError` → later ENOSPC). — **E14** `[x]` DONE (WARNING on bad ALLWELL_SCRATCH_DIR)
-- **Medium —** `image_table/image_compose.py:485/516/523` (corrupt mask → "no overlay" → user misreads QC). — **E15** `[ ]` TODO
+- **Medium —** `image_table/image_compose.py:485/516/523` (corrupt mask → "no overlay" → user misreads QC). — **E15** `[x]` DONE (DEBUG breadcrumb on decode failure; `tests/test_image_compose_load_errors.py`)
 - **Medium —** `persistence/view_state.py` (~25 `swallowed()` sites) + `sample_definitions.py` (persistence fails invisibly). — **E16** `[ ]` TODO
 - **Top recommendation:** extend `test_no_silent_except.py` to flag tuple/typed `pass` and broad `return None` in `pipeline/`, `well_viewer/data/`, `well_viewer/persistence/`, add the missing pipeline files, and route data-integrity failures to at least WARNING. — **G4** `[x]` DONE (partial: added the 3 unscanned pipeline files; tuple/typed-`pass` + broad-`return None` extension needs a frozen offender baseline — noted in-test as remaining scope)
 
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch J (error-surfacing)** — **E10** (saved-plot capture logs instead of silently dropping the group/stats config), **E15** (corrupt image/mask in the image table leaves a DEBUG breadcrumb, not a silent blank tile), **E17** (both remote-dialog `_runner` closures always enqueue a result so `_poll` can't spin forever). +3 tests (E17 is a Qt closure, inspection-verified). Fast lane green (1262). 31/77 resolved.
+
 - 2026-07-02 **Batch I (remote teardown safety)** — **X10** (stdout sentinel moved into an inner `finally` so a `flush_and_join` failure can't hang the reader), **E20** (`_current_proc` guarded by a lock; terminate/kill/pid/send_signal snapshot it), **E13** (failed `scancel`/`kill` surfaced at WARNING instead of swallowed). +6 tests. Fast lane green (1259). 28/77 resolved.
 
 - 2026-07-02 **Batch H (remote-fetch robustness)** — **X2** (`_materialize` copies via temp→`os.replace` and returns success; `_fetch_one` marks a well fetched + deletes the remote copy only after that succeeds, so an interrupted copy is no longer irrecoverable), **X9** (partial `tmp_zip` unlinked on the could-not-pull path), **E11** (corrupt input zip named in a WARN), **E14** (bad `ALLWELL_SCRATCH_DIR` surfaced at WARNING instead of silently falling back). +5 tests. Fast lane green (1255). 25/77 resolved.
@@ -442,4 +444,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch I merged (remote teardown safety + tests); **28 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch J merged (error-surfacing + tests); **31 / 77 resolved.**

@@ -10,8 +10,10 @@ external importers (playground, grid_view) are unchanged.
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Optional, Tuple
 
+logger = logging.getLogger(__name__)
 
 
 LUT_COLORS: Dict[str, Optional[Tuple[float, float, float]]] = {
@@ -483,6 +485,9 @@ def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str,
         greyscale = not _is_nuc_seg(chan_upper)
         return open_imgref_as_array(ref, greyscale=greyscale)
     except Exception:
+        # A corrupt/undecodable image renders as "no tile". Leave a breadcrumb
+        # so it's diagnosable rather than silently blank (audit E15).
+        logger.debug("image_table: failed to load %r: skipping tile", ref, exc_info=True)
         return None
 
 def _load_mask_array(app, cache, well, tp, fov):
@@ -514,6 +519,9 @@ def _load_mask_array(app, cache, well, tp, fov):
             return None
         return _np.rint(_np.asarray(arr)).astype(_np.int32)
     except Exception:
+        # A corrupt mask must not silently render as "no overlay" — that reads
+        # as a clean QC/segmentation view (audit E15). Leave a breadcrumb.
+        logger.debug("image_table: failed to load mask %r: no overlay", ref, exc_info=True)
         return None
 
 def _load_ratio_array(app, cache, well, ratio, tp, fov, *, use_tophat):

@@ -9,10 +9,13 @@ gallery thumbnail.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from well_viewer.core.lazy import lazy_names
 from well_viewer.persistence import view_state
+
+logger = logging.getLogger(__name__)
 
 # Stats is a removable feature, so it can't be imported at module scope; the lazy
 # proxies defer the import to first call (a call, not an ``import`` statement, so
@@ -79,6 +82,8 @@ def _capture_selections(app) -> list | None:
             return None
         return copy.deepcopy(list(sels))
     except Exception:
+        # Don't lose the saved plot's group definitions silently (audit E10).
+        logger.exception("saved plot: failed to capture selections; groups not saved")
         return None
 
 
@@ -99,6 +104,8 @@ def _capture_stats_config(app) -> dict | None:
         threshold = float(_threshold_for_val_col(app, val_col))
         grp_data = _serialize_stats_groups(groups)
     except Exception:
+        # Don't lose the saved plot's stats config silently (audit E10).
+        logger.exception("saved plot: failed to capture stats config; not saved")
         return None
     return {
         "groups": grp_data,

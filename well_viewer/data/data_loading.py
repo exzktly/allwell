@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from well_viewer.domain.ratio_models import RatioMetric, is_ratio_key
+from well_viewer.domain.tp_match import tp_close_mask
 
 
 _logger = logging.getLogger("well_viewer")
@@ -612,7 +613,7 @@ def _all_fluor_values_filtered(
             return np.empty(0, dtype=float)
         tp = pd.to_numeric(df[tp_col], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(tp) & (np.abs(tp - tp_filter) <= 1e-6)
+            mask &= np.isfinite(tp) & tp_close_mask(tp, tp_filter)
 
     if not mask.any():
         return np.empty(0, dtype=float)

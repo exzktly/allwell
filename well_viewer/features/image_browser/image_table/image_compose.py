@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Tuple
 
+from well_viewer.domain.tp_match import tp_close
+
 logger = logging.getLogger(__name__)
 
 
@@ -466,7 +468,7 @@ def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str,
         target_tp_n = _numeric_token(tp)
 
         def _close(a, b) -> bool:
-            return a is not None and b is not None and abs(a - b) < 1e-6
+            return a is not None and b is not None and tp_close(a, b)
 
         for (cache_fov, cache_tp), val in fluor.items():
             tp_n = _numeric_token(cache_tp)

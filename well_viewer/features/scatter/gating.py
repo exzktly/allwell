@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from well_viewer.core.safe import swallowed
+from well_viewer.domain.tp_match import tp_close_mask
 from well_viewer.features.scatter.collect import timepoint_color_map
 
 # Accent used for gate outlines / selector rubber-band (matches the app accent).
@@ -234,7 +235,7 @@ def render_scatter_points(
                 wtp = np.asarray(well_data.get("tp", []), dtype=float)
                 if wx.size and wtp.size == wx.size:
                     for tp in sorted(tp_color):
-                        m = np.abs(wtp - tp) <= 1e-6
+                        m = tp_close_mask(wtp, tp)
                         if not m.any():
                             continue
                         (line,) = ax.plot(
@@ -409,7 +410,7 @@ def compute_gate_stats(
             if not (multi_tps and tps.size == xs.size):
                 return
             for t in sorted(tps_list):
-                m = np.abs(tps - float(t)) <= 1e-6
+                m = tp_close_mask(tps, t)
                 pct_t, _, tot_t = _pct(xs[m], ys[m], gate)
                 if pct_t is not None and tot_t > 0:
                     rows.append((f"t={float(t):g}h: {pct_t:.1f}%", color, indent))

@@ -14,6 +14,7 @@ from well_viewer.data.data_loading import (
     resolve_value_series,
 )
 from well_viewer.domain.stats_compute import group_replicate_stats
+from well_viewer.domain.tp_match import tp_close_mask
 
 
 _STAT_LABELS = {
@@ -105,7 +106,7 @@ def collect_group_per_cell_values(
         mask = df_included_mask(df).to_numpy(copy=True)
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(tp) & (np.abs(tp - target_t) <= 1e-6)
+            mask &= np.isfinite(tp) & tp_close_mask(tp, target_t)
         val = resolve_value_series(df, val_col, ratios).to_numpy()
         mask &= np.isfinite(val) & (val > threshold)
         if mask.any():

@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **34 / 77 items resolved** (33 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **35 / 77 items resolved** (34 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -68,7 +68,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
 | S1 | `build_cell_scaling` ignores op/order/baseline → overlays ≠ bars | H | `[ ]` TODO | |
-| S2 | timepoint tolerance mismatch (abs 1e-6 vs rel 1e-3) → tps unmatched | H | `[ ]` TODO | |
+| S2 | timepoint tolerance mismatch (abs 1e-6 vs rel 1e-3) → tps unmatched | H | `[x]` DONE | #597 |
 | S3 | per-cell fold-change collapses multi-tp to first tp | M | `[ ]` TODO | |
 | S4 | `stats_cache` keys omit gate/on-population state → stale stats | M | `[x]` DONE | #597 |
 | S5 | image-decode numeric-close/first-FOV fallback → wrong frame | M | `[ ]` TODO | |
@@ -315,7 +315,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 ## PASS 4 — Logic & Business-Rule Integrity
 
 ### 4.1 Conditional exhaustiveness / float equality
-- **High — timepoint tolerance mismatch.** `fold_change.py:75/342` deliberately uses a **relative** tolerance (`_TP_REL_TOL = 1e-3`) because a value like 2/3 h drifts ~3e-5 when parsed back from 4-sig-fig text — but the rest of the pipeline matches with **absolute `1e-6`**: `stats_compute.py:93/285/431`, `stats/controller.py:108`, `data_loading.py:611`, `scatter/gating.py:237/412`, `image_compose.py:467`. Effect: for any tp needing >4 sig figs, Statistics / per-cell KS / bar aggregation return "no data" while fold-change succeeds. *Fix: extract the relative matcher into a shared `domain` helper and use it everywhere.* — **S2** `[ ]` TODO
+- **High — timepoint tolerance mismatch.** `fold_change.py:75/342` deliberately uses a **relative** tolerance (`_TP_REL_TOL = 1e-3`) because a value like 2/3 h drifts ~3e-5 when parsed back from 4-sig-fig text — but the rest of the pipeline matches with **absolute `1e-6`**: `stats_compute.py:93/285/431`, `stats/controller.py:108`, `data_loading.py:611`, `scatter/gating.py:237/412`, `image_compose.py:467`. Effect: for any tp needing >4 sig figs, Statistics / per-cell KS / bar aggregation return "no data" while fold-change succeeds. *Fix: extract the relative matcher into a shared `domain` helper and use it everywhere.* — **S2** `[x]` DONE (`domain/tp_match.py`; routed 9 sites; `tests/test_tp_match.py`)
 - **Low —** `stats/controller.py:407` reports the even-n median as the upper-middle element (`sv[len(sv)//2]`). *Fix: `statistics.median(...)`.* — **S6** `[x]` DONE
 - **Note (not defects):** `_filter_rows_by_timepoint` float `==` is safe; the optimizer's sign-safe gap is correct. → see Non-goals.
 
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch M (scientific)** — **S2** (new `domain/tp_match.py` relative matcher `tp_close`/`tp_close_mask`; routed the 9 absolute-`1e-6` timepoint comparisons in stats_compute / stats-controller / data_loading / scatter-gating / image_compose through it, so a fractional timepoint round-tripped through a `:.4g` label now matches in Statistics/aggregation just as in fold-change). +4 tests. Code shipped in `a4e0ab5`; tracker in the follow-up commit. Fast lane green (1275). 35/77 resolved.
+
 - 2026-07-02 **Batch L (cross-dataset state)** — **X1** (`load_directory` now calls `_reset_gating_state` before hydration, clearing `_scatter_gates`/`_review_included_overrides`/`_cell_gating_use_scatter_*`/gate-choices/`_active_heatmap_layout_name` so a prior dataset's gates can't silently filter the next dataset when it has no cell_gating sidecar). **X5 BLOCKED** — pre-declaring those attrs on the god-object conflicts with the attr-budget ratchet and doesn't fix the lossy fallback; belongs to A8/typed-state. +1 test. Fast lane green (1271). 34/77 resolved.
 
 - 2026-07-02 **Batch K (input validation)** — **X4/X6** (`_numeric_option_errors`, wired into `_validate_run_request`, blocks a bad radius/FFT/mesh/threads/workers/batch value, `mesh_ratio=0`, inverted QC area bounds, or out-of-range solidity at the entry boundary — instead of silently dropping the flag or dividing by zero downstream). +8 tests. analyze_tab budget re-baselined 1176→1206. Fast lane green (1269). 33/77 resolved.
@@ -448,4 +450,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch L merged (X1 cross-dataset gate reset + tests); **34 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch M merged (S2 timepoint tolerance + tests); **35 / 77 resolved.**

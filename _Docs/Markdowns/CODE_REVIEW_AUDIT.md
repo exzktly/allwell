@@ -435,6 +435,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - `[x]` **scatter/agg_tab_view.py** (45 → ~14) — 13 widgets + 2 `_var` aliases via `ctx.widgets`; scatter total (cells+agg) 768 → 668. `test_scatter_widget_registry_a8.py`.
 - `[x]` **lineplot/tab_view.py** (38 → ~9) — chan/metric combos + `_plot_chan_var`/`_chan_var`/`_metric_var` aliases + card/fig/4 axes/canvas via `ctx.widgets` (removed the `ctx.app._widget_registry` reach-through too). `test_lineplot_multivariate_registry_a8.py`.
 - `[x]` **multivariate/tab_view.py** (44 → ~28) — 16 widgets via `ctx.widgets` (locals already existed → clean one-line conversions); lineplot+mv total 668 → 624. `test_lineplot_multivariate_registry_a8.py`.
+- `[x]` **multivariate/feature_picker_view.py** — the feature-list QListWidget via `ctx.widgets` (the last widget-instance stash outside the main builders). Verified: zero `ctx.app._x = <QWidget>(...)` stashes remain anywhere. Total → 408.
 - `[x]` **image_browser/cell_browser/tab_view.py** (24 → 11) — 13 Qt handles via `ctx.widgets`; image-browser total 624 → 587. `test_image_browser_registry_a8.py`.
 - `[x]` **saved_plots/tab_view.py** (10 → ~6) — 4 Qt handles (count label, stack, list layout, list host) via `ctx.widgets`; repopulate callback stays.
 - `[x]` **scatter/tab_view.py** (9 → ~8) — sub-tab QTabWidget handle via `ctx.widgets`; mode state + set-mode callback stay.

@@ -31,7 +31,8 @@ def build_feature_picker(ctx, panel_layout) -> None:
     listw.setMinimumSize(240, 260)
     listw.setUniformItemSizes(False)
     panel_layout.addWidget(listw)
-    ctx.app._mv_feature_list = listw
+    # A8 burn-down: widget handle via the WidgetRegistry (stamps app._mv_feature_list).
+    ctx.widgets.register("_mv_feature_list", listw)
 
     def _on_item_changed(_item=None):
         if getattr(ctx.app, "_mv_picker_refreshing", False):

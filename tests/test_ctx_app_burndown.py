@@ -38,9 +38,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   446 → 415  cell_gating (assignments; the 2400-line builder's widget reads
 #               keep resolving via the register() app-stamp)
 #   415 → 409  saved_plots + scatter/tab_view (batch_export has no widgets)
-# Every feature tab builder's Qt widget handles now go through the registry; the
-# residual is non-widget state + behaviour calls (the typed-state / method layer).
-CTX_APP_BUDGET = 409
+#   409 → 408  multivariate feature-picker list
+# Every feature builder's Qt widget-INSTANCE handle now goes through the registry
+# (verified: zero `ctx.app._x = <QWidget>(...)` stashes remain). The residual is
+# the non-widget state + behaviour-call layer (typed-state / app-method extraction).
+CTX_APP_BUDGET = 408
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

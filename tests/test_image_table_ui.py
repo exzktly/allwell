@@ -10,8 +10,8 @@ pytest.importorskip("PySide6")
 from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
 
 
-def test_channel_dropdown_populates_and_filters(loaded_app):
-    app = loaded_app
+def test_channel_dropdown_populates_and_filters(image_table_app):
+    app = image_table_app
     # Activating the tab repopulates the dropdowns (same as the global combos).
     C.image_table_repopulate_dropdowns(app)
     # The layout-row channel dropdown menu exists and is populated.
@@ -26,8 +26,8 @@ def test_channel_dropdown_populates_and_filters(loaded_app):
     assert C._axis_values(app, "channel") == [opts[0]]
 
 
-def test_build_does_not_render(loaded_app):
-    app = app = loaded_app
+def test_build_does_not_render(image_table_app):
+    app = app = image_table_app
     app._app_state.image_table.last_render = {}
     # rows=channels, cols=timepoints
     C.image_table_apply_preset(app, "channel", "timepoint")
@@ -37,12 +37,12 @@ def test_build_does_not_render(loaded_app):
     assert not app._app_state.image_table.last_render
 
 
-def test_display_options_are_per_row(loaded_app):
+def test_display_options_are_per_row(image_table_app):
     """Top-hat / boundaries / binary now live in each row's LUT/Display box and
     are read per-row by the renderer (image_compose._row_display_opts)."""
     from well_viewer.features.image_browser.image_table.image_compose import _row_display_opts
 
-    app = loaded_app
+    app = image_table_app
     C.image_table_repopulate_dropdowns(app)
     C.image_table_apply_preset(app, "channel", "timepoint")
     luts = app._image_table_lut or {}
@@ -72,8 +72,8 @@ def _row_values(app, dim):
             for row in app._image_table_cells]
 
 
-def test_add_row_uniform_clones_and_varies_channel(loaded_app):
-    app = loaded_app
+def test_add_row_uniform_clones_and_varies_channel(image_table_app):
+    app = image_table_app
     C.image_table_repopulate_dropdowns(app)
     C.image_table_apply_preset(app, "channel", "timepoint")
     n0 = len(app._image_table_cells)
@@ -95,8 +95,8 @@ def test_add_row_uniform_clones_and_varies_channel(loaded_app):
     assert len(new_row) == cols0
 
 
-def test_add_row_step_advances_each_cell(loaded_app):
-    app = loaded_app
+def test_add_row_step_advances_each_cell(image_table_app):
+    app = image_table_app
     C.image_table_repopulate_dropdowns(app)
     # rows = wells, cols = timepoints so the source row has a single channel
     C.image_table_apply_preset(app, "well", "timepoint")
@@ -116,16 +116,16 @@ def test_add_row_step_advances_each_cell(loaded_app):
         assert new == tp_opts[min(i + 1, len(tp_opts) - 1)]
 
 
-def test_zoom_updates_label(loaded_app):
-    app = loaded_app
+def test_zoom_updates_label(image_table_app):
+    app = image_table_app
     C.image_table_set_zoom(app, 1.5)
     assert abs(app._app_state.image_table.zoom - 1.5) < 1e-9
     assert app._image_table_zoom_lbl.text() == "150%"
 
 
-def test_lut_boxes_autofill_real_numbers_from_render(loaded_app):
+def test_lut_boxes_autofill_real_numbers_from_render(image_table_app):
     import numpy as np
-    app = loaded_app
+    app = image_table_app
     C.image_table_repopulate_dropdowns(app)
     C.image_table_apply_preset(app, "channel", "timepoint")
     cells = app._image_table_cells

@@ -14,8 +14,8 @@ from well_viewer.features.image_browser.image_table import controller as C
 from well_viewer.features.image_browser.image_table.image_compose import _parse_lut, _row_display_opts
 
 
-def test_lut_table_is_per_row_not_per_channel(loaded_app):
-    app = loaded_app
+def test_lut_table_is_per_row_not_per_channel(image_table_app):
+    app = image_table_app
     C.image_table_repopulate_dropdowns(app)
     # rows = wells, cols = timepoints -> each row is the same single channel,
     # so a per-channel table would collapse to one box; per-row keeps one each.
@@ -32,8 +32,8 @@ def test_lut_table_is_per_row_not_per_channel(loaded_app):
         assert _parse_lut(app, 1) == (99.0, 123.0)
 
 
-def test_generate_runs_with_per_row_display(loaded_app):
-    app = loaded_app
+def test_generate_runs_with_per_row_display(image_table_app):
+    app = image_table_app
     C.image_table_repopulate_dropdowns(app)
     C.image_table_apply_preset(app, "channel", "timepoint")
     luts = app._image_table_lut
@@ -47,12 +47,12 @@ def test_generate_runs_with_per_row_display(loaded_app):
     C.image_table_generate(app)  # exercises the per-row render path end-to-end
 
 
-def test_per_row_controls_do_not_auto_generate(loaded_app, monkeypatch):
+def test_per_row_controls_do_not_auto_generate(image_table_app, monkeypatch):
     """Toggling a row's display options / colormap / Fit must NOT render — only
     the explicit Generate button does (regression for accidental auto-Generate)."""
     import well_viewer.features.image_browser.image_table.controller as ic
 
-    app = loaded_app
+    app = image_table_app
     ic.image_table_repopulate_dropdowns(app)
     ic.image_table_apply_preset(app, "channel", "timepoint")
     luts = app._image_table_lut

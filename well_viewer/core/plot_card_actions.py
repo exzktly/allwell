@@ -70,10 +70,8 @@ def copy_active_card_as_svg(ctx) -> None:
                 card.setPlotTheme(prev_theme)
             except Exception:
                 swallowed()  # was: pass (silent except)
-    # Status bar is a genuine app/window-level service — a named escape hatch.
-    set_status = getattr(ctx.app, "_set_status", None)
-    if callable(set_status):
-        set_status(status)
+    # Status bar is a genuine app/window-level service — via the named accessor.
+    ctx.set_status(status)
 
 
 def save_active_card_figure(ctx) -> None:
@@ -89,8 +87,8 @@ def save_active_card_figure(ctx) -> None:
     fig = getattr(card, "_figure", None) or getattr(card, "figure", None)
     if fig is None:
         return
-    # Save-As dialog is a genuine app/window-level service — a named escape hatch.
+    # Save-As dialog is a genuine app/window-level service — via the named accessor.
     try:
-        ctx.app._save_matplotlib_fig(fig, default)
+        ctx.save_figure_dialog(fig, default)
     except Exception:
         swallowed()  # was: pass (silent except)

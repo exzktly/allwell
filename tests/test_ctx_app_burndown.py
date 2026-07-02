@@ -65,7 +65,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              buttons to the functions, not app methods). The two app/window
 #              services (_set_status / _save_matplotlib_fig) remain as one named
 #              escape-hatch boundary instead of six scattered reach-throughs.
-CTX_APP_BUDGET = 309
+#   309 → 304  P3 design "C": the two card-action app services now route through
+#              named ViewerContext accessors (ctx.set_status / ctx.save_figure_
+#              dialog); the god-object touch is consolidated to viewer_context.py
+#              (self.app), frozen by test_ctx_service_accessors. Feature code no
+#              longer names the app for these. (Also reworded 3 legacy doc
+#              mentions per the "no literal token in comments" convention.)
+CTX_APP_BUDGET = 304
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

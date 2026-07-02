@@ -10,6 +10,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from well_viewer.core import plot_card_actions as pca
+from well_viewer.viewer_context import ViewerContext
 
 
 class _FakeCard:
@@ -36,7 +37,9 @@ class _FakeRegistry:
 
 
 def _ctx(cards, app):
-    return SimpleNamespace(app=app, widgets=_FakeRegistry(cards))
+    # A real ViewerContext so the named service accessors (set_status /
+    # save_figure_dialog) are exercised, delegating to the fake app.
+    return ViewerContext(app=app, state=None, bus=None, widgets=_FakeRegistry(cards))
 
 
 def test_active_card_picks_first_visible_in_priority_order():

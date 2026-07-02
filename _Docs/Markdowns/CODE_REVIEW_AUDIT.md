@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **21 / 77 items resolved** (20 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **25 / 77 items resolved** (24 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -50,10 +50,10 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E8 | smFISH `_run` no try/except → "Apply Global Threshold" hangs | H | `[ ]` TODO | |
 | E9 | auto-threshold DEBUG-skip → silently biased threshold | H | `[ ]` TODO | |
 | E10 | saved-plot capture `return None` → silently loses groups/stats | H | `[ ]` TODO | |
-| E11 | corrupt input zip silently uploaded whole | H | `[ ]` TODO | |
+| E11 | corrupt input zip silently uploaded whole | H | `[x]` DONE | #597 |
 | E12 | `Fetcher._loop` no except → wells silently not downloaded | M | `[x]` DONE | #597 |
 | E13 | failed `scancel`/`kill` unreported → lingering SLURM alloc | M | `[ ]` TODO | |
-| E14 | `ALLWELL_SCRATCH_DIR` silently ignored → ENOSPC | M | `[ ]` TODO | |
+| E14 | `ALLWELL_SCRATCH_DIR` silently ignored → ENOSPC | M | `[x]` DONE | #597 |
 | E15 | corrupt mask → "no overlay" → misread QC | M | `[ ]` TODO | |
 | E16 | view_state `swallowed()` + sample_defs persistence fail invisibly | M | `[ ]` TODO | |
 | E17 | unguarded remote-dialog `_runner` → QTimer poll spins forever | L | `[ ]` TODO | |
@@ -121,14 +121,14 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
 | X1 | reset gates/overrides in `load_directory` → stop cross-dataset leak | H | `[ ]` TODO | |
-| X2 | `_materialize` atomic tmp→replace; delete-remote only after confirm | H | `[ ]` TODO | |
+| X2 | `_materialize` atomic tmp→replace; delete-remote only after confirm | H | `[x]` DONE | #597 |
 | X3 | batch-export: stage-temp→rename on full success + manifest | H | `[ ]` TODO | |
 | X4 | validate radius/FFT numeric inputs at entry (stop silent flag-drop) | H | `[ ]` TODO | |
 | X5 | init undeclared `app._*` (esp. `_label_to_channel_key` lossy fallback) | M | `[ ]` TODO | |
 | X6 | validate negative/zero + QC bound ordering at entry | M | `[ ]` TODO | |
 | X7 | add `view_state` schema `_migrate()` (stop silent discard on bump) | M | `[ ]` TODO | |
 | X8 | persist only non-default `export_style_prefs` (replace, not merge) | M | `[x]` DONE | #597 |
-| X9 | unlink `tmp_zip` on incomplete fetch (`try/finally`) | M | `[ ]` TODO | |
+| X9 | unlink `tmp_zip` on incomplete fetch (`try/finally`) | M | `[x]` DONE | #597 |
 | X10 | enqueue stdout sentinel before `flush_and_join` (stop reader hang) | M | `[ ]` TODO | |
 | X11 | offer optional SSH key passphrase (or document risk) | M | `[ ]` TODO | |
 | X12 | `services/env.py` startup validation of `ALLWELL_*` | M | `[ ]` TODO | |
@@ -283,9 +283,9 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **Critical — `services/pipeline_service.py:93/97`** (+ `fft_*` blocks): CLI arg assembly `except (TypeError, ValueError, KeyError): pass` → a malformed option is silently omitted → **pipeline runs with different parameters than configured**. *Fix: validate up front; a bad value must raise/warn.* — **E4** `[x]` DONE (`_emit_num_flag` raises on invalid; `tests/test_pipeline_arg_validation.py`)
 - **High —** `process_microscopy.py:1561` (auto-threshold per-channel DEBUG-skip → silently biased threshold from a subset) + `data/auto_threshold.py:70` (same, viewer-side). *Fix: WARNING + report skipped counts.* — **E9** `[ ]` TODO
 - **High —** `features/saved_plots/collect.py:81/101/119` (`return None` → saved plot silently loses its groups/stats config). *Fix: log ERROR; fail the save visibly.* — **E10** `[ ]` TODO
-- **High —** `services/remote_runner.py:1153` (corrupt input zip silently treated as "upload whole well"). *Fix: WARNING naming the bad zip.* — **E11** `[ ]` TODO
+- **High —** `services/remote_runner.py:1153` (corrupt input zip silently treated as "upload whole well"). *Fix: WARNING naming the bad zip.* — **E11** `[x]` DONE (WARN names the bad zip)
 - **Medium —** `remote_runner.py:4178/4228` (failed `scancel`/`kill` → lingering SLURM allocation unreported). — **E13** `[ ]` TODO
-- **Medium —** `remote_runner.py:80` (`ALLWELL_SCRATCH_DIR` silently ignored on `OSError` → later ENOSPC). — **E14** `[ ]` TODO
+- **Medium —** `remote_runner.py:80` (`ALLWELL_SCRATCH_DIR` silently ignored on `OSError` → later ENOSPC). — **E14** `[x]` DONE (WARNING on bad ALLWELL_SCRATCH_DIR)
 - **Medium —** `image_table/image_compose.py:485/516/523` (corrupt mask → "no overlay" → user misreads QC). — **E15** `[ ]` TODO
 - **Medium —** `persistence/view_state.py` (~25 `swallowed()` sites) + `sample_definitions.py` (persistence fails invisibly). — **E16** `[ ]` TODO
 - **Top recommendation:** extend `test_no_silent_except.py` to flag tuple/typed `pass` and broad `return None` in `pipeline/`, `well_viewer/data/`, `well_viewer/persistence/`, add the missing pipeline files, and route data-integrity failures to at least WARNING. — **G4** `[x]` DONE (partial: added the 3 unscanned pipeline files; tuple/typed-`pass` + broad-`return None` extension needs a frozen offender baseline — noted in-test as remaining scope)
@@ -341,8 +341,8 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 ### 4.4 Transaction / atomicity
 **The atomic single-file layer is exemplary and the remote-cleanup *ordering* is correct** — the gaps are where a *silent* success or partial slips past that ordering.
 - **Critical — `remote_runner.py:2553` / `_run_batches:2575`** (same defect as E1, CLI path): `wait()` coerces a never-set `None` returncode to `0`, so a crashed batched run reports success to `scripts/allwell_remote.py:192` → `verify_and_cleanup(ok=True)` → empty expected-set verifies as "all 0 wells present" → `rm -rf` the run dir (+ dataset cache under `cleanup_mode="all"`). The **GUI path is only *accidentally* safe** because `pipeline_runner.py:591` reads `.returncode` (raw `None`). *Fix: as E1 — plus align both callers on `.returncode`.* → tracked under **E1**.
-- **High — `remote_runner.py:3309/3190/3211`**: `_materialize` does `shutil.copyfile(...)` **straight to the final `{well}_out.zip`** (truncating any prior good copy) with its `OSError` only logged; control then unconditionally `fetched_wells.add(well)` and, in batched mode, `_delete_well_files_on_remote(well)` → an interrupted copy marks the well fetched **and deletes the only complete (remote) copy**. *Fix: copy to `.tmp` then `os.replace`; add-to-fetched + delete-remote only after confirming a non-empty local artifact.* — **X2** `[ ]` TODO
-- **Medium — `remote_runner.py:3106/3133-3138`**: on the incomplete-fetch branch `tmp_zip` is returned without unlinking (only `:3187` cleans up) → partial temp zips accumulate. *Fix: `try/finally` unlink.* — **X9** `[ ]` TODO
+- **High — `remote_runner.py:3309/3190/3211`**: `_materialize` does `shutil.copyfile(...)` **straight to the final `{well}_out.zip`** (truncating any prior good copy) with its `OSError` only logged; control then unconditionally `fetched_wells.add(well)` and, in batched mode, `_delete_well_files_on_remote(well)` → an interrupted copy marks the well fetched **and deletes the only complete (remote) copy**. *Fix: copy to `.tmp` then `os.replace`; add-to-fetched + delete-remote only after confirming a non-empty local artifact.* — **X2** `[x]` DONE (atomic `_materialize` + confirm-before-delete; `tests/test_fetch_materialize_atomic.py`)
+- **Medium — `remote_runner.py:3106/3133-3138`**: on the incomplete-fetch branch `tmp_zip` is returned without unlinking (only `:3187` cleans up) → partial temp zips accumulate. *Fix: `try/finally` unlink.* — **X9** `[x]` DONE (`tmp_zip` unlinked on could-not-pull)
 - **Medium — `remote_runner.py:2810-2824`**: the `finally` calls `flush_and_join()` **before** enqueuing the `None` stdout sentinel → if teardown raises, the reader loop (`pipeline_runner.py:589`) blocks forever. *Fix: enqueue the sentinel first / in its own inner `finally`.* — **X10** `[ ]` TODO
 - **Batch export (`batch_export/`, `export/service.py`) — no transactional guarantee at any level:** re-run overwrites a prior *complete* export in place (`unique_export_stem` de-dupes only against a per-run set; writers open the final path in `"w"` at `base_panel.py:1418`, `bar_panel.py:355`, `scatter_panel.py:456+`); no cross-job rollback (`_run_batch_jobs:1194-1226` continue-on-error, no manifest); per-job CSV-then-figure is non-atomic. *Fix: stage to a temp subdir → confirm → `os.replace`/commit on full success → write a `manifest.json`.* — **X3** `[ ]` TODO
 - **Verified robust (credit):** `persistence/_io.py`; `pipeline/io.py` merge helpers; `remote_runner._zip_well_folder:737`; cleanup ordering; `_stage_mixed_mode`. → see Non-goals.
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch H (remote-fetch robustness)** — **X2** (`_materialize` copies via temp→`os.replace` and returns success; `_fetch_one` marks a well fetched + deletes the remote copy only after that succeeds, so an interrupted copy is no longer irrecoverable), **X9** (partial `tmp_zip` unlinked on the could-not-pull path), **E11** (corrupt input zip named in a WARN), **E14** (bad `ALLWELL_SCRATCH_DIR` surfaced at WARNING instead of silently falling back). +5 tests. Fast lane green (1255). 25/77 resolved.
+
 - 2026-07-02 **Batch G (lifecycle)** — **L1** (`AllWellApp.closeEvent` now calls `_stop_analyze_runner`, so quitting mid-run stops the pipeline runner instead of orphaning the local subprocess / leaking the remote SLURM allocation + scratch — AnalyzeTab's own closeEvent never fires as a child widget). **All 5 Critical items are now fixed.** +4 tests. Fast lane green (1251). 21/77 resolved.
 
 - 2026-07-02 **Batch F (scientific)** — **S4** (`stats_cache` keys now fold in `_gate_cache_sig` — the active gates' full definition + thresh choices — and `_notify_gates_changed` invalidates the cache, so a gate resize/rename can no longer return a stale cached statistic). +5 tests. Fast lane green (1247). 20/77 resolved.
@@ -438,4 +440,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch G merged (L1 teardown fix + tests); **21 / 77 resolved; all 5 Criticals done.**
+**Last updated:** 2026-07-02 — Batch H merged (remote-fetch robustness + tests); **25 / 77 resolved.**

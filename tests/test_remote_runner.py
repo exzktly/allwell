@@ -1209,7 +1209,7 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     try:
         with patch.object(Fetcher, "_rsync", return_value=False), \
              patch.object(Fetcher, "_rsync_glob", return_value=1), \
-             patch.object(Fetcher, "_materialize", lambda self, w, z: None), \
+             patch.object(Fetcher, "_materialize", lambda self, w, z: True), \
              patch.object(Fetcher, "_delete_well_files_on_remote", lambda self, w: None):
             f._fetch_one(well)
         assert well in run.fetched_wells                # accepted, not discarded
@@ -1363,7 +1363,7 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
 
     monkeypatch.setattr(Fetcher, "_rsync", fake_rsync)
     monkeypatch.setattr(Fetcher, "_rsync_glob", lambda self, src, dst: 1)
-    monkeypatch.setattr(Fetcher, "_materialize", lambda self, w, z: None)
+    monkeypatch.setattr(Fetcher, "_materialize", lambda self, w, z: True)
 
     with patch.object(Fetcher, "_loop", lambda self: None):
         fetcher = Fetcher(

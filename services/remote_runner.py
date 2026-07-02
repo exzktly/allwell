@@ -78,8 +78,14 @@ def _scratch_dir() -> Path:
             p = Path(override).expanduser()
             p.mkdir(parents=True, exist_ok=True)
             return p
-        except OSError:
-            pass
+        except OSError as exc:
+            # Don't silently ignore a user-set scratch dir — falling back to the
+            # OS temp can later fill a small system drive with GB of staging
+            # (audit E14). Surface it so the misconfiguration is visible.
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "ALLWELL_SCRATCH_DIR=%r is unusable (%s); falling back to the "
+                "OS temp dir", override, exc)
     return Path(tempfile.gettempdir())
 
 
@@ -1150,7 +1156,13 @@ def _filter_new_fovs_in_staging(
         try:
             with zipfile.ZipFile(wz, "r") as zf:
                 members = zf.namelist()
-        except (OSError, zipfile.BadZipFile):
+        except (OSError, zipfile.BadZipFile) as exc:
+            # A corrupt input zip is uploaded whole rather than incrementally —
+            # name it so the user can tell why a "done" well re-uploads in full
+            # (audit E11).
+            if log_fn:
+                log_fn(f"[remote] WARN {well}: input zip unreadable ({exc}); "
+                       f"uploading in full — {wz.name}\n")
             survivors.append(wz)
             continue
         keep = [m for m in members if _member_fov_tp(m, fields, filename_sep) not in done]
@@ -3166,6 +3178,10 @@ class Fetcher:
                 f"[remote] ↓ {well}: WARN could not pull {well}_out.zip from "
                 f"{self.run.remote_output_dir}; will retry at end of run.\n"
             )
+            try:
+                tmp_zip.unlink()   # don't leave a partial in scratch (audit X9)
+            except OSError:
+                pass
             return
         if not ok:
             self._log(
@@ -3213,11 +3229,20 @@ class Fetcher:
 
         # Now materialize the well's output in the user's output_dir
         # according to local input mode.
-        self._materialize(well, tmp_zip)
+        materialized = self._materialize(well, tmp_zip)
         try:
             tmp_zip.unlink()
         except OSError:
             pass
+        if not materialized:
+            # The local artifact isn't safely in place — do NOT mark the well
+            # fetched or delete the remote copy (audit X2); leave it for the
+            # end-of-run retry to re-pull.
+            self._log(
+                f"[remote] ↓ {well}: WARN local materialize failed; keeping the "
+                f"remote copy and leaving the well for retry.\n"
+            )
+            return
         self.run.fetched_wells.add(well)
         total_elapsed = time.monotonic() - t0
         position_done = len(self.run.fetched_wells)
@@ -3314,22 +3339,28 @@ class Fetcher:
                 f"into {self.run.local_output_dir.name}/\n"
             )
 
-    def _materialize(self, well: str, well_zip: Path) -> None:
+    def _materialize(self, well: str, well_zip: Path) -> bool:
         """Place the well's outputs in ``local_output_dir`` so the result
-        matches what a local run would have produced."""
+        matches what a local run would have produced.
+
+        Returns True iff the local artifact is now in place. The caller gates
+        ``fetched_wells.add`` + remote deletion on this (audit X2): the copy
+        goes to a temp path then ``os.replace`` (atomic), so an interrupted
+        copy can't leave a truncated ``{well}_out.zip`` — and a failed copy
+        returns False so the only complete (remote) copy is NOT deleted.
+        """
         dest = self.run.local_output_dir
         dest.mkdir(parents=True, exist_ok=True)
 
         if self.output_filter is OutputFilter.CSV_ONLY:
             # Nothing to extract — the CSV was pulled separately. Drop
             # the well zip on the floor.
-            return
+            return True
 
         if self.run.incremental:
             # The fetched zip holds only the new FOVs' images. Merge them into
             # the existing local <well>_out.zip instead of overwriting.
-            self._materialize_incremental(well, well_zip, dest)
-            return
+            return self._materialize_incremental(well, well_zip, dest)
 
         # Output is always a per-well .zip now (compression is mandatory), so
         # the fetched zip IS the expected local artifact for every input mode.
@@ -3337,13 +3368,27 @@ class Fetcher:
         # which left no <well>_out.zip and no <well>/ dir, so the verify step
         # failed and the post-run cleanup (delete local well folders) was
         # skipped.
+        final = dest / f"{well}_out.zip"
+        tmp = dest / f".{well}_out.zip.tmp"
         try:
-            shutil.copyfile(well_zip, dest / f"{well}_out.zip")
+            shutil.copyfile(well_zip, tmp)
+            os.replace(tmp, final)
         except OSError as exc:
             self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            return False
+        return True
 
-    def _materialize_incremental(self, well: str, well_zip: Path, dest: Path) -> None:
-        """Merge a partial fetched well zip into the existing local output."""
+    def _materialize_incremental(self, well: str, well_zip: Path, dest: Path) -> bool:
+        """Merge a partial fetched well zip into the existing local output.
+
+        Returns True on a successful merge, False if the partial zip couldn't be
+        extracted (so the caller won't mark the well fetched / delete the remote
+        copy — audit X2)."""
         from pipeline.io import merge_images_into_zip
 
         tmp_dir = _new_scratch_dir(f"allwell-merge-{well}-")
@@ -3353,9 +3398,10 @@ class Fetcher:
                     zf.extractall(tmp_dir)
             except (OSError, zipfile.BadZipFile) as exc:
                 self._log(f"[remote] warn: extracting partial {well}_out.zip failed: {exc}\n")
-                return
+                return False
             n = merge_images_into_zip(dest / f"{well}_out.zip", tmp_dir)
             self._log(f"[remote] merge: {well}_out.zip → +{n} new image(s)\n")
+            return True
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

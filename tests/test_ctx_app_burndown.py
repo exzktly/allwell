@@ -74,7 +74,10 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   304 -> 298  P3.3 open_export_style_panel -> ctx.open_export_style_panel
 #              named accessor (6 plot builders); app service consolidated to
 #              viewer_context, frozen by test_ctx_service_accessors.
-CTX_APP_BUDGET = 298
+#   298 -> 293  P3.4-1 make_plot_view_switcher takes ctx (owns the plotting-
+#              notebook navigation; 6 builder call sites drop ctx.app, one
+#              internal touch remains in ui_helpers).
+CTX_APP_BUDGET = 293
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

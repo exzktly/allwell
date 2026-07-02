@@ -608,13 +608,14 @@ _PLOT_VIEWS = [
 ]
 
 
-def make_plot_view_switcher(app: Any, current_name: str):
+def make_plot_view_switcher(ctx, current_name: str):
     """The 5-segment per-card view-switcher (Line / Bar / Scatter / Dist / Heat).
 
-    Switches the Plotting sub-notebook (``app._plotting_notebook``) to the picked
-    tab when the user changes the segment. Returns the ``SegmentedControl`` (or
-    ``None`` if it's not importable). Each plot tab mounts one of these in its
-    PlotCard's left-header slot, pre-selected to its own outer tab name.
+    Switches the Plotting sub-notebook (the app's ``_plotting_notebook``) to the
+    picked tab when the user changes the segment. Returns the ``SegmentedControl``
+    (or ``None`` if it's not importable). Each plot tab mounts one of these in its
+    PlotCard's left-header slot, pre-selected to its own outer tab name. Owns the
+    notebook-navigation concern so feature builders pass ``ctx`` and never wire it.
     """
     try:
         from widgets.segmented_control import SegmentedControl
@@ -627,7 +628,7 @@ def make_plot_view_switcher(app: Any, current_name: str):
 
     def _on_change(_idx=None) -> None:
         target = sc.currentData()
-        nb = getattr(app, "_plotting_notebook", None)
+        nb = getattr(ctx.app, "_plotting_notebook", None)
         if not target or nb is None:
             return
         nb.setCurrentByName(target)

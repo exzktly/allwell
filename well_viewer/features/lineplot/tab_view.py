@@ -124,7 +124,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
     wire_save_to_gallery(ctx.app, card, "Line Graphs")
-    _sw = make_plot_view_switcher(ctx.app, 'Line Graphs')
+    _sw = make_plot_view_switcher(ctx, 'Line Graphs')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
     # Hide the per-card header — the ctxbar above already carries the same controls.

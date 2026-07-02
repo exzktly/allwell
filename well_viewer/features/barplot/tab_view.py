@@ -271,7 +271,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
     wire_save_to_gallery(ctx.app, card, "Bar Plots")
-    _sw = make_plot_view_switcher(ctx.app, 'Bar Plots')
+    _sw = make_plot_view_switcher(ctx, 'Bar Plots')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
     # Hide the per-card header — the ctxbar above already carries the same controls.

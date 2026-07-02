@@ -114,7 +114,7 @@ def _expand_repset_wells(app, wells: Iterable[str]) -> List[str]:
     well in the rep-set it belongs to. Otherwise return wells as-is.
     """
     src = list(wells)
-    if not bool(getattr(app, "_heatmap_repset_avg", False)):
+    if not bool(app._app_state.heatmap.repset_avg):
         return src
     get_loaded = getattr(app, "_rep_sets_loaded", None)
     rep_sets = list(get_loaded() if callable(get_loaded) else [])
@@ -143,7 +143,7 @@ def _expand_repset_wells(app, wells: Iterable[str]) -> List[str]:
 
 def _repset_name_for_wells(app, wells: Iterable[str]) -> Optional[str]:
     """Return the name of the first rep-set that contains any of *wells*, or None."""
-    if not bool(getattr(app, "_heatmap_repset_avg", False)):
+    if not bool(app._app_state.heatmap.repset_avg):
         return None
     get_loaded = getattr(app, "_rep_sets_loaded", None)
     rep_sets = list(get_loaded() if callable(get_loaded) else [])
@@ -274,13 +274,13 @@ def _cell_value(
 def _resolve_color_scale(arr: np.ndarray, app) -> Tuple[Optional[float], Optional[float]]:
     """Pick (vmin, vmax) for the heatmap.
 
-    Mode is read from ``app._heatmap_scale_mode`` (Auto/Fixed). For Fixed we
+    Mode is read from ``app._app_state.heatmap.scale_mode`` (Auto/Fixed). For Fixed we
     read ``app._heatmap_vmin`` / ``app._heatmap_vmax``. For Auto we use the
     global range pre-computed across every timepoint (kept on
     ``app._heatmap_global_vmin`` / ``app._heatmap_global_vmax``) so the
     colormap stays stable while scrubbing the timepoint slider.
     """
-    mode = str(getattr(app, "_heatmap_scale_mode", "Auto") or "Auto")
+    mode = str(app._app_state.heatmap.scale_mode or "Auto")
     if mode == "Fixed":
         vmin = float(getattr(app, "_heatmap_vmin", float("nan")) or float("nan"))
         vmax = float(getattr(app, "_heatmap_vmax", float("nan")) or float("nan"))
@@ -344,8 +344,8 @@ def _compute_global_range(
         tuple(sorted((fluor_gates or {}).items())),
         ratios_fingerprint,
         tuple(tps),
-        bool(getattr(app, "_heatmap_repset_avg", False)),
-        bool(getattr(app, "_heatmap_log_scale", False)),
+        bool(app._app_state.heatmap.repset_avg),
+        bool(app._app_state.heatmap.log_scale),
     )
     cached = getattr(app, "_heatmap_global_range_cache", None)
     if cached is not None and cached.get("key") == cache_key:
@@ -453,7 +453,7 @@ def redraw_heatmap(app) -> None:
     # Log-scale toggle: route values through a LogNorm so the colorbar
     # spans orders of magnitude. Values ≤ 0 become invalid (masked).
     norm = None
-    log_scale = bool(getattr(app, "_heatmap_log_scale", False))
+    log_scale = bool(app._app_state.heatmap.log_scale)
     if log_scale:
         from matplotlib.colors import LogNorm
         positive = masked.filled(np.nan)

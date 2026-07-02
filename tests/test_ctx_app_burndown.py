@@ -42,7 +42,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 # Every feature builder's Qt widget-INSTANCE handle now goes through the registry
 # (verified: zero `ctx.app._x = <QWidget>(...)` stashes remain). The residual is
 # the non-widget state + behaviour-call layer (typed-state / app-method extraction).
-CTX_APP_BUDGET = 408
+# --- Phase 2: non-widget state flags migrate to typed AppState feature slices,
+#     which also deletes their god-object builder inits (each was a ctx.app stash):
+#   408 → 405  barplot swarm/violin  → BarPlotState
+#   405 → 402  heatmap scale_mode/repset_avg/log_scale  → HeatmapState
+CTX_APP_BUDGET = 402
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -124,7 +124,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     scale_cb.addItems(_SCALE_OPTIONS)
     scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx.app))
     cl2.addWidget(scale_cb)
-    ctx.app._heatmap_scale_mode = "Auto"
 
     cl2.addWidget(QLabel("vmin:", ctrl2))
     vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(ctrl2))
@@ -151,7 +150,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     )
     repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(ctx.app))
     cl2.addWidget(repset_avg_cb)
-    ctx.app._heatmap_repset_avg = False
 
     log_scale_cb = reg.register("_heatmap_log_scale_cb", QCheckBox("Log scale", ctrl2))
     log_scale_cb.setToolTip(
@@ -159,7 +157,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     )
     log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx.app))
     cl2.addWidget(log_scale_cb)
-    ctx.app._heatmap_log_scale = False
 
     cl2.addStretch(1)
 
@@ -336,10 +333,10 @@ def _on_scale_changed(app) -> None:
     import math as _math
     cb = getattr(app, "_heatmap_scale_cb", None)
     if cb is not None:
-        app._heatmap_scale_mode = str(cb.currentText() or "Auto")
+        app._app_state.heatmap.scale_mode = str(cb.currentText() or "Auto")
     # When the user picks Fixed but the vmin/vmax fields are blank, seed them
     # with the current global range so they have concrete numbers to tweak.
-    if app._heatmap_scale_mode == "Fixed":
+    if app._app_state.heatmap.scale_mode == "Fixed":
         vmin_edit = getattr(app, "_heatmap_vmin_edit", None)
         vmax_edit = getattr(app, "_heatmap_vmax_edit", None)
         g_vmin = getattr(app, "_heatmap_global_vmin", None)
@@ -370,7 +367,7 @@ def _on_vminmax_changed(app) -> None:
     # value actually takes effect — otherwise the heatmap silently ignores
     # vmin/vmax while Scale stays on Auto.
     if _math.isfinite(app._heatmap_vmin) or _math.isfinite(app._heatmap_vmax):
-        app._heatmap_scale_mode = "Fixed"
+        app._app_state.heatmap.scale_mode = "Fixed"
         cb = getattr(app, "_heatmap_scale_cb", None)
         if cb is not None and cb.currentText() != "Fixed":
             blocked = cb.blockSignals(True)
@@ -395,7 +392,7 @@ def _on_transpose(app) -> None:
 def _on_repset_avg_changed(app) -> None:
     cb = getattr(app, "_heatmap_repset_avg_cb", None)
     if cb is not None:
-        app._heatmap_repset_avg = bool(cb.isChecked())
+        app._app_state.heatmap.repset_avg = bool(cb.isChecked())
     _persist_settings(app)
     _redraw(app)
 
@@ -403,7 +400,7 @@ def _on_repset_avg_changed(app) -> None:
 def _on_log_scale_changed(app) -> None:
     cb = getattr(app, "_heatmap_log_scale_cb", None)
     if cb is not None:
-        app._heatmap_log_scale = bool(cb.isChecked())
+        app._app_state.heatmap.log_scale = bool(cb.isChecked())
     _persist_settings(app)
     _redraw(app)
 

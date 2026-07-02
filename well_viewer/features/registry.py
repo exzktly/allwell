@@ -111,6 +111,7 @@ def _build_sample_definitions(ctx, frame) -> None:
 
 # Uniform AppState-slice constructors — declarative lazy factories (A15).
 _state_bar = _lazy_state("well_viewer.features.barplot.state", "BarPlotState")
+_state_heatmap = _lazy_state("well_viewer.features.heatmap.state", "HeatmapState")
 _state_stats = _lazy_state("well_viewer.features.stats.state", "StatsState")
 _state_multivariate = _lazy_state("well_viewer.features.multivariate.state", "MultivariateState")
 _state_review_image = _lazy_state("well_viewer.features.image_browser.review_image.state", "ReviewImageState")
@@ -530,6 +531,7 @@ def _features() -> "list[FeatureDescriptor]":
             name="Heat Map", build=_build_heatmap,
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
+            states=(StateSpec("heatmap", _state_heatmap),),
         ),
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────

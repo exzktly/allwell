@@ -220,6 +220,14 @@ def teardown_review_pane(app) -> None:
             ev.set()
         except Exception:
             _logger.debug("teardown: smFISH cancel event set failed", exc_info=True)
+    # Supersede any in-flight Cell Browser loader (audit E22) so its daemon
+    # thread stops reading the zipfile cache once the pane is going away.
+    loader = getattr(app, "_cell_browser_loader", None)
+    if loader is not None:
+        try:
+            loader.cancel()
+        except Exception:
+            _logger.debug("teardown: cell-browser loader cancel failed", exc_info=True)
     try:
         from well_viewer.core.split_view import _remove_split_focus_filter
         _remove_split_focus_filter(app)

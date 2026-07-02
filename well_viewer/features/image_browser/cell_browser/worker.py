@@ -168,11 +168,28 @@ class CellImageLoader(QObject):
     def __init__(self, app) -> None:
         super().__init__()
         self._app = app
+        # The most recent generation token handed to load_page. A daemon
+        # loader checks this before every compose and bails the instant a
+        # newer page supersedes it — otherwise a burst of rapid paging left a
+        # pile of unbounded daemon threads all still reading the shared
+        # zipfile cache (which a dataset swap can invalidate mid-read),
+        # producing noisy exceptions and wasted work (audit E22).
+        self._latest_gen: int = -1
+
+    def cancel(self) -> None:
+        """Supersede any in-flight loader so it stops before its next compose.
+
+        Called on dataset swap / teardown: bumping ``_latest_gen`` past every
+        live page token makes each running thread's ``gen != self._latest_gen``
+        check trip, so it stops reading the (soon-to-be-invalidated) cache.
+        """
+        self._latest_gen += 1
 
     def load_page(self, descriptors: List[CellDescriptor], start_index: int,
                   channels: List[str], show_boundaries: bool, gen: int,
                   use_tophat: bool = False) -> None:
         """Spawn a daemon thread that composes *descriptors* and emits each."""
+        self._latest_gen = gen
         # Snapshot the shared per-channel LUT + tint (S4) on the GUI thread so
         # the daemon thread doesn't read app state concurrently; a copy is cheap
         # and the page reloads whenever the LUT/tint/source could matter.
@@ -184,6 +201,12 @@ class CellImageLoader(QObject):
             cache: Dict[str, Any] = {}
             n = 0
             for offset, desc in enumerate(descriptors):
+                # A newer page (or a dataset swap that bumped the gen) has
+                # superseded this run — stop compositing immediately instead
+                # of grinding through the rest of the page against a cache
+                # that may already be invalidated (audit E22).
+                if gen != self._latest_gen:
+                    return
                 try:
                     rgb = compose_cell_rgb(self._app, desc, channels,
                                            show_boundaries, cache, lut_map,

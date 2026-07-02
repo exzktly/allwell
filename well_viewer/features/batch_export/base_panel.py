@@ -52,6 +52,13 @@ from well_viewer.features.batch_export._common import (
     _CLR_WHITE,
 )
 from well_viewer.features.batch_export.well_grid_button import _WellGridButton
+# Qt-free export-execution service (A14 / X3) — safe to import at module level.
+from well_viewer.features.batch_export.service import (
+    commit_staged_export,
+    discard_staging,
+    new_staging_dir,
+    save_export_figure,
+)
 
 # Shared width for OUTPUT-SETTINGS row labels so the value controls line up in a
 # single column (Folder / Format / Style Preset / Channel / Fold change).
@@ -1193,8 +1200,16 @@ class BatchExportPanel(QWidget):
 
     def _run_batch_jobs(
         self, *, jobs: list, progress_text_fn, run_job_fn,
-        success_text: str, status_text: str,
+        success_text: str, status_text: str, out_dir: Path,
     ) -> None:
+        """Run each job into a staging dir, committing atomically on full success.
+
+        ``run_job_fn(job, write_dir)`` must write all of a job's files under
+        ``write_dir`` (never straight into ``out_dir``). Only when every job
+        succeeds are the staged files moved into ``out_dir`` + a manifest
+        written (audit X3); any error discards the staging so a failed re-run
+        leaves the previous complete export intact.
+        """
         from PySide6.QtWidgets import QApplication
 
         self._prog_bar.setVisible(True)
@@ -1202,15 +1217,24 @@ class BatchExportPanel(QWidget):
         self._prog_bar.setValue(0)
         self._run_btn.setEnabled(False)
         errors: List[str] = []
+        staging = new_staging_dir(out_dir)
         try:
             for step, job in enumerate(jobs, 1):
                 self._prog_lbl.setText(progress_text_fn(job, step, len(jobs)))
                 self._prog_bar.setValue(step - 1)
                 QApplication.processEvents()
-                err = run_job_fn(job)
+                err = run_job_fn(job, staging)
                 if err:
                     errors.append(err)
             self._prog_bar.setValue(len(jobs))
+            if not errors:
+                commit_staged_export(staging, out_dir)
+            else:
+                discard_staging(staging)
+        except BaseException:
+            # Never leave a half-committed export or a stray temp dir behind.
+            discard_staging(staging)
+            raise
         finally:
             self._run_btn.setEnabled(True)
             self._prog_bar.setVisible(False)
@@ -1229,7 +1253,6 @@ class BatchExportPanel(QWidget):
         # The actual render-write is the Qt-free service (audit A14); the panel
         # just resolves this app's export-style prefs and the plot background.
         from well_viewer.features.export.style import _ensure_export_style_prefs
-        from well_viewer.features.batch_export.service import save_export_figure
         save_export_figure(
             fig, fig_path, fmt,
             export_prefs=_ensure_export_style_prefs(self._app),
@@ -1305,13 +1328,15 @@ class BatchExportPanel(QWidget):
         fc_active = fc_vs_ctrl or fc_vs_t0
         used_stems: set = set()
 
-        def _run_group(grp: BarGroup) -> Optional[str]:
+        def _run_group(grp: BarGroup, write_dir: Path) -> Optional[str]:
             safe = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
             # Uniquify so two groups whose names sanitise to the same stem don't
             # silently overwrite each other's CSV + figure.
             safe = unique_export_stem(f"batch_{safe}", used_stems)
-            csv_path = out_dir / f"{safe}.csv"
-            fig_path = out_dir / f"{safe}.{fmt}"
+            # Write into the staging dir (audit X3) — committed to out_dir only on
+            # a fully-successful run.
+            csv_path = write_dir / f"{safe}.csv"
+            fig_path = write_dir / f"{safe}.{fmt}"
 
             try:
                 from well_viewer.features.batch_export._line_series_runner import (
@@ -1442,6 +1467,7 @@ class BatchExportPanel(QWidget):
             run_job_fn=_run_group,
             success_text=f"\u2713 {len(groups_with_data)} group(s) \u2192 {out_dir.name}/",
             status_text=f"Batch export: {len(groups_with_data)} group(s) \u2192 {out_dir}",
+            out_dir=out_dir,
         )
 
     def _log_sample_definitions_snapshot(self, groups_for_export: List[BarGroup]) -> None:

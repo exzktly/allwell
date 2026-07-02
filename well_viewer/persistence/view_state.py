@@ -23,6 +23,40 @@ from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
+# Current on-disk view_state schema. Bump when the shape of the dict below
+# changes incompatibly, and register a step in ``_MIGRATIONS`` that upgrades the
+# prior version to this one (audit X7) — otherwise a bump silently discards
+# every user's saved view. ``snapshot`` stamps this value.
+SCHEMA_VERSION = 1
+
+# ``{n: fn}`` where ``fn(state_at_v_n) -> state_at_v_{n+1}``. Empty while only v1
+# exists; each future bump adds one step so ``_migrate`` can walk an old saved
+# doc forward instead of dropping it.
+_MIGRATIONS: dict = {}
+
+
+def _migrate(state: dict, from_version) -> "dict | None":
+    """Upgrade a saved ``view_state`` dict to :data:`SCHEMA_VERSION`.
+
+    Returns the migrated dict (with ``schema_version`` stamped), or ``None`` when
+    the saved version cannot be reached — an unknown intermediate step, or a doc
+    written by a *newer* app than this one (which we can't safely downgrade). The
+    caller surfaces that as a discard. A missing / ``None`` version is treated as
+    the original, pre-versioning schema (== v1).
+    """
+    version = from_version if isinstance(from_version, int) else 1
+    work = dict(state)
+    while version < SCHEMA_VERSION:
+        step = _MIGRATIONS.get(version)
+        if step is None:
+            return None
+        work = step(work)
+        version += 1
+    if version != SCHEMA_VERSION:
+        return None  # doc is newer than we understand — don't guess.
+    work["schema_version"] = SCHEMA_VERSION
+    return work
+
 # Plot sub-tab names that live inside the "Plotting" parent stack.
 _PLOT_SUBTABS = (
     "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
@@ -59,8 +93,14 @@ def _nondefault_export_prefs(app) -> dict:
 def snapshot(app) -> dict:
     """Build a JSON-serialisable view-state dict from current app state."""
     return {
-        "schema_version": 1,
-        "selected_wells": sorted(app._app_state.selection.selected_wells or []),
+        "schema_version": SCHEMA_VERSION,
+        # X14: union back the wells that were saved for datasets/plates not
+        # currently loaded (stashed on restore), so a subset-load-then-save does
+        # not irreversibly prune wells the current dataset simply doesn't contain.
+        "selected_wells": sorted(
+            set(app._app_state.selection.selected_wells or [])
+            | getattr(app, "_view_state_absent_wells", set())
+        ),
         # Rep-set visibility (which groups are shown on the plots) + solo wells —
         # in group/replicate mode this, not ``selected_wells``, is what drives the
         # plate and the plot, so a plot saved in that mode restores what was shown.
@@ -69,7 +109,10 @@ def snapshot(app) -> dict:
                 str(s.get("id")) for s in (app._app_state.selection.selections or [])
                 if s.get("id") is not None and s.get("hidden")
             ],
-            "solo_wells": sorted(app._app_state.selection.active_solo_wells or []),
+            "solo_wells": sorted(
+                set(app._app_state.selection.active_solo_wells or [])
+                | getattr(app, "_view_state_absent_solo", set())
+            ),
         },
         "active_centre_tab": _current_leaf_tab(app),
         "active_channel": str(app._app_state.channel.active_channel or ""),
@@ -380,8 +423,12 @@ def restore(app, state: dict) -> None:
 
     wells = state.get("selected_wells") or []
     if isinstance(wells, list):
-        valid = {str(w) for w in wells if isinstance(w, str)}
-        valid &= set(app._app_state.dataset.well_paths or {})
+        saved = {str(w) for w in wells if isinstance(w, str)}
+        current = set(app._app_state.dataset.well_paths or {})
+        valid = saved & current
+        # X14: remember wells saved for datasets/plates not currently loaded so
+        # ``snapshot`` can re-persist them — a subset load must not prune them.
+        app._view_state_absent_wells = saved - current
         if valid and hasattr(app, "_set_selected_wells"):
             try:
                 app._set_selected_wells(valid, commit=False)
@@ -400,9 +447,10 @@ def restore(app, state: dict) -> None:
         solo = vis.get("solo_wells")
         if isinstance(solo, list):
             wp = set(app._app_state.dataset.well_paths or {})
-            app._app_state.selection.active_solo_wells = {
-                str(w) for w in solo if str(w) in wp
-            }
+            saved_solo = {str(w) for w in solo}
+            # X14: preserve solo wells belonging to other datasets (see above).
+            app._view_state_absent_solo = saved_solo - wp
+            app._app_state.selection.active_solo_wells = saved_solo & wp
         if hasattr(app, "_refresh_sidebar_map"):
             try:
                 app._refresh_sidebar_map()
@@ -1065,9 +1113,19 @@ def load_from_data_dir(app) -> None:
     if not isinstance(state, dict):
         return
     sv = state.get("schema_version")
-    if sv is not None and sv != 1:
-        _logger.warning("view_state schema_version=%r; ignoring saved state.", sv)
-        return
+    if sv is not None and sv != SCHEMA_VERSION:
+        # X7: try to migrate an old doc forward instead of silently dropping the
+        # user's entire saved view. Only discard when it genuinely can't be
+        # reached (unknown step, or a doc from a newer app).
+        migrated = _migrate(state, sv)
+        if migrated is None:
+            _logger.warning(
+                "view_state schema_version=%r cannot be migrated to %d; "
+                "ignoring saved state.", sv, SCHEMA_VERSION)
+            return
+        _logger.info(
+            "view_state migrated from schema_version=%r to %d.", sv, SCHEMA_VERSION)
+        state = migrated
     try:
         restore(app, state)
     except Exception:

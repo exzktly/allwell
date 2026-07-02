@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **57 / 77 items resolved** (56 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **58 / 77 items resolved** (57 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -101,7 +101,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 |----|------|-----|--------|-----------|
 | A1 | unify `find_image_groups` vs `_in_zip` (folder/zip parse divergence) | H | `[x]` DONE | `test_image_grouping_characterization.py` |
 | A2 | fetch-side reuse `pipeline.io` merge instead of reimpl | H | `[x]` DONE | `test_incremental_keys_shared.py` |
-| A3 | extract `cell_gating` domain compute out of the view | H | `[ ]` TODO | |
+| A3 | extract `cell_gating` domain compute out of the view | H | `[x]` DONE | `test_cell_gating_compute.py` |
 | A4 | characterization tests for CC-98 `find_well_images_and_masks`, decompose | H | `[x]` DONE | `test_find_well_images_characterization.py` |
 | A5 | characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats` | H | `[x]` DONE | `test_stats_report_formatting.py` |
 | A6 | ~~delete cosmetic `WidgetRegistry`~~ (stale — verified live) | H | `[-]` DROPPED | #597 |
@@ -234,7 +234,7 @@ The **only** dataset-reload reset is `load_directory` (`core/load_controller.py:
 
 ### 1.3 Pattern consistency (god modules)
 Intended pattern: `controller.py` + `tab_view.py` + `renderer.py` (+ `collect.py`). Canonical: `barplot/`, `multivariate/`.
-- **High — `features/grouping/cell_gating_tab_view.py`** (2392): a "view" embedding domain compute (numpy, `ThreshFracOptimizationResult`, off-thread masking `lines 77-204`, Otsu orchestration). *Fix: extract `cell_gating_compute.py` + controller.* — **A3** `[ ]` TODO
+- **High — `features/grouping/cell_gating_tab_view.py`** (2392): a "view" embedding domain compute (numpy, `ThreshFracOptimizationResult`, off-thread masking `lines 77-204`, Otsu orchestration). *Fix: extract `cell_gating_compute.py` + controller.* — **A3** `[x]` DONE — created `cell_gating_compute.py` (Qt-free, app-free) holding the embedded domain compute: `apply_fluor_gating` (the per-well Included/Gate_Pass/Gate_On masking that `GatingWorker` ran inline off-thread — now a pure, directly-tested function), `ThreshFracOptimizationResult`, and the ThreshFracOn optimizer numeric core (`fraction_on_for_threshold`/`frac_curve`/`scan_fc_fractions`). The view shrank 2422→2305; `GatingWorker`/optimizer call the extracted functions (`_scan_fc_fractions` kept as a back-compat alias). The Otsu worker (`_AutoThresholdWorker`) was already a thin shell delegating to `data.auto_threshold`. Golden values byte-identical; +6 unit tests, slow end-to-end gating test green. (Residual view = widget wiring + orchestration; a further view→controller split is follow-on.)
 - **High — `runtime_app.py` `WellViewerApp`** (1258): acknowledged god-object with `__getattr__` forwarder and dozens of externally-`setattr`'d handles. *Fix: continue the strangler migration to typed state.* — **A8** `[ ]` TODO
 - **Medium-High — `features/scatter/callbacks.py`** (1190): non-canonical name mixing click-handlers + a full single-cell image viewer + raw Qt UI. *Fix: split `click_handlers.py` + a reusable `single_cell_viewer`.* — **A7** `[ ]` TODO
 - **Medium — `features/batch_export/base_panel.py`** (1589): abandons the split for an inheritance hierarchy; a 1589-line base `QWidget` mixing UI + export orchestration. *Fix: pull export execution into a non-Qt service.* — **A14** `[ ]` TODO
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch AE (god-module: A3)** — **A3** (extracted the Cell Gating domain compute out of the 2400-line view into a new Qt-free `cell_gating_compute.py`: `apply_fluor_gating` — the per-well Included/Gate_Pass/Gate_On masking `GatingWorker` ran inline off-thread, now pure + directly unit-tested; the ThreshFracOn optimizer numeric core; and `ThreshFracOptimizationResult`. View 2422→2305; golden values byte-identical; the Otsu worker already delegated to `data.auto_threshold`). +6 tests, slow gating end-to-end green. `_compute.py` added to the feature-naming contract. 58/77 resolved.
+
 - 2026-07-02 **Batch AD (god-module: A2)** — **A2** (the fetch-side merge helpers already delegated to `pipeline.io`; the remaining reimplementation was the client's stdlib-only done-FOV-key twins, hand-copied to avoid `pipeline.io`'s numpy/tifffile/skimage top-level imports. Extracted the key readers into a new lightweight `pipeline/incremental_keys.py` shared by both `pipeline.io` (re-export) and `remote_runner`; deleted the three twins while keeping the remote client imaging-stack-free — now guarded by a test). +6 tests, 258 remote/incremental tests green. 57/77 resolved.
 
 - 2026-07-02 **Batch AC (god-module: A1)** — **A1** (unified the divergent directory- and zip-image-group parsers onto one shared core `_collect_image_groups` + shared parsing primitives `_is_nuclear_filename` / `_derive_fluor_filename`, so segmentation-critical nuclear/fluor filename parsing can no longer drift between the two paths; zip keeps `needed_members`, dir stays directory-aware). 6 characterization tests pinned both paths first, byte-identical after. process_microscopy budget re-baselined 4729→4755 (sanctioned structural-refactor scaffolding). 56/77 resolved.
@@ -484,4 +486,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch AD merged (A2 extract shared stdlib-only incremental_keys module); **57 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch AE merged (A3 extract cell_gating_compute domain module); **58 / 77 resolved.**

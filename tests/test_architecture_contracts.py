@@ -292,7 +292,9 @@ def _feature_name_ok(name: str) -> bool:
     if name in {"controller.py", "renderer.py", "collect.py", "state.py",
                 "worker.py", "callbacks.py", "__init__.py"}:
         return True
-    if name.endswith("_view.py") or name.endswith("_panel.py"):
+    # ``_compute.py`` — the documented pure-math suffix (ARCHITECTURE §3;
+    # e.g. domain/stats_compute.py, grouping/cell_gating_compute.py from A3).
+    if name.endswith("_view.py") or name.endswith("_panel.py") or name.endswith("_compute.py"):
         return True
     if name.startswith("_"):
         return True

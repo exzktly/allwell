@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **44 / 77 items resolved** (43 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **45 / 77 items resolved** (44 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -58,7 +58,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E16 | view_state `swallowed()` + sample_defs persistence fail invisibly | M | `[x]` DONE | `test_persistence_autosave_surfacing.py` |
 | E17 | unguarded remote-dialog `_runner` → QTimer poll spins forever | L | `[x]` DONE | #597 |
 | E18 | smFISH Apply-to-All re-entrancy → dup workers + clobbered cancel | H | `[x]` DONE | #597 |
-| E19 | smFISH worker TOCTOU: dataset swap during write loop | M | `[ ]` TODO | |
+| E19 | smFISH worker TOCTOU: dataset swap during write loop | M | `[x]` DONE | `test_smfish_write_toctou.py` |
 | E20 | `_current_proc` read without lock → Stop can miss child | M | `[x]` DONE | #597 |
 | E21 | `pipeline_runner.stop()` reads worker-assigned `_proc` unsynced | M | `[ ]` TODO | |
 | E22 | cell_browser unbounded threads read invalidated zip cache | M | `[ ]` TODO | |
@@ -292,7 +292,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 
 ### 2.3 Race conditions
 - **High — `features/smfish/tab_view.py:752`** (`_smfish_apply_to_all`): launches a thread + `ThreadPoolExecutor` with **no re-entrancy guard**; a double-click runs two workers writing the **same per-well CSVs**, and the 2nd launch `.clear()`s the shared `app._smfish_cancel_event`. *Fix: single busy flag + per-run cancel event.* — **E18** `[x]` DONE (`_smfish_apply_running` guard cleared in `_done`; `tests/test_smfish_apply_robustness.py`)
-- **Medium —** smfish `worker.py:265-279` TOCTOU (dataset swap during the write loop is never re-checked → late wells written into the swapped dataset). — **E19** `[ ]` TODO
+- **Medium —** smfish `worker.py:265-279` TOCTOU (dataset swap during the write loop is never re-checked → late wells written into the swapped dataset). — **E19** `[x]` DONE — `_write_counts_to_csvs` gained a `should_abort` callback re-checked at the top of every well iteration (cancel-event or `expected != out_dir`); it stops mid-loop and WARNs with the count already written, so a swap that lands during the write no longer bleeds into the wrong dataset. `test_smfish_write_toctou.py`.
 - **Medium —** `remote_runner.py:2557-2571` (`_current_proc` read without a lock → Stop can miss the running child). — **E20** `[x]` DONE (lock-snapshot `_current_proc`; `tests/test_batched_remote_teardown.py`)
 - **Medium —** `pipeline_runner.py:364-387` (`stop()` reads `_proc` assigned on the worker thread with no sync). — **E21** `[ ]` TODO
 - **Medium —** `cell_browser/worker.py:202` (unbounded threads read a `zipfile_cache` a dataset swap can `invalidate()`). — **E22** `[ ]` TODO
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch T (smFISH write TOCTOU)** — **E19** (`_write_counts_to_csvs` now takes a `should_abort` callback re-checked at the top of every well iteration — cancel-event or `expected != out_dir` — so a dataset swap landing *during* the multi-well write loop stops immediately with a WARN instead of writing late wells into the swapped dataset). +2 tests. Fast lane green. 45/77 resolved.
+
 - 2026-07-02 **Batch S (persistence surfacing)** — **E16** (`PersistenceRegistry._flush` now logs a raise from a debounced autosave instead of letting it vanish into the Qt event loop, so a `view_state`/`sample_definitions` write failure is diagnosable; `sample_definitions.autosave_to_pipeline_info` except broadened `(OSError, FileNotFoundError)`→`Exception`; the ~25 `swallowed()` sites already DEBUG-log the traceback). +2 tests. Fast lane green. 44/77 resolved.
 
 - 2026-07-02 **Batch R (auto-threshold bias)** — **E9** (both the pipeline `_estimate_thresholds_standalone` and the viewer-side `compute_auto_thresholds` now count per-channel image-decode attempts vs failures and WARN when ≥25% of a channel's label/tophat pairs failed to decode — a silently biased Otsu threshold was otherwise computed from a non-representative subset, only logged at DEBUG). +3 tests. Fast lane green. process_microscopy budget 4707→4729. 43/77 resolved.
@@ -462,4 +464,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch S merged (E16 persistence autosave surfacing + tests); **44 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch T merged (E19 smFISH write TOCTOU + tests); **45 / 77 resolved.**

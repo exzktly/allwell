@@ -2165,6 +2165,83 @@ def process_image_group(
 # Directory scan
 # ---------------------------------------------------------------------------
 
+_GROUP_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+
+
+def _grouping_channel_idx(schema: "list[str]") -> "int | None":
+    """The schema's ``channel`` slot index, or None for substring-fallback mode."""
+    return schema.index("channel") if "channel" in schema else None
+
+
+def _is_nuclear_filename(
+    name: str, stem: str, nuclear_token: str, channel_idx: "int | None", sep: str,
+) -> bool:
+    """Whether *name* is a nuclear file (audit A1) — schema ``channel`` slot, or
+    substring fallback. Shared so dir + zip scanners classify identically."""
+    if channel_idx is not None:
+        parts = stem.split(sep)
+        return channel_idx < len(parts) and parts[channel_idx] == nuclear_token
+    return nuclear_token in name
+
+
+def _derive_fluor_filename(
+    name: str, stem: str, suffix: str, nuclear_token: str, fluor_token: str,
+    channel_idx: "int | None", sep: str,
+) -> str:
+    """Derive one fluor channel's *filename* from a nuclear name (audit A1);
+    ``""`` if the channel slot is out of range. Shared by both scanners."""
+    if channel_idx is not None:
+        parts = stem.split(sep)
+        if channel_idx >= len(parts):
+            return ""
+        parts[channel_idx] = fluor_token
+        return sep.join(parts) + suffix
+    return name.replace(nuclear_token, fluor_token)
+
+
+def _collect_image_groups(
+    entries,
+    *,
+    nuclear_token: str,
+    fluor_tokens: "list[str]",
+    channel_idx: "int | None",
+    sep: str,
+    exists,
+    on_missing_fluor,
+):
+    """Core nuclear+fluor grouping shared by the dir and zip scanners (audit A1
+    — segmentation depends on both parsing identically).
+
+    *entries* is ``[(name, ctx)]`` — ``name`` the parseable basename, ``ctx``
+    opaque per-caller state (nuclear ``Path`` for dir, ``None`` for zip).
+    ``exists(ctx, fluor_name)`` tests presence; missing fluors go to
+    ``on_missing_fluor(fluor_name)``. Returns ``(groups, incomplete)`` =
+    ``([(name, ctx, [fluor_name...])], [(name, ctx)])``.
+    """
+    groups: list = []
+    incomplete: list = []
+    for name, ctx in entries:
+        p = Path(name)
+        stem, suffix = p.stem, p.suffix
+        if not _is_nuclear_filename(name, stem, nuclear_token, channel_idx, sep):
+            continue
+        fluor_names = [
+            _derive_fluor_filename(name, stem, suffix, nuclear_token, tok, channel_idx, sep)
+            for tok in fluor_tokens
+        ]
+        if any(not fn for fn in fluor_names):
+            incomplete.append((name, ctx))
+            continue
+        missing = [fn for fn in fluor_names if not exists(ctx, fn)]
+        if missing:
+            incomplete.append((name, ctx))
+            for fn in missing:
+                on_missing_fluor(fn)
+            continue
+        groups.append((name, ctx, fluor_names))
+    return groups, incomplete
+
+
 def find_image_groups_in_zip(
     zip_path: Path,
     nuclear_token: str,
@@ -2182,9 +2259,7 @@ def find_image_groups_in_zip(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
-
-    channel_idx: "int | None" = schema.index("channel") if "channel" in schema else None
-    image_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+    channel_idx = _grouping_channel_idx(schema)
 
     by_name: set[str] = set()
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -2192,7 +2267,7 @@ def find_image_groups_in_zip(
             base = Path(member.filename).name
             if not base or base.startswith("."):
                 continue
-            if Path(base).suffix.lower() not in image_exts:
+            if Path(base).suffix.lower() not in _GROUP_IMAGE_EXTS:
                 continue
             if base in by_name:
                 log.warning(
@@ -2203,40 +2278,18 @@ def find_image_groups_in_zip(
                 continue
             by_name.add(base)
 
-    def _derive_fluor_name(nuclear_name: str, fluor_token: str) -> str:
-        p = Path(nuclear_name)
-        if channel_idx is not None:
-            parts = p.stem.split(sep)
-            if channel_idx >= len(parts):
-                return ""
-            parts[channel_idx] = fluor_token
-            return sep.join(parts) + p.suffix
-        return p.name.replace(nuclear_token, fluor_token)
+    grp, incomplete = _collect_image_groups(
+        [(base, None) for base in sorted(by_name)],
+        nuclear_token=nuclear_token, fluor_tokens=fluor_tokens,
+        channel_idx=channel_idx, sep=sep,
+        exists=lambda _ctx, fn: fn in by_name,
+        on_missing_fluor=lambda fn: log.warning(
+            "  missing fluor file in zip %s: %s", zip_path.name, fn),
+    )
 
     groups: list[tuple[Path, list[Path]]] = []
     needed_members: set[str] = set()
-    incomplete: list[str] = []
-
-    for base in sorted(by_name):
-        p = Path(base)
-        if channel_idx is not None:
-            stem_parts = p.stem.split(sep)
-            if channel_idx >= len(stem_parts) or stem_parts[channel_idx] != nuclear_token:
-                continue
-        elif nuclear_token not in p.name:
-            continue
-
-        fluor_names = [_derive_fluor_name(base, tok) for tok in fluor_tokens]
-        if any(not fn for fn in fluor_names):
-            incomplete.append(base)
-            continue
-        missing = [fn for fn in fluor_names if fn not in by_name]
-        if missing:
-            incomplete.append(base)
-            for fn in missing:
-                log.warning("  missing fluor file in zip %s: %s", zip_path.name, fn)
-            continue
-
+    for base, _ctx, fluor_names in grp:
         needed_members.add(base)
         needed_members.update(fluor_names)
         groups.append((dest_dir / base, [dest_dir / fn for fn in fluor_names]))
@@ -2275,64 +2328,37 @@ def find_image_groups(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
+    channel_idx = _grouping_channel_idx(schema)
 
-    extensions = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
-    groups: "list[tuple[Path, list[Path]]]" = []
-    incomplete: list[Path] = []
     all_images = [
         p for p in sorted(input_dir.rglob("*"))
         if p.is_file()
         and not p.name.startswith(".")
         and not any(part.startswith(".") for part in p.parts)
-        and p.suffix.lower() in extensions
+        and p.suffix.lower() in _GROUP_IMAGE_EXTS
     ]
     all_set = set(all_images)
 
-    channel_idx: "int | None" = (
-        schema.index("channel") if "channel" in schema else None
+    grp, incomplete = _collect_image_groups(
+        [(p.name, p) for p in all_images],
+        nuclear_token=nuclear_token, fluor_tokens=fluor_tokens,
+        channel_idx=channel_idx, sep=sep,
+        exists=lambda ctx, fn: (ctx.parent / fn) in all_set,
+        on_missing_fluor=lambda fn: log.warning("  missing fluor file: %s", fn),
     )
 
-    def _derive_fluor_path(nuclear_path: Path, fluor_token: str) -> Path:
-        """Return the expected path for one fluorescent channel file."""
-        if channel_idx is not None:
-            parts = nuclear_path.stem.split(sep)
-            parts[channel_idx] = fluor_token
-            return nuclear_path.parent / (sep.join(parts) + nuclear_path.suffix)
-        # Legacy fallback: simple substring replacement.
-        return nuclear_path.parent / nuclear_path.name.replace(
-            nuclear_token, fluor_token
-        )
-
-    for path in all_images:
-
-        # Filter to nuclear channel files only.
-        if channel_idx is not None:
-            stem_parts = path.stem.split(sep)
-            if channel_idx >= len(stem_parts):
-                continue
-            if stem_parts[channel_idx] != nuclear_token:
-                continue
-        else:
-            if nuclear_token not in path.name:
-                continue
-
-        # Build the expected path for each fluorescent channel.
-        fluor_paths = [_derive_fluor_path(path, tok) for tok in fluor_tokens]
-        missing = [fp for fp in fluor_paths if fp not in all_set]
-        if missing:
-            incomplete.append(path)
-            for fp in missing:
-                log.warning("  missing fluor file: %s", fp.name)
-        else:
-            groups.append((path, fluor_paths))
+    groups: "list[tuple[Path, list[Path]]]" = [
+        (ctx, [ctx.parent / fn for fn in fluor_names])
+        for _name, ctx, fluor_names in grp
+    ]
 
     if incomplete:
         log.warning(
             "%d nuclear file(s) skipped due to missing fluorescent channel(s):",
             len(incomplete),
         )
-        for p in incomplete:
-            log.warning("  %s", p.name)
+        for _name, ctx in incomplete:
+            log.warning("  %s", ctx.name)
 
     log.info(
         "Found %d image group(s) in %s  (%d fluor channel(s): %s)",

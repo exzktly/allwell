@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **55 / 77 items resolved** (54 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **56 / 77 items resolved** (55 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -99,7 +99,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 ### A — Architecture / god-modules / duplication (Pass 1 / 5.1 / 5.2)
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
-| A1 | unify `find_image_groups` vs `_in_zip` (folder/zip parse divergence) | H | `[ ]` TODO | |
+| A1 | unify `find_image_groups` vs `_in_zip` (folder/zip parse divergence) | H | `[x]` DONE | `test_image_grouping_characterization.py` |
 | A2 | fetch-side reuse `pipeline.io` merge instead of reimpl | H | `[ ]` TODO | |
 | A3 | extract `cell_gating` domain compute out of the view | H | `[ ]` TODO | |
 | A4 | characterization tests for CC-98 `find_well_images_and_masks`, decompose | H | `[x]` DONE | `test_find_well_images_characterization.py` |
@@ -363,7 +363,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 
 ### 5.1 Duplication
 - **High — data-correctness duplication:**
-  - `find_image_groups` vs `find_image_groups_in_zip` (`process_microscopy.py:2234-2382` vs `2144-2233`, ~90 lines each): same stem/channel/FOV/tp parsing, once over a directory and once over a `ZipFile` namelist. Segmentation correctness depends on both parsing identically. *Fix: one grouping fn taking an entry-iterator.* — **A1** `[ ]` TODO
+  - `find_image_groups` vs `find_image_groups_in_zip` (`process_microscopy.py:2234-2382` vs `2144-2233`, ~90 lines each): same stem/channel/FOV/tp parsing, once over a directory and once over a `ZipFile` namelist. Segmentation correctness depends on both parsing identically. *Fix: one grouping fn taking an entry-iterator.* — **A1** `[x]` DONE — both scanners now route through a shared `_collect_image_groups(entries, …)` core plus shared parsing primitives (`_is_nuclear_filename`, `_derive_fluor_filename`), so the nuclear/fluor filename parsing can no longer drift between the directory (`rglob`) and zip (`namelist`) paths. The zip path still contributes `needed_members` and the dir path stays directory-aware — only the parsing is unified. 6 characterization tests pinned both paths first (`test_image_grouping_characterization.py`), verified byte-identical.
   - `services/remote_runner.py:3252-3327` reimplements zip-extract + CSV-append that `pipeline/io.py` already centralizes. *Fix: call the `pipeline.io` merge helper.* — **A2** `[ ]` TODO
 - **Medium —** `process_well_folder_task`/`process_well_zip_task` + `process_well_folders`/`process_well_zips` (identical phase sequences + ~130-line executor scaffolding). *Fix: parametrize a shared driver by task callable.* — **A10** `[ ]` TODO
 - **Medium —** rsync-over-ssh transport+retry in **three** overlapping impls (`remote_runner.py:2028/2150/2246`). *Fix: one cancellable retrying runner.* — **A11** `[ ]` TODO
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch AC (god-module: A1)** — **A1** (unified the divergent directory- and zip-image-group parsers onto one shared core `_collect_image_groups` + shared parsing primitives `_is_nuclear_filename` / `_derive_fluor_filename`, so segmentation-critical nuclear/fluor filename parsing can no longer drift between the two paths; zip keeps `needed_members`, dir stays directory-aware). 6 characterization tests pinned both paths first, byte-identical after. process_microscopy budget re-baselined 4729→4755 (sanctioned structural-refactor scaffolding). 56/77 resolved.
+
 - 2026-07-02 **Batch AB (god-module: A5)** — **A5** (decomposed the two next-highest-complexity functions. `run_stats` CC 52→30 via pure, unit-tested report formatters; `redraw_line_plots` CC 69→28 via `_paint_series` + `_finalize_line_axes`, verified byte-identical by the end-to-end line-plot rendering suite). Both removed from the complexity allowlist. +8 tests. Fast lane + rendering tests green. 55/77 resolved.
 
 - 2026-07-02 **Batch AA (god-module: A4)** — **A4** (decomposed the single highest-complexity function in the tree, `find_well_images_and_masks` CC 98 → orchestrator CC 13, via `_merge_scan` / `_discover_from_layouts` / `_scan_raw_disk_files` / `_raw_file_well_passes` / `_log_find_result`; 6 golden characterization tests pinned every layout first, then verified byte-identical). Removed from the complexity allowlist. +6 tests, 92 related tests green. 54/77 resolved.
@@ -480,4 +482,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch AB merged (A5 decompose run_stats CC 52→30 + redraw_line_plots CC 69→28); **55 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch AC merged (A1 unify image-group parsers into one shared core); **56 / 77 resolved.**

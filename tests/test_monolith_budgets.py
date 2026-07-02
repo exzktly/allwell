@@ -58,7 +58,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Code-review E9 (+22): the auto-threshold estimator now counts per-channel image
 # decode failures and WARNs when a biased fraction was dropped (a silently biased
 # Otsu threshold otherwise). Mandatory correctness surfacing. Resume from 4729.
-PROCESS_MICROSCOPY_BUDGET = 4729
+# Code-review A1 (+26): the divergent directory- and zip-image-group parsers were
+# unified onto one shared core (_collect_image_groups) + shared parsing primitives
+# (_is_nuclear_filename / _derive_fluor_filename), so segmentation-critical
+# filename parsing can no longer drift between the two paths. This is the
+# sanctioned "structural refactor adds def/docstring scaffolding while behaviour
+# stays byte-identical" case (verified by test_image_grouping_characterization) —
+# the duplication is gone even though the raw count ticks up. Resume from 4755.
+PROCESS_MICROSCOPY_BUDGET = 4755
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731

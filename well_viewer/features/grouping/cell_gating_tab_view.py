@@ -375,9 +375,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     cf_layout.addWidget(th_row)
 
     reg.register("_cell_gating_gate_summary", QLabel("", control_frame))
-    ctx.app._cell_gating_gate_summary.setObjectName("Muted")
-    ctx.app._cell_gating_gate_summary.setWordWrap(True)
-    cf_layout.addWidget(ctx.app._cell_gating_gate_summary)
+    ctx.widgets.get("_cell_gating_gate_summary").setObjectName("Muted")
+    ctx.widgets.get("_cell_gating_gate_summary").setWordWrap(True)
+    cf_layout.addWidget(ctx.widgets.get("_cell_gating_gate_summary"))
     # The scatter gating module fires this whenever a gate is drawn / edited /
     # cleared on the Scatter Plot tab: refresh the summary AND recompute Included
     # immediately so every other view tracks the gates without waiting for a tab
@@ -422,34 +422,34 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     cf_layout.addWidget(auto_row)
 
     reg.register("_cell_gating_scroll", QScrollArea(control_frame))
-    ctx.app._cell_gating_scroll.setWidgetResizable(True)
-    ctx.app._cell_gating_scroll.setFrameShape(QFrame.NoFrame)
-    ctx.app._cell_gating_scroll.setFixedHeight(120)
+    ctx.widgets.get("_cell_gating_scroll").setWidgetResizable(True)
+    ctx.widgets.get("_cell_gating_scroll").setFrameShape(QFrame.NoFrame)
+    ctx.widgets.get("_cell_gating_scroll").setFixedHeight(120)
     reg.register("_cell_gating_inner", QWidget())
-    QVBoxLayout(ctx.app._cell_gating_inner)
-    ctx.app._cell_gating_scroll.setWidget(ctx.app._cell_gating_inner)
-    cf_layout.addWidget(ctx.app._cell_gating_scroll)
+    QVBoxLayout(ctx.widgets.get("_cell_gating_inner"))
+    ctx.widgets.get("_cell_gating_scroll").setWidget(ctx.widgets.get("_cell_gating_inner"))
+    cf_layout.addWidget(ctx.widgets.get("_cell_gating_scroll"))
     root.addWidget(control_frame)
 
     # CDF plot area
     reg.register("_cell_gating_figure", Figure(figsize=(8, 5), dpi=100))
-    reg.register("_cell_gating_canvas", FigureCanvas(ctx.app._cell_gating_figure))
+    reg.register("_cell_gating_canvas", FigureCanvas(ctx.widgets.get("_cell_gating_figure")))
 
     reg.register("_cell_gating_plot_scroll", QScrollArea(parent))
-    ctx.app._cell_gating_plot_scroll.setWidgetResizable(True)
-    ctx.app._cell_gating_plot_scroll.setFrameShape(QFrame.NoFrame)
-    ctx.app._cell_gating_plot_scroll.setWidget(ctx.app._cell_gating_canvas)
+    ctx.widgets.get("_cell_gating_plot_scroll").setWidgetResizable(True)
+    ctx.widgets.get("_cell_gating_plot_scroll").setFrameShape(QFrame.NoFrame)
+    ctx.widgets.get("_cell_gating_plot_scroll").setWidget(ctx.widgets.get("_cell_gating_canvas"))
     # Floor the plot height so the gating controls above can never squeeze the
     # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
-    ctx.app._cell_gating_plot_scroll.setMinimumHeight(420)
-    install_canvas_wheel_scroll(ctx.app._cell_gating_canvas, ctx.app._cell_gating_plot_scroll)
+    ctx.widgets.get("_cell_gating_plot_scroll").setMinimumHeight(420)
+    install_canvas_wheel_scroll(ctx.widgets.get("_cell_gating_canvas"), ctx.widgets.get("_cell_gating_plot_scroll"))
 
     from widgets.mpl_toolbar import MplToolbar
-    reg.register("_cell_gating_toolbar", MplToolbar(ctx.app._cell_gating_canvas, parent))
+    reg.register("_cell_gating_toolbar", MplToolbar(ctx.widgets.get("_cell_gating_canvas"), parent))
 
     reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
-    ctx.app._cell_gating_status_label.setObjectName("Muted")
-    root.addWidget(ctx.app._cell_gating_status_label)
+    ctx.widgets.get("_cell_gating_status_label").setObjectName("Muted")
+    root.addWidget(ctx.widgets.get("_cell_gating_status_label"))
 
     opt_panel = QWidget(parent)
     opt_layout = QVBoxLayout(opt_panel)
@@ -463,44 +463,44 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     opt_row_layout.setContentsMargins(0, 0, 0, 0)
     opt_row_layout.addWidget(QLabel("Channel:", opt_row))
     reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
-    ctx.app._cell_gating_opt_channel_combo.setMinimumWidth(140)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_channel_combo)
+    ctx.widgets.get("_cell_gating_opt_channel_combo").setMinimumWidth(140)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_channel_combo"))
     opt_row_layout.addWidget(QLabel("Well A:", opt_row))
     reg.register("_cell_gating_opt_well_a_combo", QComboBox(opt_row))
-    ctx.app._cell_gating_opt_well_a_combo.setMinimumWidth(90)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_well_a_combo)
+    ctx.widgets.get("_cell_gating_opt_well_a_combo").setMinimumWidth(90)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_well_a_combo"))
     opt_row_layout.addWidget(QLabel("Well B:", opt_row))
     reg.register("_cell_gating_opt_well_b_combo", QComboBox(opt_row))
-    ctx.app._cell_gating_opt_well_b_combo.setMinimumWidth(90)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_well_b_combo)
+    ctx.widgets.get("_cell_gating_opt_well_b_combo").setMinimumWidth(90)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_well_b_combo"))
     opt_row_layout.addWidget(QLabel("Timepoint:", opt_row))
     reg.register("_cell_gating_opt_timepoint_combo", QComboBox(opt_row))
-    ctx.app._cell_gating_opt_timepoint_combo.setMinimumWidth(110)
-    ctx.app._cell_gating_opt_timepoint_combo.setToolTip(
+    ctx.widgets.get("_cell_gating_opt_timepoint_combo").setMinimumWidth(110)
+    ctx.widgets.get("_cell_gating_opt_timepoint_combo").setToolTip(
         "Restrict the fraction-on comparison to one timepoint, or pool all "
         "timepoints. Pooling across timepoints where the wells are both 'off' "
         "early dilutes the difference, so picking the relevant timepoint gives a "
         "sharper threshold."
     )
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_timepoint_combo)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_timepoint_combo"))
     opt_row_layout.addWidget(QLabel("Min:", opt_row))
     reg.register("_cell_gating_opt_min_edit", QLineEdit("0.0", opt_row))
-    ctx.app._cell_gating_opt_min_edit.setFixedWidth(80)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_min_edit)
+    ctx.widgets.get("_cell_gating_opt_min_edit").setFixedWidth(80)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_min_edit"))
     opt_row_layout.addWidget(QLabel("Max:", opt_row))
     reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
-    ctx.app._cell_gating_opt_max_edit.setFixedWidth(80)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_max_edit)
+    ctx.widgets.get("_cell_gating_opt_max_edit").setFixedWidth(80)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_max_edit"))
     opt_row_layout.addWidget(QLabel("# Points:", opt_row))
     reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
-    ctx.app._cell_gating_opt_steps_edit.setFixedWidth(64)
-    ctx.app._cell_gating_opt_steps_edit.setToolTip(
+    ctx.widgets.get("_cell_gating_opt_steps_edit").setFixedWidth(64)
+    ctx.widgets.get("_cell_gating_opt_steps_edit").setToolTip(
         "Number of thresholds scanned across the Min–Max range, evenly "
         "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
         "thresholds (every 1 unit across a 0–100 range). Higher values "
         "give a finer scan at the cost of a little compute."
     )
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_steps_edit)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_steps_edit"))
     from PySide6.QtWidgets import QPushButton as _QPushButton
     opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
     opt_btn.setProperty("variant", "secondary")
@@ -527,8 +527,8 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     fc_row_layout.setContentsMargins(0, 0, 0, 0)
     fc_row_layout.addWidget(QLabel("Fold change —  Control:", fc_row))
     reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
-    ctx.app._cell_gating_opt_fc_control_combo.setMinimumWidth(120)
-    ctx.app._cell_gating_opt_fc_control_combo.setToolTip(
+    ctx.widgets.get("_cell_gating_opt_fc_control_combo").setMinimumWidth(120)
+    ctx.widgets.get("_cell_gating_opt_fc_control_combo").setToolTip(
         "Divide (or subtract) each well's fraction-on by a control well / "
         "replicate set's fraction-on at the same scanned threshold. \"—\" "
         "optimises over the raw fraction-on (the original behaviour).\n\n"
@@ -537,28 +537,28 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "has signal — use Subtract, or a Baseline, to actually reshape the "
         "A-vs-B separation."
     )
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_control_combo)
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_control_combo"))
     reg.register("_cell_gating_opt_fc_ctrl_op_combo", QComboBox(fc_row))
-    ctx.app._cell_gating_opt_fc_ctrl_op_combo.addItem("Ratio", "ratio")
-    ctx.app._cell_gating_opt_fc_ctrl_op_combo.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_ctrl_op_combo)
+    ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo").addItem("Ratio", "ratio")
+    ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo").addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo"))
     fc_row_layout.addWidget(QLabel("Baseline:", fc_row))
     reg.register("_cell_gating_opt_fc_baseline_combo", QComboBox(fc_row))
-    ctx.app._cell_gating_opt_fc_baseline_combo.setMinimumWidth(110)
-    ctx.app._cell_gating_opt_fc_baseline_combo.setToolTip(
+    ctx.widgets.get("_cell_gating_opt_fc_baseline_combo").setMinimumWidth(110)
+    ctx.widgets.get("_cell_gating_opt_fc_baseline_combo").setToolTip(
         "Divide (or subtract) each well's fraction-on by its own fraction-on at "
         "a baseline timepoint. \"t0\" uses each well's earliest timepoint."
     )
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_baseline_combo)
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_baseline_combo"))
     reg.register("_cell_gating_opt_fc_t0_op_combo", QComboBox(fc_row))
-    ctx.app._cell_gating_opt_fc_t0_op_combo.addItem("Ratio", "ratio")
-    ctx.app._cell_gating_opt_fc_t0_op_combo.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_t0_op_combo)
+    ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo").addItem("Ratio", "ratio")
+    ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo").addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo"))
     fc_row_layout.addWidget(QLabel("Order:", fc_row))
     reg.register("_cell_gating_opt_fc_order_combo", QComboBox(fc_row))
-    ctx.app._cell_gating_opt_fc_order_combo.addItem("Control first", "ctrl_first")
-    ctx.app._cell_gating_opt_fc_order_combo.addItem("Baseline first", "t0_first")
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_order_combo)
+    ctx.widgets.get("_cell_gating_opt_fc_order_combo").addItem("Control first", "ctrl_first")
+    ctx.widgets.get("_cell_gating_opt_fc_order_combo").addItem("Baseline first", "t0_first")
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_order_combo"))
     fc_row_layout.addStretch(1)
     opt_layout.addWidget(fc_row)
 
@@ -568,14 +568,14 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # why a fresh Optimize used to return the range minimum). Changing only the
     # timepoint just re-derives the range.
     for _combo in (
-        ctx.app._cell_gating_opt_channel_combo,
-        ctx.app._cell_gating_opt_well_a_combo,
-        ctx.app._cell_gating_opt_well_b_combo,
+        ctx.widgets.get("_cell_gating_opt_channel_combo"),
+        ctx.widgets.get("_cell_gating_opt_well_a_combo"),
+        ctx.widgets.get("_cell_gating_opt_well_b_combo"),
     ):
         _combo.currentIndexChanged.connect(
             lambda _idx=0, _app=ctx.app: _cell_gating_on_opt_scope_changed(_app)
         )
-    ctx.app._cell_gating_opt_timepoint_combo.currentIndexChanged.connect(
+    ctx.widgets.get("_cell_gating_opt_timepoint_combo").currentIndexChanged.connect(
         lambda _idx=0, _app=ctx.app: _cell_gating_autofill_opt_range(_app)
     )
     opt_result_label = reg.register("_cell_gating_opt_result_label", QLabel(
@@ -594,8 +594,8 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     root.addWidget(build_section_header(
         parent, "Cumulative distributions (CDF)",
     ))
-    root.addWidget(ctx.app._cell_gating_plot_scroll)
-    root.addWidget(ctx.app._cell_gating_toolbar)
+    root.addWidget(ctx.widgets.get("_cell_gating_plot_scroll"))
+    root.addWidget(ctx.widgets.get("_cell_gating_toolbar"))
 
     _cell_gating_refresh_optimizer_controls(ctx.app)
 

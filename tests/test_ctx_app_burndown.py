@@ -57,7 +57,10 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   386 → 376  P3.1 ctx.app._app_state → ctx.state (identical object) across the
 #              image_table/barplot/multivariate builders + one registered-widget
 #              probe (lineplot _plot_chan_var → ctx.widgets.has)
-CTX_APP_BUDGET = 376
+#   376 → 318  P3.2 cell_gating widget-handle reads → ctx.widgets.get (finishing
+#              the Phase-1 register-discard: 58 registered-widget reads in the
+#              2.4k-line builder now read the registry, not the god-object)
+CTX_APP_BUDGET = 318
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

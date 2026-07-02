@@ -135,6 +135,35 @@ def _log_to_file(text: str) -> None:
         pass
 
 
+_BOOTSTRAP_LOG_RETENTION = 20
+
+
+def _prune_bootstrap_logs(log_dir: Path, keep: int = _BOOTSTRAP_LOG_RETENTION) -> int:
+    """Delete the oldest ``bootstrap-*.log`` files, keeping the newest *keep*.
+
+    A fresh log is written on every bootstrap invocation and they were never
+    reaped, so ``~/.cache/allwell`` grew without bound (audit X15). Called
+    before opening the new log, with ``keep`` counting the survivors *before*
+    today's file is added (so the directory settles at ``keep + 1``). Pure /
+    best-effort — a delete failure is ignored, never blocks bootstrap. Returns
+    the number removed.
+    """
+    try:
+        logs = sorted(log_dir.glob("bootstrap-*.log"))
+    except OSError:
+        return 0
+    if len(logs) <= keep:
+        return 0
+    removed = 0
+    for stale in logs[:len(logs) - keep]:   # oldest first (timestamped names sort)
+        try:
+            stale.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def _open_log_file() -> "tuple[Path, object] | tuple[None, None]":
     """Open a per-invocation bootstrap log file under
     ``~/.cache/allwell/bootstrap-<timestamp>.log`` on the LOCAL
@@ -142,13 +171,14 @@ def _open_log_file() -> "tuple[Path, object] | tuple[None, None]":
     failure (logging should never block bootstrap).
 
     Local-only by design: the user asked for a debug log they can
-    inspect on their own machine, not a remote-side artefact. Logs
-    are never auto-deleted; they pile up and the user clears them
-    if they want.
+    inspect on their own machine, not a remote-side artefact. Old logs
+    are capped at :data:`_BOOTSTRAP_LOG_RETENTION` (audit X15) so the
+    cache directory can't grow without bound.
     """
     try:
         log_dir = Path("~/.cache/allwell").expanduser()
         log_dir.mkdir(parents=True, exist_ok=True)
+        _prune_bootstrap_logs(log_dir)
         stamp = time.strftime("%Y%m%dT%H%M%S")
         path = log_dir / f"bootstrap-{stamp}.log"
         fh = open(path, "w", encoding="utf-8", buffering=1)

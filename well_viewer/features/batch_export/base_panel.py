@@ -1235,20 +1235,21 @@ class BatchExportPanel(QWidget):
 
         apply_export_style_prefs(fig, _ensure_export_style_prefs(self._app))
 
-        orig_svg = _mpl.rcParams.get("svg.fonttype", "path")
-        orig_ps = _mpl.rcParams.get("ps.fonttype", 3)
+        # rc_context restores every rcParam it touched on block exit (even on a
+        # raise), so a failed savefig can't leak a mutated svg/ps.fonttype into
+        # subsequent exports (audit X17). _plt.close still runs unconditionally.
+        overrides: dict = {}
+        if fmt == "svg":
+            overrides["svg.fonttype"] = "none"
+        elif fmt == "eps":
+            overrides["ps.fonttype"] = 42
         try:
-            if fmt == "svg":
-                _mpl.rcParams["svg.fonttype"] = "none"
-            elif fmt == "eps":
-                _mpl.rcParams["ps.fonttype"] = 42
             kw = dict(bbox_inches="tight", facecolor=PLOT_BG, format=fmt)
             if fmt == "png":
                 kw["dpi"] = 300
-            fig.savefig(str(fig_path), **kw)
+            with _mpl.rc_context(overrides):
+                fig.savefig(str(fig_path), **kw)
         finally:
-            _mpl.rcParams["svg.fonttype"] = orig_svg
-            _mpl.rcParams["ps.fonttype"] = orig_ps
             _plt.close(fig)
 
     def _export_scatter_figure(

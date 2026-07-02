@@ -308,9 +308,15 @@ class ScatterCellViewer(QWidget):
         try:
             self._load_cell_data_impl()
         except Exception as exc:  # noqa: BLE001
+            import logging
             import traceback
+            # The full traceback goes to the dev-gated logger (DEBUG), not into
+            # the user-visible diagnostics panel — the panel gets a concise,
+            # non-scary one-liner (audit X16). Set ALLWELL logging to DEBUG to
+            # see the stack.
+            logging.getLogger(__name__).debug(
+                "scatter cell-load failed\n%s", traceback.format_exc())
             self._debug(f"Unexpected error while loading cell data: {exc!r}")
-            self._debug(traceback.format_exc())
             try:
                 self._img_label.setText(f"Error loading cell: {exc}")
             except Exception:

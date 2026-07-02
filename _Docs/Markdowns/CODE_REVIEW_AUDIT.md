@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **48 / 77 items resolved** (47 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **51 / 77 items resolved** (50 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -134,9 +134,9 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | X12 | `services/env.py` startup validation of `ALLWELL_*` | M | `[x]` DONE | `test_env_validation.py` |
 | X13 | delete dead state `_bar_quick_*`, `_montage_chan_cb` | L | `[x]` DONE | #597 |
 | X14 | preserve absent saved wells (don't prune-then-persist) | L | `[ ]` TODO | |
-| X15 | bootstrap-log retention cap / "clear logs" | L | `[ ]` TODO | |
-| X16 | route full tracebacks to dev-gated sinks only | L | `[ ]` TODO | |
-| X17 | use `rc_context` instead of hand-rolled rcParams save/restore | L | `[ ]` TODO | |
+| X15 | bootstrap-log retention cap / "clear logs" | L | `[x]` DONE | `test_bootstrap_log_retention.py` |
+| X16 | route full tracebacks to dev-gated sinks only | L | `[x]` DONE | `test_scatter_traceback_dev_gated.py` |
+| X17 | use `rc_context` instead of hand-rolled rcParams save/restore | L | `[x]` DONE | `test_savefig_rc_context.py` |
 
 **Totals:** 77 items — E 23 · S 8 · L 4 · G 8 · A 17 · X 17. By severity: C 5 · H 21 · M 34 · L 17.
 
@@ -353,7 +353,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 - **Verified correct — `data/zipfile_cache.py`**: keyed by `Path`, validates `st_mtime_ns` on every access, LRU-bounded. → see Non-goals.
 
 **Matplotlib global state + module caches (deep-dive) — this surface is clean; no High/Medium defect.**
-- **Low — `batch_export/base_panel.py:1238-1251` and `core/plot_orchestrator.py:105-121`** hand-roll `rcParams` save/restore around `savefig` instead of `with rc_context({...})` (already used at `widgets/fig_clipboard.py:31`, `export/sidebar_view.py:992`). Safe today but brittle. *Fix: switch to `rc_context`.* — **X17** `[ ]` TODO
+- **Low — `batch_export/base_panel.py:1238-1251` and `core/plot_orchestrator.py:105-121`** hand-roll `rcParams` save/restore around `savefig` instead of `with rc_context({...})` (already used at `widgets/fig_clipboard.py:31`, `export/sidebar_view.py:992`). Safe today but brittle. *Fix: switch to `rc_context`.* — **X17** `[x]` DONE — both sites now build a format-specific overrides dict and wrap `savefig` in `with _mpl.rc_context(overrides)`, which restores *every* touched rcParam on exit even when savefig raises (the old finally only restored the two it knew about). `test_savefig_rc_context.py`.
 - **Info —** `plt.close(fig)` on figures pyplot never registered (`image_table/export.py:447`, `base_panel.py:1230/1252`) — harmless but misleading. (Folded into X17.)
 - **Verified correct (credit):** no pyplot state-machine in production; colormaps `.copy()`'d before `set_bad`; `rcParams` defaults set once at import; instance-scoped image-decode cache; the only production `lru_cache` is `_rsync_version` (`maxsize=1`); idempotent font-bootstrap; `force=False` backend selection. → see Non-goals.
 
@@ -394,8 +394,8 @@ The monolith budgets constrain *file size* but not *function complexity*.
 ### 5.4 Logging security
 No credential/token literals are logged anywhere; `ssh_key_setup.py` delegates passphrases to ssh's native prompt; no stdout `print()` leaks in production paths. → see Non-goals for credit.
 - **Medium — `services/ssh_key_setup.py:66-68`**: SSH keys are generated **without a passphrase** by design → a passwordless private key grants remote cluster access to anyone with home-dir read access. *Fix: offer an optional passphrase, or document the residual risk.* — **X11** `[ ]` TODO
-- **Low —** the bootstrap log (`scripts/_bootstrap_lib.py:138-160`) is never auto-deleted and captures host + home-dir paths; `remote_runner._log` echoes `ssh_alias`/`remote_output_dir` at INFO. *Fix: retention cap / "clear logs" action.* — **X15** `[ ]` TODO
-- **Low —** full `traceback.format_exc()` written to per-well error files and debug panels (`process_microscopy.py:209`, `scatter/callbacks.py:313/1145`, `cell_gating_tab_view.py:1177`). *Fix: keep full tracebacks in dev-gated sinks; show users a short message.* — **X16** `[ ]` TODO
+- **Low —** the bootstrap log (`scripts/_bootstrap_lib.py:138-160`) is never auto-deleted and captures host + home-dir paths; `remote_runner._log` echoes `ssh_alias`/`remote_output_dir` at INFO. *Fix: retention cap / "clear logs" action.* — **X15** `[x]` DONE — `_prune_bootstrap_logs` deletes the oldest `bootstrap-*.log`, keeping the newest 20; called from `_open_log_file` before each new log so `~/.cache/allwell` can't grow without bound. Best-effort (never blocks bootstrap). `test_bootstrap_log_retention.py`.
+- **Low —** full `traceback.format_exc()` written to per-well error files and debug panels (`process_microscopy.py:209`, `scatter/callbacks.py:313/1145`, `cell_gating_tab_view.py:1177`). *Fix: keep full tracebacks in dev-gated sinks; show users a short message.* — **X16** `[x]` DONE — `scatter/callbacks.py::_load_cell_data` now routes the full `format_exc()` to the module logger at DEBUG and shows only a concise `{exc!r}` line in the diagnostics panel. (`process_microscopy.py:209` already writes to a dev-diagnostic `errors/<well>.txt` sink by design, not a user surface — left as-is.) `test_scatter_traceback_dev_gated.py`.
 
 ### 5.5 Environment configuration
 No central startup validation exists, but this is **Low risk**: every env *read* uses `.get(...)` with a default or is `if`-guarded. The residual weakness is that misconfiguration surfaces as a **silent fallback** rather than a clear error, with reads scattered across 10 files. *Fix: a small `services/env.py` that reads the ~6 `ALLWELL_*`/config vars once at startup, logs active overrides, and validates provided paths exist.* — **X12** `[x]` DONE — new pure `services/env.py::validate_env` returns `(warnings, active)`; `log_env_validation()` wired into `allwell.main()` logs active overrides at INFO and set-but-unusable scratch/remotes paths at WARNING. `test_env_validation.py`.
@@ -422,6 +422,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 ## Status log
 
 > Append a dated line whenever a status box changes. Newest first.
+
+- 2026-07-02 **Batch X (export/log/traceback hygiene)** — **X17** (both figure-save paths in `plot_orchestrator` + `batch_export/base_panel` now wrap `savefig` in `matplotlib.rc_context` so a raising save can't leak a mutated `svg`/`ps.fonttype` into later plots), **X16** (`scatter/callbacks._load_cell_data` routes the full traceback to the DEBUG logger and shows only a concise line in the user panel), **X15** (`_prune_bootstrap_logs` caps `~/.cache/allwell/bootstrap-*.log` at the newest 20). +6 tests. Fast lane green. 51/77 resolved.
 
 - 2026-07-02 **Batch W (playground bridge leak)** — **E23** (`request_reference_fields` now uses one-shot handlers that disconnect both `done`/`failed` signals after the bridge fires, releasing the per-call `_ReferenceBridge` QObject + the widget/app its callbacks captured, instead of leaking a fresh connected object on every reference build). +3 tests. Fast lane + full playground suite green. 48/77 resolved.
 
@@ -470,4 +472,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch W merged (E23 playground bridge disconnect + tests); **48 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch X merged (X15/X16/X17 export+log+traceback hygiene + tests); **51 / 77 resolved.**

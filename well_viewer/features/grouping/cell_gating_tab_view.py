@@ -2309,6 +2309,8 @@ def _cell_gating_plot_cdf(app) -> None:
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
         vals = np.array(sorted(values))
+        if vals.size == 0:
+            continue  # empty channel → no CDF (audit S8; avoids 0/0)
         cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)
@@ -2336,6 +2338,8 @@ def _cell_gating_plot_cdf(app) -> None:
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
         vals = np.array(sorted(values))
+        if vals.size == 0:
+            continue  # empty channel → no CDF (audit S8; avoids 0/0)
         cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)

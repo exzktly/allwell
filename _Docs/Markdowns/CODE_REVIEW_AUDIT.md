@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **35 / 77 items resolved** (34 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **36 / 77 items resolved** (35 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -74,7 +74,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | S5 | image-decode numeric-close/first-FOV fallback → wrong frame | M | `[ ]` TODO | |
 | S6 | even-n median reported as upper element | L | `[x]` DONE | #597 |
 | S7 | `_missing_col_warned` keyed by `id(df)` | L | `[x]` DONE | #597 |
-| S8 | circularity computed before `per>0` mask (+ empty-vals CDF) | L | `[ ]` TODO | |
+| S8 | circularity computed before `per>0` mask (+ empty-vals CDF) | L | `[x]` DONE | #597 |
 
 ### L — Lifecycle / teardown (Pass 2.4)
 | ID | Item | Sev | Status | Commit/PR |
@@ -308,7 +308,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **Correctly paired:** `AnalyzeTab._eta_timer`; remote-dialog `_poll` self-termination; remote-dialog `closeEvent`s. → see Non-goals.
 
 ### 2.5 Boundary conditions — **a strength**
-The sampled data/stats surface is unusually well-hardened; no Critical/High/Medium boundary defect found. → see Non-goals. Only Low residues: `data_loading.py:112-113` (`circ` computed before the `per>0` mask; result still correct, just wasteful) and `cell_gating_tab_view.py:2302/2329` (empty-vals CDF, harmless). *Fix: compute on the masked subset; early-return on empty vals.* — **S8** `[ ]` TODO
+The sampled data/stats surface is unusually well-hardened; no Critical/High/Medium boundary defect found. → see Non-goals. Only Low residues: `data_loading.py:112-113` (`circ` computed before the `per>0` mask; result still correct, just wasteful) and `cell_gating_tab_view.py:2302/2329` (empty-vals CDF, harmless). *Fix: compute on the masked subset; early-return on empty vals.* — **S8** `[x]` DONE (mask perimeter before divide; empty-CDF guard; `tests/test_circularity_backfill.py`)
 
 ---
 
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch N (compute hygiene)** — **S8** (circularity masks non-positive perimeters before dividing → NaN instead of inf + RuntimeWarning; empty-channel CDF guarded against 0/0). +1 test. Fast lane green (1276). 36/77 resolved.
+
 - 2026-07-02 **Batch M (scientific)** — **S2** (new `domain/tp_match.py` relative matcher `tp_close`/`tp_close_mask`; routed the 9 absolute-`1e-6` timepoint comparisons in stats_compute / stats-controller / data_loading / scatter-gating / image_compose through it, so a fractional timepoint round-tripped through a `:.4g` label now matches in Statistics/aggregation just as in fold-change). +4 tests. Code shipped in `a4e0ab5`; tracker in the follow-up commit. Fast lane green (1275). 35/77 resolved.
 
 - 2026-07-02 **Batch L (cross-dataset state)** — **X1** (`load_directory` now calls `_reset_gating_state` before hydration, clearing `_scatter_gates`/`_review_included_overrides`/`_cell_gating_use_scatter_*`/gate-choices/`_active_heatmap_layout_name` so a prior dataset's gates can't silently filter the next dataset when it has no cell_gating sidecar). **X5 BLOCKED** — pre-declaring those attrs on the god-object conflicts with the attr-budget ratchet and doesn't fix the lossy fallback; belongs to A8/typed-state. +1 test. Fast lane green (1271). 34/77 resolved.
@@ -450,4 +452,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch M merged (S2 timepoint tolerance + tests); **35 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch N merged (S8 + tests); **36 / 77 resolved.**

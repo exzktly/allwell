@@ -110,8 +110,10 @@ def load_well_csv(path: Path) -> pd.DataFrame:
             from math import pi
             per = pd.to_numeric(df["shape_perimeter"], errors="coerce")
             area = pd.to_numeric(df[area_col], errors="coerce")
-            circ = (4.0 * pi * area) / (per * per)
-            df["shape_circularity"] = circ.where(per > 0)
+            # Mask non-positive perimeters BEFORE dividing (audit S8) so
+            # per == 0 yields NaN directly instead of inf/NaN + a RuntimeWarning.
+            safe_per = per.where(per > 0)
+            df["shape_circularity"] = (4.0 * pi * area) / (safe_per * safe_per)
 
     return df
 

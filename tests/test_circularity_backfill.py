@@ -65,3 +65,16 @@ def test_zero_perimeter_is_nan_not_crash(tmp_path):
     df = load_well_csv(p)
     assert "shape_circularity" in df.columns
     assert pd.isna(df["shape_circularity"].iloc[0])   # perimeter 0 → undefined
+
+
+def test_zero_perimeter_yields_nan_without_warning(tmp_path, recwarn):
+    # Audit S8: a zero-perimeter row must give NaN circularity (masked before
+    # the divide) — no inf, no RuntimeWarning.
+    import numpy as np
+    p = _write(tmp_path,
+               ["filename", "area_px", "shape_perimeter"],
+               [["ok.tif", 100, 40], ["bad.tif", 50, 0]])
+    df = load_well_csv(p)
+    assert df["shape_circularity"].iloc[0] == pytest.approx(4 * math.pi * 100 / 1600)
+    assert np.isnan(df["shape_circularity"].iloc[1])       # per==0 → NaN, not inf
+    assert not any(issubclass(w.category, RuntimeWarning) for w in recwarn.list)

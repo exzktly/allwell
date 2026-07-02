@@ -753,6 +753,13 @@ def _smfish_apply_to_all(app) -> None:
     if app._smfish_out_dir is None:
         _smfish_set_status(app, "No output loaded.")
         return
+    # Re-entrancy guard (audit E18): a double-click otherwise launched two
+    # workers writing the same per-well CSVs, and the second launch's
+    # ``cancel_event.clear()`` discarded a cancel meant for the first. Reject a
+    # second concurrent run; the flag is cleared in ``_done`` on any exit.
+    if getattr(app, "_smfish_apply_running", False):
+        _smfish_set_status(app, "Apply to All is already running.")
+        return
     channel = app._smfish_channel_cb.currentText().strip().lower()
     thr = _smfish_get_threshold(app)
     frame = app._smfish_frame
@@ -781,6 +788,13 @@ def _smfish_apply_to_all(app) -> None:
     else:
         app._smfish_cancel_event.clear()
 
+    def _done(msg: str) -> None:
+        # Clear the busy flag on every terminal path (success / cancel / error)
+        # then hand off to the GUI-thread bridge slot (audit E18).
+        app._smfish_apply_running = False
+        app._smfish_bridge.done.emit(msg)
+
+    app._smfish_apply_running = True
     # well_to_csv is the same map the app's loader populated, so the
     # writer hits the exact files the rest of the app reads from — no
     # silent glob mismatches on datasets whose CSVs are named e.g.
@@ -793,7 +807,7 @@ def _smfish_apply_to_all(app) -> None:
         classifier=app._smfish_classifier,
         fov_tp_extractor=app._smfish_fov_tp_extractor,
         status_cb=app._smfish_bridge.status.emit,
-        done_cb=app._smfish_bridge.done.emit,
+        done_cb=_done,
         # Route the after-csv callback through the bridge so it runs on
         # the GUI thread, not the worker daemon thread. Calling _after_csv
         # directly here would leave QTimer.singleShot + widget access in

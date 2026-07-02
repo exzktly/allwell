@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **39 / 77 items resolved** (38 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **41 / 77 items resolved** (40 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -47,7 +47,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E5 | per-well failure never sets exit code → all-fail exits 0 | H | `[ ]` TODO | |
 | E6 | `_run_pipeline_thread` emits `finished` not `error` on setup raise | H | `[x]` DONE | #597 |
 | E7 | `GatingWorker.run` no except + no error signal → UI hang | H | `[x]` DONE | #597 |
-| E8 | smFISH `_run` no try/except → "Apply Global Threshold" hangs | H | `[ ]` TODO | |
+| E8 | smFISH `_run` no try/except → "Apply Global Threshold" hangs | H | `[x]` DONE | #597 |
 | E9 | auto-threshold DEBUG-skip → silently biased threshold | H | `[ ]` TODO | |
 | E10 | saved-plot capture `return None` → silently loses groups/stats | H | `[x]` DONE | #597 |
 | E11 | corrupt input zip silently uploaded whole | H | `[x]` DONE | #597 |
@@ -57,7 +57,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E15 | corrupt mask → "no overlay" → misread QC | M | `[x]` DONE | #597 |
 | E16 | view_state `swallowed()` + sample_defs persistence fail invisibly | M | `[ ]` TODO | |
 | E17 | unguarded remote-dialog `_runner` → QTimer poll spins forever | L | `[x]` DONE | #597 |
-| E18 | smFISH Apply-to-All re-entrancy → dup workers + clobbered cancel | H | `[ ]` TODO | |
+| E18 | smFISH Apply-to-All re-entrancy → dup workers + clobbered cancel | H | `[x]` DONE | #597 |
 | E19 | smFISH worker TOCTOU: dataset swap during write loop | M | `[ ]` TODO | |
 | E20 | `_current_proc` read without lock → Stop can miss child | M | `[x]` DONE | #597 |
 | E21 | `pipeline_runner.stop()` reads worker-assigned `_proc` unsynced | M | `[ ]` TODO | |
@@ -270,7 +270,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **High — `process_microscopy.py:4306/4695`**: per-well failures collected into `all_failed` are only `log.warning`'d; `main()` returns `None` and `__main__` never `sys.exit`s → an all-failed run exits 0. *Fix: `sys.exit(1)` when `all_failed` non-empty.* — **E5** `[ ]` TODO
 - **High — `services/pipeline_runner.py:401-475`** (`_run_pipeline_thread`): body wrapped only in `try/finally` + a narrow `except TypeError`; a grouping/zipper `RuntimeError` skips to `finally`, emitting `("finished", None)` but **never `("error", …)`**. *Fix: add `except Exception: enqueue(("error", …))`.* — **E6** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
 - **High — `features/grouping/cell_gating_tab_view.py:98`** (`GatingWorker.run`): calls `_run_inner()` with no try/except and the class has **no error signal**; a pandas error terminates the QThread, `finished_ok` never fires, UI hangs. *Fix: add `failed = Signal(str)`, wrap, always release the UI.* — **E7** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
-- **High — `features/smfish/worker.py:227`**: `_run` has no try/except; a `pd.read_csv` `ParserError` kills the thread so `done_cb` never fires → "Apply Global Threshold" hangs. *Fix: wrap `_run`, route failure through `done_cb`.* — **E8** `[ ]` TODO
+- **High — `features/smfish/worker.py:227`**: `_run` has no try/except; a `pd.read_csv` `ParserError` kills the thread so `done_cb` never fires → "Apply Global Threshold" hangs. *Fix: wrap `_run`, route failure through `done_cb`.* — **E8** `[x]` DONE (`_run_guarded` wrapper; `tests/test_smfish_apply_robustness.py`)
 - **Medium — `services/remote_runner.py:3035/3091`** (`Fetcher._loop`→`_fetch_one`): `_fetch_one` called with no try/except; an unexpected exception kills the fetcher, **remaining wells never downloaded**, with only a misleading "N/M downloaded" line. *Fix: wrap the call, log, continue.* — **E12** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
 - **Low —** `analyze_remote_dialog.py:590/676` unguarded `_runner`s → `QTimer` poll spins forever; `cell_browser/worker.py:191` DEBUG-only blank cell. *Fix: wrap runners, put a failure tuple on the queue.* — **E17** `[x]` DONE (both `_runner`s always enqueue a result; Qt-closure, inspection-verified)
 - **Verified correct:** `_RemoteProcess._pump`, `_run_pipeline_subprocess`/`_run_pipeline_remote`, `subprocess_kill.signal_subprocess`, `_AutoThresholdWorker`. → see Non-goals.
@@ -291,7 +291,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **Top recommendation:** extend `test_no_silent_except.py` to flag tuple/typed `pass` and broad `return None` in `pipeline/`, `well_viewer/data/`, `well_viewer/persistence/`, add the missing pipeline files, and route data-integrity failures to at least WARNING. — **G4** `[x]` DONE (partial: added the 3 unscanned pipeline files; tuple/typed-`pass` + broad-`return None` extension needs a frozen offender baseline — noted in-test as remaining scope)
 
 ### 2.3 Race conditions
-- **High — `features/smfish/tab_view.py:752`** (`_smfish_apply_to_all`): launches a thread + `ThreadPoolExecutor` with **no re-entrancy guard**; a double-click runs two workers writing the **same per-well CSVs**, and the 2nd launch `.clear()`s the shared `app._smfish_cancel_event`. *Fix: single busy flag + per-run cancel event.* — **E18** `[ ]` TODO
+- **High — `features/smfish/tab_view.py:752`** (`_smfish_apply_to_all`): launches a thread + `ThreadPoolExecutor` with **no re-entrancy guard**; a double-click runs two workers writing the **same per-well CSVs**, and the 2nd launch `.clear()`s the shared `app._smfish_cancel_event`. *Fix: single busy flag + per-run cancel event.* — **E18** `[x]` DONE (`_smfish_apply_running` guard cleared in `_done`; `tests/test_smfish_apply_robustness.py`)
 - **Medium —** smfish `worker.py:265-279` TOCTOU (dataset swap during the write loop is never re-checked → late wells written into the swapped dataset). — **E19** `[ ]` TODO
 - **Medium —** `remote_runner.py:2557-2571` (`_current_proc` read without a lock → Stop can miss the running child). — **E20** `[x]` DONE (lock-snapshot `_current_proc`; `tests/test_batched_remote_teardown.py`)
 - **Medium —** `pipeline_runner.py:364-387` (`stop()` reads `_proc` assigned on the worker thread with no sync). — **E21** `[ ]` TODO
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch P (smFISH robustness)** — **E8** (worker wrapped so any `_run` crash routes through `done_cb` instead of hanging "Apply Global Threshold" forever), **E18** (re-entrancy busy-flag `_smfish_apply_running` rejects a second concurrent run — which also stops the double-launch from clobbering the shared cancel event — cleared on every terminal path). +2 tests. Fast lane green (1282). 41/77 resolved.
+
 - 2026-07-02 **Batch O (lifecycle)** — **L2/L3/L4** (AllWellApp.closeEvent now, on quit, stops the Analyze log-poller re-arming via a guarded `_alive` flag, and calls `teardown_review_pane` on the Review pane to abort the smFISH worker + disconnect the app-global focusChanged watcher — both panes are child widgets whose own closeEvent never fires). Also: **e2e deps confirmed** — an isolated venv with the repo's pinned StarDist/TF stack imports and initializes; the e2e test itself can't run here only because the pretrained-weights GitHub-release download is egress-blocked (403). +6 tests. Fast lane green (1280). analyze_tab budget 1206→1211. 39/77 resolved.
 
 - 2026-07-02 **Batch N (compute hygiene)** — **S8** (circularity masks non-positive perimeters before dividing → NaN instead of inf + RuntimeWarning; empty-channel CDF guarded against 0/0). +1 test. Fast lane green (1276). 36/77 resolved.
@@ -454,4 +456,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch O merged (lifecycle L2/L3/L4 + tests); **39 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch P merged (smFISH E8/E18 + tests); **41 / 77 resolved.**

@@ -281,6 +281,18 @@ def apply_global_threshold_async(
             after_csv_cb()
         done_cb("Apply to All complete. Line/Bar plots refreshed.")
 
-    thread = threading.Thread(target=_run, daemon=True)
+    def _run_guarded() -> None:
+        # A raise anywhere in _run (e.g. a pd.read_csv ParserError in
+        # _write_counts_to_csvs) previously killed the daemon thread with
+        # done_cb never firing, so "Apply Global Threshold" hung forever
+        # (audit E8). Route any unhandled failure through done_cb so the UI
+        # always gets a terminal signal.
+        try:
+            _run()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("smFISH Apply to All worker crashed")
+            done_cb(f"Apply to All failed: {exc}")
+
+    thread = threading.Thread(target=_run_guarded, daemon=True)
     thread.start()
     return thread

@@ -87,19 +87,18 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
 
     # ── state init ────────────────────────────────────────────────────────
     reg.register("_smfish_frame", parent)
+    # Scalar smFISH flags (separator / show_overlays / fit_on_next_redraw) are
+    # typed state on ``ctx.state.smfish`` — the slice defaults cover their inits.
     ctx.app._smfish_out_dir = None
-    ctx.app._smfish_separator = "_"
     ctx.app._smfish_fov_tp_extractor = None
     ctx.app._smfish_tokens = []
     ctx.app._smfish_well_to_zip = {}
-    ctx.app._smfish_classifier = make_classifier(ctx.app._smfish_separator)
+    ctx.app._smfish_classifier = make_classifier(ctx.state.smfish.separator)
     ctx.app._smfish_current_log_img = None
     ctx.app._smfish_current_labels = None
     ctx.app._smfish_current_sorted_vals = None
     ctx.app._smfish_hover_annot = None
     ctx.app._smfish_pan_anchor = None
-    ctx.app._smfish_fit_on_next_redraw = True
-    ctx.app._smfish_show_overlays = True
     ctx.app._smfish_cdf_popup = None
     ctx.app._smfish_cdf_canvas = None
     ctx.app._smfish_cdf_ax = None
@@ -268,13 +267,13 @@ def smfish_sync_from_app(app) -> None:
         app._smfish_tokens = [
             str(t).strip() for t in info.get("smfish_tokens", []) if str(t).strip()
         ]
-        app._smfish_separator = str(info.get("separator", "_"))
-        app._smfish_classifier = make_classifier(app._smfish_separator)
+        app._app_state.smfish.separator = str(info.get("separator", "_"))
+        app._smfish_classifier = make_classifier(app._app_state.smfish.separator)
         fov_idx = int(info.get("fov_index", -1))
         tp_idx = int(info.get("tp_index", -1))
         if tp_idx >= 0 and fov_idx >= 0:
             app._smfish_fov_tp_extractor = make_schema_extractor(
-                app._smfish_separator, fov_idx, tp_idx
+                app._app_state.smfish.separator, fov_idx, tp_idx
             )
         elif tp_idx >= 0:
             # Single-FOV pipeline (schema has `timepoint` but no `fov`).
@@ -286,7 +285,7 @@ def smfish_sync_from_app(app) -> None:
             # pair found". Mirror the single-FOV extractor in
             # viewer_state.read_pipeline_info: synthesise a constant FOV
             # ("1") and read the timepoint from the schema index.
-            _sep = app._smfish_separator
+            _sep = app._app_state.smfish.separator
             _tp_idx = tp_idx
 
             def _single_fov_extractor(stem: str):
@@ -381,9 +380,10 @@ def _smfish_set_status(app, text: str) -> None:
 
 
 def _smfish_toggle_overlays(app) -> None:
-    app._smfish_show_overlays = not app._smfish_show_overlays
+    sm = app._app_state.smfish
+    sm.show_overlays = not sm.show_overlays
     app._smfish_overlay_btn.setText(
-        "Hide Overlays" if app._smfish_show_overlays else "Show Overlays"
+        "Hide Overlays" if sm.show_overlays else "Show Overlays"
     )
     _smfish_redraw(app)
 
@@ -605,7 +605,7 @@ def _smfish_load_selected_images(app) -> None:
      app._smfish_current_sorted_vals) = result
     well = _smfish_selected_well_token(app) or "N/A"
     _smfish_set_status(app, f"Loaded {well} fov={fov_raw} tp={tp_raw}.")
-    app._smfish_fit_on_next_redraw = True
+    app._app_state.smfish.fit_on_next_redraw = True
     _smfish_redraw(app)
 
 
@@ -645,7 +645,7 @@ def _smfish_redraw(app) -> None:
     # doesn't pay the cost.
     from skimage.segmentation import find_boundaries
     bnd = find_boundaries(labels, mode="outer")
-    if app._smfish_show_overlays:
+    if app._app_state.smfish.show_overlays:
         app._smfish_ax_img.contour(
             bnd.astype(np.uint8), levels=[0.5], colors="red", linewidths=0.5
         )
@@ -658,11 +658,11 @@ def _smfish_redraw(app) -> None:
     )
     app._smfish_ax_img.set_xticks([])
     app._smfish_ax_img.set_yticks([])
-    if app._smfish_fit_on_next_redraw:
+    if app._app_state.smfish.fit_on_next_redraw:
         h, w = log_img.shape[:2]
         app._smfish_ax_img.set_xlim(-0.5, w - 0.5)
         app._smfish_ax_img.set_ylim(h - 0.5, -0.5)
-        app._smfish_fit_on_next_redraw = False
+        app._app_state.smfish.fit_on_next_redraw = False
     else:
         app._smfish_ax_img.set_xlim(prev_xlim)
         app._smfish_ax_img.set_ylim(prev_ylim)

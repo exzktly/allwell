@@ -50,7 +50,9 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              deleted + callback writes moved to ctx.state)
 #   396 → 390  scatter mode/color_by_tp/gates_hidden  → ScatterState (builder
 #              inits deleted + mode/color callback writes moved to ctx.state)
-CTX_APP_BUDGET = 390
+#   390 → 386  smfish separator/show_overlays/fit_on_next_redraw  → SmfishState
+#              (builder inits deleted + classifier-seed read moved to ctx.state)
+CTX_APP_BUDGET = 386
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

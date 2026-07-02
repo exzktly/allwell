@@ -37,7 +37,10 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   544 → 446  barplot
 #   446 → 415  cell_gating (assignments; the 2400-line builder's widget reads
 #               keep resolving via the register() app-stamp)
-CTX_APP_BUDGET = 415
+#   415 → 409  saved_plots + scatter/tab_view (batch_export has no widgets)
+# Every feature tab builder's Qt widget handles now go through the registry; the
+# residual is non-widget state + behaviour calls (the typed-state / method layer).
+CTX_APP_BUDGET = 409
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

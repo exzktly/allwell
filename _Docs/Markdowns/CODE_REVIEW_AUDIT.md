@@ -436,11 +436,11 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - `[x]` **lineplot/tab_view.py** (38 → ~9) — chan/metric combos + `_plot_chan_var`/`_chan_var`/`_metric_var` aliases + card/fig/4 axes/canvas via `ctx.widgets` (removed the `ctx.app._widget_registry` reach-through too). `test_lineplot_multivariate_registry_a8.py`.
 - `[x]` **multivariate/tab_view.py** (44 → ~28) — 16 widgets via `ctx.widgets` (locals already existed → clean one-line conversions); lineplot+mv total 668 → 624. `test_lineplot_multivariate_registry_a8.py`.
 - `[x]` **image_browser/cell_browser/tab_view.py** (24 → 11) — 13 Qt handles via `ctx.widgets`; image-browser total 624 → 587. `test_image_browser_registry_a8.py`.
-- `[ ]` **saved_plots/tab_view.py** (10)
-- `[ ]` **scatter/tab_view.py** (9)
-- `[ ]` **batch_export/tab_view.py** (9)
+- `[x]` **saved_plots/tab_view.py** (10 → ~6) — 4 Qt handles (count label, stack, list layout, list host) via `ctx.widgets`; repopulate callback stays.
+- `[x]` **scatter/tab_view.py** (9 → ~8) — sub-tab QTabWidget handle via `ctx.widgets`; mode state + set-mode callback stay.
+- `[x]` **batch_export/tab_view.py** — no Qt widget handles stashed (only inline-state dict + set-mode callback); nothing to migrate for the widget layer. saved_plots+scatter+batch total 415 → 409.
 - `[x]` **review_csv/tab_view.py** (29 → 4) — **pilot / proof-of-pattern**; 5 widgets registered via `ctx.widgets`, budget 894 → 869, readers unchanged. `test_review_csv_widget_registry_a8.py`.
-- `[ ]` remaining smaller stashers (`core/*`, `persistence/*`, per-feature `sidebar_view.py`) to reach 0.
+- `[~]` remaining smaller stashers (`core/*`, `persistence/*`, per-feature `sidebar_view.py`) + the non-widget **state / behaviour** layer (typed-state migration + app-method extraction) — the residual 409 after every tab builder's widget handles moved to the registry.
 
 **Target:** drive `CTX_APP_BUDGET` from 894 → the residual behaviour-call floor. Each row: register handles via `ctx.widgets`, drop the budget, verify the tab still builds + its feature tests pass.
 

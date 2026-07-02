@@ -61,7 +61,10 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
     tab_widget.addTab(agg_page, "Per-well aggregate")
 
     ctx.app._scatter_mode = _MODE_CELLS
-    ctx.app._scatter_tab_widget = tab_widget
+    # A8 burn-down: the sub-tab QTabWidget handle goes through the WidgetRegistry
+    # (``ctx.widgets``), which stamps ``app._scatter_tab_widget``. The mode state
+    # + set-mode callback stay on the app.
+    ctx.widgets.register("_scatter_tab_widget", tab_widget)
 
     def _set_mode(mode: str) -> None:
         if mode == _MODE_AGG:

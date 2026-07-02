@@ -59,6 +59,11 @@ class _AspectImage(QLabel):
 
 
 def build_saved_plots_tab(ctx, parent: QWidget) -> None:
+    # A8 burn-down: Qt widget handles go through the WidgetRegistry (``ctx.widgets``),
+    # which stamps ``app._saved_plots_*`` so legacy readers resolve. The repopulate
+    # callback stays on the app.
+    reg = ctx.widgets
+
     layout = parent.layout() or QVBoxLayout(parent)
     layout.setContentsMargins(0, 0, 0, 0)
 
@@ -66,8 +71,8 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     ctrl = QWidget(parent)
     cl = QHBoxLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
-    ctx.app._saved_plots_count_lbl = QLabel("", ctrl)
-    cl.addWidget(ctx.app._saved_plots_count_lbl)
+    count_lbl = reg.register("_saved_plots_count_lbl", QLabel("", ctrl))
+    cl.addWidget(count_lbl)
     cl.addStretch(1)
     report_btn = QPushButton("Export report…", ctrl)
     report_btn.setToolTip("Export all saved plots as a multi-page PDF report.")
@@ -99,9 +104,9 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     scroll.setWidget(list_host)
     stack.addWidget(scroll)  # index 1
 
-    ctx.app._saved_plots_stack = stack
-    ctx.app._saved_plots_list = col
-    ctx.app._saved_plots_list_host = list_host
+    reg.register("_saved_plots_stack", stack)
+    reg.register("_saved_plots_list", col)
+    reg.register("_saved_plots_list_host", list_host)
     # Controller repaints the gallery through this callback (avoids a
     # controller → tab_view import cycle).
     ctx.app._saved_plots_repopulate = lambda: populate_saved_plots_grid(ctx.app)

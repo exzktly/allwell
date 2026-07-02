@@ -1484,6 +1484,14 @@ def _estimate_thresholds_standalone(
 
     rng = _random.Random(rng_seed)
     per_channel: "dict[str, list[float]]" = {c: [] for c in channels}
+    # Track how many candidate (label, fluor) image pairs we attempted to
+    # decode per channel and how many failed (audit E9). A decode failure was
+    # only logged at DEBUG — invisible at the default level — so a channel
+    # whose tophat images are mostly corrupt would silently compute its Otsu
+    # threshold from a small, biased subset. We surface a WARN in the summary
+    # when a meaningful fraction was dropped.
+    per_channel_attempted: "dict[str, int]" = {c: 0 for c in channels}
+    per_channel_decode_failed: "dict[str, int]" = {c: 0 for c in channels}
 
     well_zips = sorted(p for p in output_dir.glob("*_out.zip") if not p.name.startswith("."))
     if not well_zips:
@@ -1557,10 +1565,12 @@ def _estimate_thresholds_standalone(
                     fluor_name = tophat_members.get((ch, fov, tp))
                     if fluor_name is None:
                         continue
+                    per_channel_attempted[ch] += 1
                     try:
                         labels_arr = imread(_io.BytesIO(zf.read(label_name)))
                         fluor_arr = imread(_io.BytesIO(zf.read(fluor_name)))
                     except Exception as exc:
+                        per_channel_decode_failed[ch] += 1
                         log.debug("Auto-threshold: skipping %s / %s: %s",
                                   label_name, fluor_name, exc)
                         continue
@@ -1581,6 +1591,18 @@ def _estimate_thresholds_standalone(
 
     thresholds: "dict[str, float]" = {}
     for ch in channels:
+        # A biased threshold reports itself: if a large fraction of this
+        # channel's tophat/label pairs failed to decode, the Otsu estimate is
+        # computed from a non-representative subset (audit E9).
+        attempted = per_channel_attempted.get(ch, 0)
+        failed = per_channel_decode_failed.get(ch, 0)
+        if attempted and failed / attempted >= 0.25:
+            log.warning(
+                "Auto-threshold: %s — %d/%d image pair(s) failed to decode "
+                "(%.0f%%); the threshold is estimated from the remaining "
+                "subset and may be biased. Check for corrupt *_out.zip members.",
+                ch.upper(), failed, attempted, 100.0 * failed / attempted,
+            )
         values = per_channel.get(ch) or []
         if len(values) < 2:
             log.info("Auto-threshold: skipping %s — only %d sample(s)",

@@ -55,7 +55,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # of swallowing (E2), and back-up-and-surface a corrupt existing pipeline_info
 # sidecar instead of silently clobbering user blocks (E3) — mandatory
 # correctness handling, not appended features. Resume ratcheting down from 4707.
-PROCESS_MICROSCOPY_BUDGET = 4707
+# Code-review E9 (+22): the auto-threshold estimator now counts per-channel image
+# decode failures and WARNs when a biased fraction was dropped (a silently biased
+# Otsu threshold otherwise). Mandatory correctness surfacing. Resume from 4729.
+PROCESS_MICROSCOPY_BUDGET = 4729
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731

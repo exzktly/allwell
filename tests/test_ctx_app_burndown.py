@@ -83,7 +83,10 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (bridge/extractor/figures/decoded arrays/cdf popup) move to
 #              ctx.runtime.smfish, which stamps app._smfish_<name> so the ~130
 #              legacy readers resolve unchanged (WidgetRegistry pattern).
-CTX_APP_BUDGET = 279
+#   279 -> 274  T2 scatter gate-interaction live objects (selector/edit/
+#              render/redraw_cb/draw_mode) -> ctx.runtime.scatter; gate
+#              geometry (_scatter_gates) is persisted and stays put.
+CTX_APP_BUDGET = 274
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

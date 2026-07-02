@@ -45,8 +45,12 @@ class AppRuntime:
     through ``ctx.runtime.<feature>`` instead of ``ctx.app._<feature>_*``.
     """
 
-    __slots__ = ("_app", "smfish")
+    __slots__ = ("_app", "smfish", "scatter")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
         object.__setattr__(self, "smfish", _FeatureRuntime(app, "_smfish_"))
+        # Scatter gate-interaction live objects (RectangleSelector, in-progress
+        # edit, per-panel render context, redraw callback, draw-arm flag). Gate
+        # *geometry* (``_scatter_gates``) is persisted and stays typed state.
+        object.__setattr__(self, "scatter", _FeatureRuntime(app, "_scatter_"))

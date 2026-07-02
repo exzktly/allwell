@@ -76,16 +76,21 @@ coordinator's imperative `redraw_*_orchestrate(app)` calls into
 - **Risk:** Med — signal/slot **lifetime** (disconnect on teardown; cf. audit L4
   `focusChanged` leak). Mitigate with a subscription helper that auto-disconnects.
 
-### T2 — Feature runtime holders · `[ ]`
-For category (a): introduce a per-feature **runtime** dataclass for live,
-non-persisted objects (workers, extractors, matplotlib figure/canvas handles,
-gate geometry, decoded arrays), attached as `ctx.runtime.<feature>` (parallel to
-`ctx.state.<feature>`, but explicitly *not* serialized). Migrate
-`ctx.app._smfish_*` / `ctx.app._scatter_gate*` / `ctx.app._image_table_cells`
-reads onto it.
-- **Independent of T1/T3** — can run in parallel; low architectural risk.
-- **Guardrail:** runtime holders are never touched by `persistence/` (a layering
-  test), so they can't silently become persisted state.
+### T2 — Feature runtime holders · `[~]`
+For category (a): `core/app_runtime.py` gives each feature a `ctx.runtime.<feature>`
+namespace for live objects; writing through it **stamps `app._<feature>_<name>`**
+(WidgetRegistry pattern) so the ~130 legacy readers resolve unchanged while
+builders stop naming `ctx.app`. **Landed:** smFISH (17 objects) and the scatter
+gate-interaction objects (5). **Excluded (persisted → typed state, not runtime):
+** `_scatter_gates`, `_scatter_tp_selections`, `_image_table_cells/lut` (all read
+by `persistence/` via `getattr`) and `_image_table_crop_tool` (2 persistence
+refs). **Remaining:** image-table decode caches and any other confirmed-transient
+stashes.
+- **Independent of T1/T3** — low architectural risk.
+- **Guardrail:** `tests/test_app_runtime.py` proves the stamp write-through and
+  asserts `persistence/` never depends on `app_runtime`. Classify each field by a
+  *string* search of `persistence/` (catches `getattr(app, "name")`), not just
+  `app.name`, before moving it.
 
 ### T3 — Thread `ctx` through the controller layer · `[ ]`
 The core of the epic. `plot_orchestrator` / `selection_controller` /
@@ -126,7 +131,7 @@ intentional surface between features and the window shell.
 | ID | Workstream | Depends on | Risk | Status | Metric |
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[ ]` | 293 → _tbd_ |
-| T2 | Feature runtime holders | — | Low | `[ ]` | |
+| T2 | Feature runtime holders | — | Low | `[~]` | 293 → 274 (smFISH + scatter gate objects) |
 | T3 | Thread ctx through controllers | T1 | High | `[ ]` | |
 | T4 | Extract cross-cutting services | T1 | Med | `[ ]` | |
 | T5 | Saved-plots service | — | Med | `[ ]` | |

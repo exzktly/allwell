@@ -144,19 +144,20 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).
-    ctx.app._scatter_gates = []
-    ctx.app._scatter_gate_draw_mode = False
-    ctx.app._scatter_gate_selector = None
+    ctx.app._scatter_gates = []   # gate geometry — persisted, stays on app/state
+    # Live gate-interaction objects → runtime holder (stamps app._scatter_gate_*).
+    ctx.runtime.scatter.gate_draw_mode = False
+    ctx.runtime.scatter.gate_selector = None
     # "Show gates" toggle (sidebar) is typed state: ctx.state.scatter.gates_hidden
     # Edge/corner editing of existing gates: the in-progress edit ({idx,handle})
     # and the cached render context for repainting just the gates while dragging.
-    ctx.app._scatter_gate_edit = None
+    ctx.runtime.scatter.gate_edit = None
     # Per-panel gate render entries (overlay = 1, separate-axes = N), used to
     # repaint every panel's gate during an edit drag.
-    ctx.app._scatter_gate_render = None
+    ctx.runtime.scatter.gate_render = None
     # gating.py triggers redraws through this callback so it never has to import
     # the controller (avoids a scatter-internal import cycle).
-    ctx.app._scatter_gate_redraw_cb = redraw_scatter_orchestrate
+    ctx.runtime.scatter.gate_redraw_cb = redraw_scatter_orchestrate
     cl.addStretch(1)
 
     from widgets.icon_button import IconButton as _IconButton

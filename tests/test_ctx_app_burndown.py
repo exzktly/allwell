@@ -35,7 +35,9 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   624 → 587  image_table + cell_browser
 #   587 → 544  smfish
 #   544 → 446  barplot
-CTX_APP_BUDGET = 446
+#   446 → 415  cell_gating (assignments; the 2400-line builder's widget reads
+#               keep resolving via the register() app-stamp)
+CTX_APP_BUDGET = 415
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

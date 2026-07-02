@@ -426,7 +426,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 > `[ ]` TODO · `[x]` DONE. Count = `ctx.app` refs in that file at start (mostly widget stashes). Newest-migrated first.
 
 - `[x]` **barplot/tab_view.py** (111 → 13) — 22 Qt handles (hidden channel/metric combos, reset-order + timepoint + grouping/pooling/beeswarm/violin/significance buttons, violin slider, PlotCard/fig/3 axes/canvas/scroll, export dock) + `_bar_tp_var` alias via `ctx.widgets`. Budget 544 → 446. `test_barplot_widget_registry_a8.py`.
-- `[ ]` **grouping/cell_gating_tab_view.py** (124)
+- `[x]` **grouping/cell_gating_tab_view.py** (118 → 89) — 28 Qt handle *assignments* registered via `ctx.widgets`; the 2400-line builder's many downstream widget reads keep resolving through the register app-stamp (safe partial — no local-threading through the monster). Budget 446 → 415. `test_cell_gating_registry_a8.py`.
 - `[x]` **scatter/cells_tab_view.py** (75 → ~20) — 14 widgets + 6 `_var` aliases via `ctx.widgets`. `test_scatter_widget_registry_a8.py`.
 - `[x]` **heatmap/tab_view.py** (81 → 33) — 17 widgets registered via `ctx.widgets`; budget 869 → 811. `test_heatmap_widget_registry_a8.py`.
 - `[x]` **smfish/tab_view.py** (75 → 32) — 13 Qt handles (channel/fov/tp combos, threshold + LUT edits, overlay button, status label, figure/axes/canvas/toolbar, frame) via `ctx.widgets`; the large non-widget state block stays. Budget 587 → 544. `test_smfish_widget_registry_a8.py`.

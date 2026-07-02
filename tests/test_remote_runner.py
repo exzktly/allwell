@@ -2981,3 +2981,17 @@ def test_retry_repulls_out_zip_for_folder_mode(host, tmp_path, monkeypatch):
 
     assert any("A01_out.zip" in p for p in pulled), \
         "FOLDER-mode out-zip must be re-pulled (was silently skipped)"
+
+
+def test_close_remote_job_warns_on_ssh_failure():
+    """Audit E13 — a failed scancel must be surfaced (an orphaned SLURM
+    allocation could keep running unnoticed), not swallowed silently."""
+    r = _runner_with_run("srun -p gpu")
+    logs: list[str] = []
+    with patch(
+        "services.remote_runner.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="ssh", timeout=10),
+    ):
+        r.close_remote_job(log_fn=logs.append)   # must not raise
+    assert any("WARN" in m and "scancel" in m for m in logs), \
+        f"expected a scancel-failure warning; got {logs}"

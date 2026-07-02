@@ -2483,6 +2483,9 @@ class _BatchedRemoteProcess:
         self._line_q: "queue.Queue[Optional[str]]" = queue.Queue()
         self._lines = _QueueLineIterator(self._line_q)
         self._current_proc: Optional[subprocess.Popen] = None
+        # Guards _current_proc: the worker thread reassigns it per batch while
+        # the GUI thread reads it in terminate()/kill()/pid/send_signal (E20).
+        self._current_proc_lock = threading.Lock()
 
         # Set up the shared run identifiers and remote dirs.
         # Keep the single-shot path's layout: input goes into the
@@ -2544,7 +2547,9 @@ class _BatchedRemoteProcess:
 
     @property
     def pid(self) -> int:
-        return self._current_proc.pid if self._current_proc else -1
+        with self._current_proc_lock:
+            proc = self._current_proc
+        return proc.pid if proc else -1
 
     @property
     def returncode(self) -> Optional[int]:
@@ -2576,19 +2581,25 @@ class _BatchedRemoteProcess:
 
     def terminate(self) -> None:
         self._stop.set()
-        if self._current_proc is not None:
-            self._current_proc.terminate()
+        with self._current_proc_lock:
+            proc = self._current_proc
+        if proc is not None:
+            proc.terminate()
         self._fetcher.cancel()
 
     def kill(self) -> None:
         self._stop.set()
-        if self._current_proc is not None:
-            self._current_proc.kill()
+        with self._current_proc_lock:
+            proc = self._current_proc
+        if proc is not None:
+            proc.kill()
         self._fetcher.cancel()
 
     def send_signal(self, sig: int) -> None:
-        if self._current_proc is not None:
-            self._current_proc.send_signal(sig)
+        with self._current_proc_lock:
+            proc = self._current_proc
+        if proc is not None:
+            proc.send_signal(sig)
 
     # Internals ────────────────────────────────────────────────────────
 
@@ -2788,7 +2799,7 @@ class _BatchedRemoteProcess:
                     self._runner.host.ssh_argv(allocate_tty=True)
                     + [remote_cmd]
                 )
-                self._current_proc = subprocess.Popen(
+                proc = subprocess.Popen(
                     ssh_argv,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -2804,15 +2815,21 @@ class _BatchedRemoteProcess:
                     env={**os.environ, "PYTHONUNBUFFERED": "1"},
                     start_new_session=(os.name == "posix"),
                 )
-                assert self._current_proc.stdout is not None
-                for line in self._current_proc.stdout:
+                # Publish under the lock so a concurrent Stop (terminate/kill on
+                # the GUI thread) reads a consistent handle, not a half-updated
+                # attribute or a stale value at a batch boundary (audit E20).
+                with self._current_proc_lock:
+                    self._current_proc = proc
+                assert proc.stdout is not None
+                for line in proc.stdout:
                     if self._stop.is_set():
-                        self._current_proc.terminate()
+                        proc.terminate()
                         break
                     self._fetcher.observe(line)
                     self._line_q.put(line)
-                rc = self._current_proc.wait()
-                self._current_proc = None
+                rc = proc.wait()
+                with self._current_proc_lock:
+                    self._current_proc = None
 
                 if rc != 0:
                     self._log(
@@ -2840,20 +2857,27 @@ class _BatchedRemoteProcess:
             self._log(f"[remote] batched run failed: {exc}\n")
             _logging.getLogger(__name__).exception("batched remote run crashed")
         finally:
-            # Drain the Fetcher first so every well's CSV + zip lands
-            # locally BEFORE we attempt auto-threshold against
-            # local_output_dir.
-            self._fetcher.flush_and_join()
-            # v5.4.7: single auto-threshold pass over the FULL
-            # downloaded output. The per-batch passes were suppressed
-            # via ``--no_auto_threshold`` so that a batch wouldn't
-            # write thresholds derived from a sliver of the plate.
-            # Fires only when the whole run succeeded — a mid-run
-            # abort leaves the previous run's pipeline_info.json (if
-            # any) untouched.
-            if self._returncode == 0:
-                self._run_local_auto_threshold()
-            self._line_q.put(None)
+            # The stdout sentinel MUST be enqueued no matter what — if
+            # flush_and_join (or the auto-threshold pass) raises, the reader
+            # loop in pipeline_runner would otherwise block forever waiting on
+            # a None that never arrives (audit X10). Keep it in an inner
+            # ``finally`` so it's still emitted last on the happy path (after
+            # the fetcher's progress lines) but guaranteed on any failure.
+            try:
+                # Drain the Fetcher first so every well's CSV + zip lands
+                # locally BEFORE we attempt auto-threshold against
+                # local_output_dir.
+                self._fetcher.flush_and_join()
+                # v5.4.7: single auto-threshold pass over the FULL downloaded
+                # output. The per-batch passes were suppressed via
+                # ``--no_auto_threshold`` so a batch wouldn't write thresholds
+                # derived from a sliver of the plate. Fires only when the whole
+                # run succeeded — a mid-run abort leaves the previous run's
+                # pipeline_info.json (if any) untouched.
+                if self._returncode == 0:
+                    self._run_local_auto_threshold()
+            finally:
+                self._line_q.put(None)
 
     def _run_local_auto_threshold(self) -> None:
         """Re-run the pipeline's auto-threshold pass locally against
@@ -4258,7 +4282,11 @@ class RemoteRunner:
                 self.host.ssh_argv(allocate_tty=False) + [cmd],
                 capture_output=True, text=True, timeout=10,
             )
-        except (subprocess.TimeoutExpired, OSError):
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            # A failed teardown ssh must not be silent — an orphaned SLURM
+            # allocation could keep running (and billing) unnoticed (audit E13).
+            log(f"[remote] WARN scheduler: could not confirm scancel of the "
+                f"remote job ({exc}); a SLURM allocation may still be running.\n")
             return
         out = (result.stdout or "")
         if "AW_SCANCELLED" in out:
@@ -4308,8 +4336,14 @@ class RemoteRunner:
                 ],
                 capture_output=True, timeout=10,
             )
-        except (subprocess.TimeoutExpired, OSError):
-            pass
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            # Best-effort (the local process-group kill is primary), but don't
+            # swallow it silently — record that this teardown channel failed
+            # (audit E13); close_remote_job() below is the scheduler backstop.
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "remote cancel: ssh kill failed (%s); relying on the local "
+                "process-group kill + scancel backstop", exc)
         # Belt-and-braces: also cancel the scheduler job (no-op on
         # direct-execution hosts / when no job id was recorded).
         self.close_remote_job()

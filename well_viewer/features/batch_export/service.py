@@ -12,6 +12,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# ``apply_export_style_prefs`` lives in the Qt-free core layer (``export.style``
+# only re-exports it); import it from there so this module stays Qt-free and adds
+# no deferred *feature* import.
+from well_viewer.core.plot_style import apply_export_style_prefs
+
 
 def save_export_figure(fig, fig_path, fmt: str, *, export_prefs: dict, plot_bg) -> None:
     """Apply *export_prefs* to *fig* and write it to *fig_path* as *fmt*.
@@ -22,7 +27,6 @@ def save_export_figure(fig, fig_path, fmt: str, *, export_prefs: dict, plot_bg) 
     """
     import matplotlib as _mpl
     import matplotlib.pyplot as _plt
-    from well_viewer.features.export.style import apply_export_style_prefs
 
     apply_export_style_prefs(fig, export_prefs)
     overrides: dict = {}

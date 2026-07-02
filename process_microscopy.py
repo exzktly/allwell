@@ -4,23 +4,28 @@ process_microscopy.py
 Production-ready pipeline to segment nuclei with StarDist and quantify
 GFP intensities per nucleus from paired fluorescence microscopy images.
 
-Zip-file mode (default when --input_dir contains .zip files)
-------------------------------------------------------------
-Input zips must be named after 96-well plate positions, e.g.:
-    A01.zip  A02.zip  ...  H12.zip
+Input modes (per-well, grouped upstream)
+----------------------------------------
+--input_dir must hold input grouped by 96-well plate position, in one of
+two layouts:
+  • Zip mode (preferred): per-well archives A01.zip … H12.zip.
+  • Folder mode: per-well subfolders A01/ … H12/ (compressed to
+    <well>.zip during the run).
 
-For each zip the script will:
+For each well the script will:
   1. Validate the name against the 96-well plate pattern (A-H, 01-12).
-  2. Extract contents to a temporary directory  <output_dir>/tmp_<well>/.
-  3. Run the full segmentation + quantification pipeline on that directory,
-     writing QC images to a per-zip staging area.
+  2. Extract / read its images into a temporary staging area.
+  3. Run the full segmentation + quantification pipeline,
+     writing QC images to a per-well staging area.
   4. Compress all output images (masks + overlays) into
          <output_dir>/<well>_out.zip
   5. Delete the temporary directories (extracted input + staged images).
   6. Per-well CSVs are written to <output_dir> as usual (not zipped).
 
-If no .zip files are found in --input_dir the script falls back to the
-original flat-directory behaviour.
+Loose TIFs dropped directly in an input directory named "in" are grouped
+into per-well folders first (see organize_loose_tifs_into_well_folders).
+The GUI Analyze tab and the remote runner always group input into one of
+the above layouts before invoking this script.
 
 Usage
 -----
@@ -3138,8 +3143,6 @@ def process_well_folder_task(
     nuclear_token: str,
     fluor_tokens: "list[str]",
     csv_prefix: str,
-    compress_input_well_folders: bool = False,
-    compress_output_well_folders: bool = False,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
     incremental: bool = False,
@@ -3153,7 +3156,8 @@ def process_well_folder_task(
     2. Process groups, writing QC images to a temporary staging directory.
     3. Write per-well CSV to <output_dir>/<csv_prefix>_<well>.csv.
     4. Rename staging directory to <output_dir>/<well_label>/.
-    5. Optionally compress input/output well folders to per-well zip files.
+    5. Compress input/output well folders to per-well zip files (always on;
+       the pipeline only ever emits <well>.zip / <well>_out.zip).
 
     When *incremental* is set and a prior per-well CSV exists, only the new
     FOV-groups are processed and merged into the existing CSV and output folder /
@@ -3232,23 +3236,9 @@ def process_well_folder_task(
                              well_label, csv_path.name, added)
                 else:
                     log.warning("Well %s: no records produced; CSV not updated.", well_label)
-                if compress_output_well_folders:
-                    n_out = merge_images_into_zip(out_zip, tmp_images)
-                    log.info("Well %s: merged %d new image(s) -> %s",
-                             well_label, n_out, out_zip.name)
-                else:
-                    final_out.mkdir(parents=True, exist_ok=True)
-                    moved = 0
-                    for img in sorted(tmp_images.iterdir()):
-                        if not img.is_file() or img.name.startswith("."):
-                            continue
-                        dest = final_out / img.name
-                        if dest.exists():
-                            continue  # keep existing
-                        os.replace(str(img), str(dest))
-                        moved += 1
-                    log.info("Well %s: merged %d new image(s) -> %s/",
-                             well_label, moved, final_out.name)
+                n_out = merge_images_into_zip(out_zip, tmp_images)
+                log.info("Well %s: merged %d new image(s) -> %s",
+                         well_label, n_out, out_zip.name)
                 # Incremental consumed only the new images; drop the staging dir
                 # (the non-incremental path consumes it via rename/compress).
                 remove_directory(tmp_images)
@@ -3265,26 +3255,24 @@ def process_well_folder_task(
                 tmp_images.rename(final_out)
                 log.info("Well %s: output folder -> %s", well_label, final_out.name)
 
-                if compress_output_well_folders:
-                    n_out = compress_folder_images_to_zip_and_remove(final_out, out_zip)
-                    if n_out > 0:
-                        log.info(
-                            "Well %s: compressed output folder -> %s (%d image(s))",
-                            well_label,
-                            out_zip.name,
-                            n_out,
-                        )
-
-            if compress_input_well_folders:
-                in_zip = well_folder.parent / f"{well_label}.zip"
-                n_in = compress_folder_images_to_zip_and_remove(well_folder, in_zip)
-                if n_in > 0:
+                n_out = compress_folder_images_to_zip_and_remove(final_out, out_zip)
+                if n_out > 0:
                     log.info(
-                        "Well %s: compressed input folder -> %s (%d image(s))",
+                        "Well %s: compressed output folder -> %s (%d image(s))",
                         well_label,
-                        in_zip.name,
-                        n_in,
+                        out_zip.name,
+                        n_out,
                     )
+
+            in_zip = well_folder.parent / f"{well_label}.zip"
+            n_in = compress_folder_images_to_zip_and_remove(well_folder, in_zip)
+            if n_in > 0:
+                log.info(
+                    "Well %s: compressed input folder -> %s (%d image(s))",
+                    well_label,
+                    in_zip.name,
+                    n_in,
+                )
             _committed = True
 
             # Mark the well as done before the (potential) staging-dir
@@ -3320,146 +3308,9 @@ def process_well_folder_task(
             log.info("Well %s — staging directory removed.", well_label)
 
 
-def process_well_flat_task(
-    well_label: str,
-    groups: "list[tuple[Path, list[Path]]]",
-    shared_kwargs: dict,
-) -> "tuple[list[dict], list[str]]":
-    """
-    Top-level picklable task: process all image groups for one flat-mode well.
-
-    Runs inside a worker process (StarDist already loaded by _worker_init).
-    Returns (records, failed_names).
-    """
-    log.info("Well %s — starting flat-mode (pid %d, %d group(s))",
-             well_label, os.getpid(), len(groups))
-    return _process_groups_in_worker(groups, shared_kwargs, well_label)
-
-# ---------------------------------------------------------------------------
-# Well-level pool dispatcher (replaces run_pipeline_on_directory)
-# ---------------------------------------------------------------------------
-
-def run_pipeline_on_wells(
-    wells: "list[tuple[str, list[tuple[Path, Path]]]]",
-    shared_kwargs: dict,
-    workers: int,
-    force_cpu: bool = False,
-    threads_per_worker: int = 0,
-    task_fn = None,
-) -> "tuple[list[dict], list[str]]":
-    """
-    Submit one worker task per well and collect results.
-
-    *wells*: list of (well_label, pairs) — pairs is a list of (nir, gfp) Paths.
-    *threads_per_worker*: passed to _worker_init to pin TF/BLAS thread counts.
-    *task_fn*: callable(well_label, pairs, shared_kwargs) -> (records, failed).
-               Defaults to process_well_flat_task.
-    """
-    if task_fn is None:
-        task_fn = process_well_flat_task
-
-    _ensure_stardist_runtime_deps()
-
-    all_records: list[dict] = []
-    all_failed:  list[str]  = []
-
-    ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=ctx,
-        initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker,
-                  shared_kwargs.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
-    ) as executor:
-        future_to_well = {
-            executor.submit(task_fn, well_label, pairs, shared_kwargs): well_label
-            for well_label, pairs in wells
-        }
-        for future in as_completed(future_to_well):
-            well_label = future_to_well[future]
-            try:
-                records, failed = future.result()
-                all_records.extend(records)
-                all_failed.extend(failed)
-            except Exception as exc:           # noqa: BLE001
-                _report_worker_failure(well_label, shared_kwargs.get("output_dir"), exc)
-                all_failed.append(well_label)
-
-    return all_records, all_failed
-
-# ---------------------------------------------------------------------------
-# Legacy shim kept for backward compatibility
-# ---------------------------------------------------------------------------
-
-def run_pipeline_on_directory(
-    input_dir: Path,
-    output_dir: Path,
-    shared_kwargs: dict,
-    nuclear_token: str,
-    fluor_tokens: "list[str]",
-    workers: int,
-    skip_wells: "set[str] | None" = None,
-    force_cpu: bool = False,
-    threads_per_worker: int = 0,
-    groups: "list[tuple[Path, list[Path]]] | None" = None,
-    schema: "list[str] | None" = None,
-    sep: str = DEFAULT_SEP,
-) -> "tuple[list[dict], list[str]]":
-    """
-    Flat-directory entry point: group image groups by well, then run one worker per well.
-
-    *groups* may be passed in if already discovered (avoids a second directory scan).
-    """
-    if schema is None:
-        schema = parse_schema(DEFAULT_SCHEMA)
-    if groups is None:
-        groups = find_image_groups(input_dir, nuclear_token, fluor_tokens,
-                                   schema=schema, sep=sep)
-    if not groups:
-        log.warning("No valid image groups found in %s.", input_dir)
-        return [], []
-
-    from collections import defaultdict
-    by_well: dict[str, list] = defaultdict(list)
-    for nuc, fluors in groups:
-        tok = _well_token_from_path(nuc, nuclear_token, schema=schema, sep=sep) or "unknown"
-        by_well[tok].append((nuc, fluors))
-
-    # Filter already-complete wells
-    if skip_wells:
-        before = len(by_well)
-        by_well = {w: p for w, p in by_well.items() if w not in skip_wells}
-        n_removed = before - len(by_well)
-        if n_removed:
-            log.info("Skipped %d already-complete well(s).", n_removed)
-        if not by_well:
-            log.info("All wells already complete; nothing to do.")
-            return [], []
-
-    wells = sorted(by_well.items())
-    log.info("Flat mode: %d well(s), %d worker(s).", len(wells), workers)
-
-    return run_pipeline_on_wells(
-        wells=wells,
-        shared_kwargs={**shared_kwargs, "output_dir": output_dir},
-        workers=workers,
-        force_cpu=force_cpu,
-        threads_per_worker=threads_per_worker,
-    )
-
 # ---------------------------------------------------------------------------
 # Skip-detection helpers
 # ---------------------------------------------------------------------------
-
-def _well_token_from_path(
-    nir_path: Path,
-    nuclear_token: str,
-    schema: "list[str] | None" = None,
-    sep: str = DEFAULT_SEP,
-) -> str:
-    """Extract the well token from an image filename, or return empty string."""
-    return parse_filename(nir_path, schema=schema, sep=sep)["well"]
-
 
 def output_exists_for_well(output_dir: Path, well_label: str, csv_prefix: str) -> bool:
     """
@@ -3503,17 +3354,6 @@ def output_exists_for_well_folder(
     csv_ok     = csv_path.exists() and csv_path.stat().st_size > 0
     out_ok     = zip_ok if compressed_output else folder_ok
     return out_ok and csv_ok
-
-
-def output_exists_for_well_flat(output_dir: Path, well_label: str, csv_prefix: str) -> bool:
-    """
-    Return True if a per-well CSV already exists for *well_label* (flat mode).
-
-    In flat mode there is no output zip; only the CSV is checked.
-    """
-    safe_well = _safe_well(well_label)
-    csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
-    return csv_path.exists() and csv_path.stat().st_size > 0
 
 
 def _unique_tokens_preserve_order(tokens: "list[str]") -> "list[str]":
@@ -3715,8 +3555,6 @@ def process_well_folders(
     fluor_tokens: "list[str]",
     workers: int,
     csv_prefix: str,
-    compress_input_well_folders: bool = False,
-    compress_output_well_folders: bool = False,
     force: bool = False,
     incremental: bool = False,
     incremental_prior_dir: "Path | None" = None,
@@ -3744,7 +3582,6 @@ def process_well_folders(
             process_well_folder_task,
             well_label, folder_path, output_dir, shared_kwargs_template,
             nuclear_token, fluor_tokens, csv_prefix,
-            compress_input_well_folders, compress_output_well_folders,
             schema, sep, incremental, incremental_prior_dir,
         )
 
@@ -3757,8 +3594,7 @@ def process_well_folders(
         # there is no zip-extract scratch to sweep.
         stale_sweep=lambda out: _sweep_stale_scratch_dirs(out, extra_extract=False),
         output_exists=lambda well: output_exists_for_well_folder(
-            output_dir, well, csv_prefix,
-            compressed_output=compress_output_well_folders),
+            output_dir, well, csv_prefix, compressed_output=True),
         submit_task=_submit,
     )
 
@@ -4566,8 +4402,6 @@ def main() -> None:
             fluor_tokens=fluor_tokens_for_quant,
             workers=workers,
             csv_prefix=args.csv_prefix,
-            compress_input_well_folders=True,   # mandatory: always emit .zip inputs
-            compress_output_well_folders=True,  # mandatory: always emit .zip outputs
             force=args.force,
             incremental=args.incremental,
             incremental_prior_dir=(
@@ -4580,51 +4414,20 @@ def main() -> None:
             sep=sep,
         )
     else:
-        log.info("Flat mode: no well zips or folders found, scanning directory directly.")
-
-        # Discover groups once; reuse for both skip detection and processing.
-        groups_all = find_image_groups(input_dir, args.nuclear_token, fluor_tokens_for_quant,
-                                       schema=schema, sep=sep)
-        skip_wells: set[str] = set()
-        if not args.force:
-            for nuc, _ in groups_all:
-                well = parse_filename(nuc, schema=schema, sep=sep)["well"]
-                if well and output_exists_for_well_flat(output_dir, well, args.csv_prefix):
-                    skip_wells.add(well)
-            if skip_wells:
-                log.info(
-                    "Flat mode: skipping %d already-complete well(s): %s. "
-                    "Use --force to reprocess.",
-                    len(skip_wells), sorted(skip_wells),
-                )
-
-        all_records, failed = run_pipeline_on_directory(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            shared_kwargs=shared_kwargs,
-            nuclear_token=args.nuclear_token,
-            fluor_tokens=fluor_tokens_for_quant,
-            workers=workers,
-            skip_wells=skip_wells,
-            force_cpu=args.cpu_only,
-            threads_per_worker=threads_per_worker,
-            groups=groups_all,
-            schema=schema,
-            sep=sep,
+        # No grouped input found. Every real entry point (the Analyze tab, the
+        # remote runner, and the "in"-directory loose-TIF organizer above)
+        # groups images into per-well zips or folders before invoking this
+        # script, so reaching here means the input was never grouped. Fail
+        # loudly and non-zero rather than silently processing nothing.
+        import sys as _sys
+        log.error(
+            "No per-well zips (<WELL>.zip) or folders (<WELL>/) found in %s. "
+            "Group the input first — run through the Analyze tab, or name the "
+            "input directory 'in' so loose TIFs are grouped automatically. "
+            "Exiting.",
+            input_dir,
         )
-        if not all_records and not failed:
-            log.error("No valid image pairs found. Exiting.")
-            return
-        failed_wells = failed
-        write_csvs_per_well(all_records, output_dir, args.csv_prefix)
-        log.info("=" * 60)
-        log.info("Total rows : %d", len(all_records))
-        if failed:
-            log.warning("%d pair(s) failed:", len(failed))
-            for name in failed:
-                log.warning("  %s", name)
-        log.info("Per-well CSVs written to: %s", output_dir)
-        log.info("=" * 60)
+        _sys.exit(1)
 
     # Auto-threshold pass: now that every well has been processed and the
     # output zips + pipeline_info sidecar are on disk, compute a default

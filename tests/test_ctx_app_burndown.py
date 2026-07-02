@@ -92,7 +92,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (drag_state), cell_gating (cell_areas/fluor_data/ratio_data/
 #              ax/axes_stack/worker), multivariate (picker_refreshing).
 #              Persisted fields (edits/choices/selections/cells/lut) excluded.
-CTX_APP_BUDGET = 258
+#   258 -> 249  T2 runtime callback stashes -> ctx.runtime.<f>: scatter
+#              (set_mode, gates_changed_cb), batch_export (set_mode),
+#              saved_plots (repopulate), multivariate (refresh_* / sync_
+#              controls). Live closures stamped for other layers to call.
+CTX_APP_BUDGET = 249
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

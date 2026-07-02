@@ -292,9 +292,9 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         std_cb.setEnabled(mode != mv_state.MODE_CORRELATION)
         mode_seg.setCurrentByData(mode)
 
-    ctx.app._mv_refresh_timepoints = _refresh_timepoints
-    ctx.app._mv_refresh_facet_values = _refresh_facet_values
-    ctx.app._mv_sync_controls = _sync_controls
+    ctx.runtime.multivariate.refresh_timepoints = _refresh_timepoints
+    ctx.runtime.multivariate.refresh_facet_values = _refresh_facet_values
+    ctx.runtime.multivariate.sync_controls = _sync_controls
 
     _refresh_timepoints()
     _refresh_facet_values()

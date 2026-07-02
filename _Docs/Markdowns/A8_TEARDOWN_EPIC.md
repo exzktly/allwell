@@ -131,7 +131,7 @@ intentional surface between features and the window shell.
 | ID | Workstream | Depends on | Risk | Status | Metric |
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[ ]` | 293 → _tbd_ |
-| T2 | Feature runtime holders | — | Low | `[~]` | 293 → 258 (8 features migrated) |
+| T2 | Feature runtime holders | — | Low | `[~]` | 293 → 249 (data + callback stashes, 8 features) |
 | T3 | Thread ctx through controllers | T1 | High | `[ ]` | |
 | T4 | Extract cross-cutting services | T1 | Med | `[ ]` | |
 | T5 | Saved-plots service | — | Med | `[ ]` | |

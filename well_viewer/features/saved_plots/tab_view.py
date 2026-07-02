@@ -109,7 +109,7 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     reg.register("_saved_plots_list_host", list_host)
     # Controller repaints the gallery through this callback (avoids a
     # controller → tab_view import cycle).
-    ctx.app._saved_plots_repopulate = lambda: populate_saved_plots_grid(ctx.app)
+    ctx.runtime.saved_plots.repopulate = lambda: populate_saved_plots_grid(ctx.app)
 
     layout.addWidget(stack, 1)
     populate_saved_plots_grid(ctx.app)

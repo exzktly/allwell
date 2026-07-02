@@ -46,7 +46,8 @@ class AppRuntime:
     """
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
-                 "heatmap", "barplot", "cell_gating", "multivariate")
+                 "heatmap", "barplot", "cell_gating", "multivariate",
+                 "batch_export", "saved_plots")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -63,3 +64,8 @@ class AppRuntime:
         object.__setattr__(self, "barplot", _FeatureRuntime(app, "_bar_"))
         object.__setattr__(self, "cell_gating", _FeatureRuntime(app, "_cell_gating_"))
         object.__setattr__(self, "multivariate", _FeatureRuntime(app, "_mv_"))
+        # Live callback closures a builder stamps for other layers to invoke
+        # (set-mode, repopulate, refreshers). Persistence calls some of these
+        # through the stamp — the closures are live objects, not serialized data.
+        object.__setattr__(self, "batch_export", _FeatureRuntime(app, "_batch_export_"))
+        object.__setattr__(self, "saved_plots", _FeatureRuntime(app, "_saved_plots_"))

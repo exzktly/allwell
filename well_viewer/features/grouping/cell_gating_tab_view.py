@@ -383,7 +383,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # immediately so every other view tracks the gates without waiting for a tab
     # switch. (Safe now that the per-cell scatter never filters itself by the
     # gates — see df_included_mask(include_gate=False).)
-    ctx.app._scatter_gates_changed_cb = lambda _app=ctx.app: cell_gating_sync_scatter_gates(_app)
+    ctx.runtime.scatter.gates_changed_cb = lambda _app=ctx.app: cell_gating_sync_scatter_gates(_app)
     _cell_gating_refresh_gate_filter(ctx.app)
     _cell_gating_refresh_gate_summary(ctx.app)
     _cell_gating_apply_scatter_gate_mode(ctx.app)

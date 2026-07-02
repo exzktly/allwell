@@ -90,7 +90,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
                 redraw_scatter_orchestrate(ctx.app)
             except Exception:
                 swallowed()  # was: pass (silent except)
-    ctx.app._scatter_set_mode = _set_mode
+    ctx.runtime.scatter.set_mode = _set_mode
 
     tab_widget.currentChanged.connect(
         lambda idx: _set_mode(_MODE_AGG if idx == 1 else _MODE_CELLS)

@@ -79,5 +79,5 @@ def build_feature_picker(ctx, panel_layout) -> None:
         finally:
             ctx.runtime.multivariate.picker_refreshing = False
 
-    ctx.app._mv_refresh_feature_picker = refresh
+    ctx.runtime.multivariate.refresh_feature_picker = refresh
     refresh()

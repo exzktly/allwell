@@ -74,9 +74,33 @@ def request_reference_fields(app, well: str, chan_lower: str, *,
     chan_lower, ff_field, bg_field)`` on the GUI thread when finished. Returns
     the bridge (keep a reference alive for the duration)."""
     bridge = _ReferenceBridge()
-    bridge.done.connect(lambda payload: on_done(*payload))
-    if on_failed is not None:
-        bridge.failed.connect(on_failed)
+
+    def _disconnect() -> None:
+        # One-shot: drop both connections after the bridge fires so the bridge
+        # (and the widget/app captured by on_done/on_failed) can be released
+        # instead of leaking a fresh connected QObject on every call (audit
+        # E23). Disconnecting an already-empty signal raises, so guard it.
+        for sig in (bridge.done, bridge.failed):
+            try:
+                sig.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+
+    def _handle_done(payload) -> None:
+        try:
+            on_done(*payload)
+        finally:
+            _disconnect()
+
+    def _handle_failed(msg: str) -> None:
+        try:
+            if on_failed is not None:
+                on_failed(msg)
+        finally:
+            _disconnect()
+
+    bridge.done.connect(_handle_done)
+    bridge.failed.connect(_handle_failed)
 
     def _run() -> None:
         try:

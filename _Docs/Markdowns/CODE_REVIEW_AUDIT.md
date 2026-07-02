@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **47 / 77 items resolved** (46 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **48 / 77 items resolved** (47 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -62,7 +62,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E20 | `_current_proc` read without lock → Stop can miss child | M | `[x]` DONE | #597 |
 | E21 | `pipeline_runner.stop()` reads worker-assigned `_proc` unsynced | M | `[x]` DONE | `test_pipeline_runner_stop_race.py` |
 | E22 | cell_browser unbounded threads read invalidated zip cache | M | `[x]` DONE | `test_cell_browser_loader_supersede.py` |
-| E23 | playground `_ReferenceBridge` never disconnected | L | `[ ]` TODO | |
+| E23 | playground `_ReferenceBridge` never disconnected | L | `[x]` DONE | `test_playground_bridge_disconnect.py` |
 
 ### S — Scientific correctness (Pass 4 / 2.5)
 | ID | Item | Sev | Status | Commit/PR |
@@ -296,7 +296,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **Medium —** `remote_runner.py:2557-2571` (`_current_proc` read without a lock → Stop can miss the running child). — **E20** `[x]` DONE (lock-snapshot `_current_proc`; `tests/test_batched_remote_teardown.py`)
 - **Medium —** `pipeline_runner.py:364-387` (`stop()` reads `_proc` assigned on the worker thread with no sync). — **E21** `[x]` DONE — added `_proc_lock`; the launch path (`_spawn_tracked`) checks `_stop_requested` and assigns `_proc` under the lock, and `stop()` sets the flag then snapshots `_proc`/`_zipper_proc` under the same lock. Either stop wins (subprocess never launches) or the launch wins and stop signals the handle it sees — closing the launch-after-stop orphan race. `test_pipeline_runner_stop_race.py`.
 - **Medium —** `cell_browser/worker.py:202` (unbounded threads read a `zipfile_cache` a dataset swap can `invalidate()`). — **E22** `[x]` DONE — `CellImageLoader` now tracks `_latest_gen`; the daemon loop checks `gen != self._latest_gen` before every compose and bails the instant a newer page (or `cancel()`) supersedes it, so stale threads stop reading the (possibly invalidated) cache instead of grinding the whole page. `cancel()` is wired into `teardown_review_pane` for app-close. `test_cell_browser_loader_supersede.py`.
-- **Low —** playground `_ReferenceBridge` connected per call, never disconnected. — **E23** `[ ]` TODO
+- **Low —** playground `_ReferenceBridge` connected per call, never disconnected. — **E23** `[x]` DONE — `request_reference_fields` now wires one-shot handlers that disconnect both `done`/`failed` signals after the bridge fires, so the bridge (and the widget/app captured by the callbacks) is released instead of leaking a fresh connected QObject per call. `test_playground_bridge_disconnect.py`.
 - **Verified correct:** the plate-selection debounce; `channel_state_controller` `blockSignals` discipline. → see Non-goals.
 
 ### 2.4 State lifecycle / teardown
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch W (playground bridge leak)** — **E23** (`request_reference_fields` now uses one-shot handlers that disconnect both `done`/`failed` signals after the bridge fires, releasing the per-call `_ReferenceBridge` QObject + the widget/app its callbacks captured, instead of leaking a fresh connected object on every reference build). +3 tests. Fast lane + full playground suite green. 48/77 resolved.
+
 - 2026-07-02 **Batch V (cell-browser loader)** — **E22** (`CellImageLoader` tracks `_latest_gen`; its daemon loop bails before every compose once superseded by a newer page or `cancel()`, so a burst of paging / a dataset swap no longer leaves unbounded threads reading the invalidated zipfile cache; `cancel()` wired into `teardown_review_pane`). +3 tests. Fast lane green. 47/77 resolved.
 
 - 2026-07-02 **Batch U (stop/launch race)** — **E21** (new `_proc_lock` makes the pipeline-subprocess launch atomic against `stop()`: `_spawn_tracked` checks `_stop_requested` and assigns `_proc` under the lock; `stop()` sets the flag then snapshots the handles under the same lock. Closes the launch-after-stop race that could orphan a subprocess when a Stop click read `_proc` as None mid-launch). +4 tests. Fast lane green. 46/77 resolved.
@@ -468,4 +470,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch V merged (E22 cell-browser loader supersede + tests); **47 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch W merged (E23 playground bridge disconnect + tests); **48 / 77 resolved.**

@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **31 / 77 items resolved** (30 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **33 / 77 items resolved** (32 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -123,9 +123,9 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | X1 | reset gates/overrides in `load_directory` → stop cross-dataset leak | H | `[ ]` TODO | |
 | X2 | `_materialize` atomic tmp→replace; delete-remote only after confirm | H | `[x]` DONE | #597 |
 | X3 | batch-export: stage-temp→rename on full success + manifest | H | `[ ]` TODO | |
-| X4 | validate radius/FFT numeric inputs at entry (stop silent flag-drop) | H | `[ ]` TODO | |
+| X4 | validate radius/FFT numeric inputs at entry (stop silent flag-drop) | H | `[x]` DONE | #597 |
 | X5 | init undeclared `app._*` (esp. `_label_to_channel_key` lossy fallback) | M | `[ ]` TODO | |
-| X6 | validate negative/zero + QC bound ordering at entry | M | `[ ]` TODO | |
+| X6 | validate negative/zero + QC bound ordering at entry | M | `[x]` DONE | #597 |
 | X7 | add `view_state` schema `_migrate()` (stop silent discard on bump) | M | `[ ]` TODO | |
 | X8 | persist only non-default `export_style_prefs` (replace, not merge) | M | `[x]` DONE | #597 |
 | X9 | unlink `tmp_zip` on incomplete fetch (`try/finally`) | M | `[x]` DONE | #597 |
@@ -329,8 +329,8 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 - **Low — `data_loading.py:307`**: `_missing_col_warned` is keyed by `id(df)`, reused after GC → a legitimately-due warning can be suppressed, and the global set grows unbounded per session. *Fix: key by a stable dataset/well id.* — **S7** `[x]` DONE (`tests/test_resolve_value_series_warn_key.py`)
 
 **Numeric input boundary (`analyze_tab.py` / `analyze_tab_form.py`) — every numeric field is a plain `QLineEdit` with no validator; `_validate_run_request:692-720` checks only folders/schema/tokens/background-well:**
-- **High —** a plausible non-integer radius/FFT entry like `100.5` raises `ValueError` at `pipeline_service.py:92/96/100/104`, the `--tophat_radius_*` flag is **silently omitted**, and the pipeline falls back to its own default while the form still shows "100.5" → **measured intensities silently diverge from what the user configured**. *Fix: `QIntValidator`/`QSpinBox`, or block the run in `_validate_run_request`.* — **X4** `[ ]` TODO
-- **Medium —** negative/zero values accepted unvalidated: `mesh_ratio=0` → downstream division-by-zero; negative radius/`tf_threads`/`remote_batch_size` pass through; negative `workers` silently dropped. **And** QC bounds: `_safe_qc_float:57-62` coerces bad text to `0.0`; inverted `min>max` area or `min_solidity>1` accepted → debris filter silently drops cells. *Fix: enforce ranges + `min<=max` + 0–1 solidity at entry.* — **X6** `[ ]` TODO
+- **High —** a plausible non-integer radius/FFT entry like `100.5` raises `ValueError` at `pipeline_service.py:92/96/100/104`, the `--tophat_radius_*` flag is **silently omitted**, and the pipeline falls back to its own default while the form still shows "100.5" → **measured intensities silently diverge from what the user configured**. *Fix: `QIntValidator`/`QSpinBox`, or block the run in `_validate_run_request`.* — **X4** `[x]` DONE (`_numeric_option_errors` in `_validate_run_request`; `tests/test_analyze_numeric_validation.py`)
+- **Medium —** negative/zero values accepted unvalidated: `mesh_ratio=0` → downstream division-by-zero; negative radius/`tf_threads`/`remote_batch_size` pass through; negative `workers` silently dropped. **And** QC bounds: `_safe_qc_float:57-62` coerces bad text to `0.0`; inverted `min>max` area or `min_solidity>1` accepted → debris filter silently drops cells. *Fix: enforce ranges + `min<=max` + 0–1 solidity at entry.* — **X6** `[x]` DONE (same validator: negative/zero + QC ordering/solidity range)
 
 **`view_state.py` round-trip drift:**
 - **Medium —** a schema-version bump silently discards **all** saved view-state (`view_state.py:1049-1052`; `_doc.py:89-94`) — no migration function. *Fix: add a `_migrate(state, from_version)` step, or surface the discard.* — **X7** `[ ]` TODO
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch K (input validation)** — **X4/X6** (`_numeric_option_errors`, wired into `_validate_run_request`, blocks a bad radius/FFT/mesh/threads/workers/batch value, `mesh_ratio=0`, inverted QC area bounds, or out-of-range solidity at the entry boundary — instead of silently dropping the flag or dividing by zero downstream). +8 tests. analyze_tab budget re-baselined 1176→1206. Fast lane green (1269). 33/77 resolved.
+
 - 2026-07-02 **Batch J (error-surfacing)** — **E10** (saved-plot capture logs instead of silently dropping the group/stats config), **E15** (corrupt image/mask in the image table leaves a DEBUG breadcrumb, not a silent blank tile), **E17** (both remote-dialog `_runner` closures always enqueue a result so `_poll` can't spin forever). +3 tests (E17 is a Qt closure, inspection-verified). Fast lane green (1262). 31/77 resolved.
 
 - 2026-07-02 **Batch I (remote teardown safety)** — **X10** (stdout sentinel moved into an inner `finally` so a `flush_and_join` failure can't hang the reader), **E20** (`_current_proc` guarded by a lock; terminate/kill/pid/send_signal snapshot it), **E13** (failed `scancel`/`kill` surfaced at WARNING instead of swallowed). +6 tests. Fast lane green (1259). 28/77 resolved.
@@ -444,4 +446,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch J merged (error-surfacing + tests); **31 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch K merged (input validation + tests); **33 / 77 resolved.**

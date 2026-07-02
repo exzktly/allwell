@@ -63,7 +63,10 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 963
 # Ratcheted back to 1176: the loose-TIFs-in-``in/`` work centralized the
 # well-count + layout detection into input_resolution_service.count_expected_wells,
 # removing the duplicated counter from the tab.
-ANALYZE_TAB_BUDGET = 1176
+# Code-review X4/X6 (+30): the entry-boundary numeric validator
+# (_numeric_option_errors + _INT_FIELDS) that blocks a bad radius/FFT/mesh/QC
+# value up front instead of silently dropping it. Resume ratcheting from 1206.
+ANALYZE_TAB_BUDGET = 1206
 
 
 def _line_count(rel: str) -> int:

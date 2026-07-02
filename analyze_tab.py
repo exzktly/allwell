@@ -61,6 +61,58 @@ def _safe_qc_float(text: str) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+
+# Numeric fields are plain QLineEdits with no validators, and bad values used to
+# be swallowed deep in the pipeline (a non-integer radius silently dropped its
+# flag; mesh_ratio=0 caused a downstream division-by-zero). Validate them at the
+# entry boundary instead (audit X4/X6). Pure + module-level so it's unit-tested.
+_INT_FIELDS = {
+    "tophat_radius_nir": "Nuclear tophat radius",
+    "tophat_radius_fluor": "Fluor tophat radius",
+    "fft_small_nir": "Nuclear FFT small-object px",
+    "fft_small_fluor": "Fluor FFT small-object px",
+    "tf_threads": "TF threads",
+    "workers": "Workers",
+    "remote_batch_size": "Remote batch size",
+}
+
+
+def _numeric_option_errors(opts: dict) -> list[str]:
+    """Return human-readable errors for out-of-range / unparseable numeric run
+    options. Empty/blank means "use the pipeline default" and is allowed."""
+    errors: list[str] = []
+    for key, label in _INT_FIELDS.items():
+        raw = str(opts.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            if int(raw) < 0:
+                errors.append(f"{label} must be a whole number ≥ 0 (got {raw!r}).")
+        except ValueError:
+            errors.append(f"{label} must be a whole number (got {raw!r}).")
+    for key, label, allow_zero in (("mesh_ratio", "Mesh tile ratio", False),
+                                   ("mesh_sigma", "Mesh sigma", True)):
+        raw = str(opts.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            val = float(raw)
+        except ValueError:
+            errors.append(f"{label} must be a number (got {raw!r}).")
+            continue
+        if allow_zero and val < 0:
+            errors.append(f"{label} must be ≥ 0.")
+        elif not allow_zero and val <= 0:
+            errors.append(f"{label} must be > 0.")   # 0 → downstream div-by-zero
+    mn = opts.get("qc_min_area") or 0.0
+    mx = opts.get("qc_max_area") or 0.0
+    if mn and mx and mn > mx:
+        errors.append("QC minimum area must be ≤ maximum area.")
+    sol = opts.get("qc_min_solidity") or 0.0
+    if not (0.0 <= sol <= 1.0):
+        errors.append("QC minimum solidity must be between 0 and 1.")
+    return errors
+
 # ---------------------------------------------------------------------------
 # Schema vocabulary — kept in sync with process_microscopy.py
 # ---------------------------------------------------------------------------
@@ -703,6 +755,13 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         seg_errors = self._segmentation_validation_errors()
         if seg_errors:
             QMessageBox.critical(self, "Segmentation Error", "\n".join(seg_errors))
+            return None
+        # Numeric fields (radius / FFT / mesh / threads / workers / batch / QC
+        # bounds) — block a bad value at the boundary instead of silently
+        # dropping the flag or dividing by zero downstream (audit X4/X6).
+        num_errors = _numeric_option_errors(self._collect_run_options())
+        if num_errors:
+            QMessageBox.critical(self, "Input Error", "\n".join(num_errors))
             return None
         # Empty-well flat-field / background reads its reference images from a
         # named background well — require it to be specified AND to exist in the

@@ -281,6 +281,91 @@ def compute_pairwise(app, *, groups, target_t, val_col, statistic, threshold, te
     return out
 
 
+def _sig_marker(p: float) -> str:
+    """Significance stars for a p-value (audit A5): ``***``/``**``/``*``/``ns``."""
+    return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+
+
+def _resolve_sample_units(is_ks: bool, solo_groups: List[str]) -> str:
+    """The 'Samples:' descriptor for the report header (audit A5)."""
+    if is_ks:
+        return "per-cell values"
+    if solo_groups:
+        return ("per-well (replicate sets) · per-FOV (single-well "
+                "groups, FOV mode on)")
+    return "per-well samples"
+
+
+def _build_header_lines(
+    *, test: str, channel_lbl: str, stat_lbl: str, threshold: float,
+    tp_str: str, is_ks: bool, solo_groups: List[str],
+) -> List[str]:
+    """Assemble the report header block (audit A5). Pure — takes resolved
+    labels and returns the lines, including the single-well FOV note."""
+    sample_units = _resolve_sample_units(is_ks, solo_groups)
+    header_lines: List[str] = [
+        f"Test:       {test}",
+        f"Channel:    {channel_lbl}",
+        f"Statistic:  {stat_lbl}" if not is_ks else "Statistic:  per-cell distribution",
+        f"Threshold:  {threshold:.2f}",
+        f"Timepoint:  {tp_str} h",
+        f"Samples:    {sample_units}",
+        "",
+    ]
+    if solo_groups and not is_ks:
+        header_lines.insert(-1,
+            "Note:       single-well group(s) " + ", ".join(solo_groups)
+            + " — tested across FOVs (one sample per FOV) because FOV mode is "
+            "ON and no replicate wells are defined for them.")
+        header_lines.insert(-1, "")
+    return header_lines
+
+
+def _format_group_summary_lines(group_vals: List[Tuple[str, List[float]]]) -> List[str]:
+    """Per-group n/mean/median/sd summary block (audit A5). Pure."""
+    lines: List[str] = []
+    for name_a, vals_a in group_vals:
+        if not vals_a:
+            continue
+        med = _pystats.median(vals_a)
+        try:
+            sd_val = _pystats.stdev(vals_a) if len(vals_a) > 1 else 0.0
+        except _pystats.StatisticsError:
+            sd_val = 0.0
+        lines.append(
+            f"{name_a}:  n={len(vals_a)}  "
+            f"mean={sum(vals_a)/len(vals_a):.4g}  "
+            f"median={med:.4g}  "
+            f"sd={sd_val:.4g}"
+        )
+    lines.append("")
+    return lines
+
+
+def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) -> List[str]:
+    """Pairwise test results + BH-adjusted p-values (audit A5). Pure."""
+    lines: List[str] = []
+    for idx, (name_a, name_b, stat_name, stat_value, p, err) in enumerate(pair_results):
+        lines.append(f"── {name_a}  vs  {name_b} ──")
+        if err is not None:
+            lines.append(f"  Error: {err}")
+        elif p is not None and stat_value is not None:
+            line = f"  {stat_name} = {stat_value:.4f}   p = {p:.4g}   {_sig_marker(p)}"
+            if show_adjusted and idx in adjusted:
+                ap = adjusted[idx]
+                line += f"   |   p_BH = {ap:.4g}   {_sig_marker(ap)}"
+            lines.append(line)
+        lines.append("")
+    if show_adjusted:
+        lines.append(
+            f"p_BH: Benjamini-Hochberg FDR-adjusted p-value across "
+            f"{len(adjusted)} pairwise comparison(s). Report p_BH alongside "
+            f"raw p when quoting significance with 3+ groups."
+        )
+        lines.append("")
+    return lines
+
+
 def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     """Run the selected statistical test across all group pairs."""
     tp_str = app._stats_tp_cb.currentText()
@@ -378,73 +463,19 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         g.name for g in groups
         if len([w for w in g.wells if w in app._app_state.dataset.well_paths]) == 1
     ]
-    if is_ks:
-        sample_units = "per-cell values"
-    elif solo_groups:
-        sample_units = ("per-well (replicate sets) · per-FOV (single-well "
-                        "groups, FOV mode on)")
-    else:
-        sample_units = "per-well samples"
-    header_lines: List[str] = [
-        f"Test:       {test}",
-        f"Channel:    {channel_lbl}",
-        f"Statistic:  {stat_lbl}" if not is_ks else "Statistic:  per-cell distribution",
-        f"Threshold:  {threshold:.2f}",
-        f"Timepoint:  {tp_str} h",
-        f"Samples:    {sample_units}",
-        "",
-    ]
-    if solo_groups and not is_ks:
-        header_lines.insert(-1,
-            "Note:       single-well group(s) " + ", ".join(solo_groups)
-            + " — tested across FOVs (one sample per FOV) because FOV mode is "
-            "ON and no replicate wells are defined for them.")
-        header_lines.insert(-1, "")
-    lines: List[str] = list(header_lines)
-    for name_a, vals_a in group_vals:
-        if not vals_a:
-            continue
-        med = _pystats.median(vals_a)
-        try:
-            sd_val = _pystats.stdev(vals_a) if len(vals_a) > 1 else 0.0
-        except _pystats.StatisticsError:
-            sd_val = 0.0
-        lines.append(
-            f"{name_a}:  n={len(vals_a)}  "
-            f"mean={sum(vals_a)/len(vals_a):.4g}  "
-            f"median={med:.4g}  "
-            f"sd={sd_val:.4g}"
-        )
-    lines.append("")
+    lines: List[str] = _build_header_lines(
+        test=test, channel_lbl=channel_lbl, stat_lbl=stat_lbl,
+        threshold=threshold, tp_str=tp_str, is_ks=is_ks, solo_groups=solo_groups,
+    )
+    lines += _format_group_summary_lines(group_vals)
 
     # Run every pair, then apply Benjamini-Hochberg FDR across all valid
     # p-values (shared with ``compute_pairwise`` so the live results and a
     # Saved-Plot re-run are computed by the exact same code).
     pair_results = _run_pair_tests(group_vals, test, is_ks)
     adjusted = _bh_adjust(pair_results)
-
     show_adjusted = len(adjusted) >= 2
-
-    for idx, (name_a, name_b, stat_name, stat_value, p, err) in enumerate(pair_results):
-        lines.append(f"── {name_a}  vs  {name_b} ──")
-        if err is not None:
-            lines.append(f"  Error: {err}")
-        elif p is not None and stat_value is not None:
-            sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
-            line = f"  {stat_name} = {stat_value:.4f}   p = {p:.4g}   {sig}"
-            if show_adjusted and idx in adjusted:
-                ap = adjusted[idx]
-                asig = "***" if ap < 0.001 else "**" if ap < 0.01 else "*" if ap < 0.05 else "ns"
-                line += f"   |   p_BH = {ap:.4g}   {asig}"
-            lines.append(line)
-        lines.append("")
-    if show_adjusted:
-        lines.append(
-            f"p_BH: Benjamini-Hochberg FDR-adjusted p-value across "
-            f"{len(adjusted)} pairwise comparison(s). Report p_BH alongside "
-            f"raw p when quoting significance with 3+ groups."
-        )
-        lines.append("")
+    lines += _format_pairwise_lines(pair_results, adjusted, show_adjusted)
 
     app._stats_write_result("\n".join(lines))
 

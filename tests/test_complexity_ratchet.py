@@ -84,9 +84,9 @@ def _functions_over_threshold() -> dict[str, int]:
 
 
 # Frozen baseline (CC > 40 as of the code-review remediation). SHRINK ONLY.
-# Prime decomposition targets: A5 (redraw_line_plots, run_stats). A4
-# (find_well_images_and_masks) was decomposed — see below. Remove an entry when
-# you take it under 40.
+# The audit's prime decomposition targets — A4 (find_well_images_and_masks),
+# A5 (redraw_line_plots, run_stats) — are all DONE (see notes below). Remove an
+# entry when you take it under 40.
 ALLOWLIST = {
     "well_viewer/features/barplot/collect.py::collect_bar_items",
     "well_viewer/features/barplot/collect.py::collect_bar_items._items_for_tp",
@@ -100,7 +100,9 @@ ALLOWLIST = {
     "well_viewer/features/export/sidebar_view.py::ExportStyleSidebar._build_ui",
     "well_viewer/persistence/view_state.py::restore",
     "process_microscopy.py::main",
-    "well_viewer/features/lineplot/controller.py::redraw_line_plots",
+    # A5 DONE: redraw_line_plots (was CC 69) decomposed — the per-series painter
+    # (_paint_series) and the legend/CDF finalizer (_finalize_line_axes) were
+    # extracted; the function is now CC 28. Removed from the allowlist.
     "well_viewer/core/centre_view.py::build_centre._build_plotting",
     "well_viewer/features/barplot/collect.py::collect_bar_items_for_group",
     "services/remote_runner.py::stage_local_zips",
@@ -110,7 +112,10 @@ ALLOWLIST = {
     "well_viewer/features/image_browser/image_table/export.py::_build_export_figure",
     "well_viewer/core/channel_state_controller.py::update_channel_selector",
     "well_viewer/core/selection_controller.py::refresh_sidebar_map_now",
-    "well_viewer/features/stats/controller.py::run_stats",
+    # A5 DONE: run_stats (was CC 52) decomposed — the pure report formatters
+    # (_build_header_lines / _format_group_summary_lines / _format_pairwise_lines
+    # / _resolve_sample_units / _sig_marker) were extracted and unit-tested; the
+    # function is now CC 30. Removed from the allowlist.
     "well_viewer/features/barplot/controller.py::render_bar_items",
     "well_viewer/core/load_controller.py::load_directory",
     "well_viewer/features/lineplot/controller.py::collect_line_series",

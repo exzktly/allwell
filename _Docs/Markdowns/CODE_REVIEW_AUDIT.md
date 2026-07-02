@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **54 / 77 items resolved** (53 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **55 / 77 items resolved** (54 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -103,7 +103,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A2 | fetch-side reuse `pipeline.io` merge instead of reimpl | H | `[ ]` TODO | |
 | A3 | extract `cell_gating` domain compute out of the view | H | `[ ]` TODO | |
 | A4 | characterization tests for CC-98 `find_well_images_and_masks`, decompose | H | `[x]` DONE | `test_find_well_images_characterization.py` |
-| A5 | characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats` | H | `[ ]` TODO | |
+| A5 | characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats` | H | `[x]` DONE | `test_stats_report_formatting.py` |
 | A6 | ~~delete cosmetic `WidgetRegistry`~~ (stale — verified live) | H | `[-]` DROPPED | #597 |
 | A7 | split `scatter/callbacks.py` (handlers vs single-cell viewer) | M | `[ ]` TODO | |
 | A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[ ]` TODO | |
@@ -385,7 +385,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 
 The monolith budgets constrain *file size* but not *function complexity*.
 - **Priority — characterization tests for CC-98 `find_well_images_and_masks`, then decompose.** — **A4** `[x]` DONE — added `test_find_well_images_characterization.py` (6 golden cases pinning every layout: flat subfolder, raw-file fallback + foreign-well filter, in/out zips, first-hit-wins precedence, in/out subfolders, empty). Then decomposed the CC-98 monolith into `_merge_scan` (the 6×-repeated 4-dict `setdefault` block), `_discover_from_layouts` (sections 1/1b/2/2b), `_scan_raw_disk_files` + `_raw_file_well_passes` (the rglob fallback + well-token filter), and `_log_find_result` — the orchestrator is now **CC 13** (every helper < 40), behaviour byte-identical (all 6 golden cases + 92 discovery/review/smFISH tests green). Removed from the complexity allowlist.
-- **Characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats`, then decompose.** — **A5** `[ ]` TODO
+- **Characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats`, then decompose.** — **A5** `[x]` DONE — **`run_stats`** (CC 52 → 30): extracted the pure report formatters (`_sig_marker`, `_resolve_sample_units`, `_build_header_lines`, `_format_group_summary_lines`, `_format_pairwise_lines`) and unit-tested them directly (8 cases in `test_stats_report_formatting.py`, covering logic the god-function never had a direct test for). **`redraw_line_plots`** (CC 69 → 28): extracted the per-series painter (`_paint_series`) and the legend/CDF finalizer (`_finalize_line_axes` + module-level `_has_labeled`); verified byte-identical by the end-to-end line-plot rendering suite (`test_redraw_fanout` 6✓, `test_fold_change_scopes` 12✓, `test_split_view` 11✓, all driving `_redraw` with the Line Graphs tab visible). Both removed from the complexity allowlist.
 - **Add an intra-file function-complexity ratchet alongside the line-budget ratchets.** — **G6** `[x]` DONE (`tests/test_complexity_ratchet.py` — CC>40 shrink-only allowlist of 29 functions)
 
 ### 5.3 Test quality — **a strength**
@@ -422,6 +422,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 ## Status log
 
 > Append a dated line whenever a status box changes. Newest first.
+
+- 2026-07-02 **Batch AB (god-module: A5)** — **A5** (decomposed the two next-highest-complexity functions. `run_stats` CC 52→30 via pure, unit-tested report formatters; `redraw_line_plots` CC 69→28 via `_paint_series` + `_finalize_line_axes`, verified byte-identical by the end-to-end line-plot rendering suite). Both removed from the complexity allowlist. +8 tests. Fast lane + rendering tests green. 55/77 resolved.
 
 - 2026-07-02 **Batch AA (god-module: A4)** — **A4** (decomposed the single highest-complexity function in the tree, `find_well_images_and_masks` CC 98 → orchestrator CC 13, via `_merge_scan` / `_discover_from_layouts` / `_scan_raw_disk_files` / `_raw_file_well_passes` / `_log_find_result`; 6 golden characterization tests pinned every layout first, then verified byte-identical). Removed from the complexity allowlist. +6 tests, 92 related tests green. 54/77 resolved.
 
@@ -478,4 +480,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch AA merged (A4 decompose find_well_images_and_masks CC 98→13 + characterization tests); **54 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch AB merged (A5 decompose run_stats CC 52→30 + redraw_line_plots CC 69→28); **55 / 77 resolved.**

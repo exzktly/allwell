@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **67 / 77 items resolved** (66 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **70 / 77 items resolved** (69 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -67,11 +67,11 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 ### S — Scientific correctness (Pass 4 / 2.5)
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
-| S1 | `build_cell_scaling` ignores op/order/baseline → overlays ≠ bars | H | `[ ]` TODO | |
+| S1 | `build_cell_scaling` ignores op/order/baseline → overlays ≠ bars | H | `[x]` DONE | `test_fold_change.py` |
 | S2 | timepoint tolerance mismatch (abs 1e-6 vs rel 1e-3) → tps unmatched | H | `[x]` DONE | #597 |
-| S3 | per-cell fold-change collapses multi-tp to first tp | M | `[ ]` TODO | |
+| S3 | per-cell fold-change collapses multi-tp to first tp | M | `[x]` DONE | `test_fold_change.py` |
 | S4 | `stats_cache` keys omit gate/on-population state → stale stats | M | `[x]` DONE | #597 |
-| S5 | image-decode numeric-close/first-FOV fallback → wrong frame | M | `[ ]` TODO | |
+| S5 | image-decode numeric-close/first-FOV fallback → wrong frame | M | `[x]` DONE | `test_image_compose_fov_fallback.py` |
 | S6 | even-n median reported as upper element | L | `[x]` DONE | #597 |
 | S7 | `_missing_col_warned` keyed by `id(df)` | L | `[x]` DONE | #597 |
 | S8 | circularity computed before `per>0` mask (+ empty-vals CDF) | L | `[x]` DONE | #597 |
@@ -320,8 +320,8 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 - **Note (not defects):** `_filter_rows_by_timepoint` float `==` is safe; the optimizer's sign-safe gap is correct. → see Non-goals.
 
 ### 4.2 Return-value consistency
-- **High — `domain/fold_change.py:1109` `build_cell_scaling`** takes only `fc_state=(vs_control_on, control_label, vs_t0_on)` — **no operator/order/baseline_tp** — always builds a multiplicative factor, and the renderer always **divides** (`barplot/renderer.py:207/355`). Meanwhile the bars honor per-axis ratio-vs-subtract, ctrl/t0 ordering, and the resolved `baseline_tp` (`barplot/collect.py:155-385`). Effect: with "subtract" selected, **bars subtract but overlaid per-cell distributions divide**. *Fix: thread `op_ctrl/op_t0/order/baseline_tp` into `build_cell_scaling` and use `scale_bar_value` semantics.* — **S1** `[ ]` TODO
-- **Medium — `barplot/renderer.py:986`**: per-cell fold-change passes `target_t=target_ts[0]`, silently collapsing multi-timepoint selections to the first tp. *Fix: build scaling per (well, tp), or annotate/disable when multiple tps are active.* — **S3** `[ ]` TODO
+- **High — `domain/fold_change.py:1109` `build_cell_scaling`** takes only `fc_state=(vs_control_on, control_label, vs_t0_on)` — **no operator/order/baseline_tp** — always builds a multiplicative factor, and the renderer always **divides** (`barplot/renderer.py:207/355`). Meanwhile the bars honor per-axis ratio-vs-subtract, ctrl/t0 ordering, and the resolved `baseline_tp` (`barplot/collect.py:155-385`). Effect: with "subtract" selected, **bars subtract but overlaid per-cell distributions divide**. *Fix: thread `op_ctrl/op_t0/order/baseline_tp` into `build_cell_scaling` and use `scale_bar_value` semantics.* — **S1** `[x]` DONE — `build_cell_scaling` now returns a `scale_for(well, tp) -> CellScaleSpec` resolver and a companion `apply_cell_scale(vals, spec)` applies the SAME per-axis operator (ratio÷ vs subtract−), application order, and `baseline_tp` the bars use — so with "subtract" selected the overlaid distribution subtracts too. The renderer threads `parse_fc_op_ctrl/op_t0/order` + `parse_baseline_tp` in; a new `member_baseline_value` honours the chosen baseline tp. Verified by subtract/ratio/both unit cases in `test_fold_change.py` (byte-identical for the pure single-axis ratio case that was the previous behaviour).
+- **Medium — `barplot/renderer.py:986`**: per-cell fold-change passes `target_t=target_ts[0]`, silently collapsing multi-timepoint selections to the first tp. *Fix: build scaling per (well, tp), or annotate/disable when multiple tps are active.* — **S3** `[x]` DONE — took the "build scaling per (well, tp)" route: the `scale_for(well, tp)` resolver (S1) caches the control mean per timepoint, so violin/beeswarm scale each column at its own `col_tp` (already threaded through both draw loops) instead of `target_ts[0]`. Regression: `test_build_cell_scaling_per_tp_control` proves the same cell value scales differently at t=0 vs t=1.
 - **Note (correct):** `multivariate_compute` and `resolve_value_series` return correctly-typed/indexed values on every edge path. → see Non-goals.
 
 ### 4.3 Data-flow integrity
@@ -349,7 +349,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 
 ### 4.5 Concurrency invariants / caches
 - **Medium — `domain/stats_compute.py:347` (+ siblings `:381/415/452`)**: `stats_cache` keys omit the **on-population definition** returned by `_thresh_on_col(app)` (driven by `_cell_gating_use_scatter_thresh`, thresh-layer choices, gate geometry). `_notify_gates_changed` (`scatter/gating.py:431`) does **not** invalidate the stats cache → a gate resize/rename can return **stale cached statistics**. *Fix: add a hash of the active gate set + thresh choices to all four keys, and/or invalidate from `_notify_gates_changed`.* — **S4** `[x]` DONE (both: `_gate_cache_sig` folded into all 4 keys + invalidate on gate change; `tests/test_stats_cache_gate_sig.py`)
-- **Low/Medium — `image_table/image_compose.py:447-476`**: after an exact `(fov, tp)` miss, `_load_array` falls back to a numeric-close (`<1e-6`) any-match and, when `fov` is empty, the **first** available FOV → can surface a neighboring FOV/timepoint image. *Fix: prefer "no image" over a numeric-close tp match; annotate non-exact fallbacks.* — **S5** `[ ]` TODO
+- **Low/Medium — `image_table/image_compose.py:447-476`**: after an exact `(fov, tp)` miss, `_load_array` falls back to a numeric-close (`<1e-6`) any-match and, when `fov` is empty, the **first** available FOV → can surface a neighboring FOV/timepoint image. *Fix: prefer "no image" over a numeric-close tp match; annotate non-exact fallbacks.* — **S5** `[x]` DONE — the tiered resolution moved into `_match_image_ref(images, fov, tp) -> (ref, kind)`; `_load_array` logs a breadcrumb for any non-exact (`normalized`/`numeric`) resolution so a surfaced neighbouring frame is diagnosable. The empty-FOV path now prefers "no image" (`ambiguous_fov`) when >1 distinct FOV matches the timepoint instead of silently taking the first; a genuinely single-FOV dataset still resolves. (Timepoint numeric matching keeps the S2 relative tolerance, which already can't merge distinct timepoints.) Specified-FOV resolution is byte-identical.
 - **Verified correct — `data/zipfile_cache.py`**: keyed by `Path`, validates `st_mtime_ns` on every access, LRU-bounded. → see Non-goals.
 
 **Matplotlib global state + module caches (deep-dive) — this surface is clean; no High/Medium defect.**
@@ -423,6 +423,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch S (scientific: S1, S3, S5)** — **S1** (`build_cell_scaling` now returns a `scale_for(well, tp)` resolver + `apply_cell_scale` applying the SAME per-axis operator/order/baseline-tp the bars use — per-cell overlays subtract when the bars subtract instead of always dividing; new `member_baseline_value` honours the chosen baseline tp), **S3** (the resolver caches control mean per timepoint so violin/beeswarm scale each column at its own `col_tp` rather than collapsing multi-tp to the first), **S5** (tiered image resolution moved to `_match_image_ref`; non-exact `(fov,tp)` resolutions now leave a breadcrumb and an empty FOV dropdown prefers "no image" over an arbitrary first FOV when >1 FOV matches). +8 fold-change unit cases, +7 image-fallback cases; fold-change / barplot / beeswarm suites green. 70/77 resolved.
 - 2026-07-02 **Batch AN (dedup: A12)** — **A12** (folded the barplot fold-change mean/frac/n triplet — pasted 6× — into one `_fc_scale(...)` helper bundling the eight fold-change kwargs; all six `scale_bar_value` sites now call it. The `_apply_axis` baseline-resolution block stays per-axis because mean resolves via `rset_per_fov` while frac/n use `per_fov_spread`). Fold-change end-to-end suite byte-identical. **All A-family items now resolved.** 67/77 resolved.
 - 2026-07-02 **Batch AM (guard: A8)** — **A8** (added a `ctx.app` burn-down ratchet freezing the reference count at 894 so it can only go down — new god-object reach-throughs fail CI; the test forbids gaming via `app = ctx.app` aliasing and has a no-slack companion that forces the budget down when a real migration lands. The enforceable "lint against new uses" half; the cluster migration is the ongoing burn-down it now guards). +2 tests. 66/77 resolved.
 
@@ -503,4 +504,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch AN merged (A12 `_fc_scale` barplot triplet dedup — all A-family items resolved); **67 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch S merged (S1/S3 per-cell fold-change overlay semantics, S5 image-fallback annotation); **70 / 77 resolved.**

@@ -59,6 +59,14 @@ from services.remote_config import (
     to_rsync_path,
     update_bandwidth,
 )
+# Stdlib-only (fov, tp) done-key helpers — shared with pipeline.io (audit A2).
+# This module import must stay imaging-stack-free; incremental_keys is csv/
+# zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
+from pipeline.incremental_keys import (
+    fov_tp_from_name,
+    read_done_fov_keys,
+    read_done_fov_keys_from_zip,
+)
 from util.aw_safe import swallowed
 
 
@@ -1050,72 +1058,6 @@ def _member_matches(member: str, keep_tokens: set[str]) -> bool:
     return any(tok in base for tok in keep_tokens)
 
 
-def _read_done_fov_keys_csv(csv_path: Path) -> "set[tuple[str, str]]":
-    """``(fov, timepoint)`` pairs already present in a per-well CSV.
-
-    A stdlib-only twin of ``pipeline.io.read_done_fov_keys`` — kept here so the
-    client-side split needs no imaging-stack import. Missing / column-less /
-    unreadable CSVs yield an empty set (process everything).
-    """
-    import csv
-
-    if not csv_path.exists():
-        return set()
-    keys: "set[tuple[str, str]]" = set()
-    try:
-        with open(csv_path, newline="") as fh:
-            reader = csv.DictReader(fh)
-            if not reader.fieldnames or "fov" not in reader.fieldnames \
-                    or "timepoint" not in reader.fieldnames:
-                return set()
-            for row in reader:
-                keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
-    except OSError:
-        return set()
-    return keys
-
-
-def _read_done_fov_keys_zip(
-    out_zip: Path, fields: "list[str]", sep: str,
-) -> "set[tuple[str, str]]":
-    """``(fov, timepoint)`` pairs recoverable from a local ``<well>_out.zip``.
-
-    Stdlib-only twin of ``pipeline.io.read_done_fov_keys_from_zip`` (keeps the
-    client-side split imaging-stack-free). The archive's image members keep the
-    input stem, so their tokens recover which FOV-groups are already processed —
-    used as a fallback when the per-well CSV is absent but the well's output zip
-    is present, so the split doesn't re-upload already-done FOVs for a full
-    remote re-segmentation. Missing / unreadable archive ⇒ empty set.
-    """
-    if not out_zip.exists():
-        return set()
-    keys: "set[tuple[str, str]]" = set()
-    try:
-        with zipfile.ZipFile(out_zip, "r") as zf:
-            names = zf.namelist()
-    except (OSError, zipfile.BadZipFile):
-        return set()
-    for name in names:
-        if name.endswith("/"):
-            continue
-        keys.add(_member_fov_tp(name, fields, sep))
-    keys.discard(("", ""))
-    return keys
-
-
-def _member_fov_tp(member: str, fields: "list[str]", sep: str) -> "tuple[str, str]":
-    """Extract the ``(fov, timepoint)`` tokens from a zip member's basename,
-    using the same schema-index discipline ``parse_filename`` applies (so the
-    key compares equal to what's stored in the per-well CSV)."""
-    base = Path(member).stem
-    parts = base.split(sep)
-    fi = fields.index("fov") if "fov" in fields else -1
-    ti = fields.index("timepoint") if "timepoint" in fields else -1
-    fov = parts[fi] if 0 <= fi < len(parts) else ""
-    tp = parts[ti] if 0 <= ti < len(parts) else ""
-    return (fov, tp)
-
-
 def _filter_new_fovs_in_staging(
     well_zips: tuple[Path, ...],
     *,
@@ -1134,7 +1076,6 @@ def _filter_new_fovs_in_staging(
     copies only — never the user's originals. Returns
     ``(surviving_well_zips, up_to_date_wells)``.
     """
-    fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
     survivors: list[Path] = []
     up_to_date: list[str] = []
     n_total = len(well_zips)
@@ -1147,9 +1088,12 @@ def _filter_new_fovs_in_staging(
         # CSV is the primary done-set; fall back to the well's local output zip
         # so a missing/lost CSV doesn't make us re-upload already-done FOVs for a
         # full remote re-segmentation ("reanalyzed previously processed images").
-        done = _read_done_fov_keys_csv(prior_output_dir / f"{csv_prefix}_{well}.csv")
-        done |= _read_done_fov_keys_zip(
-            prior_output_dir / f"{well}_out.zip", fields, filename_sep)
+        # The (fov, tp) key readers are the shared stdlib-only helpers in
+        # pipeline.incremental_keys (audit A2) — no imaging-stack import.
+        done = read_done_fov_keys(prior_output_dir / f"{csv_prefix}_{well}.csv")
+        done |= read_done_fov_keys_from_zip(
+            prior_output_dir / f"{well}_out.zip",
+            schema=filename_schema, sep=filename_sep)
         if not done:
             survivors.append(wz)  # genuinely new well → upload in full
             continue
@@ -1165,7 +1109,10 @@ def _filter_new_fovs_in_staging(
                        f"uploading in full — {wz.name}\n")
             survivors.append(wz)
             continue
-        keep = [m for m in members if _member_fov_tp(m, fields, filename_sep) not in done]
+        keep = [
+            m for m in members
+            if fov_tp_from_name(m, schema=filename_schema, sep=filename_sep) not in done
+        ]
         if not keep:
             # Every input FOV already processed locally — skip the upload.
             try:

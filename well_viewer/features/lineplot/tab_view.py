@@ -116,7 +116,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
         "sliders-horizontal", line_ctrl,
         tooltip="Show / hide the figure properties panel",
     )
-    style_btn.clicked.connect(lambda _=False: ctx.app._open_export_style_panel("line"))
+    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("line"))
     cl.addWidget(style_btn)
     layout.addWidget(line_ctrl)
 

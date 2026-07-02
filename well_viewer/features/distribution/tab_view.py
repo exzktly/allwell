@@ -135,7 +135,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         "sliders-horizontal", ctrl,
         tooltip="Show / hide the figure properties panel",
     )
-    style_btn.clicked.connect(lambda _=False: ctx.app._open_export_style_panel("distribution"))
+    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("distribution"))
     cl.addWidget(style_btn)
     layout.addWidget(ctrl)
 

@@ -120,7 +120,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "sliders-horizontal", bar_ctrl,
         tooltip="Show / hide the figure properties panel",
     )
-    style_btn.clicked.connect(lambda _=False: ctx.app._open_export_style_panel("bar"))
+    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("bar"))
     cl.addWidget(style_btn)
     right_l.addWidget(bar_ctrl)
 

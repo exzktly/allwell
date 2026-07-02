@@ -64,3 +64,8 @@ class ViewerContext:
         """Open the app's Save-As dialog for *fig*, honouring the shared file-type
         filter and the active dataset directory."""
         self.app._save_matplotlib_fig(fig, default_name)
+
+    def open_export_style_panel(self, plot_key: str) -> None:
+        """Open the figure-properties (export-style) side panel for *plot_key*."""
+        from well_viewer.features.export.style import open_export_style_panel
+        open_export_style_panel(self.app, plot_key)

@@ -71,7 +71,10 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (self.app), frozen by test_ctx_service_accessors. Feature code no
 #              longer names the app for these. (Also reworded 3 legacy doc
 #              mentions per the "no literal token in comments" convention.)
-CTX_APP_BUDGET = 304
+#   304 -> 298  P3.3 open_export_style_panel -> ctx.open_export_style_panel
+#              named accessor (6 plot builders); app service consolidated to
+#              viewer_context, frozen by test_ctx_service_accessors.
+CTX_APP_BUDGET = 298
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

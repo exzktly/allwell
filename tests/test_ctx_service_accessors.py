@@ -21,6 +21,7 @@ from well_viewer.viewer_context import ViewerContext
 _ALLOWED = {
     "set_status",
     "save_figure_dialog",
+    "open_export_style_panel",
 }
 
 

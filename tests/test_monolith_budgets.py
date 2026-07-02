@@ -65,7 +65,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # sanctioned "structural refactor adds def/docstring scaffolding while behaviour
 # stays byte-identical" case (verified by test_image_grouping_characterization) —
 # the duplication is gone even though the raw count ticks up. Resume from 4755.
-PROCESS_MICROSCOPY_BUDGET = 4755
+# Code-review A10 (-48): parametrized the two ~130-line process_well_zips /
+# process_well_folders drivers onto one shared _run_well_worker_pool (+ a shared
+# _sweep_stale_scratch_dirs); the mode-specific skip/sweep/submit become
+# callables. Genuine dedup — ratcheted the budget down to the new 4707.
+PROCESS_MICROSCOPY_BUDGET = 4707
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731

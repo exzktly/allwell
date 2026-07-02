@@ -3574,6 +3574,120 @@ def _unique_tokens_preserve_order(tokens: "list[str]") -> "list[str]":
 # Zip-aware orchestration
 # ---------------------------------------------------------------------------
 
+def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool) -> None:
+    """Remove stale ``_tmp_*`` staging dirs from a previous crashed run under
+    *root*, but keep any ``_tmp_images_*`` dir holding ``.fov_*.done`` checkpoint
+    markers (v5.2.0) so the worker resumes from them. ``extra_extract`` also
+    sweeps the zip-mode ``_tmp_extract_*`` scratch (audit A10)."""
+    if extra_extract:
+        for _stale in sorted(root.glob("_tmp_extract_*")):
+            if _stale.is_dir():
+                log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+                remove_directory(_stale)
+    for _stale in sorted(root.glob("_tmp_images_*")):
+        if not _stale.is_dir():
+            continue
+        if any(_stale.glob(".fov_*.done")):
+            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
+            log.info(
+                "Keeping checkpoint dir %s (%d FOV(s) already done)",
+                _stale.name, n_done,
+            )
+            continue
+        log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+        remove_directory(_stale)
+
+
+def _run_well_worker_pool(
+    *,
+    items: "list[tuple[str, Path]]",
+    output_dir: Path,
+    workers: int,
+    force: bool,
+    incremental: bool,
+    force_cpu: bool,
+    threads_per_worker: int,
+    shared_kwargs_template: dict,
+    mode_label: str,
+    stale_sweep,
+    output_exists,
+    submit_task,
+) -> None:
+    """Shared per-well ``ProcessPoolExecutor`` driver for the zip / folder modes
+    (audit A10 — both hand-rolled the identical skip / dispatch / collect / log
+    scaffolding). The mode-specific bits are callables: *stale_sweep(output_dir)*,
+    *output_exists(well_label) -> bool*, and *submit_task(executor, well_label,
+    path) -> Future* (the future resolves to ``(records, failed)``).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stale_sweep(output_dir)
+
+    # Skip already-complete wells unless --force. In --incremental mode nothing
+    # is skipped up front: every well is routed to the task, which decides
+    # new-well / merge-new-FOVs / up-to-date per well.
+    n_skipped = 0
+    to_process: list[tuple[str, Path]] = []
+    for well_label, path in items:
+        if not force and not incremental and output_exists(well_label):
+            log.info(
+                "SKIP well %s — output already exists. Use --force to reprocess.",
+                well_label,
+            )
+            n_skipped += 1
+        else:
+            to_process.append((well_label, path))
+
+    if not to_process:
+        log.info("All wells already complete.")
+        log.info("%s mode complete. %d skipped.", mode_label, n_skipped)
+        return
+
+    _ensure_stardist_runtime_deps()
+
+    if incremental:
+        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
+                 len(to_process))
+    log.info("%s mode: %d well(s) to process, %d worker(s).", mode_label, len(to_process), workers)
+
+    all_records: list[dict] = []
+    all_failed:  list[str]  = []
+
+    ctx = mp.get_context("spawn")
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=ctx,
+        initializer=_worker_init,
+        initargs=(force_cpu, threads_per_worker,
+                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
+    ) as executor:
+        future_to_well = {
+            submit_task(executor, well_label, path): well_label
+            for well_label, path in to_process
+        }
+        for future in as_completed(future_to_well):
+            well_label = future_to_well[future]
+            try:
+                records, failed = future.result()
+                all_records.extend(records)
+                all_failed.extend(failed)
+            except Exception as exc:           # noqa: BLE001
+                _report_worker_failure(well_label, output_dir, exc)
+                all_failed.append(well_label)
+
+    log.info("=" * 60)
+    log.info("%s mode complete.", mode_label)
+    log.info(
+        "Total wells : %d  |  processed : %d  |  skipped : %d  |  "
+        "nuclei : %d  |  failed wells : %d",
+        len(items), len(to_process), n_skipped,
+        len(all_records), len(all_failed),
+    )
+    if all_failed:
+        log.warning("Failed wells/pairs:")
+        for name in all_failed:
+            log.warning("  %s", name)
+
+
 def process_well_zips(
     input_dir: Path,
     output_dir: Path,
@@ -3605,109 +3719,26 @@ def process_well_zips(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sweep stale dirs from previous crashed runs. v5.2.0: a
-    # _tmp_images_* dir that holds any .fov_*.done marker is treated
-    # as per-FOV checkpoint state (not garbage) and survives the sweep —
-    # the worker will pick up where the previous attempt left off.
-    # _tmp_extract_* dirs are always per-run scratch.
-    for _stale in sorted(scratch_base_for(output_dir).glob("_tmp_extract_*")):
-        if _stale.is_dir():
-            log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
-            remove_directory(_stale)
-    for _stale in sorted(scratch_base_for(output_dir).glob("_tmp_images_*")):
-        if not _stale.is_dir():
-            continue
-        if any(_stale.glob(".fov_*.done")):
-            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
-            log.info(
-                "Keeping checkpoint dir %s (%d FOV(s) already done)",
-                _stale.name, n_done,
-            )
-            continue
-        log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
-        remove_directory(_stale)
+    def _submit(executor, well_label, zip_path):
+        return executor.submit(
+            process_well_zip_task,
+            well_label, zip_path, output_dir, shared_kwargs_template,
+            nuclear_token, fluor_tokens, csv_prefix, schema, sep,
+            incremental, incremental_prior_dir,
+        )
 
-    # Skip already-complete wells unless --force. In --incremental mode nothing
-    # is skipped up front: every well is routed to the task, which decides
-    # new-well / merge-new-FOVs / up-to-date per well.
-    n_skipped = 0
-    to_process: list[tuple[str, Path]] = []
-    for well_label, zip_path in well_zips:
-        if (not force and not incremental
-                and output_exists_for_well(output_dir, well_label, csv_prefix)):
-            log.info(
-                "SKIP well %s — output already exists. Use --force to reprocess.",
-                well_label,
-            )
-            n_skipped += 1
-        else:
-            to_process.append((well_label, zip_path))
-
-    if not to_process:
-        log.info("All wells already complete.")
-        log.info("Zip mode complete. %d skipped.", n_skipped)
-        return
-
-    _ensure_stardist_runtime_deps()
-
-    if incremental:
-        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
-                 len(to_process))
-    log.info("Zip mode: %d well(s) to process, %d worker(s).", len(to_process), workers)
-
-    # Submit one worker per well zip directly.
-    all_records: list[dict] = []
-    all_failed:  list[str]  = []
-
-    ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=ctx,
-        initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker,
-                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
-    ) as executor:
-        future_to_well = {
-            executor.submit(
-                process_well_zip_task,
-                well_label,
-                zip_path,
-                output_dir,
-                shared_kwargs_template,
-                nuclear_token,
-                fluor_tokens,
-                csv_prefix,
-                schema,
-                sep,
-                incremental,
-                incremental_prior_dir,
-            ): well_label
-            for well_label, zip_path in to_process
-        }
-        for future in as_completed(future_to_well):
-            well_label = future_to_well[future]
-            try:
-                records, failed = future.result()
-                all_records.extend(records)
-                all_failed.extend(failed)
-            except Exception as exc:           # noqa: BLE001
-                _report_worker_failure(well_label, output_dir, exc)
-                all_failed.append(well_label)
-
-    log.info("=" * 60)
-    log.info("Zip mode complete.")
-    log.info(
-        "Total wells : %d  |  processed : %d  |  skipped : %d  |  "
-        "nuclei : %d  |  failed wells : %d",
-        len(well_zips), len(to_process), n_skipped,
-        len(all_records), len(all_failed),
+    _run_well_worker_pool(
+        items=well_zips, output_dir=output_dir, workers=workers,
+        force=force, incremental=incremental, force_cpu=force_cpu,
+        threads_per_worker=threads_per_worker,
+        shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
+        # Zip staging (extract + images) lives under the scratch base.
+        stale_sweep=lambda out: _sweep_stale_scratch_dirs(
+            scratch_base_for(out), extra_extract=True),
+        output_exists=lambda well: output_exists_for_well(output_dir, well, csv_prefix),
+        submit_task=_submit,
     )
-    if all_failed:
-        log.warning("Failed wells/pairs:")
-        for name in all_failed:
-            log.warning("  %s", name)
 
 
 def process_well_folders(
@@ -3742,108 +3773,29 @@ def process_well_folders(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sweep stale staging dirs left by a previous crashed run, but
-    # keep any _tmp_images_* dir that holds per-FOV checkpoint markers
-    # (v5.2.0) — the matching worker will resume from those.
-    for _stale in sorted(output_dir.glob("_tmp_images_*")):
-        if not _stale.is_dir():
-            continue
-        if any(_stale.glob(".fov_*.done")):
-            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
-            log.info(
-                "Keeping checkpoint dir %s (%d FOV(s) already done)",
-                _stale.name, n_done,
-            )
-            continue
-        log.warning("Removing stale staging directory from previous run: %s", _stale.name)
-        remove_directory(_stale)
+    def _submit(executor, well_label, folder_path):
+        return executor.submit(
+            process_well_folder_task,
+            well_label, folder_path, output_dir, shared_kwargs_template,
+            nuclear_token, fluor_tokens, csv_prefix,
+            compress_input_well_folders, compress_output_well_folders,
+            schema, sep, incremental, incremental_prior_dir,
+        )
 
-    # Skip already-complete wells unless --force. In --incremental mode the
-    # task decides per well (new / merge-new-FOVs / up-to-date), so nothing is
-    # skipped up front.
-    n_skipped = 0
-    to_process: list[tuple[str, Path]] = []
-    for well_label, folder_path in well_folders:
-        if (not force and not incremental and output_exists_for_well_folder(
-            output_dir,
-            well_label,
-            csv_prefix,
-            compressed_output=compress_output_well_folders,
-        )):
-            log.info(
-                "SKIP well %s — output already exists. Use --force to reprocess.",
-                well_label,
-            )
-            n_skipped += 1
-        else:
-            to_process.append((well_label, folder_path))
-
-    if not to_process:
-        log.info("All wells already complete.")
-        log.info("Folder mode complete. %d skipped.", n_skipped)
-        return
-
-    _ensure_stardist_runtime_deps()
-
-    if incremental:
-        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
-                 len(to_process))
-    log.info("Folder mode: %d well(s) to process, %d worker(s).", len(to_process), workers)
-
-    all_records: list[dict] = []
-    all_failed:  list[str]  = []
-
-    ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=ctx,
-        initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker,
-                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
-    ) as executor:
-        future_to_well = {
-            executor.submit(
-                process_well_folder_task,
-                well_label,
-                folder_path,
-                output_dir,
-                shared_kwargs_template,
-                nuclear_token,
-                fluor_tokens,
-                csv_prefix,
-                compress_input_well_folders,
-                compress_output_well_folders,
-                schema,
-                sep,
-                incremental,
-                incremental_prior_dir,
-            ): well_label
-            for well_label, folder_path in to_process
-        }
-        for future in as_completed(future_to_well):
-            well_label = future_to_well[future]
-            try:
-                records, failed = future.result()
-                all_records.extend(records)
-                all_failed.extend(failed)
-            except Exception as exc:           # noqa: BLE001
-                _report_worker_failure(well_label, output_dir, exc)
-                all_failed.append(well_label)
-
-    log.info("=" * 60)
-    log.info("Folder mode complete.")
-    log.info(
-        "Total wells : %d  |  processed : %d  |  skipped : %d  |  "
-        "nuclei : %d  |  failed wells : %d",
-        len(well_folders), len(to_process), n_skipped,
-        len(all_records), len(all_failed),
+    _run_well_worker_pool(
+        items=well_folders, output_dir=output_dir, workers=workers,
+        force=force, incremental=incremental, force_cpu=force_cpu,
+        threads_per_worker=threads_per_worker,
+        shared_kwargs_template=shared_kwargs_template, mode_label="Folder",
+        # Folder-mode staging (_tmp_images_*) lives directly under output_dir;
+        # there is no zip-extract scratch to sweep.
+        stale_sweep=lambda out: _sweep_stale_scratch_dirs(out, extra_extract=False),
+        output_exists=lambda well: output_exists_for_well_folder(
+            output_dir, well, csv_prefix,
+            compressed_output=compress_output_well_folders),
+        submit_task=_submit,
     )
-    if all_failed:
-        log.warning("Failed wells/pairs:")
-        for name in all_failed:
-            log.warning("  %s", name)
 
 # ---------------------------------------------------------------------------
 # pipeline_info.json sidecar

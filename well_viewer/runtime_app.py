@@ -285,7 +285,6 @@ class WellViewerApp(QWidget):
         self._fov_observers: List = []   # callables (use_fov: bool) -> None
         # Channel / timepoint comboboxes are assigned to these attrs in the view builders.
         self._plot_chan_cb = None
-        self._montage_chan_cb = None
         self._review_image_chan_cb = None
         self._bar_tp_cb = None
         self._bar_swarm_cb = None
@@ -303,8 +302,6 @@ class WellViewerApp(QWidget):
         # remain as @property shims further down.
         self._rep_quick_pair_dir   = "row"
         self._rep_quick_iter_order = "row"
-        self._bar_quick_pair_dir   = "row"
-        self._bar_quick_iter_order = "row"
         self._entry_edit = None
         self._cdf_xmin_edit = None
         self._cdf_xmax_edit = None

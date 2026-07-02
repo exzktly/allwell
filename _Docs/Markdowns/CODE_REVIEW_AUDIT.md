@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **0 / 77 items resolved.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **8 / 77 items resolved** (7 done + 1 dropped). Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -72,8 +72,8 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | S3 | per-cell fold-change collapses multi-tp to first tp | M | `[ ]` TODO | |
 | S4 | `stats_cache` keys omit gate/on-population state → stale stats | M | `[ ]` TODO | |
 | S5 | image-decode numeric-close/first-FOV fallback → wrong frame | M | `[ ]` TODO | |
-| S6 | even-n median reported as upper element | L | `[ ]` TODO | |
-| S7 | `_missing_col_warned` keyed by `id(df)` | L | `[ ]` TODO | |
+| S6 | even-n median reported as upper element | L | `[x]` DONE | #597 |
+| S7 | `_missing_col_warned` keyed by `id(df)` | L | `[x]` DONE | #597 |
 | S8 | circularity computed before `per>0` mask (+ empty-vals CDF) | L | `[ ]` TODO | |
 
 ### L — Lifecycle / teardown (Pass 2.4)
@@ -87,14 +87,14 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 ### G — Guardrails / hygiene / dead code (Pass 1.5 / 2.2 / 5.2)
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
-| G1 | `sys` used but never imported → local auto-threshold pass dead | H | `[ ]` TODO | |
+| G1 | `sys` used but never imported → local auto-threshold pass dead | H | `[x]` DONE | #597 |
 | G2 | FOLDER-mode verify requires out-zip retry can't re-pull → no converge | M | `[ ]` TODO | |
 | G3 | `qc_*` params ignored; `filter_debris` dead | M | `[ ]` TODO | |
 | G4 | extend `test_no_silent_except` (tuple/typed pass + broad return None) | M | `[ ]` TODO | |
 | G5 | re-enable ruff `F401` with targeted `# noqa`; drop 55 unused imports | M | `[ ]` TODO | |
 | G6 | add a function-level complexity ratchet | M | `[ ]` TODO | |
-| G7 | phantom guards / no-op handlers (5 sites) | L | `[ ]` TODO | |
-| G8 | latent NameError (missing `typing` import) + dead `prefix` param | L | `[ ]` TODO | |
+| G7 | phantom guards / no-op handlers (5 sites) | L | `[x]` DONE | #597 |
+| G8 | latent NameError (missing `typing` import) + dead `prefix` param | L | `[x]` DONE | #597 |
 
 ### A — Architecture / god-modules / duplication (Pass 1 / 5.1 / 5.2)
 | ID | Item | Sev | Status | Commit/PR |
@@ -104,10 +104,10 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A3 | extract `cell_gating` domain compute out of the view | H | `[ ]` TODO | |
 | A4 | characterization tests for CC-98 `find_well_images_and_masks`, decompose | H | `[ ]` TODO | |
 | A5 | characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats` | H | `[ ]` TODO | |
-| A6 | delete cosmetic `WidgetRegistry` (one caller, double-write) | H | `[ ]` TODO | |
+| A6 | ~~delete cosmetic `WidgetRegistry`~~ (stale — verified live) | H | `[-]` DROPPED | #597 |
 | A7 | split `scatter/callbacks.py` (handlers vs single-cell viewer) | M | `[ ]` TODO | |
 | A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[ ]` TODO | |
-| A9 | delete dead frameless modules (`_window_chrome`, `window_resize_grips`) | M | `[ ]` TODO | |
+| A9 | delete dead frameless modules (`_window_chrome`, `window_resize_grips`) | M | `[x]` DONE | #597 |
 | A10 | parametrize the `process_well_*` task/driver pairs | M | `[ ]` TODO | |
 | A11 | consolidate 3 rsync transport/retry impls | M | `[ ]` TODO | |
 | A12 | loop the barplot mean/frac/n triplet (6× paste) | M | `[ ]` TODO | |
@@ -132,7 +132,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | X10 | enqueue stdout sentinel before `flush_and_join` (stop reader hang) | M | `[ ]` TODO | |
 | X11 | offer optional SSH key passphrase (or document risk) | M | `[ ]` TODO | |
 | X12 | `services/env.py` startup validation of `ALLWELL_*` | M | `[ ]` TODO | |
-| X13 | delete dead state `_bar_quick_*`, `_montage_chan_cb` | L | `[ ]` TODO | |
+| X13 | delete dead state `_bar_quick_*`, `_montage_chan_cb` | L | `[x]` DONE | #597 |
 | X14 | preserve absent saved wells (don't prune-then-persist) | L | `[ ]` TODO | |
 | X15 | bootstrap-log retention cap / "clear logs" | L | `[ ]` TODO | |
 | X16 | route full tracebacks to dev-gated sinks only | L | `[ ]` TODO | |
@@ -205,9 +205,9 @@ Self-aware housekeeping (`_Docs/Markdowns/Code_Diet.md`); guardrail tests (`test
 ## PASS 1 — Architectural Integrity
 
 ### 1.1 Orphan / dead modules
-- **Medium — `widgets/_window_chrome.py`** (130+ lines): a full frameless-titlebar policy engine (`should_use_frameless`, `frameless_source`, accessibility probe) with **zero importers**. Dead code masquerading as live infrastructure. *Fix: delete, or wire into window construction if intended.* — **A9** `[ ]` TODO
-- **Medium — `widgets/window_resize_grips.py`** (`WindowResizeGrips`): 8-grip resize helper, **never instantiated**. Companion to the above (both implement a custom-frame feature never adopted). *Fix: delete or adopt together.* — **A9** `[ ]` TODO
-- **Low — `scripts/decode_mockup.py`, `scripts/make_static_fonts.py`**: standalone dev utilities with no production importers. *Fix: move under a labeled `tools/` dir.* — **A9** `[ ]` TODO
+- **Medium — `widgets/_window_chrome.py`** (130+ lines): a full frameless-titlebar policy engine (`should_use_frameless`, `frameless_source`, accessibility probe) with **zero importers**. Dead code masquerading as live infrastructure. *Fix: delete, or wire into window construction if intended.* — **A9** `[x]` DONE
+- **Medium — `widgets/window_resize_grips.py`** (`WindowResizeGrips`): 8-grip resize helper, **never instantiated**. Companion to the above (both implement a custom-frame feature never adopted). *Fix: delete or adopt together.* — **A9** `[x]` DONE
+- **Low — `scripts/decode_mockup.py`, `scripts/make_static_fonts.py`**: standalone dev utilities with no production importers. *Fix: move under a labeled `tools/` dir.* — **A9** `[x]` DONE
 - **False positives (verified live):** persistence modules (`ratios.py`, `line_order.py`, `crop_region.py`, …) are wired via `persistence/registry.py:71-106`; `WellPlateZipper.py` via `input_resolution_service.py:14`; PyInstaller hooks are spec-consumed. → see [Non-goals](#non-goals--verified-correct--do-not-re-open).
 
 ### 1.2 Orphan state
@@ -228,7 +228,7 @@ The **only** dataset-reload reset is `load_directory` (`core/load_controller.py:
 
 **Category A/D — undeclared, guarded (mostly degrade, two can misbehave):** ~40 `getattr(app, "_x", default)` sites exist; each admits a writer may not have run. Two are not merely defensive: `_label_to_channel_key` (`channel_state_controller.py:297` write / `:801-806` **lossy lowercase fallback** → a ratio label read before the map is built resolves to a bogus real-channel key instead of `ratio:<name>`) and `_cell_gating_worker` (`cell_gating_tab_view.py:1117` **un-guarded** read, safe only by call-ordering). *Fix:* initialize these (`_label_to_channel_key`, `_seg_channel_token`, `_analyze_pane`, `_smfish_cancel_event`, `_thresh_frac_on_saved`) empty in `__init__`. — **X5** `[ ]` TODO
 
-**Category B — genuinely dead state:** `_bar_quick_pair_dir`, `_bar_quick_iter_order` (`runtime_app.py:306-307`, never read; their live twins `_rep_quick_*` are read at `grouping/controller.py:42`), and the `_montage_chan_cb` placeholder (`runtime_app.py:288`, never read — the montage combo uses `_montage_chan_var`). *Fix: delete, or wire up like the working twins.* — **X13** `[ ]` TODO
+**Category B — genuinely dead state:** `_bar_quick_pair_dir`, `_bar_quick_iter_order` (`runtime_app.py:306-307`, never read; their live twins `_rep_quick_*` are read at `grouping/controller.py:42`), and the `_montage_chan_cb` placeholder (`runtime_app.py:288`, never read — the montage combo uses `_montage_chan_var`). *Fix: delete, or wire up like the working twins.* — **X13** `[x]` DONE
 
 - *Root-cause fix (tracked under A8):* move `app._*` reads/writes onto a typed `AppState`/per-feature dataclass (scaffolding already exists in `core/app_state.py`) with an explicit `reset()` on dataset reload.
 
@@ -243,16 +243,16 @@ Intended pattern: `controller.py` + `tab_view.py` + `renderer.py` (+ `collect.py
 
 ### 1.4 Abstraction audit
 Key finding: the codebase has **no ABCs and no `typing.Protocol` at all** — so the risk is not over-abstraction via interfaces but **cosmetic indirection that provides no isolation**:
-- **High — `core/widget_registry.py`**: `register()` is called **exactly once** (`lineplot/tab_view.py:31`); the entire `get/has/names/…` API is **never called**; and `register()` *also* does `setattr(self._app, name, widget)`, so state is stored **twice** and the one consumer reads it as `app._line_export_dock` anyway. Pure ceremony. *Fix: delete it (or drop the double-write and route reads through `get()`).* — **A6** `[ ]` TODO
+- **High — `core/widget_registry.py`**: `register()` is called **exactly once** (`lineplot/tab_view.py:31`); the entire `get/has/names/…` API is **never called**; and `register()` *also* does `setattr(self._app, name, widget)`, so state is stored **twice** and the one consumer reads it as `app._line_export_dock` anyway. Pure ceremony. *Fix: delete it (or drop the double-write and route reads through `get()`).* — **A6** `[-]` DROPPED — **stale finding, verified live:** `WidgetRegistry` is the intended Phase-10 widget-handle store (guardrail comment at `test_guardrails.py:60`), used throughout `lineplot/tab_view.py` via `reg.register(...)` and covered by `tests/test_widget_registry.py`; the setattr-to-app is the designed mechanism, not a double-write bug.
 - **Medium-High — `viewer_context.ctx.app`**: the DI context exists to decouple features from the god-object, yet `ctx.app` is referenced **894 times across 20 files** — the abstraction leaks so thoroughly it provides near-zero isolation. *Fix: treat the count as a burn-down metric; lint against new `ctx.app` uses.* — **A8** `[ ]` TODO
 - **Low —** five registries exist; only `widget_registry` is unused. The rest (`feature_registry`, `persistence/registry`, `metric_registry`, `scope_registry`) earn their keep. → see Non-goals.
 
 ### 1.5 Dead code paths
-- **High — `services/remote_runner.py:2835`: the entire local auto-threshold pass is dead.** `_run_local_auto_threshold()` starts with `sys.path.insert(0, str(repo_root()))`, but **`import sys` appears nowhere in the file** (verified). It raises `NameError` on its first line every time; the whole body is wrapped in a broad `except` (~`:2880`) that logs "local auto-threshold pass failed" and continues. Because per-batch passes are deliberately suppressed (`--no_auto_threshold`, `:2755`) on the assumption this pass runs, **batched remote runs never compute/write auto-threshold defaults**. *Fix: add `import sys`.* — **G1** `[ ]` TODO
+- **High — `services/remote_runner.py:2835`: the entire local auto-threshold pass is dead.** `_run_local_auto_threshold()` starts with `sys.path.insert(0, str(repo_root()))`, but **`import sys` appears nowhere in the file** (verified). It raises `NameError` on its first line every time; the whole body is wrapped in a broad `except` (~`:2880`) that logs "local auto-threshold pass failed" and continues. Because per-batch passes are deliberately suppressed (`--no_auto_threshold`, `:2755`) on the assumption this pass runs, **batched remote runs never compute/write auto-threshold defaults**. *Fix: add `import sys`.* — **G1** `[x]` DONE
 - **Medium — `services/remote_runner.py:3983` vs `:4077`: FOLDER-mode out-zip can never converge.** `_verify_local_manifest` requires `{well}_out.zip` for any FULL run *including FOLDER mode* (`want_zip_artifact = output_filter is FULL`), but `_retry_missing_wells` gates the zip re-pull on `local_input_mode in (ZIP, FLAT, MIXED)` — **FOLDER is omitted** (verified). A FOLDER+FULL run whose out-zip failed to land loops verify→retry→verify forever and remote cleanup is skipped permanently. *Fix: make the two conditions consistent.* — **G2** `[ ]` TODO
 - **Medium — `process_microscopy.py:2063-2065`: `qc_min_area`/`qc_max_area`/`qc_min_solidity` are structurally ignored.** Declared and forwarded from `main()` (`:4512-4514`) but never read; the helper `filter_debris` (`:1222`) is never called in-module (QC is deferred to the Review layer). *Fix: drop the dead params + `filter_debris`, or wire them in.* — **G3** `[ ]` TODO
-- **Low — latent `NameError` in `features/grouping/controller.py:190`**: `Dict`/`Optional`/`List` are used in annotations with no `typing` import — safe only because `from __future__ import annotations` stringifies signatures. Also `make_replicate_pairs(toks, prefix)` (`:24`) never uses `prefix`. *Fix: add the import; drop the dead param.* — **G8** `[ ]` TODO
-- **Low — phantom guards / redundant branches (verified):** `process_microscopy.py:554` (`not in exclude_exts` can never fire — whitelist and blacklist are disjoint); `:3915` (`isinstance(h, float)` always True, `else 0.0` unreachable); `:4430-4431` (redundant `else` recomputes identical `workers`/`threads_per_worker`); `remote_runner.py:2086` (`if not line: continue` unreachable); `remote_runner.py:671` (`except OSError: raise` is a no-op handler). *Fix: remove each.* — **G7** `[ ]` TODO
+- **Low — latent `NameError` in `features/grouping/controller.py:190`**: `Dict`/`Optional`/`List` are used in annotations with no `typing` import — safe only because `from __future__ import annotations` stringifies signatures. Also `make_replicate_pairs(toks, prefix)` (`:24`) never uses `prefix`. *Fix: add the import; drop the dead param.* — **G8** `[x]` DONE
+- **Low — phantom guards / redundant branches (verified):** `process_microscopy.py:554` (`not in exclude_exts` can never fire — whitelist and blacklist are disjoint); `:3915` (`isinstance(h, float)` always True, `else 0.0` unreachable); `:4430-4431` (redundant `else` recomputes identical `workers`/`threads_per_worker`); `remote_runner.py:2086` (`if not line: continue` unreachable); `remote_runner.py:671` (`except OSError: raise` is a no-op handler). *Fix: remove each.* — **G7** `[x]` DONE
 - **Low — unused imports beyond the F401 count:** `barplot/controller.py:8-18` (10 stranded imports post-`collect.py` extraction, no `noqa`); `analyze_tab.py:45-48` (4 imports live only in the form mixin). — **G5** `[ ]` TODO
 - **Medium — 55 unused imports hidden by CI.** CI runs `ruff check .` (green), but `pyproject.toml` **ignores `F401`, `F811`, `F821`** — so `ruff --select F401` surfaces **55 unused imports** CI never reports. Many are stranded refactor residue: `barplot/controller.py:11-18` still imports `BarGroup`, `fold_change`, and five `stats_compute` functions that moved to `collect.py`; `review_image/controller.py:22-25` imports unused `numpy`/`pandas`/`data_loading` helpers. *Fix: run `ruff --select F401 --fix`, then re-enable F401 with targeted `# noqa` on genuine side-effect imports (e.g. `import tifffile  # codec registration`).* — **G5** `[ ]` TODO
 - No `if True:`/`if False:` phantom guards found in the sampled controllers.
@@ -316,7 +316,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 
 ### 4.1 Conditional exhaustiveness / float equality
 - **High — timepoint tolerance mismatch.** `fold_change.py:75/342` deliberately uses a **relative** tolerance (`_TP_REL_TOL = 1e-3`) because a value like 2/3 h drifts ~3e-5 when parsed back from 4-sig-fig text — but the rest of the pipeline matches with **absolute `1e-6`**: `stats_compute.py:93/285/431`, `stats/controller.py:108`, `data_loading.py:611`, `scatter/gating.py:237/412`, `image_compose.py:467`. Effect: for any tp needing >4 sig figs, Statistics / per-cell KS / bar aggregation return "no data" while fold-change succeeds. *Fix: extract the relative matcher into a shared `domain` helper and use it everywhere.* — **S2** `[ ]` TODO
-- **Low —** `stats/controller.py:407` reports the even-n median as the upper-middle element (`sv[len(sv)//2]`). *Fix: `statistics.median(...)`.* — **S6** `[ ]` TODO
+- **Low —** `stats/controller.py:407` reports the even-n median as the upper-middle element (`sv[len(sv)//2]`). *Fix: `statistics.median(...)`.* — **S6** `[x]` DONE
 - **Note (not defects):** `_filter_rows_by_timepoint` float `==` is safe; the optimizer's sign-safe gap is correct. → see Non-goals.
 
 ### 4.2 Return-value consistency
@@ -326,7 +326,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 
 ### 4.3 Data-flow integrity
 - **Verified correct:** ratio division epsilon **clamp** (`data_loading.py:281-297`); stats entry validation; stats-group serialize/deserialize composition preservation. → see Non-goals.
-- **Low — `data_loading.py:307`**: `_missing_col_warned` is keyed by `id(df)`, reused after GC → a legitimately-due warning can be suppressed, and the global set grows unbounded per session. *Fix: key by a stable dataset/well id.* — **S7** `[ ]` TODO
+- **Low — `data_loading.py:307`**: `_missing_col_warned` is keyed by `id(df)`, reused after GC → a legitimately-due warning can be suppressed, and the global set grows unbounded per session. *Fix: key by a stable dataset/well id.* — **S7** `[x]` DONE
 
 **Numeric input boundary (`analyze_tab.py` / `analyze_tab_form.py`) — every numeric field is a plain `QLineEdit` with no validator; `_validate_run_request:692-720` checks only folders/schema/tokens/background-well:**
 - **High —** a plausible non-integer radius/FFT entry like `100.5` raises `ValueError` at `pipeline_service.py:92/96/100/104`, the `--tophat_radius_*` flag is **silently omitted**, and the pipeline falls back to its own default while the form still shows "100.5" → **measured intensities silently diverge from what the user configured**. *Fix: `QIntValidator`/`QSpinBox`, or block the run in `_validate_run_request`.* — **X4** `[ ]` TODO
@@ -423,6 +423,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — tracker created; **0 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch A merged; **8 / 77 resolved.**

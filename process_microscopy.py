@@ -546,12 +546,10 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
     can't be packaged into a corrupt archive.
     """
     include_exts = {".tif", ".tiff", ".png"}
-    exclude_exts = {".csv"}
     candidate_files = sorted(
         p for p in image_dir.iterdir()
         if p.is_file()
         and p.suffix.lower() in include_exts
-        and p.suffix.lower() not in exclude_exts
         and not p.name.endswith(".tmp")
         # Stale _safe_imwrite / _AtomicTextHandle scratch files. The
         # `__aw_tmp_` prefix is unique enough that user filenames
@@ -3912,8 +3910,8 @@ def _collect_available_timepoints(
     def _sort_key(tp: str):
         h = _parse_timepoint_hours(tp)
         return (
-            (isinstance(h, float) and h != h),  # NaN sentinel sorts last
-            (h if (isinstance(h, float) and h == h) else 0.0),
+            h != h,  # NaN sentinel sorts last (_parse_timepoint_hours -> float)
+            (h if h == h else 0.0),
             tp,
         )
     return _collect_available_schema_values(
@@ -4425,10 +4423,8 @@ def main() -> None:
         # pin as many CPU threads — Metal does its own thread management.
         workers            = max(1, args.tf_threads if args.tf_threads > 0 else 2)
         threads_per_worker = tf_threads
-    else:
-        # Non-Mac CPU-only default: full worker pool
-        workers            = max(1, available // tf_threads)
-        threads_per_worker = tf_threads
+    # else: non-Mac CPU-only default already set above (workers = available //
+    # tf_threads), so no branch needed.
 
     workers_override = False
     if args.workers > 0:

@@ -403,8 +403,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     for name_a, vals_a in group_vals:
         if not vals_a:
             continue
-        sv = sorted(vals_a)
-        med = sv[len(sv) // 2]
+        med = _pystats.median(vals_a)
         try:
             sd_val = _pystats.stdev(vals_a) if len(vals_a) > 1 else 0.0
         except _pystats.StatisticsError:

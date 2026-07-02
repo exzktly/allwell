@@ -40,6 +40,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import contextlib
 from functools import lru_cache
 import tempfile
@@ -652,25 +653,23 @@ def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
             zip_wells.add(label)
 
     folder_wells: set[str] = set()
-    try:
-        for p in input_dir.iterdir():
-            if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+    # A raised OSError from iterdir() (e.g. the drive was yanked) propagates
+    # naturally to the caller — no wrapping handler needed.
+    for p in input_dir.iterdir():
+        if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+            continue
+        label = _canonical_well_from_path(p.name)
+        if label is None:
+            continue
+        # Empty folders don't count — they're often leftovers from
+        # ``compress_folder_images_to_zip_and_remove`` that
+        # interrupted between zip-write and folder-delete.
+        try:
+            if not any(p.iterdir()):
                 continue
-            label = _canonical_well_from_path(p.name)
-            if label is None:
-                continue
-            # Empty folders don't count — they're often leftovers from
-            # ``compress_folder_images_to_zip_and_remove`` that
-            # interrupted between zip-write and folder-delete.
-            try:
-                if not any(p.iterdir()):
-                    continue
-            except OSError:
-                continue
-            folder_wells.add(label)
-    except OSError:
-        # Drive yanked? Re-raise as a clearer error upstream.
-        raise
+        except OSError:
+            continue
+        folder_wells.add(label)
 
     # MIXED iff there's at least one well with a folder that has no
     # matching zip AND at least one well that DOES have a zip.
@@ -2083,8 +2082,6 @@ def _run_rsync_streaming(
             if stop_event and stop_event.is_set():
                 proc.terminate()
                 break
-            if not line:
-                continue
             # Progress lines (--info=progress2) print to a TTY-ish format
             # with carriage returns. We now read \r-delimited and can
             # surface them as percentage updates.

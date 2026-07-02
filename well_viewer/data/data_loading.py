@@ -304,7 +304,11 @@ def resolve_value_series(
         lc = key.lower()
         match = next((c for c in df.columns if c.lower() == lc), None)
         if match is None:
-            warn_key = f"resolve_value_series::{id(df)}::{key}"
+            # Key the dedupe by (column, schema fingerprint) rather than
+            # ``id(df)`` — object ids are reused after GC, which could suppress
+            # a legitimately-new warning (or fail to), and grow the set
+            # unbounded across a session.
+            warn_key = f"resolve_value_series::{key}::{hash(tuple(sorted(df.columns)))}"
             if warn_key not in _missing_col_warned:
                 _missing_col_warned.add(warn_key)
                 _logger.warning(

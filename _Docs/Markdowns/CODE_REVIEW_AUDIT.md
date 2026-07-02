@@ -18,6 +18,8 @@ The debt is concentrated and predictable, and it clusters into **five actionable
 4. **Guardrails create false confidence.** The silent-except test only bans literal `except Exception: pass`; the far more common `return None`, tuple/typed `pass`, and DEBUG-only `swallowed()` patterns all pass it — and several critical files aren't even scanned. Likewise, CI's ruff config disables F401, hiding 55 unused imports. (Pass 2.2 / Pass 5.)
 5. **Concentrated god-modules and copy-paste**: `cell_gating_tab_view.py` (2392 lines, view + domain), a CC-98 untested discovery function, and pipeline group-discovery / CSV-merge logic duplicated across the local and remote paths (divergence changes results). (Pass 1 / Pass 5.)
 
+A sixth theme surfaced in the follow-up deep-dive passes and cuts across several of the above: **cross-dataset state and export leakage** — undeclared `app._*` state (gates, per-cell overrides, gating mode) survives a dataset swap and silently mis-filters the new dataset (Pass 1.2), the batched remote fetch and the entire batch-export subsystem lack the stage-to-temp→rename→then-delete discipline the atomic single-file layer already models (Pass 4.4), and analyze-tab numeric inputs are unvalidated `QLineEdit`s whose bad values are swallowed downstream rather than blocked at entry (Pass 4.3).
+
 ### Top 12 prioritized actions
 
 | # | Severity | Area | Action | Anchor |
@@ -35,6 +37,9 @@ The debt is concentrated and predictable, and it clusters into **five actionable
 | 11 | **High** | 2.3 | "Apply Global Threshold" has no re-entrancy guard; a double-click runs two workers writing the same CSVs and the 2nd `.clear()`s the shared cancel event. Add a busy flag + per-run cancel event. | `features/smfish/tab_view.py:752` |
 | 12 | **High** | 2.2 | Malformed tophat/FFT CLI options are swallowed (`except (TypeError, ValueError, KeyError): pass`) → the pipeline runs with **different parameters than configured**. Validate up front. | `services/pipeline_service.py:93/97` |
 | 13 | **High** | 1.5 | `_run_local_auto_threshold` calls `sys.path.insert` but `sys` is never imported → `NameError` on line 1, swallowed → batched remote runs **never compute auto-threshold defaults** (per-batch passes are suppressed on the assumption this runs). Add `import sys`. | `services/remote_runner.py:2835` |
+| 14 | **High** | 1.2 | Opening a gated dataset then a plain one **silently carries the prior dataset's gates/overrides into the new data** (cells filtered, fraction-on redefined, no error): `load_directory` never resets `_scatter_gates`/`_review_included_overrides`/`_cell_gating_use_scatter_*`, and the persistence loaders early-return when the new sidecar is absent. Reset these before hydration. | `core/load_controller.py:121`, `persistence/cell_gating.py:59` |
+| 15 | **High** | 4.4 | Batched per-well fetch: `_materialize` copies straight to the final path with the error only logged, then unconditionally marks the well fetched and **deletes the remote copy** → an interrupted copy is irrecoverable loss. Copy to `.tmp` + `os.replace`; delete remote only after confirming a non-empty local artifact. | `services/remote_runner.py:3309/3190/3211` |
+| 16 | **High** | 4.4 | Batch export has no atomicity: writers open the final path in `"w"` and de-dupe only against a per-run set, so a **re-run that fails at job K has already truncated the prior complete export** for jobs 1..K-1, with no manifest to tell partial from complete. Stage to a temp dir → rename on full success. | `features/batch_export/base_panel.py:1194/1418`, `_common.py:35` |
 
 ---
 
@@ -70,9 +75,25 @@ Self-aware housekeeping (`_Docs/Markdowns/Code_Diet.md`); guardrail tests (`test
 
 ### 1.2 Orphan state
 Structural root cause: the "controllers" are **stateless function-modules operating on the `app` god-object**, not classes with `self` state (e.g. `channel_state_controller.py`, `selection_controller.py` are collections of `def foo(app, …)`). State lives as **dynamically-created `app._*` attributes** set by one function and read by another, with **no central declaration** — the exact structure that yields conditional-write / unconditional-read `AttributeError` risk.
-- **`runtime_app.py:923`** reads review-image colors via `getattr(self, attr, DEFAULTS[which])` — the defensive default is itself an admission the attribute may never have been created.
-- *Fix:* move `app._*` reads/writes onto a typed `AppState`/per-feature dataclass (scaffolding already exists in `core/app_state.py`) with an explicit `reset()` on dataset reload.
-- *Gap:* the exhaustive per-attribute write-site/read-site table was not completed (delegated sub-agent did not return).
+The **only** dataset-reload reset is `load_directory` (`core/load_controller.py:121-224`), which clears `selection.*`, `plot.bar_order`, `channel.threshold_range_cache`, the image/review-image/zipfile caches — **and nothing else**. Everything below survives a dataset swap.
+
+**Category C — uncleaned on reload (stale-data / silent mis-filtering; the biggest hazard):**
+
+| attribute | write | read | risk |
+|---|---|---|---|
+| `_scatter_gates` | `persistence/cell_gating.py:115` | `stats_compute.py:227`, `scatter/gating.py:463+`, `cell_browser/collect.py:300` | **High** — `load_from_pipeline_info` early-returns when the new dataset has no `cell_gating` block (`cell_gating.py:59-60`), so the prior dataset's gates leak and silently filter cells in stats/scatter/cell-browser |
+| `_review_included_overrides` | `runtime_app.py:327`, `review_image/controller.py:583` | `review_image/collect.py:238/252/382` | stale per-cell include/exclude overrides leak into the new dataset (only cleared on a crop change) |
+| `_cell_gating_use_scatter_gates` / `_use_scatter_thresh` | `persistence/cell_gating.py:117-118` | `stats_compute.py:225`, `cell_gating_tab_view.py:985/1052` | inclusion-mode + fraction-on semantics (Gate_On vs ThreshFracOn) carry across the swap |
+| `_cell_gating_gating_choices` / `_thresh_choices` | `persistence/cell_gating.py:133/135` | `cell_gating_tab_view.py:871/913/954` | old gate-name selections mis-select gates the new dataset lacks |
+| `_active_heatmap_layout_name` | `runtime_app.py:263`, `heatmap/sidebar_view.py:272` | `heatmap/controller.py:49` | points at a layout the new dataset lacks (guarded → degrades) |
+
+*Fix:* reset all of these in `load_directory`'s `begin_load` region **before** hydration, mirroring how `threshold_range_cache` and the image caches are already cleared. This is the single highest-value 1.2 fix — it turns a silent scientific-integrity leak into correct behavior.
+
+**Category A/D — undeclared, guarded (mostly degrade, two can misbehave):** ~40 `getattr(app, "_x", default)` sites exist; each admits a writer may not have run. Two are not merely defensive: `_label_to_channel_key` (`channel_state_controller.py:297` write / `:801-806` **lossy lowercase fallback** → a ratio label read before the map is built resolves to a bogus real-channel key instead of `ratio:<name>`) and `_cell_gating_worker` (`cell_gating_tab_view.py:1117` **un-guarded** read, safe only by call-ordering). *Fix:* initialize these (`_label_to_channel_key`, `_seg_channel_token`, `_analyze_pane`, `_smfish_cancel_event`, `_thresh_frac_on_saved`) empty in `__init__` so reads never hit a lossy/absent path.
+
+**Category B — genuinely dead state:** `_bar_quick_pair_dir`, `_bar_quick_iter_order` (`runtime_app.py:306-307`, never read; their live twins `_rep_quick_*` are read at `grouping/controller.py:42`), and the `_montage_chan_cb` placeholder (`runtime_app.py:288`, never read — the montage combo uses `_montage_chan_var`). *Fix: delete, or wire up like the working twins.*
+
+- *Root-cause fix:* move `app._*` reads/writes onto a typed `AppState`/per-feature dataclass (scaffolding already exists in `core/app_state.py`) with an explicit `reset()` on dataset reload, so the set of attributes is declared and lifecycle-managed rather than ad-hoc.
 
 ### 1.3 Pattern consistency (god modules)
 Intended pattern: `controller.py` + `tab_view.py` + `renderer.py` (+ `collect.py`). Canonical: `barplot/`, `multivariate/`.
@@ -99,7 +120,7 @@ Key finding: the codebase has **no ABCs and no `typing.Protocol` at all** — so
 - **Medium — 55 unused imports hidden by CI.** CI runs `ruff check .` (green), but `pyproject.toml` **ignores `F401`, `F811`, `F821`** — so `ruff --select F401` surfaces **55 unused imports** CI never reports. Many are stranded refactor residue: `barplot/controller.py:11-18` still imports `BarGroup`, `fold_change`, and five `stats_compute` functions that moved to `collect.py`; `review_image/controller.py:22-25` imports unused `numpy`/`pandas`/`data_loading` helpers. *Fix: run `ruff --select F401 --fix`, then re-enable F401 with targeted `# noqa` on the genuine side-effect imports (e.g. `import tifffile  # codec registration`) rather than a blanket ignore.*
 - No `if True:`/`if False:` phantom guards found in the sampled controllers.
 - Lead to confirm: `core/scope_registry.py` fold-change scope contributions were "relocated" to `features/registry.py:456` — verify no residual dead branch.
-- *Gap:* the unreachable-branch/unused-return sweep of the two largest files (`process_microscopy.py`, `remote_runner.py`) was not completed. *Fix: run `vulture`/`pyflakes` on those two specifically.*
+- **`vulture` sweep of the two largest files (completed):** `vulture --min-confidence 70` reports **zero** findings for both `process_microscopy.py` and `remote_runner.py`; at confidence 60 every hit (`correct_single_frame`, `stage_local_zips`, `RemoteRunner`, `RunEstimate.format/estimate`) was verified to be a **false positive** with real cross-module/script/test callers. The only corroboration is `filter_debris` (already listed above). Net: no additional confirmed dead code hides in the two monoliths beyond the manual findings.
 
 ---
 
@@ -161,17 +182,40 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 ### 4.3 Data-flow integrity
 - **Verified correct:** ratio division uses an epsilon **clamp** (`data_loading.py:281-297`, no sign-flip near zero); stats entry validates tp/threshold/val_col with fallbacks; `serialize/deserialize_stats_groups` stores member wells alongside names so rename/delete reproduces composition (`stats/controller.py:780-831`).
 - **Low — `data_loading.py:307`**: `_missing_col_warned` is keyed by `id(df)`, which is reused after GC → a legitimately-due warning can be suppressed (or duplicated), and the global set grows unbounded per session. *Fix: key by a stable dataset/well id.*
-- *Gap:* the `view_state.py` round-trip semantic-drift review and the `analyze_tab.py` numeric-input boundary trace were delegated and did not return — recommend re-running.
+
+**Numeric input boundary (`analyze_tab.py` / `analyze_tab_form.py`) — every numeric field is a plain `QLineEdit` with no validator; `_validate_run_request:692-720` checks only folders/schema/tokens/background-well, no numeric field:**
+- **High —** a plausible non-integer radius/FFT entry like `100.5` raises `ValueError` at `pipeline_service.py:92/96/100/104`, the `--tophat_radius_*` flag is **silently omitted**, and the pipeline falls back to its own default radius while the form still shows "100.5" → **measured intensities silently diverge from what the user configured**. (This is the user-facing face of the Pass 2.2 `pipeline_service.py:93` swallow.) *Fix: `QIntValidator`/`QSpinBox`, or block the run in `_validate_run_request`.*
+- **Medium —** negative/zero values are accepted unvalidated: `mesh_ratio=0` (`pipeline_service.py:108`) → downstream division-by-zero; negative radius/`tf_threads`/`remote_batch_size` pass through; negative `workers` is silently dropped (`if workers>0`) with no feedback. *Fix: enforce ranges at the widgets.*
+- **Medium —** QC bounds: `_safe_qc_float:57-62` coerces bad text to `0.0`, and inverted `min_area>max_area` or `min_solidity>1` (label says 0–1) is accepted → the debris filter silently drops most/all cells. *Fix: validate `min<=max` and the 0–1 range at entry.*
+
+**`view_state.py` round-trip drift:**
+- **Medium —** a schema-version bump silently discards **all** saved view-state (`view_state.py:1049-1052` warns and returns; `_doc.py:89-94` does the same) — there is no migration function. The first bump to `2` drops every user's selected wells / active tab / channel / fold-change config. *Fix: add a `_migrate(state, from_version)` step, or surface the discard.*
+- **Medium —** `export_style_prefs` restore **merges** into the full default dict (`:466-470`) and `snapshot` writes the whole dict (`:72`) → defaults are re-persisted as if user-set, so a future change to a default value is silently overridden by the stale persisted default. *Fix: persist only keys that differ from `DEFAULT_EXPORT_STYLE_PREFS`; replace rather than merge.*
+- **Low —** `selected_wells`/`solo_wells` are narrowed to the current dataset on restore (`:366/384`) then re-saved (`:45`) → a subset-load-then-save irreversibly drops wells absent that session.
+- **Clean:** every other `snapshot` key is read back by `restore` (bar/distribution/scatter, image-table `row_luts`, crop, fold-change legacy `op`→`op_ctrl`/`op_t0` fan-out); out-of-vocabulary value whitelisting is defensive-by-design.
 
 ### 4.4 Transaction / atomicity
-- **Verified robust — `persistence/_io.py`** (exercised by `test_atomic_write_retry.py`): uniquified temp name `<path>.<pid>.<uuid>.tmp`, retry-with-backoff on `PermissionError` around both `open` and `os.replace`, and swallowed tmp-cleanup that never masks a successful primary write. Correct write-then-rename pattern; JSON inherits it.
-- *Gap:* multi-step rollback review of `remote_runner.py` (staging → upload → remote exec) and `batch_export/` / `export/service.py` (partial success across many files) did not return. **Residual risk to check:** (a) do batch exports that write N files leave 1..N-1 on disk with no manifest/rollback when file N fails; (b) does remote submission delete/overwrite prior outputs before the new run is confirmed.
+**The atomic single-file layer is exemplary and the remote-cleanup *ordering* is correct** — the gaps are where a *silent* success or partial slips past that ordering.
+- **Critical — `remote_runner.py:2553` / `_run_batches:2575`** (the same defect as action #1, traced to the CLI path): `wait()` coerces a never-set `None` returncode to `0`, so a crashed batched run reports success to `scripts/allwell_remote.py:192` → `verify_and_cleanup(ok=True)` → an empty expected-set verifies as "all 0 wells present" → `rm -rf` the remote run dir (and the dataset cache under `cleanup_mode="all"`). Subtlety worth noting: the **GUI path is only *accidentally* safe** because `pipeline_runner.py:591` reads `self._proc.returncode` (raw `None`) instead of `wait()` — the two callers disagree on the `None` case. *Fix: set rc≠0 before re-raising in `_run_batches`; stop coercing `None→0`; align both callers on `.returncode`.*
+- **High — `remote_runner.py:3309/3190/3211`**: `_materialize` does `shutil.copyfile(...)` **straight to the final `{well}_out.zip`** (truncating any prior good copy) and its `OSError` is only logged; control then unconditionally `fetched_wells.add(well)` and, in batched mode, `_delete_well_files_on_remote(well)`. An interrupted/failed copy therefore marks the well fetched **and deletes the only complete (remote) copy** → irrecoverable without a `--force` re-run. *Fix: copy to `dest/.{well}_out.zip.tmp` then `os.replace`; only add-to-fetched and delete-remote after confirming a non-empty local artifact.*
+- **Medium — `remote_runner.py:3106/3133-3138`**: on the incomplete-fetch branch `tmp_zip` is returned without unlinking (only the success path at `:3187` cleans up) → partial temp zips accumulate in scratch. *Fix: `try/finally` unlink.*
+- **Medium — `remote_runner.py:2810-2824`**: the `finally` calls `flush_and_join()` **before** enqueuing the `None` stdout sentinel, so if teardown raises the reader loop (`pipeline_runner.py:589`) blocks forever — no completion, no error. *Fix: enqueue the sentinel first / in its own inner `finally`.*
+- **Batch export (`batch_export/`, `export/service.py`) — no transactional guarantee at any level:**
+  - **High —** re-run overwrites a prior *complete* export in place: `unique_export_stem` (`_common.py:35-49`) de-dupes only against a per-run set, never the filesystem, and writers open the final path in `"w"` (`base_panel.py:1418`, `bar_panel.py:355`, `scatter_panel.py:456+`). A re-run that fails at job K has already truncated groups 1..K-1.
+  - **High —** no cross-job rollback: `_run_batch_jobs` (`base_panel.py:1194-1226`) appends errors and continues; a mid-batch failure leaves succeeded files + an orphan from the failing job + nothing for later jobs, **with no manifest to distinguish partial from complete**.
+  - **Medium —** per-job CSV-then-figure is non-atomic (a figure exception leaves an orphan CSV); direct-to-final `savefig` (`:1248`) with no temp+rename; default output dir is the dataset's own `data_dir` (larger blast radius).
+  - *Fix (one pattern closes most of these): stage to a temp subdir → confirm → `os.replace`/commit on full success → write a `manifest.json`.*
+- **Verified robust (credit):** `persistence/_io.py` `atomic_write_json`/`atomic_write_text` (uniquified tmp → `fsync` → `os.replace`, tmp cleanup in `finally`, bounded Windows retry); `pipeline/io.py` `merge_records_into_csv`/`merge_images_into_zip` (build-full → atomic tmp→fsync→rename, unlink on `BaseException`); `remote_runner._zip_well_folder:737` (atomic staging); cleanup ordering (`rm -rf` only after the local manifest verifies); `_stage_mixed_mode` (`rmtree` on exception, never touches the input dir).
 
 ### 4.5 Concurrency invariants / caches
 - **Medium — `domain/stats_compute.py:347` (+ siblings `:381/415/452`)**: `stats_cache` keys omit the **on-population definition** returned by `_thresh_on_col(app)` (driven by `_cell_gating_use_scatter_thresh`, thresh-layer choices, and gate geometry). `_notify_gates_changed` (`scatter/gating.py:431`) does **not** invalidate the stats cache, so a gate resize/rename that changes membership without a worker re-run can return **stale cached statistics**. *Fix: add a hash of the active gate set + thresh choices to all four keys, and/or invalidate from `_notify_gates_changed`.*
 - **Low/Medium — `image_table/image_compose.py:447-476`**: after an exact `(fov, tp)` miss, `_load_array` falls back to a numeric-close (`<1e-6`) any-match and, when `fov` is empty, the **first** available FOV → can surface a neighboring FOV/timepoint image when filename tokens and `pipeline_info` disagree. *Fix: prefer "no image" over a numeric-close tp match; annotate non-exact fallbacks.*
 - **Verified correct — `data/zipfile_cache.py`**: keyed by `Path`, validates `st_mtime_ns` on every access, LRU-bounded — no cross-dataset stale-image leak.
-- *Gap:* matplotlib-global / pyplot cross-figure and LUT/font-cache review did not fully return.
+
+**Matplotlib global state + module caches (deep-dive) — this surface is clean; no High/Medium defect.**
+- **Low — `batch_export/base_panel.py:1238-1251` and `core/plot_orchestrator.py:105-121`** hand-roll `rcParams` save/restore around `savefig` instead of the `with rc_context({...})` idiom already used at `widgets/fig_clipboard.py:31` and `export/sidebar_view.py:992`. Safe today (synchronous, main-thread, no event-pump inside the window) but brittle — it would contaminate a concurrent render if export ever moved to a worker. *Fix: switch to `rc_context`.*
+- **Info —** `plt.close(fig)` is called on figures built with `Figure(...)` that pyplot never registered (`image_table/export.py:447`, `base_panel.py:1230/1252`) — harmless but misleading; pulls in pyplot needlessly.
+- **Verified correct (credit):** no pyplot state-machine in production (all figures are explicit `Figure(...)` on distinct app attrs → no shared-current-figure contamination, no figure leak); colormaps are `.copy()`'d before `set_bad` (`heatmap/controller.py:448`) so the process-global registry is never mutated; `rcParams` global defaults are set once at import (`plot_card.py:50`); the image-decode cache is instance-scoped, keyed `(well, chan, tp/fov)`, cleared on dataset swap; the only production `lru_cache` is `_rsync_version` (`maxsize=1`, no args); `icons.py`/`cellpose.py` caches are correctly keyed; the font-bootstrap monkeypatch is one-time and idempotent; backend selection uses `force=False`.
 
 ---
 
@@ -220,9 +264,12 @@ No central startup validation exists, but this is **Low risk**: every env *read*
 4. **Tighten the guardrails so they can't drift back:** extend `test_no_silent_except.py` (2.2), re-enable `F401` with targeted `# noqa` (1.5), add a function-complexity ratchet (5.2).
 5. **Then de-risk the god-modules** (action 8, `cell_gating_tab_view.py`) and unify the duplicated pipeline discovery/merge (action 10) with characterization tests (action 9) as the safety net.
 
-### Coverage gaps in this audit (recommend a follow-up pass)
-- 1.2 exhaustive per-attribute orphan-state table.
-- 1.5 unreachable-branch/unused-return sweep of `process_microscopy.py` + `remote_runner.py` (run `vulture`).
-- 4.3 `view_state.py` round-trip drift + `analyze_tab.py` input boundary.
-- 4.4 multi-step rollback in `remote_runner.py` / `batch_export/` / `export/service.py`.
-- 4.5 matplotlib/pyplot global state + LUT/font caches.
+### Coverage — all initial gaps now closed
+The five areas deferred in the first pass were completed in a follow-up round and folded into the sections above:
+- **1.2** — full orphan-state table delivered (surfaced the High cross-dataset gate-leak, action #14).
+- **1.5** — `vulture` sweep of the two monoliths completed (no new confirmed dead code beyond the manual findings); the sweep also confirmed the `sys`-not-imported bug (action #13) and the FOLDER-mode verify/retry inconsistency.
+- **4.3** — `view_state.py` round-trip drift + `analyze_tab.py` numeric-input boundary delivered.
+- **4.4** — multi-step rollback in `remote_runner.py` / `batch_export/` delivered (surfaced actions #15–16).
+- **4.5** — matplotlib global state + LUT/font caches delivered (surface clean; one Low).
+
+Residual smaller follow-ups noted inline: confirm no dead branch after the `scope_registry.py`→`features/registry.py:456` relocation; and the `export/service.py` single-file export path (vs the batch subsystem) was not separately traced.

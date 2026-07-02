@@ -67,5 +67,4 @@ class ViewerContext:
 
     def open_export_style_panel(self, plot_key: str) -> None:
         """Open the figure-properties (export-style) side panel for *plot_key*."""
-        from well_viewer.features.export.style import open_export_style_panel
-        open_export_style_panel(self.app, plot_key)
+        self.app._open_export_style_panel(plot_key)

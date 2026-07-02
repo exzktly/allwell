@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **62 / 77 items resolved** (61 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **63 / 77 items resolved** (62 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -113,7 +113,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A12 | loop the barplot mean/frac/n triplet (6× paste) | M | `[ ]` TODO | |
 | A13 | `_annotated_matrix` helper for the 4× heatmap block | M | `[x]` DONE | `test_multivariate_heatmap_render.py` |
 | A14 | decompose `batch_export/base_panel.py` (export exec → service) | M | `[ ]` TODO | |
-| A15 | lazy/deferred feature descriptors for the 49-import registry | M | `[ ]` TODO | |
+| A15 | lazy/deferred feature descriptors for the 49-import registry | M | `[x]` DONE | `test_feature_removal.py` + app smoke |
 | A16 | collapse remaining re-inlined helpers | L | `[x]` DONE | scatter/distribution suite |
 | A17 | normalize feature-file naming or document exceptions | L | `[x]` DONE | `test_architecture_contracts.py` |
 
@@ -238,7 +238,7 @@ Intended pattern: `controller.py` + `tab_view.py` + `renderer.py` (+ `collect.py
 - **High — `runtime_app.py` `WellViewerApp`** (1258): acknowledged god-object with `__getattr__` forwarder and dozens of externally-`setattr`'d handles. *Fix: continue the strangler migration to typed state.* — **A8** `[ ]` TODO
 - **Medium-High — `features/scatter/callbacks.py`** (1190): non-canonical name mixing click-handlers + a full single-cell image viewer + raw Qt UI. *Fix: split `click_handlers.py` + a reusable `single_cell_viewer`.* — **A7** `[ ]` TODO
 - **Medium — `features/batch_export/base_panel.py`** (1589): abandons the split for an inheritance hierarchy; a 1589-line base `QWidget` mixing UI + export orchestration. *Fix: pull export execution into a non-Qt service.* — **A14** `[ ]` TODO
-- **Medium — `features/registry.py`** (49 internal imports): single-point recompile/fragility hub. *Fix: lazy/deferred feature descriptors.* — **A15** `[ ]` TODO
+- **Medium — `features/registry.py`** (49 internal imports): single-point recompile/fragility hub. *Fix: lazy/deferred feature descriptors.* — **A15** `[x]` DONE — added `_lazy_build(module, attr)` / `_lazy_state(module, attr)` factories and replaced the 16 near-identical uniform wrappers (9 `build(ctx,frame)` tab builders + 7 `AppState`-slice constructors) with declarative one-line descriptors. The module paths remain greppable string literals and the import is still deferred to call time (no heavy deps at registry-build); the custom builders (smFISH/stats/review-csv/sample-defs) and the real-bodied `_activate_*` hooks stay explicit. Registry 597→564 lines; explicit feature imports 45→29. `test_feature_removal` + `test_deferred_imports` + architecture contracts + app-startup smoke all green.
 - **Low —** naming drift (`stats/view.py`, `grouping/view.py` vs `tab_view.py`; `export/` and `review_csv/` lack a controller). *Fix: normalize or document sanctioned exceptions.* — **A17** `[x]` DONE — **normalized** `stats/view.py`→`stats/tab_view.py` and `grouping/view.py`→`grouping/tab_view.py` (renamed via `git mv`, updated all 4 importers: registry, replicate_panel_view, selection_controller, ui_helpers) so no feature file uses the bare `view.py` name; removed the `view.py` entry from both `FEATURE_NAME_EXCEPTIONS` and ARCHITECTURE §3. **Documented** the two sanctioned controller-less features (`export/` = stateless service layer, `review_csv/` = read-only inspector) in ARCHITECTURE §3 Known exceptions. `test_architecture_contracts.py::test_feature_module_naming` green; ruff green.
 
 ### 1.4 Abstraction audit
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch AJ (dedup: A15)** — **A15** (added `_lazy_build`/`_lazy_state` factories; replaced the 16 uniform registry wrappers with declarative lazy descriptors — module paths stay greppable, imports still deferred. Registry 597→564; explicit feature imports 45→29). `test_feature_removal` + deferred-import + architecture + app smoke green. 63/77 resolved.
+
 - 2026-07-02 **Batch AI (dedup: A10)** — **A10** (parametrized the two ~130-line `process_well_zips`/`process_well_folders` drivers onto one shared `_run_well_worker_pool` + `_sweep_stale_scratch_dirs`; mode-specific skip/sweep/submit are callables. Net −48 lines, budget ratcheted 4755→4707). +4 tests via a fake executor. 62/77 resolved.
 
 - 2026-07-02 **Batch AH (dedup: A11)** — **A11** (consolidated the two byte-identical *streaming* rsync retry loops in `ensure_uploaded`/`upload_subset` into one `_stream_rsync_with_retry`; the third impl `_rsync_with_retry` is the capture-based control-plane twin, kept separate but now clearly paired). +4 tests; 141 remote/rsync tests green. 61/77 resolved.
@@ -494,4 +496,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch AI merged (A10 parametrize well-worker pool driver); **62 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch AJ merged (A15 lazy registry descriptors); **63 / 77 resolved.**

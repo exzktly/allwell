@@ -21,6 +21,7 @@ no other edits and no startup error.
 
 from __future__ import annotations
 
+import importlib
 import logging
 
 from well_viewer.core.feature_registry import (
@@ -32,40 +33,41 @@ from well_viewer.core.feature_registry import (
 _logger = logging.getLogger("well_viewer.runtime_app")
 
 
+def _lazy_build(module_path: str, attr: str):
+    """Return a ``build(ctx, frame)`` that imports *attr* from *module_path* on
+    call and invokes ``attr(ctx, frame)`` (audit A15).
+
+    Collapses the uniform tab-builder wrappers into declarative descriptors so
+    the registry isn't 40+ near-identical ``def _build_x`` functions. The module
+    path stays a greppable string literal and the import is still deferred to
+    call time, so building the registry pulls no heavy feature deps.
+    """
+    def build(ctx, frame) -> None:
+        getattr(importlib.import_module(module_path), attr)(ctx, frame)
+    return build
+
+
+def _lazy_state(module_path: str, attr: str):
+    """Return a no-arg factory that imports *attr* from *module_path* and
+    constructs it — the uniform AppState-slice constructor shape (audit A15)."""
+    def make():
+        return getattr(importlib.import_module(module_path), attr)()
+    return make
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tab builders — uniform ``build(ctx, frame)`` adapters over each feature's
 # entry point (some take ``ctx``, some take the legacy ``app``; Review CSV is an
 # app method). Mirrors the former ``_build_*`` closures in ``centre_view``.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_lineplot(ctx, frame) -> None:
-    from well_viewer.features.lineplot.tab_view import build_line_graphs_tab
-    build_line_graphs_tab(ctx, frame)
-
-
-def _build_barplot(ctx, frame) -> None:
-    from well_viewer.features.barplot.tab_view import build_bar_plots_tab
-    build_bar_plots_tab(ctx, frame)
-
-
-def _build_scatter(ctx, frame) -> None:
-    from well_viewer.features.scatter.tab_view import build_scatter_tab
-    build_scatter_tab(ctx, frame)
-
-
-def _build_distribution(ctx, frame) -> None:
-    from well_viewer.features.distribution.tab_view import build_distribution_tab
-    build_distribution_tab(ctx, frame)
-
-
-def _build_heatmap(ctx, frame) -> None:
-    from well_viewer.features.heatmap.tab_view import build_heatmap_tab
-    build_heatmap_tab(ctx, frame)
-
-
-def _build_image_browser(ctx, frame) -> None:
-    from well_viewer.features.image_browser.tab_view import build_image_browser_tab
-    build_image_browser_tab(ctx, frame)
+# Uniform ``build(ctx, frame)`` tab builders — declarative lazy descriptors (A15).
+_build_lineplot = _lazy_build("well_viewer.features.lineplot.tab_view", "build_line_graphs_tab")
+_build_barplot = _lazy_build("well_viewer.features.barplot.tab_view", "build_bar_plots_tab")
+_build_scatter = _lazy_build("well_viewer.features.scatter.tab_view", "build_scatter_tab")
+_build_distribution = _lazy_build("well_viewer.features.distribution.tab_view", "build_distribution_tab")
+_build_heatmap = _lazy_build("well_viewer.features.heatmap.tab_view", "build_heatmap_tab")
+_build_image_browser = _lazy_build("well_viewer.features.image_browser.tab_view", "build_image_browser_tab")
 
 
 def _build_smfish(ctx, frame) -> None:
@@ -87,9 +89,9 @@ def _build_stats(ctx, frame) -> None:
     build_stats_group_editor(ctx.app, ctx.app._sidebar_stats_frame)
 
 
-def _build_multivariate(ctx, frame) -> None:
-    from well_viewer.features.multivariate.tab_view import build_multivariate_tab
-    build_multivariate_tab(ctx, frame)
+_build_multivariate = _lazy_build("well_viewer.features.multivariate.tab_view", "build_multivariate_tab")
+_build_saved_plots = _lazy_build("well_viewer.features.saved_plots.tab_view", "build_saved_plots_tab")
+_build_batch_export = _lazy_build("well_viewer.features.batch_export.tab_view", "build_batch_export_tab")
 
 
 def _build_review_csv(ctx, frame) -> None:
@@ -103,53 +105,18 @@ def _build_sample_definitions(ctx, frame) -> None:
     build_sample_definitions_centre(ctx.app, frame)
 
 
-def _build_saved_plots(ctx, frame) -> None:
-    from well_viewer.features.saved_plots.tab_view import build_saved_plots_tab
-    build_saved_plots_tab(ctx, frame)
-
-
-def _build_batch_export(ctx, frame) -> None:
-    from well_viewer.features.batch_export.tab_view import build_batch_export_tab
-    build_batch_export_tab(ctx, frame)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # State factories — lazy constructors for each feature-owned ``AppState`` slice.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _state_bar():
-    from well_viewer.features.barplot.state import BarPlotState
-    return BarPlotState()
-
-
-def _state_stats():
-    from well_viewer.features.stats.state import StatsState
-    return StatsState()
-
-
-def _state_multivariate():
-    from well_viewer.features.multivariate.state import MultivariateState
-    return MultivariateState()
-
-
-def _state_review_image():
-    from well_viewer.features.image_browser.review_image.state import ReviewImageState
-    return ReviewImageState()
-
-
-def _state_preview():
-    from well_viewer.features.image_browser.review_image.state import PreviewState
-    return PreviewState()
-
-
-def _state_image_table():
-    from well_viewer.features.image_browser.image_table.state import ImageTableState
-    return ImageTableState()
-
-
-def _state_playground():
-    from well_viewer.features.image_browser.playground.state import PlaygroundState
-    return PlaygroundState()
+# Uniform AppState-slice constructors — declarative lazy factories (A15).
+_state_bar = _lazy_state("well_viewer.features.barplot.state", "BarPlotState")
+_state_stats = _lazy_state("well_viewer.features.stats.state", "StatsState")
+_state_multivariate = _lazy_state("well_viewer.features.multivariate.state", "MultivariateState")
+_state_review_image = _lazy_state("well_viewer.features.image_browser.review_image.state", "ReviewImageState")
+_state_preview = _lazy_state("well_viewer.features.image_browser.review_image.state", "PreviewState")
+_state_image_table = _lazy_state("well_viewer.features.image_browser.image_table.state", "ImageTableState")
+_state_playground = _lazy_state("well_viewer.features.image_browser.playground.state", "PlaygroundState")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

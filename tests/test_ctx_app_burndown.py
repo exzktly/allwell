@@ -77,7 +77,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   298 -> 293  P3.4-1 make_plot_view_switcher takes ctx (owns the plotting-
 #              notebook navigation; 6 builder call sites drop ctx.app, one
 #              internal touch remains in ui_helpers).
-CTX_APP_BUDGET = 293
+# --- A8-teardown epic (293 -> 0): decompose WellViewerApp; see
+#     _Docs/Markdowns/A8_TEARDOWN_EPIC.md.
+#   293 -> 279  T2 smFISH runtime holder: 17 builder writes of live objects
+#              (bridge/extractor/figures/decoded arrays/cdf popup) move to
+#              ctx.runtime.smfish, which stamps app._smfish_<name> so the ~130
+#              legacy readers resolve unchanged (WidgetRegistry pattern).
+CTX_APP_BUDGET = 279
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -89,22 +89,22 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     reg.register("_smfish_frame", parent)
     # Scalar smFISH flags (separator / show_overlays / fit_on_next_redraw) are
     # typed state on ``ctx.state.smfish`` — the slice defaults cover their inits.
-    ctx.app._smfish_out_dir = None
-    ctx.app._smfish_fov_tp_extractor = None
-    ctx.app._smfish_tokens = []
-    ctx.app._smfish_well_to_zip = {}
-    ctx.app._smfish_classifier = make_classifier(ctx.state.smfish.separator)
-    ctx.app._smfish_current_log_img = None
-    ctx.app._smfish_current_labels = None
-    ctx.app._smfish_current_sorted_vals = None
-    ctx.app._smfish_hover_annot = None
-    ctx.app._smfish_pan_anchor = None
-    ctx.app._smfish_cdf_popup = None
-    ctx.app._smfish_cdf_canvas = None
-    ctx.app._smfish_cdf_ax = None
-    ctx.app._smfish_cdf_fig = None
-    ctx.app._smfish_Figure = Figure
-    ctx.app._smfish_FigureCanvas = FigureCanvas
+    ctx.runtime.smfish.out_dir = None
+    ctx.runtime.smfish.fov_tp_extractor = None
+    ctx.runtime.smfish.tokens = []
+    ctx.runtime.smfish.well_to_zip = {}
+    ctx.runtime.smfish.classifier = make_classifier(ctx.state.smfish.separator)
+    ctx.runtime.smfish.current_log_img = None
+    ctx.runtime.smfish.current_labels = None
+    ctx.runtime.smfish.current_sorted_vals = None
+    ctx.runtime.smfish.hover_annot = None
+    ctx.runtime.smfish.pan_anchor = None
+    ctx.runtime.smfish.cdf_popup = None
+    ctx.runtime.smfish.cdf_canvas = None
+    ctx.runtime.smfish.cdf_ax = None
+    ctx.runtime.smfish.cdf_fig = None
+    ctx.runtime.smfish.Figure = Figure
+    ctx.runtime.smfish.FigureCanvas = FigureCanvas
 
     bridge = _WorkerBridge(parent)
     bridge.status.connect(lambda text: _smfish_set_status(ctx.app, text))
@@ -114,7 +114,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # the only safe way to schedule widget-touching work from the
     # apply-global worker daemon.
     bridge.after_csv.connect(lambda cb: cb())
-    ctx.app._smfish_bridge = bridge
+    ctx.runtime.smfish.bridge = bridge
 
     # ── layout ────────────────────────────────────────────────────────────
     root = parent.layout()

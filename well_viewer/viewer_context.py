@@ -48,6 +48,7 @@ class ViewerContext:
     state: AppState
     bus: EventBus
     widgets: WidgetRegistry
+    runtime: object = None   # AppRuntime — per-feature live-object namespaces (T2)
 
     # ── Named app/window-service accessors (A8 Phase 3, design "C") ──────────
     # Minimal, closed set — see the module docstring and the freeze test. Each

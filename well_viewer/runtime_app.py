@@ -54,6 +54,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.core.app_state import AppState
+from well_viewer.core.app_runtime import AppRuntime
 from well_viewer.features.registry import attach_feature_state, build_feature_registry
 from well_viewer.core.event_bus import EventBus
 from well_viewer.core.bus_wiring import wire_event_bus
@@ -263,14 +264,20 @@ class WellViewerApp(QWidget):
         # legacy ``app._<widget>`` reads to it so reader call sites are
         # untouched while writers migrate tab by tab.
         self._widget_registry = WidgetRegistry(self)
+        # Per-feature live-object namespaces (workers, decoded arrays, popup
+        # figures) — A8 teardown T2. Stamps app._<feature>_<name> so legacy
+        # readers resolve while builders write through ctx.runtime.
+        self._runtime = AppRuntime(self)
         # The dependency-injection context handed to tab builders and
         # controllers in place of ``self``. Bundles the typed state, the bus,
-        # and the widget registry (+ a transitional ``app`` escape hatch).
+        # the widget registry, the runtime namespaces (+ a transitional ``app``
+        # escape hatch).
         self._ctx = ViewerContext(
             app=self,
             state=self._app_state,
             bus=self._event_bus,
             widgets=self._widget_registry,
+            runtime=self._runtime,
         )
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
         wire_event_bus(self, self._event_bus)

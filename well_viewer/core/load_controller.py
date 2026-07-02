@@ -118,6 +118,26 @@ def load_path(app, path: Path) -> None:
         _close_opening_dialog(app)
 
 
+def _reset_gating_state(app) -> None:
+    """Clear the previous dataset's scatter-gate / cell-gating / per-cell
+    override state on a dataset swap.
+
+    The persistence loaders (``cell_gating.load_from_pipeline_info``,
+    ``cell_overrides.load_from_data_dir``) early-return when the new dataset has
+    no sidecar, leaving this ad-hoc ``app._*`` state in place — where it
+    silently filters the new dataset's cells / redefines fraction-on (audit
+    X1). Reset it to the "no gating" defaults before hydration; the new
+    dataset's own sidecar (if any) repopulates it afterwards.
+    """
+    app._scatter_gates = []
+    app._review_included_overrides = {}
+    app._cell_gating_use_scatter_gates = False
+    app._cell_gating_use_scatter_thresh = False
+    app._cell_gating_gating_choices = None
+    app._cell_gating_thresh_choices = None
+    app._active_heatmap_layout_name = None
+
+
 def load_directory(app, d: Path, label=None) -> None:
     _opening_set_phase(app, "Scanning folder…")
     csvs_all = [p for p in sorted(d.glob("*.csv")) if not p.name.startswith(".")]
@@ -203,6 +223,9 @@ def load_directory(app, d: Path, label=None) -> None:
         _invalidate_zip_cache()
     except Exception:
         swallowed()  # was: pass (silent except)
+    # Clear the prior dataset's gate / override / cell-gating state before the
+    # new dataset hydrates (audit X1 — stops cross-dataset gate leakage).
+    _reset_gating_state(app)
     # Signal any in-flight smFISH "Apply to All" worker to abort so
     # it doesn't overwrite the *new* dataset's CSVs with counts
     # computed against the previous dataset.

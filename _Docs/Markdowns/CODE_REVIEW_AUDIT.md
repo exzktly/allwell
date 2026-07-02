@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **33 / 77 items resolved** (32 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **34 / 77 items resolved** (33 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -120,11 +120,11 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 ### X — Cross-dataset state / atomicity / input validation (Pass 1.2 / 4.3 / 4.4 / 5.4 / 5.5)
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
-| X1 | reset gates/overrides in `load_directory` → stop cross-dataset leak | H | `[ ]` TODO | |
+| X1 | reset gates/overrides in `load_directory` → stop cross-dataset leak | H | `[x]` DONE | #597 |
 | X2 | `_materialize` atomic tmp→replace; delete-remote only after confirm | H | `[x]` DONE | #597 |
 | X3 | batch-export: stage-temp→rename on full success + manifest | H | `[ ]` TODO | |
 | X4 | validate radius/FFT numeric inputs at entry (stop silent flag-drop) | H | `[x]` DONE | #597 |
-| X5 | init undeclared `app._*` (esp. `_label_to_channel_key` lossy fallback) | M | `[ ]` TODO | |
+| X5 | init undeclared `app._*` (esp. `_label_to_channel_key` lossy fallback) | M | `[!]` BLOCKED | — |
 | X6 | validate negative/zero + QC bound ordering at entry | M | `[x]` DONE | #597 |
 | X7 | add `view_state` schema `_migrate()` (stop silent discard on bump) | M | `[ ]` TODO | |
 | X8 | persist only non-default `export_style_prefs` (replace, not merge) | M | `[x]` DONE | #597 |
@@ -224,9 +224,9 @@ The **only** dataset-reload reset is `load_directory` (`core/load_controller.py:
 | `_cell_gating_gating_choices` / `_thresh_choices` | `persistence/cell_gating.py:133/135` | `cell_gating_tab_view.py:871/913/954` | old gate-name selections mis-select gates the new dataset lacks |
 | `_active_heatmap_layout_name` | `runtime_app.py:263`, `heatmap/sidebar_view.py:272` | `heatmap/controller.py:49` | points at a layout the new dataset lacks (guarded → degrades) |
 
-*Fix:* reset all of these in `load_directory`'s `begin_load` region **before** hydration, mirroring how `threshold_range_cache` and the image caches are already cleared. This is the single highest-value 1.2 fix.
+*Fix:* reset all of these in `load_directory`'s `begin_load` region **before** hydration, mirroring how `threshold_range_cache` and the image caches are already cleared. This is the single highest-value 1.2 fix. — **X1** `[x]` DONE (`_reset_gating_state` in `load_directory`; `tests/test_load_resets_gating_state.py`)
 
-**Category A/D — undeclared, guarded (mostly degrade, two can misbehave):** ~40 `getattr(app, "_x", default)` sites exist; each admits a writer may not have run. Two are not merely defensive: `_label_to_channel_key` (`channel_state_controller.py:297` write / `:801-806` **lossy lowercase fallback** → a ratio label read before the map is built resolves to a bogus real-channel key instead of `ratio:<name>`) and `_cell_gating_worker` (`cell_gating_tab_view.py:1117` **un-guarded** read, safe only by call-ordering). *Fix:* initialize these (`_label_to_channel_key`, `_seg_channel_token`, `_analyze_pane`, `_smfish_cancel_event`, `_thresh_frac_on_saved`) empty in `__init__`. — **X5** `[ ]` TODO
+**Category A/D — undeclared, guarded (mostly degrade, two can misbehave):** ~40 `getattr(app, "_x", default)` sites exist; each admits a writer may not have run. Two are not merely defensive: `_label_to_channel_key` (`channel_state_controller.py:297` write / `:801-806` **lossy lowercase fallback** → a ratio label read before the map is built resolves to a bogus real-channel key instead of `ratio:<name>`) and `_cell_gating_worker` (`cell_gating_tab_view.py:1117` **un-guarded** read, safe only by call-ordering). *Fix:* initialize these (`_label_to_channel_key`, `_seg_channel_token`, `_analyze_pane`, `_smfish_cancel_event`, `_thresh_frac_on_saved`) empty in `__init__`. — **X5** `[!]` BLOCKED — pre-declaring on the god-object trips the attr-budget ratchet (test_guardrails, tightened to 68), and init-to-`{}` doesn't fix the lossy `_label_to_channel_key` fallback anyway (it fires on any miss). Correct fix is the typed-state migration (A8) or a targeted fix to `channel_key_for_label`'s ratio-label fallback.
 
 **Category B — genuinely dead state:** `_bar_quick_pair_dir`, `_bar_quick_iter_order` (`runtime_app.py:306-307`, never read; their live twins `_rep_quick_*` are read at `grouping/controller.py:42`), and the `_montage_chan_cb` placeholder (`runtime_app.py:288`, never read — the montage combo uses `_montage_chan_var`). *Fix: delete, or wire up like the working twins.* — **X13** `[x]` DONE
 
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch L (cross-dataset state)** — **X1** (`load_directory` now calls `_reset_gating_state` before hydration, clearing `_scatter_gates`/`_review_included_overrides`/`_cell_gating_use_scatter_*`/gate-choices/`_active_heatmap_layout_name` so a prior dataset's gates can't silently filter the next dataset when it has no cell_gating sidecar). **X5 BLOCKED** — pre-declaring those attrs on the god-object conflicts with the attr-budget ratchet and doesn't fix the lossy fallback; belongs to A8/typed-state. +1 test. Fast lane green (1271). 34/77 resolved.
+
 - 2026-07-02 **Batch K (input validation)** — **X4/X6** (`_numeric_option_errors`, wired into `_validate_run_request`, blocks a bad radius/FFT/mesh/threads/workers/batch value, `mesh_ratio=0`, inverted QC area bounds, or out-of-range solidity at the entry boundary — instead of silently dropping the flag or dividing by zero downstream). +8 tests. analyze_tab budget re-baselined 1176→1206. Fast lane green (1269). 33/77 resolved.
 
 - 2026-07-02 **Batch J (error-surfacing)** — **E10** (saved-plot capture logs instead of silently dropping the group/stats config), **E15** (corrupt image/mask in the image table leaves a DEBUG breadcrumb, not a silent blank tile), **E17** (both remote-dialog `_runner` closures always enqueue a result so `_poll` can't spin forever). +3 tests (E17 is a Qt closure, inspection-verified). Fast lane green (1262). 31/77 resolved.
@@ -446,4 +448,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch K merged (input validation + tests); **33 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch L merged (X1 cross-dataset gate reset + tests); **34 / 77 resolved.**

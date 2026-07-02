@@ -942,7 +942,11 @@ def _load_image_source(source) -> "np.ndarray | None":
                 arr = arr[0]
             return arr.astype(np.float32)
         return load_2d_gray(source)
-    except Exception:
+    except (OSError, zipfile.BadZipFile, ValueError, KeyError) as exc:
+        log.debug("skipping unreadable image source %r: %s", source, exc)
+        return None
+    except Exception:  # unexpected (a bug, not bad data) — surface, still skip
+        log.warning("unexpected error loading image %r; skipping", source, exc_info=True)
         return None
 
 
@@ -4001,17 +4005,28 @@ def write_pipeline_info(
     if p.exists():
         try:
             existing = json.loads(p.read_text())
-            if isinstance(existing, dict):
-                for preserved_key in (
-                    "cell_gating",
-                    "sample_definitions",
-                    "ratios",
-                    "notes",
-                ):
-                    if preserved_key in existing and preserved_key not in info:
-                        info[preserved_key] = existing[preserved_key]
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as exc:
+            # Corrupt existing sidecar: back it up + surface at ERROR rather
+            # than silently overwriting (which drops the user-side blocks —
+            # cell_gating/sample_definitions/ratios/notes — audit E3).
+            backup = p.with_suffix(p.suffix + ".corrupt.bak")
+            try:
+                if not backup.exists():
+                    shutil.copy2(p, backup)
+            except OSError:
+                backup = None
+            log.error("existing %s unreadable (%s); backed up to %s",
+                      p.name, exc, backup if backup is not None else "(backup failed)")
+            existing = None
+        if isinstance(existing, dict):
+            for preserved_key in (
+                "cell_gating",
+                "sample_definitions",
+                "ratios",
+                "notes",
+            ):
+                if preserved_key in existing and preserved_key not in info:
+                    info[preserved_key] = existing[preserved_key]
     tmp = p.with_suffix(p.suffix + ".tmp")
     try:
         tmp.write_text(json.dumps(info, indent=2))

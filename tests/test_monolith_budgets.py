@@ -51,7 +51,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # --incremental CLI flags, dispatch, per-task diff/merge branches and driver
 # routing (+154); analyze_tab's one-line integration hook (+8). Resume ratcheting
 # down from these.
-PROCESS_MICROSCOPY_BUDGET = 4696
+# Code-review E2/E3 (+11): narrowed the image-loader catch to log skips instead
+# of swallowing (E2), and back-up-and-surface a corrupt existing pipeline_info
+# sidecar instead of silently clobbering user blocks (E3) — mandatory
+# correctness handling, not appended features. Resume ratcheting down from 4707.
+PROCESS_MICROSCOPY_BUDGET = 4707
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731

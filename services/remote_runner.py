@@ -2549,7 +2549,18 @@ class _BatchedRemoteProcess:
 
     def wait(self, timeout: Optional[float] = None) -> int:
         self._worker.join(timeout=timeout)
-        return self._returncode if self._returncode is not None else 0
+        if self._worker.is_alive():
+            # Timed out; the worker is still running — not a completion, so
+            # report the current (possibly None→0) state without inventing a
+            # success code.
+            return self._returncode if self._returncode is not None else 0
+        # The worker finished. A ``None`` code here means it crashed before
+        # setting one — surface that as a failure rather than coercing it to 0
+        # (which previously made a crashed batched run look successful and
+        # triggered verify_and_cleanup to delete remote data — audit E1).
+        if self._returncode is None:
+            self._returncode = 1
+        return self._returncode
 
     def terminate(self) -> None:
         self._stop.set()
@@ -2804,6 +2815,18 @@ class _BatchedRemoteProcess:
                 )
 
             self._returncode = 0
+        except BaseException as exc:
+            # A crash anywhere in the batch loop (ssh spawn failure, argv
+            # build, upload, stdout iteration) must NOT leave ``_returncode``
+            # at None — that made ``wait()`` report success and
+            # verify_and_cleanup delete remote data though nothing ran
+            # (audit E1). Record a non-zero code and surface the error in the
+            # GUI log; the ``finally`` below still drains the fetcher and, now
+            # that rc != 0, skips the auto-threshold pass.
+            import logging as _logging
+            self._returncode = 1
+            self._log(f"[remote] batched run failed: {exc}\n")
+            _logging.getLogger(__name__).exception("batched remote run crashed")
         finally:
             # Drain the Fetcher first so every well's CSV + zip lands
             # locally BEFORE we attempt auto-threshold against

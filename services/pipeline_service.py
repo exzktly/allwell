@@ -20,6 +20,29 @@ def find_pipeline_script() -> Path | None:
     return PIPELINE_SCRIPT if PIPELINE_SCRIPT.exists() else None
 
 
+def _emit_num_flag(args: list[str], opts: dict, key: str, flag: str, cast) -> None:
+    """Append ``[flag, str(cast(opts[key]))]`` when *key* carries a usable value.
+
+    A missing or blank value means "use the pipeline default" and is skipped
+    silently. A value that is *present but cannot be cast* is a user
+    misconfiguration — silently dropping it would run the pipeline with
+    different parameters than the operator configured (see audit E4), so it
+    raises a clear ``ValueError`` instead.
+    """
+    if key not in opts:
+        return
+    raw = opts[key]
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return
+    try:
+        value = cast(raw)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"Invalid value for {key!r}: {raw!r} (expected {cast.__name__})"
+        ) from None
+    args += [flag, str(value)]
+
+
 def build_pipeline_args(
     pipeline: Path,
     input_dir: Path,
@@ -88,30 +111,12 @@ def build_pipeline_args(
         nuc = (opts.get("cellpose_nuclei_channel") or "").strip()
         if nuc:
             args += ["--cellpose_nuclei_channel", nuc]
-    try:
-        args += ["--tophat_radius_nir", str(int(opts["tophat_radius_nir"]))]
-    except (TypeError, ValueError, KeyError):
-        pass
-    try:
-        args += ["--tophat_radius_fluor", str(int(opts["tophat_radius_fluor"]))]
-    except (TypeError, ValueError, KeyError):
-        pass
-    try:
-        args += ["--fft_small_nir", str(int(opts["fft_small_nir"]))]
-    except (TypeError, ValueError, KeyError):
-        pass
-    try:
-        args += ["--fft_small_fluor", str(int(opts["fft_small_fluor"]))]
-    except (TypeError, ValueError, KeyError):
-        pass
-    try:
-        args += ["--mesh_ratio", str(float(opts["mesh_ratio"]))]
-    except (TypeError, ValueError, KeyError):
-        pass
-    try:
-        args += ["--mesh_sigma", str(float(opts["mesh_sigma"]))]
-    except (TypeError, ValueError, KeyError):
-        pass
+    _emit_num_flag(args, opts, "tophat_radius_nir", "--tophat_radius_nir", int)
+    _emit_num_flag(args, opts, "tophat_radius_fluor", "--tophat_radius_fluor", int)
+    _emit_num_flag(args, opts, "fft_small_nir", "--fft_small_nir", int)
+    _emit_num_flag(args, opts, "fft_small_fluor", "--fft_small_fluor", int)
+    _emit_num_flag(args, opts, "mesh_ratio", "--mesh_ratio", float)
+    _emit_num_flag(args, opts, "mesh_sigma", "--mesh_sigma", float)
 
     for flag in (
         "no_tophat_nir",

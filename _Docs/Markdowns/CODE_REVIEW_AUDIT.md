@@ -425,7 +425,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > `[ ]` TODO · `[x]` DONE. Count = `ctx.app` refs in that file at start (mostly widget stashes). Newest-migrated first.
 
-- `[ ]` **barplot/tab_view.py** (128)
+- `[x]` **barplot/tab_view.py** (111 → 13) — 22 Qt handles (hidden channel/metric combos, reset-order + timepoint + grouping/pooling/beeswarm/violin/significance buttons, violin slider, PlotCard/fig/3 axes/canvas/scroll, export dock) + `_bar_tp_var` alias via `ctx.widgets`. Budget 544 → 446. `test_barplot_widget_registry_a8.py`.
 - `[ ]` **grouping/cell_gating_tab_view.py** (124)
 - `[x]` **scatter/cells_tab_view.py** (75 → ~20) — 14 widgets + 6 `_var` aliases via `ctx.widgets`. `test_scatter_widget_registry_a8.py`.
 - `[x]` **heatmap/tab_view.py** (81 → 33) — 17 widgets registered via `ctx.widgets`; budget 869 → 811. `test_heatmap_widget_registry_a8.py`.

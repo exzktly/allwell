@@ -85,6 +85,34 @@ def tokens_for(ax) -> tuple:
 _tokens_for = tokens_for
 
 
+def reconfigure_stacked_axes(fig, n_axes: int, build):
+    """Reuse *fig*'s existing axes when their count matches *n_axes* (clearing
+    them in place — avoids the costly ``fig.clear()`` + canvas resize on every
+    redraw); otherwise preserve the ``_plot_card`` back-ref across ``fig.clear``
+    and rebuild via ``build(fig)``. Returns the axes list.
+
+    Extracted from the scatter (`_setup_scatter_axes`) and distribution
+    (`_setup_axes`) tabs, which both hand-rolled this reuse/clear/preserve prefix
+    (audit A16); the per-tab subplot layout stays in each ``build`` closure.
+    """
+    existing = list(fig.axes)
+    if len(existing) == n_axes:
+        for ax in existing:
+            ax.clear()
+        return existing
+    # ``fig.clear()`` resets figure-level attributes, which can wipe the
+    # ``_plot_card`` back-ref that ``tokens_for`` consults — re-attach it after
+    # rebuilding so the next card-style read gets the right palette.
+    card = getattr(fig, "_plot_card", None)
+    fig.clear()
+    if card is not None:
+        try:
+            fig._plot_card = card
+        except Exception:
+            swallowed()
+    return build(fig)
+
+
 def apply_ax_style(ax, title: str, ylabel: str) -> None:
     """Apply the standard plot style to *ax*."""
     bg, title_fg, muted_fg, grid, spine = tokens_for(ax)

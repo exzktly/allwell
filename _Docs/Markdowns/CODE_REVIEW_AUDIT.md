@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **59 / 77 items resolved** (58 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **60 / 77 items resolved** (59 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -114,7 +114,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A13 | `_annotated_matrix` helper for the 4× heatmap block | M | `[x]` DONE | `test_multivariate_heatmap_render.py` |
 | A14 | decompose `batch_export/base_panel.py` (export exec → service) | M | `[ ]` TODO | |
 | A15 | lazy/deferred feature descriptors for the 49-import registry | M | `[ ]` TODO | |
-| A16 | collapse remaining re-inlined helpers | L | `[ ]` TODO | |
+| A16 | collapse remaining re-inlined helpers | L | `[x]` DONE | scatter/distribution suite |
 | A17 | normalize feature-file naming or document exceptions | L | `[x]` DONE | `test_architecture_contracts.py` |
 
 ### X — Cross-dataset state / atomicity / input validation (Pass 1.2 / 4.3 / 4.4 / 5.4 / 5.5)
@@ -369,7 +369,7 @@ The sampled data/stats surface is unusually well-hardened; no Critical/High/Medi
 - **Medium —** rsync-over-ssh transport+retry in **three** overlapping impls (`remote_runner.py:2028/2150/2246`). *Fix: one cancellable retrying runner.* — **A11** `[ ]` TODO
 - **Medium —** the barplot fold-change mean/frac/n triplet pasted **6×** (`barplot/collect.py:265-387/496-579`). *Fix: loop over a field-spec tuple.* — **A12** `[ ]` TODO
 - **Medium —** the annotated-heatmap block ×4 in `multivariate/renderer.py`. *Fix: one `_annotated_matrix(ax, mat, cmap, fmt)` helper.* — **A13** `[x]` DONE — added `_annotated_matrix(ax, mat, *, cmap, vmin, vmax, row/col_labels, fmt, annotate, annot_color, x_rotation, mask_invalid)` holding the shared imshow + tick-label + annotation-loop scaffolding; the correlation / PCA-loadings / cluster-profile / facet renderers now call it (per-call cmap/clim/predicate/fmt/colour differences are parameters). A new characterization test snapshots the drawn image + tick labels + every annotation (position/string/colour) for all four — byte-identical after.
-- **Low —** helper-exists-but-re-inlined: `scatter/_layout.py:46 _style_scatter_ax` re-inlined at `scatter/controller.py:83/267`; `distribution/controller.py:143` mirrors `scatter/_layout.py:66`; `timepoint_color_map` duplicated in `multivariate/renderer.py:82`; persistence `_coerce_*` map helpers with **drifted** NaN handling. *Fix: call the shared helpers.* — **A16** `[ ]` TODO
+- **Low —** helper-exists-but-re-inlined: `scatter/_layout.py:46 _style_scatter_ax` re-inlined at `scatter/controller.py:83/267`; `distribution/controller.py:143` mirrors `scatter/_layout.py:66`; `timepoint_color_map` duplicated in `multivariate/renderer.py:82`; persistence `_coerce_*` map helpers with **drifted** NaN handling. *Fix: call the shared helpers.* — **A16** `[x]` DONE — (1) both `scatter/controller.py` re-inlines now call `_style_scatter_ax` (given a `fig` param so the aggregate scatter can share it — which also fixed the aggregate axis silently missing the title-colour styling the single/faceted paths applied); (2) the `_setup_scatter_axes` / distribution `_setup_axes` reuse-or-rebuild prefix (reuse existing axes on count match, else preserve `_plot_card` across `fig.clear()` + rebuild) extracted to a shared `plot_style.reconfigure_stacked_axes(fig, n, build)` in the core layer, with each tab's subplot layout kept in its own `build` closure. (`timepoint_color_map` reuse in `multivariate` was left inlined — importing it there would couple multivariate→scatter against the layering guard; the persistence `_coerce_*` helpers named in the audit no longer exist.) 73 scatter/distribution tests green, byte-identical.
 - **Positive:** well-plate coordinate math is centralized; rsync transport/retry and `pipeline/io.py` CSV/zip merge are single-source. → see Non-goals.
 
 ### 5.2 Complexity (radon CC; "untested" = no test references the function)
@@ -422,6 +422,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 ## Status log
 
 > Append a dated line whenever a status box changes. Newest first.
+
+- 2026-07-02 **Batch AG (dedup: A16)** — **A16** (both `scatter/controller` re-inlines now call `_style_scatter_ax` — gained a `fig` param so the aggregate scatter shares it, incidentally fixing the aggregate axis missing title-colour styling; and the scatter/distribution stacked-axes reuse-or-rebuild prefix extracted to `plot_style.reconfigure_stacked_axes` in the core layer. `timepoint_color_map` reuse left inlined to avoid multivariate→scatter coupling; the audit's persistence `_coerce_*` helpers no longer exist). 73 scatter/distribution tests green. 60/77 resolved.
 
 - 2026-07-02 **Batch AF (dedup: A13)** — **A13** (extracted the 4×-pasted annotated-heatmap block in `multivariate/renderer.py` into one `_annotated_matrix` helper; correlation / PCA-loadings / cluster-profile / facet renderers call it with per-call params. New rendering characterization test pins image + tick labels + every annotation — byte-identical). +4 tests. Fast lane green. 59/77 resolved.
 
@@ -488,4 +490,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch AF merged (A13 _annotated_matrix heatmap helper); **59 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch AG merged (A16 collapse re-inlined helpers); **60 / 77 resolved.**

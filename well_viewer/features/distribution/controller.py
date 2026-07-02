@@ -151,24 +151,9 @@ def _setup_axes(app, n_axes: int):
     aliased back onto ``app._distribution_ax`` for back-compat with
     older code paths that pluck the single axis directly.
     """
-    fig = app._distribution_fig
-    existing = list(fig.axes)
-    if len(existing) == n_axes:
-        for ax in existing:
-            ax.clear()
-        axes = existing
-    else:
-        # ``fig.clear()`` resets figure-level attributes, which can wipe
-        # the ``_plot_card`` back-ref that ``plot_style.tokens_for``
-        # consults — re-attach it after rebuilding axes so the next
-        # ``_apply_card_style`` reads the right palette.
-        card = getattr(fig, "_plot_card", None)
-        fig.clear()
-        if card is not None:
-            try:
-                fig._plot_card = card
-            except Exception:
-                swallowed()  # was: pass (silent except)
+    from well_viewer.core.plot_style import reconfigure_stacked_axes
+
+    def _build(fig):
         if n_axes == 1:
             axes = [fig.add_subplot(1, 1, 1)]
             fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
@@ -180,6 +165,9 @@ def _setup_axes(app, n_axes: int):
             fig.subplots_adjust(
                 top=0.93, bottom=0.10, left=0.10, right=0.97, hspace=0.02,
             )
+        return axes
+
+    axes = reconfigure_stacked_axes(app._distribution_fig, n_axes, _build)
     for ax in axes:
         _apply_card_style(app, ax)
     app._distribution_ax = axes[0]

@@ -43,13 +43,20 @@ def _scatter_col_label(col: str) -> str:
     return label
 
 
-def _style_scatter_ax(app, ax):
+def _style_scatter_ax(app, ax, fig=None):
     """Apply Screen/Publication theme tokens to one scatter axis. Returns the
-    ``(bg, title_fg, muted_fg, grid, spine)`` tuple for the caller."""
+    ``(bg, title_fg, muted_fg, grid, spine)`` tuple for the caller.
+
+    *fig* is the figure whose facecolor should track the theme bg; it defaults
+    to ``app._scatter_fig`` (the single / faceted scatter). The aggregate scatter
+    passes ``app._scatter_agg_fig``. (audit A16 — this was re-inlined at both
+    scatter/controller.py call sites.)"""
     from well_viewer.core.plot_style import tokens_for as _tokens_for_ax
     _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for_ax(ax)
+    if fig is None:
+        fig = app._scatter_fig
     try:
-        app._scatter_fig.set_facecolor(_bg)
+        fig.set_facecolor(_bg)
     except Exception:
         swallowed()
     ax.set_facecolor(_bg)
@@ -69,20 +76,9 @@ def _setup_scatter_axes(app, n_axes: int):
     count matches; otherwise rebuilds. ``app._ax_scatter`` is aliased to the
     first axis for the overlay path + gate tooling. Mirrors the Distribution
     tab's ``_setup_axes``."""
-    fig = app._scatter_fig
-    existing = list(fig.axes)
-    if len(existing) == n_axes:
-        for ax in existing:
-            ax.clear()
-        axes = existing
-    else:
-        card = getattr(fig, "_plot_card", None)
-        fig.clear()
-        if card is not None:
-            try:
-                fig._plot_card = card
-            except Exception:
-                swallowed()
+    from well_viewer.core.plot_style import reconfigure_stacked_axes
+
+    def _build(fig):
         if n_axes == 1:
             axes = [fig.add_subplot(1, 1, 1)]
             fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.16, right=0.97)
@@ -94,6 +90,9 @@ def _setup_scatter_axes(app, n_axes: int):
             # (get_tightbbox only captures artists inside the figure).
             axes = list(fig.subplots(n_axes, 1, sharex=True, sharey=True))
             fig.subplots_adjust(top=0.95, bottom=0.10, left=0.16, right=0.97, hspace=0.08)
+        return axes
+
+    axes = reconfigure_stacked_axes(app._scatter_fig, n_axes, _build)
     app._ax_scatter = axes[0]
     app._scatter_axes = axes
     # Keep a reasonable minimum height per panel so stacked panels don't squish:

@@ -30,7 +30,7 @@ from well_viewer.features.scatter.gating import (
     render_scatter_points,
 )
 
-from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, log1p_axis_suffix  # noqa: E501
+from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix  # noqa: E501
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -79,21 +79,8 @@ def redraw_scatter(
     app._ax_scatter.clear()
     # Honour Screen / Publication mode — the scatter axes used to default
     # to matplotlib's white background, so dark-mode users saw a glaring
-    # white block. Pull the theme bg + ink tokens via plot_style.tokens_for.
-    from well_viewer.core.plot_style import tokens_for as _tokens_for_ax
-    _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for_ax(app._ax_scatter)
-    try:
-        app._scatter_fig.set_facecolor(_bg)
-    except Exception:
-        swallowed()  # was: pass (silent except)
-    app._ax_scatter.set_facecolor(_bg)
-    for sp in app._ax_scatter.spines.values():
-        sp.set_color(_spine)
-        sp.set_linewidth(0.8)
-    app._ax_scatter.tick_params(colors=_muted_fg, labelsize=8)
-    app._ax_scatter.xaxis.label.set_color(_muted_fg)
-    app._ax_scatter.yaxis.label.set_color(_muted_fg)
-    app._ax_scatter.title.set_color(_title_fg)
+    # white block. Shared with the faceted + aggregate paths (audit A16).
+    _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(app, app._ax_scatter)
 
     if not selected_wells and not active_rsets:
         app._scatter_interaction_cache = {"points": []}
@@ -264,19 +251,9 @@ def redraw_scatter_agg(
 
     # Clear existing plot
     app._ax_scatter_agg.clear()
-    from well_viewer.core.plot_style import tokens_for as _tokens_for_ax
-    _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for_ax(app._ax_scatter_agg)
-    try:
-        app._scatter_agg_fig.set_facecolor(_bg)
-    except Exception:
-        swallowed()  # was: pass (silent except)
-    app._ax_scatter_agg.set_facecolor(_bg)
-    for sp in app._ax_scatter_agg.spines.values():
-        sp.set_color(_spine)
-        sp.set_linewidth(0.8)
-    app._ax_scatter_agg.tick_params(colors=_muted_fg, labelsize=8)
-    app._ax_scatter_agg.xaxis.label.set_color(_muted_fg)
-    app._ax_scatter_agg.yaxis.label.set_color(_muted_fg)
+    # Shared axis theming (audit A16); the aggregate figure tracks the theme bg.
+    _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(
+        app, app._ax_scatter_agg, fig=app._scatter_agg_fig)
 
     if not selected_wells and not active_rsets:
         app._ax_scatter_agg.text(

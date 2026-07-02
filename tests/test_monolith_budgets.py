@@ -65,8 +65,9 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 963
 # removing the duplicated counter from the tab.
 # Code-review X4/X6 (+30): the entry-boundary numeric validator
 # (_numeric_option_errors + _INT_FIELDS) that blocks a bad radius/FFT/mesh/QC
-# value up front instead of silently dropping it. Resume ratcheting from 1206.
-ANALYZE_TAB_BUDGET = 1206
+# value up front instead of silently dropping it. Then L2 (+5): the `_alive`
+# flag + guarded log-poller re-arm so it stops on app close. Resume from 1211.
+ANALYZE_TAB_BUDGET = 1211
 
 
 def _line_count(rel: str) -> int:

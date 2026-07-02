@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **36 / 77 items resolved** (35 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **39 / 77 items resolved** (38 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -80,9 +80,9 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | ID | Item | Sev | Status | Commit/PR |
 |----|------|-----|--------|-----------|
 | L1 | `MainWindow.closeEvent` never stops runner → orphan + remote leak | C | `[x]` DONE | #597 |
-| L2 | `_poll_log` self-reschedules forever, no stop/teardown | M | `[ ]` TODO | |
-| L3 | `runtime_app` no closeEvent → smFISH cancel unset, threads unjoined | M | `[ ]` TODO | |
-| L4 | app-global `focusChanged` not disconnected on teardown | L | `[ ]` TODO | |
+| L2 | `_poll_log` self-reschedules forever, no stop/teardown | M | `[x]` DONE | #597 |
+| L3 | `runtime_app` no closeEvent → smFISH cancel unset, threads unjoined | M | `[x]` DONE | #597 |
+| L4 | app-global `focusChanged` not disconnected on teardown | L | `[x]` DONE | #597 |
 
 ### G — Guardrails / hygiene / dead code (Pass 1.5 / 2.2 / 5.2)
 | ID | Item | Sev | Status | Commit/PR |
@@ -302,9 +302,9 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 ### 2.4 State lifecycle / teardown
 **Root cause:** `AnalyzeTab` is mounted as a *child* widget (`allwell.py:225-229`); in Qt, `closeEvent` reaches only top-level windows, so **`AnalyzeTab.closeEvent` never fires**.
 - **Critical — `allwell.py:918`**: `MainWindow.closeEvent` only saves geometry + cleans the review temp dir; it **never stops the runner**. Quitting mid-run orphans the local `subprocess.Popen`; for remote runs the `finally` teardown in `pipeline_runner._run_pipeline_remote:646-663` runs on a daemon thread killed abruptly → **remote SLURM allocation, remote staging dir, and local scratch all leak**. *Fix: in `MainWindow.closeEvent`, `self._analyze._runner.stop()` (and briefly wait) before `super().closeEvent`.* — **L1** `[x]` DONE (`_stop_analyze_runner` called from `AllWellApp.closeEvent`; `tests/test_close_stops_analyze_runner.py`)
-- **Medium —** `analyze_tab.py:1035` `_poll_log` self-reschedules `singleShot(80,…)` forever with no stop condition. *Fix: stop re-arming when `not self._running`.* — **L2** `[ ]` TODO
-- **Medium —** `runtime_app.py` has no `closeEvent`, so the smfish cancel event is never set on close and worker threads aren't joined at shutdown. *Fix: on close, set the cancel event + signal loaders to stop.* — **L3** `[ ]` TODO
-- **Low —** `core/split_view.py:222-246` disconnects the app-global `focusChanged` only when Split View is toggled off, not on teardown. — **L4** `[ ]` TODO
+- **Medium —** `analyze_tab.py:1035` `_poll_log` self-reschedules `singleShot(80,…)` forever with no stop condition. *Fix: stop re-arming when `not self._running`.* — **L2** `[x]` DONE (guarded `_alive` flag cleared on close; `tests/test_close_stops_analyze_runner.py`)
+- **Medium —** `runtime_app.py` has no `closeEvent`, so the smfish cancel event is never set on close and worker threads aren't joined at shutdown. *Fix: on close, set the cancel event + signal loaders to stop.* — **L3** `[x]` DONE (`teardown_review_pane` from `AllWellApp.closeEvent`; `tests/test_review_teardown.py`)
+- **Low —** `core/split_view.py:222-246` disconnects the app-global `focusChanged` only when Split View is toggled off, not on teardown. — **L4** `[x]` DONE (`teardown_review_pane` calls `_remove_split_focus_filter`)
 - **Correctly paired:** `AnalyzeTab._eta_timer`; remote-dialog `_poll` self-termination; remote-dialog `closeEvent`s. → see Non-goals.
 
 ### 2.5 Boundary conditions — **a strength**
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch O (lifecycle)** — **L2/L3/L4** (AllWellApp.closeEvent now, on quit, stops the Analyze log-poller re-arming via a guarded `_alive` flag, and calls `teardown_review_pane` on the Review pane to abort the smFISH worker + disconnect the app-global focusChanged watcher — both panes are child widgets whose own closeEvent never fires). Also: **e2e deps confirmed** — an isolated venv with the repo's pinned StarDist/TF stack imports and initializes; the e2e test itself can't run here only because the pretrained-weights GitHub-release download is egress-blocked (403). +6 tests. Fast lane green (1280). analyze_tab budget 1206→1211. 39/77 resolved.
+
 - 2026-07-02 **Batch N (compute hygiene)** — **S8** (circularity masks non-positive perimeters before dividing → NaN instead of inf + RuntimeWarning; empty-channel CDF guarded against 0/0). +1 test. Fast lane green (1276). 36/77 resolved.
 
 - 2026-07-02 **Batch M (scientific)** — **S2** (new `domain/tp_match.py` relative matcher `tp_close`/`tp_close_mask`; routed the 9 absolute-`1e-6` timepoint comparisons in stats_compute / stats-controller / data_loading / scatter-gating / image_compose through it, so a fractional timepoint round-tripped through a `:.4g` label now matches in Statistics/aggregation just as in fold-change). +4 tests. Code shipped in `a4e0ab5`; tracker in the follow-up commit. Fast lane green (1275). 35/77 resolved.
@@ -452,4 +454,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch N merged (S8 + tests); **36 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch O merged (lifecycle L2/L3/L4 + tests); **39 / 77 resolved.**

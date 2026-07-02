@@ -202,6 +202,31 @@ from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_the
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.features.preview.panel_view import refresh_fov_btn_state
 
+
+def teardown_review_pane(app) -> None:
+    """App-close teardown for the Review pane.
+
+    ``WellViewerApp`` is mounted as a child widget of ``AllWellApp``, so its own
+    ``closeEvent`` never fires — ``AllWellApp.closeEvent`` calls this instead
+    (audit L3/L4). It (L3) signals any in-flight smFISH "Apply to All" worker to
+    abort so it can't write CSVs after the UI is gone, and (L4) disconnects the
+    application-global ``focusChanged`` watcher installed for Split View.
+    """
+    if app is None:
+        return
+    ev = getattr(app, "_smfish_cancel_event", None)
+    if ev is not None:
+        try:
+            ev.set()
+        except Exception:
+            _logger.debug("teardown: smFISH cancel event set failed", exc_info=True)
+    try:
+        from well_viewer.core.split_view import _remove_split_focus_filter
+        _remove_split_focus_filter(app)
+    except Exception:
+        _logger.debug("teardown: split-focus-filter removal failed", exc_info=True)
+
+
 class WellViewerApp(QWidget):
 
     def __init__(self, parent=None, data_path: Optional[Path] = None) -> None:

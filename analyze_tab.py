@@ -184,6 +184,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         self._log_q: queue.Queue[tuple[str, object]] = self._runner.log_q
         self._progress_tracker = ProgressTracker()
         self._running = False
+        # Cleared on app close so the self-rescheduling log poller stops
+        # re-arming its QTimer (audit L2) — AnalyzeTab is a child widget whose
+        # own closeEvent never fires.
+        self._alive = True
         self._well_total = 0
         self._well_done  = 0
         self._zipper_done = 0
@@ -1180,7 +1184,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             pass
         except Exception:  # noqa: BLE001 — a bad event must not kill the poller
             swallowed()    # (would freeze the live log/dashboard permanently)
-        QTimer.singleShot(80, self._poll_log)
+        if getattr(self, "_alive", True):
+            QTimer.singleShot(80, self._poll_log)
 
     def closeEvent(self, event) -> None:
         if self._runner.is_running:

@@ -39,3 +39,13 @@ def test_stop_failure_is_swallowed_not_propagated():
     runner = types.SimpleNamespace(is_running=True, stop=_boom)
     # A failing stop() during shutdown must not block the app from closing.
     _stop_analyze_runner(types.SimpleNamespace(_runner=runner))
+
+
+def test_stop_analyze_runner_also_stops_the_log_poller():
+    # Audit L2 — closing must stop _poll_log re-arming its QTimer.
+    analyze = types.SimpleNamespace(
+        _alive=True,
+        _runner=types.SimpleNamespace(is_running=False, stop=lambda: None),
+    )
+    _stop_analyze_runner(analyze)
+    assert analyze._alive is False

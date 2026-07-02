@@ -49,6 +49,11 @@ def _stop_analyze_runner(analyze) -> None:
     """
     if analyze is None:
         return
+    # Stop the self-rescheduling log poller re-arming its QTimer (audit L2).
+    try:
+        analyze._alive = False
+    except Exception:
+        swallowed()
     runner = getattr(analyze, "_runner", None)
     if runner is None:
         return
@@ -952,8 +957,17 @@ class AllWellApp(QMainWindow):
                 swallowed()  # was: pass (silent except)
         # Stop any in-flight Analyze run — AnalyzeTab's own closeEvent never
         # fires (it's a child widget), so without this a mid-run quit leaks the
-        # local subprocess / remote SLURM allocation + scratch (audit L1).
+        # local subprocess / remote SLURM allocation + scratch (audit L1). Also
+        # stops the log poller re-arming (L2).
         _stop_analyze_runner(self._analyze)
+        # Review pane is also a child widget: signal its smFISH worker to abort
+        # and disconnect the app-global focus watcher on close (audit L3/L4).
+        if self._review is not None:
+            try:
+                from well_viewer.runtime_app import teardown_review_pane
+                teardown_review_pane(self._review)
+            except Exception:
+                swallowed()
         super().closeEvent(event)
 
     # ── Cross-tab threshold ───────────────────────────────────────────────

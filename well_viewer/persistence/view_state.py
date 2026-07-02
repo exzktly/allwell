@@ -198,10 +198,10 @@ def _snapshot_bar(app) -> dict:
     sels = app._app_state.bar.tp_selections if hasattr(app, "_app_state") else None
     if isinstance(sels, dict) and sels:
         out["timepoint_selections"] = {k: bool(v) for k, v in sels.items()}
-    if hasattr(app, "_bar_swarm"):
-        out["swarm"] = bool(app._bar_swarm)
-    if hasattr(app, "_bar_violin"):
-        out["violin"] = bool(app._bar_violin)
+    _bar = app._app_state.feature_slice("bar")
+    if _bar is not None:
+        out["swarm"] = bool(_bar.swarm)
+        out["violin"] = bool(_bar.violin)
     slider = getattr(app, "_violin_slider", None)
     if slider is not None:
         try:
@@ -727,10 +727,12 @@ def _apply_bar(app, state: dict) -> None:
                     lbl.setText(f"({count}/{total} selected)" if total else "(0 selected)")
         except Exception:
             _logger.debug("view_state: bar tp post-restore sync failed", exc_info=True)
-    if "swarm" in state:
-        app._bar_swarm = bool(state["swarm"])
-    if "violin" in state:
-        app._bar_violin = bool(state["violin"])
+    _bar = app._app_state.feature_slice("bar")
+    if _bar is not None:
+        if "swarm" in state:
+            _bar.swarm = bool(state["swarm"])
+        if "violin" in state:
+            _bar.violin = bool(state["violin"])
     slider = getattr(app, "_violin_slider", None)
     if slider is not None and "violin_smooth" in state:
         try:
@@ -1186,12 +1188,10 @@ def reset(app) -> None:
 
 
 def _reset_bar(app) -> None:
-    for attr, default in (
-        ("_bar_swarm", False),
-        ("_bar_violin", False),
-    ):
-        if hasattr(app, attr):
-            setattr(app, attr, default)
+    _bar = app._app_state.feature_slice("bar")
+    if _bar is not None:
+        _bar.swarm = False
+        _bar.violin = False
     slider = getattr(app, "_violin_slider", None)
     if slider is not None:
         try:

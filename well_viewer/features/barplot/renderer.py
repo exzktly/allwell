@@ -867,7 +867,7 @@ def draw_per_cell_bar_mode(
     # The Properties "Show: All points" option also routes here so per-cell
     # dots overlay the bars, reusing the beeswarm path.
     show_mode = str(getattr(app._app_state.plot, "bar_show_mode", "mean_spread") or "mean_spread")
-    use_per_cell = app._bar_violin or app._bar_swarm or show_mode == "all_pts"
+    use_per_cell = app._app_state.bar.violin or app._app_state.bar.swarm or show_mode == "all_pts"
     if not use_per_cell:
         return False
     ordered_keys = app._bar_current_keys()
@@ -976,7 +976,7 @@ def draw_per_cell_bar_mode(
                 group_keys.append(full if multi_tp else "")
 
     if _debug_flags.review_bar_debug_enabled():
-        mode = "violin" if app._bar_violin else "beeswarm"
+        mode = "violin" if app._app_state.bar.violin else "beeswarm"
         _logger.debug(
             "per-cell mode=%s wells=%r labels=%r tps=%r",
             mode, plot_wells, plot_labels, plot_tps,
@@ -1007,7 +1007,7 @@ def draw_per_cell_bar_mode(
     # doesn't match simply falls back to integer positions).
     app._bar_xs = list(xs)
     app._bar_xs_keys = list(ordered_keys)
-    if app._bar_violin:
+    if app._app_state.bar.violin:
         draw_violin(
             app, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
             plot_tps, tp_str, threshold,

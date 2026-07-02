@@ -445,6 +445,9 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 **Target:** drive `CTX_APP_BUDGET` from 894 → the residual behaviour-call floor. Each row: register handles via `ctx.widgets`, drop the budget, verify the tab still builds + its feature tests pass.
 
+**Phase 2 — non-widget STATE → typed feature slices (A8, in progress).** Widget handles are done (894 → 408). The next tranche moves the *persistable feature flags/options* off the god-object into the typed `AppState` feature slices (unlike widgets there is no `register()` app-stamp shim, so every reader migrates). Transient runtime objects (workers, image caches, extractors, matplotlib artists) are NOT typed-state candidates and stay. Pilot done:
+- `[x]` **barplot swarm/violin** → `BarPlotState.swarm`/`.violin`; migrated builder + controller toggles + renderer + persistence save/restore/reset. `test_bar_state_migration_a8.py` (toggle, mutual-exclusion, persistence round-trip). 408 → 405.
+
 ---
 
 ## Status log

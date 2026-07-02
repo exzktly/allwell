@@ -207,7 +207,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Overlay the individual per-cell points on each bar.")
     swarm_btn.clicked.connect(lambda _=False: ctx.app._toggle_swarm())
     _disp_lay.addWidget(swarm_btn)
-    ctx.app._bar_swarm = False
+    # swarm/violin state lives on the typed BarPlotState slice (defaults False).
 
     violin_btn = reg.register("_violin_btn", QPushButton("Violin: Off", shape_ctrl))
     violin_btn.setProperty("variant", "toggle")
@@ -217,7 +217,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Enables the Smooth control.")
     violin_btn.clicked.connect(lambda _=False: ctx.app._toggle_violin())
     _disp_lay.addWidget(violin_btn)
-    ctx.app._bar_violin = False
 
     _disp_lay.addWidget(QLabel("Smooth:", shape_ctrl))
     from widgets.styled_slider import StyledSlider as _StyledSlider
@@ -229,7 +228,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Violin kernel bandwidth — higher is smoother. "
         "Active only when Violin is on.")
     violin_slider.valueChanged.connect(
-        lambda _v: (redraw_bars(ctx.app) if ctx.app._bar_violin else None)
+        lambda _v: (redraw_bars(ctx.app) if ctx.state.bar.violin else None)
     )
     violin_slider.setEnabled(False)
     _disp_lay.addWidget(violin_slider)

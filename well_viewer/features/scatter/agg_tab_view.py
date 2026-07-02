@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from well_viewer.core.plot_card_actions import (
+    copy_active_card_as_svg, save_active_card_figure,
+)
+
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout,
@@ -107,10 +111,10 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     _export_btn.clicked.connect(lambda _=False: ctx.app._export_scatter_agg_data())
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", ctrl, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: ctx.app._copy_active_card_as_svg())
+    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
     cl.addWidget(_copy_btn)
     _save_btn = _IconButton("save", ctrl, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: ctx.app._save_active_card_figure())
+    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
     cl.addWidget(_save_btn)
     style_btn = _IconButton(
         "sliders-horizontal", ctrl,

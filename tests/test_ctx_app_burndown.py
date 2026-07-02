@@ -60,7 +60,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   376 → 318  P3.2 cell_gating widget-handle reads → ctx.widgets.get (finishing
 #              the Phase-1 register-discard: 58 registered-widget reads in the
 #              2.4k-line builder now read the registry, not the god-object)
-CTX_APP_BUDGET = 318
+#   318 → 309  P3.3 active-card Copy/Save extracted to core.plot_card_actions
+#              (ctx-based; cards via ctx.widgets; the 6 plot builders wire the
+#              buttons to the functions, not app methods). The two app/window
+#              services (_set_status / _save_matplotlib_fig) remain as one named
+#              escape-hatch boundary instead of six scattered reach-throughs.
+CTX_APP_BUDGET = 309
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

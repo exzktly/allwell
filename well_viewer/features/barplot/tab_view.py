@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from well_viewer.core.plot_card_actions import (
+    copy_active_card_as_svg, save_active_card_figure,
+)
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
@@ -105,10 +109,10 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _export_btn.clicked.connect(lambda _=False: export_bar_plot_data(ctx.app))
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", bar_ctrl, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: ctx.app._copy_active_card_as_svg())
+    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
     cl.addWidget(_copy_btn)
     _save_btn = _IconButton("save", bar_ctrl, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: ctx.app._save_active_card_figure())
+    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
     cl.addWidget(_save_btn)
     # Properties button last in the row so it sits flush with the right
     # edge of the plot area — adjacent to where the dock slides out.

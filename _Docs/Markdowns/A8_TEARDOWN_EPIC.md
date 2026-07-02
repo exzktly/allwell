@@ -76,16 +76,22 @@ coordinator's imperative `redraw_*_orchestrate(app)` calls into
 - **Risk:** Med — signal/slot **lifetime** (disconnect on teardown; cf. audit L4
   `focusChanged` leak). Mitigate with a subscription helper that auto-disconnects.
 
-### T2 — Feature runtime holders · `[~]`
+### T2 — Feature runtime holders · `[x]` DONE (293 → 249)
 For category (a): `core/app_runtime.py` gives each feature a `ctx.runtime.<feature>`
 namespace for live objects; writing through it **stamps `app._<feature>_<name>`**
 (WidgetRegistry pattern) so the ~130 legacy readers resolve unchanged while
-builders stop naming `ctx.app`. **Landed:** smFISH (17 objects) and the scatter
-gate-interaction objects (5). **Excluded (persisted → typed state, not runtime):
-** `_scatter_gates`, `_scatter_tp_selections`, `_image_table_cells/lut` (all read
-by `persistence/` via `getattr`) and `_image_table_crop_tool` (2 persistence
-refs). **Remaining:** image-table decode caches and any other confirmed-transient
-stashes.
+builders stop naming `ctx.app`. **Done** across 8 features + callback stashes (293 → 249): smFISH (17 objects),
+scatter (5 gate-interaction objects + set_mode/gates_changed_cb closures),
+cell_browser (state/chips/lut_rows/loader/refreshers), image_browser (built),
+heatmap (global_range_cache), barplot (drag_state), cell_gating (cell_areas/
+fluor_data/ratio_data/ax/axes_stack/worker), multivariate (picker_refreshing +
+refresh_*/sync_controls), batch_export/saved_plots (set_mode/repopulate closures).
+**Excluded (persisted → belong in typed state, not a runtime holder):**
+`_scatter_gates`, `_scatter_*_tp_selections`, `_image_table_cells/lut`,
+`_batch_export_inline_state`, `_cell_gating_fluor_gate_edits/thresh_frac_edits/
+use_scatter_*/choices`, and `_image_table_crop_tool` / `_image_browser_subtabs`
+(persistence-adjacent / widget). Migrating those is a Phase-2-style *state* task,
+not T2.
 - **Independent of T1/T3** — low architectural risk.
 - **Guardrail:** `tests/test_app_runtime.py` proves the stamp write-through and
   asserts `persistence/` never depends on `app_runtime`. Classify each field by a
@@ -131,7 +137,7 @@ intentional surface between features and the window shell.
 | ID | Workstream | Depends on | Risk | Status | Metric |
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[ ]` | 293 → _tbd_ |
-| T2 | Feature runtime holders | — | Low | `[~]` | 293 → 249 (data + callback stashes, 8 features) |
+| T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
 | T3 | Thread ctx through controllers | T1 | High | `[ ]` | |
 | T4 | Extract cross-cutting services | T1 | Med | `[ ]` | |
 | T5 | Saved-plots service | — | Med | `[ ]` | |

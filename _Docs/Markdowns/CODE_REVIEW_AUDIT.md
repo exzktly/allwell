@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **65 / 77 items resolved** (64 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **66 / 77 items resolved** (65 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -106,7 +106,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A5 | characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats` | H | `[x]` DONE | `test_stats_report_formatting.py` |
 | A6 | ~~delete cosmetic `WidgetRegistry`~~ (stale — verified live) | H | `[-]` DROPPED | #597 |
 | A7 | split `scatter/callbacks.py` (handlers vs single-cell viewer) | M | `[x]` DONE | `test_scatter_cell_viewer_dock.py` |
-| A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[ ]` TODO | |
+| A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[x]` DONE | `test_ctx_app_burndown.py` |
 | A9 | delete dead frameless modules (`_window_chrome`, `window_resize_grips`) | M | `[x]` DONE | #597 |
 | A10 | parametrize the `process_well_*` task/driver pairs | M | `[x]` DONE | `test_well_worker_pool.py` |
 | A11 | consolidate 3 rsync transport/retry impls | M | `[x]` DONE | `test_stream_rsync_retry.py` |
@@ -244,7 +244,7 @@ Intended pattern: `controller.py` + `tab_view.py` + `renderer.py` (+ `collect.py
 ### 1.4 Abstraction audit
 Key finding: the codebase has **no ABCs and no `typing.Protocol` at all** — so the risk is not over-abstraction via interfaces but **cosmetic indirection that provides no isolation**:
 - **High — `core/widget_registry.py`**: `register()` is called **exactly once** (`lineplot/tab_view.py:31`); the entire `get/has/names/…` API is **never called**; and `register()` *also* does `setattr(self._app, name, widget)`, so state is stored **twice** and the one consumer reads it as `app._line_export_dock` anyway. Pure ceremony. *Fix: delete it (or drop the double-write and route reads through `get()`).* — **A6** `[-]` DROPPED — **stale finding, verified live:** `WidgetRegistry` is the intended Phase-10 widget-handle store (guardrail comment at `test_guardrails.py:60`), used throughout `lineplot/tab_view.py` via `reg.register(...)` and covered by `tests/test_widget_registry.py`; the setattr-to-app is the designed mechanism, not a double-write bug.
-- **Medium-High — `viewer_context.ctx.app`**: the DI context exists to decouple features from the god-object, yet `ctx.app` is referenced **894 times across 20 files** — the abstraction leaks so thoroughly it provides near-zero isolation. *Fix: treat the count as a burn-down metric; lint against new `ctx.app` uses.* — **A8** `[ ]` TODO
+- **Medium-High — `viewer_context.ctx.app`**: the DI context exists to decouple features from the god-object, yet `ctx.app` is referenced **894 times across 20 files** — the abstraction leaks so thoroughly it provides near-zero isolation. *Fix: treat the count as a burn-down metric; lint against new `ctx.app` uses.* — **A8** `[x]` DONE — added `test_ctx_app_burndown.py`: a ratchet freezing the total `ctx.app` reference count at its current **894** and asserting it may only ever go *down*, so any new `ctx.app` reference fails CI and nudges contributors toward the typed `AppState` slice / a dedicated context accessor. The test explicitly forbids gaming the metric by aliasing `app = ctx.app` (the count must fall because a cluster stopped reaching through to the god-object, not because a reference was renamed), and a companion no-slack check forces the budget down whenever a real migration lands. This is the enforceable "lint against new uses" half; the cluster-by-cluster strangler migration to typed state is the ongoing burn-down the ratchet now guards (paired with the `runtime_app` god-object work).
 - **Low —** five registries exist; only `widget_registry` is unused. The rest (`feature_registry`, `persistence/registry`, `metric_registry`, `scope_registry`) earn their keep. → see Non-goals.
 
 ### 1.5 Dead code paths
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch AM (guard: A8)** — **A8** (added a `ctx.app` burn-down ratchet freezing the reference count at 894 so it can only go down — new god-object reach-throughs fail CI; the test forbids gaming via `app = ctx.app` aliasing and has a no-slack companion that forces the budget down when a real migration lands. The enforceable "lint against new uses" half; the cluster migration is the ongoing burn-down it now guards). +2 tests. 66/77 resolved.
+
 - 2026-07-02 **Batch AL (service: A14)** — **A14** (pulled the batch-export render-to-file execution out of `BatchExportPanel._save_figure` into a Qt-free `batch_export/service.py::save_export_figure`, shared by all 3 panel call sites and now directly unit-tested with no app/Qt fixture; panels keep the UI + progress orchestration). +3 tests; batch-export suite green. 65/77 resolved.
 
 - 2026-07-02 **Batch AK (split: A7)** — **A7** (extracted the ~1020-line `ScatterCellViewer` + `open_scatter_cell_viewer` into a new `scatter/cell_viewer_view.py`; `callbacks.py` 1196→125, now just the canvas click/hover handlers. 3 importers updated). Fast + slow scatter / cell-viewer-dock tests green. 64/77 resolved.
@@ -500,4 +502,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch AL merged (A14 batch-export render service); **65 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch AM merged (A8 ctx.app burn-down ratchet); **66 / 77 resolved.**

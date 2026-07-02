@@ -86,6 +86,7 @@ class GatingWorker(QThread):
 
     progress = Signal(int, int)  # (current, total)
     finished_ok = Signal()
+    failed = Signal(str)         # emitted with the error message on any crash
 
     def __init__(self, app, parent: Optional[object] = None) -> None:
         super().__init__(parent)
@@ -96,7 +97,15 @@ class GatingWorker(QThread):
         self._cancelled = True
 
     def run(self) -> None:
-        self._run_inner()
+        # A raise in _run_inner previously killed the QThread with no signal:
+        # finished_ok never fired, the UI stayed stuck, and the exception
+        # vanished into sys.excepthook (audit E7). Route it through ``failed``
+        # so the caller can release the UI and report it.
+        try:
+            self._run_inner()
+        except Exception as exc:
+            logger.exception("gating worker failed")
+            self.failed.emit(str(exc))
 
     def _run_inner(self) -> None:
         debug = _debug_flags.cell_gating_debug_enabled()
@@ -1122,6 +1131,7 @@ def cell_gating_start_gating_worker(app) -> None:
     worker = GatingWorker(app)
     worker.progress.connect(lambda cur, tot: _cell_gating_on_progress(app, cur, tot))
     worker.finished_ok.connect(lambda: _cell_gating_on_finished(app))
+    worker.failed.connect(lambda msg: _cell_gating_on_failed(app, msg))
     app._cell_gating_worker = worker
     bar = getattr(app, "_progress_bar", None)
     if bar is not None:
@@ -2369,6 +2379,22 @@ def _cell_gating_on_finished(app) -> None:
         bar.setValue(0)
         bar.hide()
     app._redraw()
+
+
+def _cell_gating_on_failed(app, msg: str) -> None:
+    # Release the UI (hide the progress bar) and surface the error instead of
+    # leaving the status bar stuck mid-pass (audit E7).
+    bar = getattr(app, "_progress_bar", None)
+    if bar is not None:
+        bar.setValue(0)
+        bar.hide()
+    logger.error("Cell gating failed: %s", msg)
+    show = getattr(app, "show_status_message", None)
+    if callable(show):
+        try:
+            show(f"Cell gating failed: {msg}")
+        except Exception:
+            logger.exception("failed to display gating-error status")
 
 
 def _cell_gating_persist_params(app) -> None:

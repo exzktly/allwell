@@ -471,6 +471,12 @@ class PipelineRunner:
                 )
             else:
                 self._run_pipeline_subprocess(args, on_success=on_success)
+        except Exception as exc:
+            # A setup-phase failure (grouping/zipper RuntimeError, a bad
+            # build_pipeline_args value, etc.) must surface as an ``error`` so
+            # the GUI shows *why* — the bare try/finally previously fell
+            # straight through to ``finished`` with no reason (audit E6).
+            self._enqueue(("error", f"Pipeline setup failed: {exc}\n"))
         finally:
             self._enqueue(("finished", None))
 

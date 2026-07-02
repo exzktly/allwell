@@ -3062,7 +3062,18 @@ class Fetcher:
                 continue
             if item is None:
                 return
-            self._fetch_one(item)
+            try:
+                self._fetch_one(item)
+            except Exception:
+                # A crash in one well's fetch must not kill the fetcher thread
+                # — that left the remaining wells silently un-downloaded behind
+                # a misleading "N/M downloaded" line (audit E12). Log it and
+                # move on to the next item; the verify/retry step re-pulls the
+                # gap.
+                import logging as _logging
+                _logging.getLogger(__name__).exception(
+                    "fetcher: error downloading %r; continuing", item)
+                self._log(f"[remote] ↓ fetcher: error on {item!r}; continuing\n")
 
     @contextlib.contextmanager
     def _transfer_heartbeat(self, label: str, dest_path: Path, interval: float = 8.0):

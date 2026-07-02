@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **12 / 77 items resolved** (11 done + 1 dropped). Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **15 / 77 items resolved** (14 done + 1 dropped). Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -45,13 +45,13 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E3 | corrupt `metadata.json` swallowed+overwritten → user-data loss | C | `[x]` DONE | #597 |
 | E4 | malformed tophat/FFT opts swallowed → wrong pipeline params | C | `[x]` DONE | #597 |
 | E5 | per-well failure never sets exit code → all-fail exits 0 | H | `[ ]` TODO | |
-| E6 | `_run_pipeline_thread` emits `finished` not `error` on setup raise | H | `[ ]` TODO | |
-| E7 | `GatingWorker.run` no except + no error signal → UI hang | H | `[ ]` TODO | |
+| E6 | `_run_pipeline_thread` emits `finished` not `error` on setup raise | H | `[x]` DONE | #597 |
+| E7 | `GatingWorker.run` no except + no error signal → UI hang | H | `[x]` DONE | #597 |
 | E8 | smFISH `_run` no try/except → "Apply Global Threshold" hangs | H | `[ ]` TODO | |
 | E9 | auto-threshold DEBUG-skip → silently biased threshold | H | `[ ]` TODO | |
 | E10 | saved-plot capture `return None` → silently loses groups/stats | H | `[ ]` TODO | |
 | E11 | corrupt input zip silently uploaded whole | H | `[ ]` TODO | |
-| E12 | `Fetcher._loop` no except → wells silently not downloaded | M | `[ ]` TODO | |
+| E12 | `Fetcher._loop` no except → wells silently not downloaded | M | `[x]` DONE | #597 |
 | E13 | failed `scancel`/`kill` unreported → lingering SLURM alloc | M | `[ ]` TODO | |
 | E14 | `ALLWELL_SCRATCH_DIR` silently ignored → ENOSPC | M | `[ ]` TODO | |
 | E15 | corrupt mask → "no overlay" → misread QC | M | `[ ]` TODO | |
@@ -268,10 +268,10 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 ### 2.1 Async/thread exception surfacing
 - **Critical — `services/remote_runner.py:2575`** (`_BatchedRemoteProcess._run_batches`): worker body is `try/…/finally` with **no `except`**. Any raise kills the daemon thread leaving `self._returncode = None`; `wait()` returns `rc if not None else 0` → **reports success (rc 0)** → `_run_pipeline_remote` calls `verify_and_cleanup(ok=True)` which can **delete the remote dataset though nothing ran**, with no logged error. *Fix: `except Exception: set rc=1, push error line`; treat dead-worker `None` rc as failure.* — **E1** `[x]` DONE (`tests/test_batched_remote_returncode.py`)
 - **High — `process_microscopy.py:4306/4695`**: per-well failures collected into `all_failed` are only `log.warning`'d; `main()` returns `None` and `__main__` never `sys.exit`s → an all-failed run exits 0. *Fix: `sys.exit(1)` when `all_failed` non-empty.* — **E5** `[ ]` TODO
-- **High — `services/pipeline_runner.py:401-475`** (`_run_pipeline_thread`): body wrapped only in `try/finally` + a narrow `except TypeError`; a grouping/zipper `RuntimeError` skips to `finally`, emitting `("finished", None)` but **never `("error", …)`**. *Fix: add `except Exception: enqueue(("error", …))`.* — **E6** `[ ]` TODO
-- **High — `features/grouping/cell_gating_tab_view.py:98`** (`GatingWorker.run`): calls `_run_inner()` with no try/except and the class has **no error signal**; a pandas error terminates the QThread, `finished_ok` never fires, UI hangs. *Fix: add `failed = Signal(str)`, wrap, always release the UI.* — **E7** `[ ]` TODO
+- **High — `services/pipeline_runner.py:401-475`** (`_run_pipeline_thread`): body wrapped only in `try/finally` + a narrow `except TypeError`; a grouping/zipper `RuntimeError` skips to `finally`, emitting `("finished", None)` but **never `("error", …)`**. *Fix: add `except Exception: enqueue(("error", …))`.* — **E6** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
+- **High — `features/grouping/cell_gating_tab_view.py:98`** (`GatingWorker.run`): calls `_run_inner()` with no try/except and the class has **no error signal**; a pandas error terminates the QThread, `finished_ok` never fires, UI hangs. *Fix: add `failed = Signal(str)`, wrap, always release the UI.* — **E7** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
 - **High — `features/smfish/worker.py:227`**: `_run` has no try/except; a `pd.read_csv` `ParserError` kills the thread so `done_cb` never fires → "Apply Global Threshold" hangs. *Fix: wrap `_run`, route failure through `done_cb`.* — **E8** `[ ]` TODO
-- **Medium — `services/remote_runner.py:3035/3091`** (`Fetcher._loop`→`_fetch_one`): `_fetch_one` called with no try/except; an unexpected exception kills the fetcher, **remaining wells never downloaded**, with only a misleading "N/M downloaded" line. *Fix: wrap the call, log, continue.* — **E12** `[ ]` TODO
+- **Medium — `services/remote_runner.py:3035/3091`** (`Fetcher._loop`→`_fetch_one`): `_fetch_one` called with no try/except; an unexpected exception kills the fetcher, **remaining wells never downloaded**, with only a misleading "N/M downloaded" line. *Fix: wrap the call, log, continue.* — **E12** `[x]` DONE (`tests/test_worker_error_surfacing.py`)
 - **Low —** `analyze_remote_dialog.py:590/676` unguarded `_runner`s → `QTimer` poll spins forever; `cell_browser/worker.py:191` DEBUG-only blank cell. *Fix: wrap runners, put a failure tuple on the queue.* — **E17** `[ ]` TODO
 - **Verified correct:** `_RemoteProcess._pump`, `_run_pipeline_subprocess`/`_run_pipeline_remote`, `subprocess_kill.signal_subprocess`, `_AutoThresholdWorker`. → see Non-goals.
 
@@ -423,9 +423,11 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch C (High error/race surfacing)** — **E6** (pipeline setup crash now emits `("error", …)` not just `("finished")`), **E7** (`GatingWorker` gains a `failed` signal + wired handler so a crash releases the UI instead of hanging), **E12** (`Fetcher._loop` survives a per-well fetch crash and continues instead of silently abandoning the rest). +3 regression tests (`tests/test_worker_error_surfacing.py`). Fast lane green (1235 passed). 15/77 resolved.
+
 - 2026-07-02 **Batch B (Critical error-surfacing) + new regression tests** — **E1** (`_run_batches` now records rc≠0 on crash; `wait()` no longer coerces a dead-worker `None`→0 → stops the false-success chain that deleted remote data), **E2** (image-loader catch narrowed + logs skips), **E3** (corrupt `pipeline_info.json` is backed up + ERROR-logged, not silently clobbered), **E4** (`build_pipeline_args` raises on an invalid numeric flag instead of dropping it). Added **6 new test files** (21 tests) covering E1–E4 + the batch-A behavioral fixes S7/G8; each fails against the pre-fix code (e.g. the E1 test caught a NameError in the crash handler mid-development). `process_microscopy` monolith budget re-baselined 4696→4707 for the mandatory E2/E3 handling. Fast lane green (1232 passed). Structural batch-A items (G7/A9/X13) are covered by ruff + the attr-budget guardrail + import; S6 is a trivial `statistics.median` swap inside the Qt-coupled `run_stats` (no bespoke test). 12/77 resolved.
 
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch B merged (+ regression tests); **12 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch C merged (+ regression tests); **15 / 77 resolved.**

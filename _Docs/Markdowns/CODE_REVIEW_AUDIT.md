@@ -430,7 +430,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - `[ ]` **scatter/cells_tab_view.py** (92)
 - `[x]` **heatmap/tab_view.py** (81 → 33) — 17 widgets registered via `ctx.widgets`; budget 869 → 811. `test_heatmap_widget_registry_a8.py`.
 - `[ ]` **smfish/tab_view.py** (83)
-- `[ ]` **distribution/tab_view.py** (65)
+- `[x]` **distribution/tab_view.py** (57 → 22) — 12 widgets + 3 `_var` aliases registered via `ctx.widgets`; budget 811 → 768. `test_distribution_widget_registry_a8.py`.
 - `[ ]` **image_browser/image_table/tab_view.py** (63)
 - `[ ]` **scatter/agg_tab_view.py** (53)
 - `[ ]` **lineplot/tab_view.py** (46)

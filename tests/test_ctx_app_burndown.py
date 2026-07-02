@@ -29,7 +29,8 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 # each feature's widget handles move into the WidgetRegistry:
 #   894 → 869  review_csv
 #   869 → 811  heatmap
-CTX_APP_BUDGET = 811
+#   811 → 768  distribution
+CTX_APP_BUDGET = 768
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

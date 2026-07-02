@@ -468,7 +468,7 @@ def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
     "Separate axes" layout).
     """
     # "Show gates" toggle off → keep the gates in memory but don't render them.
-    if getattr(app, "_scatter_gates_hidden", False):
+    if app._app_state.scatter.gates_hidden:
         return
     from matplotlib.patches import Rectangle
     gates = getattr(app, "_scatter_gates", None) or []
@@ -717,7 +717,7 @@ def gate_edge_at(app, event, tol_px: float = 8.0):
     ``l/r/t/b/tl/tr/bl/br``. Works in display (pixel) space so the tolerance is
     uniform regardless of axis scale (incl. log). Hidden gates are not hittable.
     """
-    if getattr(app, "_scatter_gates_hidden", False):
+    if app._app_state.scatter.gates_hidden:
         return None
     ax = getattr(app, "_ax_scatter", None)
     if ax is None or getattr(event, "inaxes", None) is not ax:

@@ -268,9 +268,9 @@ def _snapshot_scatter(app) -> dict:
         if v is not None:
             out[key] = v
     # Which sub-tab (per-cell vs aggregate) was active.
-    mode = getattr(app, "_scatter_mode", None)
-    if mode:
-        out["mode"] = str(mode)
+    _sc = app._app_state.feature_slice("scatter")
+    if _sc is not None and _sc.mode:
+        out["mode"] = str(_sc.mode)
     # Per-timepoint multi-select checkboxes for each sub-tab (the dataset-wide
     # timepoint filter the user can toggle). Mirrors the Bar tab's
     # ``timepoint_selections`` round-trip.

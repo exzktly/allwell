@@ -119,7 +119,6 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # identity, so a well's cloud shows its evolution over time. With more than
     # one well selected the view auto-stacks into one panel per well (overlaying
     # several time-coloured clouds on one axis would be unreadable).
-    ctx.app._scatter_color_by_tp = False
     color_by_tp_btn = reg.register(
         "_scatter_color_by_tp_btn", QPushButton("Color by time: Off", ctrl))
     color_by_tp_btn.setProperty("variant", "toggle")
@@ -130,7 +129,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
 
     def _toggle_color_by_tp(checked: bool) -> None:
         on = bool(checked)
-        ctx.app._scatter_color_by_tp = on
+        ctx.state.scatter.color_by_tp = on
         # State-label + matching highlight (label and accent always agree).
         color_by_tp_btn.setText(
             "Color by time: On" if on else "Color by time: Off")
@@ -144,7 +143,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctx.app._scatter_gates = []
     ctx.app._scatter_gate_draw_mode = False
     ctx.app._scatter_gate_selector = None
-    ctx.app._scatter_gates_hidden = False   # "Show gates" toggle (sidebar)
+    # "Show gates" toggle (sidebar) is typed state: ctx.state.scatter.gates_hidden
     # Edge/corner editing of existing gates: the in-progress edit ({idx,handle})
     # and the cached render context for repainting just the gates while dragging.
     ctx.app._scatter_gate_edit = None

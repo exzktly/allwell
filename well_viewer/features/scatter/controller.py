@@ -119,7 +119,7 @@ def redraw_scatter(
     # Stack one group per panel (>1 group) when Layout is "Separate axes", or
     # whenever "Color by time" is on — overlaid time-coloured clouds are noise,
     # so each well gets its own time-coloured panel via _render_scatter_faceted.
-    color_by_tp = bool(getattr(app, "_scatter_color_by_tp", False))
+    color_by_tp = bool(app._app_state.scatter.color_by_tp)
     _lay = getattr(app, "_scatter_layout_var", None)
     _separate = _lay is not None and str(_lay.currentText()).startswith("Separate")
     if len(scatter_data) > 1 and (color_by_tp or _separate):

@@ -48,7 +48,9 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   405 → 402  heatmap scale_mode/repset_avg/log_scale  → HeatmapState
 #   402 → 396  distribution bins/log_x/log_y  → DistributionState (builder inits
 #              deleted + callback writes moved to ctx.state)
-CTX_APP_BUDGET = 396
+#   396 → 390  scatter mode/color_by_tp/gates_hidden  → ScatterState (builder
+#              inits deleted + mode/color callback writes moved to ctx.state)
+CTX_APP_BUDGET = 390
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

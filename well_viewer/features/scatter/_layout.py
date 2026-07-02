@@ -121,7 +121,7 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
     # "Color by time" colours each panel's points by timepoint (see
     # render_scatter_points); each panel then legends the timepoints it shows.
-    color_by_tp = bool(getattr(app, "_scatter_color_by_tp", False))
+    color_by_tp = bool(app._app_state.scatter.color_by_tp)
     xlabel = _scatter_col_label(col_x) + log1p_axis_suffix(x_log)
     ylabel = _scatter_col_label(col_y) + log1p_axis_suffix(y_log)
 

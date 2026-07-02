@@ -113,6 +113,8 @@ def _build_sample_definitions(ctx, frame) -> None:
 _state_bar = _lazy_state("well_viewer.features.barplot.state", "BarPlotState")
 _state_heatmap = _lazy_state("well_viewer.features.heatmap.state", "HeatmapState")
 _state_distribution = _lazy_state("well_viewer.features.distribution.state", "DistributionState")
+_state_scatter = _lazy_state("well_viewer.features.scatter.state", "ScatterState")
+_state_smfish = _lazy_state("well_viewer.features.smfish.state", "SmfishState")
 _state_stats = _lazy_state("well_viewer.features.stats.state", "StatsState")
 _state_multivariate = _lazy_state("well_viewer.features.multivariate.state", "MultivariateState")
 _state_review_image = _lazy_state("well_viewer.features.image_browser.review_image.state", "ReviewImageState")
@@ -481,6 +483,7 @@ def _features() -> "list[FeatureDescriptor]":
             on_activate=_activate_smfish,
             on_selection_changed=_sel_smfish,
             single_well_selection=True,
+            states=(StateSpec("smfish", _state_smfish),),
         ),
         # ── Data ──────────────────────────────────────────────────────────
         FeatureDescriptor(
@@ -522,6 +525,7 @@ def _features() -> "list[FeatureDescriptor]":
             on_activate=_activate_scatter,
             on_selection_changed=_sel_scatter,
             on_channel_changed=_channel_scatter,
+            states=(StateSpec("scatter", _state_scatter),),
         ),
         FeatureDescriptor(
             name="Distribution", build=_build_distribution,

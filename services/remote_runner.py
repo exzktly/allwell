@@ -1625,29 +1625,11 @@ class DatasetCache:
         # ``--partial`` flag means each retry resumes where the previous
         # attempt left off, so a flaky link doesn't restart the whole
         # upload from zero. Non-transient errors (permission, bad path)
-        # break out of the loop on the first attempt.
-        t0 = time.monotonic()
-        sent_bytes = 0
-        rc = -1
-        attempts_run = 0  # v5.2.15: actual count, for the error message
-        for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
-            if stop_event is not None and stop_event.is_set():
-                break
-            if delay > 0:
-                if log_fn:
-                    log_fn(
-                        f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
-                        f"in {delay:.0f}s (last exit code {rc})\n"
-                    )
-                time.sleep(delay)
-            attempt_bytes, rc = _run_rsync_streaming(
-                cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
-            )
-            sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
-            attempts_run += 1
-            if rc == 0 or rc not in _RSYNC_RETRY_CODES:
-                break
-        elapsed = max(time.monotonic() - t0, 1e-6)
+        # break out of the loop on the first attempt. Shared with
+        # ``upload_subset`` via ``_stream_rsync_with_retry`` (audit A11).
+        sent_bytes, elapsed, rc, attempts_run = _stream_rsync_with_retry(
+            cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+        )
 
         # v5.2.14: pre-v5.2.14 ``ensure_uploaded`` returned even when
         # rsync exited non-zero (e.g. rc=23 "partial transfer due to
@@ -1767,26 +1749,10 @@ class DatasetCache:
                 f"({len(sources)} file(s))\n"
             )
         cmd += [*sources, dest]
-        t0 = time.monotonic()
-        sent_bytes = 0
-        rc = -1
-        for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
-            if stop_event is not None and stop_event.is_set():
-                break
-            if delay > 0:
-                if log_fn:
-                    log_fn(
-                        f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
-                        f"in {delay:.0f}s (last exit code {rc})\n"
-                    )
-                time.sleep(delay)
-            attempt_bytes, rc = _run_rsync_streaming(
-                cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
-            )
-            sent_bytes += attempt_bytes
-            if rc == 0 or rc not in _RSYNC_RETRY_CODES:
-                break
-        elapsed = max(time.monotonic() - t0, 1e-6)
+        # Shared streaming retry loop (audit A11).
+        sent_bytes, elapsed, rc, _attempts = _stream_rsync_with_retry(
+            cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+        )
         return sent_bytes, elapsed, rc
 
     def gc(
@@ -2101,6 +2067,50 @@ _RSYNC_RETRY_CODES = {10, 12, 30, 35}
 # across the three retries is 14 s, an upper bound the user can sit
 # through without thinking the run is hung.
 _RSYNC_RETRY_DELAYS = (2.0, 4.0, 8.0)
+
+
+def _stream_rsync_with_retry(
+    cmd: list[str],
+    *,
+    log_fn: Callable[[str], None] | None = None,
+    progress_fn=None,
+    stop_event: threading.Event | None = None,
+) -> "tuple[int, float, int, int]":
+    """Run a *streaming* rsync (:func:`_run_rsync_streaming`) with bounded retry
+    on transient network failures, resuming via ``--partial`` each attempt.
+
+    The progress-streaming twin of :func:`_rsync_with_retry` (which *captures*
+    output for small control-plane rsyncs). Consolidates the two byte-identical
+    retry loops the ``ensure_uploaded`` + ``upload_subset`` transfer paths
+    hand-rolled (audit A11). Non-transient rsync errors break out on the first
+    attempt; a set ``stop_event`` breaks at the top of the next iteration.
+
+    Returns ``(sent_bytes, elapsed_s, rc, attempts_run)`` — ``sent_bytes``
+    accumulates the incremental bytes each resumed attempt sent.
+    """
+    t0 = time.monotonic()
+    sent_bytes = 0
+    rc = -1
+    attempts_run = 0  # v5.2.15: actual count, for the error message
+    for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
+        if stop_event is not None and stop_event.is_set():
+            break
+        if delay > 0:
+            if log_fn:
+                log_fn(
+                    f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
+                    f"in {delay:.0f}s (last exit code {rc})\n"
+                )
+            time.sleep(delay)
+        attempt_bytes, rc = _run_rsync_streaming(
+            cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+        )
+        sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
+        attempts_run += 1
+        if rc == 0 or rc not in _RSYNC_RETRY_CODES:
+            break
+    elapsed = max(time.monotonic() - t0, 1e-6)
+    return sent_bytes, elapsed, rc, attempts_run
 
 
 def _rsync_with_retry(

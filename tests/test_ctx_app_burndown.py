@@ -32,7 +32,8 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   811 → 768  distribution
 #   768 → 668  scatter (cells + agg)
 #   668 → 624  lineplot + multivariate
-CTX_APP_BUDGET = 624
+#   624 → 587  image_table + cell_browser
+CTX_APP_BUDGET = 587
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

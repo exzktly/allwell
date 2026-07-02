@@ -71,6 +71,10 @@ def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") 
 
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:
+    # A8 burn-down: Qt widget handles go through the WidgetRegistry
+    # (``ctx.widgets``), which stamps ``app._image_table_*`` so legacy
+    # readers resolve. State lists/dicts + the crop tool stay on app.
+    reg = ctx.widgets
     """Construct the Image Table tab inside *parent*."""
     layout = parent.layout()
     if layout is None:
@@ -142,12 +146,12 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ar.addWidget(QLabel("Rows:", axes_row))
     row_axis_cb = _axis_combo(ctx.app._app_state.image_table.row_axis)
     ar.addWidget(row_axis_cb)
-    ctx.app._image_table_row_axis_cb = row_axis_cb
+    reg.register("_image_table_row_axis_cb", row_axis_cb)
 
     ar.addWidget(QLabel("×  Columns:", axes_row))
     col_axis_cb = _axis_combo(ctx.app._app_state.image_table.col_axis)
     ar.addWidget(col_axis_cb)
-    ctx.app._image_table_col_axis_cb = col_axis_cb
+    reg.register("_image_table_col_axis_cb", col_axis_cb)
 
     # Channel multi-select dropdown (drives the "Channels" axis; default all).
     chan_btn = QToolButton(axes_row)
@@ -160,8 +164,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
     chan_menu = QMenu(chan_btn)
     chan_btn.setMenu(chan_menu)
-    ctx.app._image_table_channel_btn = chan_btn
-    ctx.app._image_table_channel_menu = chan_menu
+    reg.register("_image_table_channel_btn", chan_btn)
+    reg.register("_image_table_channel_menu", chan_menu)
     ar.addWidget(chan_btn)
 
     ar.addSpacing(8)
@@ -215,19 +219,19 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     chan_cb = QComboBox(opts_row)
     chan_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx.app, "chan"))
     orow.addWidget(chan_cb)
-    ctx.app._image_table_global_chan_cb = chan_cb
+    reg.register("_image_table_global_chan_cb", chan_cb)
 
     orow.addWidget(QLabel("Time:", opts_row))
     tp_cb = QComboBox(opts_row)
     tp_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx.app, "tp"))
     orow.addWidget(tp_cb)
-    ctx.app._image_table_global_tp_cb = tp_cb
+    reg.register("_image_table_global_tp_cb", tp_cb)
 
     orow.addWidget(QLabel("FOV:", opts_row))
     fov_cb = QComboBox(opts_row)
     fov_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx.app, "fov"))
     orow.addWidget(fov_cb)
-    ctx.app._image_table_global_fov_cb = fov_cb
+    reg.register("_image_table_global_fov_cb", fov_cb)
 
     orow.addStretch(1)
 
@@ -241,7 +245,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     rows_spin.setToolTip("Grid rows (Build sets this automatically).")
     rows_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
     orow.addWidget(rows_spin)
-    ctx.app._image_table_rows_spin = rows_spin
+    reg.register("_image_table_rows_spin", rows_spin)
     orow.addWidget(QLabel("×", opts_row))
     cols_spin = QSpinBox(opts_row)
     cols_spin.setRange(1, 12)
@@ -250,7 +254,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     cols_spin.setToolTip("Grid columns (Build sets this automatically).")
     cols_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
     orow.addWidget(cols_spin)
-    ctx.app._image_table_cols_spin = cols_spin
+    reg.register("_image_table_cols_spin", cols_spin)
     bv.addWidget(opts_row)
 
     il.addWidget(builder)
@@ -280,7 +284,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     selector_grid = QGridLayout(selector_host)
     selector_grid.setContentsMargins(0, 0, 0, 0)
     selector_grid.setSpacing(4)
-    ctx.app._image_table_selector_grid = selector_grid
+    reg.register("_image_table_selector_grid", selector_grid)
     sb_layout.addWidget(selector_host)
     il.addWidget(selector_box)
     il.addSpacing(6)
@@ -304,7 +308,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     lut_layout.setContentsMargins(0, 0, 0, 0)
     lut_layout.setHorizontalSpacing(14)
     lut_layout.setVerticalSpacing(6)
-    ctx.app._image_table_lut_container = lut_container
+    reg.register("_image_table_lut_container", lut_container)
     lut_outer_layout.addWidget(lut_container)
     il.addWidget(lut_outer)
 
@@ -333,7 +337,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     crop_act.setChecked(bool(_crop.mode))
     crop_act.toggled.connect(lambda _c=False: _crop.toggle_mode())
     cmenu.addAction(crop_act)
-    ctx.app._image_table_crop_act = crop_act
+    reg.register("_image_table_crop_act", crop_act)
     reset_crop_act = cmenu.addAction("Reset crop")
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
@@ -354,22 +358,22 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Cell Gating tab / the plot tabs, and re-composites the generated table.
     tr.addSpacing(12)
     tr.addWidget(QLabel("ON threshold:", action_row))
-    ctx.app._image_table_thresh_frac_stepper = Stepper(
-        action_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
-    ctx.app._image_table_thresh_frac_stepper.setFixedWidth(96)
-    ctx.app._image_table_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
-    _it_edit = getattr(ctx.app._image_table_thresh_frac_stepper, "_edit", None)
+    thresh_stepper = reg.register("_image_table_thresh_frac_stepper", Stepper(
+        action_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
+    thresh_stepper.setFixedWidth(96)
+    thresh_stepper.setFocusPolicy(Qt.ClickFocus)
+    _it_edit = getattr(thresh_stepper, "_edit", None)
     if _it_edit is not None:
         _it_edit.setFocusPolicy(Qt.ClickFocus)
-    ctx.app._image_table_thresh_frac_stepper.setToolTip(
+    thresh_stepper.setToolTip(
         "ON/OFF intensity threshold for the active channel — drives a row's "
         "≥ Thr binary overlay. Same value as the Cell Gating tab's "
         "ThreshFracOn and the plot tabs' Threshold quick-edit."
     )
-    ctx.app._image_table_thresh_frac_stepper.valueChanged.connect(
+    thresh_stepper.valueChanged.connect(
         lambda v: image_table_set_thresh_frac(ctx.app, v)
     )
-    tr.addWidget(ctx.app._image_table_thresh_frac_stepper)
+    tr.addWidget(thresh_stepper)
 
     tr.addStretch(1)
 
@@ -410,7 +414,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_lbl.setFixedWidth(52)
     zoom_lbl.setToolTip("Click to reset zoom to 100%")
     zoom_lbl.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1.0))
-    ctx.app._image_table_zoom_lbl = zoom_lbl
+    reg.register("_image_table_zoom_lbl", zoom_lbl)
     tr.addWidget(zoom_lbl)
 
     zoom_in = QPushButton("+", action_row)
@@ -431,16 +435,16 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # ``image_table_generate`` hides this and reveals the render host once the
     # first table is produced.
     from widgets.empty_state import EmptyState as _EmptyState
-    ctx.app._image_table_empty_state = _EmptyState(
+    empty_state = reg.register("_image_table_empty_state", _EmptyState(
         "No image table generated",
         icon="image",
         parent=inner,
         hint="Choose wells/channels above, then press Generate.",
-    )
+    ))
     # Give the placeholder enough vertical room so the wrapped hint never
     # gets clipped by tight sibling rows.
-    ctx.app._image_table_empty_state.setMinimumHeight(180)
-    il.addWidget(ctx.app._image_table_empty_state)
+    empty_state.setMinimumHeight(180)
+    il.addWidget(empty_state)
 
     render_host = QWidget(inner)
     render_grid = QGridLayout(render_host)
@@ -450,7 +454,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # space across rows/columns and the per-cell pixmaps render with large
     # gaps between them.
     render_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-    ctx.app._image_table_render_grid = render_grid
+    reg.register("_image_table_render_grid", render_grid)
     il.addWidget(render_host)
 
     il.addStretch(1)

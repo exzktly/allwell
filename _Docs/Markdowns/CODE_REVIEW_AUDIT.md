@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **43 / 77 items resolved** (42 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **44 / 77 items resolved** (43 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -55,7 +55,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | E13 | failed `scancel`/`kill` unreported → lingering SLURM alloc | M | `[x]` DONE | #597 |
 | E14 | `ALLWELL_SCRATCH_DIR` silently ignored → ENOSPC | M | `[x]` DONE | #597 |
 | E15 | corrupt mask → "no overlay" → misread QC | M | `[x]` DONE | #597 |
-| E16 | view_state `swallowed()` + sample_defs persistence fail invisibly | M | `[ ]` TODO | |
+| E16 | view_state `swallowed()` + sample_defs persistence fail invisibly | M | `[x]` DONE | `test_persistence_autosave_surfacing.py` |
 | E17 | unguarded remote-dialog `_runner` → QTimer poll spins forever | L | `[x]` DONE | #597 |
 | E18 | smFISH Apply-to-All re-entrancy → dup workers + clobbered cancel | H | `[x]` DONE | #597 |
 | E19 | smFISH worker TOCTOU: dataset swap during write loop | M | `[ ]` TODO | |
@@ -287,7 +287,7 @@ Concurrency model: `threading.Thread` (11 live starts) + `QThread` (2) + `QTimer
 - **Medium —** `remote_runner.py:4178/4228` (failed `scancel`/`kill` → lingering SLURM allocation unreported). — **E13** `[x]` DONE (WARN on failed scancel/kill; `tests/test_remote_runner.py`)
 - **Medium —** `remote_runner.py:80` (`ALLWELL_SCRATCH_DIR` silently ignored on `OSError` → later ENOSPC). — **E14** `[x]` DONE (WARNING on bad ALLWELL_SCRATCH_DIR)
 - **Medium —** `image_table/image_compose.py:485/516/523` (corrupt mask → "no overlay" → user misreads QC). — **E15** `[x]` DONE (DEBUG breadcrumb on decode failure; `tests/test_image_compose_load_errors.py`)
-- **Medium —** `persistence/view_state.py` (~25 `swallowed()` sites) + `sample_definitions.py` (persistence fails invisibly). — **E16** `[ ]` TODO
+- **Medium —** `persistence/view_state.py` (~25 `swallowed()` sites) + `sample_definitions.py` (persistence fails invisibly). — **E16** `[x]` DONE — the ~25 `swallowed()` sites already log at DEBUG with traceback (bare `pass` was migrated earlier). The real invisible path was the **debounced autosave**: `PersistenceRegistry._flush` runs a domain's `save` from a `QTimer` with no caller to catch a raise, so a disk write failure vanished into the event loop. `_flush` now logs the failure (covers every autosave domain), and `sample_definitions.autosave_to_pipeline_info` broadened its except from `(OSError, FileNotFoundError)` to `Exception` so a malformed-selection build error is logged too. The explicit user-triggered `save()` still propagates (its callers show a dialog). `test_persistence_autosave_surfacing.py`.
 - **Top recommendation:** extend `test_no_silent_except.py` to flag tuple/typed `pass` and broad `return None` in `pipeline/`, `well_viewer/data/`, `well_viewer/persistence/`, add the missing pipeline files, and route data-integrity failures to at least WARNING. — **G4** `[x]` DONE (partial: added the 3 unscanned pipeline files; tuple/typed-`pass` + broad-`return None` extension needs a frozen offender baseline — noted in-test as remaining scope)
 
 ### 2.3 Race conditions
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch S (persistence surfacing)** — **E16** (`PersistenceRegistry._flush` now logs a raise from a debounced autosave instead of letting it vanish into the Qt event loop, so a `view_state`/`sample_definitions` write failure is diagnosable; `sample_definitions.autosave_to_pipeline_info` except broadened `(OSError, FileNotFoundError)`→`Exception`; the ~25 `swallowed()` sites already DEBUG-log the traceback). +2 tests. Fast lane green. 44/77 resolved.
+
 - 2026-07-02 **Batch R (auto-threshold bias)** — **E9** (both the pipeline `_estimate_thresholds_standalone` and the viewer-side `compute_auto_thresholds` now count per-channel image-decode attempts vs failures and WARN when ≥25% of a channel's label/tophat pairs failed to decode — a silently biased Otsu threshold was otherwise computed from a non-representative subset, only logged at DEBUG). +3 tests. Fast lane green. process_microscopy budget 4707→4729. 43/77 resolved.
 
 - 2026-07-02 **Batch Q (env validation)** — **X12** (new pure `services/env.py::validate_env(env) -> (warnings, active)`; `log_env_validation()` wired into `allwell.main()` early startup: logs active `ALLWELL_*` overrides at INFO and set-but-unusable scratch/remotes paths at WARNING instead of letting a mistyped path fall back silently and only misbehave mid-run). +8 tests. Fast lane green. 42/77 resolved.
@@ -460,4 +462,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch R merged (E9 auto-threshold bias surfacing + tests); **43 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch S merged (E16 persistence autosave surfacing + tests); **44 / 77 resolved.**

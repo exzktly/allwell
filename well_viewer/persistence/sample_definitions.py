@@ -61,7 +61,11 @@ def autosave_to_pipeline_info(app) -> None:
     )
     try:
         _write_block(ds.data_dir, block)
-    except (OSError, FileNotFoundError):
+    except Exception:
+        # Autosave is best-effort and runs off a debounce timer with no user
+        # dialog, so any failure (disk error *or* a malformed-selection build
+        # error) must be logged rather than propagated or swallowed — else the
+        # user's sample definitions silently fail to persist (audit E16).
         _logger.exception("sample_definitions autosave failed")
 
 

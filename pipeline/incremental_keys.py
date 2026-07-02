@@ -48,15 +48,24 @@ def read_done_fov_keys(csv_path: "Path | str") -> "set[tuple[str, str]]":
     return keys
 
 
-def fov_tp_from_name(name: str, *, schema: str, sep: str) -> "tuple[str, str]":
+def fov_tp_from_name(name: str, *, schema: "str | list[str]", sep: str) -> "tuple[str, str]":
     """Extract ``(fov, timepoint)`` tokens from a file/member basename using the
     schema's field indices — the same positional discipline ``parse_filename``
     applies, so the key compares equal to what a freshly-parsed input group and
     the per-well CSV produce. A processed-output basename keeps the full input
     stem plus a role suffix (``..._overlay``/``..._labels``); the suffix lands in
     a slot past ``timepoint`` and is ignored.
+
+    *schema* may be the colon-delimited string (the CLI / remote callers) or an
+    already-parsed list of field names (the pipeline threads ``parse_schema``'s
+    list). Both normalise to the same field tokens: passing the list straight to
+    ``str(schema).split(":")`` used to yield the list's repr — no colons — so
+    ``fov`` / ``timepoint`` were never found and every key collapsed to
+    ``('', '')``, silently defeating out-zip/folder recovery when the CSV was
+    absent (an incremental run then re-segmented already-done FOVs).
     """
-    fields = [f.strip().lower() for f in str(schema or "").split(":")]
+    raw = schema if isinstance(schema, (list, tuple)) else str(schema or "").split(":")
+    fields = [str(f).strip().lower() for f in raw]
     fi = fields.index("fov") if "fov" in fields else -1
     ti = fields.index("timepoint") if "timepoint" in fields else -1
     parts = Path(name).stem.split(sep)
@@ -66,7 +75,7 @@ def fov_tp_from_name(name: str, *, schema: str, sep: str) -> "tuple[str, str]":
 
 
 def read_done_fov_keys_from_zip(
-    out_zip: "Path | str", *, schema: str, sep: str,
+    out_zip: "Path | str", *, schema: "str | list[str]", sep: str,
 ) -> "set[tuple[str, str]]":
     """``(fov, timepoint)`` pairs recoverable from a ``<well>_out.zip``'s members.
 
@@ -96,7 +105,7 @@ def read_done_fov_keys_from_zip(
 
 
 def read_done_fov_keys_from_folder(
-    folder: "Path | str", *, schema: str, sep: str,
+    folder: "Path | str", *, schema: "str | list[str]", sep: str,
 ) -> "set[tuple[str, str]]":
     """``(fov, timepoint)`` pairs recoverable from an uncompressed output well
     folder's files — the folder-mode twin of :func:`read_done_fov_keys_from_zip`
@@ -119,7 +128,7 @@ def read_done_fov_keys_from_folder(
 
 def incremental_done_fov_keys(
     prior_dir: "Path | str", well_label: str, *,
-    csv_prefix: str, safe_well: str, schema: str, sep: str,
+    csv_prefix: str, safe_well: str, schema: "str | list[str]", sep: str,
 ) -> "tuple[set[tuple[str, str]], bool]":
     """Done ``(fov, timepoint)`` keys for an incremental diff, from every prior
     artefact: the per-well CSV (primary) unioned with the processed-output

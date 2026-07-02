@@ -182,7 +182,7 @@ well_viewer/
 │   │                 tab_view.py, cells_tab_view.py, agg_tab_view.py
 │   ├── heatmap/      controller.py, models.py, sidebar_view.py, tab_view.py
 │   ├── distribution/ controller.py, tab_view.py
-│   ├── stats/        controller.py, state.py, view.py
+│   ├── stats/        controller.py, state.py, tab_view.py
 │   ├── multivariate/ controller.py, collect.py, renderer.py, state.py,
 │   │                 tab_view.py, feature_picker_view.py   ← higher-dimensional analysis
 │   │                 (correlation / PCA·UMAP·t-SNE / clustering / faceting over the
@@ -201,7 +201,7 @@ well_viewer/
 │   ├── review_csv/   tab_view.py   ← Data-tab CSV inspector (was review_image/csv_tab_view.py)
 │   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py
-│   ├── grouping/     controller.py, view.py, label_grid_view.py,
+│   ├── grouping/     controller.py, tab_view.py, label_grid_view.py,
 │   │                 label_editor_view.py, replicate_panel_view.py,
 │   │                 cell_gating_tab_view.py
 │   ├── export/       service.py, style.py, sidebar_view.py
@@ -236,7 +236,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 
 **Known exceptions** (legacy or single-purpose modules that don't fit the grid; do not propagate these naming choices to new files):
 
-- `features/grouping/view.py` and `features/stats/view.py` use bare `view.py` instead of `tab_view.py` — both predate the convention.
+- `features/export/` (service.py + style.py) and `features/review_csv/` (tab_view.py) intentionally have **no `controller.py`**: `export/` is a stateless service layer (figure-style application + save), and `review_csv/` is a thin read-only CSV inspector tab with no behaviour to orchestrate. Adding an empty controller would be ceremony, not structure.
 - `features/heatmap/models.py` is the only `models.py` in `features/` (the convention under `domain/` is `_models.py`).
 - `data/` modules use bare names (`data_loading.py`, `auto_threshold.py`, `crop_tool.py`, `image_discovery.py`, `image_resolver.py`, `metric_labels.py`, `zipfile_cache.py`) — each is one self-contained utility, no internal suffix scheme.
 - `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `gating_state`) and bare (`fold_change.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.

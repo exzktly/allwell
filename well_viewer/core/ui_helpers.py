@@ -900,7 +900,7 @@ def on_theme_change(app, theme_name: str = None) -> None:
     app._apply_theme()
 
     if hasattr(app, '_rep_cards_frame') and app._rep_cards_frame:
-        from well_viewer.features.grouping.view import rep_panel_refresh
+        from well_viewer.features.grouping.tab_view import rep_panel_refresh
         rep_panel_refresh(app)
     if hasattr(app, '_stats_fig') and app._stats_fig:
         from well_viewer.features.stats.controller import stats_refresh_colors

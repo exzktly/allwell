@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-02 · **Living tracker since:** 2026-07-02
 **Scope:** `/home/user/allwell` — PySide6 desktop app for fluorescence-microscopy well-plate analysis. ~90,462 LOC non-test across 267 modules; 179 test files (~800 fast-lane tests).
 **Method:** Structured multi-pass audit (Pass 0 inventory; Pass 1 architecture; Pass 2 async/state; Pass 4 logic/business rules; Pass 5 quality). Findings verified by direct file reads; every item carries `file:line`, severity, and an actionable fix.
-**Status at a glance:** **52 / 77 items resolved** (51 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
+**Status at a glance:** **53 / 77 items resolved** (52 done + 1 dropped) — **all 5 Criticals fixed.** Umbrella tracking issue: [#598](https://github.com/exzktly/allwell/issues/598). See the [Progress](#progress) table.
 
 > This document started as a static audit and is now a **living work plan**. Each finding below carries a stable ID and a status box; fixing it flips the box here, the Progress-table row, the Status log, and the umbrella issue checkbox — in the same commit. It mirrors the house style of `_Docs/Markdowns/Code_Diet.md` and `_Docs/Markdowns/FABLE_PLAN.md`.
 
@@ -115,7 +115,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A14 | decompose `batch_export/base_panel.py` (export exec → service) | M | `[ ]` TODO | |
 | A15 | lazy/deferred feature descriptors for the 49-import registry | M | `[ ]` TODO | |
 | A16 | collapse remaining re-inlined helpers | L | `[ ]` TODO | |
-| A17 | normalize feature-file naming or document exceptions | L | `[ ]` TODO | |
+| A17 | normalize feature-file naming or document exceptions | L | `[x]` DONE | `test_architecture_contracts.py` |
 
 ### X — Cross-dataset state / atomicity / input validation (Pass 1.2 / 4.3 / 4.4 / 5.4 / 5.5)
 | ID | Item | Sev | Status | Commit/PR |
@@ -239,7 +239,7 @@ Intended pattern: `controller.py` + `tab_view.py` + `renderer.py` (+ `collect.py
 - **Medium-High — `features/scatter/callbacks.py`** (1190): non-canonical name mixing click-handlers + a full single-cell image viewer + raw Qt UI. *Fix: split `click_handlers.py` + a reusable `single_cell_viewer`.* — **A7** `[ ]` TODO
 - **Medium — `features/batch_export/base_panel.py`** (1589): abandons the split for an inheritance hierarchy; a 1589-line base `QWidget` mixing UI + export orchestration. *Fix: pull export execution into a non-Qt service.* — **A14** `[ ]` TODO
 - **Medium — `features/registry.py`** (49 internal imports): single-point recompile/fragility hub. *Fix: lazy/deferred feature descriptors.* — **A15** `[ ]` TODO
-- **Low —** naming drift (`stats/view.py`, `grouping/view.py` vs `tab_view.py`; `export/` and `review_csv/` lack a controller). *Fix: normalize or document sanctioned exceptions.* — **A17** `[ ]` TODO
+- **Low —** naming drift (`stats/view.py`, `grouping/view.py` vs `tab_view.py`; `export/` and `review_csv/` lack a controller). *Fix: normalize or document sanctioned exceptions.* — **A17** `[x]` DONE — **normalized** `stats/view.py`→`stats/tab_view.py` and `grouping/view.py`→`grouping/tab_view.py` (renamed via `git mv`, updated all 4 importers: registry, replicate_panel_view, selection_controller, ui_helpers) so no feature file uses the bare `view.py` name; removed the `view.py` entry from both `FEATURE_NAME_EXCEPTIONS` and ARCHITECTURE §3. **Documented** the two sanctioned controller-less features (`export/` = stateless service layer, `review_csv/` = read-only inspector) in ARCHITECTURE §3 Known exceptions. `test_architecture_contracts.py::test_feature_module_naming` green; ruff green.
 
 ### 1.4 Abstraction audit
 Key finding: the codebase has **no ABCs and no `typing.Protocol` at all** — so the risk is not over-abstraction via interfaces but **cosmetic indirection that provides no isolation**:
@@ -423,6 +423,8 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-02 **Batch Z (feature naming)** — **A17** (normalized `stats/view.py`→`tab_view.py` and `grouping/view.py`→`tab_view.py` via `git mv` + updated all 4 importers, so no feature file uses the bare `view.py` name; dropped `view.py` from `FEATURE_NAME_EXCEPTIONS` + ARCHITECTURE §3; documented `export/`/`review_csv/` as sanctioned controller-less features). Architecture-contract naming test + ruff green. 53/77 resolved.
+
 - 2026-07-02 **Batch Y (F401 enforcement)** — **G5** (`ruff --select F401 --fix` dropped 56 genuinely-unused imports across 23 files — mostly refactor residue like `barplot/controller`'s stranded `stats_compute`/`fold_change` imports and `review_image/controller`'s leftover numpy/pandas; removed `F401` from the ruff ignore list so it's enforced in CI going forward; intentional side-effect/re-export imports keep their `# noqa: F401` reasons). +1 guard test. `ruff check .` green, all touched modules import. 52/77 resolved.
 
 - 2026-07-02 **Batch X (export/log/traceback hygiene)** — **X17** (both figure-save paths in `plot_orchestrator` + `batch_export/base_panel` now wrap `savefig` in `matplotlib.rc_context` so a raising save can't leak a mutated `svg`/`ps.fonttype` into later plots), **X16** (`scatter/callbacks._load_cell_data` routes the full traceback to the DEBUG logger and shows only a concise line in the user panel), **X15** (`_prune_bootstrap_logs` caps `~/.cache/allwell/bootstrap-*.log` at the newest 20). +6 tests. Fast lane green. 51/77 resolved.
@@ -474,4 +476,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — Batch Y merged (G5 F401 enforcement + drop 56 unused imports + guard test); **52 / 77 resolved.**
+**Last updated:** 2026-07-02 — Batch Z merged (A17 feature-file naming normalization); **53 / 77 resolved.**

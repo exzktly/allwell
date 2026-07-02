@@ -80,7 +80,7 @@ def _build_smfish(ctx, frame) -> None:
 
 
 def _build_stats(ctx, frame) -> None:
-    from well_viewer.features.stats.view import (
+    from well_viewer.features.stats.tab_view import (
         build_stats_group_editor, build_stats_tab,
     )
     build_stats_tab(ctx.app, frame)

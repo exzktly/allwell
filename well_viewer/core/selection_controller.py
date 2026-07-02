@@ -792,7 +792,7 @@ def groups_centre_refresh(app) -> None:
 
     if tab_visible:
         from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-        from well_viewer.features.grouping.view import rep_panel_refresh
+        from well_viewer.features.grouping.tab_view import rep_panel_refresh
         rep_panel_refresh(app)
         label_grid_refresh(app)
     app._rep_refresh_map()

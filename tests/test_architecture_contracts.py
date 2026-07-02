@@ -268,7 +268,10 @@ def test_event_bus_signal_catalogue_is_capped():
 # match the pattern (controller/renderer/state/worker/callbacks/__init__, or a
 # *_view.py / *_panel.py / _private.py) rather than extend this list.
 FEATURE_NAME_EXCEPTIONS = {
-    "view.py", "models.py", "params.py", "region.py", "service.py", "style.py",
+    # "view.py" was removed (audit A17): features/stats and features/grouping
+    # were normalized from bare view.py → tab_view.py, so no feature file uses
+    # the bare name anymore.
+    "models.py", "params.py", "region.py", "service.py", "style.py",
     "box_select.py", "well_grid_button.py",
     "export.py", "grid_layout.py", "image_compose.py",
     # scatter density-coloring + rectangular-gating helpers (point rendering,

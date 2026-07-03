@@ -35,7 +35,7 @@ def _fake_app(frames):
     # Seed the row cache so the ctx-native get_rows (A8) finds these frames.
     dataset = types.SimpleNamespace(well_paths=dict.fromkeys(frames), data_dir=None,
                                     cache=dict(frames))
-    selection = types.SimpleNamespace(selected_wells=set(frames))
+    selection = types.SimpleNamespace(selected_wells=set(frames), selections=[])
 
     class _AppState:
         def __init__(self):

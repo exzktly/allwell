@@ -243,7 +243,10 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              via ctx.state, writers (sidebar set / load reset) via the slice,
 #              dead runtime_app init removed. Clears heatmap controller's last
 #              ctx.app residual.
-CTX_APP_BUDGET = 178
+#   178 -> 177  Multivariate collect drops its ctx.app._rep_sets_active bridge —
+#              rep_sets_active is just active_replicate_sets over ctx.state, so
+#              collect calls the domain resolver directly (no god-object).
+CTX_APP_BUDGET = 177
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

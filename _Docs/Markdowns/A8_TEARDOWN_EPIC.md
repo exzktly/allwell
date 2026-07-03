@@ -64,17 +64,22 @@ inventing new abstractions:
 
 ## Workstreams
 
-### T1 — Wire the EventBus (foundation) · `[ ]`
-Connect the five existing signals: the controllers **publish** state-carrying
-events; features **subscribe** in their builders (via `ctx.bus`). Convert the
-coordinator's imperative `redraw_*_orchestrate(app)` calls into
-`bus.redraw_requested.emit(scope)` with each feature subscribing for its scope.
-- **Unblocks:** most of category (b) — a feature reacts to a typed event instead
-  of being called with `app`.
-- **Guardrail:** a test asserting every emitted signal has ≥1 subscriber and the
-  catalogue stays capped at five (no new-god-object drift).
-- **Risk:** Med — signal/slot **lifetime** (disconnect on teardown; cf. audit L4
-  `focusChanged` leak). Mitigate with a subscription helper that auto-disconnects.
+### T1 — Wire the EventBus (foundation) · `[x]` ALREADY IN PLACE
+On inspection the bus is **already wired for the paths it should own**:
+`core/bus_wiring.py` constructs a `RedrawCoordinator` (subscribes
+`channel_changed` / `plot_options_changed` / `dataset_loaded` → the
+`redraw_scopes_or_defer` coalescer) and a `SelectionRefreshCoordinator`
+(`selection_changed`); the controllers already `emit` those signals
+(`channel_state_controller`, `selection_controller`, `load_controller`, `stats`,
+`fold_change_controls`, `timepoint_sync`). Connections are synchronous
+`DirectConnection`, so ordering matches the direct calls they replaced.
+**What T1 does NOT extend to:** the per-control `redraw_X(ctx.app)` /
+`_on_changed(ctx.app)` calls in builders are **intentionally direct and
+scope-local** — the distribution/heatmap scopes redraw via `redraw_app` (fans out
+across *all* default plots), whereas the direct call redraws *only that scope*.
+Blanket-converting them to `bus.plot_options_changed.emit(...)` would change the
+redraw fan-out — a behaviour regression, not an equivalence. So these belong to
+**T3** (thread `ctx`), not to bus-ification. T1's scope is complete.
 
 ### T2 — Feature runtime holders · `[x]` DONE (293 → 249)
 For category (a): `core/app_runtime.py` gives each feature a `ctx.runtime.<feature>`
@@ -98,17 +103,25 @@ not T2.
   *string* search of `persistence/` (catches `getattr(app, "name")`), not just
   `app.name`, before moving it.
 
-### T3 — Thread `ctx` through the controller layer · `[ ]`
-The core of the epic. `plot_orchestrator` / `selection_controller` /
-`channel_state_controller` / `tab_controller` take or hold `ctx` and pass it to
-feature functions; migrate each orchestration function's body to
-`ctx.state`/`ctx.widgets`/`ctx.bus` and named accessors. Do it **feature by
-feature behind that feature's slow suite**, leaning on T1 to have already removed
-the hottest imperative calls.
-- **Depends on:** T1 (fewer direct calls to convert).
-- **Risk:** High — app-wide; this is where regressions hide. Mitigate: one feature
-  per PR, characterization tests first, `app._ctx` as the transitional bridge at
-  call sites that haven't converted yet (never inside a migrated body).
+### T3 — Thread `ctx` through the controller layer · `[ ]` (the remaining core)
+**Mechanism (validated):** the app-level callers already hold `app`, and
+`app._ctx` exists, so an orchestration function can be flipped to take `ctx`
+while its app-machinery callers pass `app._ctx` (which does **not** match the
+`\bctx\.app\b` ratchet — it's the app handing over its own context, not a feature
+reaching through) and builder callers pass `ctx`. Inside, the body migrates
+`app._x` → `ctx.widgets.get`/`ctx.state`/`ctx.runtime`, leaving `ctx.app` only for
+genuine god-object methods.
+**Why it's the whole remaining job & not batchable headlessly:** the residual
+~249 are dozens of these functions (`redraw_scatter_orchestrate` alone has ~15
+`app.` touches to reclassify), each called from both builders and the runtime
+(redraw_coordinator / plot_orchestrator / channel + selection controllers /
+registry). Every conversion is a careful body-migration whose *only* failure mode
+is a mis-classified `app._x` that still resolves via the stamp in tests but paints
+the wrong thing at runtime — invisible to headless tests, visible only when a
+human drives the UI. So: **one feature per PR, characterization test first,
+interactive smoke after.** This is the god-object teardown proper.
+- **Depends on:** T2 (runtime holders, done) so live objects have a `ctx` home.
+- **Risk:** High — interactive-behaviour regressions that headless CI cannot catch.
 
 ### T4 — Extract cross-cutting services · `[ ]`
 Category (c). `_invalidate_stats_cache` operates on the already-typed
@@ -136,9 +149,9 @@ intentional surface between features and the window shell.
 
 | ID | Workstream | Depends on | Risk | Status | Metric |
 |----|------------|-----------|------|--------|--------|
-| T1 | Wire the EventBus | — | Med | `[ ]` | 293 → _tbd_ |
+| T1 | Wire the EventBus | — | Med | `[x]` | already in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T1 | High | `[ ]` | |
+| T3 | Thread ctx through controllers | T2 | High | `[ ]` | 249 → 0 — the remaining core; one feature per PR, interactive-validated |
 | T4 | Extract cross-cutting services | T1 | Med | `[ ]` | |
 | T5 | Saved-plots service | — | Med | `[ ]` | |
 | T6 | Retire `ctx.app` | T1–T5 | Low | `[ ]` | → 0 |

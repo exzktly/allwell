@@ -44,7 +44,16 @@ def _cc(node: ast.AST) -> int:
 def _iter_source_files():
     for p in REPO_ROOT.rglob("*.py"):
         s = p.relative_to(REPO_ROOT).as_posix()
-        if s.startswith("tests/") or s.startswith("_Docs/") or "/.git/" in s:
+        # `.claude/worktrees/*` holds throwaway git worktrees (parallel-agent
+        # scratch copies of the tree). Scanning them double-counts every source
+        # file under a path that is not in the frozen baseline, so exclude the
+        # whole `.claude/` tree alongside tests/_Docs/.git.
+        if (
+            s.startswith("tests/")
+            or s.startswith("_Docs/")
+            or s.startswith(".claude/")
+            or "/.git/" in s
+        ):
             continue
         yield p, s
 

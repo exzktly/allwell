@@ -90,7 +90,7 @@ def sync_heatmap_slider_to_focus(app) -> None:
     and present in this tab's timepoints — so a timepoint chosen on another
     plotting tab (Distribution) is reflected here. Signals are blocked so this
     silent sync never re-fires ``_on_tp_changed``. No-op when no focus is set."""
-    focus = current_focus_tp(app)
+    focus = current_focus_tp(app._ctx)
     if focus is None:
         return
     tps: List[float] = list(getattr(app, "_heatmap_tp_values", []) or [])

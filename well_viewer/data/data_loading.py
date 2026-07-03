@@ -238,17 +238,21 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     return mask
 
 
-def get_all_timepoints(app) -> "list[float]":
+def get_all_timepoints(ctx) -> "list[float]":
     """Unique included timepoints across all loaded wells.
 
     A dataset-level helper used by several plot tabs (scatter / distribution /
     heat map), so it lives in the data layer rather than any one feature.
     ``include_gate=False`` — the per-cell scatter draws gates, so timepoint
     enumeration must see the full cloud, not a gate-filtered subset.
+
+    A8-teardown T3: takes ``ctx``. The well list reads typed state
+    (``ctx.state.dataset``); row access still routes through the god-object's
+    lazy ``_get_rows`` (no typed data-service home yet) — the one residual.
     """
     timepoints: set = set()
-    for label in app._app_state.dataset.well_paths:
-        df = app._get_rows(label)
+    for label in ctx.state.dataset.well_paths:
+        df = ctx.app._get_rows(label)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             continue
         mask = df_included_mask(df, include_gate=False)

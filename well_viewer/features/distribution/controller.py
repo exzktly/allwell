@@ -181,7 +181,7 @@ def _sync_distribution_tp_to_focus(app) -> None:
     drives this redraw. Signals blocked so the silent sync never re-fires the
     combo handler. No-op when no focus is set."""
     from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
-    focus = current_focus_tp(app)
+    focus = current_focus_tp(app._ctx)
     if focus is None:
         return
     cb = getattr(app, "_distribution_tp_cb", None)

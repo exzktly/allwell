@@ -531,7 +531,7 @@ def update_scatter_menus(app) -> None:
         app._refresh_scatter_metric_for_axis(axis)
 
     # Update timepoint dropdown for cells scatter
-    timepoints = list(app._app_state.dataset.all_timepoints_cache) or get_all_timepoints(app)
+    timepoints = list(app._app_state.dataset.all_timepoints_cache) or get_all_timepoints(app._ctx)
     tp_strs = [f"{tp:.1f}" for tp in timepoints] if timepoints else ["0"]
     _set_combo_values(app._scatter_tp_cb, tp_strs)
 

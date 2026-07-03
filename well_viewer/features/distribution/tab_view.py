@@ -165,7 +165,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         ctx.app, card, icon="line-chart",
     ), 1)
 
-    refresh_distribution_timepoints(ctx.app)
+    refresh_distribution_timepoints(ctx)
 
 
 def _on_changed(ctx) -> None:
@@ -191,19 +191,23 @@ def _on_tp_changed_dist(app) -> None:
     except (ValueError, TypeError):
         tp = None
     if getattr(app, "_split_active", False):
-        set_focus_tp(app, tp)
+        set_focus_tp(app._ctx, tp)
     else:
-        set_focus_tp(app, tp, emit=False)
+        set_focus_tp(app._ctx, tp, emit=False)
         _on_changed(app._ctx)
 
 
-def refresh_distribution_timepoints(app) -> None:
-    """Populate the timepoint dropdown from the loaded data."""
-    cb = getattr(app, "_distribution_tp_cb", None)
+def refresh_distribution_timepoints(ctx) -> None:
+    """Populate the timepoint dropdown from the loaded data.
+
+    A8-teardown T3: takes ``ctx`` — the combo comes from the WidgetRegistry and
+    the timepoint leaves (``get_all_timepoints`` / ``current_focus_tp``) now take
+    ``ctx`` too, so this handler names no god-object."""
+    cb = ctx.widgets.get_or_none("_distribution_tp_cb")
     if cb is None:
         return
     try:
-        tps = get_all_timepoints(app)
+        tps = get_all_timepoints(ctx)
     except Exception:
         tps = []
     items = [f"{tp:g}" for tp in tps] if tps else []
@@ -216,7 +220,7 @@ def refresh_distribution_timepoints(app) -> None:
             cb.addItem("—")
         # Seed from the shared focus timepoint (N5) when one is set and present.
         from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
-        i = nearest_index(tps, current_focus_tp(app)) if tps else None
+        i = nearest_index(tps, current_focus_tp(ctx)) if tps else None
         if i is not None:
             cb.setCurrentIndex(i)
     finally:

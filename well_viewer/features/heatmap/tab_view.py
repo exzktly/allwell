@@ -287,7 +287,7 @@ def refresh_heatmap_timepoints(app) -> None:
         return
     try:
         from well_viewer.features.scatter.controller import get_all_timepoints
-        tps = list(get_all_timepoints(app))
+        tps = list(get_all_timepoints(app._ctx))
     except Exception:
         tps = []
     app._heatmap_tp_values = tps
@@ -295,7 +295,7 @@ def refresh_heatmap_timepoints(app) -> None:
     # present, so opening Heat Map after picking a timepoint on Distribution
     # lands on the same point; else default to the first timepoint.
     from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
-    focus_idx = nearest_index(tps, current_focus_tp(app)) if tps else None
+    focus_idx = nearest_index(tps, current_focus_tp(app._ctx)) if tps else None
     start_idx = focus_idx if focus_idx is not None else 0
     blocked = slider.blockSignals(True)
     try:
@@ -327,9 +327,9 @@ def _on_tp_changed(app) -> None:
     # offscreen fan-out). Other tabs pick the value up on next show.
     from well_viewer.core.timepoint_sync import set_focus_tp
     if getattr(app, "_split_active", False):
-        set_focus_tp(app, tps[idx])
+        set_focus_tp(app._ctx, tps[idx])
     else:
-        set_focus_tp(app, tps[idx], emit=False)
+        set_focus_tp(app._ctx, tps[idx], emit=False)
         _redraw(app)
 
 

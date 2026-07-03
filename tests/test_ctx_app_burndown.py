@@ -101,7 +101,17 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (redraw_distribution) is the one residual ctx.app. Internal
 #              caller bridged via app._ctx (uncounted). Demonstrates the T3
 #              signature-flip + builder(ctx)/machinery(app._ctx) caller split.
-CTX_APP_BUDGET = 246
+#   246 -> 245  T3 shared-leaf pass: the timepoint leaves take ctx —
+#              timepoint_sync.set_focus_tp / current_focus_tp go pure
+#              (ctx.state.plot + ctx.bus, zero residual) and
+#              data_loading.get_all_timepoints takes ctx (well list from
+#              ctx.state.dataset; the lone _get_rows row-fetch is the residual
+#              until a typed data-service lands). That lets the distribution
+#              timepoint refresh handler and the multivariate timepoint combo
+#              read ctx (combo via ctx.widgets), dropping their builder-site
+#              touches; the other callers (heatmap/scatter/distribution) bridge
+#              through app._ctx (uncounted) pending their own handler passes.
+CTX_APP_BUDGET = 245
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

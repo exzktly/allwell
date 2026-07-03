@@ -260,7 +260,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
             current = st.timepoints[0] if st.timepoints else None
             tp_cb.clear()
             tp_cb.addItem("All timepoints", None)
-            for t in get_all_timepoints(ctx.app):
+            for t in get_all_timepoints(ctx):
                 tp_cb.addItem(f"{t:g} h", float(t))
             if current is not None:
                 _select_combo_by_data(tp_cb, current)

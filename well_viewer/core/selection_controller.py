@@ -909,7 +909,19 @@ def sel_add(app, name=None, wells=None, replicates=None, source="user",
     app._app_state.selection.selections.append(sel)
     if make_current:
         app._app_state.selection.current_selection_id = sel["id"]
-    app._rebuild_all()
+    # >>> TEMP DEBUG (group-creation bug): surface any failure in the
+    # post-create rebuild/refresh straight to the console. Remove once fixed.
+    try:
+        app._rebuild_all()
+    except Exception:
+        import sys
+        import traceback
+        print("\n=== ALLWELL DEBUG: sel_add -> _rebuild_all() FAILED "
+              f"(name={name!r}, n_wells={len(sel.get('wells') or [])}) ===",
+              file=sys.stderr)
+        traceback.print_exc()
+        print("=== end ALLWELL DEBUG ===\n", file=sys.stderr, flush=True)
+    # <<< TEMP DEBUG
     return sel["id"]
 
 

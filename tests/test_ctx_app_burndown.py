@@ -134,7 +134,18 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              get_rows(ctx) instead of ctx.app._get_rows -> its last residual is
 #              gone. The service is reusable by stats_compute + every collect
 #              module (their own ctx passes come later).
-CTX_APP_BUDGET = 243
+#   243 -> 241  R6 cell-gating gate values -> typed CellGatingState core slice
+#              (AppState.cell_gating). The FluorGating/ThreshFracOn values move
+#              off the QLineEdits: the editingFinished handlers sync edits ->
+#              slice, persistence load writes the slice, accessors/CDF/saved-
+#              plots/load-kick read the slice; edits become the input surface,
+#              seeded FROM the slice at build. The {channel -> QLineEdit} maps
+#              register via ctx.widgets (widget containers) -> -2. Subsumes the
+#              loose _thresh_frac_on_saved shadow dict. Locked by
+#              test_cell_gating_gate_state (real QLineEdits, offscreen: sync,
+#              defaults, ratio-key resolution, garbage-keeps-last-committed,
+#              handler fan-out, editingFinished wiring).
+CTX_APP_BUDGET = 241
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

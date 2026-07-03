@@ -78,9 +78,13 @@ class _FakeBus:
 
 class _FakeState:
     def __init__(self) -> None:
+        from well_viewer.core.cell_gating_state import CellGatingState
         self.channel = _FakeChannel()
         self.dataset = _FakeDataset()
         self.plot = object()  # emit payload for plot_options_changed
+        # R6: gate values live on the typed slice; the edits are the input
+        # surface, synced into the slice by the change handlers.
+        self.cell_gating = CellGatingState()
 
 
 class _FakeApp:
@@ -132,7 +136,9 @@ def test_set_noop_without_dataset():
 
 def test_refresh_syncs_stepper_with_signals_blocked():
     app = _FakeApp()
-    app._cell_gating_thresh_frac_edits["gfp"].setText("88.0")
+    # R6: a committed value lives on the typed slice (setText alone is an
+    # uncommitted keystroke — the change handler is what syncs it).
+    app._app_state.cell_gating.thresh_frac_on["gfp"] = 88.0
     stepper = _FakeStepper(0.0)
     app._plotting_thresh_frac_stepper = stepper
     refresh_thresh_frac_quick_edit(app)
@@ -143,8 +149,8 @@ def test_refresh_syncs_stepper_with_signals_blocked():
 
 def test_refresh_follows_active_channel():
     app = _FakeApp()
-    app._cell_gating_thresh_frac_edits["gfp"].setText("10.0")
-    app._cell_gating_thresh_frac_edits["mcherry"].setText("20.0")
+    app._app_state.cell_gating.thresh_frac_on["gfp"] = 10.0
+    app._app_state.cell_gating.thresh_frac_on["mcherry"] = 20.0
     app._plotting_thresh_frac_stepper = _FakeStepper(0.0)
 
     refresh_thresh_frac_quick_edit(app)

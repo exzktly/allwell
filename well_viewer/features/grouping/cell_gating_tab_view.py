@@ -7,11 +7,12 @@ Public surface (matches the convention used by every other
   stash widget refs and tab state on ``app._cell_gating_*``.
 * :func:`cell_gating_load_cell_areas` — repopulate cell-area + per-channel
   fluorescence CDFs from the currently-selected wells.
-* :func:`cell_gating_load_threshold_frac_on` — re-fill the
-  ThreshFracOn line-edits from ``app._thresh_frac_on_saved``.
+* :func:`cell_gating_load_threshold_frac_on` — push the typed slice's
+  ThreshFracOn values onto the line-edits.
 * :func:`cell_gating_get_fluor_gate(app, channel)` /
   :func:`cell_gating_get_thresh_frac_on(app, channel)` — read the current
-  threshold for *channel* from the UI.
+  threshold for *channel* from the typed ``CellGatingState`` slice (R6);
+  the line-edits are the input surface, not the source of truth.
 * :func:`cell_gating_on_gating_change` /
   :func:`cell_gating_on_threshold_frac_on_change` — re-fired by the
   persistence layer when defaults are restored.
@@ -210,8 +211,12 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
 
     reg.register("_cell_gating_frame", parent)
     ctx.runtime.cell_gating.cell_areas = []
-    ctx.app._cell_gating_fluor_gate_edits = {}
-    ctx.app._cell_gating_thresh_frac_edits = {}
+    # {channel_key → QLineEdit} widget maps — containers of widget handles, so
+    # they go through the registry (stamps the legacy app attr for the many
+    # hasattr/getattr probes). The gate *values* live on the typed
+    # ctx.state.cell_gating slice (R6); these edits are the input surface.
+    reg.register("_cell_gating_fluor_gate_edits", {})
+    reg.register("_cell_gating_thresh_frac_edits", {})
     ctx.runtime.cell_gating.fluor_data = {}
     ctx.runtime.cell_gating.ratio_data = {}
     ctx.runtime.cell_gating.ax = None
@@ -725,53 +730,73 @@ def cell_gating_load_cell_areas(app) -> None:
 
 
 def cell_gating_load_threshold_frac_on(app) -> None:
-    """Re-fill ThreshFracOn line-edits from ``app._thresh_frac_on_saved``."""
-    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
+    """Push the typed slice's ThreshFracOn values onto the line-edits (R6)."""
+    edits = getattr(app, "_cell_gating_thresh_frac_edits", None) or {}
+    if not edits:
         return
-    if hasattr(app, "_thresh_frac_on_saved"):
-        for channel, value in app._thresh_frac_on_saved.items():
-            if channel in app._cell_gating_thresh_frac_edits:
-                app._cell_gating_thresh_frac_edits[channel].setText(str(value))
+    for channel, value in app._app_state.cell_gating.thresh_frac_on.items():
+        if channel in edits:
+            edits[channel].setText(str(value))
+
+
+def _cell_gating_sync_gate_state(app) -> None:
+    """Parse every gate edit into the typed ``CellGatingState`` slice (R6).
+
+    The line-edits are the input surface; the typed slice is the source of
+    truth the accessors / persistence / plots read. Both ``editingFinished``
+    handlers call this after their validate-all pass, and every programmatic
+    ``setText`` path either routes through those handlers or (persistence
+    load) writes the slice directly — so slice and widgets cannot diverge.
+
+    Unparsable text leaves that key's last-committed value in place. (The old
+    widget-reading accessors returned the 0.0 / 50.0 *defaults* for garbage
+    text even though the change handlers refused to act on it — i.e. a stray
+    keystroke could silently disable a gate for any concurrent redraw. Keeping
+    the last-committed value is the strictly safer semantic.)
+    """
+    st = app._app_state.cell_gating
+    for channel, edit in (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).items():
+        try:
+            st.fluor_gates[channel] = float(edit.text())
+        except ValueError:
+            swallowed(f"cell gating: keep last FluorGating for {channel!r} (non-numeric)")
+    for channel, edit in (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).items():
+        try:
+            st.thresh_frac_on[channel] = float(edit.text())
+        except ValueError:
+            swallowed(f"cell gating: keep last ThreshFracOn for {channel!r} (non-numeric)")
 
 
 def _cell_gating_resolve_key(app, channel: str) -> str:
-    """Map a channel arg onto the key used in the Cell Gating edits dicts.
+    """Map a channel arg onto the key used for the Cell Gating rows.
 
     Real fluor channels (``"gfp"``, ``"mcherry"``) are stored under their
     bare name. Ratios are stored under their full key (``"ratio:<name>"``).
     Callers can pass either the bare ratio name (``app._app_state.channel.active_channel``
     after a ratio switch) or the full ``ratio:`` key — resolve to whichever
-    form actually exists in the edits dict so the user's edit is honoured.
+    form actually exists in the typed slice so the user's edit is honoured.
     """
-    edits = (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {})
-    if channel in edits:
+    known = app._app_state.cell_gating.thresh_frac_on
+    if channel in known:
         return channel
     candidate = f"ratio:{channel}"
-    if candidate in edits:
+    if candidate in known:
         return candidate
     return channel
 
 
 def cell_gating_get_fluor_gate(app, channel: str) -> float:
+    """FluorGating threshold for *channel* from the typed slice (0.0 = off)."""
     key = _cell_gating_resolve_key(app, channel)
-    edit = (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).get(key)
-    if edit is None:
-        return 0.0
-    try:
-        return float(edit.text())
-    except ValueError:
-        return 0.0
+    val = app._app_state.cell_gating.fluor_gates.get(key)
+    return 0.0 if val is None else float(val)
 
 
 def cell_gating_get_thresh_frac_on(app, channel: str) -> float:
+    """ThreshFracOn cutoff for *channel* from the typed slice (default 50.0)."""
     key = _cell_gating_resolve_key(app, channel)
-    edit = (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).get(key)
-    if edit is None:
-        return 50.0
-    try:
-        return float(edit.text())
-    except ValueError:
-        return 50.0
+    val = app._app_state.cell_gating.thresh_frac_on.get(key)
+    return 50.0 if val is None else float(val)
 
 
 def cell_gating_on_gating_change(app) -> None:
@@ -781,6 +806,7 @@ def cell_gating_on_gating_change(app) -> None:
     except ValueError:
         return
 
+    _cell_gating_sync_gate_state(app)
     app._cell_gating_axes_stack = []
     _cell_gating_plot_cdf(app)
     _cell_gating_persist_params(app)
@@ -1070,7 +1096,7 @@ def cell_gating_on_threshold_frac_on_change(app) -> None:
     try:
         for edit in app._cell_gating_thresh_frac_edits.values():
             float(edit.text())
-        _cell_gating_save_threshold_frac_on(app)
+        _cell_gating_sync_gate_state(app)
         _cell_gating_persist_params(app)
         app._invalidate_stats_cache()
         # ``_redraw`` only fans out to the default-scope plots (line /
@@ -1624,9 +1650,14 @@ def _cell_gating_build_channel_controls(app) -> None:
         ch_lbl.setFixedWidth(160)
         rl.addWidget(ch_lbl)
 
+        # R6: the typed slice is the source of truth — seed the slice with the
+        # historical defaults for new rows, and seed the edit's text FROM the
+        # slice (so values persisted/loaded before this row was built appear).
+        gate_state = app._app_state.cell_gating
+
         rl.addWidget(QLabel("FluorGating:", ch_row))
         if channel not in app._cell_gating_fluor_gate_edits:
-            gate_edit = QLineEdit("0.0", ch_row)
+            gate_edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), ch_row)
             gate_edit.setFixedWidth(90)
             gate_edit.editingFinished.connect(
                 lambda _app=app: cell_gating_on_gating_change(_app)
@@ -1636,7 +1667,7 @@ def _cell_gating_build_channel_controls(app) -> None:
 
         rl.addWidget(QLabel("ThreshFracOn:", ch_row))
         if channel not in app._cell_gating_thresh_frac_edits:
-            thresh_edit = QLineEdit("50.0", ch_row)
+            thresh_edit = QLineEdit(str(gate_state.thresh_frac_on.setdefault(channel, 50.0)), ch_row)
             thresh_edit.setFixedWidth(90)
             thresh_edit.editingFinished.connect(
                 lambda _app=app: cell_gating_on_threshold_frac_on_change(_app)
@@ -2209,14 +2240,12 @@ def _cell_gating_plot_cdf(app) -> None:
         ax.grid(True, alpha=0.2, color=txt_mut)
         ax.tick_params(colors=txt_mut, labelsize=8)
 
-        try:
-            fluor_gate = float(
-                app._cell_gating_fluor_gate_edits[channel].text()
-            )
-            ax.axvline(x=fluor_gate, color=warn,
+        fluor_gate = app._app_state.cell_gating.fluor_gates.get(channel)
+        if fluor_gate is not None:
+            ax.axvline(x=float(fluor_gate), color=warn,
                        linestyle="--", linewidth=2, alpha=0.7)
-        except (ValueError, KeyError):
-            swallowed("cell gating CDF: no fluor-gate line (unparsable/missing)")
+        else:
+            swallowed("cell gating CDF: no fluor-gate line (channel not in slice)")
         _focus_cdf_xaxis(ax, vals)
         next_idx += 1
 
@@ -2300,11 +2329,3 @@ def _cell_gating_persist_params(app) -> None:
         logger.exception("Failed to save gating params to pipeline_info.json")
 
 
-def _cell_gating_save_threshold_frac_on(app) -> None:
-    if not hasattr(app, "_thresh_frac_on_saved"):
-        app._thresh_frac_on_saved = {}
-    for channel, edit in app._cell_gating_thresh_frac_edits.items():
-        try:
-            app._thresh_frac_on_saved[channel] = float(edit.text())
-        except ValueError:
-            swallowed(f"cell gating: skip non-numeric ThreshFracOn for {channel!r}")

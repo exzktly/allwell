@@ -420,15 +420,12 @@ def _kick_off_gating_after_load(app) -> None:
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return
     # Cell-area gating is retired (now QC-owned); only a non-default
-    # fluorescence gate needs the gating worker kicked off here.
-    has_non_default_gate = False
-    for edit in getattr(app, "_cell_gating_fluor_gate_edits", {}).values():
-        try:
-            if float(edit.text()) > 0.0:
-                has_non_default_gate = True
-                break
-        except ValueError:
-            pass
+    # fluorescence gate needs the gating worker kicked off here. Values come
+    # from the typed slice (R6), synced from the edits / persistence load.
+    has_non_default_gate = any(
+        float(val) > 0.0
+        for val in app._app_state.cell_gating.fluor_gates.values()
+    )
     # Scatter-gate inclusion / thresholding modes also need the pass so
     # Gate_Pass / Gate_On are computed from the persisted gates on load (neither
     # has a per-channel edit to inspect).

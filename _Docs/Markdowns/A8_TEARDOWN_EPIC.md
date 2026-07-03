@@ -238,19 +238,25 @@ only after the shared render graph they call takes `ctx`. Order:
    but its body then names `ctx.app._get_all_fluor_gates()` **and**
    `ctx.app` for `apply_export_style_to_current` (+2) → net +1. So the render
    features must **not** go first. The real next leaves, in order:
-   - **`get_all_fluor_gates` / `get_fluor_gate`** → `ctx`. Deeper than R4: the
-     chain bottoms out in `cell_gating_get_fluor_gate`, which reads
-     `_cell_gating_fluor_gate_edits[key].text()` — and those "dicts" are
-     **`{channel_key → QLineEdit}` widget maps**, not plain values
-     (same for `_cell_gating_thresh_frac_edits`, the ThreshFracOn twin). So the
-     gate value is held *on the widget*. **Prereq (R6) = decouple: the gate
-     float per channel lives in a typed cell-gating state slice; the edit writes
-     to state on change; persistence serialises the state (not `edit.text()`);
-     the accessor reads `ctx.state`.** ~44 refs across cell_gating_tab_view (25),
-     channel_state_controller, persistence (cell_gating + sample_definitions),
-     registry, load_controller. Not mechanical — it rewires the cell-gating UI's
-     source of truth, so it needs its own characterization coverage + interactive
-     smoke. Once done, every renderer's fluor-gate residual clears at once.
+   - **`get_all_fluor_gates` / `get_fluor_gate`** → `ctx`. **State prereq (R6)
+     DONE**: the gate values moved off the QLineEdits into a typed
+     `CellGatingState` core slice (`AppState.cell_gating`). The two
+     `editingFinished` handlers sync edits → slice after their validate-all
+     pass; persistence load writes the slice directly (and mirrors onto built
+     edits); accessors / CDF axvline / saved-plots capture / the post-load
+     worker kick all read the slice; new rows seed their edit text FROM the
+     slice; the loose `_thresh_frac_on_saved` shadow dict is subsumed. Every
+     text-changing path funnels through the handlers or the loader, so slice ↔
+     widget cannot diverge (verified: zero `.text()` value-readers remain).
+     Locked headless by `test_cell_gating_gate_state` — real offscreen
+     QLineEdits covering sync, defaults, ratio-key resolution, handler fan-out,
+     `editingFinished` wiring, and the garbage-input case (which now *keeps the
+     last-committed value* instead of the old silent fall-to-default — a stray
+     keystroke can no longer quietly disable a gate). Gate-value flow is data
+     flow, not paint, so this is headless-verified; only a light UI sanity pass
+     (type a value, see plots react) is suggested at next manual run — NOT the
+     full smoke a render conversion needs. Remaining: the accessor signature
+     flip (`get_all_fluor_gates(ctx)` etc.), now a pure-state 3-liner.
    - **`apply_export_style_to_current`** → `ctx`. **Storage prereq DONE** (commit
      dab9823): `_export_style_prefs` / `_export_axis_prefs` moved to a typed
      `ExportPrefsState` core slice (`AppState.export_prefs`). What remains is the

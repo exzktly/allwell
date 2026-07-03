@@ -80,28 +80,31 @@ def load_from_pipeline_info(app) -> bool:
     # ``cell_area_threshold`` is retired from this block — the QC layer now owns
     # cell-area gating and migrates any legacy value (see QCParams.from_pipeline_info).
 
+    # R6: the typed CellGatingState slice is the source of truth for the gate
+    # values — write it directly, then mirror onto any already-built line-edit
+    # (the edits are the input surface; a row built later seeds from the slice).
+    gate_state = app._app_state.cell_gating
     fluor_gates = block.get("fluor_gates") or {}
     if isinstance(fluor_gates, dict):
         for ch, val in fluor_gates.items():
-            edit = app._cell_gating_fluor_gate_edits.get(str(ch))
-            if edit is None:
-                continue
             try:
-                edit.setText(str(float(val)))
-                applied = True
+                fval = float(val)
             except (ValueError, TypeError):
-                pass
+                continue
+            gate_state.fluor_gates[str(ch)] = fval
+            edit = app._cell_gating_fluor_gate_edits.get(str(ch))
+            if edit is not None:
+                edit.setText(str(fval))
+                applied = True
 
     thresh_frac_on = block.get("thresh_frac_on") or {}
     if isinstance(thresh_frac_on, dict):
-        if not hasattr(app, "_thresh_frac_on_saved"):
-            app._thresh_frac_on_saved = {}
         for ch, val in thresh_frac_on.items():
             try:
                 fval = float(val)
             except (ValueError, TypeError):
                 continue
-            app._thresh_frac_on_saved[str(ch)] = fval
+            gate_state.thresh_frac_on[str(ch)] = fval
             edit = app._cell_gating_thresh_frac_edits.get(str(ch))
             if edit is not None:
                 edit.setText(str(fval))

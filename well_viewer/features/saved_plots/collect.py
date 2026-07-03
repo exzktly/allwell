@@ -66,7 +66,7 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     fluor = _safe(lambda: app._get_all_fluor_gates())
     if isinstance(fluor, dict) and fluor:
         thresholds["fluor_gates"] = {str(k): float(v) for k, v in fluor.items()}
-    tfo = _safe(lambda: dict(getattr(app, "_thresh_frac_on_saved", {}) or {}))
+    tfo = _safe(lambda: dict(app._app_state.cell_gating.thresh_frac_on))
     if isinstance(tfo, dict) and tfo:
         thresholds["thresh_frac_on"] = {str(k): float(v) for k, v in tfo.items()}
     return params, thresholds

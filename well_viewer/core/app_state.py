@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from well_viewer.core.channel_state import ChannelState
 from well_viewer.core.dataset_state import DatasetState
 from well_viewer.core.image_view_state import ImageViewState
+from well_viewer.core.cell_gating_state import CellGatingState
 from well_viewer.core.export_prefs_state import ExportPrefsState
 from well_viewer.core.plot_state import PlotState
 from well_viewer.core.qc_state import QcState
@@ -64,6 +65,9 @@ class AppState:
     qc: QcState = field(default_factory=QcState)
     # Export/figure-style prefs (global publication style + per-figure axis view).
     export_prefs: ExportPrefsState = field(default_factory=ExportPrefsState)
+    # Cell-gating threshold values (FluorGating / ThreshFracOn per channel) —
+    # core, like qc: they feed the channel layer every plot reads (R6).
+    cell_gating: CellGatingState = field(default_factory=CellGatingState)
 
     def feature_slice(self, name: str):
         """Return the feature-owned slice *name*, or ``None`` when its feature is

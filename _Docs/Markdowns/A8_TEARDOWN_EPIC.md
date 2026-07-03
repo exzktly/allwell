@@ -150,6 +150,20 @@ at the *call sites*, and only if the body doesn't relocate calls into new
   2. **Feature handlers + renderers** — now net-positive; one feature per PR.
   3. **Shared controllers** (`plot_orchestrator` / channel / selection) last.
 
+**Progress — shared-leaf pass 1 (246 → 245).** `timepoint_sync.set_focus_tp` /
+`current_focus_tp` and `data_loading.get_all_timepoints` now take `ctx`. The
+first two are **pure** (`ctx.state.plot` + `ctx.bus`, zero residual); the third
+reads the well list from `ctx.state.dataset` with a single residual — the
+per-well `_get_rows` row-fetch, which stays god-object-bound until a typed data
+service exists (that is the next-deepest leaf, shared with `stats_compute` and
+every `collect` module). Riding on the leaves, `refresh_distribution_timepoints`
+(combo via `ctx.widgets`) and the multivariate timepoint combo dropped their
+builder-site touches. The heatmap `_on_tp_changed` / `refresh_heatmap_timepoints`
+handlers were **deliberately left on `app`**: converting them is net-positive
+only once `_redraw` (plot-render tree) and `_split_active` also take `ctx`, so
+they wait for pass 2. Confirms the finding: the render tree and `_get_rows` are
+the true deep leaves gating the rest of T3.
+
 ### T4 — Extract cross-cutting services · `[ ]`
 Category (c). `_invalidate_stats_cache` operates on the already-typed
 `stats_cache` slice → replace the ~20 scattered calls with a

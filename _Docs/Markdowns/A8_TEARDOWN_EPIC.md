@@ -198,6 +198,38 @@ residual.
 > each, smoke-tested). This ledger is the definitive circle-back list for the
 > "modernized but for one deep leaf" sites.
 
+#### T3 completion — approved method & leaf-first sequence
+
+**Method (user-approved).** Render-tree conversions get a **numeric
+characterization test first** (assert on the renderer's data outputs —
+`_heatmap_array`, group value arrays, cell indices — so a mis-mapped attr that
+resolves via the stamp but *paints wrong* is caught), then convert, then **flag
+the feature "needs interactive smoke" before merge** (headless CI can't see
+theme/label/visual regressions). One feature per pass, each green + committed.
+
+**Remaining 243 → ~5, leaf-first (traced).** The feature `tab_view` counts fall
+only after the shared render graph they call takes `ctx`. Order:
+
+1. **Grouping/colour leaves** → `ctx`: `rank_color_wells` (already app-free) →
+   `sel_color` (only needs `rank_color_wells`) → `rank_color_rset` /
+   `rep_sets_active` (state + those) → `get_all_fluor_gates`
+   (`channel_state_controller`). All convert to pure `ctx.state` + the free
+   colour fn — no render, unit-testable.
+2. **`iter_plot_groups(ctx)`** (`data_loading`): now clean — colour leaves +
+   `get_rows(ctx)` (R1 done) + `ctx.state`.
+3. **Per-feature renderer + handlers** (one pass each, characterization test +
+   smoke flag): distribution **R3** (`redraw_distribution` + `_setup_axes` /
+   `_apply_card_style` / `_display_label_for` / `_render_*`) → heatmap **R2**
+   (`redraw_heatmap`) → scatter (cells+agg) → barplot → lineplot → multivariate.
+4. **Non-render controller passes** (low risk, no plot tree): image_table (33),
+   cell_gating (28, also A3 domain extract), batch_export, cell_browser,
+   registry, saved_plots, review_csv, mv-picker, image_browser, playground.
+5. **Follow-on:** point `stats_compute` + the feature `collect` modules at
+   `get_rows(ctx)` (modernizes the last `app._get_rows` readers; no count move).
+
+Legit residuals that stay: `core/app_runtime.py` (the runtime stamps `ctx.app`),
+and the one shared-helper touch each in `ui_helpers` / `plot_card_actions`.
+
 ### T4 — Extract cross-cutting services · `[ ]`
 Category (c). `_invalidate_stats_cache` operates on the already-typed
 `stats_cache` slice → replace the ~20 scattered calls with a

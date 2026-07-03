@@ -164,6 +164,40 @@ only once `_redraw` (plot-render tree) and `_split_active` also take `ctx`, so
 they wait for pass 2. Confirms the finding: the render tree and `_get_rows` are
 the true deep leaves gating the rest of T3.
 
+**Progress — timepoint-handler modernization (245 → 244).** A new
+`ctx.runtime.split` namespace gives the app-global split-view flag a ctx home
+(`ctx.runtime.split.active` ↔ `app._split_active`; `split_view.py` still writes
+it directly, the runtime read bridges). With that, the distribution and heatmap
+timepoint handlers now read the modern infra end-to-end (combo/slider via
+`ctx.widgets`, tp-value cache via `ctx.runtime.heatmap`, split via
+`ctx.runtime.split`). `distribution._on_tp_changed_dist` → ctx is a clean −1;
+the two heatmap handlers → ctx are net 0 (the onward `_redraw` render handoff is
+the one residual, mirroring distribution `_on_changed`) but are otherwise fully
+off the god-object. A latent bug from pass 1 was caught and fixed:
+`features/registry.py`'s channel-change reactors still passed bare `app` to the
+now-ctx refresh handlers, which their broad `except` would have swallowed —
+locked by `test_timepoint_refresh_ctx_contract`.
+
+#### T3 residuals ledger — modernized-except-for, for circle-back
+
+Sites that were converted to `ctx` but still carry **one named god-object touch**
+because a *deeper* leaf has no `ctx` home yet. Each stays here until its blocker
+is cleared; clearing a blocker should zero every row that names it. `[ ]` = still
+residual.
+
+| # | Site | Residual touch | Blocker (what unblocks it) | Status |
+|---|------|----------------|----------------------------|--------|
+| R1 | `data/data_loading.py` `get_all_timepoints` | `ctx.app._get_rows(label)` | **Typed data service.** `_get_rows` (lazy load + QC/Crop projection) has no ctx home. Its own chain: `apply_qc_to_cache`/`apply_crop_to_cache` → `get_crop_region` (already pure `ctx.state.dataset.crop_region`) + `get_qc_params` (**blocked by R4**). Build `data_service.get_rows(ctx, label)`; delegate `WellViewerApp._get_rows` to it. Shared with `stats_compute` + every `collect` module. | `[ ]` |
+| R2 | `features/heatmap/tab_view.py` `refresh_heatmap_timepoints`, `_on_tp_changed` | `_redraw(ctx.app)` | **Heatmap render tree.** `redraw_heatmap` (≈200 lines, 44 app-touches) still takes `app`. High-risk one-feature pass: characterization test on `_heatmap_array`/`cell_well_index` first, **interactive smoke after** (headless CI can't see a mis-mapped attr that paints wrong). | `[ ]` |
+| R3 | `features/distribution/tab_view.py` `_on_changed` | `redraw_distribution(ctx.app)` | **Distribution render tree.** Same shape as R2 — the feature renderer still takes `app`. Convert `redraw_distribution` (+ shared plot-render helpers `iter_plot_groups` / `_setup_axes` / plot-style / `_display_label_for`) to ctx. | `[ ]` |
+| R4 | `features/qc/controller.py` `get_qc_params` | `app._qc_params` (read + lazy-seed write) | **Typed QC state.** `_qc_params` is a loose cached god-object attr (seeded from `dataset.pipeline_info`). Migrate it to a typed state slice (Phase-2 style) so `get_qc_params(ctx)` / `apply_qc_to_cache(ctx)` go pure — the prerequisite for R1. | `[ ]` |
+| R5 | `core/split_view.py` (≈4 write sites) | `app._split_active = …` (bare writes) | **Low priority / cosmetic.** Reads are modernized via `ctx.runtime.split` (R-home done). The direct writes are bare `app._split_active` (uncounted by the ratchet), harmless; move them onto `ctx.runtime.split.active` when `split_view` functions take `ctx`. | `[ ]` |
+
+> When you clear a blocker, delete the residual touch, drop the ratchet, and tick
+> the row(s). R4 → unblocks R1. R2/R3 are the render-tree passes (one feature
+> each, smoke-tested). This ledger is the definitive circle-back list for the
+> "modernized but for one deep leaf" sites.
+
 ### T4 — Extract cross-cutting services · `[ ]`
 Category (c). `_invalidate_stats_cache` operates on the already-typed
 `stats_cache` slice → replace the ~20 scattered calls with a

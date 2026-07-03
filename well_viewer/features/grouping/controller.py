@@ -134,29 +134,14 @@ def rep_add(app) -> None:
     btn_row.addStretch(1)
 
     def _ok():
-        import sys
         sel = _selected_list_values(lb)
-        # >>> TEMP DEBUG (group-creation bug): confirm the create handler fires.
-        print(f"=== ALLWELL DEBUG: rep_add._ok fired — {len(sel)} well(s) selected ===",
-              file=sys.stderr, flush=True)
-        # <<< TEMP DEBUG
         if not sel:
             QMessageBox.warning(dlg, "No wells", "Select at least one well.")
             return
         name = name_edit.text().strip() or f"Rep {len(app._app_state.selection.selections) + 1}"
         dlg.accept()
         # _sel_add enforces well-exclusivity (the new group takes the wells).
-        # >>> TEMP DEBUG (group-creation bug): remove once fixed.
-        try:
-            new_id = app._sel_add(name, list(sel), replicates=[list(sel)], source="rep_set")
-            print(f"=== ALLWELL DEBUG: _sel_add returned id={new_id!r}; total groups now "
-                  f"{len(app._app_state.selection.selections)} ===", file=sys.stderr, flush=True)
-        except Exception:
-            import traceback
-            print("\n=== ALLWELL DEBUG: _sel_add FAILED ===", file=sys.stderr)
-            traceback.print_exc()
-            print("=== end ALLWELL DEBUG ===\n", file=sys.stderr, flush=True)
-        # <<< TEMP DEBUG
+        app._sel_add(name, list(sel), replicates=[list(sel)], source="rep_set")
 
     ok_btn.clicked.connect(_ok)
     cancel_btn.clicked.connect(dlg.reject)

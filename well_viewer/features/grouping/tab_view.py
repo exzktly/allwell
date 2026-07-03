@@ -60,36 +60,13 @@ def rep_panel_refresh(app) -> None:
     """Refresh the GROUPS list (a widgets.SavedSelectionsList over app._app_state.selection.selections)."""
     lst = getattr(app, "_rep_list", None)
     if lst is None:
-        # >>> TEMP DEBUG (group-creation bug)
-        import sys
-        print("=== ALLWELL DEBUG: rep_panel_refresh — _rep_list is None "
-              "(GROUPS list widget not built) ===", file=sys.stderr, flush=True)
-        # <<< TEMP DEBUG
         return
     try:
         lst.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
     except Exception:
-        # >>> TEMP DEBUG (group-creation bug): was swallowed at DEBUG.
-        import sys
-        import traceback
-        print("\n=== ALLWELL DEBUG: setEnabledWells FAILED ===", file=sys.stderr)
-        traceback.print_exc()
-        print("=== end ALLWELL DEBUG ===\n", file=sys.stderr, flush=True)
-        # <<< TEMP DEBUG
+        swallowed()  # was: pass (silent except)
     sels = list(app._app_state.selection.selections or [])
-    # >>> TEMP DEBUG (group-creation bug): the new group renders into the list
-    # here. Surface any failure instead of letting a caller swallow it.
-    try:
-        lst.updateSelections(sels)
-    except Exception:
-        import sys
-        import traceback
-        print(f"\n=== ALLWELL DEBUG: updateSelections FAILED (n_groups={len(sels)}) ===",
-              file=sys.stderr)
-        traceback.print_exc()
-        print("=== end ALLWELL DEBUG ===\n", file=sys.stderr, flush=True)
-        raise
-    # <<< TEMP DEBUG
+    lst.updateSelections(sels)
     cur = app._app_state.selection.current_selection_id
     # When the app has explicitly cleared the active group (e.g. the user
     # just entered the Groups sub-tab), force the list's current row to

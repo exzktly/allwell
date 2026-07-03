@@ -237,6 +237,27 @@ def _plot_groups_add_current(app) -> None:
         (app._app_state.selection.selected_wells or set()),
         key=app._parse_rc,
     )
+    # >>> TEMP DEBUG (Plot Group "add" bug): reveal WHY selected_wells is empty.
+    import sys
+    _sel = app._app_state.selection
+    try:
+        from well_viewer.core.selection_controller import (
+            _plate_passive_in_group_mode, _active_tab,
+        )
+        _passive = _plate_passive_in_group_mode(app)
+        _tab = _active_tab(app)
+    except Exception as _e:  # noqa: BLE001
+        _passive, _tab = f"<err {_e!r}>", "<err>"
+    print(
+        "=== ALLWELL DEBUG: _plot_groups_add_current fired ===\n"
+        f"    selected_wells   = {sorted(_sel.selected_wells or set())}\n"
+        f"    #replicate-sets  = {len(_sel.selections or [])}\n"
+        f"    plate passive?   = {_passive}   (True => plate toggles GROUPS, not wells)\n"
+        f"    active tab       = {_tab!r}\n"
+        f"    #existing plot-groups = {len(_sel.plot_groups or [])}",
+        file=sys.stderr, flush=True,
+    )
+    # <<< TEMP DEBUG
     if not wells:
         try:
             app._set_status("Select wells before adding a Plot Group.")

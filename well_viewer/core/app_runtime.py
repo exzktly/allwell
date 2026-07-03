@@ -46,7 +46,7 @@ class AppRuntime:
     """
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
-                 "heatmap", "barplot", "cell_gating", "multivariate",
+                 "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split")
 
     def __init__(self, app) -> None:
@@ -60,6 +60,8 @@ class AppRuntime:
         # stay on the app / typed state; see each feature's migration notes.
         object.__setattr__(self, "cell_browser", _FeatureRuntime(app, "_cell_browser_"))
         object.__setattr__(self, "image_browser", _FeatureRuntime(app, "_image_browser_"))
+        # Image-table grid: live cell list, per-row LUTs, crop tool, grid widgets.
+        object.__setattr__(self, "image_table", _FeatureRuntime(app, "_image_table_"))
         object.__setattr__(self, "heatmap", _FeatureRuntime(app, "_heatmap_"))
         object.__setattr__(self, "barplot", _FeatureRuntime(app, "_bar_"))
         object.__setattr__(self, "cell_gating", _FeatureRuntime(app, "_cell_gating_"))

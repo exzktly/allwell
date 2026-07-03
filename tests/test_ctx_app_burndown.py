@@ -233,7 +233,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              domain.selections_model.color_for_well (WELL_COLORS[well_rank%N]);
 #              the delegate forwards to it and multivariate collect drops its
 #              ctx.app._rank_color_well. Second pure core god-method decomposed.
-CTX_APP_BUDGET = 186
+#   186 -> 179  Add the ``image_table`` AppRuntime namespace (prefix
+#              ``_image_table_``) and route the Image Table tab's live-grid
+#              container inits (cells / lut / crop_tool) through it instead of
+#              hasattr/assign on ctx.app. Unblocks the full image_table controller
+#              conversion (its ~30 fns + helper files) as a later pass.
+CTX_APP_BUDGET = 179
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

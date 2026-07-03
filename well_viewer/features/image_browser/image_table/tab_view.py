@@ -88,14 +88,18 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # (``ctx.state.image_table``), constructed with AppState — no
     # loose-attr defaults needed here. Only widget-handle containers and the
     # CropTool helper are seeded on the app below.
-    if not hasattr(ctx.app, "_image_table_cells"):
-        ctx.app._image_table_cells = []
-    if not hasattr(ctx.app, "_image_table_lut"):
-        ctx.app._image_table_lut = {}
+    # Live grid handles are the ``_image_table_`` runtime namespace; seed the
+    # container defaults idempotently (ctx.runtime stamps app._image_table_*
+    # so the controller's legacy readers resolve unchanged).
+    _it = ctx.runtime.image_table
+    if _it.cells is None:
+        _it.cells = []
+    if _it.lut is None:
+        _it.lut = {}
     # Shared square-region crop helper. on_change re-runs Generate so the
     # rendered grid follows mode toggles and crop changes automatically.
-    if not hasattr(ctx.app, "_image_table_crop_tool"):
-        ctx.app._image_table_crop_tool = CropTool(
+    if _it.crop_tool is None:
+        _it.crop_tool = CropTool(
             on_change=lambda: image_table_generate(ctx.app),
         )
 
@@ -331,7 +335,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # dataset-wide crop tool.
     crop_btn = _menu_button(action_row, "Crop", tooltip="Crop region tool")
     cmenu = crop_btn.menu()
-    _crop = ctx.app._image_table_crop_tool
+    _crop = ctx.runtime.image_table.crop_tool
     crop_act = QAction("Crop region (drag on image)", cmenu)
     crop_act.setCheckable(True)
     crop_act.setChecked(bool(_crop.mode))

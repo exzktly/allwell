@@ -267,7 +267,22 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              tab_view drops all 26 ctx.app; the one residual (shared core
 #              build_plot_groups_drawer) stays a ctx.app bridge until that
 #              builder migrates.
-CTX_APP_BUDGET = 141
+#   141 -> 135  Cell Browser subsystem fully ctx-native: collect, controller,
+#              criteria_view, sort_view, tab_view, worker, state all take ctx
+#              (app._app_state->ctx.state; app._cell_browser_*->ctx.runtime.
+#              cell_browser incl. dynamic getattr/setattr; _get_rows->get_rows(ctx);
+#              _norm_timepoint/_review_row_keys/_parse_rc/_rep_sets_active->the
+#              ctx-native domain leaves; _set_status->ctx.set_status; _notebook nav
+#              ->ctx.window). CellImageLoader holds ctx. tab_view drops all 6
+#              ctx.app; external callers bridge via app._ctx. Zero residual.
+#   141 -> 140  Cell Browser subsystem converted to ctx (collect/controller/
+#              criteria_view/sort_view/tab_view/worker/state). tab_view drops its
+#              6 ctx.app; the controller keeps 5 deliberate bridges to the still
+#              app-native review_image navigation (show_image_browser_subtab,
+#              update_preview, refresh_review_image, zoom_..._nucleus,
+#              review_row_keys) — they convert when review_image does. Net -1 but
+#              the whole subsystem is now ctx save those bridges.
+CTX_APP_BUDGET = 140
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -48,7 +48,7 @@ def test_gallery_mirrors_groups_over_stale_selection(loaded_app):
     app._app_state.selection.selected_wells = set(wells[1:2])  # stale individual sel
     # With groups defined the gallery MIRRORS the scatter's group wells, not a
     # leftover individual selection — so the two panes always agree.
-    assert cell_browser_source_wells(app) == wells[:1]
+    assert cell_browser_source_wells(app._ctx) == wells[:1]
 
 
 def test_gallery_follows_groups_when_no_explicit_selection(loaded_app):
@@ -59,7 +59,7 @@ def test_gallery_follows_groups_when_no_explicit_selection(loaded_app):
     app._sel_add(name="g1", wells=wells[:1])
     app._app_state.selection.selected_wells = set()   # nothing explicitly selected
     # Falls back to the Scatter's visible group wells (preserve #576/#578 intent).
-    assert cell_browser_source_wells(app) == wells[:1]
+    assert cell_browser_source_wells(app._ctx) == wells[:1]
 
 
 def test_plate_highlight_consistent_across_focus_in_split(loaded_app):
@@ -89,10 +89,10 @@ def test_plate_click_toggles_group_in_split(loaded_app):
     _enter_split(app)
     app._sel_add(name="g1", wells=wells[:1])           # group covers wells[0]
     _focus(app, "Plotting")
-    assert wells[0] in cell_browser_source_wells(app)  # group visible → in gallery
+    assert wells[0] in cell_browser_source_wells(app._ctx)  # group visible → in gallery
 
     sc.on_sidebar_plate_well_activated(app, wells[0])   # click the well → toggle group
-    assert wells[0] not in cell_browser_source_wells(app)  # group hidden → gone
+    assert wells[0] not in cell_browser_source_wells(app._ctx)  # group hidden → gone
     assert app._app_state.selection.selected_wells == set()  # no per-well sel made
 
 
@@ -111,7 +111,7 @@ def test_gate_stays_live_as_wells_are_added_and_removed(loaded_app):
     app._cell_browser_gate_choices = None
 
     def scope():
-        return sorted({c.well for c in collect_cells(app, [], live_sync=True)})
+        return sorted({c.well for c in collect_cells(app._ctx, [], live_sync=True)})
 
     app._app_state.selection.selected_wells = {wells[0]}
     assert scope() == [wells[0]]
@@ -130,7 +130,7 @@ def test_inspecting_a_cell_does_not_rescope_wells(loaded_app):
     wells = list(app._app_state.dataset.well_paths.keys())
     _enter_split(app)
     app._app_state.selection.selected_wells = set(wells[:2])
-    cells = collect_cells(app, [], live_sync=True)
+    cells = collect_cells(app._ctx, [], live_sync=True)
     assert cells, "expected some cells to inspect"
     before = set(app._app_state.selection.selected_wells)
     ctl.on_cell_clicked(app, cells[0])  # navigates to Segmentation; read-only for scope

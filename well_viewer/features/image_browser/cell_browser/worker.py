@@ -41,7 +41,7 @@ def resolve_channel_tint(channel: str, index: int,
 
     An explicit per-channel override (the shared ``tint_by_channel``, 0–255)
     wins; otherwise fall back to the fixed palette by channel index. Pure (no
-    Qt / app), so it's unit-testable on its own.
+    Qt / ctx), so it's unit-testable on its own.
     """
     override = (tint_map or {}).get(str(channel).strip().lower())
     if override is not None:
@@ -85,7 +85,7 @@ def _norm01(crop, bounds: Optional[tuple] = None) -> np.ndarray:
     return np.clip((a - lo) / (hi - lo), 0.0, 1.0)
 
 
-def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
+def compose_cell_rgb(ctx, desc: CellDescriptor, channels: List[str],
                      show_boundaries: bool, cache: Dict,
                      lut_by_channel: Optional[Dict[str, tuple]] = None,
                      tint_by_channel: Optional[Dict[str, tuple]] = None,
@@ -110,11 +110,11 @@ def compose_cell_rgb(app, desc: CellDescriptor, channels: List[str],
     # _load_mask_array depends on it. Calling _load_mask_array before any
     # _load_array always missed → every cell rendered as "—".
     chan_arrays = [
-        _load_array(app, cache, desc.well, ch, desc.tp_token, desc.fov,
+        _load_array(ctx, cache, desc.well, ch, desc.tp_token, desc.fov,
                     use_tophat=use_tophat)
         for ch in channels
     ]
-    mask_full = _load_mask_array(app, cache, desc.well, desc.tp_token, desc.fov)
+    mask_full = _load_mask_array(ctx, cache, desc.well, desc.tp_token, desc.fov)
     if mask_full is None:
         return None
     mask_full = np.asarray(mask_full)
@@ -164,9 +164,9 @@ class CellImageLoader(QObject):
     cell_ready = Signal(object)      # {"gen", "index", "rgb", "desc"}
     page_finished = Signal(object)   # {"gen", "count"}
 
-    def __init__(self, app) -> None:
+    def __init__(self, ctx) -> None:
         super().__init__()
-        self._app = app
+        self._ctx = ctx
         # The most recent generation token handed to load_page. A daemon
         # loader checks this before every compose and bails the instant a
         # newer page supersedes it — otherwise a burst of rapid paging left a
@@ -190,9 +190,9 @@ class CellImageLoader(QObject):
         """Spawn a daemon thread that composes *descriptors* and emits each."""
         self._latest_gen = gen
         # Snapshot the shared per-channel LUT + tint (S4) on the GUI thread so
-        # the daemon thread doesn't read app state concurrently; a copy is cheap
+        # the daemon thread doesn't read ctx state concurrently; a copy is cheap
         # and the page reloads whenever the LUT/tint/source could matter.
-        _iv = getattr(self._app._app_state, "image_view", None)
+        _iv = getattr(self._ctx.state, "image_view", None)
         lut_map = dict(_iv.lut_by_channel) if _iv is not None else {}
         tint_map = dict(_iv.tint_by_channel) if _iv is not None else {}
 
@@ -207,7 +207,7 @@ class CellImageLoader(QObject):
                 if gen != self._latest_gen:
                     return
                 try:
-                    rgb = compose_cell_rgb(self._app, desc, channels,
+                    rgb = compose_cell_rgb(self._ctx, desc, channels,
                                            show_boundaries, cache, lut_map,
                                            tint_map, use_tophat)
                 except Exception:

@@ -10,6 +10,11 @@ two stay consistent.
 
 from __future__ import annotations
 
+from well_viewer.data.data_loading import get_rows
+
+from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.selections_model import active_replicate_sets
+
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -86,42 +91,42 @@ class CellDescriptor:
     spot_count: Optional[int] = None
 
 
-def _sample_df(app):
+def _sample_df(ctx):
     """The first selected (else first loaded) well's frame, for column probing."""
-    sel = [lbl for lbl in app._app_state.selection.selected_wells
-           if lbl in app._app_state.dataset.well_paths]
-    order = sel or list(app._app_state.dataset.well_paths.keys())
+    sel = [lbl for lbl in ctx.state.selection.selected_wells
+           if lbl in ctx.state.dataset.well_paths]
+    order = sel or list(ctx.state.dataset.well_paths.keys())
     for lbl in order:
-        df = app._get_rows(lbl)
+        df = get_rows(ctx, lbl)
         if df is not None and not df.empty:
             return df
     return None
 
 
-def cell_browser_channels(app) -> List[str]:
+def cell_browser_channels(ctx) -> List[str]:
     """Fluorescence channels for the Cell Browser chips.
 
-    Prefers ``app._app_state.channel.fluor_channels`` (the app-wide detected
+    Prefers ``ctx.state.channel.fluor_channels`` (the ctx-wide detected
     list), but falls back to detecting channels from a loaded well's columns so
     the chips still appear if that list isn't populated when the tab builds /
     refreshes."""
-    chans = list(getattr(app._app_state.channel, "fluor_channels", None) or [])
+    chans = list(getattr(ctx.state.channel, "fluor_channels", None) or [])
     if chans:
         return [str(c) for c in chans]
-    df = _sample_df(app)
+    df = _sample_df(ctx)
     if df is not None:
         return [str(c) for c in detect_fluor_channels(df)]
     return []
 
 
-def enumerate_properties(app) -> List[Tuple[str, str]]:
+def enumerate_properties(ctx) -> List[Tuple[str, str]]:
     """Ordered ``[(column_or_ratiokey, label)]`` of every measured per-cell
     property available in the current dataset, for the criteria-property picker.
 
     Families, in order: fluorescence intensity metrics, smFISH counts, shape
     features, ratios. Empty when no dataset is loaded.
     """
-    df = _sample_df(app)
+    df = _sample_df(ctx)
     out: List[Tuple[str, str]] = []
     if df is not None:
         for ch in detect_fluor_channels(df):
@@ -138,7 +143,7 @@ def enumerate_properties(app) -> List[Tuple[str, str]]:
         for col in detect_shape_features(df):
             out.append((col, _shape_label_for(col) or col))
     # Ratios are virtual columns (no df column); offer every defined ratio.
-    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     for key, ratio in ratios.items():
         label = getattr(ratio, "name", None) or str(key)
         out.append((key, f"{label} (ratio)"))
@@ -152,21 +157,21 @@ def enumerate_properties(app) -> List[Tuple[str, str]]:
     return deduped
 
 
-def sort_field_options(app) -> List[Tuple[str, str]]:
+def sort_field_options(ctx) -> List[Tuple[str, str]]:
     """Ordered ``[(field, label)]`` for the sort-key picker.
 
     The intrinsic image dimensions (Well, plus Timepoint / FOV when the dataset
     has them) followed by every measured property (``enumerate_properties``), so
     a sort key can be any of well / timepoint / filter value / metric value.
     """
-    df = _sample_df(app)
+    df = _sample_df(ctx)
     out: List[Tuple[str, str]] = [("well", "Well")]
     if df is not None:
         if "timepoint_hours" in df.columns or "timepoint" in df.columns:
             out.append(("timepoint", "Timepoint"))
         if "fov" in df.columns:
             out.append(("fov", "FOV"))
-    out.extend(enumerate_properties(app))
+    out.extend(enumerate_properties(ctx))
     return out
 
 
@@ -208,7 +213,7 @@ def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
     return mask
 
 
-def cell_browser_source_wells(app) -> List[str]:
+def cell_browser_source_wells(ctx) -> List[str]:
     """Wells the Cell Browser draws from — it MIRRORS what the plotting tabs draw.
 
     * **Group mode** (sample-definition groups exist): the union of the visible
@@ -222,17 +227,16 @@ def cell_browser_source_wells(app) -> List[str]:
     * **Neither** (first open): every loaded well, so the gallery / FOV picker
       still populate before anything is defined.
     """
-    paths = app._app_state.dataset.well_paths
-    sel = app._app_state.selection
+    paths = ctx.state.dataset.well_paths
+    sel = ctx.state.selection
     # ``getattr`` guards keep this importable for lightweight test stubs that
-    # only populate ``selected_wells`` — the real app always provides all three.
+    # only populate ``selected_wells`` — the real ctx always provides all three.
     selections = getattr(sel, "selections", None)
     selected_wells = getattr(sel, "selected_wells", None) or ()
     if selections:
         wells: List[str] = []
         seen: set = set()
-        rep_active = getattr(app, "_rep_sets_active", None)
-        for rset in (rep_active() if callable(rep_active) else ()):
+        for rset in active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths):
             for w in rset.wells:
                 if w in paths and w not in seen:
                     seen.add(w)
@@ -245,12 +249,12 @@ def cell_browser_source_wells(app) -> List[str]:
         wells = [lbl for lbl in selected_wells if lbl in paths]
     else:
         wells = list(paths.keys())
-    key = getattr(app, "_parse_rc", None) or (lambda s: s)
+    key = parse_rc
     return sorted(wells, key=key)
 
 
 def collect_cells(
-    app,
+    ctx,
     criteria: List[Criterion],
     timepoints: Optional[List[float]] = None,
     fovs: Optional[List[str]] = None,
@@ -273,19 +277,19 @@ def collect_cells(
     descending). When empty/None the cells keep their natural per-well row
     order. Cells with no measurable value for a key sort **last** for that key.
 
-    Criteria-only filtering per the feature spec (the app-wide Included/QC/Crop
+    Criteria-only filtering per the feature spec (the ctx-wide Included/QC/Crop
     inclusion is intentionally NOT applied here).
     """
-    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     target = (None if timepoints is None
               else np.asarray([float(t) for t in timepoints], dtype=float))
     fov_set = None if fovs is None else {str(f) for f in fovs}
     keys = list(sort_keys or [])
 
     # N9: caption each crop with the active channel's smFISH spot count.
-    st = getattr(app, "_cell_browser_state", None)
+    st = getattr(ctx.runtime.cell_browser, "state", None)
     label_spot = bool(getattr(st, "label_spot_count", False))
-    active_ch = str(getattr(app._app_state.channel, "active_channel", "") or "").strip().lower()
+    active_ch = str(getattr(ctx.state.channel, "active_channel", "") or "").strip().lower()
     spot_col = f"{active_ch}_smfish_count" if active_ch else ""
 
     # N1: source cells from the active scatter gate(s) instead of the criteria.
@@ -297,9 +301,9 @@ def collect_cells(
     gate_mode = bool(getattr(st, "scatter_gate_mode", False))
     gates = []
     if gate_mode:
-        all_gates = list(getattr(app, "_scatter_gates", []) or [])
+        all_gates = list(ctx.runtime.scatter.gates or [])
         # Only the gate(s) the user picked in the sidebar (None ⇒ all gates).
-        chosen = getattr(app, "_cell_browser_gate_choices", None)
+        chosen = getattr(ctx.runtime.cell_browser, "gate_choices", None)
         if chosen is None:
             gates = all_gates
         else:
@@ -320,15 +324,15 @@ def collect_cells(
     # One parallel value list per sort key (aligned with ``out``), filled per
     # well so the cross-well sort below has a value for every cell.
     sort_cols: List[list] = [[] for _ in keys]
-    # Source from the LIVE well selection (shared app state) in every mode,
+    # Source from the LIVE well selection (shared ctx state) in every mode,
     # including gate mode. The selection is global, so in Split View the Cell
     # Browser and the Scatter stay in sync — changing the wells on either pane
     # drives both. (An earlier attempt froze the gallery to the wells stamped on
     # the gate at draw time; that decoupled the panes, which is the opposite of
     # what's wanted.)
-    selected = cell_browser_source_wells(app)
+    selected = cell_browser_source_wells(ctx)
     for well in selected:
-        df = app._get_rows(well)
+        df = get_rows(ctx, well)
         if df is None or df.empty:
             continue
         if gate_mode:
@@ -402,11 +406,11 @@ def collect_cells(
                 sort_cols[k].append(key_vals[k][i])
 
     if keys and out:
-        out = _apply_sort(app, out, keys, sort_cols)
+        out = _apply_sort(ctx, out, keys, sort_cols)
     return out
 
 
-def _apply_sort(app, out, keys: List[SortKey], sort_cols: List[list]):
+def _apply_sort(ctx, out, keys: List[SortKey], sort_cols: List[list]):
     """Stable multi-key sort of *out* by *keys* (sort_cols holds each key's
     per-cell value, aligned with *out*).
 
@@ -415,7 +419,7 @@ def _apply_sort(app, out, keys: List[SortKey], sort_cols: List[list]):
     Missing/NaN values are pushed to the end on every pass, so a cell that can't
     be measured against the primary key always lands last.
     """
-    parse_rc = getattr(app, "_parse_rc", None) or (lambda s: s)
+
     order = list(range(len(out)))
     for k in range(len(keys) - 1, -1, -1):
         sk = keys[k]

@@ -51,7 +51,7 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
     real_get_rows = app._get_rows
     app._get_rows = lambda _label: None
     try:
-        cell_browser_refresh(app)
+        cell_browser_refresh(app._ctx)
     finally:
         app._get_rows = real_get_rows
 
@@ -76,12 +76,12 @@ def test_cell_browser_click_navigates_to_segmentation(loaded_app):
 
     # None timepoints/FOVs → no tp/fov restriction (strict-list semantics: [] would
     # mean "0 selected → 0 cells"). We just need a cell to click.
-    cells = collect_cells(app, [], None, None)
+    cells = collect_cells(app._ctx, [], None, None)
     assert cells, "expected the mini dataset to yield cells"
 
     # Clicking a cell must switch to Segmentation and select that nucleus —
     # the navigation path must not raise even when image arrays are absent.
-    ctl.on_cell_clicked(app, cells[0])
+    ctl.on_cell_clicked(app._ctx, cells[0])
     assert app._current_centre_tab() == "Segmentation"
     assert app._app_state.review_image.selected_nucleus == int(float(cells[0].nucleus_id))
     assert app._app_state.preview.selected_well == cells[0].well
@@ -99,7 +99,7 @@ def test_cell_browser_click_sets_normalized_timepoint(loaded_app):
     from well_viewer.features.image_browser.cell_browser import controller as ctl
     from well_viewer.features.image_browser.cell_browser.collect import collect_cells
 
-    cells = collect_cells(app, [], None, None)
+    cells = collect_cells(app._ctx, [], None, None)
     cell = next(c for c in cells if c.tp_token == "24h")
     assert app._norm_timepoint("24h") == "24"  # normalization actually differs
 
@@ -117,7 +117,7 @@ def test_cell_browser_click_sets_normalized_timepoint(loaded_app):
     app._preview_fov_cb = fov_rec
     app._review_image_tp_cb = tp_rec
 
-    ctl.on_cell_clicked(app, cell)
+    ctl.on_cell_clicked(app._ctx, cell)
 
     # The raw token must never be the value handed to the combo; the normalized
     # hours value must be.
@@ -134,7 +134,7 @@ def test_cell_browser_apply_filters_no_criteria(loaded_app):
 
     # No criteria + all timepoints/FOVs selected → every cell in the selected
     # wells qualifies. apply_filters must populate the state without raising.
-    ctl.apply_filters(app)
+    ctl.apply_filters(app._ctx)
     st = app._cell_browser_state
     assert isinstance(st.cells, list)
     # loaded advances by at most one page; never exceeds the total.

@@ -242,7 +242,7 @@ def _activate_cell_browser(app) -> None:
     if hasattr(app, "_sidebar_cell_browser_frame"):
         app._sidebar_cell_browser_frame.setVisible(True)
     for _refresh in getattr(app, "_cell_browser_refreshers", ()):
-        _refresh(app)
+        _refresh(app._ctx)
 
 
 def _activate_playground(app) -> None:
@@ -374,7 +374,7 @@ def _sel_cell_browser(app) -> None:
     from well_viewer.features.image_browser.cell_browser.controller import (
         apply_filters,
     )
-    apply_filters(app, live_sync=True)
+    apply_filters(app._ctx, live_sync=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

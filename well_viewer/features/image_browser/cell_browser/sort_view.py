@@ -17,7 +17,7 @@ from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.cell_browser.collect import sort_field_options
 
 
-def build_cell_browser_sort_section(app, parent_layout) -> None:
+def build_cell_browser_sort_section(ctx, parent_layout) -> None:
     """Build the "Sort by" heading + rows host + add button into *parent_layout*."""
     title = QLabel("Sort by")
     title.setObjectName("Heading")
@@ -29,17 +29,17 @@ def build_cell_browser_sort_section(app, parent_layout) -> None:
     rows_lay.setSpacing(4)
     rows_lay.addStretch(1)
     parent_layout.addWidget(host)
-    app._cell_browser_sort_host = rows_lay
-    app._cell_browser_sort_rows = []
+    ctx.runtime.cell_browser.sort_host = rows_lay
+    ctx.runtime.cell_browser.sort_rows = []
 
     add_btn = QPushButton("+ Add sort key")
     add_btn.setProperty("variant", "secondary")
-    add_btn.clicked.connect(lambda _=False: add_sort_row(app))
+    add_btn.clicked.connect(lambda _=False: add_sort_row(ctx))
     parent_layout.addWidget(add_btn)
 
 
-def add_sort_row(app, field: str = "", ascending: bool = True) -> None:
-    rows_lay = getattr(app, "_cell_browser_sort_host", None)
+def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
+    rows_lay = getattr(ctx.runtime.cell_browser, "sort_host", None)
     if rows_lay is None:
         return
     row = QWidget()
@@ -48,7 +48,7 @@ def add_sort_row(app, field: str = "", ascending: bool = True) -> None:
     rl.setSpacing(3)
 
     combo = QComboBox(row)
-    for col, label in sort_field_options(app):
+    for col, label in sort_field_options(ctx):
         combo.addItem(label, userData=col)
     if field:
         idx = combo.findData(field)
@@ -78,22 +78,22 @@ def add_sort_row(app, field: str = "", ascending: bool = True) -> None:
     # insert before the trailing stretch
     rows_lay.insertWidget(rows_lay.count() - 1, row)
     entry = (combo, dir_btn)
-    app._cell_browser_sort_rows.append(entry)
+    ctx.runtime.cell_browser.sort_rows.append(entry)
 
     def _remove(_=False) -> None:
         try:
-            app._cell_browser_sort_rows.remove(entry)
+            ctx.runtime.cell_browser.sort_rows.remove(entry)
         except ValueError:
             swallowed()
         row.deleteLater()
     rm.clicked.connect(_remove)
 
 
-def cell_browser_sort_refresh(app) -> None:
+def cell_browser_sort_refresh(ctx) -> None:
     """Repopulate each sort row's field combo from the current dataset (called
     alongside the criteria refresh on tab show / dataset load)."""
-    opts = sort_field_options(app)
-    for combo, _dir in getattr(app, "_cell_browser_sort_rows", []):
+    opts = sort_field_options(ctx)
+    for combo, _dir in (ctx.runtime.cell_browser.sort_rows or []):
         cur = combo.currentData()
         combo.blockSignals(True)
         combo.clear()

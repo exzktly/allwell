@@ -1,11 +1,14 @@
 """Cell Browser orchestration: run the filter, page in thumbnails, navigate.
 
-Reaches the app via the ``app`` argument (never imports ``WellViewerApp``).
+Reaches the ctx via the ``ctx`` argument (never imports ``WellViewerApp``).
 Image loading is delegated to ``worker.CellImageLoader`` so the UI never blocks;
 this module owns the page bookkeeping and turns worker results into grid tiles.
 """
 
 from __future__ import annotations
+
+from well_viewer.features.image_browser.review_image.collect import review_row_keys
+from well_viewer.core.ui_helpers import norm_timepoint
 
 import logging
 from typing import List
@@ -34,9 +37,9 @@ GRID_COLS = 6
 class _CellThumb(QLabel):
     """A clickable cell thumbnail — click highlights the cell in Segmentation."""
 
-    def __init__(self, app, desc, parent=None) -> None:
+    def __init__(self, ctx, desc, parent=None) -> None:
         super().__init__(parent)
-        self._app = app
+        self._ctx = ctx
         self._desc = desc
         self.setFixedSize(THUMB_PX, THUMB_PX)
         self.setAlignment(Qt.AlignCenter)
@@ -48,13 +51,13 @@ class _CellThumb(QLabel):
         )
 
     def mousePressEvent(self, ev) -> None:  # noqa: N802 (Qt override)
-        on_cell_clicked(self._app, self._desc)
+        on_cell_clicked(self._ctx, self._desc)
         super().mousePressEvent(ev)
 
 
-def make_cell_thumb(app, rgb, desc) -> QWidget:
+def make_cell_thumb(ctx, rgb, desc) -> QWidget:
     """Build one grid tile for a composed cell (placeholder when rgb is None)."""
-    thumb = _CellThumb(app, desc)
+    thumb = _CellThumb(ctx, desc)
     tp = f"t={desc.timepoint_h:g}h" if desc.timepoint_h == desc.timepoint_h else "t=?"
     thumb.setToolTip(
         f"{desc.well}  FOV {desc.fov}  {tp}\nnucleus {desc.nucleus_id}")
@@ -82,9 +85,9 @@ def make_cell_thumb(app, rgb, desc) -> QWidget:
 
 # ── reading the filter/display widgets ───────────────────────────────────────
 
-def read_criteria(app) -> List[Criterion]:
+def read_criteria(ctx) -> List[Criterion]:
     out: List[Criterion] = []
-    for combo, lo_edit, hi_edit in getattr(app, "_cell_browser_criteria_rows", []):
+    for combo, lo_edit, hi_edit in (ctx.runtime.cell_browser.criteria_rows or []):
         col = combo.currentData()
         if not col:
             continue
@@ -92,10 +95,10 @@ def read_criteria(app) -> List[Criterion]:
     return out
 
 
-def read_sort_keys(app) -> List[SortKey]:
+def read_sort_keys(ctx) -> List[SortKey]:
     """Ordered sort keys from the sidebar's sort rows (first row = primary)."""
     out: List[SortKey] = []
-    for combo, dir_btn in getattr(app, "_cell_browser_sort_rows", []):
+    for combo, dir_btn in (ctx.runtime.cell_browser.sort_rows or []):
         field = combo.currentData()
         if not field:
             continue
@@ -104,11 +107,11 @@ def read_sort_keys(app) -> List[SortKey]:
     return out
 
 
-def read_timepoints(app):
+def read_timepoints(ctx):
     """Checked timepoints (strict include-list). Returns ``None`` when the
     dataset has no timepoint dimension (nothing to filter), else the list of
     checked timepoints — possibly ``[]`` (none checked → no cells)."""
-    sel = getattr(app, "_cell_browser_tp_selections", {}) or {}
+    sel = getattr(ctx.runtime.cell_browser, "tp_selections", {}) or {}
     if not sel:
         return None  # no timepoint dimension → don't filter on it
     out: List[float] = []
@@ -121,17 +124,17 @@ def read_timepoints(app):
     return out
 
 
-def read_fovs(app):
+def read_fovs(ctx):
     """Checked FOVs (strict include-list); ``None`` when there's no FOV
     dimension, else the checked list (possibly ``[]`` → no cells)."""
-    sel = getattr(app, "_cell_browser_fov_selections", {}) or {}
+    sel = getattr(ctx.runtime.cell_browser, "fov_selections", {}) or {}
     if not sel:
         return None
     return [f for f, on in sel.items() if on]
 
 
-def read_channels(app) -> List[str]:
-    chips = getattr(app, "_cell_browser_channel_chips", {}) or {}
+def read_channels(ctx) -> List[str]:
+    chips = getattr(ctx.runtime.cell_browser, "channel_chips", {}) or {}
     return [tok for tok, cb in chips.items() if cb.isChecked()]
 
 
@@ -147,96 +150,96 @@ def _num(text: str):
 
 # ── run / page ───────────────────────────────────────────────────────────────
 
-def apply_filters(app, *, live_sync: bool = False) -> None:
+def apply_filters(ctx, *, live_sync: bool = False) -> None:
     """Collect the filtered cell set and load the first page of thumbnails.
 
     ``live_sync`` marks the automatic Split-View / gate re-collect paths (vs the
     explicit Generate button): on those, an empty timepoint/FOV include-list
     relaxes to "all" so a selection change isn't met with a silently-blank
     gallery (see ``collect_cells``)."""
-    st = app._cell_browser_state
-    st.criteria = read_criteria(app)
-    st.timepoints = read_timepoints(app)
-    st.fovs = read_fovs(app)
-    st.sort_keys = read_sort_keys(app)
-    st.channels_on = read_channels(app)
-    bcb = getattr(app, "_cell_browser_boundary_cb", None)
+    st = ctx.runtime.cell_browser.state
+    st.criteria = read_criteria(ctx)
+    st.timepoints = read_timepoints(ctx)
+    st.fovs = read_fovs(ctx)
+    st.sort_keys = read_sort_keys(ctx)
+    st.channels_on = read_channels(ctx)
+    bcb = getattr(ctx.runtime.cell_browser, "boundary_cb", None)
     st.show_boundaries = bool(bcb.isChecked()) if bcb is not None else True
-    src = getattr(app, "_cell_browser_source_seg", None)
+    src = getattr(ctx.runtime.cell_browser, "source_seg", None)
     st.use_tophat = (src.currentData() == "corrected") if src is not None else False
-    lcb = getattr(app, "_cell_browser_label_spot_cb", None)
+    lcb = getattr(ctx.runtime.cell_browser, "label_spot_cb", None)
     st.label_spot_count = bool(lcb.isChecked()) if lcb is not None else False
-    gcb = getattr(app, "_cell_browser_gate_mode_cb", None)
+    gcb = getattr(ctx.runtime.cell_browser, "gate_mode_cb", None)
     st.scatter_gate_mode = bool(gcb.isChecked()) if gcb is not None else False
-    st.page_size = _page_size(app)
+    st.page_size = _page_size(ctx)
 
     # Sort happens inside collect_cells (before the MAX_TOTAL cap, so the cap
     # keeps the top-ordered cells).
-    cells = collect_cells(app, st.criteria, st.timepoints, st.fovs, st.sort_keys,
+    cells = collect_cells(ctx, st.criteria, st.timepoints, st.fovs, st.sort_keys,
                           live_sync=live_sync)
     if len(cells) > MAX_TOTAL:
         cells = cells[:MAX_TOTAL]
     st.cells = cells
     st.loaded = 0
-    app._cell_browser_gen = getattr(app, "_cell_browser_gen", 0) + 1
-    _clear_grid(app)
-    _update_count(app)
+    ctx.runtime.cell_browser.gen = (ctx.runtime.cell_browser.gen or 0) + 1
+    _clear_grid(ctx)
+    _update_count(ctx)
     if not st.channels_on:
-        _set_status(app, "Select at least one channel to display.")
+        _set_status(ctx, "Select at least one channel to display.")
         return
     if not cells:
         # The timepoint/FOV pickers start fully deselected (a deliberate
         # include-list default), so the commonest reason for an empty gallery is
         # "nothing picked yet". Name the exact next click rather than leaving a
         # blank grid with no explanation.
-        _set_status(app, _empty_gallery_hint(st))
-        _set_apply_busy(app, False)
+        _set_status(ctx, _empty_gallery_hint(st))
+        _set_apply_busy(ctx, False)
         return
-    _set_apply_busy(app, True)
-    load_next_page(app)
+    _set_apply_busy(ctx, True)
+    load_next_page(ctx)
 
 
-def load_next_page(app) -> None:
-    st = app._cell_browser_state
+def load_next_page(ctx) -> None:
+    st = ctx.runtime.cell_browser.state
     if st.remaining <= 0:
-        _update_count(app)
+        _update_count(ctx)
         return
     page = st.cells[st.loaded:st.loaded + st.page_size]
     start = st.loaded
-    loader = app._cell_browser_loader
+    loader = ctx.runtime.cell_browser.loader
     loader.load_page(page, start, list(st.channels_on),
-                     st.show_boundaries, app._cell_browser_gen,
+                     st.show_boundaries, ctx.runtime.cell_browser.gen,
                      use_tophat=st.use_tophat)
     # Optimistically advance; on_page_finished reconciles the count.
     st.loaded += len(page)
-    _update_count(app)
-    btn = getattr(app, "_cell_browser_load_more_btn", None)
+    _update_count(ctx)
+    btn = getattr(ctx.runtime.cell_browser, "load_more_btn", None)
     if btn is not None:
         btn.setEnabled(False)  # re-enabled when the page finishes
 
 
-def on_cell_ready(app, payload: dict) -> None:
+def on_cell_ready(ctx, payload: dict) -> None:
     """Queued-signal sink: add one composed thumbnail to the grid."""
-    if payload.get("gen") != getattr(app, "_cell_browser_gen", 0):
+    if payload.get("gen") != (ctx.runtime.cell_browser.gen or 0):
         return  # superseded by a newer filter run
     idx = int(payload["index"])
     rgb = payload.get("rgb")
     desc = payload["desc"]
-    tile = make_cell_thumb(app, rgb, desc)
-    grid = getattr(app, "_cell_browser_grid", None)
+    tile = make_cell_thumb(ctx, rgb, desc)
+    grid = getattr(ctx.runtime.cell_browser, "grid", None)
     if grid is None:
         return
     grid.addWidget(tile, idx // GRID_COLS, idx % GRID_COLS)
 
 
-def on_page_finished(app, payload: dict) -> None:
-    if payload.get("gen") != getattr(app, "_cell_browser_gen", 0):
+def on_page_finished(ctx, payload: dict) -> None:
+    if payload.get("gen") != (ctx.runtime.cell_browser.gen or 0):
         return
-    _update_count(app)
-    btn = getattr(app, "_cell_browser_load_more_btn", None)
+    _update_count(ctx)
+    btn = getattr(ctx.runtime.cell_browser, "load_more_btn", None)
     if btn is not None:
-        btn.setEnabled(app._cell_browser_state.remaining > 0)
-    _set_apply_busy(app, False)
+        btn.setEnabled(ctx.runtime.cell_browser.state.remaining > 0)
+    _set_apply_busy(ctx, False)
 
 
 def _empty_gallery_hint(st) -> str:
@@ -251,82 +254,82 @@ def _empty_gallery_hint(st) -> str:
     return "No cells match the current filters — relax the criteria above."
 
 
-def cell_browser_sync_scatter_gates(app) -> None:
+def cell_browser_sync_scatter_gates(ctx) -> None:
     """Re-collect the gallery from the active scatter gate(s) when gate-source
     mode is on and the Cell Browser is visible — the live half of the
     Scatter ⇄ Cell Browser brushing (N1). Wired from the scatter gating module's
-    ``_notify_gates_changed`` via ``app._cell_browser_gates_changed_cb``; a no-op
+    ``_notify_gates_changed`` via ``ctx.runtime.cell_browser.gates_changed_cb``; a no-op
     when the mode is off or the tab isn't on screen (so it costs nothing in the
     common case)."""
-    st = getattr(app, "_cell_browser_state", None)
+    st = getattr(ctx.runtime.cell_browser, "state", None)
     if st is None or not getattr(st, "scatter_gate_mode", False):
         return
     from well_viewer.core.tab_controller import is_tab_visible
-    if not is_tab_visible(app, "Cell Browser"):
+    if not is_tab_visible(ctx, "Cell Browser"):
         return
-    apply_filters(app, live_sync=True)
+    apply_filters(ctx, live_sync=True)
 
 
-def _set_apply_busy(app, busy: bool) -> None:
+def _set_apply_busy(ctx, busy: bool) -> None:
     """Disable the Apply button + signal progress while the worker composes a
     page, so a click gives immediate feedback instead of a frozen-looking grid."""
-    btn = getattr(app, "_cell_browser_apply_btn", None)
+    btn = getattr(ctx.runtime.cell_browser, "apply_btn", None)
     if btn is not None:
         btn.setEnabled(not busy)
         btn.setText("Loading…" if busy else "Apply filters")
-    gen_btn = getattr(app, "_cell_browser_generate_btn", None)
+    gen_btn = getattr(ctx.runtime.cell_browser, "generate_btn", None)
     if gen_btn is not None:
         gen_btn.setEnabled(not busy)
         gen_btn.setText("Loading…" if busy else "Generate")
     if busy:
-        _set_status(app, "Loading cells…")
+        _set_status(ctx, "Loading cells…")
 
 
-def on_cell_clicked(app, desc) -> None:
+def on_cell_clicked(ctx, desc) -> None:
     """Highlight the clicked cell in the Segmentation view (mirrors the
     Review-CSV jump-to-image navigation)."""
     try:
-        if hasattr(app, "_notebook"):
+        if getattr(ctx.window, "_notebook", None) is not None:
             from well_viewer.features.image_browser.controller import (
                 show_image_browser_subtab,
             )
-            show_image_browser_subtab(app, "Segmentation")
+            show_image_browser_subtab(ctx.app, "Segmentation")
         # Target nucleus before any refresh so intermediate renders already
         # draw the highlight (mirrors review_image.controller's jump-to-cell).
         if desc.nucleus_id:
             try:
-                app._app_state.review_image.selected_nucleus = int(float(desc.nucleus_id))
+                ctx.state.review_image.selected_nucleus = int(float(desc.nucleus_id))
             except (TypeError, ValueError):
-                app._app_state.review_image.selected_nucleus = None
+                ctx.state.review_image.selected_nucleus = None
         # Switch wells *through* update_preview so the target well's image maps
         # are decoded and the FOV menu is repopulated — otherwise jumping to a
         # cell in a different well leaves the FOV combo (and image) stale.
-        app._app_state.preview.selected_well = desc.well
-        update_preview(app, desc.well)
+        ctx.state.preview.selected_well = desc.well
+        update_preview(ctx.app, desc.well)
         # The FOV / timepoint combos hold *normalized* tokens — FOV as
         # ``float:g`` (renderer ``_norm_fov``) and timepoint as parsed hours
         # ``:g`` (``_norm_timepoint``). The descriptor carries the raw CSV
         # tokens, so passing them straight to setCurrentText silently no-ops
         # (no matching item) and the view stays on the previous FOV/timepoint.
         # Normalize the same way the working Review-CSV jump does so they match.
-        fov_norm = app._review_row_keys(
+        fov_norm = review_row_keys(ctx.app,
             {"fov": desc.fov, "timepoint": desc.tp_token,
              "nucleus_id": desc.nucleus_id})[0]
-        tp_norm = app._norm_timepoint(desc.tp_token)
-        fov_cb = getattr(app, "_preview_fov_cb", None)
+        tp_norm = norm_timepoint(ctx, desc.tp_token)
+        fov_cb = getattr(ctx.window, "_preview_fov_cb", None)
         if fov_cb is not None and fov_norm:
             fov_cb.setCurrentText(fov_norm)
-        refresh_review_image(app)
+        refresh_review_image(ctx.app)
         # The TP menu now holds the target FOV's timepoints; setting it fires
         # currentIndexChanged → refresh, rendering the correct frame.
-        tp_cb = getattr(app, "_review_image_tp_cb", None)
+        tp_cb = getattr(ctx.window, "_review_image_tp_cb", None)
         if tp_cb is not None and tp_norm:
             tp_cb.setCurrentText(tp_norm)
         # Centre + zoom on the highlighted cell so it's actually visible.
-        zoom_review_image_to_selected_nucleus(app)
+        zoom_review_image_to_selected_nucleus(ctx.app)
     except Exception as exc:  # noqa: BLE001
         _logger.exception("cell_browser: navigate-to-segmentation failed")
-        _set_status(app, f"Could not open cell in Segmentation: {exc}")
+        _set_status(ctx, f"Could not open cell in Segmentation: {exc}")
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -340,18 +343,18 @@ def rgb_to_pixmap(rgb) -> QPixmap:
     return QPixmap.fromImage(img)
 
 
-def _page_size(app) -> int:
-    edit = getattr(app, "_cell_browser_pagesize_edit", None)
+def _page_size(ctx) -> int:
+    edit = getattr(ctx.runtime.cell_browser, "pagesize_edit", None)
     if edit is None:
-        return app._cell_browser_state.page_size
+        return ctx.runtime.cell_browser.state.page_size
     try:
         return max(1, int(float(edit.text().strip())))
     except (TypeError, ValueError):
-        return app._cell_browser_state.page_size
+        return ctx.runtime.cell_browser.state.page_size
 
 
-def _clear_grid(app) -> None:
-    grid = getattr(app, "_cell_browser_grid", None)
+def _clear_grid(ctx) -> None:
+    grid = getattr(ctx.runtime.cell_browser, "grid", None)
     if grid is None:
         return
     while grid.count():
@@ -361,18 +364,17 @@ def _clear_grid(app) -> None:
             w.deleteLater()
 
 
-def _update_count(app) -> None:
-    lbl = getattr(app, "_cell_browser_count_label", None)
+def _update_count(ctx) -> None:
+    lbl = getattr(ctx.runtime.cell_browser, "count_label", None)
     if lbl is None:
         return
-    st = app._cell_browser_state
+    st = ctx.runtime.cell_browser.state
     lbl.setText(f"Showing {st.loaded} / {len(st.cells)} cells")
 
 
-def _set_status(app, msg: str) -> None:
-    fn = getattr(app, "_set_status", None)
-    if callable(fn):
+def _set_status(ctx, msg: str) -> None:
+    if True:
         try:
-            fn(msg)
+            ctx.set_status(msg)
         except Exception:
             swallowed()

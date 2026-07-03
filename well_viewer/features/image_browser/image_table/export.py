@@ -454,5 +454,8 @@ def image_table_save_to_gallery(ctx) -> None:
     label = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
 
     from well_viewer.features.saved_plots.controller import save_plot_from_card
-    status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label)
+    # save_plot_from_card still walks WellViewerApp (a later A8 cluster), so pass
+    # the app handle, not ctx (this call previously passed ctx by mistake — the
+    # store/capture layer would have mis-resolved it).
+    status = save_plot_from_card(ctx.app, "Image Table", buf.getvalue(), label)
     ctx.set_status(status)

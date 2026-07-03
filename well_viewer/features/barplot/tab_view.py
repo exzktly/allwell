@@ -27,8 +27,10 @@ from well_viewer.features.barplot.controller import (
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
 from well_viewer.features.barplot.controller import on_bar_drag_press
+from well_viewer.features.barplot.controller import on_bar_drag_motion
 from well_viewer.features.barplot.controller import on_bar_drag_release
 from well_viewer.features.export.service import export_bar_plot_data
+from ui.theme import ACCENT
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -311,5 +313,8 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Drag-to-reorder bars
     ctx.runtime.barplot.drag_state = {"active": False, "src_idx": -1, "cur_idx": -1}
     canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx))
-    canvas.mpl_connect("motion_notify_event", ctx.app._on_bar_drag_motion)
+    canvas.mpl_connect(
+        "motion_notify_event",
+        partial(on_bar_drag_motion, ctx, accent_color=ACCENT),
+    )
     canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx))

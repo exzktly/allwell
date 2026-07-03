@@ -95,7 +95,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     agg_tp_label = reg.register("_scatter_agg_tp_label", QLabel("(0 selected)", ctrl))
     agg_tp_label.setObjectName("Muted")
     cl.addWidget(agg_tp_label)
-    ctx.app._scatter_agg_tp_selections = {}
+    ctx.runtime.scatter.agg_tp_selections = {}
 
     # Error band (SEM/SD) for the aggregate's mean±spread points collapses into
     # a "Display ▾" popover (matches line/bar), instead of a card-controls row.
@@ -126,7 +126,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx.app, card, "Scatter Plot")
+    wire_save_to_gallery(ctx, card, "Scatter Plot")
     _sw = make_plot_view_switcher(ctx, 'Scatter Plot')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

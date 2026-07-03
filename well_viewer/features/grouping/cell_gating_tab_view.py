@@ -226,21 +226,19 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # define Included instead of the per-channel FluorGating. The gating and
     # thresholding layers each pick their OWN set of gates (a set of names, or
     # None ⇒ all gates, which auto-includes gates drawn later).
-    ctx.app._cell_gating_use_scatter_gates = getattr(
-        ctx.app, "_cell_gating_use_scatter_gates", False
-    )
-    ctx.app._cell_gating_gating_choices = getattr(
-        ctx.app, "_cell_gating_gating_choices", None
-    )
-    ctx.app._cell_gating_thresh_choices = getattr(
-        ctx.app, "_cell_gating_thresh_choices", None
-    )
-    # Thresholding mode (independent of gating): cells inside the selected
-    # gate(s) count as "on" for fraction-on stats, replacing the ThreshFracOn
-    # cutoff. Cells are not removed.
-    ctx.app._cell_gating_use_scatter_thresh = getattr(
-        ctx.app, "_cell_gating_use_scatter_thresh", False
-    )
+    # A8 teardown: these live-session flags/choices are the ``_cell_gating_``
+    # runtime namespace. Seed defaults idempotently (preserve any value carried
+    # across a tab rebuild); ``ctx.runtime`` stamps back onto the same
+    # ``app._cell_gating_*`` attributes the readers below resolve.
+    _cg = ctx.runtime.cell_gating
+    if _cg.use_scatter_gates is None:
+        _cg.use_scatter_gates = False
+    if _cg.use_scatter_thresh is None:
+        _cg.use_scatter_thresh = False
+    # gating/thresholding gate selections default to None (⇒ all gates); touch
+    # so the attribute exists for any direct (non-getattr) reader.
+    _cg.gating_choices = _cg.gating_choices
+    _cg.thresh_choices = _cg.thresh_choices
 
     # The tab stacks a tall column of gating controls *above* the CDF plot and
     # the optimizer panel. On shorter windows that column squeezed the plot down
@@ -314,7 +312,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "Use scatter-plot gates for cell inclusion (replaces FluorGating)",
         sg_row,
     )
-    use_sg_cb.setChecked(bool(ctx.app._cell_gating_use_scatter_gates))
+    use_sg_cb.setChecked(bool(ctx.runtime.cell_gating.use_scatter_gates))
     use_sg_cb.setToolTip(
         "Define the Included population from the named rectangular gates drawn "
         "on the Scatter Plot tab instead of the per-channel intensity "
@@ -352,7 +350,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "Use scatter gate for fraction-on (thresholding, replaces ThreshFracOn)",
         th_row,
     )
-    use_th_cb.setChecked(bool(ctx.app._cell_gating_use_scatter_thresh))
+    use_th_cb.setChecked(bool(ctx.runtime.cell_gating.use_scatter_thresh))
     use_th_cb.setToolTip(
         "Define the 'on' population for fraction-on stats as the cells inside "
         "the selected gate(s), instead of cells above the per-channel "

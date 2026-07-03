@@ -28,12 +28,16 @@ _compute_pairwise, _deserialize_stats_groups = lazy_names(
 )
 
 
-def wire_save_to_gallery(app, card, tab_name: str) -> None:
-    """Enable *card*'s hover "save to Saved Plots" button for *tab_name*."""
+def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
+    """Enable *card*'s hover "save to Saved Plots" button for *tab_name*.
+
+    A8 teardown: takes ``ctx`` so plot builders wire the gallery hook without
+    naming the god-object. The capture itself still walks ``WellViewerApp`` (a
+    later cluster), so the handler bridges through ``ctx.app``."""
     if card is None or not hasattr(card, "set_save_handler"):
         return
     card.set_save_handler(
-        lambda png, label: save_plot_from_card(app, tab_name, png, label)
+        lambda png, label: save_plot_from_card(ctx.app, tab_name, png, label)
     )
 
 

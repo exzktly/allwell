@@ -191,7 +191,15 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              stamped by ctx.runtime.heatmap so they keep resolving. Data path
 #              covered by test_heatmap_cell_value_ctx; the imshow/colorbar paint
 #              wants an interactive smoke.
-CTX_APP_BUDGET = 233
+#   233 -> 214  Headless cross-cutting cleanup toward 0. wire_save_to_gallery ->
+#              ctx (6 plot tabs drop the reach-through; the capture subtree still
+#              bridges via ctx.app inside the one helper). Feature runtime-attr
+#              reach-throughs routed onto ctx.runtime.<feature> (stamps the same
+#              app._<prefix>_<name>, behavior-identical): cell_gating scatter-gate
+#              flags + gate-choice selections, scatter tp-selection / gate-geometry
+#              inits, scatter-agg tp-selections, batch_export inline state,
+#              image_browser subtabs.
+CTX_APP_BUDGET = 214
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

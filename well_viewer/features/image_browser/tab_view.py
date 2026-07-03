@@ -38,7 +38,7 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     sub_tabs.tabBar().setElideMode(Qt.ElideNone)
     sub_tabs.tabBar().setUsesScrollButtons(True)
     layout.addWidget(sub_tabs)
-    ctx.app._image_browser_subtabs = sub_tabs
+    ctx.runtime.image_browser.subtabs = sub_tabs
     ctx.runtime.image_browser.built = {}
 
     # One empty frame per sub-tab; bodies build lazily (the build function sets

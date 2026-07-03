@@ -99,7 +99,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     tp_cb.addItems(["0"])
     tp_cb.hide()
     reg.register("_scatter_tp_var", tp_cb)
-    ctx.app._scatter_tp_selections = {}
+    ctx.runtime.scatter.tp_selections = {}
 
     # Secondary display options (Layout + Colour-by-time) collapse into a
     # "Display ▾" popover so the per-cell scatter control row stays readable —
@@ -144,7 +144,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).
-    ctx.app._scatter_gates = []   # gate geometry — persisted, stays on app/state
+    ctx.runtime.scatter.gates = []   # gate geometry — persisted, stays on app/state
     # Live gate-interaction objects → runtime holder (stamps app._scatter_gate_*).
     ctx.runtime.scatter.gate_draw_mode = False
     ctx.runtime.scatter.gate_selector = None
@@ -180,7 +180,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx.app, card, "Scatter Plot")
+    wire_save_to_gallery(ctx, card, "Scatter Plot")
     _sw = make_plot_view_switcher(ctx, 'Scatter Plot')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

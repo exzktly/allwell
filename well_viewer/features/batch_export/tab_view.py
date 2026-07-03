@@ -171,7 +171,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     QVBoxLayout(host)
     layout.addWidget(host, 1)
 
-    ctx.app._batch_export_inline_state = {
+    ctx.runtime.batch_export.inline_state = {
         "host": host,
         "panels": {},
         "mode": "line",

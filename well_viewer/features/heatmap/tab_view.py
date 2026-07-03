@@ -196,7 +196,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx.app, card, "Heat Map")
+    wire_save_to_gallery(ctx, card, "Heat Map")
     _sw = make_plot_view_switcher(ctx, 'Heat Map')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

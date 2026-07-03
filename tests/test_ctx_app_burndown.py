@@ -199,7 +199,10 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              flags + gate-choice selections, scatter tp-selection / gate-geometry
 #              inits, scatter-agg tp-selections, batch_export inline state,
 #              image_browser subtabs.
-CTX_APP_BUDGET = 214
+#   214 -> 211  More cross-cutting: panelCopied status hook -> the ctx.set_status
+#              accessor (lineplot/barplot); mv feature-picker refresh guard ->
+#              ctx.runtime.multivariate (read-only flag).
+CTX_APP_BUDGET = 211
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

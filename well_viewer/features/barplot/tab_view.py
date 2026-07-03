@@ -292,7 +292,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Error band now lives in the "Display ▾" popover above (C1); no card row.
     card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx.app))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
-    card.panelCopied.connect(ctx.app._set_status)
+    card.panelCopied.connect(ctx.set_status)
     card.setStatsChipVisible(False)
 
     scroll_canvas = reg.register("_bar_scroll_canvas", QScrollArea(bar_right))

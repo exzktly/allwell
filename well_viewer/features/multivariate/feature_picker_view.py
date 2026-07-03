@@ -35,7 +35,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
     ctx.widgets.register("_mv_feature_list", listw)
 
     def _on_item_changed(_item=None):
-        if getattr(ctx.app, "_mv_picker_refreshing", False):
+        if ctx.runtime.multivariate.picker_refreshing:
             return
         cols = []
         for i in range(listw.count()):

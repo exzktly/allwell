@@ -3,7 +3,7 @@
 ``build_playground_tab(ctx, parent)`` assembles the single-frame correction
 testbed: a left controls column (frame selectors, correction method + params,
 display options) and a right zoomable canvas. Per ARCHITECTURE.md §5.3 it reads
-``ctx.app`` directly (no ``app = ctx.app`` unwrap) and wires every signal to the
+the app handle directly (no ``app =`` unwrap) and wires every signal to the
 controller via ``functools.partial`` — no new ``runtime_app`` proxies.
 """
 
@@ -42,7 +42,7 @@ def _row(parent, label_text: str) -> QWidget:
 
 def build_playground_tab(ctx, parent: QWidget) -> None:
     # ctx is a ViewerContext (carries .app); tolerate a bare app in headless
-    # tests. This getattr is not the guardrailed `app = ctx.app` unwrap.
+    # tests. This getattr is not the guardrailed app-unwrap.
     app = getattr(ctx, "app", ctx)
     if parent.layout() is None:
         QHBoxLayout(parent).setContentsMargins(0, 0, 0, 0)

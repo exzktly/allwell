@@ -65,7 +65,7 @@ class ViewerContext:
         never be god-object-free: dialog parenting
         (``QFileDialog``/``QMessageBox``), ``isinstance(..., QWidget)`` guards,
         and ``findChildren`` tree walks. Routing those through ``window`` keeps
-        the ``ctx.app`` burn-down ratchet honest — a ``ctx.window`` call is a
+        the ctx-app burn-down ratchet honest — a ``ctx.window`` call is a
         widget-parenting need, not un-migrated behaviour coupling."""
         return self.app
 
@@ -75,7 +75,7 @@ class ViewerContext:
 
         A genuine app-level *service* (view-state autosave/load), not lazy
         behaviour coupling — features name it here instead of reaching through
-        ``ctx.app._persistence``. Kept in the frozen accessor set."""
+        the raw app persistence handle. Kept in the frozen accessor set."""
         return self.app._persistence
 
     def set_status(self, message: str) -> None:

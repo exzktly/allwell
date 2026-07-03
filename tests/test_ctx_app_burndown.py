@@ -301,7 +301,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              ctx.runtime.smfish; combo/edit widgets via ctx.runtime.smfish;
 #              data_dir via ctx.state). smFISH tab_view calls them with ctx;
 #              runtime_app + load_controller bridge via ._ctx.
-CTX_APP_BUDGET = 121
+#   121 -> 114  Prose sweep + widget-nav: reword 5 doc/comment mentions of the
+#              literal token (viewer_context window/persistence docstrings,
+#              image_table picker + playground comments) per the no-literal-in-
+#              comments convention; ui_helpers plotting-notebook lookup -> ctx.window.
+CTX_APP_BUDGET = 114
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

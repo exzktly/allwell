@@ -628,7 +628,7 @@ def make_plot_view_switcher(ctx, current_name: str):
 
     def _on_change(_idx=None) -> None:
         target = sc.currentData()
-        nb = getattr(ctx.app, "_plotting_notebook", None)
+        nb = getattr(ctx.window, "_plotting_notebook", None)
         if not target or nb is None:
             return
         nb.setCurrentByName(target)

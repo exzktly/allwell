@@ -815,6 +815,70 @@ downstream analysis (count cells per cluster per condition, cross-tabulate
 against treatment, etc.). The cluster ids match the colours in the on-screen
 scatter and the phenotype-composition bars.
 
+### Spatial analysis
+
+The **Spatial** tab (Analysis rail, next to Multivariate) analyses per-cell
+positions in the well plane — the pipeline emits `shape_centroid_row` /
+`shape_centroid_col` for every segmented cell, and this tab uses them to
+answer questions the plotting and multivariate tabs can't: *"Do my cells
+form colonies, and are they growing or sparse?"*, *"Do edge cells behave
+differently from interior cells?"*, *"How much of the GFP variability is
+between colonies versus inside each one?"*.
+
+Everything runs on the **currently selected well and one timepoint** at a
+time (spatial statistics are per-frame). Pick a well in the plate map, open
+Spatial, and use the top-row controls:
+
+- **Level** — the scale of the analysis:
+  - **Cell** — per-cell distance metrics and clustering statistics in the
+    well plane (nearest-neighbour distance, k-NN density, Ripley's L).
+  - **Colony** — one aggregate per auto-detected colony (size, hull area,
+    packing density, per-colony metric spread).
+  - **Intra-colony** — each cell's position relative to its colony
+    (distance to centroid, distance to hull edge, boundary flag).
+- **Viz** — the visualisation. The dropdown shows only the visualisations
+  that make sense at the current level; hover any option for its meaning.
+- **Metric** — the per-cell CSV column used as the signal in colour maps,
+  radial profiles, per-colony violins, and boundary/interior splits. Any
+  `<channel>_<property>` intensity column, any `shape_*` morphology column,
+  or any user-defined ratio is eligible.
+- **Timepoint** — which frame to analyse. *First available* uses the
+  smallest finite `timepoint_hours` in the well.
+
+The second row controls **colony detection** — colonies are computed, not
+manually annotated:
+
+- **Method** — **DBSCAN** (default) is density-based: cells whose
+  ε-neighbourhood contains ≥ min-samples other cells seed a colony; the
+  rest are marked *noise* (grey on the map). **Single-linkage** chains any
+  two cells closer than ε into the same colony — simpler, but doesn't
+  reject outliers.
+- **ε × median NND** — the colony-membership radius as a multiple of this
+  frame's median nearest-neighbour distance. Self-scaling to density: the
+  same multiplier gives roughly the same "grain" of clustering whether the
+  well is packed or sparse. Larger multiplier → fewer, bigger colonies.
+- **Min. samples** — DBSCAN's min-neighbours threshold (ignored by
+  single-linkage). Higher → tighter, purer colonies + more noise cells.
+- **Boundary %** — the bottom-N-percentile of *distance to the colony hull
+  edge*, per colony, that counts as boundary for the Boundary-vs-Interior
+  viz.
+
+**Which visualisation for which question**
+
+| If you want to answer… | Level | Viz | What you see |
+|---|---|---|---|
+| Are my cells clustered, dispersed, or random? | Cell | Ripley L(r) − r | Sample curve vs a Monte-Carlo CSR envelope. Above the envelope = clustered at that radius; below = dispersed; inside = consistent with random. |
+| How closely packed are my cells? | Cell | NND histogram | Distribution of each cell's nearest-neighbour distance, with a median marker (the reference scale for the ε multiplier). |
+| How many colonies did I get, and how big? | Colony | Colony size histogram | One bar per colony-cell-count bucket. |
+| **How much of my GFP (or any metric) is between colonies vs inside them?** | Colony | **Per-colony distribution** | One violin per colony, sorted by median. The top-left callout gives `ICC = σ²_between / σ²_total`, `σ²_between`, `σ²_within`, and the cell / colony count. **ICC → 1** means variability is almost entirely between colonies; **ICC → 0** means variability lives inside colonies. |
+| Do edge cells look different from centre cells? | Intra-colony | Radial profile | Metric ± SEM binned by normalised radius `r/R` (0 = colony centre, 1 = furthest cell). |
+| Do boundary cells look different from interior cells? | Intra-colony | Boundary vs interior | Split violin of the metric partitioned by the Boundary % percentile. |
+| Where are my cells / colonies in the well? | any | Spatial map | Scatter of centroids in the well plane, coloured by metric / colony id / r/R, with optional convex-hull overlays per colony. |
+
+Every metric name, control label, and viz option carries a hover tooltip
+with the same one-line reading — the table above is what's on screen when
+you rest the mouse.
+
 ---
 
 ## Filename schema

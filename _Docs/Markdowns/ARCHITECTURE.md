@@ -892,6 +892,143 @@ test_not_installed_is_single_tab`.)
   against the single-notebook layout, so leaving split first avoids driving
   detached pages (the reported open-dataset crash).
 
+### 5.11 The Spatial feature
+
+The **Spatial** tab (`well_viewer/features/spatial/`) is the Review-side
+analysis of **per-cell physical positions in the well plane**. It's the
+only feature that consumes the pipeline's always-on
+`shape_centroid_row` / `shape_centroid_col` columns for anything analytical
+— the Multivariate tab treats those centroids as ordinary shape features
+in z-scored feature space, not as physical coordinates. Spatial is a
+one-file-per-role package that mirrors Multivariate (see §5.3 recipe): a
+`SpatialState` slice, a Qt-free `collect.py` walker, a `controller.py`
+that owns state mutation + the compute→render pipeline, a `renderer.py`
+that draws the six MVP visualisations, a `tab_view.py` builder, and no
+sidebar body (all controls live in the top-of-canvas rows).
+
+**Where the math lives.** All numeric algorithms sit in
+`well_viewer/domain/spatial_compute.py` — Qt-free, matplotlib-free,
+numpy + scipy only (`scipy.spatial.cKDTree` / `ConvexHull` /
+`scipy.cluster.hierarchy` — no new third-party dep). The compute layer
+returns small dataclasses (`RipleyResult`, `ColonyLabels`,
+`ColonyStats`, `IntraColonyGeometry`, `RadialProfile`,
+`VarianceDecomposition`) which the renderer consumes directly. This is
+the same split as `domain/multivariate_compute.py` and lets the pure-
+Python pytest suite exercise every algorithm without a display.
+
+**When it runs.** Everything is Review-side and on demand. Colony
+detection is parameter-driven (method / ε / min-samples / boundary
+percentile) so it can't be baked into the pipeline CSV — freezing the ε
+would defeat the sweep the user is going to want to do. Per-cell
+distance metrics are ~milliseconds via `cKDTree` even at ~10⁴
+centroids, cheap enough to compute on tab activation. Ripley's L is a
+visualisation choice (envelope size, radial grid), also Review-time. A
+future pipeline hook for the deterministic-and-cheap
+`spatial_nnd` / `spatial_knn_mean_d` / `spatial_local_density_k5`
+columns is documented in the plan file but deliberately not shipped —
+schema version bump not warranted yet.
+
+**Scales of analysis.** Spatial classifies everything by **scale** —
+sub-cellular, cell, colony, intra-colony — and the tab's Level
+segmented control switches between three of them (sub-cellular is
+served by the existing shape columns via the Metric picker rather than
+a dedicated Level):
+
+| Level | What each cell contributes | Vizs available |
+|---|---|---|
+| Cell | its centroid `(x, y)` in pixel space | Spatial map, NND histogram, Ripley L |
+| Colony | membership in an auto-detected colony | Spatial map (colour by colony id), Colony size histogram, Per-colony distribution |
+| Intra-colony | `d_centroid` / `d_edge` / `r/R` inside its colony | Spatial map (colour by r/R), Radial profile, Boundary vs Interior |
+
+**Colony detection.** Colonies are computed, not manually annotated
+(`spatial_compute.detect_colonies`). Two methods behind a Method
+dropdown:
+
+- **DBSCAN** (default). ε defaults to `eps_mult · median(NND)`, so the
+  same multiplier gives roughly the same "grain" regardless of the
+  well's density. Cells with fewer than `min_samples` neighbours in
+  their ε-ball are marked noise (label `-1`, drawn grey on the map).
+- **Single-linkage hierarchical**. Cut the dendrogram at ε; equivalent
+  to DBSCAN with `min_samples=1`. Simpler mental model, but doesn't
+  reject outliers.
+
+Aggregates per colony are stacked in `ColonyStats`: cell count, convex-
+hull area, packing density (`size / hull_area`), covariance-ellipse
+eccentricity (`√(1 − λ_min / λ_max)` of the centroid covariance) and
+orientation, and the mean centroid. `IntraColonyGeometry` adds per-cell
+`d_centroid`, `d_edge` (min distance to the hull's edge segments —
+positive for interior points), normalized `r/R`, and an `is_boundary`
+flag (bottom-N-percentile of `d_edge` within each colony).
+
+**Inter- vs intra-colony variance.** The Per-colony distribution viz
+answers "how much of the signal's variability lives between colonies
+vs inside each one?" by drawing one violin per colony (sorted by
+median) and stamping the ANOVA-style variance decomposition on the
+axes:
+
+- `σ²_between = (1/N) Σ_c n_c · (μ_c − μ)²` — variance of colony
+  means, weighted by colony size.
+- `σ²_within = (1/N) Σ_c Σ_i (x_ci − μ_c)²` — pooled within-colony
+  variance.
+- `σ²_total = var(x)` — population variance; equals
+  `σ²_between + σ²_within` by construction.
+- `ICC = σ²_between / σ²_total` — the intraclass correlation
+  coefficient. **1** means variability is almost entirely between
+  colonies; **0** means colony identity carries no information about
+  the signal.
+
+Noise cells (label `-1`) and non-finite metric values are dropped from
+the decomposition, so ICC always reports on the analysed population,
+not the raw frame.
+
+**How the compute + render pipeline fires.** The controller's single
+entry point is `sp_recompute(ctx)`. Every setter (`sp_set_level`,
+`sp_set_viz`, `sp_set_metric`, `sp_set_colony_eps_mult`, …) ends by
+calling it. The pipeline:
+
+1. Grab the current well from `ctx.state.selection.selected_wells` +
+   the SpatialState-cached `active_well`.
+2. `collect_spatial_frame(ctx, well, …)` reads the well's DataFrame
+   *directly from `ctx.state.dataset.cache`* (the tab is downstream of
+   whatever plotting / image tab first loaded the well, so a
+   cache-only lookup is correct) and returns
+   `{points, metric, timepoint, well, n_cells}`.
+3. Cell-level distance metrics (`nearest_neighbour_distance`) always
+   compute — they're cheap and the Metric ▾ popover can gate them off.
+4. Colony detection + colony stats + intra-colony geometry compute
+   only when the current level *or* viz demands it (the
+   Per-colony-distribution viz demands colonies even at Cell level).
+5. Ripley's L, radial profiles, and the variance decomposition are
+   viz-gated — they only run when the corresponding viz is active.
+6. `render_spatial(ctx)` reads the cached payload off
+   `SpatialState.last_result` and dispatches on `st.viz`. Every viz
+   ends with `canvas.draw_idle()`.
+
+The whole recompute stays under a few milliseconds on the ~1–10 k
+centroids a single well/timepoint holds, so control changes repaint
+live.
+
+**How the tab satisfies the `ctx.app` burn-down ratchet.** The Spatial
+package is the first Review feature written with **zero
+`ctx.app` references** — every setter / lifecycle hook takes the
+`ViewerContext` directly, widget handles resolve via `ctx.widgets`,
+state via `ctx.state.feature_slice`, per-well DataFrames via the
+dataset-state cache, and Copy/Save through the named
+`ctx.set_status` / `ctx.save_figure_dialog` accessors. The registry
+adapters in `features/registry.py` translate the legacy
+`_activate_spatial(app)` / `_sel_spatial(app)` / `_channel_spatial(app)`
+signatures into `sp_on_activate(app._ctx)` calls; that single
+translation is the only place the two worlds meet.
+
+**Tooltips are load-bearing.** Every control on the tab carries a hover
+tooltip whose text mirrors the interpretation given in the README's
+Spatial section — the module-level `_LEVEL_TOOLTIP`,
+`_VIZ_TOOLTIPS`, and `_METHOD_TOOLTIPS` dictionaries in
+`tab_view.py` are the single source of truth. `viz_cb.setItemData(idx,
+tip, Qt.ToolTipRole)` puts a distinct tooltip on each dropdown option
+so hovering `Per-colony distribution` explains the ICC without the
+user having to open the docs.
+
 ---
 
 ## 6. The Analyze side

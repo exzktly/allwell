@@ -90,6 +90,7 @@ def _build_stats(ctx, frame) -> None:
 
 
 _build_multivariate = _lazy_build("well_viewer.features.multivariate.tab_view", "build_multivariate_tab")
+_build_spatial = _lazy_build("well_viewer.features.spatial.tab_view", "build_spatial_tab")
 _build_saved_plots = _lazy_build("well_viewer.features.saved_plots.tab_view", "build_saved_plots_tab")
 _build_batch_export = _lazy_build("well_viewer.features.batch_export.tab_view", "build_batch_export_tab")
 
@@ -117,6 +118,7 @@ _state_scatter = _lazy_state("well_viewer.features.scatter.state", "ScatterState
 _state_smfish = _lazy_state("well_viewer.features.smfish.state", "SmfishState")
 _state_stats = _lazy_state("well_viewer.features.stats.state", "StatsState")
 _state_multivariate = _lazy_state("well_viewer.features.multivariate.state", "MultivariateState")
+_state_spatial = _lazy_state("well_viewer.features.spatial.state", "SpatialState")
 _state_review_image = _lazy_state("well_viewer.features.image_browser.review_image.state", "ReviewImageState")
 _state_preview = _lazy_state("well_viewer.features.image_browser.review_image.state", "PreviewState")
 _state_image_table = _lazy_state("well_viewer.features.image_browser.image_table.state", "ImageTableState")
@@ -180,6 +182,13 @@ def _activate_multivariate(app) -> None:
     app._sidebar_main_frame.setVisible(True)
     app._refresh_sidebar_map()
     mv_on_activate(app)
+
+
+def _activate_spatial(app) -> None:
+    from well_viewer.features.spatial.controller import sp_on_activate
+    app._sidebar_main_frame.setVisible(True)
+    app._refresh_sidebar_map()
+    sp_on_activate(app._ctx)
 
 
 def _activate_batch_export(app) -> None:
@@ -335,6 +344,12 @@ def _sel_multivariate(app) -> None:
         mv_recompute(app)
 
 
+def _sel_spatial(app) -> None:
+    from well_viewer.features.spatial.controller import sp_on_selection_changed
+    if hasattr(app, "_sp_canvas"):
+        sp_on_selection_changed(app._ctx)
+
+
 def _sel_smfish(app) -> None:
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
     smfish_sync_from_app(app)
@@ -408,6 +423,12 @@ def _channel_multivariate(app) -> None:
         mv_on_channel_changed(app)
 
 
+def _channel_spatial(app) -> None:
+    from well_viewer.features.spatial.controller import sp_on_channel_changed
+    if hasattr(app, "_sp_canvas"):
+        sp_on_channel_changed(app._ctx)
+
+
 def _channel_scatter(app) -> None:
     if hasattr(app, "_scatter_ch_x_cb"):
         try:
@@ -465,6 +486,15 @@ def _features() -> "list[FeatureDescriptor]":
             on_activate=_activate_multivariate,
             on_selection_changed=_sel_multivariate,
             on_channel_changed=_channel_multivariate,
+            per_well_selection=True,
+        ),
+        FeatureDescriptor(
+            name="Spatial", group="Analysis", build=_build_spatial,
+            lazy_only=True,
+            states=(StateSpec("spatial", _state_spatial),),
+            on_activate=_activate_spatial,
+            on_selection_changed=_sel_spatial,
+            on_channel_changed=_channel_spatial,
             per_well_selection=True,
         ),
         # ── Images ────────────────────────────────────────────────────────

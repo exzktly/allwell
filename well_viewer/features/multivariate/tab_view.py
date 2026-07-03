@@ -67,7 +67,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         mode_seg.addSegment(text=label, data=key)
     mode_seg.setCurrentByData(st.mode)
     mode_seg.currentChanged.connect(
-        lambda idx: mv_ctrl.mv_set_mode(ctx.app, _MODE_ORDER[idx][0]))
+        lambda idx: mv_ctrl.mv_set_mode(ctx, _MODE_ORDER[idx][0]))
     reg.register("_mv_mode_seg", mode_seg)
     r1.addWidget(mode_seg)
 
@@ -80,20 +80,20 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     std_cb.setChecked(bool(st.standardize))
     std_cb.setToolTip("Z-score each feature before PCA / clustering "
                       "(essential when features span different units)")
-    std_cb.toggled.connect(lambda on: mv_ctrl.mv_set_standardize(ctx.app, on))
+    std_cb.toggled.connect(lambda on: mv_ctrl.mv_set_standardize(ctx, on))
     reg.register("_mv_standardize_cb", std_cb)
     r1.addWidget(std_cb)
 
     r1.addStretch(1)
 
     export_btn = IconButton("download", row1, tooltip="Export feature matrix (CSV)")
-    export_btn.clicked.connect(lambda _=False: mv_ctrl.mv_export_csv(ctx.app))
+    export_btn.clicked.connect(lambda _=False: mv_ctrl.mv_export_csv(ctx))
     r1.addWidget(export_btn)
     copy_btn = IconButton("copy", row1, tooltip="Copy figure")
-    copy_btn.clicked.connect(lambda _=False: _copy_figure(ctx.app))
+    copy_btn.clicked.connect(lambda _=False: _copy_figure(ctx))
     r1.addWidget(copy_btn)
     save_btn = IconButton("save", row1, tooltip="Save figure")
-    save_btn.clicked.connect(lambda _=False: _save_figure(ctx.app))
+    save_btn.clicked.connect(lambda _=False: _save_figure(ctx))
     r1.addWidget(save_btn)
     layout.addWidget(row1)
 
@@ -112,7 +112,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     corr_seg.addSegment(text="Pair matrix", data="splom")
     corr_seg.setCurrentByData(st.corr_view)
     corr_seg.currentChanged.connect(
-        lambda idx: mv_ctrl.mv_set_corr_view(ctx.app, "heatmap" if idx == 0 else "splom"))
+        lambda idx: mv_ctrl.mv_set_corr_view(ctx, "heatmap" if idx == 0 else "splom"))
     cf.addWidget(corr_seg)
     reg.register("_mv_corr_frame", corr_frame)
     r2.addWidget(corr_frame)
@@ -135,7 +135,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
                 Qt.ToolTipRole)
     _select_combo_by_data(method_cb, st.dimred_method)
     method_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_dimred_method(ctx.app, method_cb.currentData()))
+        lambda _i: mv_ctrl.mv_set_dimred_method(ctx, method_cb.currentData()))
     reg.register("_mv_method_cb", method_cb)
     df.addWidget(method_cb)
     df.addWidget(QLabel("Colour by:", dr_frame))
@@ -144,7 +144,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         color_cb.addItem(label, key)
     _select_combo_by_data(color_cb, st.color_by)
     color_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_color_by(ctx.app, color_cb.currentData()))
+        lambda _i: mv_ctrl.mv_set_color_by(ctx, color_cb.currentData()))
     reg.register("_mv_color_cb", color_cb)
     df.addWidget(color_cb)
     reg.register("_mv_dimred_frame", dr_frame)
@@ -160,7 +160,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     cmethod_cb.addItem("Hierarchical", "hierarchical")
     _select_combo_by_data(cmethod_cb, st.cluster_method)
     cmethod_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_cluster_method(ctx.app, cmethod_cb.currentData()))
+        lambda _i: mv_ctrl.mv_set_cluster_method(ctx, cmethod_cb.currentData()))
     reg.register("_mv_cmethod_cb", cmethod_cb)
     clf.addWidget(cmethod_cb)
     clf.addWidget(QLabel("k:", cl_frame))
@@ -171,7 +171,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # clips.
     kspin.setMinimumWidth(64)
     kspin.setValue(int(st.cluster_count))
-    kspin.valueChanged.connect(lambda v: mv_ctrl.mv_set_cluster_count(ctx.app, v))
+    kspin.valueChanged.connect(lambda v: mv_ctrl.mv_set_cluster_count(ctx, v))
     reg.register("_mv_kspin", kspin)
     clf.addWidget(kspin)
     linkage_cb = QComboBox(cl_frame)
@@ -179,7 +179,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         linkage_cb.addItem(m, m)
     _select_combo_by_data(linkage_cb, st.linkage_method)
     linkage_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_linkage(ctx.app, linkage_cb.currentData()))
+        lambda _i: mv_ctrl.mv_set_linkage(ctx, linkage_cb.currentData()))
     reg.register("_mv_linkage_cb", linkage_cb)
     clf.addWidget(linkage_cb)
     reg.register("_mv_cluster_frame", cl_frame)
@@ -193,7 +193,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     fvalue_cb = QComboBox(fc_frame)
     fvalue_cb.setMinimumWidth(140)
     fvalue_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_facet_value(ctx.app, fvalue_cb.currentData() or ""))
+        lambda _i: mv_ctrl.mv_set_facet_value(ctx, fvalue_cb.currentData() or ""))
     reg.register("_mv_facet_value_cb", fvalue_cb)
     fcf.addWidget(fvalue_cb)
     fcf.addWidget(QLabel("Rows:", fc_frame))
@@ -202,7 +202,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         frow_cb.addItem(label, key)
     _select_combo_by_data(frow_cb, st.facet_row)
     frow_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_facet_row(ctx.app, frow_cb.currentData()))
+        lambda _i: mv_ctrl.mv_set_facet_row(ctx, frow_cb.currentData()))
     fcf.addWidget(frow_cb)
     fcf.addWidget(QLabel("Cols:", fc_frame))
     fcol_cb = QComboBox(fc_frame)
@@ -210,14 +210,14 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         fcol_cb.addItem(label, key)
     _select_combo_by_data(fcol_cb, st.facet_col)
     fcol_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_facet_col(ctx.app, fcol_cb.currentData()))
+        lambda _i: mv_ctrl.mv_set_facet_col(ctx, fcol_cb.currentData()))
     fcf.addWidget(fcol_cb)
     agg_cb = QComboBox(fc_frame)
     for a in _AGGS:
         agg_cb.addItem(a, a)
     _select_combo_by_data(agg_cb, st.facet_agg)
     agg_cb.currentIndexChanged.connect(
-        lambda _i: mv_ctrl.mv_set_facet_agg(ctx.app, agg_cb.currentData()))
+        lambda _i: mv_ctrl.mv_set_facet_agg(ctx, agg_cb.currentData()))
     fcf.addWidget(agg_cb)
     reg.register("_mv_facet_frame", fc_frame)
     r2.addWidget(fc_frame)
@@ -230,7 +230,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     tp_cb.addItem("All timepoints", None)
     tp_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_timepoints(
-            ctx.app, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
+            ctx, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
     reg.register("_mv_tp_cb", tp_cb)
     r2.addWidget(tp_cb)
     layout.addWidget(row2)
@@ -246,7 +246,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_card", card)
     reg.register("_mv_fig", card.figure)
     reg.register("_mv_canvas", card.canvas)
-    card.plotThemeChanged.connect(lambda _m: mv_ctrl.mv_recompute(ctx.app))
+    card.plotThemeChanged.connect(lambda _m: mv_ctrl.mv_recompute(ctx))
     layout.addWidget(wrap_with_empty_state(
         ctx.app, card, icon="scatter-chart",
         text="Load a directory to explore the feature space.",
@@ -271,9 +271,9 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         blocked = fvalue_cb.blockSignals(True)
         try:
             fvalue_cb.clear()
-            for _family, cols in available_feature_columns(ctx.app).items():
+            for _family, cols in available_feature_columns(ctx).items():
                 for col in cols:
-                    fvalue_cb.addItem(column_display_label(ctx.app, col), col)
+                    fvalue_cb.addItem(column_display_label(ctx, col), col)
             if st.facet_value_col:
                 _select_combo_by_data(fvalue_cb, st.facet_value_col)
             elif fvalue_cb.count():
@@ -312,27 +312,25 @@ def _select_combo_by_data(combo, value) -> None:
             return
 
 
-def _copy_figure(app) -> None:
-    card = getattr(app, "_mv_card", None)
+def _copy_figure(ctx) -> None:
+    card = ctx.runtime.multivariate.card
     if card is None:
         return
     fig = getattr(card, "figure", None)
     if fig is None:
         return
     try:
-        status = copy_figure_to_clipboard(fig)
-        if hasattr(app, "_set_status"):
-            app._set_status(status)
+        ctx.set_status(copy_figure_to_clipboard(fig))
     except Exception:
         swallowed()
 
 
-def _save_figure(app) -> None:
-    card = getattr(app, "_mv_card", None)
+def _save_figure(ctx) -> None:
+    card = ctx.runtime.multivariate.card
     fig = getattr(card, "figure", None) if card is not None else None
     if fig is None:
         return
     try:
-        app._save_matplotlib_fig(fig, "multivariate.png")
+        ctx.save_figure_dialog(fig, "multivariate.png")
     except Exception:
         swallowed()

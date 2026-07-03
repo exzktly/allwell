@@ -217,7 +217,19 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              well-sort drops its ctx.app._parse_rc. First core god-method fully
 #              decomposed (the delegate is now a pure passthrough, deletable once
 #              its bare-app callers migrate).
-CTX_APP_BUDGET = 201
+#   201 -> 187  Multivariate feature → ctx. The controller (_apply/_state/
+#              mv_recompute/mv_set_*/mv_export_csv/mv_on_*), the collect layer
+#              (collect_feature_matrix/available_feature_columns/
+#              column_display_label), the renderer (render_multivariate), the
+#              feature-picker, and the figure copy/save handlers all take ctx —
+#              state via ctx.state, live handles via ctx.runtime.multivariate,
+#              _get_rows/rank-colour/parse_rc via the ctx-native leaves + domain
+#              color_for_replicate_set (no feature import), status/save via the
+#              ctx.set_status / ctx.save_figure_dialog accessors. Residuals: the
+#              genuine app services (_persistence, _rep_sets_active,
+#              _rank_color_well, refresh_plot_empty_states, QMessageBox/QFileDialog
+#              main-window parents) + wrap_with_empty_state, bridged via ctx.app.
+CTX_APP_BUDGET = 187
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

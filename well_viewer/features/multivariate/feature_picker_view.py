@@ -43,7 +43,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
             col = it.data(Qt.UserRole)
             if col is not None and it.checkState() == Qt.Checked:
                 cols.append(col)
-        mv_set_features(ctx.app, cols)
+        mv_set_features(ctx, cols)
 
     listw.itemChanged.connect(_on_item_changed)
 
@@ -54,7 +54,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
         ctx.runtime.multivariate.picker_refreshing = True
         try:
             listw.clear()
-            families = available_feature_columns(ctx.app)
+            families = available_feature_columns(ctx)
             selected = set(st.feature_cols)
             present_cols = []
             for family, cols in families.items():
@@ -66,7 +66,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
                 listw.addItem(header)
                 for col in cols:
                     present_cols.append(col)
-                    item = QListWidgetItem(f"  {column_display_label(ctx.app, col)}")
+                    item = QListWidgetItem(f"  {column_display_label(ctx, col)}")
                     item.setData(Qt.UserRole, col)
                     item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
                     item.setCheckState(

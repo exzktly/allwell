@@ -26,28 +26,28 @@ def test_multivariate_tab_runs_all_modes(loaded_app_shape):
     assert hasattr(app, "_mv_canvas"), "tab did not build"
 
     # Pick a mixed feature set (intensity + shape) discovered from the dataset.
-    fams = available_feature_columns(app)
+    fams = available_feature_columns(app._ctx)
     cols = fams.get("Intensity", [])[:2] + fams.get("Shape", [])[:1]
     assert len(cols) >= 2, f"expected >=2 discoverable features, got {fams}"
-    mvctl.mv_set_features(app, cols)
+    mvctl.mv_set_features(app._ctx, cols)
 
     st = app._app_state.feature_slice("multivariate")
     assert st.n_cells > 0
 
     for mode in ("correlation", "dimred", "clustering", "facet"):
-        mvctl.mv_set_mode(app, mode)
+        mvctl.mv_set_mode(app._ctx, mode)
         assert not st.last_error, f"{mode}: {st.last_error}"
         assert st.last_result.get("kind") == mode
 
     # SPLOM view path.
-    mvctl.mv_set_mode(app, "correlation")
-    mvctl.mv_set_corr_view(app, "splom")
+    mvctl.mv_set_mode(app._ctx, "correlation")
+    mvctl.mv_set_corr_view(app._ctx, "splom")
     assert not st.last_error
     assert st.last_result.get("view") == "splom"
 
     # Clustering colour-by on the dim-reduction view.
-    mvctl.mv_set_mode(app, "dimred")
-    mvctl.mv_set_color_by(app, "cluster")
+    mvctl.mv_set_mode(app._ctx, "dimred")
+    mvctl.mv_set_color_by(app._ctx, "cluster")
     assert not st.last_error
     assert "clusters" in st.last_result
 
@@ -62,12 +62,12 @@ def test_multivariate_dimred_pca_exposes_loadings(loaded_app_shape):
 
     app._set_selected_wells(set(app._app_state.dataset.well_paths))
     assert app._notebook.setCurrentByName("Multivariate")
-    fams = available_feature_columns(app)
+    fams = available_feature_columns(app._ctx)
     cols = fams.get("Intensity", [])[:2] + fams.get("Shape", [])[:1]
     assert len(cols) >= 2
-    mvctl.mv_set_features(app, cols)
-    mvctl.mv_set_mode(app, "dimred")
-    mvctl.mv_set_dimred_method(app, "pca")
+    mvctl.mv_set_features(app._ctx, cols)
+    mvctl.mv_set_mode(app._ctx, "dimred")
+    mvctl.mv_set_dimred_method(app._ctx, "pca")
 
     st = app._app_state.feature_slice("multivariate")
     assert not st.last_error
@@ -87,10 +87,10 @@ def test_multivariate_clustering_exposes_feature_profile(loaded_app_shape):
 
     app._set_selected_wells(set(app._app_state.dataset.well_paths))
     assert app._notebook.setCurrentByName("Multivariate")
-    fams = available_feature_columns(app)
+    fams = available_feature_columns(app._ctx)
     cols = fams.get("Intensity", [])[:2] + fams.get("Shape", [])[:1]
-    mvctl.mv_set_features(app, cols)
-    mvctl.mv_set_mode(app, "clustering")
+    mvctl.mv_set_features(app._ctx, cols)
+    mvctl.mv_set_mode(app._ctx, "clustering")
 
     st = app._app_state.feature_slice("multivariate")
     assert not st.last_error
@@ -132,7 +132,7 @@ def test_multivariate_empty_selection_shows_message(loaded_app_shape):
 
     app._set_selected_wells(set())
     assert app._notebook.setCurrentByName("Multivariate")
-    mvctl.mv_set_features(app, [])
+    mvctl.mv_set_features(app._ctx, [])
     st = app._app_state.feature_slice("multivariate")
     # No features and/or no cells → a friendly error, not a crash.
     assert st.last_error

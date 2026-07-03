@@ -181,7 +181,7 @@ def _activate_multivariate(app) -> None:
     from well_viewer.features.multivariate.controller import mv_on_activate
     app._sidebar_main_frame.setVisible(True)
     app._refresh_sidebar_map()
-    mv_on_activate(app)
+    mv_on_activate(app._ctx)
 
 
 def _activate_spatial(app) -> None:
@@ -341,7 +341,7 @@ def _sel_review_csv(app) -> None:
 def _sel_multivariate(app) -> None:
     from well_viewer.features.multivariate.controller import mv_recompute
     if hasattr(app, "_mv_canvas"):
-        mv_recompute(app)
+        mv_recompute(app._ctx)
 
 
 def _sel_spatial(app) -> None:

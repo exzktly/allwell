@@ -76,62 +76,62 @@ def mv_dimred_methods_available() -> dict:
 
 # ── state slice access ───────────────────────────────────────────────────────
 
-def _state(app):
-    return app._app_state.feature_slice("multivariate")
+def _state(ctx):
+    return ctx.state.feature_slice("multivariate")
 
 
 # ── lifecycle hooks ──────────────────────────────────────────────────────────
 
-def mv_on_activate(app) -> None:
+def mv_on_activate(ctx) -> None:
     """Tab shown: restore persisted config (once), repopulate pickers, recompute."""
-    st = _state(app)
+    st = _state(ctx)
     if st is None:
         return
-    if not getattr(app, "_mv_config_loaded", False):
+    if not ctx.runtime.multivariate.config_loaded:
         try:
-            app._persistence.load("multivariate")
+            ctx.app._persistence.load("multivariate")
         except Exception:
             swallowed()
-        app._mv_config_loaded = True
-    mv_refresh_inputs(app)
-    if hasattr(app, "_mv_canvas"):
-        mv_recompute(app)
+        ctx.runtime.multivariate.config_loaded = True
+    mv_refresh_inputs(ctx)
+    if ctx.runtime.multivariate.canvas is not None:
+        mv_recompute(ctx)
 
 
-def mv_on_channel_changed(app) -> None:
+def mv_on_channel_changed(ctx) -> None:
     """Channel list changed → the available feature columns may have changed."""
-    if hasattr(app, "_mv_canvas"):
-        mv_refresh_inputs(app)
+    if ctx.runtime.multivariate.canvas is not None:
+        mv_refresh_inputs(ctx)
 
 
-def mv_refresh_inputs(app) -> None:
+def mv_refresh_inputs(ctx) -> None:
     """Rebuild the feature picker + timepoint menu from the live dataset."""
-    if hasattr(app, "_mv_refresh_feature_picker"):
+    if ctx.runtime.multivariate.refresh_feature_picker is not None:
         try:
-            app._mv_refresh_feature_picker()
+            ctx.runtime.multivariate.refresh_feature_picker()
         except Exception:
             swallowed()
-    if hasattr(app, "_mv_refresh_timepoints"):
+    if ctx.runtime.multivariate.refresh_timepoints is not None:
         try:
-            app._mv_refresh_timepoints()
+            ctx.runtime.multivariate.refresh_timepoints()
         except Exception:
             swallowed()
 
 
 # ── recompute pipeline ───────────────────────────────────────────────────────
 
-def mv_recompute(app) -> None:
+def mv_recompute(ctx) -> None:
     """Collect → compute → render for the current state. The single redraw entry."""
-    st = _state(app)
-    if st is None or not hasattr(app, "_mv_canvas"):
+    st = _state(ctx)
+    if st is None or ctx.runtime.multivariate.canvas is None:
         return
     # Flip the empty-state stack off its placeholder now that this lazily-built
     # tab exists — the global refresh at load time ran before the tab was built,
     # so its stack would otherwise stay on the "load a directory" page.
-    refresh_plot_empty_states(app)
+    refresh_plot_empty_states(ctx.app)
     st.reset_result()
     data = collect_feature_matrix(
-        app, feature_cols=st.feature_cols, timepoints=st.timepoints,
+        ctx, feature_cols=st.feature_cols, timepoints=st.timepoints,
     )
     st.n_cells = data["n_cells"]
     X = data["X"]
@@ -148,9 +148,9 @@ def mv_recompute(app) -> None:
         slow = (st.mode == mv_state.MODE_DIMRED
                 and st.dimred_method in ("tsne", "umap"))
         if slow:
-            _begin_busy(app, f"Computing {st.dimred_method.upper()}…")
+            _begin_busy(ctx, f"Computing {st.dimred_method.upper()}…")
         try:
-            st.last_result = _compute_for_mode(app, st, data)
+            st.last_result = _compute_for_mode(ctx, st, data)
         except mvc.MethodUnavailable as exc:
             st.last_error = (
                 f"{exc.method} needs the '{exc.package}' package, which is not "
@@ -163,24 +163,24 @@ def mv_recompute(app) -> None:
             st.last_error = f"Analysis failed: {exc}"
         finally:
             if slow:
-                _end_busy(app)
-    render_multivariate(app)
+                _end_busy(ctx)
+    render_multivariate(ctx)
 
 
-def _begin_busy(app, message: str) -> None:
+def _begin_busy(ctx, message: str) -> None:
     """Show a wait cursor + status and force one repaint so they appear before a
     blocking compute freezes the event loop."""
     try:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        app._set_status(message)
+        ctx.set_status(message)
         QApplication.processEvents()  # paint the cursor + status before blocking
     except Exception:
         swallowed()
 
 
-def _end_busy(app) -> None:
+def _end_busy(ctx) -> None:
     try:
         from PySide6.QtWidgets import QApplication
         QApplication.restoreOverrideCursor()
@@ -188,7 +188,7 @@ def _end_busy(app) -> None:
         swallowed()
 
 
-def _compute_for_mode(app, st, data) -> dict:
+def _compute_for_mode(ctx, st, data) -> dict:
     """Run the analysis for ``st.mode`` and return a renderer-ready payload."""
     X = data["X"]
     mode = st.mode
@@ -277,7 +277,7 @@ def _compute_for_mode(app, st, data) -> dict:
         if not col:
             raise ValueError("Pick a feature column to aggregate for faceting.")
         # Re-collect just the facet value column so it need not be in the matrix.
-        fdata = collect_feature_matrix(app, feature_cols=[col], timepoints=st.timepoints)
+        fdata = collect_feature_matrix(ctx, feature_cols=[col], timepoints=st.timepoints)
         if fdata["n_cells"] == 0:
             raise ValueError("No cells to facet in the current selection.")
         value = fdata["X"][:, 0]
@@ -285,7 +285,7 @@ def _compute_for_mode(app, st, data) -> dict:
         col_factor = _factor_array(fdata, st.facet_col)
         pivot = mvc.pivot_facets(value, row_factor, col_factor, agg=st.facet_agg)
         return {
-            "kind": mode, "pivot": pivot, "value_label": column_display_label(app, col),
+            "kind": mode, "pivot": pivot, "value_label": column_display_label(ctx, col),
             "row_factor": st.facet_row, "col_factor": st.facet_col,
             "agg": st.facet_agg, "data": fdata,
         }
@@ -313,90 +313,90 @@ def _factor_array(data, factor: str):
 
 # ── setters (called by the tab controls) ─────────────────────────────────────
 
-def _apply(app, **changes) -> None:
+def _apply(ctx, **changes) -> None:
     """Mutate the state slice, persist (debounced), sync controls, recompute."""
-    st = _state(app)
+    st = _state(ctx)
     if st is None:
         return
     for key, val in changes.items():
         setattr(st, key, val)
     try:
-        app._persistence.schedule_save("multivariate")
+        ctx.app._persistence.schedule_save("multivariate")
     except Exception:
         swallowed()
-    if hasattr(app, "_mv_sync_controls"):
+    if ctx.runtime.multivariate.sync_controls is not None:
         try:
-            app._mv_sync_controls()
+            ctx.runtime.multivariate.sync_controls()
         except Exception:
             swallowed()
-    mv_recompute(app)
+    mv_recompute(ctx)
 
 
-def mv_set_mode(app, mode: str) -> None:
-    _apply(app, mode=mode)
+def mv_set_mode(ctx, mode: str) -> None:
+    _apply(ctx, mode=mode)
 
 
-def mv_set_corr_view(app, view: str) -> None:
-    _apply(app, corr_view=view)
+def mv_set_corr_view(ctx, view: str) -> None:
+    _apply(ctx, corr_view=view)
 
 
-def mv_set_dimred_method(app, method: str) -> None:
-    _apply(app, dimred_method=method)
+def mv_set_dimred_method(ctx, method: str) -> None:
+    _apply(ctx, dimred_method=method)
 
 
-def mv_set_color_by(app, key: str) -> None:
-    _apply(app, color_by=key)
+def mv_set_color_by(ctx, key: str) -> None:
+    _apply(ctx, color_by=key)
 
 
-def mv_set_cluster_method(app, method: str) -> None:
-    _apply(app, cluster_method=method)
+def mv_set_cluster_method(ctx, method: str) -> None:
+    _apply(ctx, cluster_method=method)
 
 
-def mv_set_cluster_count(app, k: int) -> None:
-    _apply(app, cluster_count=int(k))
+def mv_set_cluster_count(ctx, k: int) -> None:
+    _apply(ctx, cluster_count=int(k))
 
 
-def mv_set_standardize(app, on: bool) -> None:
-    _apply(app, standardize=bool(on))
+def mv_set_standardize(ctx, on: bool) -> None:
+    _apply(ctx, standardize=bool(on))
 
 
-def mv_set_features(app, cols) -> None:
-    _apply(app, feature_cols=list(cols))
+def mv_set_features(ctx, cols) -> None:
+    _apply(ctx, feature_cols=list(cols))
 
 
-def mv_set_facet_row(app, factor: str) -> None:
-    _apply(app, facet_row=factor)
+def mv_set_facet_row(ctx, factor: str) -> None:
+    _apply(ctx, facet_row=factor)
 
 
-def mv_set_facet_col(app, factor: str) -> None:
-    _apply(app, facet_col=factor)
+def mv_set_facet_col(ctx, factor: str) -> None:
+    _apply(ctx, facet_col=factor)
 
 
-def mv_set_facet_value(app, col: str) -> None:
-    _apply(app, facet_value_col=col)
+def mv_set_facet_value(ctx, col: str) -> None:
+    _apply(ctx, facet_value_col=col)
 
 
-def mv_set_facet_agg(app, agg: str) -> None:
-    _apply(app, facet_agg=agg)
+def mv_set_facet_agg(ctx, agg: str) -> None:
+    _apply(ctx, facet_agg=agg)
 
 
-def mv_set_linkage(app, method: str) -> None:
-    _apply(app, linkage_method=method)
+def mv_set_linkage(ctx, method: str) -> None:
+    _apply(ctx, linkage_method=method)
 
 
-def mv_set_timepoints(app, tps) -> None:
-    _apply(app, timepoints=[float(t) for t in (tps or [])])
+def mv_set_timepoints(ctx, tps) -> None:
+    _apply(ctx, timepoints=[float(t) for t in (tps or [])])
 
 
 # ── export ───────────────────────────────────────────────────────────────────
 
-def mv_export_csv(app) -> None:
+def mv_export_csv(ctx) -> None:
     """Write the current feature matrix (+ any cluster labels) to a CSV file."""
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
     import numpy as np
 
-    st = _state(app)
+    st = _state(ctx)
     if st is None:
         return
     # Prefer the currently displayed dim-red / clustering result so the exported
@@ -408,15 +408,15 @@ def mv_export_csv(app) -> None:
         data = res["data"]
     else:
         res = {}
-        data = collect_feature_matrix(app, feature_cols=st.feature_cols,
+        data = collect_feature_matrix(ctx, feature_cols=st.feature_cols,
                                       timepoints=st.timepoints)
     if data["n_cells"] == 0 or not data["feature_cols"]:
-        QMessageBox.information(app, "Nothing to export",
+        QMessageBox.information(ctx.app, "Nothing to export",
                                "The current selection produced no feature matrix.")
         return
-    init_dir = str(app._app_state.dataset.data_dir or "")
+    init_dir = str(ctx.state.dataset.data_dir or "")
     path, _ = QFileDialog.getSaveFileName(
-        app, "Export feature matrix", init_dir, "CSV files (*.csv)")
+        ctx.app, "Export feature matrix", init_dir, "CSV files (*.csv)")
     if not path:
         return
     try:
@@ -450,19 +450,19 @@ def mv_export_csv(app) -> None:
 
         frame.to_csv(path, index=False)
         msg = f"Exported {len(frame):,} cells → {path}"
-        loadings_path = _write_pca_loadings_csv(app, st, data, path)
+        loadings_path = _write_pca_loadings_csv(ctx, st, data, path)
         if loadings_path:
             msg += f"  ·  PCA loadings → {loadings_path}"
         # Cluster feature-profile companion (what each cluster/region represents).
-        prof_path = _write_cluster_profile_csv(app, st, res, path)
+        prof_path = _write_cluster_profile_csv(ctx, st, res, path)
         if prof_path:
             msg += f"  ·  cluster profiles → {prof_path}"
-        app._set_status(msg)
+        ctx.set_status(msg)
     except Exception as exc:
-        QMessageBox.critical(app, "Export failed", f"Could not write CSV:\n{exc}")
+        QMessageBox.critical(ctx.app, "Export failed", f"Could not write CSV:\n{exc}")
 
 
-def _write_cluster_profile_csv(app, st, res, matrix_path: str):
+def _write_cluster_profile_csv(ctx, st, res, matrix_path: str):
     """Write ``<stem>_cluster_profiles.csv`` — the mean (z-scored) value of each
     feature within each cluster, the interpretable "what does each cluster mean"
     table. Returns the path, or None when the displayed result carries no
@@ -490,7 +490,7 @@ def _write_cluster_profile_csv(app, st, res, matrix_path: str):
         return None
 
 
-def _write_pca_loadings_csv(app, st, data, matrix_path: str):
+def _write_pca_loadings_csv(ctx, st, data, matrix_path: str):
     """Write a ``<stem>_pca_loadings.csv`` next to the feature matrix.
 
     Rows are features; columns are PC1..PCk (each cell = that feature's loading

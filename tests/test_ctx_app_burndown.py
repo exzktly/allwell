@@ -295,7 +295,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              service) replaces ctx.app._persistence in heatmap + multivariate;
 #              multivariate refresh_plot_empty_states + export QFileDialog parent
 #              move to ctx.window. Self-contained, behaviour-identical.
-CTX_APP_BUDGET = 124
+#   124 -> 121  smFISH threshold persistence -> ctx: persistence/smfish.py
+#              save_threshold/load_from_pipeline_info/apply_saved_to_spinbox/
+#              get_saved_threshold take ctx (thresholds_saved via
+#              ctx.runtime.smfish; combo/edit widgets via ctx.runtime.smfish;
+#              data_dir via ctx.state). smFISH tab_view calls them with ctx;
+#              runtime_app + load_controller bridge via ._ctx.
+CTX_APP_BUDGET = 121
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

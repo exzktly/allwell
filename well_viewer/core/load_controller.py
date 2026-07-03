@@ -363,7 +363,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # is restored when the tab populates its channel combo.
     try:
         from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.load_from_pipeline_info(app)
+        _smfish_persist.load_from_pipeline_info(app._ctx)
     except Exception:
         logging.getLogger("well_viewer").exception(
             "Eager smFISH threshold load from pipeline_info failed"

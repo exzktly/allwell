@@ -61,7 +61,7 @@ def _read_block(out_dir: Path) -> Dict[str, float]:
     return out
 
 
-def save_threshold(app, channel: str, threshold: float) -> None:
+def save_threshold(ctx, channel: str, threshold: float) -> None:
     """Persist the last-applied threshold for *channel* under
     ``smfish_thresholds`` in pipeline_info.json. Called from
     ``_smfish_apply_to_all``'s after-csv callback so the saved value is
@@ -79,7 +79,7 @@ def save_threshold(app, channel: str, threshold: float) -> None:
     Silent no-op when no data directory is loaded or the channel
     string is empty.
     """
-    data_dir = getattr(app._app_state.dataset, "data_dir", None)
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
     if not data_dir:
         _logger.info(
             "smFISH save_threshold: no data_dir loaded, skipping persistence",
@@ -121,10 +121,10 @@ def save_threshold(app, channel: str, threshold: float) -> None:
 
     # Mirror onto the in-memory cache so a subsequent channel switch
     # restores the just-saved value without a round-trip to disk.
-    saved = getattr(app, "_smfish_thresholds_saved", None)
+    saved = ctx.runtime.smfish.thresholds_saved
     if saved is None:
         saved = {}
-        app._smfish_thresholds_saved = saved
+        ctx.runtime.smfish.thresholds_saved = saved
     saved[ch] = float(threshold)
 
     try:
@@ -137,32 +137,32 @@ def save_threshold(app, channel: str, threshold: float) -> None:
         _logger.warning("Could not write %s: %s", info_path, exc)
 
 
-def load_from_pipeline_info(app) -> bool:
+def load_from_pipeline_info(ctx) -> bool:
     """Read saved per-channel thresholds into
     ``app._smfish_thresholds_saved`` and, if the smFISH spinbox exists
     and the currently-selected channel has a saved value, write that
     value into the spinbox. Returns True when any value was applied to
     the UI.
     """
-    data_dir = getattr(app._app_state.dataset, "data_dir", None)
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
     if not data_dir:
         return False
     block = _read_block(Path(data_dir))
-    app._smfish_thresholds_saved = dict(block)
+    ctx.runtime.smfish.thresholds_saved = dict(block)
     if not block:
         return False
-    return apply_saved_to_spinbox(app)
+    return apply_saved_to_spinbox(ctx)
 
 
-def apply_saved_to_spinbox(app) -> bool:
+def apply_saved_to_spinbox(ctx) -> bool:
     """If the smFISH tab is built, restore the spinbox to the saved
     threshold for the currently-selected channel. Returns True when a
     value was applied. Safe to call from the channel-change handler."""
-    cb = getattr(app, "_smfish_channel_cb", None)
-    edit = getattr(app, "_smfish_threshold_edit", None)
+    cb = ctx.runtime.smfish.channel_cb
+    edit = ctx.runtime.smfish.threshold_edit
     if cb is None or edit is None:
         return False
-    saved: Dict[str, float] = getattr(app, "_smfish_thresholds_saved", {}) or {}
+    saved: Dict[str, float] = ctx.runtime.smfish.thresholds_saved or {}
     if not saved:
         return False
     ch = str(cb.currentText() or "").strip().lower()
@@ -179,7 +179,7 @@ def apply_saved_to_spinbox(app) -> bool:
     return True
 
 
-def get_saved_threshold(app, channel: str) -> Optional[float]:
+def get_saved_threshold(ctx, channel: str) -> Optional[float]:
     """Look up the saved threshold for *channel* without touching the UI."""
-    saved: Dict[str, float] = getattr(app, "_smfish_thresholds_saved", {}) or {}
+    saved: Dict[str, float] = ctx.runtime.smfish.thresholds_saved or {}
     return saved.get(str(channel).strip().lower())

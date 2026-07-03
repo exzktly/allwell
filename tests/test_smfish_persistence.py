@@ -13,6 +13,11 @@ from types import SimpleNamespace
 
 
 from well_viewer.persistence import smfish as _smfish_persist
+from well_viewer.core.app_runtime import AppRuntime
+
+def _attach_ctx(app):
+    app._ctx = SimpleNamespace(app=app, state=getattr(app, '_app_state', None), runtime=AppRuntime(app))
+    return app
 
 
 class _FakeEdit:
@@ -53,12 +58,13 @@ def _make_app(tmp_path: Path) -> SimpleNamespace:
     app._app_state = SimpleNamespace(dataset=SimpleNamespace(data_dir=tmp_path))
     app._smfish_channel_cb = _FakeCombo()
     app._smfish_threshold_edit = _FakeEdit()
+    _attach_ctx(app)
     return app
 
 
 def test_save_threshold_writes_to_pipeline_info(tmp_path):
     app = _make_app(tmp_path)
-    _smfish_persist.save_threshold(app, "w3cy5", 1500.0)
+    _smfish_persist.save_threshold(app._ctx, "w3cy5", 1500.0)
 
     data = json.loads((tmp_path / "pipeline_info.json").read_text())
     assert data["smfish_thresholds"] == {"w3cy5": 1500.0}
@@ -70,8 +76,8 @@ def test_save_threshold_writes_to_pipeline_info(tmp_path):
 
 def test_save_threshold_merges_multiple_channels(tmp_path):
     app = _make_app(tmp_path)
-    _smfish_persist.save_threshold(app, "w3cy5", 1500.0)
-    _smfish_persist.save_threshold(app, "w4gfp", 800.0)
+    _smfish_persist.save_threshold(app._ctx, "w3cy5", 1500.0)
+    _smfish_persist.save_threshold(app._ctx, "w4gfp", 800.0)
 
     data = json.loads((tmp_path / "pipeline_info.json").read_text())
     assert data["smfish_thresholds"] == {"w3cy5": 1500.0, "w4gfp": 800.0}
@@ -79,8 +85,8 @@ def test_save_threshold_merges_multiple_channels(tmp_path):
 
 def test_save_threshold_overwrites_existing_channel(tmp_path):
     app = _make_app(tmp_path)
-    _smfish_persist.save_threshold(app, "w3cy5", 1500.0)
-    _smfish_persist.save_threshold(app, "w3cy5", 1750.0)
+    _smfish_persist.save_threshold(app._ctx, "w3cy5", 1500.0)
+    _smfish_persist.save_threshold(app._ctx, "w3cy5", 1750.0)
 
     data = json.loads((tmp_path / "pipeline_info.json").read_text())
     assert data["smfish_thresholds"] == {"w3cy5": 1750.0}
@@ -88,7 +94,7 @@ def test_save_threshold_overwrites_existing_channel(tmp_path):
 
 def test_save_threshold_lowercases_channel(tmp_path):
     app = _make_app(tmp_path)
-    _smfish_persist.save_threshold(app, "W3Cy5", 1500.0)
+    _smfish_persist.save_threshold(app._ctx, "W3Cy5", 1500.0)
 
     data = json.loads((tmp_path / "pipeline_info.json").read_text())
     assert data["smfish_thresholds"] == {"w3cy5": 1500.0}
@@ -97,8 +103,9 @@ def test_save_threshold_lowercases_channel(tmp_path):
 def test_save_threshold_no_data_dir_silently_noops(tmp_path):
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(dataset=SimpleNamespace(data_dir=None))
+    _attach_ctx(app)
     # Must not raise even though no data_dir is set.
-    _smfish_persist.save_threshold(app, "w3cy5", 1500.0)
+    _smfish_persist.save_threshold(app._ctx, "w3cy5", 1500.0)
 
 
 def test_save_threshold_missing_sidecar_creates_minimal_file(tmp_path):
@@ -111,7 +118,8 @@ def test_save_threshold_missing_sidecar_creates_minimal_file(tmp_path):
     next run, so creating-on-missing is non-destructive."""
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(dataset=SimpleNamespace(data_dir=tmp_path))
-    _smfish_persist.save_threshold(app, "w3cy5", 1500.0)
+    _attach_ctx(app)
+    _smfish_persist.save_threshold(app._ctx, "w3cy5", 1500.0)
 
     info_path = tmp_path / "pipeline_info.json"
     assert info_path.exists()
@@ -130,8 +138,9 @@ def test_load_from_pipeline_info_populates_cache_and_spinbox(tmp_path):
     app._app_state = SimpleNamespace(dataset=SimpleNamespace(data_dir=tmp_path))
     app._smfish_channel_cb = _FakeCombo("w3cy5")
     app._smfish_threshold_edit = _FakeEdit("1500")
+    _attach_ctx(app)
 
-    applied = _smfish_persist.load_from_pipeline_info(app)
+    applied = _smfish_persist.load_from_pipeline_info(app._ctx)
 
     assert applied is True
     assert app._smfish_thresholds_saved == {"w3cy5": 1500.0, "w4gfp": 800.0}
@@ -149,8 +158,9 @@ def test_load_with_no_saved_block_clears_cache_and_returns_false(tmp_path):
     app._smfish_thresholds_saved = {"w3cy5": 9999.0}
     app._smfish_channel_cb = _FakeCombo("w3cy5")
     app._smfish_threshold_edit = _FakeEdit("1500")
+    _attach_ctx(app)
 
-    applied = _smfish_persist.load_from_pipeline_info(app)
+    applied = _smfish_persist.load_from_pipeline_info(app._ctx)
 
     assert applied is False
     assert app._smfish_thresholds_saved == {}
@@ -162,8 +172,8 @@ def test_apply_saved_to_spinbox_channel_with_no_save(tmp_path):
     app._smfish_channel_cb = _FakeCombo("w4gfp")
     app._smfish_threshold_edit = _FakeEdit("1500")
     app._smfish_thresholds_saved = {"w3cy5": 1234.0}
-
-    assert _smfish_persist.apply_saved_to_spinbox(app) is False
+    _attach_ctx(app)
+    assert _smfish_persist.apply_saved_to_spinbox(app._ctx) is False
     assert app._smfish_threshold_edit.text() == "1500"
 
 
@@ -171,14 +181,14 @@ def test_apply_saved_to_spinbox_no_tab_built(tmp_path):
     """Safe to call before the smFISH tab is built (load_controller does)."""
     app = SimpleNamespace()
     app._smfish_thresholds_saved = {"w3cy5": 1234.0}
-
-    assert _smfish_persist.apply_saved_to_spinbox(app) is False
+    _attach_ctx(app)
+    assert _smfish_persist.apply_saved_to_spinbox(app._ctx) is False
 
 
 def test_get_saved_threshold_lookup(tmp_path):
     app = SimpleNamespace()
     app._smfish_thresholds_saved = {"w3cy5": 1500.0}
-
-    assert _smfish_persist.get_saved_threshold(app, "w3cy5") == 1500.0
-    assert _smfish_persist.get_saved_threshold(app, "W3Cy5") == 1500.0
-    assert _smfish_persist.get_saved_threshold(app, "missing") is None
+    _attach_ctx(app)
+    assert _smfish_persist.get_saved_threshold(app._ctx, "w3cy5") == 1500.0
+    assert _smfish_persist.get_saved_threshold(app._ctx, "W3Cy5") == 1500.0
+    assert _smfish_persist.get_saved_threshold(app._ctx, "missing") is None

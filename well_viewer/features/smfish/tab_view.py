@@ -351,7 +351,7 @@ def smfish_sync_from_app(ctx) -> None:
     # _smfish_redraw uses the stale hardcoded "1500" default.
     try:
         from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.apply_saved_to_spinbox(ctx.app)
+        _smfish_persist.apply_saved_to_spinbox(ctx)
     except Exception:
         logging.getLogger("well_viewer").exception(
             "smFISH threshold restore on channel populate failed"
@@ -365,7 +365,7 @@ def _smfish_on_channel_changed(ctx) -> None:
     the CSVs), then run the standard FOV/TP refresh."""
     try:
         from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.apply_saved_to_spinbox(ctx.app)
+        _smfish_persist.apply_saved_to_spinbox(ctx)
     except Exception:
         logging.getLogger("well_viewer").exception(
             "smFISH threshold restore on channel change failed"
@@ -777,7 +777,7 @@ def _smfish_apply_to_all(ctx) -> None:
         # synchronously.
         try:
             from well_viewer.persistence import smfish as _smfish_persist
-            _smfish_persist.save_threshold(ctx.app, channel, thr)
+            _smfish_persist.save_threshold(ctx, channel, thr)
         except Exception:
             logging.getLogger("well_viewer").exception(
                 "smFISH threshold persistence failed"

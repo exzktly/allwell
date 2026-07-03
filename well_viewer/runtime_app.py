@@ -693,7 +693,7 @@ class WellViewerApp(QWidget):
 
     def _load_sample_definitions_from_pipeline_info(self) -> bool:
         from well_viewer.persistence import sample_definitions as _sd
-        return _sd.load_from_pipeline_info(self)
+        return _sd.load_from_pipeline_info(self._ctx)
 
 
     def _clear_sample_definitions_all(self) -> None:

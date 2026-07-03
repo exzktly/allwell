@@ -73,8 +73,8 @@ _NO_SMFISH_MESSAGE = (
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
 
-    State and widget handles are attached to ``ctx.app`` under the
-    ``_smfish_*`` prefix.
+    State and widget handles are attached to ``ctx.runtime.smfish.*`` (which
+    resolves the legacy ``_smfish_*`` prefixed app attributes).
     """
     # Defer matplotlib imports until the tab actually builds. Loading the
     # QtAgg backend at module import time was a measurable chunk of startup.

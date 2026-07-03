@@ -719,9 +719,9 @@ class WellViewerApp(QWidget):
 
     def _rank_color_wells(self, wells) -> str: return rank_color_wells(self, wells)
 
-    def _sel_color(self, s) -> str: return sel_color(self, s)
+    def _sel_color(self, s) -> str: return sel_color(self._ctx, s)
 
-    def _rank_color_rset(self, rset) -> str: return rank_color_rset(self, rset)
+    def _rank_color_rset(self, rset) -> str: return rank_color_rset(self._ctx, rset)
 
     def _rep_color_for(self, lbl: str) -> Optional[str]: return rep_color_for(self, lbl)
 
@@ -1129,7 +1129,7 @@ class WellViewerApp(QWidget):
         groups mirror what's shown rather than every defined grouping."""
         return [BarGroup(r.name, members=[r]) for r in self._rep_sets_active()]
 
-    def _rep_sets_active(self) -> 'List[ReplicateSet]': return rep_sets_active(self)
+    def _rep_sets_active(self) -> 'List[ReplicateSet]': return rep_sets_active(self._ctx)
 
 
 

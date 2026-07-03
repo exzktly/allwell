@@ -235,7 +235,7 @@ def redraw_distribution(app) -> None:
     )
 
     groups: List[Tuple[str, str, np.ndarray]] = []
-    for name, color, df in iter_plot_groups(app, fallback_to_all=False):
+    for name, color, df in iter_plot_groups(app._ctx, fallback_to_all=False):
         tp_filter = tp_h if math.isfinite(tp_h) else None
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,

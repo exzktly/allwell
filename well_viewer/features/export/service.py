@@ -690,7 +690,7 @@ def export_distribution_data(app) -> None:
     import pandas as pd
     chunks = []
     tp_tag_str = f"{tp_h:g}" if _math.isfinite(tp_h) else ""
-    for name, _color, df in iter_plot_groups(app):
+    for name, _color, df in iter_plot_groups(app._ctx):
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,
             fluor_gates=fluor_gates,

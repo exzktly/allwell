@@ -79,6 +79,62 @@ def well_rank(token: Any) -> int:
         return 1 << 30
 
 
+def color_for_wells(wells: Any) -> str:
+    """Canonical group colour: the rank colour of the *lowest* well in *wells*.
+
+    So every well in a group (and its line/bar trace) shares one colour. The
+    pure implementation shared by ``core`` and feature code (A8 teardown), lifted
+    verbatim from ``grouping.controller.rank_color_wells`` so there is one home
+    for it and neither layer reaches through the god-object. Indexes the raw
+    ``WELL_COLORS`` palette directly to preserve the exact historical colours.
+    """
+    from well_viewer.domain.plate_layout import WELL_COLORS
+    ranks = [well_rank(w) for w in (wells or [])]
+    ranks = [r for r in ranks if r < (1 << 30)]
+    return WELL_COLORS[(min(ranks) if ranks else 0) % len(WELL_COLORS)]
+
+
+def color_for_selection(s: Any) -> str:
+    """Effective colour for a selection dict: explicit ``color`` override first,
+    otherwise the rank colour of its wells. The pure core of ``sel_color``,
+    lifted here (A8 teardown) so ``core`` and the data layer share one home
+    without importing a feature."""
+    if isinstance(s, dict):
+        c = s.get("color")
+        if isinstance(c, str) and c.strip():
+            return c.strip()
+        return color_for_wells(s.get("wells"))
+    return color_for_wells(getattr(s, "wells", None))
+
+
+def color_for_replicate_set(rset: Any, selections: Iterable[Any]) -> str:
+    """Colour for a replicate set / bar group: honours the ``color`` of a
+    selection sharing its ``name``, else the rank colour of its wells. Pure core
+    of ``grouping.controller.rank_color_rset`` (A8 teardown)."""
+    name = getattr(rset, "name", None)
+    if name:
+        for s in selections:
+            if isinstance(s, dict) and s.get("name") == name:
+                return color_for_selection(s)
+    return color_for_wells(getattr(rset, "wells", None))
+
+
+def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
+    """One ``ReplicateSet`` per visible (non-hidden) selection with ≥1 loaded
+    well, in order — the traces drawn on the plots. Pure core of
+    ``barplot.controller.rep_sets_active`` (A8 teardown), so the data layer can
+    enumerate groups without importing a feature."""
+    from well_viewer.domain.batch_models import ReplicateSet
+    out = []
+    for s in selections:
+        if s.get("hidden"):
+            continue
+        wells = s.get("wells") or []
+        if any(w in well_paths for w in wells):
+            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+    return out
+
+
 def _clean_token(w: Any) -> Optional[str]:
     """Normalise a 96-well token (``"a1"`` → ``"A01"``); drop anything that isn't
     a structurally-valid well token. (We do *not* filter against the currently

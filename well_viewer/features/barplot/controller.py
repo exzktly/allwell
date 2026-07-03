@@ -524,17 +524,15 @@ def toggle_violin(app) -> None:
 
 
 
-def rep_sets_active(app) -> "List[ReplicateSet]":
+def rep_sets_active(ctx) -> "List[ReplicateSet]":
     """One ReplicateSet per visible (non-hidden) selection with ≥1 loaded
-    well — these are exactly the traces drawn on the plots."""
-    out: "List[ReplicateSet]" = []
-    for s in app._app_state.selection.selections:
-        if s.get("hidden"):
-            continue
-        wells = s.get("wells") or []
-        if any(w in app._app_state.dataset.well_paths for w in wells):
-            out.append(ReplicateSet(s.get("name") or "", list(wells)))
-    return out
+    well — these are exactly the traces drawn on the plots.
+
+    A8 teardown: takes ``ctx`` — delegates to the pure domain enumerator over
+    ``ctx.state`` (no god-object)."""
+    from well_viewer.domain.selections_model import active_replicate_sets
+    return active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
 
 
 

@@ -1054,16 +1054,15 @@ def sel_by_id(app, sid):
 
 
 
-def sel_color(app, s) -> str:
+def sel_color(ctx, s) -> str:
     """Effective colour for a selection dict: explicit ``color`` override
     first, otherwise the rank-based fallback so groups without a user-set
-    colour stay consistent with their wells."""
-    if not isinstance(s, dict):
-        return app._rank_color_wells(getattr(s, "wells", None))
-    c = s.get("color")
-    if isinstance(c, str) and c.strip():
-        return c.strip()
-    return app._rank_color_wells(s.get("wells"))
+    colour stay consistent with their wells.
+
+    A8 teardown: takes ``ctx`` for uniformity with the colour graph; delegates
+    to the pure domain resolver (no god-object)."""
+    from well_viewer.domain.selections_model import color_for_selection
+    return color_for_selection(s)
 
 
 

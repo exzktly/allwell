@@ -781,7 +781,7 @@ def parse_well_token(token: str) -> Optional[Tuple[int, int]]:
 
 # ── Plot-group iteration ─────────────────────────────────────────────────────
 
-def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, str, pd.DataFrame]]:
+def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[Tuple[str, str, pd.DataFrame]]:
     """Yield ``(name, color, df)`` for each replicate set or selected well.
 
     When replicate sets are defined, one entry per replicate set with rows
@@ -789,57 +789,34 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
     selected well. When ``fallback_to_all`` is True (default) and no wells are
     selected, all loaded wells are yielded.
 
-    Colours come from the same rank-based palette the sidebar plate map +
-    the Line / Bar / Scatter renderers use (``_rank_color_well`` /
-    ``_rank_color_rset`` in ``runtime_app``). Optional ``_color_for_label``
-    and ``_color_for_well`` callbacks on *app* still get first dibs so a
-    caller can override the canonical lookup.
+    A8 teardown: takes ``ctx`` — the well set / selection come from typed state,
+    rows from the ctx-native :func:`get_rows` (R1), and colours from the pure
+    ``rank_color_rset`` / ``color_for_wells`` graph. The old ``_color_for_label``
+    / ``_color_for_well`` override hooks were vestigial (never set anywhere) and
+    are dropped. Colours are identical to the sidebar plate map + the Line / Bar /
+    Scatter renderers (locked by test_iter_plot_groups_ctx).
     """
-    get_active = getattr(app, "_rep_sets_active", None)
-    rep_sets = list(get_active() if callable(get_active) else [])
-    well_paths = app._app_state.dataset.well_paths or {}
-    selected = set(app._app_state.selection.selected_wells or set())
-    color_for_label = getattr(app, "_color_for_label", None)
-    color_for_well = getattr(app, "_color_for_well", None)
-    rank_rset = getattr(app, "_rank_color_rset", None)
-    rank_well = getattr(app, "_rank_color_well", None)
+    from well_viewer.domain.selections_model import (
+        active_replicate_sets, color_for_replicate_set, color_for_wells,
+    )
 
-    def _override(fn, key):
-        if not callable(fn):
-            return None
-        try:
-            c = fn(key)
-        except Exception:
-            return None
-        return c if c else None
+    well_paths = ctx.state.dataset.well_paths or {}
+    selections = ctx.state.selection.selections
+    rep_sets = list(active_replicate_sets(selections, well_paths))
+    selected = set(ctx.state.selection.selected_wells or set())
 
     def _color_rset(rset) -> str:
-        c = _override(color_for_label, rset.name)
-        if c:
-            return c
-        if callable(rank_rset):
-            try:
-                return rank_rset(rset)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        return "#808080"
-
-    def _color_well(w: str) -> str:
-        c = _override(color_for_well, w)
-        if c:
-            return c
-        if callable(rank_well):
-            try:
-                return rank_well(w)
-            except Exception:
-                swallowed()  # was: pass (silent except)
+        try:
+            return color_for_replicate_set(rset, selections)
+        except Exception:
+            swallowed()  # was: pass (silent except)
         return "#808080"
 
     if rep_sets:
         # With groups defined the active set on the plot is exactly
-        # ``_rep_sets_active()`` (every non-hidden group) plus any solo
+        # ``rep_sets_active`` (every non-hidden group) plus any solo
         # wells the user has explicitly toggled on via
-        # ``_active_solo_wells``. ``_selected_wells`` is not used in
+        # ``active_solo_wells``. ``selected_wells`` is not used in
         # rep-mode — group visibility is the single source of truth.
         in_any_group: set = set()
         for rset in rep_sets:
@@ -847,13 +824,13 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
             in_any_group.update(wells)
             if not wells:
                 continue
-            frames = [app._get_rows(w) for w in wells]
+            frames = [get_rows(ctx, w) for w in wells]
             pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
             yield rset.name, _color_rset(rset), pooled
-        active_solo = app._app_state.selection.active_solo_wells or set()
+        active_solo = ctx.state.selection.active_solo_wells or set()
         for w in sorted(w for w in active_solo
                         if w in well_paths and w not in in_any_group):
-            yield w, _color_well(w), app._get_rows(w)
+            yield w, color_for_wells([w]), get_rows(ctx, w)
         return
 
     if not selected:
@@ -863,4 +840,4 @@ def iter_plot_groups(app, fallback_to_all: bool = True) -> Iterator[Tuple[str, s
     for w in sorted(selected):
         if w not in well_paths:
             continue
-        yield w, _color_well(w), app._get_rows(w)
+        yield w, color_for_wells([w]), get_rows(ctx, w)

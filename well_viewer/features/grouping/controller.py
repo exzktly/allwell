@@ -14,12 +14,12 @@ from PySide6.QtWidgets import (
 
 from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.domain.viewer_state import extract_well_token as _extract_well_token
-from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS, WELL_COLORS
+from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS
 from well_viewer.core.ui_helpers import (
     wells_multiselect_listbox as _wells_multiselect_listbox,
     selected_list_values as _selected_list_values,
 )
-from well_viewer.domain.selections_model import well_rank as _sel_well_rank
+from well_viewer.domain.selections_model import color_for_wells
 
 
 def make_replicate_pairs(toks):
@@ -202,17 +202,16 @@ def rep_refresh_map(app) -> None:
 
 
 
-def rank_color_rset(app, rset) -> str:
+def rank_color_rset(ctx, rset) -> str:
     """Colour for a ReplicateSet / BarGroup (or anything with a ``wells``
     attribute) — honours the per-selection ``color`` override when an entry
     in ``_selections`` shares its ``name``, otherwise falls back to the
-    rank colour of its lowest well."""
-    name = getattr(rset, "name", None)
-    if name:
-        for s in app._app_state.selection.selections:
-            if s.get("name") == name:
-                return app._sel_color(s)
-    return app._rank_color_wells(getattr(rset, "wells", None))
+    rank colour of its lowest well.
+
+    A8 teardown: takes ``ctx`` — delegates to the pure domain colour resolver
+    over ``ctx.state.selection`` (no god-object)."""
+    from well_viewer.domain.selections_model import color_for_replicate_set
+    return color_for_replicate_set(rset, ctx.state.selection.selections)
 
 
 
@@ -253,8 +252,10 @@ def rep_color_for(app, lbl: str) -> Optional[str]:
 
 def rank_color_wells(app, wells) -> str:
     """Colour for a set of wells — the rank colour of its lowest well, so all
-    of its wells (and its line/bar trace) share one colour."""
-    ranks = [_sel_well_rank(w) for w in (wells or [])]
-    ranks = [r for r in ranks if r < (1 << 30)]
-    return WELL_COLORS[(min(ranks) if ranks else 0) % len(WELL_COLORS)]
+    of its wells (and its line/bar trace) share one colour.
+
+    A8 teardown: the pure implementation now lives in ``domain.selections_model``
+    (``color_for_wells``); this thin app-signature wrapper stays for the legacy
+    ``WellViewerApp._rank_color_wells`` god-method delegate."""
+    return color_for_wells(wells)
 

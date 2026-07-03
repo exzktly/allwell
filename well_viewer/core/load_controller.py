@@ -304,7 +304,7 @@ def load_directory(app, d: Path, label=None) -> None:
     try:
         app._persistence.load("crop_region")
         from well_viewer.features.crop.controller import apply_crop_to_cache
-        apply_crop_to_cache(app)
+        apply_crop_to_cache(app._ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate user-defined line-plot draw order (line_order.json).

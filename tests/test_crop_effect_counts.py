@@ -56,9 +56,12 @@ def test_effect_no_centroids_fails_open():
 
 # ── aggregation over the cache ────────────────────────────────────────────────
 def _app(cache, region):
-    return SimpleNamespace(
+    app = SimpleNamespace(
         _app_state=SimpleNamespace(
             dataset=SimpleNamespace(cache=cache, crop_region=region)))
+    # _crop_effect_counts reads the region through get_crop_region(ctx) (R1).
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
+    return app
 
 
 def test_counts_aggregate_over_loaded_wells():

@@ -86,15 +86,18 @@ def test_df_included_mask_three_way_and():
 
 # ── controller projection ─────────────────────────────────────────────────────
 def _fake_app(cache, region=None):
-    return SimpleNamespace(
+    app = SimpleNamespace(
         _app_state=SimpleNamespace(
             dataset=SimpleNamespace(cache=cache, crop_region=region)))
+    # The crop projector takes ``ctx`` (R1); a minimal ctx over the same state.
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
+    return app
 
 
 def test_apply_crop_to_cache_writes_crop_pass_column():
     cache = {"A01": _df([2, 50], [3, 60])}
     app = _fake_app(cache, region=(0, 0, 10, 10))
-    crop.apply_crop_to_cache(app, "A01")
+    crop.apply_crop_to_cache(app._ctx, "A01")
     assert "Crop_Pass" in cache["A01"].columns
     assert list(cache["A01"]["Crop_Pass"]) == [1, 0]
 
@@ -102,5 +105,5 @@ def test_apply_crop_to_cache_writes_crop_pass_column():
 def test_apply_crop_to_cache_no_region_is_all_pass():
     cache = {"A01": _df([2, 50], [3, 60])}
     app = _fake_app(cache, region=None)
-    crop.apply_crop_to_cache(app)
+    crop.apply_crop_to_cache(app._ctx)
     assert list(cache["A01"]["Crop_Pass"]) == [1, 1]

@@ -118,20 +118,22 @@ def _fake_app(cache, pipeline_info=None, params=None):
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(cache=cache, pipeline_info=pipeline_info),
         qc=QcState(params=params))
+    # The QC projectors take ``ctx`` (R1); a minimal ctx over the same state.
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
     return app
 
 
 def test_apply_qc_to_cache_writes_qc_pass_column():
     cache = {"A01": _df([5, 100], solidity=[0.99, 0.99])}
     app = _fake_app(cache, params=QCParams(enabled=True, min_area=10))
-    qc.apply_qc_to_cache(app, "A01")
+    qc.apply_qc_to_cache(app._ctx, "A01")
     assert "QC_Pass" in cache["A01"].columns
     assert list(cache["A01"]["QC_Pass"]) == [0, 1]
 
 
 def test_get_qc_params_lazy_seeds_from_pipeline_info():
     app = _fake_app({}, pipeline_info={"qc_options": {"remove_debris": True, "min_area": 15}})
-    p = qc.get_qc_params(app)
+    p = qc.get_qc_params(app._ctx)
     assert p.enabled and p.min_area == 15
     # cached on the typed QC state afterwards
     assert app._app_state.qc.params is p
@@ -191,6 +193,8 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
         qc=QcState(params=QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)))
+    # qc_gate_refresh_widgets reads the params through get_qc_params(ctx).
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
 
     parent = QWidget()
     qtbot.addWidget(parent)

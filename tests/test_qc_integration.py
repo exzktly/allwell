@@ -35,7 +35,7 @@ def test_qc_gate_excludes_small_cells_via_chokepoint(loaded_app):
     # The chokepoint now excludes the sub-threshold cells.
     incl_after = int(df_included_mask(df2).sum())
     assert incl_after < incl_before
-    assert get_qc_params(app).min_area == thresh
+    assert get_qc_params(app._ctx).min_area == thresh
 
 
 def test_qc_disabled_includes_everything(loaded_app):

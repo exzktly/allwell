@@ -126,7 +126,15 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              their except — now app._ctx, locked by test_timepoint_refresh_
 #              ctx_contract. Fully zeroing the heatmap handlers waits on the
 #              redraw_heatmap render-tree conversion (High-risk one-feature pass).
-CTX_APP_BUDGET = 244
+#   244 -> 243  R1 ctx-native row-fetch data service: new data_loading.get_rows(
+#              ctx, label) does the lazy load + QC/Crop projection over ctx.state
+#              (QC/crop projectors get_qc_params/apply_qc_to_cache/get_crop_region/
+#              apply_crop_to_cache flipped to ctx, pure typed state after R4).
+#              WellViewerApp._get_rows delegates to it; get_all_timepoints reads
+#              get_rows(ctx) instead of ctx.app._get_rows -> its last residual is
+#              gone. The service is reusable by stats_compute + every collect
+#              module (their own ctx passes come later).
+CTX_APP_BUDGET = 243
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

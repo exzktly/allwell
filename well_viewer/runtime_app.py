@@ -908,14 +908,11 @@ class WellViewerApp(QWidget):
         return sorted(self._app_state.selection.selected_wells, key=lambda lbl: self._parse_rc(lbl))
 
     def _get_rows(self, label: str) -> pd.DataFrame:
-        if label not in self._app_state.dataset.cache:
-            self._app_state.dataset.cache[label] = load_well_csv(self._app_state.dataset.well_paths[label])
-            # Project QC_Pass / Crop_Pass onto freshly-built frames (lazy wells).
-            from well_viewer.features.qc.controller import apply_qc_to_cache
-            from well_viewer.features.crop.controller import apply_crop_to_cache
-            apply_qc_to_cache(self, label)
-            apply_crop_to_cache(self, label)
-        return self._app_state.dataset.cache[label]
+        # A8 residuals-ledger R1: the lazy load + QC/Crop projection moved to the
+        # ctx-native data service ``data_loading.get_rows``; this stays as the
+        # legacy god-object entry point and delegates through the context.
+        from well_viewer.data.data_loading import get_rows
+        return get_rows(self._ctx, label)
 
     def _invalidate_dataset_cache(self) -> None: self._app_state.dataset.cache.clear()
 

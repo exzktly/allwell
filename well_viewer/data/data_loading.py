@@ -238,6 +238,34 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     return mask
 
 
+def get_rows(ctx, label: str) -> pd.DataFrame:
+    """Return the measurement frame for well *label*, loading + projecting lazily.
+
+    The dataset's row cache holds one ``DataFrame`` per loaded well. On first
+    access this reads the well CSV, then projects the composable ``QC_Pass`` /
+    ``Crop_Pass`` verdict columns onto the fresh frame so the inclusion
+    chokepoint (:func:`df_included_mask`) sees a consistent row.
+
+    A8 residuals-ledger R1: the ctx-native row-fetch data service. Cache + paths
+    come from ``ctx.state.dataset``; the QC/Crop projection controllers are
+    imported function-locally (the sanctioned escape hatch for a data-layer
+    module reaching a feature — the projection is data-layer logic that happens
+    to live under ``features/qc`` and ``features/crop``). ``WellViewerApp._get_rows``
+    now delegates here, so every caller — this module's ``get_all_timepoints``,
+    ``stats_compute``, and the feature ``collect`` modules — can fetch rows from
+    ``ctx`` without naming the god-object.
+    """
+    cache = ctx.state.dataset.cache
+    if label not in cache:
+        cache[label] = load_well_csv(ctx.state.dataset.well_paths[label])
+        # Project QC_Pass / Crop_Pass onto freshly-built frames (lazy wells).
+        from well_viewer.features.qc.controller import apply_qc_to_cache
+        from well_viewer.features.crop.controller import apply_crop_to_cache
+        apply_qc_to_cache(ctx, label)
+        apply_crop_to_cache(ctx, label)
+    return cache[label]
+
+
 def get_all_timepoints(ctx) -> "list[float]":
     """Unique included timepoints across all loaded wells.
 
@@ -246,13 +274,12 @@ def get_all_timepoints(ctx) -> "list[float]":
     ``include_gate=False`` — the per-cell scatter draws gates, so timepoint
     enumeration must see the full cloud, not a gate-filtered subset.
 
-    A8-teardown T3: takes ``ctx``. The well list reads typed state
-    (``ctx.state.dataset``); row access still routes through the god-object's
-    lazy ``_get_rows`` (no typed data-service home yet) — the one residual.
+    A8 residuals-ledger R1: fully ctx — the well list reads typed state and rows
+    come from the ctx-native :func:`get_rows` service, so no god-object residual.
     """
     timepoints: set = set()
     for label in ctx.state.dataset.well_paths:
-        df = ctx.app._get_rows(label)
+        df = get_rows(ctx, label)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             continue
         mask = df_included_mask(df, include_gate=False)

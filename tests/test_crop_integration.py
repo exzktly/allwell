@@ -33,7 +33,7 @@ def test_crop_excludes_outside_centroids_via_chokepoint(loaded_app_shape):
     assert len(df2) == rows_before                 # non-destructive: no rows removed
     assert "Crop_Pass" in df2.columns
     assert int(df_included_mask(df2).sum()) < incl_before
-    assert get_crop_region(app) == _REGION
+    assert get_crop_region(app._ctx) == _REGION
 
     # A lazily-loaded *other* well also gets Crop_Pass projected (the _get_rows hook).
     other = sorted(app._app_state.dataset.well_paths)[-1]
@@ -49,7 +49,7 @@ def test_clear_crop_restores_cells(loaded_app_shape):
     assert int(df_included_mask(app._get_rows(well)).sum()) < incl_full
 
     clear_crop_region(app)
-    assert get_crop_region(app) is None
+    assert get_crop_region(app._ctx) is None
     assert int(df_included_mask(app._get_rows(well)).sum()) == incl_full
 
 
@@ -72,7 +72,7 @@ def test_reset_restores_manual_deletes_and_clears_crop(loaded_app_shape, monkeyp
 
     reset_crop_and_overrides(app)
 
-    assert get_crop_region(app) is None
+    assert get_crop_region(app._ctx) is None
     assert not app._review_included_overrides
     # Cache was invalidated → frames reload original (all-Included) rows → full set.
     assert int(df_included_mask(app._get_rows(well)).sum()) == incl_full

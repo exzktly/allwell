@@ -50,7 +50,7 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
     hl.setContentsMargins(8, 2, 8, 2)
     hl.setSpacing(6)
 
-    params = get_qc_params(app)
+    params = get_qc_params(app._ctx)
 
     enable_cb = QCheckBox("QC debris gate", row)
     enable_cb.setChecked(bool(params.enabled))
@@ -180,7 +180,7 @@ def qc_gate_refresh_widgets(app) -> None:
     w = getattr(app, "_qc_gate_widgets", None)
     if not w:
         return
-    p = get_qc_params(app)
+    p = get_qc_params(app._ctx)
     edit_keys = ("min_area", "max_area", "min_solidity", "max_region_area",
                  "min_circularity", "max_circularity")
     fields = [w["enable"]] + [w[k] for k in edit_keys]

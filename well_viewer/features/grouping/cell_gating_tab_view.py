@@ -2181,7 +2181,7 @@ def _cell_gating_plot_cdf(app) -> None:
         # Mark the QC layer's min-area gate (cell-area gating is QC-owned now).
         try:
             from well_viewer.features.qc.controller import get_qc_params
-            _qc_min = get_qc_params(app).min_area
+            _qc_min = get_qc_params(app._ctx).min_area
             if _qc_min is not None:
                 axes[0].axvline(x=float(_qc_min), color=warn,
                                 linestyle="--", linewidth=2, alpha=0.7)

@@ -15,7 +15,10 @@ def _app(tmp_path, pipeline_info=None):
     from well_viewer.core.qc_state import QcState
     ds = SimpleNamespace(data_dir=tmp_path, persistence_doc=None,
                          pipeline_info=pipeline_info or {})
-    return SimpleNamespace(_app_state=SimpleNamespace(dataset=ds, qc=QcState()))
+    app = SimpleNamespace(_app_state=SimpleNamespace(dataset=ds, qc=QcState()))
+    # get_qc_params takes ``ctx`` (R1); a minimal ctx over the same state.
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
+    return app
 
 
 def test_saves_into_persistence_json_not_a_sidecar(tmp_path):
@@ -62,7 +65,7 @@ def test_no_persisted_state_clears_then_controller_seeds(tmp_path):
     app._app_state.qc.params = QCParams(enabled=True, min_area=999)  # stale, from a prior dataset
     qc_params.load_from_data_dir(app)
     assert app._app_state.qc.params is None                          # persistence cleared it
-    seeded = get_qc_params(app)                            # controller seeds lazily
+    seeded = get_qc_params(app._ctx)                            # controller seeds lazily
     assert seeded.enabled and seeded.min_area == 15
     # seeding alone doesn't write a file
     assert not (tmp_path / "qc_params.json").exists()

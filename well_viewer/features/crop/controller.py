@@ -23,19 +23,26 @@ from well_viewer.core.safe import swallowed
 _logger = logging.getLogger("well_viewer")
 
 
-def get_crop_region(app) -> Optional[CropRegion]:
-    """The active dataset-wide crop rectangle, or ``None``."""
-    return app._app_state.dataset.crop_region
+def get_crop_region(ctx) -> Optional[CropRegion]:
+    """The active dataset-wide crop rectangle, or ``None``.
+
+    A8 residuals-ledger R1: pure typed state (``ctx.state.dataset.crop_region``),
+    so it takes ``ctx``."""
+    return ctx.state.dataset.crop_region
 
 
-def apply_crop_to_cache(app, label: Optional[str] = None) -> None:
+def apply_crop_to_cache(ctx, label: Optional[str] = None) -> None:
     """Write the ``Crop_Pass`` column onto cached well frame(s).
 
     With ``label`` given, only that well; otherwise every cached well. Writes an
     explicit all-pass column when there is no crop so the chokepoint stays
-    consistent across re-crops. Mirrors ``qc.controller.apply_qc_to_cache``."""
-    region = get_crop_region(app)
-    cache = app._app_state.dataset.cache
+    consistent across re-crops. Mirrors ``qc.controller.apply_qc_to_cache``.
+
+    A8 residuals-ledger R1: takes ``ctx`` — region + row cache from typed state,
+    so the crop projection is a pure ``ctx`` operation the row-fetch data service
+    can call."""
+    region = get_crop_region(ctx)
+    cache = ctx.state.dataset.cache
     labels = [label] if label is not None else list(cache.keys())
     for lbl in labels:
         df = cache.get(lbl)
@@ -50,7 +57,7 @@ def apply_crop_to_cache(app, label: Optional[str] = None) -> None:
 def recompute_crop_all(app) -> None:
     """Re-project ``Crop_Pass`` onto all cached wells and bust the stats cache so
     downstream consumers recompute on the next read."""
-    apply_crop_to_cache(app, None)
+    apply_crop_to_cache(app._ctx, None)
     if hasattr(app, "_invalidate_stats_cache"):
         try:
             app._invalidate_stats_cache()  # clears stats cache + bumps override_version
@@ -133,7 +140,7 @@ def _crop_effect_counts(app):
     """
     from .region import crop_effect_for_df
 
-    region = get_crop_region(app)
+    region = get_crop_region(app._ctx)
     removed = total_incl = n_wells = 0
     has_centroids = False
     for df in app._app_state.dataset.cache.values():

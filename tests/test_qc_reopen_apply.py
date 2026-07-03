@@ -36,6 +36,6 @@ def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
 
     # The bounds must survive the reopen AND actually filter, without the user
     # re-entering anything.
-    p = get_qc_params(app)
+    p = get_qc_params(app._ctx)
     assert p.enabled and p.min_area == 250.0
     assert int(df_included_mask(app._get_rows(well)).sum()) == gated

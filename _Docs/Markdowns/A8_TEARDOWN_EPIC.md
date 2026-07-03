@@ -210,17 +210,45 @@ theme/label/visual regressions). One feature per pass, each green + committed.
 **Remaining 243 → ~5, leaf-first (traced).** The feature `tab_view` counts fall
 only after the shared render graph they call takes `ctx`. Order:
 
-1. **Grouping/colour leaves** → `ctx`: `rank_color_wells` (already app-free) →
-   `sel_color` (only needs `rank_color_wells`) → `rank_color_rset` /
-   `rep_sets_active` (state + those) → `get_all_fluor_gates`
-   (`channel_state_controller`). All convert to pure `ctx.state` + the free
-   colour fn — no render, unit-testable.
-2. **`iter_plot_groups(ctx)`** (`data_loading`): now clean — colour leaves +
-   `get_rows(ctx)` (R1 done) + `ctx.state`.
+1. **Grouping/colour leaves** → `ctx` · **DONE** (commit e9e85bc). The pure logic
+   moved *down* into `domain.selections_model` (`color_for_wells` /
+   `color_for_selection` / `color_for_replicate_set` / `active_replicate_sets`);
+   `sel_color` (core), `rank_color_rset` / `rank_color_wells` (grouping),
+   `rep_sets_active` (barplot) delegate to it and take `ctx`. Locked by
+   `test_iter_plot_groups_ctx`. (`get_all_fluor_gates` is NOT part of this —
+   it bottoms out in cell_gating's loose persisted `_cell_gating_fluor_gate_edits`
+   dict, i.e. a deep R4-style typed-state prerequisite; see step 3 residuals.)
+2. **`iter_plot_groups(ctx)`** (`data_loading`) → `ctx` · **DONE** (e9e85bc):
+   colour leaves + `get_rows(ctx)` (R1) + `ctx.state`, no feature import from the
+   data layer (shared logic lifted to domain — keeps deferred-imports/layering
+   guards green). Vestigial `_color_for_*` override hooks dropped.
 3. **Per-feature renderer + handlers** (one pass each, characterization test +
    smoke flag): distribution **R3** (`redraw_distribution` + `_setup_axes` /
    `_apply_card_style` / `_display_label_for` / `_render_*`) → heatmap **R2**
    (`redraw_heatmap`) → scatter (cells+agg) → barplot → lineplot → multivariate.
+   Now unblocked by steps 1–2, but each still carries a few **shared deep-leaf
+   residuals** to leave documented as `ctx.app.…`: `get_all_fluor_gates`
+   (→ cell_gating typed-state), `apply_export_style_to_current`, and
+   `_on_plot_channel_selected`. (`plot_style.apply_ax_style` / `tokens_for`
+   already take `ax`, not `app` — no work there.)
+
+   **Critical-path finding (measured on distribution).** Converting a render
+   handler *before* these shared leaves is **net-POSITIVE on the ratchet**: e.g.
+   `redraw_distribution(ctx)` drops the single `_on_changed` builder site (−1)
+   but its body then names `ctx.app._get_all_fluor_gates()` **and**
+   `ctx.app` for `apply_export_style_to_current` (+2) → net +1. So the render
+   features must **not** go first. The real next leaves, in order:
+   - **`get_all_fluor_gates` / `get_fluor_gate`** → `ctx`. Blocked like R4: the
+     chain bottoms out in `cell_gating_get_fluor_gate` reading the loose,
+     *persisted* `_cell_gating_fluor_gate_edits` (and `_cell_gating_thresh_frac_edits`
+     for the ThreshFracOn twin). **Prereq = migrate those cell-gating edit dicts
+     to a typed state slice** (an R4-shaped pass), then the gate accessors go
+     pure `ctx.state` and every renderer's fluor-gate residual clears at once.
+   - **`apply_export_style_to_current`** → `ctx` (its own small pass).
+   - **`_on_plot_channel_selected`** and the channel/axis handlers (overlaps T4).
+   Only after these do the per-feature renderers convert **net-negative**. So the
+   next concrete task is the **cell-gating fluor/thresh edits → typed state**
+   migration (call it R6), mirroring R4.
 4. **Non-render controller passes** (low risk, no plot tree): image_table (33),
    cell_gating (28, also A3 domain extract), batch_export, cell_browser,
    registry, saved_plots, review_csv, mv-picker, image_browser, playground.

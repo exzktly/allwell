@@ -113,6 +113,7 @@ def sp_set_viz(ctx, viz: str) -> None:
     if st is None or not viz:
         return
     st.viz = viz
+    _run_registered(ctx, "_sp_sync_summary_visibility")
     sp_recompute(ctx)
 
 

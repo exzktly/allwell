@@ -97,6 +97,13 @@ _VIZ_TOOLTIPS = {
         "with every summary column at once.",
 }
 
+_METRIC_PICKER_TOOLTIP = (
+    "Per-cell CSV column used as the signal in colour maps, radial "
+    "profiles, per-colony violins, and the boundary/interior split.\n"
+    "Any <channel>_<property> intensity / count column, any shape_* "
+    "morphology column, and any user-defined ratio channel is eligible."
+)
+
 _METHOD_ORDER = (
     (sp_state.METHOD_DBSCAN, "DBSCAN"),
     (sp_state.METHOD_SINGLE_LINKAGE, "Single-linkage"),
@@ -160,12 +167,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     r1.addWidget(QLabel("Metric:", row1))
     metric_cb = QComboBox(row1)
     metric_cb.setMinimumWidth(160)
-    metric_cb.setToolTip(
-        "Per-cell CSV column used as the signal in colour maps, radial "
-        "profiles, per-colony violins, and the boundary/interior split.\n"
-        "Any <channel>_<property> intensity / count column, any shape_* "
-        "morphology column, and any user-defined ratio channel is eligible."
-    )
+    metric_cb.setToolTip(_METRIC_PICKER_TOOLTIP)
     metric_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_metric(ctx, metric_cb.currentData() or ""))
     reg.register("_sp_metric_cb", metric_cb)
@@ -182,42 +184,6 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
         lambda _i: sp_ctrl.sp_set_timepoint(ctx, tp_cb.currentData()))
     reg.register("_sp_tp_cb", tp_cb)
     r1.addWidget(tp_cb)
-
-    # Summary-only controls: metric key + display mode. Hidden on other levels.
-    summary_metric_label = QLabel("Summary metric:", row1)
-    r1.addWidget(summary_metric_label)
-    summary_metric_cb = QComboBox(row1)
-    summary_metric_cb.setMinimumWidth(180)
-    for key, label, units in _summary_metric_catalog():
-        summary_metric_cb.addItem(
-            f"{label} ({units})" if units else label, key)
-    _select_combo_by_data(summary_metric_cb, st.summary_metric_key)
-    summary_metric_cb.setToolTip(
-        "Which per-frame scalar to summarise across the (well × timepoint) "
-        "grid. ICC needs a per-cell Metric selected."
-    )
-    summary_metric_cb.currentIndexChanged.connect(
-        lambda _i: sp_ctrl.sp_set_summary_metric(
-            ctx, summary_metric_cb.currentData() or "nnd_median"))
-    reg.register("_sp_summary_metric_cb", summary_metric_cb)
-    r1.addWidget(summary_metric_cb)
-
-    summary_display_label = QLabel("Display:", row1)
-    r1.addWidget(summary_display_label)
-    summary_display_cb = QComboBox(row1)
-    summary_display_cb.addItem("Heatmap", sp_state.SUMMARY_DISPLAY_HEATMAP)
-    summary_display_cb.addItem("Line plot", sp_state.SUMMARY_DISPLAY_LINE)
-    _select_combo_by_data(summary_display_cb, st.summary_display)
-    summary_display_cb.setToolTip(
-        "Heatmap: wells × timepoints matrix, coloured by the summary metric.\n"
-        "Line plot: one line per well, X = timepoint, Y = summary metric."
-    )
-    summary_display_cb.currentIndexChanged.connect(
-        lambda _i: sp_ctrl.sp_set_summary_display(
-            ctx, summary_display_cb.currentData()
-            or sp_state.SUMMARY_DISPLAY_HEATMAP))
-    reg.register("_sp_summary_display_cb", summary_display_cb)
-    r1.addWidget(summary_display_cb)
 
     r1.addStretch(1)
 
@@ -253,20 +219,10 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
 
     layout.addWidget(row1)
 
-    def _sync_summary_only_visibility() -> None:
-        is_summary = st.level == sp_state.LEVEL_SUMMARY
-        summary_metric_label.setVisible(is_summary)
-        summary_metric_cb.setVisible(is_summary)
-        summary_display_label.setVisible(is_summary)
-        summary_display_cb.setVisible(is_summary)
-        export_csv_btn.setEnabled(is_summary)
-        # Single-timepoint picker is meaningless at Summary level (all tps
-        # are walked). Keep it enabled but hint that it's ignored via tooltip.
-        tp_cb.setEnabled(not is_summary)
-    reg.register("_sp_sync_summary_visibility", _sync_summary_only_visibility)
-    _sync_summary_only_visibility()
-
-    # ── row 2: colony detection controls ─────────────────────────────────────
+    # ── row 2: parameters (colony detection + summary display + boundary) ────
+    # Row 2 hosts every parameter control. Groups are shown / hidden based on
+    # what the current (level, viz) actually consumes, so the row never gets
+    # crowded with irrelevant knobs.
     row2 = QWidget(parent)
     row2.setObjectName("TabCtrl")
     r2 = QHBoxLayout(row2)
@@ -349,9 +305,103 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_boundary_spin", bnd_spin)
     r2.addWidget(bnd_spin)
 
+    # A visible spacer between colony-detection and summary-display groups so
+    # they read as separate clusters when both are visible at Summary level.
+    r2.addSpacing(18)
+
+    # Summary-only controls: which FrameSummary field to project + heatmap /
+    # line-plot toggle. Shown only at Summary level, alongside the colony
+    # detection params (which still matter — one DBSCAN per frame).
+    summary_metric_label = QLabel("Summary:", row2)
+    r2.addWidget(summary_metric_label)
+    summary_metric_cb = QComboBox(row2)
+    summary_metric_cb.setMinimumWidth(180)
+    for key, label, units in _summary_metric_catalog():
+        summary_metric_cb.addItem(
+            f"{label} ({units})" if units else label, key)
+    _select_combo_by_data(summary_metric_cb, st.summary_metric_key)
+    summary_metric_cb.setToolTip(
+        "Which per-frame scalar to summarise across the (well × timepoint) "
+        "grid. ICC needs a per-cell Metric selected (row 1)."
+    )
+    summary_metric_cb.currentIndexChanged.connect(
+        lambda _i: sp_ctrl.sp_set_summary_metric(
+            ctx, summary_metric_cb.currentData() or "nnd_median"))
+    reg.register("_sp_summary_metric_cb", summary_metric_cb)
+    r2.addWidget(summary_metric_cb)
+
+    summary_display_label = QLabel("Display:", row2)
+    r2.addWidget(summary_display_label)
+    summary_display_cb = QComboBox(row2)
+    summary_display_cb.addItem("Heatmap", sp_state.SUMMARY_DISPLAY_HEATMAP)
+    summary_display_cb.addItem("Line plot", sp_state.SUMMARY_DISPLAY_LINE)
+    _select_combo_by_data(summary_display_cb, st.summary_display)
+    summary_display_cb.setToolTip(
+        "Heatmap: wells × timepoints matrix, coloured by the summary metric.\n"
+        "Line plot: one line per well, X = timepoint, Y = summary metric."
+    )
+    summary_display_cb.currentIndexChanged.connect(
+        lambda _i: sp_ctrl.sp_set_summary_display(
+            ctx, summary_display_cb.currentData()
+            or sp_state.SUMMARY_DISPLAY_HEATMAP))
+    reg.register("_sp_summary_display_cb", summary_display_cb)
+    r2.addWidget(summary_display_cb)
+
     r2.addStretch(1)
 
     layout.addWidget(row2)
+
+    # ── level / viz visibility sync (colony vs summary vs metric-driven) ─────
+    _colony_widgets = (colonies_label, method_cb, eps_label, eps_spin,
+                        ms_label, ms_spin)
+    _boundary_widgets = (bnd_label, bnd_spin)
+    _summary_widgets = (summary_metric_label, summary_metric_cb,
+                         summary_display_label, summary_display_cb)
+
+    def _sync_visibility() -> None:
+        level = st.level
+        viz = st.viz
+        is_summary = level == sp_state.LEVEL_SUMMARY
+        # Colony detection params drive Colony, Intra-colony, Summary compute
+        # and per-viz colony-consuming vizs at Cell level (currently none, but
+        # keep the option open by keying on level here).
+        show_colonies = level in (sp_state.LEVEL_COLONY, sp_state.LEVEL_INTRA,
+                                   sp_state.LEVEL_SUMMARY)
+        for w in _colony_widgets:
+            w.setVisible(show_colonies)
+        # Boundary % is only meaningful for the boundary-vs-interior split at
+        # Intra-colony level.
+        show_boundary = (level == sp_state.LEVEL_INTRA
+                          and viz == sp_state.VIZ_BOUNDARY_INTERIOR)
+        for w in _boundary_widgets:
+            w.setVisible(show_boundary)
+        # Summary metric + display live in row 2 (used to crowd row 1).
+        for w in _summary_widgets:
+            w.setVisible(is_summary)
+        # Whole row 2 hides when nothing in it applies.
+        row2.setVisible(show_colonies or show_boundary or is_summary)
+
+        # Row 1 tweaks:
+        # - Metric picker is greyed on vizs that don't consume it. Stops the
+        #   tab from promising an effect it can't deliver.
+        metric_enabled = viz not in sp_state.METRIC_IGNORED_VIZS
+        metric_cb.setEnabled(metric_enabled)
+        if metric_enabled:
+            metric_cb.setToolTip(_METRIC_PICKER_TOOLTIP)
+        else:
+            metric_cb.setToolTip(
+                _METRIC_PICKER_TOOLTIP
+                + "\n\n(Disabled: the current visualisation does not use the "
+                "Metric picker — NND histogram / Ripley L / Colony size are "
+                "structural / statistical, not signal.)"
+            )
+        # Single-timepoint picker is meaningless at Summary level (all tps
+        # are walked).
+        tp_cb.setEnabled(not is_summary)
+        export_csv_btn.setEnabled(is_summary)
+
+    reg.register("_sp_sync_summary_visibility", _sync_visibility)
+    _sync_visibility()
 
     # ── the figure ───────────────────────────────────────────────────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)

@@ -44,3 +44,19 @@ def test_spatial_config_round_trip():
     assert b.metric_col == "gfp_mean_intensity"
     assert b.colony_eps_mult == 2.5
     assert b.boundary_pct == 15.0
+
+
+def test_metric_ignored_vizs_cover_expected_set():
+    """The three structural / statistical vizs — NND histogram, Ripley L,
+    and Colony size histogram — do not consume the per-cell Metric picker.
+    Every other viz is metric-driven (spatial map at any level, per-colony
+    distribution, radial profile, boundary/interior, summary panel)."""
+    assert sp_state.VIZ_NND_HISTOGRAM in sp_state.METRIC_IGNORED_VIZS
+    assert sp_state.VIZ_RIPLEY in sp_state.METRIC_IGNORED_VIZS
+    assert sp_state.VIZ_COLONY_SIZE in sp_state.METRIC_IGNORED_VIZS
+    # Metric-driven vizs must NOT be in the set.
+    assert sp_state.VIZ_SPATIAL_MAP not in sp_state.METRIC_IGNORED_VIZS
+    assert sp_state.VIZ_COLONY_METRIC_DIST not in sp_state.METRIC_IGNORED_VIZS
+    assert sp_state.VIZ_RADIAL_PROFILE not in sp_state.METRIC_IGNORED_VIZS
+    assert sp_state.VIZ_BOUNDARY_INTERIOR not in sp_state.METRIC_IGNORED_VIZS
+    assert sp_state.VIZ_SUMMARY_PANEL not in sp_state.METRIC_IGNORED_VIZS

@@ -72,6 +72,34 @@ def test_read_done_fov_keys_from_folder(tmp_path):
         tmp_path / "nope", schema=SCHEMA, sep=SEP) == set()
 
 
+def test_done_keys_accept_parsed_list_schema(tmp_path):
+    """The zip/folder recovery readers must accept schema as an already-parsed
+    list of fields — the form ``process_microscopy`` threads through the worker
+    tasks — not only the colon-delimited string the remote/CLI callers pass.
+
+    Regression: ``str(list).split(":")`` yielded the list's repr (no colons), so
+    fov/timepoint indices were never found and every recovered key collapsed to
+    ('', ''). An incremental run whose CSV was missing then re-segmented every
+    already-done FOV instead of skipping it (test_incremental_e2e's
+    out-zip-without-csv case). The list and string schemas must agree.
+    """
+    schema_list = SCHEMA.split(":")   # what parse_schema()/the pipeline passes
+
+    z = tmp_path / "A01_out.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("exp_NIR_A01_1_T01_labels.tif", b"x")
+        zf.writestr("exp_NIR_A01_2_T01_overlay.png", b"x")
+    assert read_done_fov_keys_from_zip(z, schema=schema_list, sep=SEP) == {
+        ("1", "T01"), ("2", "T01")}
+    assert read_done_fov_keys_from_zip(z, schema=schema_list, sep=SEP) \
+        == read_done_fov_keys_from_zip(z, schema=SCHEMA, sep=SEP)
+
+    d = tmp_path / "A01"
+    d.mkdir()
+    (d / "exp_NIR_A01_1_T01_labels.tif").write_bytes(b"x")
+    assert read_done_fov_keys_from_folder(d, schema=schema_list, sep=SEP) == {("1", "T01")}
+
+
 def test_merge_records_appends_only_new_keys(tmp_path):
     p = tmp_path / "m_A01.csv"
     base = [

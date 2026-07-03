@@ -171,9 +171,15 @@ def test_directory_pipeline_assembles_per_well_csvs(tmp_path, stardist_worker):
     assert all(r["well"] == "A01" for r in rows_a)
     assert all(r["well"] == "B02" for r in rows_b)
 
-    # Per-well output folder produced (staging dir renamed into place).
-    assert (out / "A01").is_dir() and (out / "B02").is_dir()
-    assert any(p.name.endswith("_labels.tif") for p in (out / "A01").iterdir())
+    # Per-well output is compressed to <well>_out.zip (compression is always
+    # on — folder mode zips the staged output folder before returning).
+    import zipfile as _zipfile
+    for well in ("A01", "B02"):
+        out_zip = out / f"{well}_out.zip"
+        assert out_zip.exists() and out_zip.stat().st_size > 0
+        assert not (out / well).exists()  # staging folder consumed by the zip
+    with _zipfile.ZipFile(out / "A01_out.zip") as zf:
+        assert any(n.endswith("_labels.tif") for n in zf.namelist())
 
 
 def test_pipeline_info_sidecar_written(tmp_path, stardist_worker):

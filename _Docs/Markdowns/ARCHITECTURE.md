@@ -950,9 +950,10 @@ fallback.
 Inputs / outputs / contract:
 
 ```
-Input dir (one of)
+Input dir (one of; grouped per 96-well position upstream)
 ├── A01.zip / A02.zip / … H12.zip          ← per-well zip mode (preferred)
-└── flat directory of TIFs                  ← flat (unzipped) mode
+└── A01/ / A02/ / … H12/                    ← per-well folder mode
+                                              (compressed to <well>.zip during the run)
 
 Output dir
 ├── <well>_out.zip                          ← masks + tophat + overlays per well
@@ -1459,7 +1460,7 @@ services.pipeline_service.spawn_pipeline(args) → subprocess.Popen
                          → Analyze tab log view (collapsible, underneath)
 process_microscopy.main()
         ├── per-well loop (ProcessPoolExecutor)
-        │     ├── extract zip → tmp dir
+        │     ├── extract zip (or compress input folder) → tmp dir
         │     ├── segment + quantify
         │     ├── write per-well CSV + image outputs
         │     └── compress to <well>_out.zip

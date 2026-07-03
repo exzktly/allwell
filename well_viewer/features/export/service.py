@@ -260,12 +260,12 @@ def export_plot_data(app) -> None:
     well_labels = _well_labels_map(app)
     include_repset_col = bool(well_to_repset)
 
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app._ctx)
     fc_control_means: dict = {}
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_means = _fc.pts_to_mean_by_t(
             _fc.control_pts_for_line(
-                app, fc_ctrl_lbl, threshold=threshold,
+                app._ctx, fc_ctrl_lbl, threshold=threshold,
                 val_col=app._app_state.channel.active_val_col,
                 fluor_gates=fluor_gates,
             )
@@ -347,7 +347,7 @@ def export_bar_plot_data(app) -> None:
         return
     target_ts = [t for t, _ in tp_list]
     target_t_arg = target_ts[0] if len(target_ts) == 1 else target_ts
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app._ctx)
     fc_active = fc_vs_ctrl or fc_vs_t0
     # Additive CSV: raw values in the standard ``mean_*`` / ``err_*``
     # columns, fold-change values in their own columns. The aggregation

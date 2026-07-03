@@ -1343,7 +1343,7 @@ def _cell_gating_opt_fc_inputs(app, *, channel_key, well_a, well_b, timepoint, r
 
     # vs control — pool the resolved control wells' valid values at this scan tp.
     if ctrl_label and ctrl_label != "—":
-        ctrl_wells = resolve_control_wells(app, ctrl_label)
+        ctrl_wells = resolve_control_wells(app._ctx, ctrl_label)
         chunks = [
             _valid_values_for_channel(app._get_rows(w), channel_key, ratios, timepoint)
             for w in ctrl_wells if w in (app._app_state.dataset.well_paths or {})

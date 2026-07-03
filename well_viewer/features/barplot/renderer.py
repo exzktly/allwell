@@ -64,7 +64,7 @@ def _set_frac_ylim(app, ax_frac) -> None:
     overrides still apply in either case via ``apply_bar_ylims``.
     """
     from well_viewer.domain import fold_change as _fc
-    fc_on, _, fc_t0 = _fc.fold_change_state(app)
+    fc_on, _, fc_t0 = _fc.fold_change_state(app._ctx)
     if fc_on or fc_t0:
         return
     ax_frac.set_ylim(-0.05, 1.05)
@@ -279,7 +279,7 @@ def draw_violin(
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
-    _fc_suffix = _fc.fold_change_suffix_for(app) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(app._ctx) if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{app._app_state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
@@ -433,7 +433,7 @@ def draw_beeswarm(
     from well_viewer.domain import fold_change as _fc
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _thr_q = threshold_qualifier(app._app_state.channel.active_metric)
-    _fc_suffix = _fc.fold_change_suffix_for(app) if cell_scale else ""
+    _fc_suffix = _fc.fold_change_suffix_for(app._ctx) if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
         f"{app._app_state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
@@ -637,7 +637,7 @@ def draw_grouped_bar_mode(
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _metric_key = app._app_state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(app)
+    _fc_suffix = _fc.fold_change_suffix_for(app._ctx)
     _tp_suffix = _format_tp_title(target_ts, tp_str)
     # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
     # when any survive normalization, push the title up so it clears them rather
@@ -718,7 +718,7 @@ def redraw_bars(app) -> None:
     _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
     _metric_key = app._app_state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(app)
+    _fc_suffix = _fc.fold_change_suffix_for(app._ctx)
     apply_ax_style(ax_mean,
                    f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}",
                    f"{_ch} {_metric_label}{_fc_suffix}")
@@ -985,18 +985,18 @@ def draw_per_cell_bar_mode(
     # violin / beeswarm so the overlay applies the SAME operator / order /
     # baseline-tp the bars use (audit S1) and scales each column at its own
     # timepoint instead of collapsing multi-tp selections to the first (S3).
-    _fc_state = _fc.fold_change_state(app)
+    _fc_state = _fc.fold_change_state(app._ctx)
     if _fc_state[0] or _fc_state[2]:
         cell_scale = _fc.build_cell_scaling(
-            app, base_wells, fc_state=_fc_state,
+            app._ctx, base_wells, fc_state=_fc_state,
             threshold=threshold, val_col=app._app_state.channel.active_val_col,
             use_sem=app._app_state.plot.use_sem,
             per_fov_spread=app._use_fov_spread_active(),
             fluor_gates=app._get_all_fluor_gates(),
-            op_ctrl=_fc.parse_fc_op_ctrl(app),
-            op_t0=_fc.parse_fc_op_t0(app),
-            order=_fc.parse_fc_order(app),
-            baseline_tp=_fc.parse_baseline_tp(app),
+            op_ctrl=_fc.parse_fc_op_ctrl(app._ctx),
+            op_t0=_fc.parse_fc_op_t0(app._ctx),
+            order=_fc.parse_fc_order(app._ctx),
+            baseline_tp=_fc.parse_baseline_tp(app._ctx),
         )
     else:
         cell_scale = None

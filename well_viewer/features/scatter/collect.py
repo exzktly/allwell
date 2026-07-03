@@ -397,7 +397,7 @@ def collect_scatter_agg_data(
         """
         if not val_col:
             return float("nan"), 0.0
-        gm, gerr, gf, ferr = well_aggregate_stats(app,
+        gm, gerr, gf, ferr = well_aggregate_stats(app._ctx,
             wells, tp,
             threshold=threshold,
             val_col=val_col,

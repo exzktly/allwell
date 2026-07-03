@@ -111,20 +111,20 @@ def test_unity_plot_spread_reduces_same_replicates_as_stats(loaded_app_multifov)
 
     # Multi-well: plot per-well spread == SD of the stats' per-well values.
     rset = ReplicateSet("R", ["A01", "A02"])
-    reps = group_replicate_stats(app, rset.wells, 0.0, use_fov=True,
+    reps = group_replicate_stats(app._ctx, rset.wells, 0.0, use_fov=True,
                                  val_col=_VAL, threshold=0.0)
     assert len(reps) == 2
-    gm, gerr, _gf, _fe = compute_rep_stats(app, rset, 0.0, 0.0, use_sem=False)
+    gm, gerr, _gf, _fe = compute_rep_stats(app._ctx, rset, 0.0, 0.0, use_sem=False)
     means = np.array([r.mean for r in reps])
     assert np.isclose(gm, means.mean())
     assert np.isclose(gerr, means.std(ddof=1))
 
     # Single well: plot per-FOV spread == SD of the stats' per-FOV values.
     solo = ReplicateSet("S", ["A01"])
-    fov_reps = group_replicate_stats(app, solo.wells, 0.0, use_fov=True,
+    fov_reps = group_replicate_stats(app._ctx, solo.wells, 0.0, use_fov=True,
                                      val_col=_VAL, threshold=0.0)
     assert len(fov_reps) == 3
-    fm, ferr, *_ = compute_rep_per_fov_stats(app, solo, 0.0, 0.0, use_sem=False)
+    fm, ferr, *_ = compute_rep_per_fov_stats(app._ctx, solo, 0.0, 0.0, use_sem=False)
     fmeans = np.array([r.mean for r in fov_reps])
     assert np.isclose(fm, fmeans.mean())
     assert np.isclose(ferr, fmeans.std(ddof=1))

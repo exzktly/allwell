@@ -23,9 +23,11 @@ def _app(use_thresh, gates, choices=None):
     )
     # A8 R-leaf: ``_gate_cache_sig`` now resolves the gate-on flags through
     # ``ctx.runtime`` (which stamps back onto these same app attributes).
+    # ``_gate_cache_sig`` is now ctx-native (A8 residuals): it reads the gate-on
+    # flags through ``ctx.runtime``, so the test passes the ctx, not the app.
     from well_viewer.core.app_runtime import AppRuntime
     app._ctx = types.SimpleNamespace(app=app, runtime=AppRuntime(app))
-    return app
+    return app._ctx
 
 
 def test_none_in_plain_threshold_mode():

@@ -72,7 +72,7 @@ def collect_group_values(
     threshold = float(threshold)
 
     reps = group_replicate_stats(
-        app, grp.wells, target_t, use_fov=use_fov,
+        app._ctx, grp.wells, target_t, use_fov=use_fov,
         val_col=val_col, threshold=threshold,
     )
     out: List[float] = []

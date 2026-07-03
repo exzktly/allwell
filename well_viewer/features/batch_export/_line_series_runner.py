@@ -63,7 +63,7 @@ def collect_line_series_for_group(
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_means = _fc.pts_to_mean_by_t(
             _fc.control_pts_for_line(
-                app, fc_ctrl_lbl, threshold=threshold,
+                app._ctx, fc_ctrl_lbl, threshold=threshold,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
             )

@@ -167,13 +167,13 @@ def collect_bar_items(
     group_mode = getattr(app._app_state.plot, "bar_group_mode", "well")
 
     if fc_state is None:
-        fc_state = _fc.fold_change_state(app)
+        fc_state = _fc.fold_change_state(app._ctx)
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
     if fc_baseline_tp is None:
-        fc_baseline_tp = _fc.parse_baseline_tp(app)
-    fc_op_ctrl = _fc.parse_fc_op_ctrl(app)
-    fc_op_t0 = _fc.parse_fc_op_t0(app)
-    fc_order = _fc.parse_fc_order(app)
+        fc_baseline_tp = _fc.parse_baseline_tp(app._ctx)
+    fc_op_ctrl = _fc.parse_fc_op_ctrl(app._ctx)
+    fc_op_t0 = _fc.parse_fc_op_t0(app._ctx)
+    fc_order = _fc.parse_fc_order(app._ctx)
     fluor_gates = app._get_all_fluor_gates()
     per_fov_spread = app._use_fov_spread_active()
 
@@ -197,7 +197,7 @@ def collect_bar_items(
         fc_control_n_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             ctrl_stats = _fc.control_stats_at_for_bar(
-                app, fc_ctrl_lbl, target_t,
+                app._ctx, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=app._app_state.channel.active_val_col,
                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                 fluor_gates=fluor_gates,
@@ -208,7 +208,7 @@ def collect_bar_items(
             else:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
             ctrl_frac = _fc.control_frac_at_for_bar(
-                app, fc_ctrl_lbl, target_t,
+                app._ctx, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=app._app_state.channel.active_val_col,
                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                 fluor_gates=fluor_gates,
@@ -216,7 +216,7 @@ def collect_bar_items(
             if ctrl_frac is not None:
                 fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac
             ctrl_n = _fc.control_n_at_for_bar(
-                app, fc_ctrl_lbl, target_t,
+                app._ctx, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=app._app_state.channel.active_val_col,
                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                 fluor_gates=fluor_gates,
@@ -254,17 +254,17 @@ def collect_bar_items(
                 rset_per_fov = replicate_unit(n_loaded, per_fov_spread) == "fov"
                 if rset_per_fov:
                     gm, g_err_m, gf, g_err_f, n_above_pf_mean, n_above_pf_spread = (
-                        compute_rep_per_fov_stats(app, rset, target_t, threshold, use_sem)
+                        compute_rep_per_fov_stats(app._ctx, rset, target_t, threshold, use_sem)
                     )
                     n_above_val = float(n_above_pf_mean)
                     n_above_err = float(n_above_pf_spread)
                 else:
-                    gm, g_err_m, gf, g_err_f = compute_rep_stats(app, rset, target_t, threshold, use_sem)
+                    gm, g_err_m, gf, g_err_f = compute_rep_stats(app._ctx, rset, target_t, threshold, use_sem)
                     # Events panel: per-well mean ± cross-well spread (replicate
                     # error bars), consistent with the Mean/Fraction panels —
                     # rather than a spread-less total.
                     n_above_val, n_above_err = compute_rep_n_above_stats(
-                        app, rset, target_t, use_sem)
+                        app._ctx, rset, target_t, use_sem)
                 t0_mean = None
                 t0_spread = None
                 t0_frac = None
@@ -283,7 +283,7 @@ def collect_bar_items(
                 eff_ctrl_n_spread = fc_control_n_spread_at_t
                 if fc_vs_t0:
                     stats = _fc.member_first_tp_stats_resolved(
-                        app, rset.name,
+                        app._ctx, rset.name,
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=rset_per_fov,
                         fluor_gates=fluor_gates,
@@ -296,7 +296,7 @@ def collect_bar_items(
                         # t0_first:   control denom becomes post-t0 control.
                         if fc_vs_ctrl and fc_ctrl_lbl:
                             ctrl_b = _fc.control_stats_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp,
+                                app._ctx, fc_ctrl_lbl, resolved_tp,
                                 threshold=threshold,
                                 val_col=app._app_state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -314,7 +314,7 @@ def collect_bar_items(
                                         ctrl_b[0], ctrl_b[1], fc_op_ctrl,
                                     )
                     fstats = _fc.member_first_tp_frac_resolved(
-                        app, rset.name,
+                        app._ctx, rset.name,
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
                         fluor_gates=fluor_gates,
@@ -324,7 +324,7 @@ def collect_bar_items(
                         resolved_tp_f, t0_frac, t0_frac_spread = fstats
                         if fc_vs_ctrl and fc_ctrl_lbl:
                             ctrl_bf = _fc.control_frac_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_f,
+                                app._ctx, fc_ctrl_lbl, resolved_tp_f,
                                 threshold=threshold,
                                 val_col=app._app_state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -342,7 +342,7 @@ def collect_bar_items(
                                         ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
                                     )
                     nstats = _fc.member_first_tp_n_resolved(
-                        app, rset.name,
+                        app._ctx, rset.name,
                         threshold=threshold, val_col=app._app_state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
                         fluor_gates=fluor_gates,
@@ -352,7 +352,7 @@ def collect_bar_items(
                         resolved_tp_n, t0_n, t0_n_spread = nstats
                         if fc_vs_ctrl and fc_ctrl_lbl:
                             ctrl_bn = _fc.control_n_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_n,
+                                app._ctx, fc_ctrl_lbl, resolved_tp_n,
                                 threshold=threshold,
                                 val_col=app._app_state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -502,7 +502,7 @@ def collect_bar_items(
                         # Cross-axis stacking: ctrl_first → adjust t0 denom; t0_first → adjust control denom.
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp is not None and t0_mean is not None:
                             ctrl_b = _fc.control_stats_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp,
+                                app._ctx, fc_ctrl_lbl, resolved_tp,
                                 threshold=threshold,
                                 val_col=app._app_state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -521,7 +521,7 @@ def collect_bar_items(
                                     )
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_f is not None and t0_frac is not None:
                             ctrl_bf = _fc.control_frac_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_f,
+                                app._ctx, fc_ctrl_lbl, resolved_tp_f,
                                 threshold=threshold,
                                 val_col=app._app_state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -540,7 +540,7 @@ def collect_bar_items(
                                     )
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_n is not None and t0_n is not None:
                             ctrl_bn = _fc.control_n_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_n,
+                                app._ctx, fc_ctrl_lbl, resolved_tp_n,
                                 threshold=threshold,
                                 val_col=app._app_state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
@@ -696,14 +696,14 @@ def collect_bar_items_for_group(
         fc_control_frac_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             ctrl_stats = _fc.control_stats_at(
-                app, fc_ctrl_lbl, target_t,
+                app._ctx, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=val_col,
                 fluor_gates=fluor_gates,
             )
             if ctrl_stats is not None:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
             ctrl_pts = _fc.control_pts_for_line(
-                app, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
+                app._ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
                 fluor_gates=fluor_gates,
             )
             if ctrl_pts:

@@ -28,7 +28,7 @@ def _app(n_above_by_well: dict, t: float = 24.0) -> MockApp:
 def test_n_above_stats_mean_and_sd_across_wells():
     app = _app({"A01": 4, "A02": 6, "A03": 8})
     rset = ReplicateSet("R", ["A01", "A02", "A03"])
-    mean, spread = compute_rep_n_above_stats(app, rset, 24.0, use_sem=False)
+    mean, spread = compute_rep_n_above_stats(app._ctx, rset, 24.0, use_sem=False)
     assert mean == 6.0
     # ddof=1 SD of {4,6,8} = 2.0
     assert math.isclose(spread, 2.0, rel_tol=1e-9)
@@ -37,15 +37,15 @@ def test_n_above_stats_mean_and_sd_across_wells():
 def test_n_above_stats_sem_scales_sd():
     app = _app({"A01": 4, "A02": 6, "A03": 8})
     rset = ReplicateSet("R", ["A01", "A02", "A03"])
-    _mean, sd = compute_rep_n_above_stats(app, rset, 24.0, use_sem=False)
-    _mean2, sem = compute_rep_n_above_stats(app, rset, 24.0, use_sem=True)
+    _mean, sd = compute_rep_n_above_stats(app._ctx, rset, 24.0, use_sem=False)
+    _mean2, sem = compute_rep_n_above_stats(app._ctx, rset, 24.0, use_sem=True)
     assert math.isclose(sem, sd / math.sqrt(3), rel_tol=1e-9)
 
 
 def test_n_above_stats_single_well_zero_spread():
     app = _app({"A01": 7})
     rset = ReplicateSet("R", ["A01"])
-    mean, spread = compute_rep_n_above_stats(app, rset, 24.0, use_sem=False)
+    mean, spread = compute_rep_n_above_stats(app._ctx, rset, 24.0, use_sem=False)
     assert mean == 7.0
     assert spread == 0.0
 
@@ -53,7 +53,7 @@ def test_n_above_stats_single_well_zero_spread():
 def test_n_above_stats_empty_is_zero():
     app = _app({"A01": 5})
     rset = ReplicateSet("R", ["NOPE"])  # not in well_paths
-    mean, spread = compute_rep_n_above_stats(app, rset, 24.0, use_sem=False)
+    mean, spread = compute_rep_n_above_stats(app._ctx, rset, 24.0, use_sem=False)
     assert mean == 0.0 and spread == 0.0
 
 

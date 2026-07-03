@@ -1438,7 +1438,7 @@ class BatchExportPanel(QWidget):
                 if fc_vs_ctrl and fc_ctrl_lbl:
                     fc_control_means = _fc.pts_to_mean_by_t(
                         _fc.control_pts_for_line(
-                            self._app, fc_ctrl_lbl, threshold=threshold,
+                            self._app._ctx, fc_ctrl_lbl, threshold=threshold,
                             val_col=_val_col,
                             fluor_gates=_fluor_gates,
                         )

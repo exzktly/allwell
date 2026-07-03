@@ -191,12 +191,12 @@ def collect_line_series(
     band_lbl = "SEM" if use_sem else "SD"
 
     if fc_state is None:
-        fc_state = _fc.fold_change_state(app)
+        fc_state = _fc.fold_change_state(app._ctx)
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
     if fc_baseline_tp is None:
-        fc_baseline_tp = _fc.parse_baseline_tp(app)
-    fc_op_ctrl = _fc.parse_fc_op_ctrl(app)
-    fc_op_t0 = _fc.parse_fc_op_t0(app)
+        fc_baseline_tp = _fc.parse_baseline_tp(app._ctx)
+    fc_op_ctrl = _fc.parse_fc_op_ctrl(app._ctx)
+    fc_op_t0 = _fc.parse_fc_op_t0(app._ctx)
     if val_col is None:
         val_col = app._app_state.channel.active_val_col
 
@@ -217,19 +217,19 @@ def collect_line_series(
     fc_n_per_fov = bool(rep_per_fov or per_fov_spread)
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_stats = _fc.member_stats_series(
-            app, fc_ctrl_lbl,
+            app._ctx, fc_ctrl_lbl,
             threshold=threshold, val_col=val_col,
             use_sem=use_sem, per_fov_spread=fc_n_per_fov,
             fluor_gates=fluor_gates,
         )
         fc_control_frac_stats = _fc.member_frac_stats_series(
-            app, fc_ctrl_lbl,
+            app._ctx, fc_ctrl_lbl,
             threshold=threshold, val_col=val_col,
             use_sem=use_sem, per_fov_spread=fc_n_per_fov,
             fluor_gates=fluor_gates,
         )
         fc_control_n_stats = _fc.member_n_stats_series(
-            app, fc_ctrl_lbl,
+            app._ctx, fc_ctrl_lbl,
             threshold=threshold, val_col=val_col,
             per_fov_spread=fc_n_per_fov,
             fluor_gates=fluor_gates,
@@ -268,15 +268,15 @@ def collect_line_series(
             _raw_pts: list = []
             for t in sorted(all_tps):
                 if rset_per_fov:
-                    gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(app,
+                    gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(app._ctx,
                         rset, t, threshold, use_sem,
                     )
                 else:
-                    gm, gerr, gf, _ = compute_rep_stats(app,
+                    gm, gerr, gf, _ = compute_rep_stats(app._ctx,
                         rset, t, threshold, use_sem,
                     )
                     # compute_rep_n_above reads threshold from app state internally
-                    _n_above_val = compute_rep_n_above(app, rset, t)
+                    _n_above_val = compute_rep_n_above(app._ctx, rset, t)
                     gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
                 if not (isinstance(gm, float) and math.isnan(gm)):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
@@ -536,7 +536,7 @@ def redraw_line_plots(
     # control-series resolution + per-trace normalization happens inside
     # ``collect_line_series`` (single source of truth, mirrors the
     # bar plot's ``collect_bar_items``).
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app._ctx)
     fc_misses: set = set()
     # Theme-aware chrome colors (track the active PlotCard's Publication/Screen
     # state) — the renderer's *trace* colours stay rank-based.
@@ -548,7 +548,7 @@ def redraw_line_plots(
     legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none", edgecolor=_spine, labelcolor=_title_fg)
 
     _ch = app._app_state.channel.active_channel.upper()
-    _fc_suffix = _fc.fold_change_suffix_for(app)
+    _fc_suffix = _fc.fold_change_suffix_for(app._ctx)
     from well_viewer.data.metric_labels import threshold_qualifier, fraction_title, events_per_fov_title, events_total_title
     _thr_q = threshold_qualifier(app._app_state.channel.active_metric)
     apply_ax_style(app._line_ax_mean, f"{_ch} {metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}", metric_label + _fc_suffix)

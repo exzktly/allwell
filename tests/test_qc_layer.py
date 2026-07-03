@@ -113,11 +113,11 @@ def test_df_included_mask_qc_only_when_included_absent():
 
 # ── controller projection ─────────────────────────────────────────────────────
 def _fake_app(cache, pipeline_info=None, params=None):
+    from well_viewer.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(cache=cache, pipeline_info=pipeline_info))
-    if params is not None:
-        app._qc_params = params
+        dataset=SimpleNamespace(cache=cache, pipeline_info=pipeline_info),
+        qc=QcState(params=params))
     return app
 
 
@@ -133,8 +133,8 @@ def test_get_qc_params_lazy_seeds_from_pipeline_info():
     app = _fake_app({}, pipeline_info={"qc_options": {"remove_debris": True, "min_area": 15}})
     p = qc.get_qc_params(app)
     assert p.enabled and p.min_area == 15
-    # cached on the app afterwards
-    assert app._qc_params is p
+    # cached on the typed QC state afterwards
+    assert app._app_state.qc.params is p
 
 
 def test_qc_excluded_count_preview_params():
@@ -186,10 +186,11 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
         build_qc_gate_controls, qc_gate_refresh_widgets,
     )
 
+    from well_viewer.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}))
-    app._qc_params = QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)
+        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
+        qc=QcState(params=QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)))
 
     parent = QWidget()
     qtbot.addWidget(parent)
@@ -201,7 +202,7 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     assert w["min_circularity"].text() == "0.5"
     assert w["max_circularity"].text() == "0.95"
 
-    app._qc_params = QCParams(enabled=True, min_circularity=0.7)
+    app._app_state.qc.params = QCParams(enabled=True, min_circularity=0.7)
     qc_gate_refresh_widgets(app)
     assert w["min_circularity"].text() == "0.7"
     assert w["max_circularity"].text() == ""   # unset → blank

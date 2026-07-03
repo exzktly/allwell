@@ -12,14 +12,15 @@ from well_viewer.features.qc.params import QCParams
 
 
 def _app(tmp_path, pipeline_info=None):
+    from well_viewer.core.qc_state import QcState
     ds = SimpleNamespace(data_dir=tmp_path, persistence_doc=None,
                          pipeline_info=pipeline_info or {})
-    return SimpleNamespace(_app_state=SimpleNamespace(dataset=ds))
+    return SimpleNamespace(_app_state=SimpleNamespace(dataset=ds, qc=QcState()))
 
 
 def test_saves_into_persistence_json_not_a_sidecar(tmp_path):
     app = _app(tmp_path)
-    app._qc_params = QCParams(enabled=True, min_area=20, min_solidity=0.8)
+    app._app_state.qc.params = QCParams(enabled=True, min_area=20, min_solidity=0.8)
     qc_params.save_to_data_dir(app)
     pj = json.loads((tmp_path / "persistence.json").read_text())
     assert pj["qc_params"]["min_area"] == 20 and pj["qc_params"]["enabled"] is True
@@ -28,11 +29,11 @@ def test_saves_into_persistence_json_not_a_sidecar(tmp_path):
 
 def test_round_trips_through_the_section(tmp_path):
     app = _app(tmp_path)
-    app._qc_params = QCParams(enabled=True, min_area=33)
+    app._app_state.qc.params = QCParams(enabled=True, min_area=33)
     qc_params.save_to_data_dir(app)
     app2 = _app(tmp_path)                                    # fresh cache
     qc_params.load_from_data_dir(app2)
-    assert app2._qc_params.min_area == 33 and app2._qc_params.enabled
+    assert app2._app_state.qc.params.min_area == 33 and app2._app_state.qc.params.enabled
 
 
 def test_legacy_sidecar_is_absorbed_then_deleted(tmp_path):
@@ -41,7 +42,7 @@ def test_legacy_sidecar_is_absorbed_then_deleted(tmp_path):
         {"schema_version": 1, "qc_params": {"enabled": True, "min_area": 42}}))
     app = _app(tmp_path)
     qc_params.load_from_data_dir(app)
-    assert app._qc_params.min_area == 42 and app._qc_params.enabled
+    assert app._app_state.qc.params.min_area == 42 and app._app_state.qc.params.enabled
     # migrated into persistence.json and the legacy file removed
     assert not (tmp_path / "qc_params.json").exists()
     pj = json.loads((tmp_path / "persistence.json").read_text())
@@ -58,9 +59,9 @@ def test_no_persisted_state_clears_then_controller_seeds(tmp_path):
 
     app = _app(tmp_path, pipeline_info={"qc_options": {"remove_debris": True,
                                                        "min_area": 15}})
-    app._qc_params = QCParams(enabled=True, min_area=999)  # stale, from a prior dataset
+    app._app_state.qc.params = QCParams(enabled=True, min_area=999)  # stale, from a prior dataset
     qc_params.load_from_data_dir(app)
-    assert app._qc_params is None                          # persistence cleared it
+    assert app._app_state.qc.params is None                          # persistence cleared it
     seeded = get_qc_params(app)                            # controller seeds lazily
     assert seeded.enabled and seeded.min_area == 15
     # seeding alone doesn't write a file

@@ -21,13 +21,17 @@ _logger = logging.getLogger("well_viewer")
 
 def get_qc_params(app) -> QCParams:
     """Current QC thresholds, lazily seeded from the dataset's ``pipeline_info``
-    on first access so the view opens with the run's settings."""
-    params = getattr(app, "_qc_params", None)
-    if params is None:
+    on first access so the view opens with the run's settings.
+
+    A8 residuals-ledger R4: the thresholds live on the typed ``QcState`` slice
+    (``app._app_state.qc.params``) rather than a loose ``_qc_params`` attribute,
+    so this reads/seeds pure typed state — the prerequisite for a ctx-based
+    row-fetch data service."""
+    qc = app._app_state.qc
+    if qc.params is None:
         info = getattr(app._app_state.dataset, "pipeline_info", None)
-        params = QCParams.from_pipeline_info(info)
-        app._qc_params = params
-    return params
+        qc.params = QCParams.from_pipeline_info(info)
+    return qc.params
 
 
 def apply_qc_to_cache(app, label: Optional[str] = None) -> None:
@@ -63,7 +67,7 @@ def recompute_qc_all(app) -> None:
 def set_qc_params(app, params: QCParams) -> None:
     """Install new thresholds, recompute the verdict everywhere, persist, and
     re-render the active view so the change is immediately visible."""
-    app._qc_params = params
+    app._app_state.qc.params = params
     recompute_qc_all(app)
     if getattr(app, "_persistence", None) is not None:
         try:

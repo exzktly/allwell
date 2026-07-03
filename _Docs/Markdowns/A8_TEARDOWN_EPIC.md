@@ -222,15 +222,36 @@ only after the shared render graph they call takes `ctx`. Order:
    colour leaves + `get_rows(ctx)` (R1) + `ctx.state`, no feature import from the
    data layer (shared logic lifted to domain — keeps deferred-imports/layering
    guards green). Vestigial `_color_for_*` override hooks dropped.
-3. **Per-feature renderer + handlers** (one pass each, characterization test +
-   smoke flag): distribution **R3** (`redraw_distribution` + `_setup_axes` /
-   `_apply_card_style` / `_display_label_for` / `_render_*`) → heatmap **R2**
-   (`redraw_heatmap`) → scatter (cells+agg) → barplot → lineplot → multivariate.
-   Now unblocked by steps 1–2, but each still carries a few **shared deep-leaf
-   residuals** to leave documented as `ctx.app.…`: `get_all_fluor_gates`
-   (→ cell_gating typed-state), `apply_export_style_to_current`, and
-   `_on_plot_channel_selected`. (`plot_style.apply_ax_style` / `tokens_for`
-   already take `ax`, not `app` — no work there.)
+2a. **Shared render leaves → `ctx`** (post-R6/R7 all pure state) · **DONE**:
+   - `get_all_fluor_gates` / `get_fluor_gate` + the cell-gating gate accessors
+     (`cell_gating_get_fluor_gate` / `_thresh_frac_on` / `_cell_gating_resolve_key`)
+     — commit fe88f14 (unblocked by R6).
+   - the export-style chain (`_ensure_export_style_prefs` / `_ensure_axis_prefs_store`
+     / `figure_pref_key` [via `ctx.widgets`] / `figure_prefs` /
+     `apply_export_style_to_current`) — commit 5c8d8a1 (unblocked by R7).
+
+2b. **Label/threshold leaf tier → `ctx`** · **NEXT** (the newly-measured blocker).
+   A render redraw still bottoms into these god-methods; until they take `ctx`,
+   converting a renderer is **net-POSITIVE** (measured on distribution:
+   `redraw_distribution(ctx)` would add ~6 `ctx.app` residuals — one each for the
+   leaves below — while dropping only the single `_on_changed` builder site):
+   - `active_channel_label` (→ its own sub-leaf `_ratio_label_for`),
+   - `get_thresh_frac_on` (the `_get_thresh_frac_on` twin of the fluor accessor;
+     careful — its "tab-not-built" guard falls back to `channel.threshold`, a
+     *different* default from the slice's 50.0, so the guard's semantics must be
+     preserved, not dropped),
+   - `_well_display_label` and `replicate_display_label` (+ `_display_label_for`
+     which composes them).
+   Convert this tier (state + the already-ctx `rep_sets_active`) first; then the
+   per-feature renderers finally convert **net-negative**.
+
+3. **Per-feature renderer + handlers** (one pass each, characterization test on
+   the data path + **paint** smoke flag — paint is the only genuinely
+   headless-unverifiable part): distribution **R3** (`redraw_distribution` +
+   `_setup_axes` / `_apply_card_style` / `_display_label_for` / `_render_*`) →
+   heatmap **R2** (`redraw_heatmap`) → scatter (cells+agg) → barplot → lineplot →
+   multivariate. (`plot_style.apply_ax_style` / `tokens_for` already take `ax` —
+   no work there.)
 
    **Critical-path finding (measured on distribution).** Converting a render
    handler *before* these shared leaves is **net-POSITIVE on the ratchet**: e.g.

@@ -942,7 +942,7 @@ class ExportStyleSidebar(QWidget):
             tab = ""
         try:
             if tab == "Bar Plots":
-                redraw_bars(app)
+                redraw_bars(app._ctx)
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
                 scatter_redraw_active(app)
@@ -1193,7 +1193,7 @@ class ExportStyleSidebar(QWidget):
                 app._redraw()
                 return
             if getattr(app, "_bar_fig", None) is self._fig:
-                redraw_bars(app)
+                redraw_bars(app._ctx)
                 return
             if getattr(app, "_scatter_fig", None) is self._fig:
                 redraw_scatter_orchestrate(app)

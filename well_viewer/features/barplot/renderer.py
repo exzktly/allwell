@@ -1,11 +1,19 @@
 """Bar/violin/beeswarm matplotlib drawing.
 
 Extracted from ``WellViewerApp`` so the GUI class no longer owns plot
-rendering. Each function takes ``app`` (WellViewerApp) for state access plus
+rendering. Each function takes ``ctx`` (WellViewerApp) for state access plus
 the matplotlib axes to draw into.
 """
 
 from __future__ import annotations
+
+from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
+from well_viewer.features.barplot.collect import collect_bar_items_for_app
+
+from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
+from well_viewer.core.channel_state_controller import get_all_fluor_gates, get_thresh_frac_on
+from well_viewer.data.data_loading import get_rows
+from well_viewer.domain.viewer_state import parse_rc
 
 import logging
 import math
@@ -53,7 +61,7 @@ import numpy as np
 import pandas as pd
 
 
-def _set_frac_ylim(app, ax_frac) -> None:
+def _set_frac_ylim(ctx, ax_frac) -> None:
     """Clamp the OnFraction panel to [0, 1] unless fold-change is on.
 
     Raw fractions are bounded so the clamp is a sensible default — without
@@ -64,7 +72,7 @@ def _set_frac_ylim(app, ax_frac) -> None:
     overrides still apply in either case via ``apply_bar_ylims``.
     """
     from well_viewer.domain import fold_change as _fc
-    fc_on, _, fc_t0 = _fc.fold_change_state(app._ctx)
+    fc_on, _, fc_t0 = _fc.fold_change_state(ctx)
     if fc_on or fc_t0:
         return
     ax_frac.set_ylim(-0.05, 1.05)
@@ -91,20 +99,20 @@ NO_SELECTION_MSG = (
 )
 
 
-def _pooled_rows(app, lbl: str, pool_groups: Optional[Dict[str, List[str]]]):
+def _pooled_rows(ctx, lbl: str, pool_groups: Optional[Dict[str, List[str]]]):
     """Return cells for ``lbl``. When ``pool_groups[lbl]`` exists, concat
     the per-well DataFrames of every well in the group; otherwise just
-    return ``app._get_rows(lbl)`` unchanged."""
+    return ``get_rows(ctx, lbl)`` unchanged."""
     if pool_groups is not None and lbl in pool_groups:
         frames = []
         for w in pool_groups[lbl]:
-            sub = app._get_rows(w)
+            sub = get_rows(ctx, w)
             if sub is not None and not sub.empty:
                 frames.append(sub)
         if not frames:
             return None
         return pd.concat(frames, ignore_index=True)
-    return app._get_rows(lbl)
+    return get_rows(ctx, lbl)
 
 
 def _format_tp_title(target_ts: List[float], tp_str: str) -> str:
@@ -117,7 +125,7 @@ def _format_tp_title(target_ts: List[float], tp_str: str) -> str:
 
 
 def draw_violin(
-    app,
+    ctx,
     ax_mean,
     ax_frac,
     wells: List[str],
@@ -157,7 +165,7 @@ def draw_violin(
 
     n = len(wells)
     if bw is None:
-        slider = getattr(app, "_violin_slider", None)
+        slider = getattr(ctx, "_violin_slider", None)
         bw_raw = float(slider.value()) / 100.0 if slider is not None else 1.0
         bw = max(0.05, bw_raw)
     else:
@@ -171,11 +179,11 @@ def draw_violin(
     else:
         target_ts_per_col = [float(target_t)] * n
     frac_vals: List[float] = []
-    ratios = app._app_state.channel.ratio_index
+    ratios = ctx.state.channel.ratio_index
 
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
-        df = _pooled_rows(app, lbl, pool_groups)
+        df = _pooled_rows(ctx, lbl, pool_groups)
         vals = np.empty(0, dtype=float)
         n_total = n_above = 0
         if df is not None and not df.empty and "timepoint_hours" in df.columns:
@@ -183,7 +191,7 @@ def draw_violin(
             tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & (np.abs(tp - col_tp) <= 1e-6)
-            v = resolve_value_series(df, app._app_state.channel.active_val_col, ratios).to_numpy()
+            v = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
             mask &= np.isfinite(v)
             v_sel = v[mask]
             n_total = int(v_sel.size)
@@ -244,7 +252,7 @@ def draw_violin(
             ax_frac.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
                             marker="x", zorder=3, linewidths=1)
 
-    if getattr(app._app_state.plot, "show_threshold_line", False):
+    if getattr(ctx.state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=BORDER, lw=0.8, ls="--", alpha=0.5, zorder=1)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6
     xlim_hi = (max(xs) + 0.6) if xs else 0.4
@@ -274,24 +282,24 @@ def draw_violin(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    _set_frac_ylim(app, ax_frac)
+    _set_frac_ylim(ctx, ax_frac)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
-    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
-    _fc_suffix = _fc.fold_change_suffix_for(app._ctx) if cell_scale else ""
+    _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
+    _fc_suffix = _fc.fold_change_suffix_for(ctx) if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
-        f"{app._app_state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
+        f"{ctx.state.channel.active_channel.upper()} {_metric_label} distribution (violin, bw={bw:.2f}){_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
-    ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"{fraction_title(app._app_state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
+        f"{fraction_title(ctx.state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
 def draw_beeswarm(
-    app,
+    ctx,
     ax_mean,
     ax_frac,
     wells: List[str],
@@ -323,12 +331,12 @@ def draw_beeswarm(
     else:
         target_ts_per_col = [float(target_t)] * n
     bar_w = min(0.35, 3.0 / max(n, 1))
-    ratios = app._app_state.channel.ratio_index
+    ratios = ctx.state.channel.ratio_index
 
     for i, (lbl, color) in enumerate(zip(wells, colors)):
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
         xi = xs[i] if i < len(xs) else i
-        df = _pooled_rows(app, lbl, pool_groups)
+        df = _pooled_rows(ctx, lbl, pool_groups)
         cell_vals = np.empty(0, dtype=float)
         frac_val: Optional[float] = None
         if df is not None and not df.empty:
@@ -344,7 +352,7 @@ def draw_beeswarm(
                 tp[need] = fallback.fillna(np.nan).to_numpy(dtype=float)
             with np.errstate(invalid="ignore"):
                 mask &= np.isfinite(tp) & (np.abs(tp - col_tp) <= 1e-6)
-            val = resolve_value_series(df, app._app_state.channel.active_val_col, ratios).to_numpy()
+            val = resolve_value_series(df, ctx.state.channel.active_val_col, ratios).to_numpy()
             mask &= np.isfinite(val)
             v_sel = val[mask]
             n_total = int(v_sel.size)
@@ -394,7 +402,7 @@ def draw_beeswarm(
             ax_frac.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
                             marker="x", zorder=3, linewidths=1)
 
-    if getattr(app._app_state.plot, "show_threshold_line", False):
+    if getattr(ctx.state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=BORDER, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6
@@ -424,23 +432,23 @@ def draw_beeswarm(
             cx = sum(positions) / len(positions)
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
-    _set_frac_ylim(app, ax_frac)
+    _set_frac_ylim(ctx, ax_frac)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import (
         METRIC_KEY_TO_LABEL as _MLB,
         threshold_qualifier, fraction_title,
     )
     from well_viewer.domain import fold_change as _fc
-    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
-    _thr_q = threshold_qualifier(app._app_state.channel.active_metric)
-    _fc_suffix = _fc.fold_change_suffix_for(app._ctx) if cell_scale else ""
+    _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
+    _thr_q = threshold_qualifier(ctx.state.channel.active_metric)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx) if cell_scale else ""
     _tp_suffix = _format_tp_title(target_ts_per_col, tp_str)
     ax_mean.set_title(
-        f"{app._app_state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
+        f"{ctx.state.channel.active_channel.upper()} {_metric_label} per cell{_thr_q}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_mean)[1], fontsize=9, fontweight="bold", pad=6)
-    ax_mean.set_ylabel(f"{app._app_state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
+    ax_mean.set_ylabel(f"{ctx.state.channel.active_channel.upper()} {_metric_label}{_fc_suffix}", fontsize=8, labelpad=5)
     ax_frac.set_title(
-        f"{fraction_title(app._app_state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
+        f"{fraction_title(ctx.state.channel.active_metric)}{_fc_suffix}  —  {_tp_suffix}",
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6)
 
 
@@ -455,7 +463,7 @@ def _significance_marker(p: float) -> str:
     return "ns"
 
 
-def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
+def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
                                target_ts=None) -> None:
     """Draw significance brackets from the Statistics tab's pairwise results (N7).
 
@@ -474,9 +482,9 @@ def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
     pairs that don't line up with the current bars are skipped (with a status
     hint). The BH-adjusted p drives the asterisk where available. No-op in
     per-cell mode (this is only called from the aggregate bar path)."""
-    if not getattr(app._app_state.plot, "show_significance", False):
+    if not getattr(ctx.state.plot, "show_significance", False):
         return
-    pairwise = list(getattr(app._app_state.stats, "pairwise", []) or [])
+    pairwise = list(getattr(ctx.state.stats, "pairwise", []) or [])
     if not pairwise:
         return
     rec0 = pairwise[0]
@@ -485,7 +493,7 @@ def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
     # context keys are not gated (drawn as before).
     rec_val_col = rec0.get("val_col")
     if rec_val_col is not None:
-        cur_val_col = str(getattr(app._app_state.channel, "active_val_col", "") or "")
+        cur_val_col = str(getattr(ctx.state.channel, "active_val_col", "") or "")
         if str(rec_val_col) != cur_val_col:
             return
     rec_tp = rec0.get("target_t")
@@ -504,8 +512,8 @@ def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
         ax, val_attr, spread_attr, has_attr = ax_mean, "mean", "spread", "has_mean"
     if ax is None:
         return
-    keys = list(getattr(app, "_bar_xs_keys", []) or [])
-    xs = list(getattr(app, "_bar_xs", []) or [])
+    keys = list(getattr(ctx.runtime.barplot, "xs_keys", []) or [])
+    xs = list(getattr(ctx.runtime.barplot, "xs", []) or [])
     if not keys or len(keys) != len(xs):
         return
     x_by_key = {k: xs[i] for i, k in enumerate(keys)}
@@ -522,8 +530,8 @@ def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
     # WELLS match so a comparison still lands on the right bar when the
     # Statistics group and the bar's replicate set are named differently.
     wells_to_key: Dict[frozenset, str] = {}
-    get_active = getattr(app, "_rep_sets_active", None)
-    for rset in (get_active() if callable(get_active) else []):
+    for rset in active_replicate_sets(ctx.state.selection.selections,
+                                      ctx.state.dataset.well_paths):
         fw = frozenset(getattr(rset, "wells", []) or [])
         if fw:
             wells_to_key.setdefault(fw, rset.name)
@@ -547,7 +555,7 @@ def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
         # Significance is on and a test has run, but no comparison lines up with
         # the current bars (e.g. per-well bars, or groups spanning several bars).
         # Say so rather than silently drawing nothing.
-        setter = getattr(app, "_set_status", None)
+        setter = ctx.set_status
         if callable(setter):
             setter("Significance: no comparison matches the current bars — "
                    "pool replicates so each compared group is a single bar.")
@@ -582,7 +590,7 @@ def draw_significance_brackets(app, items, *, ax_mean, ax_frac=None,
 
 
 def draw_grouped_bar_mode(
-    app,
+    ctx,
     *,
     ax_mean,
     ax_frac,
@@ -605,7 +613,7 @@ def draw_grouped_bar_mode(
     warning instead of silently empty bars.
     """
     fc_misses: set = set()
-    use_groups, items, _ = app._collect_bar_items(target_ts, miss_sink=fc_misses)
+    use_groups, items, _ = collect_bar_items_for_app(ctx, target_ts, miss_sink=fc_misses)
     _render_bar_items(
         ax_mean=ax_mean,
         ax_frac=ax_frac,
@@ -618,26 +626,26 @@ def draw_grouped_bar_mode(
         placeholder_color=CLR_PLACEHOLDER,
         disabled_well_color=CLR_MUTED_DISABLED,
         err_bar_color=CLR_ERR_BAR,
-        fc_active=bool(app._app_state.plot.fold_change_active),
-        app=app,
+        fc_active=bool(ctx.state.plot.fold_change_active),
+        ctx=ctx,
     )
-    if (str(getattr(app._app_state.plot, "bar_group_mode", "well") or "well") == "well"
+    if (str(getattr(ctx.state.plot, "bar_group_mode", "well") or "well") == "well"
             and len(target_ts) > 1):
-        _fsize = float(_ensure_export_style_prefs(app._ctx).get("group_label_size", 8))
+        _fsize = float(_ensure_export_style_prefs(ctx).get("group_label_size", 8))
         _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
         _annotate_cluster_footers(items, _xtick_axes, fontsize=_fsize)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
-    _ch = app._app_state.channel.active_channel.upper()
+    _ch = ctx.state.channel.active_channel.upper()
     from well_viewer.data.metric_labels import (
         METRIC_KEY_TO_LABEL as _MLB,
         threshold_qualifier, fraction_title,
         events_per_fov_title, events_total_title,
     )
     from well_viewer.domain import fold_change as _fc
-    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
-    _metric_key = app._app_state.channel.active_metric
+    _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
+    _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(app._ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx)
     _tp_suffix = _format_tp_title(target_ts, tp_str)
     # Cluster headers (_annotate_cluster_headers) sit at y≈1.02 on ax_mean only;
     # when any survive normalization, push the title up so it clears them rather
@@ -654,7 +662,7 @@ def draw_grouped_bar_mode(
         color=tokens_for(ax_frac)[1], fontsize=9, fontweight="bold", pad=6,
     )
     if ax_n is not None:
-        fov_active = app._use_fov_spread_active()
+        fov_active = ctx.state.plot.use_fov_replicates
         if fov_active:
             n_title = f"{events_per_fov_title(_metric_key, band_lbl)}{_fc_suffix}  —  {_tp_suffix}"
             n_ylabel = "N(above)/FOV"
@@ -665,66 +673,66 @@ def draw_grouped_bar_mode(
             n_title, color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold", pad=6,
         )
         ax_n.set_ylabel(n_ylabel, fontsize=8, labelpad=5)
-    _apply_bar_ylims(app, ax_mean, ax_frac, ax_n=ax_n)
+    _apply_bar_ylims(ctx, ax_mean, ax_frac, ax_n=ax_n)
     # Significance brackets (N7) — after ylims so the bracket headroom isn't
     # clipped; the helper extends the Mean panel's top to fit.
-    draw_significance_brackets(app, items, ax_mean=ax_mean, ax_frac=ax_frac,
+    draw_significance_brackets(ctx, items, ax_mean=ax_mean, ax_frac=ax_frac,
                                target_ts=target_ts)
     if fc_misses:
         _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
-        app._set_status(
+        ctx.set_status(
             f"Fold change: control missing at t={_tps} — bars dropped."
         )
-    app._bar_canvas.draw_idle()
+    ctx.runtime.barplot.canvas.draw_idle()
 
 
-def redraw_bars(app) -> None:
+def redraw_bars(ctx) -> None:
     """Top-level bar plot redraw (drives the Bar Plots tab)."""
-    if not hasattr(app, "_ax_bar_mean"):
+    if not hasattr(ctx, "_ax_bar_mean"):
         return
-    ax_mean = app._ax_bar_mean
-    ax_frac = app._ax_bar_frac
-    ax_n = getattr(app, "_ax_bar_n", None)
+    ax_mean = ctx.widgets.get_or_none("_ax_bar_mean")
+    ax_frac = ctx.widgets.get_or_none("_ax_bar_frac")
+    ax_n = ctx.widgets.get_or_none("_ax_bar_n")
     ax_mean.cla()
     ax_frac.cla()
     if ax_n is not None:
         ax_n.cla()
 
-    use_sem = app._app_state.plot.use_sem
+    use_sem = ctx.state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
     # Shapes keep every cell (no ON cutoff); smFISH counts honour the
     # channel's ThreshFracOn like intensities.
-    if app._app_state.channel.is_shape_active():
+    if ctx.state.channel.is_shape_active():
         threshold = -1.0
     else:
-        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
+        threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
 
-    active_rsets = app._rep_sets_active()
+    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
     # Keep the Display-popover toggles (notably "Pool Replicates", hidden until
     # replicate sets exist) in sync on every redraw — covers the case where the
     # user just created a replicate set, which otherwise never refreshed the
     # button's visibility.
-    if hasattr(app, "_refresh_bar_layout_btn_state"):
-        app._refresh_bar_layout_btn_state()
-    bar_selected = selected_bar_wells(app, active_rsets)
+    if hasattr(ctx, "_refresh_bar_layout_btn_state"):
+        refresh_bar_layout_btn_state(ctx)
+    bar_selected = selected_bar_wells(ctx, active_rsets)
 
-    _ch = app._app_state.channel.active_channel.upper()
+    _ch = ctx.state.channel.active_channel.upper()
     from well_viewer.data.metric_labels import (
         METRIC_KEY_TO_LABEL as _MLB,
         threshold_qualifier, fraction_title,
         events_per_fov_title, events_total_title,
     )
     from well_viewer.domain import fold_change as _fc
-    _metric_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
-    _metric_key = app._app_state.channel.active_metric
+    _metric_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
+    _metric_key = ctx.state.channel.active_metric
     _thr_q = threshold_qualifier(_metric_key)
-    _fc_suffix = _fc.fold_change_suffix_for(app._ctx)
+    _fc_suffix = _fc.fold_change_suffix_for(ctx)
     apply_ax_style(ax_mean,
                    f"{_ch} {_metric_label}{_thr_q} ± {band_lbl}{_fc_suffix}",
                    f"{_ch} {_metric_label}{_fc_suffix}")
     apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}", "Fraction" + _fc_suffix)
     if ax_n is not None:
-        fov_active = app._use_fov_spread_active()
+        fov_active = ctx.state.plot.use_fov_replicates
         if fov_active:
             apply_ax_style(
                 ax_n,
@@ -736,30 +744,30 @@ def redraw_bars(app) -> None:
                 ax_n, f"{events_total_title(_metric_key)}{_fc_suffix}",
                 "N(above)",
             )
-    _set_frac_ylim(app, ax_frac)
+    _set_frac_ylim(ctx, ax_frac)
 
-    if not app._app_state.dataset.well_paths:
+    if not ctx.state.dataset.well_paths:
         draw_bar_empty_state(
-            app, ax_mean, ax_frac,
+            ctx, ax_mean, ax_frac,
             "Load a directory.\n"
             "Use the Open button at the top-right (⌘O) to pick a folder.",
             ax_n=ax_n,
         )
         return
     if not bar_selected and not active_rsets:
-        draw_bar_empty_state(app, ax_mean, ax_frac, NO_SELECTION_MSG, ax_n=ax_n)
+        draw_bar_empty_state(ctx, ax_mean, ax_frac, NO_SELECTION_MSG, ax_n=ax_n)
         return
 
-    tp_list = resolve_bar_timepoints(app)
+    tp_list = resolve_bar_timepoints(ctx)
     if not tp_list:
-        draw_bar_empty_state(app, ax_mean, ax_frac, "Select a timepoint above", ax_n=ax_n)
+        draw_bar_empty_state(ctx, ax_mean, ax_frac, "Select a timepoint above", ax_n=ax_n)
         return
     target_ts = [t for t, _ in tp_list]
     tp_strs = [s for _, s in tp_list]
     tp_str_combined = ", ".join(tp_strs)
 
     if draw_per_cell_bar_mode(
-        app,
+        ctx,
         ax_mean=ax_mean,
         ax_frac=ax_frac,
         ax_n=ax_n,
@@ -768,10 +776,10 @@ def redraw_bars(app) -> None:
         tp_str=tp_str_combined,
         threshold=threshold,
     ):
-        apply_export_style_to_current(app._ctx, app._bar_fig, getattr(app, "_bar_canvas", None))
+        apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
         return
     draw_grouped_bar_mode(
-        app,
+        ctx,
         ax_mean=ax_mean,
         ax_frac=ax_frac,
         ax_n=ax_n,
@@ -782,12 +790,12 @@ def redraw_bars(app) -> None:
         band_lbl=band_lbl,
         use_sem=use_sem,
     )
-    apply_export_style_to_current(app._ctx, app._bar_fig, getattr(app, "_bar_canvas", None))
+    apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
 
 
-def draw_bar_empty_state(app, ax_mean, ax_frac, message: str, *, ax_n=None) -> None:
+def draw_bar_empty_state(ctx, ax_mean, ax_frac, message: str, *, ax_n=None) -> None:
     # Honour Screen vs Publication mode so the placeholder doesn't render
-    # as a glaring white block when the rest of the app is dark.
+    # as a glaring white block when the rest of the ctx is dark.
     _bg, _title_fg, _muted_fg, _grid, _spine = tokens_for(ax_mean)
     try:
         ax_mean.figure.set_facecolor(_bg)
@@ -805,10 +813,10 @@ def draw_bar_empty_state(app, ax_mean, ax_frac, message: str, *, ax_n=None) -> N
             color=_muted_fg, fontsize=10,
         )
         ax.set_axis_off()
-    app._bar_canvas.draw_idle()
+    ctx.runtime.barplot.canvas.draw_idle()
 
 
-def resolve_bar_timepoints(app) -> List[tuple]:
+def resolve_bar_timepoints(ctx) -> List[tuple]:
     """Return the list of ``(float, str)`` timepoints currently selected.
 
     ``BarPlotState.tp_selections`` is authoritative once populated: an
@@ -816,9 +824,9 @@ def resolve_bar_timepoints(app) -> List[tuple]:
     hidden ``_bar_tp_cb`` combo still carries. We only fall back to the
     combo before the popup has been populated at all (e.g. very early
     after construction, before ``update_bar_tp_menu`` ran), so the
-    legacy single-tp shape still works on a fresh app.
+    legacy single-tp shape still works on a fresh ctx.
     """
-    sels = app._app_state.bar.tp_selections if hasattr(app, "_app_state") else None
+    sels = ctx.state.bar.tp_selections if hasattr(ctx, "state") else None
     if isinstance(sels, dict) and sels:
         out: List[tuple] = []
         for tp_str, on in sels.items():
@@ -831,7 +839,7 @@ def resolve_bar_timepoints(app) -> List[tuple]:
         out.sort(key=lambda p: p[0])
         return out
     # Fallback: derive from the hidden combo (popup not yet populated).
-    tp_str = app._bar_tp_var.currentText() if hasattr(app, "_bar_tp_var") else ""
+    tp_str = ctx.runtime.barplot.tp_var.currentText() if (ctx.runtime.barplot.tp_var is not None) else ""
     if tp_str in ("—", ""):
         return []
     try:
@@ -840,18 +848,18 @@ def resolve_bar_timepoints(app) -> List[tuple]:
         return []
 
 
-def selected_bar_wells(app, active_rsets) -> List[str]:
+def selected_bar_wells(ctx, active_rsets) -> List[str]:
     if active_rsets:
         return []
     return sorted(
-        (lbl for lbl in app._app_state.selection.selected_wells
-         if lbl in app._app_state.dataset.well_paths),
-        key=lambda lbl: app._parse_rc(lbl),
+        (lbl for lbl in ctx.state.selection.selected_wells
+         if lbl in ctx.state.dataset.well_paths),
+        key=lambda lbl: parse_rc(lbl),
     )
 
 
 def draw_per_cell_bar_mode(
-    app,
+    ctx,
     *,
     ax_mean,
     ax_frac,
@@ -866,12 +874,12 @@ def draw_per_cell_bar_mode(
 
     # The Properties "Show: All points" option also routes here so per-cell
     # dots overlay the bars, reusing the beeswarm path.
-    show_mode = str(getattr(app._app_state.plot, "bar_show_mode", "mean_spread") or "mean_spread")
-    use_per_cell = app._app_state.bar.violin or app._app_state.bar.swarm or show_mode == "all_pts"
+    show_mode = str(getattr(ctx.state.plot, "bar_show_mode", "mean_spread") or "mean_spread")
+    use_per_cell = ctx.state.bar.violin or ctx.state.bar.swarm or show_mode == "all_pts"
     if not use_per_cell:
         return False
-    ordered_keys = app._bar_current_keys()
-    plot = app._app_state.plot
+    ordered_keys = ctx.runtime.barplot.current_keys()
+    plot = ctx.state.plot
     group_mode = getattr(plot, "bar_group_mode", "well")
     pool_reps = bool(getattr(plot, "bar_pool_replicates", True))
     pool_rset_cells = bool(getattr(plot, "bar_pool_rset_cells", False)) and bool(active_rsets)
@@ -899,11 +907,11 @@ def draw_per_cell_bar_mode(
             rset = rset_by_name.get(key)
             if rset is None:
                 continue
-            valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+            valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
             if not valid:
                 continue
             base_wells.append(rset.name)
-            base_colors.append(app._rank_color_rset(rset))
+            base_colors.append(color_for_replicate_set(rset, ctx.state.selection.selections))
             base_short.append(rset.name)
             base_full.append(rset.name)
             pool_groups[rset.name] = valid
@@ -913,35 +921,35 @@ def draw_per_cell_bar_mode(
             rset = rset_by_name.get(key)
             if rset is None:
                 continue
-            color = app._rank_color_rset(rset)
-            valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+            color = color_for_replicate_set(rset, ctx.state.selection.selections)
+            valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
             for w in valid:
                 base_wells.append(w)
                 base_colors.append(color)
-                short = app._well_display_label(w)
+                short = well_display_label(ctx, w)
                 base_short.append(short)
                 base_full.append(f"{short} [{rset.name}]")
     elif active_rsets:
         seen: set = set()
         for rset in active_rsets:
-            color = app._rank_color_rset(rset)
+            color = color_for_replicate_set(rset, ctx.state.selection.selections)
             for w in rset.wells:
-                if w in seen or w not in app._app_state.dataset.well_paths:
+                if w in seen or w not in ctx.state.dataset.well_paths:
                     continue
                 seen.add(w)
                 base_wells.append(w)
                 base_colors.append(color)
-                short = app._well_display_label(w)
+                short = well_display_label(ctx, w)
                 base_short.append(short)
                 base_full.append(f"{short} [{rset.name}]")
     else:
-        base_wells = [k for k in ordered_keys if k in app._app_state.dataset.well_paths]
-        base_colors = [app._rank_color_well(w) for w in base_wells]
-        base_short = [app._well_display_label(w) for w in base_wells]
+        base_wells = [k for k in ordered_keys if k in ctx.state.dataset.well_paths]
+        base_colors = [color_for_well(w) for w in base_wells]
+        base_short = [well_display_label(ctx, w) for w in base_wells]
         base_full = list(base_short)
 
     if not base_wells:
-        app._bar_canvas.draw_idle()
+        ctx.runtime.barplot.canvas.draw_idle()
         return True
 
     # Materialise (well × tp) columns in the order the active layout asks
@@ -976,7 +984,7 @@ def draw_per_cell_bar_mode(
                 group_keys.append(full if multi_tp else "")
 
     if _debug_flags.review_bar_debug_enabled():
-        mode = "violin" if app._app_state.bar.violin else "beeswarm"
+        mode = "violin" if ctx.state.bar.violin else "beeswarm"
         _logger.debug(
             "per-cell mode=%s wells=%r labels=%r tps=%r",
             mode, plot_wells, plot_labels, plot_tps,
@@ -985,18 +993,18 @@ def draw_per_cell_bar_mode(
     # violin / beeswarm so the overlay applies the SAME operator / order /
     # baseline-tp the bars use (audit S1) and scales each column at its own
     # timepoint instead of collapsing multi-tp selections to the first (S3).
-    _fc_state = _fc.fold_change_state(app._ctx)
+    _fc_state = _fc.fold_change_state(ctx)
     if _fc_state[0] or _fc_state[2]:
         cell_scale = _fc.build_cell_scaling(
-            app._ctx, base_wells, fc_state=_fc_state,
-            threshold=threshold, val_col=app._app_state.channel.active_val_col,
-            use_sem=app._app_state.plot.use_sem,
-            per_fov_spread=app._use_fov_spread_active(),
-            fluor_gates=app._get_all_fluor_gates(),
-            op_ctrl=_fc.parse_fc_op_ctrl(app._ctx),
-            op_t0=_fc.parse_fc_op_t0(app._ctx),
-            order=_fc.parse_fc_order(app._ctx),
-            baseline_tp=_fc.parse_baseline_tp(app._ctx),
+            ctx, base_wells, fc_state=_fc_state,
+            threshold=threshold, val_col=ctx.state.channel.active_val_col,
+            use_sem=ctx.state.plot.use_sem,
+            per_fov_spread=ctx.state.plot.use_fov_replicates,
+            fluor_gates=get_all_fluor_gates(ctx),
+            op_ctrl=_fc.parse_fc_op_ctrl(ctx),
+            op_t0=_fc.parse_fc_op_t0(ctx),
+            order=_fc.parse_fc_order(ctx),
+            baseline_tp=_fc.parse_baseline_tp(ctx),
         )
     else:
         cell_scale = None
@@ -1005,11 +1013,11 @@ def draw_per_cell_bar_mode(
     # Stash positions for the drag-reorder hit-test (aligned to the reorder
     # keys; the hit-test guards on length+identity so a per-well expansion that
     # doesn't match simply falls back to integer positions).
-    app._bar_xs = list(xs)
-    app._bar_xs_keys = list(ordered_keys)
-    if app._app_state.bar.violin:
+    ctx.runtime.barplot.xs = list(xs)
+    ctx.runtime.barplot.xs_keys = list(ordered_keys)
+    if ctx.state.bar.violin:
         draw_violin(
-            app, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
+            ctx, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
             plot_tps, tp_str, threshold,
             xs=xs, group_keys=group_keys,
             cell_scale=cell_scale,
@@ -1017,28 +1025,28 @@ def draw_per_cell_bar_mode(
         )
     else:
         draw_beeswarm(
-            app, ax_mean, ax_frac,
+            ctx, ax_mean, ax_frac,
             plot_wells, plot_colors, plot_labels,
             plot_tps, tp_str, threshold,
             xs=xs, group_keys=group_keys,
             cell_scale=cell_scale,
             pool_groups=pool_groups,
         )
-    _apply_bar_ylims(app, ax_mean, ax_frac, ax_n=ax_n)
+    _apply_bar_ylims(ctx, ax_mean, ax_frac, ax_n=ax_n)
     # Even in violin/beeswarm mode the user wants to see the events
     # above threshold count alongside the distribution.
     if ax_n is not None:
         draw_per_well_n_bars(
-            app, ax_n, plot_wells, plot_colors, plot_labels,
+            ctx, ax_n, plot_wells, plot_colors, plot_labels,
             plot_tps, threshold, xs=xs, group_keys=group_keys,
             pool_groups=pool_groups,
         )
-    app._bar_canvas.draw_idle()
+    ctx.runtime.barplot.canvas.draw_idle()
     return True
 
 
 def draw_per_well_n_bars(
-    app,
+    ctx,
     ax_n,
     wells: List[str],
     colors: List[str],
@@ -1059,9 +1067,9 @@ def draw_per_well_n_bars(
     """
     from matplotlib.ticker import MaxNLocator
     from well_viewer.domain.stats_compute import aggregate_group
-    fluor_gates = app._get_all_fluor_gates()
-    per_fov_spread = app._use_fov_spread_active()
-    use_sem = bool(app._app_state.plot.use_sem)
+    fluor_gates = get_all_fluor_gates(ctx)
+    per_fov_spread = ctx.state.plot.use_fov_replicates
+    use_sem = bool(ctx.state.plot.use_sem)
     n = len(wells)
     if xs is None:
         xs = list(range(n))
@@ -1074,21 +1082,21 @@ def draw_per_well_n_bars(
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
         xi = xs[i] if i < len(xs) else i
         if pool_groups is not None and lbl in pool_groups:
-            pts = aggregate_group(app._ctx,
+            pts = aggregate_group(ctx,
                 pool_groups[lbl], threshold=threshold, use_sem=use_sem,
-                val_col=app._app_state.channel.active_val_col,
+                val_col=ctx.state.channel.active_val_col,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
         else:
-            pts = aggregate_well(app._ctx,
+            pts = aggregate_well(ctx,
                 lbl, threshold=threshold, use_sem=use_sem,
-                val_col=app._app_state.channel.active_val_col,
+                val_col=ctx.state.channel.active_val_col,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
         matched = [pt for pt in pts if abs(pt[0] - col_tp) < 1e-6]
-        color = colors[i % len(colors)] if colors else app._rank_color_well(lbl)
+        color = colors[i % len(colors)] if colors else color_for_well(lbl)
         if matched:
             pt = matched[0]
             if per_fov_spread:

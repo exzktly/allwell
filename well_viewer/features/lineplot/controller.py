@@ -697,5 +697,5 @@ def toggle_sem(app) -> None:
     if (_vis("Bar Plots") if callable(_vis)
             else app._current_centre_tab() == "Bar Plots"):
         from well_viewer.features.barplot.renderer import redraw_bars
-        redraw_bars(app)
+        redraw_bars(app._ctx)
 

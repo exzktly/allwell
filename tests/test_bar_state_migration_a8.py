@@ -26,11 +26,11 @@ def test_slice_defaults_false(viewer_app):
 def test_toggles_are_mutually_exclusive_on_the_slice(viewer_app):
     app = viewer_app
     bar = app._app_state.bar
-    toggle_swarm(app)
+    toggle_swarm(app._ctx)
     assert bar.swarm is True and bar.violin is False
-    toggle_violin(app)                 # turning violin on clears swarm
+    toggle_violin(app._ctx)                 # turning violin on clears swarm
     assert bar.violin is True and bar.swarm is False
-    toggle_violin(app)
+    toggle_violin(app._ctx)
     assert bar.violin is False
 
 

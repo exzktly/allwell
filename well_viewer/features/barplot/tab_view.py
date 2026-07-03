@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.features.barplot.controller import (bar_reset_order, open_bar_timepoint_selector, toggle_bar_group_mode, toggle_bar_pool_replicates, toggle_bar_pool_rset_cells, toggle_swarm, toggle_violin, on_bar_drag_press, on_bar_drag_release)
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -99,7 +101,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     reset_order_btn = reg.register("_bar_reset_order_btn", QPushButton("Reset Order", bar_ctrl))
     reset_order_btn.setProperty("variant", "toggle_muted")
-    reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx.app))
+    reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
     cl.addWidget(reset_order_btn)
 
     # IconButton — matches Sample Definitions top toolbar style; see
@@ -139,7 +141,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     tp_button = reg.register("_bar_tp_button", QPushButton("Select Timepoints", shape_ctrl))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(
-        lambda _=False: open_bar_timepoint_selector(ctx.app)
+        lambda _=False: open_bar_timepoint_selector(ctx)
     )
     sl.addWidget(tp_button)
     tp_label = reg.register("_bar_tp_label", QLabel("(0 selected)", shape_ctrl))
@@ -171,7 +173,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     group_mode_btn.setToolTip(
         "Cluster the bars by well/group vs by timepoint.")
     group_mode_btn.clicked.connect(
-        lambda _=False: toggle_bar_group_mode(ctx.app)
+        lambda _=False: toggle_bar_group_mode(ctx)
     )
     _disp_lay.addWidget(group_mode_btn)
 
@@ -184,7 +186,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Collapse each replicate set's wells into one pooled column "
         "(off = one column per well).")
     pool_reps_btn.clicked.connect(
-        lambda _=False: toggle_bar_pool_replicates(ctx.app)
+        lambda _=False: toggle_bar_pool_replicates(ctx)
     )
     # Always present in the Display ▾ popover; enable-gated on active replicate
     # sets by refresh_bar_layout_btn_state. Toggling a child's visibility inside
@@ -199,7 +201,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Pool every cell across a replicate set before drawing its beeswarm / "
         "violin distribution (off = keep per-well distributions).")
     pool_rset_cells_btn.clicked.connect(
-        lambda _=False: toggle_bar_pool_rset_cells(ctx.app)
+        lambda _=False: toggle_bar_pool_rset_cells(ctx)
     )
     # Always present; enable-gated on (violin/beeswarm AND active rsets).
     _disp_lay.addWidget(pool_rset_cells_btn)
@@ -209,7 +211,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     swarm_btn.setCheckable(True)
     swarm_btn.setToolTip(
         "Overlay the individual per-cell points on each bar.")
-    swarm_btn.clicked.connect(lambda _=False: ctx.app._toggle_swarm())
+    swarm_btn.clicked.connect(lambda _=False: toggle_swarm(ctx))
     _disp_lay.addWidget(swarm_btn)
     # swarm/violin state lives on the typed BarPlotState slice (defaults False).
 
@@ -219,7 +221,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     violin_btn.setToolTip(
         "Draw a violin (kernel-density) shape for each group. "
         "Enables the Smooth control.")
-    violin_btn.clicked.connect(lambda _=False: ctx.app._toggle_violin())
+    violin_btn.clicked.connect(lambda _=False: toggle_violin(ctx))
     _disp_lay.addWidget(violin_btn)
 
     _disp_lay.addWidget(QLabel("Smooth:", shape_ctrl))
@@ -232,7 +234,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Violin kernel bandwidth — higher is smoother. "
         "Active only when Violin is on.")
     violin_slider.valueChanged.connect(
-        lambda _v: (redraw_bars(ctx.app) if ctx.state.bar.violin else None)
+        lambda _v: (redraw_bars(ctx) if ctx.state.bar.violin else None)
     )
     violin_slider.setEnabled(False)
     _disp_lay.addWidget(violin_slider)
@@ -248,11 +250,12 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "pairwise tests. Run a test in Statistics first; brackets appear for the "
         "compared groups that match the current bars (grouped / pooled mode).")
 
-    def _toggle_bar_significance(_=False, _app=ctx.app):
-        on = bool(_app._bar_significance_btn.isChecked())
-        _app._app_state.plot.show_significance = on
-        _app._bar_significance_btn.setText(f"Significance: {'On' if on else 'Off'}")
-        redraw_bars(_app)
+    def _toggle_bar_significance(_=False):
+        _sig = ctx.widgets.get_or_none("_bar_significance_btn")
+        on = bool(_sig.isChecked())
+        ctx.state.plot.show_significance = on
+        _sig.setText(f"Significance: {'On' if on else 'Off'}")
+        redraw_bars(ctx)
     sig_btn.clicked.connect(_toggle_bar_significance)
     _disp_lay.addWidget(sig_btn)
 
@@ -290,7 +293,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)
 
     # Error band now lives in the "Display ▾" popover above (C1); no card row.
-    card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx.app))
+    card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
     card.panelCopied.connect(ctx.set_status)
     card.setStatsChipVisible(False)
@@ -307,6 +310,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Drag-to-reorder bars
     ctx.runtime.barplot.drag_state = {"active": False, "src_idx": -1, "cur_idx": -1}
-    canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx.app))
+    canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx))
     canvas.mpl_connect("motion_notify_event", ctx.app._on_bar_drag_motion)
-    canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx.app))
+    canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx))

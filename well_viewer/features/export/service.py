@@ -341,7 +341,7 @@ def export_bar_plot_data(app) -> None:
     # read ``_bar_tp_cb.currentText()`` directly — that carries just the
     # first checked timepoint, so a multi-tp selection silently dropped
     # every additional one from the CSV.
-    tp_list = resolve_bar_timepoints(app)
+    tp_list = resolve_bar_timepoints(app._ctx)
     if not tp_list:
         _warn(app, "Export", "Select a timepoint first.")
         return

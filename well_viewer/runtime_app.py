@@ -889,8 +889,8 @@ class WellViewerApp(QWidget):
     def _toggle_fov_replicates(self) -> None: return toggle_fov_replicates(self)
 
     def _refresh_fov_btn_state(self) -> None: return refresh_fov_btn_state(self._ctx)
-    def _refresh_bar_layout_btn_state(self) -> None: return refresh_bar_layout_btn_state(self)
-    def _update_bar_tp_selection_display(self) -> None: return update_bar_tp_selection_display(self)
+    def _refresh_bar_layout_btn_state(self) -> None: return refresh_bar_layout_btn_state(self._ctx)
+    def _update_bar_tp_selection_display(self) -> None: return update_bar_tp_selection_display(self._ctx)
 
     # ── Well selection (plate-map backed) ─────────────────────────────────────
 
@@ -1068,14 +1068,14 @@ class WellViewerApp(QWidget):
 
     def _review_load_rows(self, label: str) -> List[dict]: return review_load_rows(self, label)
 
-    def _update_bar_tp_menu(self) -> None: return update_bar_tp_menu(self)
+    def _update_bar_tp_menu(self) -> None: return update_bar_tp_menu(self._ctx)
 
     # ── Bar drag-and-drop reordering ─────────────────────────────────────────
     # Implementations live in ``well_viewer.barplot_controller``.
 
-    def _bar_event_xdata(self, event) -> "Optional[float]": return bar_event_xdata(self, event)
+    def _bar_event_xdata(self, event) -> "Optional[float]": return bar_event_xdata(self._ctx, event)
 
-    def _bar_current_keys(self) -> List: return _bar_ordered_keys(self)
+    def _bar_current_keys(self) -> List: return _bar_ordered_keys(self._ctx)
 
     def _bar_idx_at_x(self, xdata: float, n: int) -> int:
         from well_viewer.features.barplot.controller import bar_idx_at_x
@@ -1083,7 +1083,7 @@ class WellViewerApp(QWidget):
 
 
 
-    def _on_bar_drag_motion(self, event) -> None: on_bar_drag_motion(self, event, accent_color=ACCENT)
+    def _on_bar_drag_motion(self, event) -> None: on_bar_drag_motion(self._ctx, event, accent_color=ACCENT)
 
 
     def _apply_bar_ylims(
@@ -1093,11 +1093,11 @@ class WellViewerApp(QWidget):
         ax_n=None,
     ) -> None:
         """Apply user-specified y-axis limits to the bar panels."""
-        _bar_apply_ylims(self, ax_mean, ax_frac, ax_n=ax_n)
+        _bar_apply_ylims(self._ctx, ax_mean, ax_frac, ax_n=ax_n)
 
-    def _toggle_swarm(self) -> None: return toggle_swarm(self)
+    def _toggle_swarm(self) -> None: return toggle_swarm(self._ctx)
 
-    def _toggle_violin(self) -> None: return toggle_violin(self)
+    def _toggle_violin(self) -> None: return toggle_violin(self._ctx)
 
 
 
@@ -1106,7 +1106,7 @@ class WellViewerApp(QWidget):
     def _well_display_label(self, lbl: str) -> str:
         return well_display_label(self._ctx, lbl)
 
-    def _bar_well_display_label(self, lbl: str) -> str: return bar_well_display_label(self, lbl)
+    def _bar_well_display_label(self, lbl: str) -> str: return bar_well_display_label(self._ctx, lbl)
 
     def _replicate_display_label(self, rset: 'ReplicateSet') -> str: return replicate_display_label(self._ctx, rset)
 
@@ -1134,7 +1134,7 @@ class WellViewerApp(QWidget):
 
 
     def _collect_bar_items(self, target_t: float, *, fc_state = None, miss_sink = None) -> tuple:
-        return collect_bar_items_for_app(self, target_t, fc_state=fc_state, miss_sink=miss_sink)
+        return collect_bar_items_for_app(self._ctx, target_t, fc_state=fc_state, miss_sink=miss_sink)
 
 
 

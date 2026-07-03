@@ -281,7 +281,7 @@ def _activate_bar_plots(app) -> None:
     app._sidebar_main_frame.setVisible(True)
     app._refresh_sidebar_map()
     app._update_bar_tp_menu()
-    redraw_bars(app)
+    redraw_bars(app._ctx)
 
 
 def _activate_scatter(app) -> None:
@@ -324,7 +324,7 @@ def _activate_default_plot(app) -> None:
 def _sel_bar_plots(app) -> None:
     from well_viewer.features.barplot.renderer import redraw_bars
     app._update_bar_tp_menu()
-    redraw_bars(app)
+    redraw_bars(app._ctx)
 
 
 def _sel_scatter(app) -> None:
@@ -455,7 +455,7 @@ def _fold_change_scope_bar():
         name="bar",
         ctrl_combo_attr="_fc_ctrl_combo_bar",
         baseline_combo_attr="_fc_baseline_combo_bar",
-        redraw=redraw_bars,
+        redraw=lambda a: redraw_bars(a._ctx),
         tab_names=("Bar Plots",),
     )
 

@@ -69,7 +69,7 @@ def test_grouped_collect_emits_spread_on_all_three_panels():
         },
         selections=[{"name": "R", "wells": ["A01", "A02"], "hidden": False}],
     )
-    use_groups, items, _ = collect_bar_items(app, 1.0)
+    use_groups, items, _ = collect_bar_items(app._ctx, 1.0)
     assert use_groups is True
     item = next(it for it in items if it.key == "R")
     assert item.spread > 0          # Mean panel

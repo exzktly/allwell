@@ -48,6 +48,6 @@ def test_pending_bar_timepoints_survive_tab_activation(loaded_app):
     # The renderer's authoritative timepoint source must reflect the restored
     # multi-select (not the single default _update_bar_tp_menu seeds), and the
     # pending entry must have been consumed.
-    resolved = {s for _f, s in resolve_bar_timepoints(app)}
+    resolved = {s for _f, s in resolve_bar_timepoints(app._ctx)}
     assert resolved == set(tp_strs), (resolved, tp_strs)
     assert not (app._view_state_pending or {}).get("Bar Plots")

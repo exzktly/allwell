@@ -32,17 +32,35 @@ def _bars():
 
 
 def _app(pairwise, *, rsets=(), active_val_col="gfp_mean_intensity"):
-    return SimpleNamespace(
+    _sels = [{"name": r.name, "wells": list(getattr(r, "wells", []) or [])}
+             for r in rsets]
+    _wp = {w: None for r in rsets for w in (getattr(r, "wells", []) or [])}
+    app = SimpleNamespace(
         _app_state=SimpleNamespace(
             plot=SimpleNamespace(show_significance=True),
             stats=SimpleNamespace(pairwise=pairwise),
             channel=SimpleNamespace(active_val_col=active_val_col),
+            selection=SimpleNamespace(selections=_sels, selected_wells=set()),
+            dataset=SimpleNamespace(well_paths=_wp),
         ),
         _bar_xs_keys=["CTRL", "DRUG"],
         _bar_xs=[0.0, 1.0],
         _rep_sets_active=lambda: list(rsets),
         _set_status=lambda *_a, **_k: None,
     )
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = SimpleNamespace(app=app, state=app._app_state, widgets=_W(app),
+                               runtime=AppRuntime(app),
+                               set_status=lambda m, *a, **k: app._set_status(m))
+    return app
+
+
+class _W:
+    """Minimal ctx.widgets shim over the fake app's bare _bar_* attrs."""
+    def __init__(self, app):
+        self._app = app
+    def get_or_none(self, name):
+        return getattr(self._app, name, None)
 
 
 def _artists(ax):
@@ -59,7 +77,7 @@ def _axes():
 def test_brackets_draw_on_mean_panel_by_default():
     ax_mean, ax_frac = _axes()
     app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001, "stat": "mean"}])
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) > 0
     assert _artists(ax_frac) == 0
 
@@ -68,7 +86,7 @@ def test_fraction_test_brackets_the_fraction_panel():
     # A "fraction" statistic must draw on the On-fraction panel, not the mean one.
     ax_mean, ax_frac = _axes()
     app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.01, "p_adj": 0.01, "stat": "fraction"}])
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_frac) > 0
     assert _artists(ax_mean) == 0
 
@@ -79,11 +97,11 @@ def test_brackets_gated_to_matching_channel():
     pairwise = [{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001,
                  "stat": "mean", "val_col": "cy5_mean_intensity"}]
     app = _app(pairwise, active_val_col="gfp_mean_intensity")  # showing GFP
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) == 0  # cy5 test not drawn over the gfp bars
     # Switch the displayed channel to match → brackets appear.
     app._app_state.channel.active_val_col = "cy5_mean_intensity"
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) > 0
 
 
@@ -93,11 +111,11 @@ def test_brackets_gated_to_matching_timepoint():
                  "stat": "mean", "val_col": "gfp_mean_intensity", "target_t": 24.0}]
     app = _app(pairwise, active_val_col="gfp_mean_intensity")
     # Bars show t=0 only → the t=24 test is not overlaid.
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac,
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac,
                                target_ts=[0.0])
     assert _artists(ax_mean) == 0
     # Bars now include t=24 → drawn.
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac,
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac,
                                target_ts=[0.0, 24.0])
     assert _artists(ax_mean) > 0
 
@@ -110,7 +128,7 @@ def test_brackets_draw_on_wells_match_when_names_differ():
                  "a_wells": ["A01", "A02"], "b_wells": ["B01", "B02"],
                  "p": 0.0001, "p_adj": 0.0001, "stat": "mean"}]
     app = _app(pairwise, rsets=rsets)
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) > 0
 
 
@@ -121,7 +139,7 @@ def test_no_match_sets_status_and_draws_nothing():
                  "p": 0.001, "p_adj": 0.001, "stat": "mean"}]
     app = _app(pairwise)
     app._set_status = lambda m, *_a, **_k: msgs.append(m)
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) == 0 and _artists(ax_frac) == 0
     assert msgs and "no comparison matches" in msgs[0]
 
@@ -130,7 +148,7 @@ def test_off_toggle_draws_nothing():
     ax_mean, ax_frac = _axes()
     app = _app([{"a": "CTRL", "b": "DRUG", "p": 0.001, "p_adj": 0.001, "stat": "mean"}])
     app._app_state.plot.show_significance = False
-    draw_significance_brackets(app, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
+    draw_significance_brackets(app._ctx, _bars(), ax_mean=ax_mean, ax_frac=ax_frac)
     assert _artists(ax_mean) == 0 and _artists(ax_frac) == 0
 
 

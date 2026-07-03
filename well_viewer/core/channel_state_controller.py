@@ -560,7 +560,7 @@ def set_active_metric(app, metric: str) -> None:
     app._redraw()
     if hasattr(app, "_bar_tp_cb"):
         from well_viewer.features.barplot.renderer import redraw_bars
-        redraw_bars(app)
+        redraw_bars(app._ctx)
 
 
 

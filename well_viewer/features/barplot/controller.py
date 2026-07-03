@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
+from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.core.plot_orchestrator import redraw_app
+from well_viewer.core.tab_controller import current_centre_tab
+from well_viewer.features.preview.panel_view import refresh_fov_btn_state
+from well_viewer.core.selection_controller import invalidate_stats_cache
+
 import logging
 import math
 import re
@@ -50,12 +57,12 @@ from well_viewer.features.barplot.collect import (  # noqa: E402,F401
 )
 
 
-def ordered_bar_keys(app) -> list:
+def ordered_bar_keys(ctx) -> list:
     """Return ordered bar keys for current mode, respecting custom drag order."""
-    active_rsets = app._rep_sets_active()
+    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
     if active_rsets:
         keys = [r.name for r in active_rsets]
-    elif app._app_state.selection.selections:
+    elif ctx.state.selection.selections:
         # Group mode (replicate sets / groups defined) but every group hidden →
         # no bars. Don't fall back to ``selected_wells`` here: in group mode the
         # plate is passive and clicks toggle group visibility, so selected_wells
@@ -63,12 +70,12 @@ def ordered_bar_keys(app) -> list:
         keys = []
     else:
         keys = sorted(
-            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
-            key=lambda lbl: app._parse_rc(lbl),
+            (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),
+            key=lambda lbl: parse_rc(lbl),
         )
-    if app._app_state.plot.bar_order is None:
+    if ctx.state.plot.bar_order is None:
         return keys
-    ordered = [k for k in app._app_state.plot.bar_order if k in keys]
+    ordered = [k for k in ctx.state.plot.bar_order if k in keys]
     seen = set(ordered)
     ordered.extend(k for k in keys if k not in seen)
     return ordered
@@ -123,7 +130,7 @@ def render_bar_items(
     err_bar_color: str,
     ax_n=None,
     fc_active: bool = False,
-    app=None,
+    ctx=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
 
@@ -148,11 +155,11 @@ def render_bar_items(
     xs = clustered_x_positions(items)
     # Stash the real positions (aligned to the key order) so the drag-reorder
     # hit-test maps clicks to the right column when clusters insert gaps.
-    if app is not None:
-        app._bar_xs = list(xs)
-        app._bar_xs_keys = list(keys)
+    if ctx is not None:
+        ctx.runtime.barplot.xs = list(xs)
+        ctx.runtime.barplot.xs_keys = list(keys)
     # Error-bar appearance from the Properties → Statistics controls.
-    err_kind, ci_scale, draw_err = bar_err_settings(app)
+    err_kind, ci_scale, draw_err = bar_err_settings(ctx)
     # Opt-in diagnostic: with review_bar_debug on, dump per-item spreads so a
     # single desktop retest tells us whether the Fraction/Events panels are
     # blank because their spreads arrive zero (legitimate / data) vs a draw-gate
@@ -207,7 +214,7 @@ def render_bar_items(
                          linewidth=1, edgecolor=disabled_well_color,
                          linestyle="--", zorder=3)
 
-    if app is not None and getattr(app._app_state.plot, "show_threshold_line", False):
+    if ctx is not None and getattr(ctx.state.plot, "show_threshold_line", False):
         ax_frac.axhline(0.5, color=border_color, lw=0.8, ls="--", alpha=0.5, zorder=1)
         # Add threshold context label to fraction axis
         ax_frac.text(0.02, 0.98, f"threshold={threshold:.2f}", transform=ax_frac.transAxes,
@@ -283,13 +290,13 @@ def render_bar_items(
             pass
 
 
-def apply_bar_ylims(app, ax_mean, ax_frac, *, ax_n=None) -> None:
+def apply_bar_ylims(ctx, ax_mean, ax_frac, *, ax_n=None) -> None:
     """Apply user-entered y-limits to the bar panels (linear scale only)."""
     def _parse(edit) -> Optional[float]:
         return _parse_float_edit(edit)
 
-    mean_lo = _parse(app._bar_ylim_mean_lo_edit)
-    mean_hi = _parse(app._bar_ylim_mean_hi_edit)
+    mean_lo = _parse(ctx.runtime.barplot.ylim_mean_lo_edit)
+    mean_hi = _parse(ctx.runtime.barplot.ylim_mean_hi_edit)
     if mean_lo is not None or mean_hi is not None:
         cur_lo, cur_hi = ax_mean.get_ylim()
         lo = mean_lo if mean_lo is not None else cur_lo
@@ -297,8 +304,8 @@ def apply_bar_ylims(app, ax_mean, ax_frac, *, ax_n=None) -> None:
         if hi > lo:
             ax_mean.set_ylim(lo, hi)
 
-    frac_lo = _parse(app._bar_ylim_frac_lo_edit)
-    frac_hi = _parse(app._bar_ylim_frac_hi_edit)
+    frac_lo = _parse(ctx.runtime.barplot.ylim_frac_lo_edit)
+    frac_hi = _parse(ctx.runtime.barplot.ylim_frac_hi_edit)
     if frac_lo is not None or frac_hi is not None:
         cur_lo, cur_hi = ax_frac.get_ylim()
         lo = frac_lo if frac_lo is not None else cur_lo
@@ -311,12 +318,12 @@ def apply_bar_ylims(app, ax_mean, ax_frac, *, ax_n=None) -> None:
 #
 # Lightweight helpers that drive the bar drag interaction. The view (matplotlib
 # canvas + axes) is owned by ``WellViewerApp``; these helpers only mutate
-# ``app._bar_drag_state`` / ``app._app_state.plot.bar_order`` and trigger a redraw.
+# ``ctx.runtime.barplot.drag_state`` / ``ctx.state.plot.bar_order`` and trigger a redraw.
 
-def bar_event_xdata(app, event) -> Optional[float]:
+def bar_event_xdata(ctx, event) -> Optional[float]:
     """Return data-x for a matplotlib MouseEvent over any bar axis."""
     ax = getattr(event, "inaxes", None)
-    if ax is not app._ax_bar_mean and ax is not app._ax_bar_frac and ax is not getattr(app, "_ax_bar_n", None):
+    if ax is not ctx.widgets.get_or_none("_ax_bar_mean") and ax is not ctx.widgets.get_or_none("_ax_bar_frac") and ax is not ctx.widgets.get_or_none("_ax_bar_n"):
         return None
     xdata = getattr(event, "xdata", None)
     if xdata is None:
@@ -328,50 +335,50 @@ def bar_event_xdata(app, event) -> Optional[float]:
 # moved to ``barplot/collect.py`` (Qt-free) and re-exported above.
 
 
-def bar_reset_order(app) -> None:
-    app._app_state.plot.bar_order = None
-    app._bar_reset_order_btn.setProperty("variant", "toggle_muted")
-    app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
-    app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)
+def bar_reset_order(ctx) -> None:
+    ctx.state.plot.bar_order = None
+    ctx.runtime.barplot.reset_order_btn.setProperty("variant", "toggle_muted")
+    ctx.runtime.barplot.reset_order_btn.style().unpolish(ctx.runtime.barplot.reset_order_btn)
+    ctx.runtime.barplot.reset_order_btn.style().polish(ctx.runtime.barplot.reset_order_btn)
     from well_viewer.features.barplot.renderer import redraw_bars
-    redraw_bars(app)
+    redraw_bars(ctx)
 
 
-def on_bar_drag_press(app, event) -> None:
+def on_bar_drag_press(ctx, event) -> None:
     """Begin drag — record which bar was pressed."""
     if getattr(event, "button", None) != 1:
         return
-    xdata = bar_event_xdata(app, event)
+    xdata = bar_event_xdata(ctx, event)
     if xdata is None:
         return
-    keys = app._bar_current_keys()
+    keys = ctx.runtime.barplot.current_keys()
     n = len(keys)
     if n < 2:
         return
-    idx = bar_idx_at_x(xdata, n, bar_drag_xs(app, keys))
-    app._bar_drag_state.update(active=True, src_idx=idx, cur_idx=idx)
+    idx = bar_idx_at_x(xdata, n, bar_drag_xs(ctx, keys))
+    ctx.runtime.barplot.drag_state.update(active=True, src_idx=idx, cur_idx=idx)
 
 
-def on_bar_drag_motion(app, event, *, accent_color: str) -> None:
+def on_bar_drag_motion(ctx, event, *, accent_color: str) -> None:
     """Update drop-target indicator while dragging."""
-    ds = app._bar_drag_state
+    ds = ctx.runtime.barplot.drag_state
     if not ds["active"]:
         return
-    xdata = bar_event_xdata(app, event)
+    xdata = bar_event_xdata(ctx, event)
     if xdata is None:
         return
-    keys = app._bar_current_keys()
+    keys = ctx.runtime.barplot.current_keys()
     n = len(keys)
     if n < 2:
         return
-    xs = bar_drag_xs(app, keys)
+    xs = bar_drag_xs(ctx, keys)
     tgt = bar_idx_at_x(xdata, n, xs)
     if tgt == ds["cur_idx"]:
         return
     ds["cur_idx"] = tgt
 
     guide_x = bar_guide_x(xs, tgt, ds["src_idx"], n)
-    for ax in (app._ax_bar_mean, app._ax_bar_frac, getattr(app, "_ax_bar_n", None)):
+    for ax in (ctx.widgets.get_or_none("_ax_bar_mean"), ctx.widgets.get_or_none("_ax_bar_frac"), ctx.widgets.get_or_none("_ax_bar_n")):
         if ax is None:
             continue
         for ln in list(ax.lines):
@@ -380,17 +387,17 @@ def on_bar_drag_motion(app, event, *, accent_color: str) -> None:
         ln = ax.axvline(guide_x, color=accent_color, lw=1.5, ls="--",
                         alpha=0.8, zorder=10)
         ln._bar_drag_guide = True
-    app._bar_canvas.draw_idle()
+    ctx.runtime.barplot.canvas.draw_idle()
 
 
-def on_bar_drag_release(app, event) -> None:
+def on_bar_drag_release(ctx, event) -> None:
     """Finalise drop — reorder and redraw."""
-    ds = app._bar_drag_state
+    ds = ctx.runtime.barplot.drag_state
     if not ds["active"]:
         return
     ds["active"] = False
 
-    for ax in (app._ax_bar_mean, app._ax_bar_frac, getattr(app, "_ax_bar_n", None)):
+    for ax in (ctx.widgets.get_or_none("_ax_bar_mean"), ctx.widgets.get_or_none("_ax_bar_frac"), ctx.widgets.get_or_none("_ax_bar_n")):
         if ax is None:
             continue
         for ln in list(ax.lines):
@@ -400,48 +407,48 @@ def on_bar_drag_release(app, event) -> None:
     src = ds["src_idx"]
     tgt = ds["cur_idx"]
     if src == tgt:
-        app._bar_canvas.draw_idle()
+        ctx.runtime.barplot.canvas.draw_idle()
         return
 
-    keys = app._bar_current_keys()
+    keys = ctx.runtime.barplot.current_keys()
     if not (0 <= src < len(keys) and 0 <= tgt < len(keys)):
-        app._bar_canvas.draw_idle()
+        ctx.runtime.barplot.canvas.draw_idle()
         return
 
     item = keys.pop(src)
     keys.insert(tgt, item)
-    app._app_state.plot.bar_order = keys
-    app._bar_reset_order_btn.setProperty("variant", "toggle_accent")
-    app._bar_reset_order_btn.style().unpolish(app._bar_reset_order_btn)
-    app._bar_reset_order_btn.style().polish(app._bar_reset_order_btn)
+    ctx.state.plot.bar_order = keys
+    ctx.runtime.barplot.reset_order_btn.setProperty("variant", "toggle_accent")
+    ctx.runtime.barplot.reset_order_btn.style().unpolish(ctx.runtime.barplot.reset_order_btn)
+    ctx.runtime.barplot.reset_order_btn.style().polish(ctx.runtime.barplot.reset_order_btn)
     from well_viewer.features.barplot.renderer import redraw_bars
-    redraw_bars(app)
+    redraw_bars(ctx)
 
 
-def update_bar_tp_menu(app) -> None:
+def update_bar_tp_menu(ctx) -> None:
     """
     Populate the timepoint menu with the union of all timepoints
     present across all loaded wells.
 
     Maintains two pieces of state in sync:
-      * ``app._app_state.bar.tp_selections`` — the multi-select dict
+      * ``ctx.state.bar.tp_selections`` — the multi-select dict
         backing the popup checkbox menu (BarPlotState).
-      * ``app._bar_tp_cb`` — a hidden combo holding the first checked tp
+      * ``ctx.runtime.barplot.tp_cb`` — a hidden combo holding the first checked tp
         string so legacy callers (export, view-state, plot orchestrator)
         that read ``currentText()`` continue to work.
     """
-    bar_state = app._app_state.bar
+    bar_state = ctx.state.bar
 
-    if not app._app_state.dataset.well_paths:
+    if not ctx.state.dataset.well_paths:
         bar_state.tp_selections = {}
-        if hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None:
-            _set_combo_values(app._bar_tp_cb, ["—"])
-            app._bar_tp_cb.setCurrentText("—")
-        if hasattr(app, "_update_bar_tp_selection_display"):
-            app._update_bar_tp_selection_display()
+        if (ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None:
+            _set_combo_values(ctx.runtime.barplot.tp_cb, ["—"])
+            ctx.runtime.barplot.tp_cb.setCurrentText("—")
+        if True:
+            update_bar_tp_selection_display(ctx)
         return
 
-    all_tps: set = set(app._app_state.dataset.all_timepoints_cache)
+    all_tps: set = set(ctx.state.dataset.all_timepoints_cache)
     # If no timepoints were found the schema had no timepoint field.
     # Use 0.0 as a single synthetic timepoint so bar plots remain usable.
     if not all_tps:
@@ -450,7 +457,7 @@ def update_bar_tp_menu(app) -> None:
     sorted_tps = sorted(all_tps)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
 
-    cur = app._bar_tp_cb.currentText() if (hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None) else ""
+    cur = ctx.runtime.barplot.tp_cb.currentText() if ((ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None) else ""
 
     # Preserve any existing selections; default-check the previously
     # selected single tp on first build, falling back to the first tp.
@@ -469,58 +476,58 @@ def update_bar_tp_menu(app) -> None:
             new_selections[tp_strs[0]] = True
     bar_state.tp_selections = new_selections
 
-    if hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None:
-        _set_combo_values(app._bar_tp_cb, tp_strs)
+    if (ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None:
+        _set_combo_values(ctx.runtime.barplot.tp_cb, tp_strs)
         first_on = next((s for s in tp_strs if new_selections.get(s)), None)
         if first_on is not None:
-            app._bar_tp_cb.setCurrentText(first_on)
+            ctx.runtime.barplot.tp_cb.setCurrentText(first_on)
         elif tp_strs:
-            app._bar_tp_cb.setCurrentText(tp_strs[0])
+            ctx.runtime.barplot.tp_cb.setCurrentText(tp_strs[0])
         else:
-            app._bar_tp_cb.setCurrentText("—")
-    if hasattr(app, "_update_bar_tp_selection_display"):
-        app._update_bar_tp_selection_display()
+            ctx.runtime.barplot.tp_cb.setCurrentText("—")
+    if True:
+        update_bar_tp_selection_display(ctx)
 
 
 
 
 
 
-def toggle_swarm(app) -> None:
+def toggle_swarm(ctx) -> None:
     """Toggle beeswarm / bar mode and update the button appearance."""
     from well_viewer.features.barplot.renderer import redraw_bars
-    bs = app._app_state.bar
+    bs = ctx.state.bar
     bs.swarm = not bs.swarm
     on = bs.swarm
-    app._swarm_btn.setChecked(on)
-    app._swarm_btn.setText("Beeswarm: On" if on else "Beeswarm: Off")
+    ctx.widgets.get_or_none("_swarm_btn").setChecked(on)
+    ctx.widgets.get_or_none("_swarm_btn").setText("Beeswarm: On" if on else "Beeswarm: Off")
     if on and bs.violin:
         # Swarm and violin are mutually exclusive
         bs.violin = False
-        app._violin_btn.setChecked(False)
-        app._violin_btn.setText("Violin: Off")
-        app._violin_slider.setEnabled(False)
-    app._refresh_bar_layout_btn_state()
-    redraw_bars(app)
+        ctx.widgets.get_or_none("_violin_btn").setChecked(False)
+        ctx.widgets.get_or_none("_violin_btn").setText("Violin: Off")
+        ctx.widgets.get_or_none("_violin_slider").setEnabled(False)
+    refresh_bar_layout_btn_state(ctx)
+    redraw_bars(ctx)
 
 
 
-def toggle_violin(app) -> None:
+def toggle_violin(ctx) -> None:
     """Toggle violin / bar mode and update the button appearance."""
     from well_viewer.features.barplot.renderer import redraw_bars
-    bs = app._app_state.bar
+    bs = ctx.state.bar
     bs.violin = not bs.violin
     on = bs.violin
-    app._violin_btn.setChecked(on)
-    app._violin_btn.setText("Violin: On" if on else "Violin: Off")
-    app._violin_slider.setEnabled(on)
+    ctx.widgets.get_or_none("_violin_btn").setChecked(on)
+    ctx.widgets.get_or_none("_violin_btn").setText("Violin: On" if on else "Violin: Off")
+    ctx.widgets.get_or_none("_violin_slider").setEnabled(on)
     if on and bs.swarm:
         # Mutually exclusive with beeswarm
         bs.swarm = False
-        app._swarm_btn.setChecked(False)
-        app._swarm_btn.setText("Beeswarm: Off")
-    app._refresh_bar_layout_btn_state()
-    redraw_bars(app)
+        ctx.widgets.get_or_none("_swarm_btn").setChecked(False)
+        ctx.widgets.get_or_none("_swarm_btn").setText("Beeswarm: Off")
+    refresh_bar_layout_btn_state(ctx)
+    redraw_bars(ctx)
 
 
 
@@ -536,56 +543,56 @@ def rep_sets_active(ctx) -> "List[ReplicateSet]":
 
 
 
-def bar_well_display_label(app, lbl: str) -> str:
+def bar_well_display_label(ctx, lbl: str) -> str:
     """Bar-plot-safe well label that avoids numeric-only tick text."""
-    disp = str(app._well_display_label(lbl))
+    disp = str(well_display_label(ctx, lbl))
     if re.match(r"^\s*\d+\s*$", disp):
         return _extract_well_token(lbl) or disp
     return disp
 
 
 
-def toggle_fov_replicates(app) -> None:
+def toggle_fov_replicates(ctx) -> None:
     from well_viewer.features.barplot.renderer import redraw_bars
-    app._app_state.plot.toggle_fov_replicates()
-    app._invalidate_stats_cache()
-    app._refresh_fov_btn_state()
-    app._refresh_bar_layout_btn_state()
-    app._redraw()
+    ctx.state.plot.toggle_fov_replicates()
+    invalidate_stats_cache(ctx)
+    refresh_fov_btn_state(ctx)
+    refresh_bar_layout_btn_state(ctx)
+    redraw_app(ctx.ctx)
     # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
-    _vis = getattr(app, "_is_tab_visible", None)
-    if _vis("Bar Plots") if callable(_vis) else app._current_centre_tab() == "Bar Plots":
-        redraw_bars(app)
+    _vis = getattr(ctx, "_is_tab_visible", None)
+    if _vis("Bar Plots") if callable(_vis) else current_centre_tab(ctx.ctx) == "Bar Plots":
+        redraw_bars(ctx)
 
 
-def toggle_bar_group_mode(app) -> None:
+def toggle_bar_group_mode(ctx) -> None:
     """Flip the bar-tab x-axis grouping (well ↔ timepoint) and redraw."""
     from well_viewer.features.barplot.renderer import redraw_bars
-    app._app_state.plot.toggle_bar_group_mode()
-    app._refresh_bar_layout_btn_state()
-    redraw_bars(app)
+    ctx.state.plot.toggle_bar_group_mode()
+    refresh_bar_layout_btn_state(ctx)
+    redraw_bars(ctx)
 
 
-def toggle_bar_pool_replicates(app) -> None:
+def toggle_bar_pool_replicates(ctx) -> None:
     """Flip whether replicate-set wells collapse to a single column."""
     from well_viewer.features.barplot.renderer import redraw_bars
-    app._app_state.plot.toggle_bar_pool_replicates()
-    app._refresh_bar_layout_btn_state()
-    redraw_bars(app)
+    ctx.state.plot.toggle_bar_pool_replicates()
+    refresh_bar_layout_btn_state(ctx)
+    redraw_bars(ctx)
 
 
-def toggle_bar_pool_rset_cells(app) -> None:
+def toggle_bar_pool_rset_cells(ctx) -> None:
     """Flip whether violin/beeswarm pool an rset's wells into one column."""
     from well_viewer.features.barplot.renderer import redraw_bars
-    app._app_state.plot.toggle_bar_pool_rset_cells()
-    app._refresh_bar_layout_btn_state()
-    redraw_bars(app)
+    ctx.state.plot.toggle_bar_pool_rset_cells()
+    refresh_bar_layout_btn_state(ctx)
+    redraw_bars(ctx)
 
 
-def update_bar_tp_selection_display(app) -> None:
+def update_bar_tp_selection_display(ctx) -> None:
     """Refresh the bar tab's "(X selected)" label below the picker."""
-    sels = app._app_state.bar.tp_selections
-    lbl = getattr(app, "_bar_tp_label", None)
+    sels = ctx.state.bar.tp_selections
+    lbl = getattr(ctx.runtime.barplot, "tp_label", None)
     if lbl is None:
         return
     total = len(sels)
@@ -596,7 +603,7 @@ def update_bar_tp_selection_display(app) -> None:
         lbl.setText(f"({count}/{total} selected)" if total else "(0 selected)")
 
 
-def sync_hidden_bar_tp_combo(app) -> None:
+def sync_hidden_bar_tp_combo(ctx) -> None:
     """Mirror the first checked tp into the hidden ``_bar_tp_cb`` combo.
 
     Legacy callers (export/service.py, persistence/view_state.py,
@@ -605,18 +612,18 @@ def sync_hidden_bar_tp_combo(app) -> None:
     sorted tp list (set by ``update_bar_tp_menu``) and snap its current
     text to the first checked tp here.
     """
-    sels = app._app_state.bar.tp_selections
-    if not (hasattr(app, "_bar_tp_cb") and app._bar_tp_cb is not None):
+    sels = ctx.state.bar.tp_selections
+    if not ((ctx.runtime.barplot.tp_cb is not None) and ctx.runtime.barplot.tp_cb is not None):
         return
     if not sels:
         return
     for tp_str in sorted(sels.keys(), key=float):
         if sels[tp_str]:
-            app._bar_tp_cb.setCurrentText(tp_str)
+            ctx.runtime.barplot.tp_cb.setCurrentText(tp_str)
             return
 
 
-def open_bar_timepoint_selector(app) -> None:
+def open_bar_timepoint_selector(ctx) -> None:
     """Pop up a QMenu of checkboxes below the bar tab's Timepoints button.
 
     Mirrors ``features/scatter/cells_tab_view.py:_open_timepoint_selector``
@@ -628,9 +635,9 @@ def open_bar_timepoint_selector(app) -> None:
     from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
     from well_viewer.features.barplot.renderer import redraw_bars
 
-    menu = QMenu(app._bar_tp_button)
+    menu = QMenu(ctx.runtime.barplot.tp_button)
 
-    sels = app._app_state.bar.tp_selections
+    sels = ctx.state.bar.tp_selections
     checkboxes: dict[str, QCheckBox] = {}
     for tp_str in sorted(sels.keys(), key=float):
         cb = QCheckBox(tp_str, menu)
@@ -639,10 +646,10 @@ def open_bar_timepoint_selector(app) -> None:
 
         def _make_handler(tp=tp_str, checkbox=cb):
             def on_toggled(checked: bool) -> None:
-                app._app_state.bar.tp_selections[tp] = bool(checked)
-                sync_hidden_bar_tp_combo(app)
-                update_bar_tp_selection_display(app)
-                redraw_bars(app)
+                ctx.state.bar.tp_selections[tp] = bool(checked)
+                sync_hidden_bar_tp_combo(ctx)
+                update_bar_tp_selection_display(ctx)
+                redraw_bars(ctx)
             return on_toggled
 
         cb.toggled.connect(_make_handler())
@@ -659,10 +666,10 @@ def open_bar_timepoint_selector(app) -> None:
                 cb.setChecked(value)
             finally:
                 cb.blockSignals(False)
-            app._app_state.bar.tp_selections[tp_str] = value
-        sync_hidden_bar_tp_combo(app)
-        update_bar_tp_selection_display(app)
-        redraw_bars(app)
+            ctx.state.bar.tp_selections[tp_str] = value
+        sync_hidden_bar_tp_combo(ctx)
+        update_bar_tp_selection_display(ctx)
+        redraw_bars(ctx)
 
     all_action = QAction("All", menu)
     all_action.triggered.connect(lambda _=False: _set_all(True))
@@ -671,11 +678,11 @@ def open_bar_timepoint_selector(app) -> None:
     none_action.triggered.connect(lambda _=False: _set_all(False))
     menu.addAction(none_action)
 
-    btn = app._bar_tp_button
+    btn = ctx.runtime.barplot.tp_button
     menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
-def refresh_bar_layout_btn_state(app) -> None:
+def refresh_bar_layout_btn_state(ctx) -> None:
     """Sync the bar-tab layout toggle buttons with PlotState.
 
     Updates the *Grouping* and *Pooled* button labels / checked states using the
@@ -687,12 +694,12 @@ def refresh_bar_layout_btn_state(app) -> None:
     *Pool rset cells* button only when violin / beeswarm is on AND ≥1 rset is
     active.
     """
-    plot = app._app_state.plot
-    group_btn = getattr(app, "_bar_group_mode_btn", None)
-    pool_btn = getattr(app, "_bar_pool_reps_btn", None)
-    pool_cells_btn = getattr(app, "_bar_pool_rset_cells_btn", None)
-    has_rsets = bool(app._rep_sets_active())
-    use_per_cell = bool(app._app_state.bar.violin or app._app_state.bar.swarm)
+    plot = ctx.state.plot
+    group_btn = getattr(ctx.runtime.barplot, "group_mode_btn", None)
+    pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)
+    pool_cells_btn = getattr(ctx.runtime.barplot, "pool_rset_cells_btn", None)
+    has_rsets = bool(active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths))
+    use_per_cell = bool(ctx.state.bar.violin or ctx.state.bar.swarm)
     if group_btn is not None:
         # Two-way mode selector: label names the current mode, highlight tracks
         # the non-default "timepoint" mode so label and highlight never conflict.

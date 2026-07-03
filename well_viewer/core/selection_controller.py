@@ -855,7 +855,7 @@ def rebuild_all(app) -> None:
     app._invalidate_stats_cache()
     app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
-    redraw_bars(app)
+    redraw_bars(app._ctx)
     app._redraw()
     try:
         from well_viewer.features.scatter.tab_view import scatter_redraw_active

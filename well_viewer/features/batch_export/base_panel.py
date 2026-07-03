@@ -609,7 +609,7 @@ class BatchExportPanel(QWidget):
         )
 
         name = str(profile_name or "Custom")
-        prefs = _ensure_export_style_prefs(self._app)
+        prefs = _ensure_export_style_prefs(self._app._ctx)
         custom_profiles = _ensure_custom_export_profiles(self._app)
         overrides = EXPORT_PROFILES.get(name) or custom_profiles.get(name) or {}
         prefs["export_profile"] = name
@@ -1255,7 +1255,7 @@ class BatchExportPanel(QWidget):
         from well_viewer.features.export.style import _ensure_export_style_prefs
         save_export_figure(
             fig, fig_path, fmt,
-            export_prefs=_ensure_export_style_prefs(self._app),
+            export_prefs=_ensure_export_style_prefs(self._app._ctx),
             plot_bg=PLOT_BG,
         )
 

@@ -645,7 +645,7 @@ def redraw_line_plots(
     # limits, log scale, etc. survive a redraw (matches what the bar,
     # heatmap, and distribution renderers do).
     try:
-        apply_export_style_to_current(app, app._line_fig,
+        apply_export_style_to_current(app._ctx, app._line_fig,
                                       getattr(app, "_line_canvas", None))
     except Exception:  # pragma: no cover - never let style restore break a draw
         swallowed()  # was: pass (silent except)

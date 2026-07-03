@@ -599,7 +599,7 @@ def redraw_heatmap(app) -> None:
     # Apply the Export Style sidebar prefs (font sizes, grid, log scale, …)
     # so toggling those in the configurator survives a redraw.
     try:
-        apply_export_style_to_current(app, fig, canvas)
+        apply_export_style_to_current(app._ctx, fig, canvas)
     except Exception:
         swallowed()  # was: pass (silent except)
 

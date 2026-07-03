@@ -86,7 +86,7 @@ class ExportStyleSidebar(QWidget):
         # Per-figure view: global publication style (fonts, line/marker, grid,
         # legend …) is shared, but axis limits / log scaling are scoped to this
         # figure so they no longer leak across tabs.
-        self._prefs = figure_prefs(app, fig)
+        self._prefs = figure_prefs(app._ctx, fig)
         self._updating = False
         self._getters: dict[str, Callable[[], object]] = {}
         self._setters: dict[str, Callable[[object], None]] = {}
@@ -901,7 +901,7 @@ class ExportStyleSidebar(QWidget):
             return
         try:
             self._persist()
-            apply_export_style_to_current(self._app, self._fig, self._canvas)
+            apply_export_style_to_current(self._app._ctx, self._fig, self._canvas)
         except Exception:
             swallowed()  # was: pass (silent except)
 

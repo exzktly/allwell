@@ -172,6 +172,7 @@ def _render_app(*, density: bool, gates):
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
     )
+    app._ctx = SimpleNamespace(state=app._app_state, widgets=SimpleNamespace(get_or_none=lambda _n: None), app=app)
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: df
     app._rank_color_well = lambda label: "#3366cc"
@@ -307,6 +308,7 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
     )
+    app._ctx = SimpleNamespace(state=app._app_state, widgets=SimpleNamespace(get_or_none=lambda _n: None), app=app)
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
     app._rank_color_well = lambda label: "#3366cc"
@@ -375,6 +377,7 @@ def test_gates_appear_on_every_separate_axis():
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
     )
+    app._ctx = SimpleNamespace(state=app._app_state, widgets=SimpleNamespace(get_or_none=lambda _n: None), app=app)
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
     app._rank_color_well = lambda label: "#3366cc"
@@ -412,6 +415,7 @@ def _sidebar_stub_app(fig):
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
     )
+    app._ctx = SimpleNamespace(state=app._app_state, widgets=SimpleNamespace(get_or_none=lambda _n: None), app=app)
     app._scatter_fig = fig  # makes _is_scatter_cells_fig / _supports_well_order true
     app._rep_sets_active = lambda: []
     app._parse_rc = lambda lbl: (lbl, 0, 0)
@@ -603,7 +607,7 @@ def test_scatter_defaults_to_log_and_survives_restyle():
     assert ax.get_xscale() == "function"
     assert ax.get_yscale() == "function"
     # A later restyle (e.g. sidebar field change) must not revert to linear.
-    apply_export_style_to_current(app, app._scatter_fig, app._scatter_canvas)
+    apply_export_style_to_current(app._ctx, app._scatter_fig, app._scatter_canvas)
     assert ax.get_xscale() == "function" and ax.get_yscale() == "function"
 
 
@@ -679,6 +683,7 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
     )
+    app._ctx = SimpleNamespace(state=app._app_state, widgets=SimpleNamespace(get_or_none=lambda _n: None), app=app)
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
     app._rank_color_well = lambda label: "#3366cc"

@@ -92,7 +92,7 @@ def _apply_export_style(app) -> None:
     if fig is None:
         return
     try:
-        apply_export_style_to_current(app, fig, canvas)
+        apply_export_style_to_current(app._ctx, fig, canvas)
     except Exception:
         swallowed()  # was: pass (silent except)
 

@@ -249,10 +249,10 @@ def apply_axis_log_scale(ax, which: str, on: bool) -> None:
     mpl_axis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:g}"))
 
 
-def _ensure_export_style_prefs(app) -> dict:
+def _ensure_export_style_prefs(ctx) -> dict:
     # A8 teardown: backed by the typed ExportPrefsState slice; seeded lazily on
-    # first access (None → defaults) exactly as the old loose attr was.
-    ep = app._app_state.export_prefs
+    # first access (None → defaults) exactly as the old loose attr was. Takes ctx.
+    ep = ctx.state.export_prefs
     if ep.style_prefs is None:
         ep.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
     return ep.style_prefs
@@ -283,17 +283,20 @@ _FIG_PREF_KEY_MAP = (
 )
 
 
-def figure_pref_key(app, fig) -> str:
-    """A stable identifier for *fig* used to scope its axis prefs."""
+def figure_pref_key(ctx, fig) -> str:
+    """A stable identifier for *fig* used to scope its axis prefs.
+
+    A8 teardown: resolves the fig through the WidgetRegistry (``ctx.widgets``),
+    so it takes ``ctx``."""
     for attr, key in _FIG_PREF_KEY_MAP:
-        if getattr(app, attr, None) is fig:
+        if ctx.widgets.get_or_none(attr) is fig:
             return key
     return f"fig:{id(fig)}"
 
 
-def _ensure_axis_prefs_store(app) -> dict:
+def _ensure_axis_prefs_store(ctx) -> dict:
     # A8 teardown: backed by the typed ExportPrefsState slice (per-figure store).
-    return app._app_state.export_prefs.axis_prefs
+    return ctx.state.export_prefs.axis_prefs
 
 
 class _FigurePrefs(MutableMapping):
@@ -345,12 +348,12 @@ class _FigurePrefs(MutableMapping):
         return sum(1 for _ in self)
 
 
-def figure_prefs(app, fig):
+def figure_prefs(ctx, fig):
     """A :class:`_FigurePrefs` view for *fig* — global style + that figure's
-    own axis limits / log scaling."""
-    global_prefs = _ensure_export_style_prefs(app)
-    store = _ensure_axis_prefs_store(app)
-    axis = store.setdefault(figure_pref_key(app, fig), {})
+    own axis limits / log scaling. A8 teardown: takes ``ctx``."""
+    global_prefs = _ensure_export_style_prefs(ctx)
+    store = _ensure_axis_prefs_store(ctx)
+    axis = store.setdefault(figure_pref_key(ctx, fig), {})
     return _FigurePrefs(global_prefs, axis)
 
 
@@ -645,10 +648,10 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 swallowed()  # was: pass (silent except)
 
 
-def apply_export_style_to_current(app, fig, canvas=None) -> None:
+def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
     # Per-figure view (global style + *this* figure's axis limits / log scaling)
-    # so axis settings never leak across tabs.
-    prefs = figure_prefs(app, fig)
+    # so axis settings never leak across tabs. A8 teardown: takes ``ctx``.
+    prefs = figure_prefs(ctx, fig)
     apply_export_style_prefs(fig, prefs)
     if canvas is not None:
         canvas.draw_idle()

@@ -167,7 +167,7 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     }
     try:
         apply_export_style_to_current(
-            app, app._scatter_fig, getattr(app, "_scatter_canvas", None))
+            app._ctx, app._scatter_fig, getattr(app, "_scatter_canvas", None))
     except Exception:
         swallowed()
     # Re-arm the gate selector against the new top panel (axes[0]). The figure

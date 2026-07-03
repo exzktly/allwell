@@ -623,7 +623,7 @@ def draw_grouped_bar_mode(
     )
     if (str(getattr(app._app_state.plot, "bar_group_mode", "well") or "well") == "well"
             and len(target_ts) > 1):
-        _fsize = float(_ensure_export_style_prefs(app).get("group_label_size", 8))
+        _fsize = float(_ensure_export_style_prefs(app._ctx).get("group_label_size", 8))
         _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
         _annotate_cluster_footers(items, _xtick_axes, fontsize=_fsize)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
@@ -768,7 +768,7 @@ def redraw_bars(app) -> None:
         tp_str=tp_str_combined,
         threshold=threshold,
     ):
-        apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))
+        apply_export_style_to_current(app._ctx, app._bar_fig, getattr(app, "_bar_canvas", None))
         return
     draw_grouped_bar_mode(
         app,
@@ -782,7 +782,7 @@ def redraw_bars(app) -> None:
         band_lbl=band_lbl,
         use_sem=use_sem,
     )
-    apply_export_style_to_current(app, app._bar_fig, getattr(app, "_bar_canvas", None))
+    apply_export_style_to_current(app._ctx, app._bar_fig, getattr(app, "_bar_canvas", None))
 
 
 def draw_bar_empty_state(app, ax_mean, ax_frac, message: str, *, ax_n=None) -> None:

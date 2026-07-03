@@ -202,7 +202,7 @@ def redraw_scatter(
     # Re-apply Export Style sidebar prefs so axis limits / log scale /
     # font sizes survive a redraw — matches bar/heatmap/distribution.
     try:
-        apply_export_style_to_current(app, app._scatter_fig,
+        apply_export_style_to_current(app._ctx, app._scatter_fig,
                                       getattr(app, "_scatter_canvas", None))
     except Exception:  # pragma: no cover
         swallowed()  # was: pass (silent except)
@@ -335,7 +335,7 @@ def redraw_scatter_agg(
 
     # Redraw canvas
     try:
-        apply_export_style_to_current(app, app._scatter_agg_fig,
+        apply_export_style_to_current(app._ctx, app._scatter_agg_fig,
                                       getattr(app, "_scatter_agg_canvas", None))
     except Exception:  # pragma: no cover
         swallowed()  # was: pass (silent except)
@@ -425,7 +425,7 @@ def redraw_scatter_orchestrate(app) -> None:
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )
-    apply_export_style_to_current(app, app._scatter_fig, getattr(app, "_scatter_canvas", None))
+    apply_export_style_to_current(app._ctx, app._scatter_fig, getattr(app, "_scatter_canvas", None))
 
 
 def redraw_scatter_agg_orchestrate(app) -> None:
@@ -485,7 +485,7 @@ def redraw_scatter_agg_orchestrate(app) -> None:
         selected_timepoints,
         well_colors=WELL_COLORS,
     )
-    apply_export_style_to_current(app, app._scatter_agg_fig, getattr(app, "_scatter_agg_canvas", None))
+    apply_export_style_to_current(app._ctx, app._scatter_agg_fig, getattr(app, "_scatter_agg_canvas", None))
 
 
 def update_scatter_menus(app) -> None:

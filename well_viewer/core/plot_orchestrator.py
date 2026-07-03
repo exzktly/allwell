@@ -206,7 +206,7 @@ def redraw_app(app) -> None:
         all_fluor_values_filtered=_all_fluor_values_filtered,
         warn=WARN,
     )
-    apply_export_style_to_current(app, app._line_fig, getattr(app, "_line_canvas", None))
+    apply_export_style_to_current(app._ctx, app._line_fig, getattr(app, "_line_canvas", None))
 
     # Keep the Export Configurator's line-order lists in sync with the
     # current selection / replicate sets when the sidebar is open.

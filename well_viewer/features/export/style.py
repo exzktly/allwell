@@ -145,7 +145,7 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
         # routing the open path through it risks extra restyle+redraw passes
         # on a heavy (tall, 3-panel) bar figure.
         try:
-            apply_export_style_to_current(app, fig, canvas)
+            apply_export_style_to_current(app._ctx, fig, canvas)
         except Exception:
             swallowed()  # was: pass (silent except)
         # Re-populate the line-order lists so they reflect the current rep-set

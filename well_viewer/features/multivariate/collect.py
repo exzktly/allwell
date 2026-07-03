@@ -22,7 +22,7 @@ import numpy as np
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.metric_registry import METRIC_BY_KEY
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.domain.selections_model import color_for_replicate_set
+from well_viewer.domain.selections_model import color_for_replicate_set, color_for_well
 
 _logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def collect_feature_matrix(
             key=lambda lbl: parse_rc(lbl),
         )
         for well_label in selected:
-            group_colors[well_label] = ctx.app._rank_color_well(well_label)
+            group_colors[well_label] = color_for_well(well_label)
             _collect_well(well_label, well_label)
 
     if rows_X:

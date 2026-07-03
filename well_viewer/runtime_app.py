@@ -130,8 +130,7 @@ _logger = logging.getLogger("well_viewer")
 # ── Semantic colour aliases (use these instead of magic hex strings) ──────────
 CLR_ACCENT_DARK = ACCENT_DARK
 
-from well_viewer.domain.plate_layout import WELL_COLORS
-from well_viewer.domain.selections_model import well_rank as _sel_well_rank
+from well_viewer.domain.selections_model import color_for_well
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
@@ -715,7 +714,7 @@ class WellViewerApp(QWidget):
     # group is coloured by *well-position rank*, so the same well always gets the
     # same colour everywhere (plate maps, line/bar/stats plots).
     def _rank_color_well(self, tok) -> str:
-        return WELL_COLORS[_sel_well_rank(tok) % len(WELL_COLORS)]
+        return color_for_well(tok)
 
     def _rank_color_wells(self, wells) -> str: return rank_color_wells(self, wells)
 

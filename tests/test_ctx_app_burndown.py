@@ -229,7 +229,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              genuine app services (_persistence, _rep_sets_active,
 #              _rank_color_well, refresh_plot_empty_states, QMessageBox/QFileDialog
 #              main-window parents) + wrap_with_empty_state, bridged via ctx.app.
-CTX_APP_BUDGET = 187
+#   187 -> 186  Extract the pure WellViewerApp._rank_color_well god-method to
+#              domain.selections_model.color_for_well (WELL_COLORS[well_rank%N]);
+#              the delegate forwards to it and multivariate collect drops its
+#              ctx.app._rank_color_well. Second pure core god-method decomposed.
+CTX_APP_BUDGET = 186
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

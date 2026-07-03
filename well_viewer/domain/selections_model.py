@@ -94,6 +94,13 @@ def color_for_wells(wells: Any) -> str:
     return WELL_COLORS[(min(ranks) if ranks else 0) % len(WELL_COLORS)]
 
 
+def color_for_well(token: Any) -> str:
+    """Rank colour for a single well token — the pure core of the
+    ``WellViewerApp._rank_color_well`` god-method (A8 teardown)."""
+    from well_viewer.domain.plate_layout import WELL_COLORS
+    return WELL_COLORS[well_rank(token) % len(WELL_COLORS)]
+
+
 def color_for_selection(s: Any) -> str:
     """Effective colour for a selection dict: explicit ``color`` override first,
     otherwise the rank colour of its wells. The pure core of ``sel_color``,

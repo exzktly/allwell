@@ -211,7 +211,7 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: mask)
 
-    before = get_thresh_frac_on(app, (st.channel or "").lower())
+    before = get_thresh_frac_on(app._ctx, (st.channel or "").lower())
     st.source = "raw"
     st.binary_mask = True
     st.threshold = 100.0          # local override between the two cells
@@ -220,7 +220,7 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
     assert (rgb[3, 3] == (255, 255, 255)).all()    # bright cell ON
     assert (rgb[14, 14] == (0, 0, 0)).all()        # dim cell OFF
     # The app-wide ThreshFracOn is untouched.
-    assert get_thresh_frac_on(app, (st.channel or "").lower()) == before
+    assert get_thresh_frac_on(app._ctx, (st.channel or "").lower()) == before
 
 
 def test_qc_size_filter_drops_out_of_range_cells(playground_app, monkeypatch):

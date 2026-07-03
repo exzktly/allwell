@@ -234,7 +234,7 @@ def _effective_threshold(app) -> float:
         return float(st.threshold)
     try:
         from well_viewer.core.channel_state_controller import get_thresh_frac_on
-        return float(get_thresh_frac_on(app, (st.channel or "").lower()))
+        return float(get_thresh_frac_on(app._ctx, (st.channel or "").lower()))
     except Exception:
         return 0.0
 

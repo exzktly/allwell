@@ -850,16 +850,21 @@ def get_all_fluor_gates(ctx) -> Dict[str, float]:
 
 
 
-def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
-    """Get ThreshFracOn threshold. Uses active channel if not specified."""
+def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
+    """Get ThreshFracOn threshold. Uses active channel if not specified.
+
+    A8 teardown: pure typed state, so it takes ``ctx``. Post-R6 the per-channel
+    ThreshFracOn cutoffs live on the ``CellGatingState`` slice; a channel with no
+    configured cutoff falls back to the global ``channel.threshold`` — the same
+    value the pre-R6 "tab-not-built" guard returned (``channel.threshold`` has no
+    writers, so it is the constant 50.0 the cell-gating accessor also defaults
+    to; the fallback is kept explicit in case that ever changes)."""
     if channel is None:
-        channel = app._app_state.channel.active_channel
-    # _redraw can fire before the cell-gating tab is built (e.g. from
-    # sidebar releases during early load); fall back to the default.
-    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
-        return app._app_state.channel.threshold
-    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
-    return cell_gating_get_thresh_frac_on(app._ctx, channel)
+        channel = ctx.state.channel.active_channel
+    from well_viewer.features.grouping.cell_gating_tab_view import _cell_gating_resolve_key
+    key = _cell_gating_resolve_key(ctx, channel)
+    tf = ctx.state.cell_gating.thresh_frac_on
+    return tf[key] if key in tf else ctx.state.channel.threshold
 
 
 def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
@@ -917,7 +922,7 @@ def refresh_thresh_frac_quick_edit(app) -> None:
     refresh_chips = getattr(app, "_refresh_status_chips", None)
     if callable(refresh_chips):
         refresh_chips()
-    value = float(get_thresh_frac_on(app))
+    value = float(get_thresh_frac_on(app._ctx))
     for attr in (
         "_plotting_thresh_frac_stepper",
         "_review_thresh_frac_stepper",

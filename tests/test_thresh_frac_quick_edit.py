@@ -115,8 +115,8 @@ def test_set_writes_through_active_channel_edit():
     app = _FakeApp()
     set_thresh_frac_on(app, 123.0)            # active channel == gfp
     assert app._cell_gating_thresh_frac_edits["gfp"].text() == "123.0"
-    assert get_thresh_frac_on(app) == 123.0
-    assert get_thresh_frac_on(app, "mcherry") == 50.0   # untouched
+    assert get_thresh_frac_on(app._ctx) == 123.0
+    assert get_thresh_frac_on(app._ctx, "mcherry") == 50.0   # untouched
     assert app.redraws == 1                    # change handler redrew once
     # The edit's signals were restored (not left blocked) after the write.
     assert app._cell_gating_thresh_frac_edits["gfp"].blocked is False
@@ -125,15 +125,15 @@ def test_set_writes_through_active_channel_edit():
 def test_set_targets_explicit_channel():
     app = _FakeApp()
     set_thresh_frac_on(app, 77.0, channel="mcherry")
-    assert get_thresh_frac_on(app, "mcherry") == 77.0
-    assert get_thresh_frac_on(app, "gfp") == 50.0
+    assert get_thresh_frac_on(app._ctx, "mcherry") == 77.0
+    assert get_thresh_frac_on(app._ctx, "gfp") == 50.0
 
 
 def test_set_noop_without_dataset():
     app = _FakeApp()
     app._app_state.dataset.data_dir = ""
     set_thresh_frac_on(app, 999.0)
-    assert get_thresh_frac_on(app, "gfp") == 50.0
+    assert get_thresh_frac_on(app._ctx, "gfp") == 50.0
     assert app.redraws == 0
 
 

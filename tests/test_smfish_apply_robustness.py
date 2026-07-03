@@ -46,8 +46,10 @@ def test_apply_to_all_rejects_a_reentrant_run(monkeypatch):
     monkeypatch.setattr(tab_view, "apply_global_threshold_async",
                         lambda **_k: launched.__setitem__("n", launched["n"] + 1))
 
+    from well_viewer.core.app_runtime import AppRuntime
     app = types.SimpleNamespace(_smfish_out_dir="x", _smfish_apply_running=True)
-    tab_view._smfish_apply_to_all(app)
+    ctx = types.SimpleNamespace(app=app, runtime=AppRuntime(app))
+    tab_view._smfish_apply_to_all(ctx)
 
     assert launched["n"] == 0, "a second concurrent run must not launch a worker"
     assert any("already running" in s.lower() for s in statuses)

@@ -6,7 +6,7 @@ apply-to-all worker live in ``smfish_controller.py`` and ``smfish_worker.py``.
 Public surface (matches the convention used by every other ``tabs/*_tab_view.py``):
 
 * :func:`build_smfish_tab` — construct the UI inside *parent*; stash widget
-  refs and tab state on ``app._smfish_*``.
+  refs and tab state on ``ctx.runtime.smfish.*``.
 * :func:`smfish_sync_from_app` — repopulate combo boxes from the loaded
   dataset's ``pipeline_info.json``; called when a new dataset opens and
   when the user returns to the smFISH tab.
@@ -38,8 +38,9 @@ from well_viewer.features.smfish.controller import (
     scan_well_zip,
 )
 from well_viewer.features.smfish.worker import apply_global_threshold_async
-from well_viewer.domain.viewer_state import make_schema_extractor
+from well_viewer.domain.viewer_state import make_schema_extractor, extract_well_token
 from well_viewer.core.channel_state_controller import recalculate_threshold
+from well_viewer.data.data_loading import load_well_csv
 from well_viewer.core.safe import swallowed
 
 logger = logging.getLogger("smfish_tab")
@@ -81,7 +82,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     from matplotlib.figure import Figure
 
     # A8 burn-down: Qt widget handles go through the WidgetRegistry
-    # (``ctx.widgets``), which stamps ``app._smfish_*`` so legacy readers resolve.
+    # (``ctx.widgets``), which stamps ``ctx.runtime.smfish.*`` so legacy readers resolve.
     # The (many) non-widget state fields below stay on the app — a later layer.
     reg = ctx.widgets
 
@@ -107,8 +108,8 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctx.runtime.smfish.FigureCanvas = FigureCanvas
 
     bridge = _WorkerBridge(parent)
-    bridge.status.connect(lambda text: _smfish_set_status(ctx.app, text))
-    bridge.done.connect(lambda text: _smfish_set_status(ctx.app, text))
+    bridge.status.connect(lambda text: _smfish_set_status(ctx, text))
+    bridge.done.connect(lambda text: _smfish_set_status(ctx, text))
     # The bridge lives on the GUI thread, so any callable emitted from
     # the worker thread runs here when the signal is delivered. This is
     # the only safe way to schedule widget-touching work from the
@@ -132,40 +133,40 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("Channel:", ctrl))
     channel_cb = reg.register("_smfish_channel_cb", QComboBox(ctrl))
     channel_cb.currentIndexChanged.connect(
-        lambda _i: _smfish_on_channel_changed(ctx.app)
+        lambda _i: _smfish_on_channel_changed(ctx)
     )
     cl.addWidget(channel_cb)
 
     cl.addWidget(QLabel("FOV:", ctrl))
     fov_cb = reg.register("_smfish_fov_cb", QComboBox(ctrl))
     fov_cb.currentIndexChanged.connect(
-        lambda _i: _smfish_load_selected_images(ctx.app)
+        lambda _i: _smfish_load_selected_images(ctx)
     )
     cl.addWidget(fov_cb)
 
     cl.addWidget(QLabel("Timepoint:", ctrl))
     tp_cb = reg.register("_smfish_tp_cb", QComboBox(ctrl))
     tp_cb.currentIndexChanged.connect(
-        lambda _i: _smfish_load_selected_images(ctx.app)
+        lambda _i: _smfish_load_selected_images(ctx)
     )
     cl.addWidget(tp_cb)
 
     cl.addWidget(QLabel("smFISH_Thresh:", ctrl))
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500", ctrl))
     threshold_edit.setFixedWidth(90)
-    threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
+    threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     cl.addWidget(threshold_edit)
 
     cl.addWidget(QLabel("LUT Min:", ctrl))
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit("", ctrl))
     lut_min_edit.setFixedWidth(70)
-    lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
+    lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     cl.addWidget(lut_min_edit)
 
     cl.addWidget(QLabel("LUT Max:", ctrl))
     lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit("", ctrl))
     lut_max_edit.setFixedWidth(70)
-    lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx.app))
+    lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     cl.addWidget(lut_max_edit)
     cl.addStretch(1)
     root.addWidget(ctrl)
@@ -178,22 +179,22 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
 
     apply_btn = QPushButton("Apply Global Threshold", btn_row)
     apply_btn.setProperty("variant", "secondary")
-    apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx.app))
+    apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx))
     bl.addWidget(apply_btn)
 
     refresh_btn = QPushButton("Refresh", btn_row)
     refresh_btn.setProperty("variant", "secondary")
-    refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx.app))
+    refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx))
     bl.addWidget(refresh_btn)
 
     overlay_btn = reg.register("_smfish_overlay_btn", QPushButton("Hide Overlays", btn_row))
     overlay_btn.setProperty("variant", "secondary")
-    overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx.app))
+    overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx))
     bl.addWidget(overlay_btn)
 
     cdf_btn = QPushButton("This Frame CDF", btn_row)
     cdf_btn.setProperty("variant", "secondary")
-    cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx.app))
+    cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     bl.addWidget(cdf_btn)
     bl.addStretch(1)
     root.addWidget(btn_row)
@@ -212,68 +213,68 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     root.addWidget(canvas_img, 1)
     # Theme the canvas immediately so it's never a bare white figure before the
     # first refresh paints data or an empty-state message.
-    _smfish_paint_empty(ctx.app, "Select a well to view smFISH images.")
+    _smfish_paint_empty(ctx, "Select a well to view smFISH images.")
 
     from widgets.mpl_toolbar import MplToolbar
     toolbar = reg.register("_smfish_toolbar", MplToolbar(canvas_img, parent))
     root.addWidget(toolbar)
 
     canvas_img.mpl_connect(
-        "motion_notify_event", lambda ev: _smfish_on_img_hover(ctx.app, ev)
+        "motion_notify_event", lambda ev: _smfish_on_img_hover(ctx, ev)
     )
     canvas_img.mpl_connect(
-        "scroll_event", lambda ev: _smfish_on_img_scroll(ctx.app, ev)
+        "scroll_event", lambda ev: _smfish_on_img_scroll(ctx, ev)
     )
     canvas_img.mpl_connect(
-        "button_press_event", lambda ev: _smfish_on_img_press(ctx.app, ev)
+        "button_press_event", lambda ev: _smfish_on_img_press(ctx, ev)
     )
     canvas_img.mpl_connect(
-        "button_release_event", lambda ev: _smfish_on_img_release(ctx.app, ev)
+        "button_release_event", lambda ev: _smfish_on_img_release(ctx, ev)
     )
     canvas_img.mpl_connect(
-        "motion_notify_event", lambda ev: _smfish_on_img_drag(ctx.app, ev)
+        "motion_notify_event", lambda ev: _smfish_on_img_drag(ctx, ev)
     )
 
 
 # ── public API ────────────────────────────────────────────────────────────
 
 
-def smfish_sync_from_app(app) -> None:
+def smfish_sync_from_app(ctx) -> None:
     """Repopulate combo boxes from the loaded dataset's ``pipeline_info.json``.
 
     Called when a new dataset opens and when the user navigates to the
     smFISH tab; a no-op if the tab hasn't been built yet.
     """
-    if not hasattr(app, "_smfish_channel_cb"):
+    if ctx.runtime.smfish.channel_cb is None:
         return  # tab not built yet
 
-    out_dir = app._app_state.dataset.data_dir or app._smfish_out_dir
+    out_dir = ctx.state.dataset.data_dir or ctx.runtime.smfish.out_dir
     if out_dir is None:
-        _smfish_set_status(app, "No output loaded.")
+        _smfish_set_status(ctx, "No output loaded.")
         _smfish_paint_empty(
-            app, "No dataset loaded.\nOpen a results folder to view smFISH images."
+            ctx, "No dataset loaded.\nOpen a results folder to view smFISH images."
         )
         return
     info_path = out_dir / "pipeline_info.json"
     if not info_path.exists():
-        app._smfish_out_dir = out_dir
-        app._smfish_tokens = []
-        app._smfish_well_to_zip = {}
-        app._smfish_fov_tp_extractor = None
-        _smfish_show_no_smfish_state(app)
+        ctx.runtime.smfish.out_dir = out_dir
+        ctx.runtime.smfish.tokens = []
+        ctx.runtime.smfish.well_to_zip = {}
+        ctx.runtime.smfish.fov_tp_extractor = None
+        _smfish_show_no_smfish_state(ctx)
         return
     try:
         info = json.loads(info_path.read_text())
-        app._smfish_tokens = [
+        ctx.runtime.smfish.tokens = [
             str(t).strip() for t in info.get("smfish_tokens", []) if str(t).strip()
         ]
-        app._app_state.smfish.separator = str(info.get("separator", "_"))
-        app._smfish_classifier = make_classifier(app._app_state.smfish.separator)
+        ctx.state.smfish.separator = str(info.get("separator", "_"))
+        ctx.runtime.smfish.classifier = make_classifier(ctx.state.smfish.separator)
         fov_idx = int(info.get("fov_index", -1))
         tp_idx = int(info.get("tp_index", -1))
         if tp_idx >= 0 and fov_idx >= 0:
-            app._smfish_fov_tp_extractor = make_schema_extractor(
-                app._app_state.smfish.separator, fov_idx, tp_idx
+            ctx.runtime.smfish.fov_tp_extractor = make_schema_extractor(
+                ctx.state.smfish.separator, fov_idx, tp_idx
             )
         elif tp_idx >= 0:
             # Single-FOV pipeline (schema has `timepoint` but no `fov`).
@@ -285,7 +286,7 @@ def smfish_sync_from_app(app) -> None:
             # pair found". Mirror the single-FOV extractor in
             # viewer_state.read_pipeline_info: synthesise a constant FOV
             # ("1") and read the timepoint from the schema index.
-            _sep = app._app_state.smfish.separator
+            _sep = ctx.state.smfish.separator
             _tp_idx = tp_idx
 
             def _single_fov_extractor(stem: str):
@@ -293,41 +294,41 @@ def smfish_sync_from_app(app) -> None:
                 tp = parts[_tp_idx] if 0 <= _tp_idx < len(parts) else "unknown"
                 return "1", tp
 
-            app._smfish_fov_tp_extractor = _single_fov_extractor
+            ctx.runtime.smfish.fov_tp_extractor = _single_fov_extractor
         else:
-            app._smfish_fov_tp_extractor = None
+            ctx.runtime.smfish.fov_tp_extractor = None
     except Exception as exc:
         logger.warning("Could not parse %s: %s", info_path, exc)
-        app._smfish_out_dir = out_dir
-        app._smfish_tokens = []
-        app._smfish_well_to_zip = {}
-        app._smfish_fov_tp_extractor = None
-        _smfish_show_no_smfish_state(app)
+        ctx.runtime.smfish.out_dir = out_dir
+        ctx.runtime.smfish.tokens = []
+        ctx.runtime.smfish.well_to_zip = {}
+        ctx.runtime.smfish.fov_tp_extractor = None
+        _smfish_show_no_smfish_state(ctx)
         return
 
-    app._smfish_out_dir = out_dir
+    ctx.runtime.smfish.out_dir = out_dir
 
-    if not app._smfish_tokens:
-        app._smfish_well_to_zip = {}
-        _smfish_show_no_smfish_state(app)
+    if not ctx.runtime.smfish.tokens:
+        ctx.runtime.smfish.well_to_zip = {}
+        _smfish_show_no_smfish_state(ctx)
         return
 
-    _smfish_set_controls_enabled(app, True)
+    _smfish_set_controls_enabled(ctx, True)
 
     zips = sorted(out_dir.glob("*_out.zip"))
-    app._smfish_well_to_zip = {}
+    ctx.runtime.smfish.well_to_zip = {}
     for z in zips:
         m = re.match(r"([A-Ha-h])(\d{1,2})_out\.zip$", z.name)
         if m:
-            app._smfish_well_to_zip[
+            ctx.runtime.smfish.well_to_zip[
                 f"{m.group(1).upper()}{int(m.group(2)):02d}"
             ] = z
 
-    channels = app._smfish_tokens
-    app._smfish_channel_cb.blockSignals(True)
-    app._smfish_channel_cb.clear()
-    app._smfish_channel_cb.addItems(channels)
-    app._smfish_channel_cb.blockSignals(False)
+    channels = ctx.runtime.smfish.tokens
+    ctx.runtime.smfish.channel_cb.blockSignals(True)
+    ctx.runtime.smfish.channel_cb.clear()
+    ctx.runtime.smfish.channel_cb.addItems(channels)
+    ctx.runtime.smfish.channel_cb.blockSignals(False)
     if channels:
         # Prefer a channel that has a saved threshold so the spinbox
         # shows the previously-applied value the moment the tab opens
@@ -337,87 +338,87 @@ def smfish_sync_from_app(app) -> None:
         # manually switched the combo. The saved value still wins
         # later (via apply_saved_to_spinbox below), but the *visible*
         # selection now matches the applied configuration on reopen.
-        saved = getattr(app, "_smfish_thresholds_saved", {}) or {}
+        saved = ctx.runtime.smfish.thresholds_saved or {}
         preferred_idx = 0
         if saved:
             for i, ch in enumerate(channels):
                 if str(ch).strip().lower() in saved:
                     preferred_idx = i
                     break
-        app._smfish_channel_cb.setCurrentIndex(preferred_idx)
+        ctx.runtime.smfish.channel_cb.setCurrentIndex(preferred_idx)
     # Restore the saved threshold for the now-current channel before
     # the FOV / TP combos finish populating; otherwise the first
     # _smfish_redraw uses the stale hardcoded "1500" default.
     try:
         from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.apply_saved_to_spinbox(app)
+        _smfish_persist.apply_saved_to_spinbox(ctx.app)
     except Exception:
         logging.getLogger("well_viewer").exception(
             "smFISH threshold restore on channel populate failed"
         )
-    _smfish_refresh_fov_tp_values(app)
+    _smfish_refresh_fov_tp_values(ctx)
 
 
-def _smfish_on_channel_changed(app) -> None:
+def _smfish_on_channel_changed(ctx) -> None:
     """Channel combo handler: restore the saved threshold for the
     new channel (so the spinbox matches the spot counts already in
     the CSVs), then run the standard FOV/TP refresh."""
     try:
         from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.apply_saved_to_spinbox(app)
+        _smfish_persist.apply_saved_to_spinbox(ctx.app)
     except Exception:
         logging.getLogger("well_viewer").exception(
             "smFISH threshold restore on channel change failed"
         )
-    _smfish_refresh_fov_tp_values(app)
+    _smfish_refresh_fov_tp_values(ctx)
 
 
 # ── internal helpers ──────────────────────────────────────────────────────
 
 
-def _smfish_set_status(app, text: str) -> None:
-    app._smfish_status_label.setText(text)
+def _smfish_set_status(ctx, text: str) -> None:
+    ctx.runtime.smfish.status_label.setText(text)
 
 
-def _smfish_toggle_overlays(app) -> None:
-    sm = app._app_state.smfish
+def _smfish_toggle_overlays(ctx) -> None:
+    sm = ctx.state.smfish
     sm.show_overlays = not sm.show_overlays
-    app._smfish_overlay_btn.setText(
+    ctx.runtime.smfish.overlay_btn.setText(
         "Hide Overlays" if sm.show_overlays else "Show Overlays"
     )
-    _smfish_redraw(app)
+    _smfish_redraw(ctx)
 
 
-def _smfish_open_cdf_popup(app) -> None:
-    if app._smfish_cdf_popup is not None and app._smfish_cdf_popup.isVisible():
-        app._smfish_cdf_popup.raise_()
-        app._smfish_cdf_popup.activateWindow()
-        _smfish_update_cdf_plot(app)
+def _smfish_open_cdf_popup(ctx) -> None:
+    if ctx.runtime.smfish.cdf_popup is not None and ctx.runtime.smfish.cdf_popup.isVisible():
+        ctx.runtime.smfish.cdf_popup.raise_()
+        ctx.runtime.smfish.cdf_popup.activateWindow()
+        _smfish_update_cdf_plot(ctx)
         return
 
-    popup = QDialog(app._smfish_frame)
+    popup = QDialog(ctx.runtime.smfish.frame)
     popup.setWindowTitle("smFISH CDF")
     popup.resize(760, 380)
     vl = QVBoxLayout(popup)
-    app._smfish_cdf_fig = app._smfish_Figure(figsize=(7.2, 3.4), dpi=100)
-    app._smfish_cdf_ax = app._smfish_cdf_fig.add_subplot(111)
-    app._smfish_cdf_canvas = app._smfish_FigureCanvas(app._smfish_cdf_fig)
-    vl.addWidget(app._smfish_cdf_canvas)
-    popup.finished.connect(lambda _r: _smfish_close_cdf_popup(app))
-    app._smfish_cdf_popup = popup
+    ctx.runtime.smfish.cdf_fig = ctx.runtime.smfish.Figure(figsize=(7.2, 3.4), dpi=100)
+    ctx.runtime.smfish.cdf_ax = ctx.runtime.smfish.cdf_fig.add_subplot(111)
+    ctx.runtime.smfish.cdf_canvas = ctx.runtime.smfish.FigureCanvas(ctx.runtime.smfish.cdf_fig)
+    vl.addWidget(ctx.runtime.smfish.cdf_canvas)
+    popup.finished.connect(lambda _r: _smfish_close_cdf_popup(ctx))
+    ctx.runtime.smfish.cdf_popup = popup
     popup.show()
-    _smfish_update_cdf_plot(app)
+    _smfish_update_cdf_plot(ctx)
 
 
-def _smfish_close_cdf_popup(app) -> None:
-    app._smfish_cdf_popup = None
-    app._smfish_cdf_canvas = None
-    app._smfish_cdf_ax = None
-    app._smfish_cdf_fig = None
+def _smfish_close_cdf_popup(ctx) -> None:
+    ctx.runtime.smfish.cdf_popup = None
+    ctx.runtime.smfish.cdf_canvas = None
+    ctx.runtime.smfish.cdf_ax = None
+    ctx.runtime.smfish.cdf_fig = None
 
 
-def _smfish_update_cdf_plot(app) -> None:
-    if app._smfish_cdf_ax is None:
+def _smfish_update_cdf_plot(ctx) -> None:
+    if ctx.runtime.smfish.cdf_ax is None:
         return
 
     bg_panel = get_color("BG_PANEL")
@@ -425,20 +426,20 @@ def _smfish_update_cdf_plot(app) -> None:
     txt_mut = get_color("TXT_MUT")
     accent = get_color("ACCENT")
 
-    log_img = app._smfish_current_log_img
-    labels = app._smfish_current_labels
-    thr = _smfish_get_threshold(app)
-    ax = app._smfish_cdf_ax
+    log_img = ctx.runtime.smfish.current_log_img
+    labels = ctx.runtime.smfish.current_labels
+    thr = _smfish_get_threshold(ctx)
+    ax = ctx.runtime.smfish.cdf_ax
     ax.clear()
     ax.set_facecolor(bg_panel)
-    if app._smfish_cdf_fig is not None:
-        app._smfish_cdf_fig.patch.set_facecolor(bg_panel)
+    if ctx.runtime.smfish.cdf_fig is not None:
+        ctx.runtime.smfish.cdf_fig.patch.set_facecolor(bg_panel)
 
     if log_img is None or labels is None:
         ax.text(0.5, 0.5, "No smFISH image loaded.", transform=ax.transAxes,
                 ha="center", va="center", color=txt_mut, fontsize=10)
-        if app._smfish_cdf_canvas is not None:
-            app._smfish_cdf_canvas.draw_idle()
+        if ctx.runtime.smfish.cdf_canvas is not None:
+            ctx.runtime.smfish.cdf_canvas.draw_idle()
         return
 
     candidate_mask = (log_img > 0) & (labels > 0)
@@ -462,7 +463,7 @@ def _smfish_update_cdf_plot(app) -> None:
         ax.text(0.5, 0.5, "No candidate values found.", transform=ax.transAxes,
                 ha="center", va="center", color=txt_mut, fontsize=10)
 
-    if getattr(app._app_state.plot, "show_threshold_line", False):
+    if getattr(ctx.state.plot, "show_threshold_line", False):
         ax.axvline(thr, color="red", linestyle="--", linewidth=2.0, alpha=0.7)
     ax.set_title("CDF of LoG values inside labels", color=txt_pri,
                  fontsize=10, fontweight="bold")
@@ -473,111 +474,111 @@ def _smfish_update_cdf_plot(app) -> None:
     ax.tick_params(axis="y", colors=txt_mut, labelsize=8)
     for spine in ax.spines.values():
         spine.set_color(txt_mut)
-    if app._smfish_cdf_canvas is not None:
-        app._smfish_cdf_canvas.draw_idle()
+    if ctx.runtime.smfish.cdf_canvas is not None:
+        ctx.runtime.smfish.cdf_canvas.draw_idle()
 
 
-def _smfish_set_controls_enabled(app, enabled: bool) -> None:
-    for w in (app._smfish_channel_cb, app._smfish_fov_cb, app._smfish_tp_cb,
-              app._smfish_threshold_edit, app._smfish_lut_min_edit,
-              app._smfish_lut_max_edit):
+def _smfish_set_controls_enabled(ctx, enabled: bool) -> None:
+    for w in (ctx.runtime.smfish.channel_cb, ctx.runtime.smfish.fov_cb, ctx.runtime.smfish.tp_cb,
+              ctx.runtime.smfish.threshold_edit, ctx.runtime.smfish.lut_min_edit,
+              ctx.runtime.smfish.lut_max_edit):
         try:
             w.setEnabled(enabled)
         except Exception:
             swallowed()  # was: pass (silent except)
 
 
-def _smfish_paint_empty(app, message: str) -> None:
+def _smfish_paint_empty(ctx, message: str) -> None:
     """Paint *message* centred on the image axes over the theme background.
 
     Matches every other plot's empty/no-selection warning so the smFISH tab
     never shows a bare white matplotlib canvas (the default figure colour) when
     there's no dataset, no smFISH channel, or no image for the selection.
     """
-    if getattr(app, "_smfish_ax_img", None) is None:
+    if ctx.runtime.smfish.ax_img is None:
         return
     try:
         bg_panel = get_color("BG_PANEL")
         txt_mut = get_color("TXT_MUT")
-        app._smfish_ax_img.clear()
-        app._smfish_ax_img.set_facecolor(bg_panel)
-        if app._smfish_fig_img is not None:
-            app._smfish_fig_img.patch.set_facecolor(bg_panel)
-        app._smfish_ax_img.set_axis_off()
-        app._smfish_ax_img.text(
+        ctx.runtime.smfish.ax_img.clear()
+        ctx.runtime.smfish.ax_img.set_facecolor(bg_panel)
+        if ctx.runtime.smfish.fig_img is not None:
+            ctx.runtime.smfish.fig_img.patch.set_facecolor(bg_panel)
+        ctx.runtime.smfish.ax_img.set_axis_off()
+        ctx.runtime.smfish.ax_img.text(
             0.5, 0.5, message,
-            transform=app._smfish_ax_img.transAxes,
+            transform=ctx.runtime.smfish.ax_img.transAxes,
             ha="center", va="center",
             color=txt_mut,
             fontsize=11, wrap=True,
         )
-        if app._smfish_canvas_img is not None:
-            app._smfish_canvas_img.draw_idle()
+        if ctx.runtime.smfish.canvas_img is not None:
+            ctx.runtime.smfish.canvas_img.draw_idle()
     except Exception:
         swallowed()
 
 
-def _smfish_show_no_smfish_state(app) -> None:
+def _smfish_show_no_smfish_state(ctx) -> None:
     # The full guidance is drawn once, centered on the canvas below; keep the
     # status line concise so the same paragraph is not shown twice.
-    _smfish_set_status(app, "smFISH not enabled for this dataset.")
-    for cb in (app._smfish_channel_cb, app._smfish_fov_cb, app._smfish_tp_cb):
+    _smfish_set_status(ctx, "smFISH not enabled for this dataset.")
+    for cb in (ctx.runtime.smfish.channel_cb, ctx.runtime.smfish.fov_cb, ctx.runtime.smfish.tp_cb):
         cb.blockSignals(True)
         cb.clear()
         cb.blockSignals(False)
-    _smfish_set_controls_enabled(app, False)
-    app._smfish_well_to_zip = {}
-    app._smfish_current_log_img = None
-    app._smfish_current_labels = None
-    app._smfish_current_sorted_vals = None
-    _smfish_paint_empty(app, _NO_SMFISH_MESSAGE)
+    _smfish_set_controls_enabled(ctx, False)
+    ctx.runtime.smfish.well_to_zip = {}
+    ctx.runtime.smfish.current_log_img = None
+    ctx.runtime.smfish.current_labels = None
+    ctx.runtime.smfish.current_sorted_vals = None
+    _smfish_paint_empty(ctx, _NO_SMFISH_MESSAGE)
 
 
-def _smfish_selected_well_token(app) -> str | None:
-    sels = sorted(app._app_state.selection.selected_wells, key=lambda lbl: app._parse_rc(lbl))
+def _smfish_selected_well_token(ctx) -> str | None:
+    sels = sorted(ctx.state.selection.selected_wells, key=lambda lbl: ctx.app._parse_rc(lbl))
     if len(sels) != 1:
         return None
-    tok = app._extract_well_token(sels[0]) or sels[0]
+    tok = extract_well_token(sels[0]) or sels[0]
     m = re.match(r"([A-Ha-h])(\d{1,2})$", tok.strip())
     if not m:
         return None
     return f"{m.group(1).upper()}{int(m.group(2)):02d}"
 
 
-def _smfish_scan_selected_zip(app):
-    if app._smfish_out_dir is None:
+def _smfish_scan_selected_zip(ctx):
+    if ctx.runtime.smfish.out_dir is None:
         return {}, {}
-    well = _smfish_selected_well_token(app)
-    channel = app._smfish_channel_cb.currentText().strip().lower()
-    zip_path = app._smfish_well_to_zip.get(well)
+    well = _smfish_selected_well_token(ctx)
+    channel = ctx.runtime.smfish.channel_cb.currentText().strip().lower()
+    zip_path = ctx.runtime.smfish.well_to_zip.get(well)
     if not well or not channel or zip_path is None:
         return {}, {}
     return scan_well_zip(
         zip_path=zip_path,
         channel=channel,
-        classifier=app._smfish_classifier,
-        fov_tp_extractor=app._smfish_fov_tp_extractor,
+        classifier=ctx.runtime.smfish.classifier,
+        fov_tp_extractor=ctx.runtime.smfish.fov_tp_extractor,
     )
 
 
-def _smfish_refresh_fov_tp_values(app) -> None:
-    smfish, mask = _smfish_scan_selected_zip(app)
+def _smfish_refresh_fov_tp_values(ctx) -> None:
+    smfish, mask = _smfish_scan_selected_zip(ctx)
     keys = sorted(set(smfish).intersection(mask))
     fovs = sorted({k[0] for k in keys})
     tps = sorted({k[1] for k in keys})
 
-    for cb, values in ((app._smfish_fov_cb, fovs), (app._smfish_tp_cb, tps)):
+    for cb, values in ((ctx.runtime.smfish.fov_cb, fovs), (ctx.runtime.smfish.tp_cb, tps)):
         cb.blockSignals(True)
         cb.clear()
         cb.addItems(values)
         cb.blockSignals(False)
-    _smfish_load_selected_images(app)
+    _smfish_load_selected_images(ctx)
 
 
-def _smfish_load_selected_images(app) -> None:
-    smfish, mask = _smfish_scan_selected_zip(app)
-    fov_raw = app._smfish_fov_cb.currentText().strip()
-    tp_raw = app._smfish_tp_cb.currentText().strip()
+def _smfish_load_selected_images(ctx) -> None:
+    smfish, mask = _smfish_scan_selected_zip(ctx)
+    fov_raw = ctx.runtime.smfish.fov_cb.currentText().strip()
+    tp_raw = ctx.runtime.smfish.tp_cb.currentText().strip()
     sm_ref = resolve_ref_by_fov_tp(
         smfish,
         fov_raw=fov_raw,
@@ -591,42 +592,42 @@ def _smfish_load_selected_images(app) -> None:
         norm_timepoint=lambda value: str(value or "").strip(),
     )
     if sm_ref is None or mk_ref is None:
-        _smfish_set_status(app, "No smFISH/mask pair found for current selection.")
+        _smfish_set_status(ctx, "No smFISH/mask pair found for current selection.")
         _smfish_paint_empty(
-            app, "No smFISH/mask pair found for the current well / FOV / timepoint."
+            ctx, "No smFISH/mask pair found for the current well / FOV / timepoint."
         )
         return
     result = read_image_arrays(sm_ref, mk_ref)
     if result is None:
-        _smfish_set_status(app, "Failed to load selected image data.")
-        _smfish_paint_empty(app, "Failed to load the selected image data.")
+        _smfish_set_status(ctx, "Failed to load selected image data.")
+        _smfish_paint_empty(ctx, "Failed to load the selected image data.")
         return
-    (app._smfish_current_log_img, app._smfish_current_labels,
-     app._smfish_current_sorted_vals) = result
-    well = _smfish_selected_well_token(app) or "N/A"
-    _smfish_set_status(app, f"Loaded {well} fov={fov_raw} tp={tp_raw}.")
-    app._app_state.smfish.fit_on_next_redraw = True
-    _smfish_redraw(app)
+    (ctx.runtime.smfish.current_log_img, ctx.runtime.smfish.current_labels,
+     ctx.runtime.smfish.current_sorted_vals) = result
+    well = _smfish_selected_well_token(ctx) or "N/A"
+    _smfish_set_status(ctx, f"Loaded {well} fov={fov_raw} tp={tp_raw}.")
+    ctx.state.smfish.fit_on_next_redraw = True
+    _smfish_redraw(ctx)
 
 
-def _smfish_get_threshold(app) -> float:
+def _smfish_get_threshold(ctx) -> float:
     try:
-        return float(app._smfish_threshold_edit.text().strip())
+        return float(ctx.runtime.smfish.threshold_edit.text().strip())
     except ValueError:
         return 0.0
 
 
-def _smfish_redraw(app) -> None:
-    if app._smfish_current_log_img is None or app._smfish_current_labels is None:
+def _smfish_redraw(ctx) -> None:
+    if ctx.runtime.smfish.current_log_img is None or ctx.runtime.smfish.current_labels is None:
         return
     txt_pri = get_color("TXT_PRI")
-    thr = _smfish_get_threshold(app)
-    log_img = app._smfish_current_log_img
-    labels = app._smfish_current_labels
-    prev_xlim = app._smfish_ax_img.get_xlim()
-    prev_ylim = app._smfish_ax_img.get_ylim()
-    lut_min_txt = app._smfish_lut_min_edit.text().strip()
-    lut_max_txt = app._smfish_lut_max_edit.text().strip()
+    thr = _smfish_get_threshold(ctx)
+    log_img = ctx.runtime.smfish.current_log_img
+    labels = ctx.runtime.smfish.current_labels
+    prev_xlim = ctx.runtime.smfish.ax_img.get_xlim()
+    prev_ylim = ctx.runtime.smfish.ax_img.get_ylim()
+    lut_min_txt = ctx.runtime.smfish.lut_min_edit.text().strip()
+    lut_max_txt = ctx.runtime.smfish.lut_max_edit.text().strip()
     try:
         lut_min = float(lut_min_txt) if lut_min_txt else None
     except ValueError:
@@ -638,36 +639,36 @@ def _smfish_redraw(app) -> None:
     spot_mask = (log_img > thr) & (labels > 0)
     ys, xs = np.where(spot_mask)
 
-    app._smfish_ax_img.clear()
-    app._smfish_ax_img.imshow(log_img, cmap="gray", vmin=lut_min, vmax=lut_max)
+    ctx.runtime.smfish.ax_img.clear()
+    ctx.runtime.smfish.ax_img.imshow(log_img, cmap="gray", vmin=lut_min, vmax=lut_max)
     # skimage is multi-second to import on cold caches; defer until the
     # first redraw so opening the smFISH tab without analysing data
     # doesn't pay the cost.
     from skimage.segmentation import find_boundaries
     bnd = find_boundaries(labels, mode="outer")
-    if app._app_state.smfish.show_overlays:
-        app._smfish_ax_img.contour(
+    if ctx.state.smfish.show_overlays:
+        ctx.runtime.smfish.ax_img.contour(
             bnd.astype(np.uint8), levels=[0.5], colors="red", linewidths=0.5
         )
         if xs.size:
-            app._smfish_ax_img.scatter(
+            ctx.runtime.smfish.ax_img.scatter(
                 xs, ys, s=20, facecolors="none", edgecolors="cyan", linewidths=0.6
             )
-    app._smfish_ax_img.set_title(
+    ctx.runtime.smfish.ax_img.set_title(
         f"Spots above threshold: {int(xs.size)}", color=txt_pri, fontsize=10
     )
-    app._smfish_ax_img.set_xticks([])
-    app._smfish_ax_img.set_yticks([])
-    if app._app_state.smfish.fit_on_next_redraw:
+    ctx.runtime.smfish.ax_img.set_xticks([])
+    ctx.runtime.smfish.ax_img.set_yticks([])
+    if ctx.state.smfish.fit_on_next_redraw:
         h, w = log_img.shape[:2]
-        app._smfish_ax_img.set_xlim(-0.5, w - 0.5)
-        app._smfish_ax_img.set_ylim(h - 0.5, -0.5)
-        app._app_state.smfish.fit_on_next_redraw = False
+        ctx.runtime.smfish.ax_img.set_xlim(-0.5, w - 0.5)
+        ctx.runtime.smfish.ax_img.set_ylim(h - 0.5, -0.5)
+        ctx.state.smfish.fit_on_next_redraw = False
     else:
-        app._smfish_ax_img.set_xlim(prev_xlim)
-        app._smfish_ax_img.set_ylim(prev_ylim)
-    if app._smfish_hover_annot is None:
-        app._smfish_hover_annot = app._smfish_ax_img.annotate(
+        ctx.runtime.smfish.ax_img.set_xlim(prev_xlim)
+        ctx.runtime.smfish.ax_img.set_ylim(prev_ylim)
+    if ctx.runtime.smfish.hover_annot is None:
+        ctx.runtime.smfish.hover_annot = ctx.runtime.smfish.ax_img.annotate(
             "",
             xy=(0, 0),
             xytext=(8, 8),
@@ -677,97 +678,97 @@ def _smfish_redraw(app) -> None:
             bbox=dict(boxstyle="round,pad=0.2", fc="black", ec="white",
                       lw=0.6, alpha=0.8),
         )
-        app._smfish_hover_annot.set_visible(False)
+        ctx.runtime.smfish.hover_annot.set_visible(False)
 
-    app._smfish_canvas_img.draw_idle()
-    _smfish_update_cdf_plot(app)
+    ctx.runtime.smfish.canvas_img.draw_idle()
+    _smfish_update_cdf_plot(ctx)
 
 
-def _smfish_on_img_hover(app, event) -> None:
-    if app._smfish_current_log_img is None or event.inaxes != app._smfish_ax_img:
-        if app._smfish_hover_annot is not None and app._smfish_hover_annot.get_visible():
-            app._smfish_hover_annot.set_visible(False)
-            app._smfish_canvas_img.draw_idle()
+def _smfish_on_img_hover(ctx, event) -> None:
+    if ctx.runtime.smfish.current_log_img is None or event.inaxes != ctx.runtime.smfish.ax_img:
+        if ctx.runtime.smfish.hover_annot is not None and ctx.runtime.smfish.hover_annot.get_visible():
+            ctx.runtime.smfish.hover_annot.set_visible(False)
+            ctx.runtime.smfish.canvas_img.draw_idle()
         return
-    if event.xdata is None or event.ydata is None or app._smfish_hover_annot is None:
+    if event.xdata is None or event.ydata is None or ctx.runtime.smfish.hover_annot is None:
         return
     x = int(round(event.xdata))
     y = int(round(event.ydata))
-    h, w = app._smfish_current_log_img.shape[:2]
+    h, w = ctx.runtime.smfish.current_log_img.shape[:2]
     if not (0 <= x < w and 0 <= y < h):
-        app._smfish_hover_annot.set_visible(False)
-        app._smfish_canvas_img.draw_idle()
+        ctx.runtime.smfish.hover_annot.set_visible(False)
+        ctx.runtime.smfish.canvas_img.draw_idle()
         return
-    if app._smfish_current_labels is None or int(app._smfish_current_labels[y, x]) <= 0:
-        app._smfish_hover_annot.set_visible(False)
-        app._smfish_canvas_img.draw_idle()
+    if ctx.runtime.smfish.current_labels is None or int(ctx.runtime.smfish.current_labels[y, x]) <= 0:
+        ctx.runtime.smfish.hover_annot.set_visible(False)
+        ctx.runtime.smfish.canvas_img.draw_idle()
         return
-    px = float(app._smfish_current_log_img[y, x])
-    app._smfish_hover_annot.xy = (x, y)
-    app._smfish_hover_annot.set_text(f"({x}, {y}) = {px:.3f}")
-    app._smfish_hover_annot.set_visible(True)
-    app._smfish_canvas_img.draw_idle()
+    px = float(ctx.runtime.smfish.current_log_img[y, x])
+    ctx.runtime.smfish.hover_annot.xy = (x, y)
+    ctx.runtime.smfish.hover_annot.set_text(f"({x}, {y}) = {px:.3f}")
+    ctx.runtime.smfish.hover_annot.set_visible(True)
+    ctx.runtime.smfish.canvas_img.draw_idle()
 
 
-def _smfish_on_img_scroll(app, event) -> None:
-    if event.inaxes != app._smfish_ax_img or event.xdata is None or event.ydata is None:
+def _smfish_on_img_scroll(ctx, event) -> None:
+    if event.inaxes != ctx.runtime.smfish.ax_img or event.xdata is None or event.ydata is None:
         return
     scale = 1 / 1.2 if event.button == "up" else 1.2
-    xlim = app._smfish_ax_img.get_xlim()
-    ylim = app._smfish_ax_img.get_ylim()
+    xlim = ctx.runtime.smfish.ax_img.get_xlim()
+    ylim = ctx.runtime.smfish.ax_img.get_ylim()
     new_w = (xlim[1] - xlim[0]) * scale
     new_h = (ylim[1] - ylim[0]) * scale
     relx = (event.xdata - xlim[0]) / (xlim[1] - xlim[0]) if xlim[1] != xlim[0] else 0.5
     rely = (event.ydata - ylim[0]) / (ylim[1] - ylim[0]) if ylim[1] != ylim[0] else 0.5
-    app._smfish_ax_img.set_xlim(
+    ctx.runtime.smfish.ax_img.set_xlim(
         event.xdata - new_w * relx, event.xdata + new_w * (1 - relx)
     )
-    app._smfish_ax_img.set_ylim(
+    ctx.runtime.smfish.ax_img.set_ylim(
         event.ydata - new_h * rely, event.ydata + new_h * (1 - rely)
     )
-    app._smfish_canvas_img.draw_idle()
+    ctx.runtime.smfish.canvas_img.draw_idle()
 
 
-def _smfish_on_img_press(app, event) -> None:
-    if (event.inaxes != app._smfish_ax_img or event.button != 1
+def _smfish_on_img_press(ctx, event) -> None:
+    if (event.inaxes != ctx.runtime.smfish.ax_img or event.button != 1
             or event.xdata is None or event.ydata is None):
         return
-    app._smfish_pan_anchor = (
+    ctx.runtime.smfish.pan_anchor = (
         event.xdata, event.ydata,
-        app._smfish_ax_img.get_xlim(), app._smfish_ax_img.get_ylim(),
+        ctx.runtime.smfish.ax_img.get_xlim(), ctx.runtime.smfish.ax_img.get_ylim(),
     )
 
 
-def _smfish_on_img_release(app, _event) -> None:
-    app._smfish_pan_anchor = None
+def _smfish_on_img_release(ctx, _event) -> None:
+    ctx.runtime.smfish.pan_anchor = None
 
 
-def _smfish_on_img_drag(app, event) -> None:
-    if (app._smfish_pan_anchor is None or event.inaxes != app._smfish_ax_img
+def _smfish_on_img_drag(ctx, event) -> None:
+    if (ctx.runtime.smfish.pan_anchor is None or event.inaxes != ctx.runtime.smfish.ax_img
             or event.xdata is None or event.ydata is None):
         return
-    x0, y0, xlim0, ylim0 = app._smfish_pan_anchor
+    x0, y0, xlim0, ylim0 = ctx.runtime.smfish.pan_anchor
     dx = event.xdata - x0
     dy = event.ydata - y0
-    app._smfish_ax_img.set_xlim(xlim0[0] - dx, xlim0[1] - dx)
-    app._smfish_ax_img.set_ylim(ylim0[0] - dy, ylim0[1] - dy)
-    app._smfish_canvas_img.draw_idle()
+    ctx.runtime.smfish.ax_img.set_xlim(xlim0[0] - dx, xlim0[1] - dx)
+    ctx.runtime.smfish.ax_img.set_ylim(ylim0[0] - dy, ylim0[1] - dy)
+    ctx.runtime.smfish.canvas_img.draw_idle()
 
 
-def _smfish_apply_to_all(app) -> None:
-    if app._smfish_out_dir is None:
-        _smfish_set_status(app, "No output loaded.")
+def _smfish_apply_to_all(ctx) -> None:
+    if ctx.runtime.smfish.out_dir is None:
+        _smfish_set_status(ctx, "No output loaded.")
         return
     # Re-entrancy guard (audit E18): a double-click otherwise launched two
     # workers writing the same per-well CSVs, and the second launch's
     # ``cancel_event.clear()`` discarded a cancel meant for the first. Reject a
     # second concurrent run; the flag is cleared in ``_done`` on any exit.
-    if getattr(app, "_smfish_apply_running", False):
-        _smfish_set_status(app, "Apply to All is already running.")
+    if ctx.runtime.smfish.apply_running:
+        _smfish_set_status(ctx, "Apply to All is already running.")
         return
-    channel = app._smfish_channel_cb.currentText().strip().lower()
-    thr = _smfish_get_threshold(app)
-    frame = app._smfish_frame
+    channel = ctx.runtime.smfish.channel_cb.currentText().strip().lower()
+    thr = _smfish_get_threshold(ctx)
+    frame = ctx.runtime.smfish.frame
 
     def _after_csv() -> None:
         # Runs on the GUI thread via _WorkerBridge.after_csv — see the
@@ -776,70 +777,70 @@ def _smfish_apply_to_all(app) -> None:
         # synchronously.
         try:
             from well_viewer.persistence import smfish as _smfish_persist
-            _smfish_persist.save_threshold(app, channel, thr)
+            _smfish_persist.save_threshold(ctx.app, channel, thr)
         except Exception:
             logging.getLogger("well_viewer").exception(
                 "smFISH threshold persistence failed"
             )
-        _smfish_refresh_app_cache(app)
+        _smfish_refresh_app_cache(ctx)
         QMessageBox.information(frame, "smFISH", "Apply to All finished.")
 
     # Cancel event used by load_controller / app shutdown to abort
     # the in-flight smFISH run before it overwrites CSVs from a
     # different dataset.
     import threading as _threading
-    if not hasattr(app, "_smfish_cancel_event") or app._smfish_cancel_event is None:
-        app._smfish_cancel_event = _threading.Event()
+    if ctx.runtime.smfish.cancel_event is None:
+        ctx.runtime.smfish.cancel_event = _threading.Event()
     else:
-        app._smfish_cancel_event.clear()
+        ctx.runtime.smfish.cancel_event.clear()
 
     def _done(msg: str) -> None:
         # Clear the busy flag on every terminal path (success / cancel / error)
         # then hand off to the GUI-thread bridge slot (audit E18).
-        app._smfish_apply_running = False
-        app._smfish_bridge.done.emit(msg)
+        ctx.runtime.smfish.apply_running = False
+        ctx.runtime.smfish.bridge.done.emit(msg)
 
-    app._smfish_apply_running = True
+    ctx.runtime.smfish.apply_running = True
     # well_to_csv is the same map the app's loader populated, so the
     # writer hits the exact files the rest of the app reads from — no
     # silent glob mismatches on datasets whose CSVs are named e.g.
     # "<well>.csv" with no underscore prefix.
     apply_global_threshold_async(
-        out_dir=app._smfish_out_dir,
-        well_to_zip=app._smfish_well_to_zip,
+        out_dir=ctx.runtime.smfish.out_dir,
+        well_to_zip=ctx.runtime.smfish.well_to_zip,
         channel=channel,
         threshold=thr,
-        classifier=app._smfish_classifier,
-        fov_tp_extractor=app._smfish_fov_tp_extractor,
-        status_cb=app._smfish_bridge.status.emit,
+        classifier=ctx.runtime.smfish.classifier,
+        fov_tp_extractor=ctx.runtime.smfish.fov_tp_extractor,
+        status_cb=ctx.runtime.smfish.bridge.status.emit,
         done_cb=_done,
         # Route the after-csv callback through the bridge so it runs on
         # the GUI thread, not the worker daemon thread. Calling _after_csv
         # directly here would leave QTimer.singleShot + widget access in
         # the worker thread where they silently no-op.
-        after_csv_cb=lambda: app._smfish_bridge.after_csv.emit(_after_csv),
-        cancel_event=app._smfish_cancel_event,
-        expected_data_dir=app._smfish_out_dir,
-        well_to_csv=dict(app._app_state.dataset.well_paths),
+        after_csv_cb=lambda: ctx.runtime.smfish.bridge.after_csv.emit(_after_csv),
+        cancel_event=ctx.runtime.smfish.cancel_event,
+        expected_data_dir=ctx.runtime.smfish.out_dir,
+        well_to_csv=dict(ctx.state.dataset.well_paths),
     )
 
 
-def _smfish_refresh_app_cache(app) -> None:
-    for label, path in app._app_state.dataset.well_paths.items():
-        if label in app._app_state.dataset.cache:
-            app._app_state.dataset.cache[label] = app._load_well_csv(path)
-    recalculate_threshold(app)
+def _smfish_refresh_app_cache(ctx) -> None:
+    for label, path in ctx.state.dataset.well_paths.items():
+        if label in ctx.state.dataset.cache:
+            ctx.state.dataset.cache[label] = load_well_csv(path)
+    recalculate_threshold(ctx.app)
     # The per-well DataFrames now carry new smfish_count values; the
     # stats cache keys do not include CSV content, so without an
     # explicit invalidation every line / bar / scatter aggregate keeps
     # returning the pre-apply numbers.
-    if hasattr(app, "_invalidate_stats_cache"):
-        app._invalidate_stats_cache()
-    app._redraw()
+    if hasattr(ctx.app, "_invalidate_stats_cache"):
+        ctx.app._invalidate_stats_cache()
+    ctx.app._redraw()
     # Refresh the Review CSV table so the smfish_count column on the
     # active well reflects the new counts. The plot redraw above does
     # not touch the Review CSV widget — it lives outside the plot fan-out.
-    refresh_review_csv = getattr(app, "_refresh_review_csv", None)
+    refresh_review_csv = getattr(ctx.app, "_refresh_review_csv", None)
     if callable(refresh_review_csv):
         try:
             refresh_review_csv()

@@ -202,7 +202,16 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   214 -> 211  More cross-cutting: panelCopied status hook -> the ctx.set_status
 #              accessor (lineplot/barplot); mv feature-picker refresh guard ->
 #              ctx.runtime.multivariate (read-only flag).
-CTX_APP_BUDGET = 211
+#   211 -> 202  smFISH tab fully ctx-native. Every _smfish_* handler + the
+#              sync/build helpers take ctx; the ~30 live handles + flags read
+#              through ctx.runtime.smfish, state via ctx.state, well-token/CSV
+#              load via the domain/data free functions (extract_well_token /
+#              load_well_csv). External callers (registry activate, load_controller
+#              post-load) bridge via app._ctx. Residual (10): the smFISH god-service
+#              tail — _redraw / _invalidate_stats_cache / _parse_rc /
+#              _refresh_review_csv / persistence save+restore / recalculate_threshold
+#              — bridged through ctx.app pending their own ctx conversion.
+CTX_APP_BUDGET = 202
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

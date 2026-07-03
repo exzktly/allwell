@@ -219,7 +219,7 @@ def _activate_smfish(app) -> None:
         # mis-attributing cross-tab additions / removals.
         app._set_selected_wells({keep}, commit=False)
     app._refresh_sidebar_map()
-    smfish_sync_from_app(app)
+    smfish_sync_from_app(app._ctx)
 
 
 def _activate_cell_gating(app) -> None:
@@ -352,7 +352,7 @@ def _sel_spatial(app) -> None:
 
 def _sel_smfish(app) -> None:
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-    smfish_sync_from_app(app)
+    smfish_sync_from_app(app._ctx)
 
 
 def _sel_sample_definitions(app) -> None:

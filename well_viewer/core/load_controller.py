@@ -402,7 +402,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # redraw; it moves onto the bus when the smFISH tab is relocated.)
     try:
         from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-        smfish_sync_from_app(app)
+        smfish_sync_from_app(app._ctx)
     except Exception:
         logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
     # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs

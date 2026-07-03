@@ -2,7 +2,7 @@
 
 A multi-select well picker (a ``widgets.WellPlateSelector`` in "select" mode)
 that explicitly ignores replicate sets / groups. State is held in
-``app._app_state.image_table.active_wells`` (a ``set`` of well tokens).
+``ctx.state.image_table.active_wells`` (a ``set`` of well tokens).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_select_all
 
 
-def build_image_table_picker(app, parent: QWidget) -> None:
+def build_image_table_picker(ctx, parent: QWidget) -> None:
     """Compact plate-map picker for the Image Table tab sidebar."""
     from widgets.well_plate_selector import WellPlateSelector
 
@@ -34,7 +34,7 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])               # nothing selectable until a dataset loads
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    plate.setWellTooltipProvider(well_plate_tooltip_provider(app))
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
     # Match the main sidebar plate's geometry so the picker stays in the
     # same screen position when the user switches tabs.
     plate.setMinimumHeight(280)
@@ -43,14 +43,14 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     _sp.setHeightForWidth(True)
     plate.setSizePolicy(_sp)
     layout.addWidget(plate)
-    app._sidebar_image_table_plate = plate
+    ctx.runtime.image_table.sidebar_plate = plate
 
     def _on_plate_changed(ids) -> None:
-        new = {w for w in ids if w in app._app_state.dataset.well_paths}
-        if new == app._app_state.image_table.active_wells:
+        new = {w for w in ids if w in ctx.state.dataset.well_paths}
+        if new == ctx.state.image_table.active_wells:
             return
-        app._app_state.image_table.active_wells = new
-        image_table_refresh_picker(app)
+        ctx.state.image_table.active_wells = new
+        image_table_refresh_picker(ctx)
     plate.selectionChanged.connect(_on_plate_changed)
 
     btn_row = QWidget(parent)
@@ -60,20 +60,20 @@ def build_image_table_picker(app, parent: QWidget) -> None:
 
     select_all = QPushButton("Select All", btn_row)
     select_all.setProperty("variant", "secondary")
-    select_all.clicked.connect(lambda _=False: image_table_select_all(app))
+    select_all.clicked.connect(lambda _=False: image_table_select_all(ctx))
     bl.addWidget(select_all)
 
     clear_btn = QPushButton("Clear", btn_row)
     clear_btn.setProperty("variant", "secondary")
-    clear_btn.clicked.connect(lambda _=False: image_table_clear_active(app))
+    clear_btn.clicked.connect(lambda _=False: image_table_clear_active(ctx))
     bl.addWidget(clear_btn)
     bl.addStretch(1)
     layout.addWidget(btn_row)
 
-    app._image_table_count_lbl = QLabel("0 wells active", parent)
-    app._image_table_count_lbl.setObjectName("Muted")
-    app._image_table_count_lbl.setAlignment(Qt.AlignLeft)
-    layout.addWidget(app._image_table_count_lbl)
+    ctx.runtime.image_table.count_lbl = QLabel("0 wells active", parent)
+    ctx.runtime.image_table.count_lbl.setObjectName("Muted")
+    ctx.runtime.image_table.count_lbl.setAlignment(Qt.AlignLeft)
+    layout.addWidget(ctx.runtime.image_table.count_lbl)
 
     layout.addStretch(1)
 
@@ -90,17 +90,19 @@ def build_image_table_picker(app, parent: QWidget) -> None:
     # Image Table grid immediately. ``include_add_controls=False`` because
     # authoring new groups belongs with the plotting workflow.
     from well_viewer.core.sidebar_view import build_plot_groups_drawer
+    # build_plot_groups_drawer is a shared core sidebar builder that still takes
+    # (and mutates) the app; bridge through ctx.app until it migrates to ctx.
     plot_groups_section = build_plot_groups_drawer(
-        app, parent, include_add_controls=False,
+        ctx.app, parent, include_add_controls=False,
     )
     layout.addWidget(plot_groups_section)
 
-    image_table_refresh_picker(app)
+    image_table_refresh_picker(ctx)
     # Repaint both Plot Groups drawers now that the Image Table's drawer
     # has registered itself — otherwise the first paint of the sidebar
-    # shows an empty group list even when groups exist in app state.
+    # shows an empty group list even when groups exist in ctx state.
     try:
         from well_viewer.core.sidebar_view import refresh_plot_groups_sidebar
-        refresh_plot_groups_sidebar(app)
+        refresh_plot_groups_sidebar(ctx)
     except Exception:
         swallowed("image table picker: plot groups refresh on build")

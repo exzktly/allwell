@@ -100,7 +100,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # rendered grid follows mode toggles and crop changes automatically.
     if _it.crop_tool is None:
         _it.crop_tool = CropTool(
-            on_change=lambda: image_table_generate(ctx.app),
+            on_change=lambda: image_table_generate(ctx),
         )
 
     scroll = QScrollArea(parent)
@@ -176,7 +176,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     # Build ▾ split button: click = build with current axes; menu = presets.
     build_act = QAction("Build table", axes_row)
-    build_act.triggered.connect(lambda _=False: image_table_build_layout(ctx.app))
+    build_act.triggered.connect(lambda _=False: image_table_build_layout(ctx))
     build_btn = _menu_button(
         axes_row, "Build table", split=True, default_action=build_act,
         tooltip="Assemble the selector grid from the chosen axes. ▾ = quick presets.",
@@ -190,7 +190,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ):
         act = build_btn.menu().addAction(label)
         act.triggered.connect(
-            lambda _=False, r=ra_, c=ca_: image_table_apply_preset(ctx.app, r, c)
+            lambda _=False, r=ra_, c=ca_: image_table_apply_preset(ctx, r, c)
         )
     ar.addWidget(build_btn)
 
@@ -198,16 +198,16 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     more_btn = _menu_button(axes_row, "More", tooltip="Manual fill helpers + Add row/column")
     _mm = more_btn.menu()
     _mm.addAction("Distribute Wells").triggered.connect(
-        lambda _=False: image_table_distribute_wells(ctx.app))
+        lambda _=False: image_table_distribute_wells(ctx))
     _mm.addAction("Distribute Timepoints").triggered.connect(
-        lambda _=False: image_table_distribute_timepoints(ctx.app))
+        lambda _=False: image_table_distribute_timepoints(ctx))
     _mm.addAction("Load Heatmap Layout").triggered.connect(
-        lambda _=False: image_table_load_heatmap_layout(ctx.app))
+        lambda _=False: image_table_load_heatmap_layout(ctx))
     _mm.addSeparator()
     _mm.addAction("Add row…").triggered.connect(
-        lambda _=False: image_table_open_add_row_dialog(ctx.app))
+        lambda _=False: image_table_open_add_row_dialog(ctx))
     _mm.addAction("Add column…").triggered.connect(
-        lambda _=False: image_table_open_add_col_dialog(ctx.app))
+        lambda _=False: image_table_open_add_col_dialog(ctx))
     ar.addWidget(more_btn)
     ar.addStretch(1)
     bv.addWidget(axes_row)
@@ -221,19 +221,19 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     orow.addWidget(QLabel("Ch:", opts_row))
     chan_cb = QComboBox(opts_row)
-    chan_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx.app, "chan"))
+    chan_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx, "chan"))
     orow.addWidget(chan_cb)
     reg.register("_image_table_global_chan_cb", chan_cb)
 
     orow.addWidget(QLabel("Time:", opts_row))
     tp_cb = QComboBox(opts_row)
-    tp_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx.app, "tp"))
+    tp_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx, "tp"))
     orow.addWidget(tp_cb)
     reg.register("_image_table_global_tp_cb", tp_cb)
 
     orow.addWidget(QLabel("FOV:", opts_row))
     fov_cb = QComboBox(opts_row)
-    fov_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx.app, "fov"))
+    fov_cb.currentIndexChanged.connect(lambda _i: image_table_apply_global(ctx, "fov"))
     orow.addWidget(fov_cb)
     reg.register("_image_table_global_fov_cb", fov_cb)
 
@@ -247,7 +247,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # instead of being clipped against them.
     rows_spin.setFixedWidth(70)
     rows_spin.setToolTip("Grid rows (Build sets this automatically).")
-    rows_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
+    rows_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx))
     orow.addWidget(rows_spin)
     reg.register("_image_table_rows_spin", rows_spin)
     orow.addWidget(QLabel("×", opts_row))
@@ -256,7 +256,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     cols_spin.setValue(int(ctx.state.image_table.cols))
     cols_spin.setFixedWidth(70)
     cols_spin.setToolTip("Grid columns (Build sets this automatically).")
-    cols_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx.app))
+    cols_spin.valueChanged.connect(lambda _v: image_table_apply_dimensions(ctx))
     orow.addWidget(cols_spin)
     reg.register("_image_table_cols_spin", cols_spin)
     bv.addWidget(opts_row)
@@ -328,7 +328,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr.setContentsMargins(0, 0, 0, 0)
     tr.setSpacing(6)
 
-    tr.addWidget(btn_primary(action_row, "Generate", partial(image_table_generate, ctx.app)))
+    tr.addWidget(btn_primary(action_row, "Generate", partial(image_table_generate, ctx)))
 
     # The per-display options (Tophat / Boundaries / Binary) are now per-row,
     # in the LUT boxes below the grid (each row independent). This menu keeps the
@@ -375,7 +375,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         "ThreshFracOn and the plot tabs' Threshold quick-edit."
     )
     thresh_stepper.valueChanged.connect(
-        lambda v: image_table_set_thresh_frac(ctx.app, v)
+        lambda v: image_table_set_thresh_frac(ctx, v)
     )
     tr.addWidget(thresh_stepper)
 
@@ -383,25 +383,25 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     # Export ▾ split button: click = Export; menu = Copy / settings.
     export_act = QAction("Export", action_row)
-    export_act.triggered.connect(lambda _=False: image_table_export(ctx.app))
+    export_act.triggered.connect(lambda _=False: image_table_export(ctx))
     export_btn = _menu_button(
         action_row, "Export", split=True, default_action=export_act,
         tooltip="Export the rendered table to a file. ▾ = copy / settings.",
     )
     emenu = export_btn.menu()
     emenu.addAction("Export to File…").triggered.connect(
-        lambda _=False: image_table_export(ctx.app))
+        lambda _=False: image_table_export(ctx))
     emenu.addSeparator()
     emenu.addAction("Copy PNG").triggered.connect(
-        lambda _=False: image_table_copy_png(ctx.app))
+        lambda _=False: image_table_copy_png(ctx))
     emenu.addAction("Copy SVG").triggered.connect(
-        lambda _=False: image_table_copy_svg(ctx.app))
+        lambda _=False: image_table_copy_svg(ctx))
     emenu.addSeparator()
     emenu.addAction("Save to Saved Plots").triggered.connect(
-        lambda _=False: image_table_save_to_gallery(ctx.app))
+        lambda _=False: image_table_save_to_gallery(ctx))
     emenu.addSeparator()
     emenu.addAction("Export settings…").triggered.connect(
-        lambda _=False: image_table_open_export_settings(ctx.app))
+        lambda _=False: image_table_open_export_settings(ctx))
     tr.addWidget(export_btn)
 
     # Zoom: − [level] +  (clicking the % resets to 100%).
@@ -410,14 +410,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_out.setProperty("variant", "secondary")
     zoom_out.setFixedWidth(32)
     zoom_out.setToolTip("Zoom out")
-    zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1 / 1.25, relative=True))
+    zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1 / 1.25, relative=True))
     tr.addWidget(zoom_out)
 
     zoom_lbl = QPushButton(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
     zoom_lbl.setFlat(True)
     zoom_lbl.setFixedWidth(52)
     zoom_lbl.setToolTip("Click to reset zoom to 100%")
-    zoom_lbl.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1.0))
+    zoom_lbl.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.0))
     reg.register("_image_table_zoom_lbl", zoom_lbl)
     tr.addWidget(zoom_lbl)
 
@@ -425,7 +425,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_in.setProperty("variant", "secondary")
     zoom_in.setFixedWidth(32)
     zoom_in.setToolTip("Zoom in")
-    zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx.app, 1.25, relative=True))
+    zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))
     tr.addWidget(zoom_in)
 
     il.addWidget(action_row)
@@ -464,5 +464,5 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.addStretch(1)
 
     # Build the initial grid + LUT row using current pipeline_info.
-    image_table_repopulate_dropdowns(ctx.app)
-    image_table_rebuild_grid(ctx.app)
+    image_table_repopulate_dropdowns(ctx)
+    image_table_rebuild_grid(ctx)

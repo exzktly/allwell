@@ -72,7 +72,7 @@ def build_image_browser_subtab(app, idx: int) -> None:
             update_channel_selector(app)
         elif name == "Image Table":
             build_image_table_tab(ctx, frame)
-            build_image_table_picker(app, app._sidebar_image_table_frame)
+            build_image_table_picker(ctx, app._sidebar_image_table_frame)
         elif name == "Cell Browser":
             build_cell_browser_tab(ctx, frame)
             build_cell_browser_sidebar(app, app._sidebar_cell_browser_frame)

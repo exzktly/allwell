@@ -35,6 +35,9 @@ class ChannelState:
     fluor_channels: list[str] = field(default_factory=list)
     review_image_channels: list[str] = field(default_factory=list)
     smfish_channels: set[str] = field(default_factory=set)
+    # Segmentation channel token detected at load (e.g. "seg"/"mask"); read by
+    # the image-table grid layout to skip the seg channel in pickers.
+    seg_channel_token: str = ""
     # Channel-independent ``shape_*`` columns present in the loaded CSVs. Like
     # ratios, a shape feature is a single value per cell selectable in the plot
     # dropdown; its ``active_val_col`` is the column name itself.

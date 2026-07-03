@@ -257,7 +257,17 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              multivariate QMessageBox parents move ctx.app -> ctx.window — a
 #              widget-parenting need is not behaviour coupling, so it shouldn't
 #              count. Behaviour-identical (window returns the same object).
-CTX_APP_BUDGET = 165
+#   165 -> 141  Image Table subsystem fully ctx-native: controller + grid_ops +
+#              grid_layout + grid_view + image_compose + export + picker_view +
+#              state all take ctx (app._app_state->ctx.state, _image_table_*->
+#              ctx.runtime.image_table, _set_status->ctx.set_status, parse_rc /
+#              norm_timepoint / set_thresh_frac_on domain-leaves, dialogs->
+#              ctx.window). seg_channel_token moved to typed ChannelState; the
+#              sidebar plate attr renamed to fit the runtime namespace. Its
+#              tab_view drops all 26 ctx.app; the one residual (shared core
+#              build_plot_groups_drawer) stays a ctx.app bridge until that
+#              builder migrates.
+CTX_APP_BUDGET = 141
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

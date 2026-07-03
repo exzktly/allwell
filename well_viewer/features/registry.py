@@ -148,8 +148,8 @@ def _activate_image_table(app) -> None:
     )
     if hasattr(app, "_sidebar_image_table_frame"):
         app._sidebar_image_table_frame.setVisible(True)
-    image_table_repopulate_dropdowns(app)
-    image_table_refresh_picker(app)
+    image_table_repopulate_dropdowns(app._ctx)
+    image_table_refresh_picker(app._ctx)
 
 
 def _activate_sample_definitions(app) -> None:

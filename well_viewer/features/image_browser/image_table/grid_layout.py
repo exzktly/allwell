@@ -10,6 +10,8 @@ names, so call sites and external importers (playground) are unchanged.
 
 from __future__ import annotations
 
+from well_viewer.domain.viewer_state import parse_rc
+
 from typing import Dict, List, Optional  # noqa: F401
 
 from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: F401
@@ -18,23 +20,23 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
 )
 
 
-def _channel_options(app) -> List[str]:
+def _channel_options(ctx) -> List[str]:
     """All channel tokens available for selection (uppercase for display).
 
-    Sourced from the canonical ``app._app_state.channel.fluor_channels`` /
-    ``app._app_state.channel.smfish_channels`` lists (built by ``_recalculate_threshold`` from
+    Sourced from the canonical ``ctx.state.channel.fluor_channels`` /
+    ``ctx.state.channel.smfish_channels`` lists (built by ``_recalculate_threshold`` from
     pipeline_info.json + CSV detection — same lists every other tab uses).
-    Falls back to the raw ``app._app_state.dataset.pipeline_info`` dict for the rare case
+    Falls back to the raw ``ctx.state.dataset.pipeline_info`` dict for the rare case
     where the tab is repopulated before the first ``_recalculate_threshold``
     pass. Adds the virtual ``NUC+SEG`` token at the end when a nuclear
     channel is known — that's where the pre-rendered segmentation overlay
     images live, and they're how the Image Table replaces the old Movie
     Montage tab.
     """
-    info = app._app_state.dataset.pipeline_info or {}
+    info = ctx.state.dataset.pipeline_info or {}
     chans: List[str] = []
 
-    fluor = list(app._app_state.channel.fluor_channels or [])
+    fluor = list(ctx.state.channel.fluor_channels or [])
     if not fluor:
         nuclear_pi = (info.get("nuclear_token") or "").strip().lower()
         if nuclear_pi:
@@ -48,7 +50,7 @@ def _channel_options(app) -> List[str]:
         if tok and tok not in chans:
             chans.append(tok)
 
-    smfish = app._app_state.channel.smfish_channels or []
+    smfish = ctx.state.channel.smfish_channels or []
     for tok in smfish:
         tok = str(tok).strip().lower()
         if tok and tok not in chans:
@@ -56,7 +58,7 @@ def _channel_options(app) -> List[str]:
 
     options = [c.upper() for c in chans]
 
-    seg_tok = (getattr(app, "_seg_channel_token", "") or "").strip()
+    seg_tok = (ctx.state.channel.seg_channel_token or "").strip()
     if not seg_tok:
         seg_tok = (info.get("nuclear_token") or "").strip()
     if seg_tok:
@@ -65,7 +67,7 @@ def _channel_options(app) -> List[str]:
     # Append user-defined ratio metrics as virtual channels.  The display
     # label "GFP/RFP" is what appears in the dropdown; _find_ratio_for_channel
     # resolves it back to the RatioMetric at render time.
-    for r in (app._app_state.channel.ratio_metrics or []):
+    for r in (ctx.state.channel.ratio_metrics or []):
         lbl = r.display_label()
         if lbl and lbl not in options:
             options.append(lbl)
@@ -73,9 +75,9 @@ def _channel_options(app) -> List[str]:
     return options
 
 
-def _find_ratio_for_channel(app, chan: str):
+def _find_ratio_for_channel(ctx, chan: str):
     """Return the RatioMetric whose display_label matches *chan*, or None."""
-    for r in (app._app_state.channel.ratio_metrics or []):
+    for r in (ctx.state.channel.ratio_metrics or []):
         if r.display_label().upper() == chan.strip().upper():
             return r
     return None
@@ -89,15 +91,15 @@ def _tp_sort_key(tp: str):
     return (h is None, h if h is not None else 0.0, str(tp))
 
 
-def _cache_column_tokens(app, column: str) -> List[str]:
+def _cache_column_tokens(ctx, column: str) -> List[str]:
     """Unique normalised tokens from ``column`` across every cached DataFrame.
 
-    ``app._app_state.dataset.cache`` values are DataFrames since the pandas migration; iterating
+    ``ctx.state.dataset.cache`` values are DataFrames since the pandas migration; iterating
     one with ``for row in df`` yields *column names*, not rows. Pull the column
     out vectorised instead — and skip frames that don't carry it at all.
     """
     seen: List[str] = []
-    cache = app._app_state.dataset.cache or {}
+    cache = ctx.state.dataset.cache or {}
     for df in cache.values():
         if df is None or column not in getattr(df, "columns", ()):
             continue
@@ -108,8 +110,8 @@ def _cache_column_tokens(app, column: str) -> List[str]:
     return seen
 
 
-def _timepoint_options(app) -> List[str]:
-    info = app._app_state.dataset.pipeline_info or {}
+def _timepoint_options(ctx) -> List[str]:
+    info = ctx.state.dataset.pipeline_info or {}
     seen: List[str] = []
     for tp in (info.get("available_timepoints") or []):
         tok = _norm_token(tp)
@@ -119,11 +121,11 @@ def _timepoint_options(app) -> List[str]:
         return sorted(seen, key=_tp_sort_key)
     # Fallback: derive timepoints from loaded CSV rows when pipeline_info
     # doesn't list them (older runs, custom schemas, etc.).
-    return sorted(_cache_column_tokens(app, "timepoint"), key=_tp_sort_key)
+    return sorted(_cache_column_tokens(ctx, "timepoint"), key=_tp_sort_key)
 
 
-def _fov_options(app) -> List[str]:
-    info = app._app_state.dataset.pipeline_info or {}
+def _fov_options(ctx) -> List[str]:
+    info = ctx.state.dataset.pipeline_info or {}
     seen: List[str] = []
     for fv in (info.get("available_fovs") or []):
         tok = _norm_token(fv)
@@ -131,37 +133,37 @@ def _fov_options(app) -> List[str]:
             seen.append(tok)
     if seen:
         return seen
-    return _cache_column_tokens(app, "fov")
+    return _cache_column_tokens(ctx, "fov")
 
 
-def _well_options(app) -> List[str]:
-    return sorted(app._app_state.dataset.well_paths.keys(), key=app._parse_rc)
+def _well_options(ctx) -> List[str]:
+    return sorted(ctx.state.dataset.well_paths.keys(), key=parse_rc)
 
 
-def _axis_values(app, axis: str) -> List[str]:
+def _axis_values(ctx, axis: str) -> List[str]:
     """Ordered value list an axis expands into, drawn from the live selections."""
     if axis == "channel":
-        opts = _channel_options(app)
-        sel = getattr(app._app_state.image_table, "active_channels", None) or set()
+        opts = _channel_options(ctx)
+        sel = getattr(ctx.state.image_table, "active_channels", None) or set()
         return [c for c in opts if c in sel] if sel else list(opts)
     if axis == "well":
-        sel = sorted(getattr(app._app_state.image_table, "active_wells", set()) or set(),
-                     key=app._parse_rc)
-        return sel if sel else _well_options(app)
+        sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
+                     key=parse_rc)
+        return sel if sel else _well_options(ctx)
     if axis == "timepoint":
-        return _timepoint_options(app)
+        return _timepoint_options(ctx)
     if axis == "fov":
-        return _fov_options(app)
+        return _fov_options(ctx)
     return []
 
 
-def _fixed_off_axis(app, on_axis: set) -> Dict[str, str]:
+def _fixed_off_axis(ctx, on_axis: set) -> Dict[str, str]:
     """Pick a single held value for each dimension NOT on a row/col axis.
 
     Prefers the matching Global Options dropdown (so the user can change it and
     re-Build), else the first selected/available value."""
     def _global(attr: str) -> str:
-        cb = getattr(app, attr, None)
+        cb = getattr(ctx.runtime.image_table, attr, None)
         return cb.currentText().strip() if cb is not None else ""
 
     def _first(seq) -> str:
@@ -169,26 +171,26 @@ def _fixed_off_axis(app, on_axis: set) -> Dict[str, str]:
 
     fixed = {"well": "", "channel": "", "timepoint": "", "fov": ""}
     if "well" not in on_axis:
-        sel = sorted(getattr(app._app_state.image_table, "active_wells", set()) or set(),
-                     key=app._parse_rc)
-        fixed["well"] = sel[0] if sel else _first(_well_options(app))
+        sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
+                     key=parse_rc)
+        fixed["well"] = sel[0] if sel else _first(_well_options(ctx))
     if "channel" not in on_axis:
-        fixed["channel"] = _global("_image_table_global_chan_cb") or _first(_axis_values(app, "channel"))
+        fixed["channel"] = _global("global_chan_cb") or _first(_axis_values(ctx, "channel"))
     if "timepoint" not in on_axis:
-        fixed["timepoint"] = _global("_image_table_global_tp_cb") or _first(_timepoint_options(app))
+        fixed["timepoint"] = _global("global_tp_cb") or _first(_timepoint_options(ctx))
     if "fov" not in on_axis:
-        fixed["fov"] = _global("_image_table_global_fov_cb") or _first(_fov_options(app))
+        fixed["fov"] = _global("global_fov_cb") or _first(_fov_options(ctx))
     return fixed
 
 
-def _current_axis(app, which: str) -> str:
-    cb = getattr(app, f"_image_table_{which}_axis_cb", None)
+def _current_axis(ctx, which: str) -> str:
+    cb = getattr(ctx.runtime.image_table, f"{which}_axis_cb", None)
     if cb is not None:
         data = cb.currentData()
         if data:
             return str(data)
     # state fallback / default
-    return getattr(app, f"_image_table_{which}_axis",
+    return getattr(ctx.runtime.image_table, f"{which}_axis",
                    "channel" if which == "row" else "timepoint")
 
 
@@ -201,16 +203,16 @@ def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c) -> 
     return vals
 
 
-def _all_dim_options(app, dim: str) -> List[str]:
+def _all_dim_options(ctx, dim: str) -> List[str]:
     """Every available value for a dimension (not selection-filtered)."""
     if dim == "channel":
-        return _channel_options(app)
+        return _channel_options(ctx)
     if dim == "well":
-        return _well_options(app)
+        return _well_options(ctx)
     if dim == "timepoint":
-        return _timepoint_options(app)
+        return _timepoint_options(ctx)
     if dim == "fov":
-        return _fov_options(app)
+        return _fov_options(ctx)
     return []
 
 
@@ -218,10 +220,10 @@ _DIM_KEY = {"well": "well_cb", "channel": "chan_cb",
             "timepoint": "tp_cb", "fov": "fov_cb"}
 
 
-def _snapshot_cells(app) -> List[List[Dict[str, str]]]:
+def _snapshot_cells(ctx) -> List[List[Dict[str, str]]]:
     """Capture every cell's (well, channel, timepoint, fov) selections."""
     snap: List[List[Dict[str, str]]] = []
-    for row in (getattr(app, "_image_table_cells", None) or []):
+    for row in (getattr(ctx.runtime.image_table, "cells", None) or []):
         snap.append([
             {dim: cell[key].currentText().strip() for dim, key in _DIM_KEY.items()}
             for cell in row

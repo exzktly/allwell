@@ -25,9 +25,9 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
 )
 
 
-def _restore_cells(app, snap: List[List[Dict[str, str]]]) -> None:
+def _restore_cells(ctx, snap: List[List[Dict[str, str]]]) -> None:
     """Write *snap* back into the freshly-rebuilt live cell grid."""
-    for r, row in enumerate(getattr(app, "_image_table_cells", None) or []):
+    for r, row in enumerate(getattr(ctx.runtime.image_table, "cells", None) or []):
         if r >= len(snap):
             break
         for c, cell in enumerate(row):
@@ -35,10 +35,10 @@ def _restore_cells(app, snap: List[List[Dict[str, str]]]) -> None:
                 _write_cell(cell, snap[r][c])
 
 
-def _set_cols(app, new_cols: int) -> None:
+def _set_cols(ctx, new_cols: int) -> None:
     """Update the cols state + spinner (signals blocked) ahead of a rebuild."""
-    app._app_state.image_table.cols = new_cols
-    spin = getattr(app, "_image_table_cols_spin", None)
+    ctx.state.image_table.cols = new_cols
+    spin = getattr(ctx.runtime.image_table, "cols_spin", None)
     if spin is not None:
         blocked = spin.blockSignals(True)
         try:
@@ -47,10 +47,10 @@ def _set_cols(app, new_cols: int) -> None:
             spin.blockSignals(blocked)
 
 
-def _set_rows(app, new_rows: int) -> None:
+def _set_rows(ctx, new_rows: int) -> None:
     """Update the rows state + spinner (signals blocked) ahead of a rebuild."""
-    app._app_state.image_table.rows = new_rows
-    spin = getattr(app, "_image_table_rows_spin", None)
+    ctx.state.image_table.rows = new_rows
+    spin = getattr(ctx.runtime.image_table, "rows_spin", None)
     if spin is not None:
         blocked = spin.blockSignals(True)
         try:
@@ -59,65 +59,65 @@ def _set_rows(app, new_rows: int) -> None:
             spin.blockSignals(blocked)
 
 
-def image_table_remove_row(app, r: int) -> None:
+def image_table_remove_row(ctx, r: int) -> None:
     """Remove row *r* from the grid (never the only row), preserving the rest."""
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
-        app._set_status("Image Table: no rows to remove.")
+        ctx.set_status("Image Table: no rows to remove.")
         return
     if len(cells) <= 1:
-        app._set_status("Image Table: cannot remove the only row.")
+        ctx.set_status("Image Table: cannot remove the only row.")
         return
     if not (0 <= r < len(cells)):
-        app._set_status(f"Image Table: row {r + 1} out of range.")
+        ctx.set_status(f"Image Table: row {r + 1} out of range.")
         return
 
-    new_snap = [row for idx, row in enumerate(_snapshot_cells(app)) if idx != r]
-    _set_rows(app, len(new_snap))
-    image_table_rebuild_grid(app)
-    _restore_cells(app, new_snap)
-    image_table_rebuild_lut_row(app)
-    app._set_status(f"Image Table: removed row {r + 1}. Press Generate to render.")
+    new_snap = [row for idx, row in enumerate(_snapshot_cells(ctx)) if idx != r]
+    _set_rows(ctx, len(new_snap))
+    image_table_rebuild_grid(ctx)
+    _restore_cells(ctx, new_snap)
+    image_table_rebuild_lut_row(ctx)
+    ctx.set_status(f"Image Table: removed row {r + 1}. Press Generate to render.")
 
 
-def image_table_remove_col(app, c: int) -> None:
+def image_table_remove_col(ctx, c: int) -> None:
     """Remove column *c* from the grid (never the only column)."""
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells or not cells[0]:
-        app._set_status("Image Table: no columns to remove.")
+        ctx.set_status("Image Table: no columns to remove.")
         return
     if len(cells[0]) <= 1:
-        app._set_status("Image Table: cannot remove the only column.")
+        ctx.set_status("Image Table: cannot remove the only column.")
         return
     if not (0 <= c < len(cells[0])):
-        app._set_status(f"Image Table: column {c + 1} out of range.")
+        ctx.set_status(f"Image Table: column {c + 1} out of range.")
         return
 
     new_snap = [[cell for idx, cell in enumerate(row) if idx != c]
-                for row in _snapshot_cells(app)]
-    _set_cols(app, len(new_snap[0]) if new_snap else 0)
-    image_table_rebuild_grid(app)
-    _restore_cells(app, new_snap)
-    image_table_rebuild_lut_row(app)
-    app._set_status(f"Image Table: removed column {c + 1}. Press Generate to render.")
+                for row in _snapshot_cells(ctx)]
+    _set_cols(ctx, len(new_snap[0]) if new_snap else 0)
+    image_table_rebuild_grid(ctx)
+    _restore_cells(ctx, new_snap)
+    image_table_rebuild_lut_row(ctx)
+    ctx.set_status(f"Image Table: removed column {c + 1}. Press Generate to render.")
 
 
-def image_table_add_varied_col(app, *, src_idx: int, dim: str, mode: str, value: str) -> None:
+def image_table_add_varied_col(ctx, *, src_idx: int, dim: str, mode: str, value: str) -> None:
     """Append a column cloned from *src_idx*, varying one dimension.
 
     Uniform mode sets *dim* to *value* across the whole new column; Step mode
     advances each cell's value for *dim* by one (clamped to the last option).
     Mirrors ``controller.image_table_add_varied_row`` for the column axis.
     """
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
-        app._set_status("Image Table: build a table first, then add a column.")
+        ctx.set_status("Image Table: build a table first, then add a column.")
         return
     dim = dim or "channel"
     mode = mode or "uniform"
     value = (value or "").strip()
 
-    snap = _snapshot_cells(app)
+    snap = _snapshot_cells(ctx)
     last_col = (len(snap[0]) - 1) if snap and snap[0] else 0
     if not (0 <= src_idx <= last_col):
         src_idx = last_col
@@ -130,7 +130,7 @@ def image_table_add_varied_col(app, *, src_idx: int, dim: str, mode: str, value:
             if value:
                 nv[dim] = value
         else:  # step +1
-            opts = _all_dim_options(app, dim)
+            opts = _all_dim_options(ctx, dim)
             if opts:
                 try:
                     i = opts.index(nv.get(dim, ""))
@@ -139,18 +139,18 @@ def image_table_add_varied_col(app, *, src_idx: int, dim: str, mode: str, value:
                 nv[dim] = opts[min(i + 1, len(opts) - 1)] if i >= 0 else opts[0]
         new_col.append(nv)
 
-    _set_cols(app, (len(snap[0]) + 1) if snap and snap[0] else 1)
-    image_table_rebuild_grid(app)
-    _restore_cells(app, [row + [new_col[r]] for r, row in enumerate(snap)])
-    image_table_rebuild_lut_row(app)
+    _set_cols(ctx, (len(snap[0]) + 1) if snap and snap[0] else 1)
+    image_table_rebuild_grid(ctx)
+    _restore_cells(ctx, [row + [new_col[r]] for r, row in enumerate(snap)])
+    image_table_rebuild_lut_row(ctx)
     verb = f"set {dim} = {value}" if mode == "uniform" else f"stepped {dim}"
-    app._set_status(
+    ctx.set_status(
         f"Image Table: added column {len(snap[0]) + 1} cloned from column "
         f"{src_idx + 1} ({verb}). Press Generate to render."
     )
 
 
-def image_table_open_add_col_dialog(app) -> None:
+def image_table_open_add_col_dialog(ctx) -> None:
     """Modal dialog to clone an existing column, varying one dimension.
 
     Mirrors ``controller.image_table_open_add_row_dialog``; on accept it calls
@@ -158,12 +158,12 @@ def image_table_open_add_col_dialog(app) -> None:
     """
     from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout
 
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells or not cells[0]:
-        app._set_status("Image Table: build a table first, then add a column.")
+        ctx.set_status("Image Table: build a table first, then add a column.")
         return
 
-    dlg = QDialog(app)
+    dlg = QDialog(ctx.window)
     dlg.setWindowTitle("Image Table — Add column")
     form = QFormLayout(dlg)
 
@@ -198,7 +198,7 @@ def image_table_open_add_col_dialog(app) -> None:
         blocked = val_cb.blockSignals(True)
         try:
             val_cb.clear()
-            opts = _all_dim_options(app, dim)
+            opts = _all_dim_options(ctx, dim)
             val_cb.addItems(opts)
             if prev in opts:
                 val_cb.setCurrentText(prev)
@@ -218,7 +218,7 @@ def image_table_open_add_col_dialog(app) -> None:
     if dlg.exec() != QDialog.Accepted:
         return
     image_table_add_varied_col(
-        app,
+        ctx,
         src_idx=int(src_cb.currentData() or 0),
         dim=str(dim_cb.currentData() or "channel"),
         mode=str(mode_cb.currentData() or "uniform"),

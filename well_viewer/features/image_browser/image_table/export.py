@@ -29,9 +29,9 @@ from well_viewer.features.image_browser.image_table.image_compose import (
 )
 
 
-def _export_opts(app) -> Dict[str, Any]:
+def _export_opts(ctx) -> Dict[str, Any]:
     """Return the image-table export option dict, seeding defaults on demand."""
-    opts = getattr(app._app_state.image_table, "export_opts", None)
+    opts = getattr(ctx.state.image_table, "export_opts", None)
     if not isinstance(opts, dict):
         opts = {
             "pad_inches": 0.10,    # outer margin around the saved figure
@@ -41,19 +41,19 @@ def _export_opts(app) -> Dict[str, Any]:
             "dpi": 300,
             "transparent_bg": True,
         }
-        app._app_state.image_table.export_opts = opts
+        ctx.state.image_table.export_opts = opts
     return opts
 
 
-def image_table_open_export_settings(app) -> None:
+def image_table_open_export_settings(ctx) -> None:
     """Pop a small modal dialog to edit the image-table export options."""
     from PySide6.QtWidgets import (
         QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
         QSpinBox,
     )
 
-    opts = _export_opts(app)
-    dlg = QDialog(app)
+    opts = _export_opts(ctx)
+    dlg = QDialog(ctx.window)
     dlg.setWindowTitle("Image Table — Export settings")
     form = QFormLayout(dlg)
 
@@ -152,7 +152,7 @@ def _max_pool_rgb(rgb, max_side: int):
     return out.astype(a.dtype)
 
 
-def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
+def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     """Render the current image-table contents to a matplotlib Figure.
 
     Returns ``(fig, save_kwargs)`` where *save_kwargs* are the format-agnostic
@@ -165,22 +165,22 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
     interpolation, so a small saved snapshot keeps its contrast (see
     :func:`_max_pool_rgb`). ``None`` (file export / clipboard) renders full-res.
     """
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
-        app._set_status("Image Table: nothing to export.")
+        ctx.set_status("Image Table: nothing to export.")
         return None, None
     try:
         from matplotlib.figure import Figure
     except Exception as exc:
-        QMessageBox.critical(app, "Export failed", f"matplotlib unavailable: {exc}")
+        QMessageBox.critical(ctx.window, "Export failed", f"matplotlib unavailable: {exc}")
         return None, None
     try:
         import numpy as _np
     except Exception as exc:
-        QMessageBox.critical(app, "Export failed", f"numpy unavailable: {exc}")
+        QMessageBox.critical(ctx.window, "Export failed", f"numpy unavailable: {exc}")
         return None, None
 
-    opts = _export_opts(app)
+    opts = _export_opts(ctx)
     pad_inches = float(opts.get("pad_inches", 0.10))
     cell_pad = float(opts.get("cell_pad", 0.50))
     show_titles = bool(opts.get("show_titles", True))
@@ -188,12 +188,12 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
     dpi = int(opts.get("dpi", 300))
     transparent_bg = bool(opts.get("transparent_bg", True))
 
-    rows = int(getattr(app._app_state.image_table, "rows", len(cells)) or len(cells))
-    cols = int(getattr(app._app_state.image_table, "cols", len(cells[0])) or len(cells[0]))
+    rows = int(getattr(ctx.state.image_table, "rows", len(cells)) or len(cells))
+    cols = int(getattr(ctx.state.image_table, "cols", len(cells[0])) or len(cells[0]))
 
-    cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(app._app_state.image_table, "image_cache", None) or {})
-    rendered = getattr(app._app_state.image_table, "last_render", None) or {}
-    crop_tool = getattr(app, "_image_table_crop_tool", None)
+    cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(ctx.state.image_table, "image_cache", None) or {})
+    rendered = getattr(ctx.state.image_table, "last_render", None) or {}
+    crop_tool = getattr(ctx.runtime.image_table, "crop_tool", None)
     # Display toggles (top-hat / boundaries / binary) + LUT are per ROW —
     # mirror the live thumbnail, reading each from the cell's row box so the
     # export matches what's on screen.
@@ -207,7 +207,7 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
     img_h: Optional[int] = None
     img_w: Optional[int] = None
     for r, row in enumerate(cells):
-        use_tophat, _sb, _bm = _row_display_opts(app, r)
+        use_tophat, _sb, _bm = _row_display_opts(ctx, r)
         for c, cell in enumerate(row):
             arr = rendered.get((r, c))
             if arr is None:
@@ -216,7 +216,7 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
                 tp = cell["tp_cb"].currentText().strip()
                 fov = cell["fov_cb"].currentText().strip()
                 if well and chan and tp:
-                    arr = _load_array(app, cache, well, chan, tp, fov, use_tophat=use_tophat)
+                    arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
             if arr is not None and crop_tool is not None:
                 arr = crop_tool.apply_to_array(arr)
             if arr is not None:
@@ -243,7 +243,7 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
     fig.patch.set_alpha(0.0 if transparent_bg else 1.0)
 
     for r, row in enumerate(cells):
-        use_tophat, show_boundaries, binary_mode = _row_display_opts(app, r)
+        use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r)
         for c, cell in enumerate(row):
             ax = fig.add_subplot(rows, cols, r * cols + c + 1)
             ax.set_facecolor("none" if transparent_bg else "white")
@@ -254,12 +254,12 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
 
             arr = rendered.get((r, c))
             if arr is None and well and chan and tp:
-                arr = _load_array(app, cache, well, chan, tp, fov, use_tophat=use_tophat)
+                arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
             if arr is not None and crop_tool is not None:
                 arr = crop_tool.apply_to_array(arr)
 
             if arr is not None:
-                lo, hi = _parse_lut(app, r)
+                lo, hi = _parse_lut(ctx, r)
                 # Render exactly the same RGB the live thumbnail shows:
                 # full mpl colormap (not the black→tint approximation
                 # this path used before) + show_binary / show_boundaries
@@ -268,22 +268,22 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
                 # propagates to the export.
                 mask_arr = None
                 if show_boundaries and not _is_nuc_seg(chan):
-                    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+                    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
                     if mask_arr is not None and crop_tool is not None:
                         mask_arr = crop_tool.apply_to_array(mask_arr)
                 binary_mask = None
                 if binary_mode in ("mask", "threshold") and not _is_nuc_seg(chan):
                     binary_mask = _export_binary_mask(
-                        app, cache, well, chan, tp, fov, binary_mode, crop_tool,
+                        ctx, cache, well, chan, tp, fov, binary_mode, crop_tool,
                     )
                 rgb = _compose_image_table_rgb(
                     arr, mask_arr,
                     lo=lo, hi=hi,
-                    cmap_name=_row_cmap_name(app, r),
+                    cmap_name=_row_cmap_name(ctx, r),
                     is_overlay=_is_nuc_seg(chan),
                     binary_mask=binary_mask,
                     show_boundaries=show_boundaries,
-                    log_scale=_row_log_scale(app, r),
+                    log_scale=_row_log_scale(ctx, r),
                 )
                 if rgb is not None:
                     if cell_max_px:
@@ -327,18 +327,17 @@ def _build_export_figure(app, *, cell_max_px: Optional[int] = None):
     return fig, save_kwargs
 
 
-def image_table_export(app) -> None:
+def image_table_export(ctx) -> None:
     """Export the current image table to PNG/PDF/SVG with no background."""
-    fig, save_kwargs = _build_export_figure(app)
+    fig, save_kwargs = _build_export_figure(ctx)
     if fig is None:
         return
 
-    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
+    initial_dir = str(ctx.state.dataset.data_dir) if ctx.state.dataset.data_dir else ""
     initial = (
         str(Path(initial_dir) / "image_table.png") if initial_dir else "image_table.png"
     )
-    out, _ = QFileDialog.getSaveFileName(
-        app, "Export image table", initial,
+    out, _ = QFileDialog.getSaveFileName(ctx.window, "Export image table", initial,
         "PNG (*.png);;PDF (*.pdf);;SVG (*.svg);;All files (*.*)",
     )
     if not out:
@@ -350,17 +349,17 @@ def image_table_export(app) -> None:
         if fmt == "png":
             kw["dpi"] = dpi
         fig.savefig(out, **kw)
-        app._set_status(f"Image table saved → {Path(out).name}")
+        ctx.set_status(f"Image table saved → {Path(out).name}")
     except Exception as exc:
-        QMessageBox.critical(app, "Export failed", str(exc))
+        QMessageBox.critical(ctx.window, "Export failed", str(exc))
 
 
-def image_table_copy_png(app) -> None:
+def image_table_copy_png(ctx) -> None:
     """Render the image table and place a PNG of it on the system clipboard."""
     import io
     from PySide6.QtGui import QGuiApplication, QImage
 
-    fig, save_kwargs = _build_export_figure(app)
+    fig, save_kwargs = _build_export_figure(ctx)
     if fig is None:
         return
     dpi = save_kwargs.pop("_dpi")
@@ -368,17 +367,17 @@ def image_table_copy_png(app) -> None:
     try:
         fig.savefig(buf, format="png", dpi=dpi, **save_kwargs)
     except Exception as exc:
-        QMessageBox.critical(app, "Copy failed", str(exc))
+        QMessageBox.critical(ctx.window, "Copy failed", str(exc))
         return
     img = QImage.fromData(buf.getvalue(), "PNG")
     if img.isNull():
-        QMessageBox.critical(app, "Copy failed", "Could not decode rendered PNG.")
+        QMessageBox.critical(ctx.window, "Copy failed", "Could not decode rendered PNG.")
         return
     QGuiApplication.clipboard().setImage(img)
-    app._set_status("Image table copied to clipboard (PNG).")
+    ctx.set_status("Image table copied to clipboard (PNG).")
 
 
-def image_table_copy_svg(app) -> None:
+def image_table_copy_svg(ctx) -> None:
     """Render the image table and copy it to the clipboard, preferring vector.
 
     On macOS the figure is written natively to ``NSPasteboard`` so Illustrator
@@ -387,7 +386,7 @@ def image_table_copy_svg(app) -> None:
     """
     from well_viewer.features.export.style import copy_figure_to_clipboard
 
-    fig, save_kwargs = _build_export_figure(app)
+    fig, save_kwargs = _build_export_figure(ctx)
     if fig is None:
         return
     save_kwargs.pop("_dpi", None)
@@ -397,9 +396,9 @@ def image_table_copy_svg(app) -> None:
         fig, svg_kwargs=save_kwargs, pdf_kwargs=save_kwargs,
     )
     if status.startswith("Copy failed"):
-        QMessageBox.critical(app, "Copy failed", "Could not render the image table.")
+        QMessageBox.critical(ctx.window, "Copy failed", "Could not render the image table.")
         return
-    app._set_status("Image table " + status[0].lower() + status[1:])
+    ctx.set_status("Image table " + status[0].lower() + status[1:])
 
 
 def _downsample_dpi(orig_dpi: int, w_in: float, h_in: float,
@@ -410,7 +409,7 @@ def _downsample_dpi(orig_dpi: int, w_in: float, h_in: float,
     return max(floor, min(int(orig_dpi), int(max_px / longest)))
 
 
-def image_table_save_to_gallery(app) -> None:
+def image_table_save_to_gallery(ctx) -> None:
     """Render the current image grid (downsampled) and save it to Saved Plots.
 
     Microscopy grids can be enormous at full export resolution, so the saved
@@ -422,9 +421,9 @@ def image_table_save_to_gallery(app) -> None:
     # Pre-shrink each cell with brightness-preserving max-pooling so the small
     # saved snapshot keeps its contrast (plain dpi downscaling area-averages and
     # washes out sparse fluorescence).
-    fig, save_kwargs = _build_export_figure(app, cell_max_px=320)
+    fig, save_kwargs = _build_export_figure(ctx, cell_max_px=320)
     if fig is None:
-        app._set_status("Image table is empty — nothing to save.")
+        ctx.set_status("Image table is empty — nothing to save.")
         return
     orig_dpi = int(save_kwargs.pop("_dpi", 200) or 200)
     save_kwargs.pop("format", None)
@@ -440,7 +439,7 @@ def image_table_save_to_gallery(app) -> None:
     try:
         fig.savefig(buf, format="png", dpi=dpi_ds, **save_kwargs)
     except Exception as exc:
-        QMessageBox.critical(app, "Save failed", str(exc))
+        QMessageBox.critical(ctx.window, "Save failed", str(exc))
         return
     finally:
         try:
@@ -449,11 +448,11 @@ def image_table_save_to_gallery(app) -> None:
         except Exception:
             swallowed()  # figure cleanup is best-effort
 
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     rows = len(cells)
     cols = len(cells[0]) if rows and cells[0] else 0
     label = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
 
     from well_viewer.features.saved_plots.controller import save_plot_from_card
-    status = save_plot_from_card(app, "Image Table", buf.getvalue(), label)
-    app._set_status(status)
+    status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label)
+    ctx.set_status(status)

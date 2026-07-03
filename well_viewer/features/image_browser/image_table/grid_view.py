@@ -23,7 +23,7 @@ from well_viewer.core.safe import swallowed
 
 
 def build_image_table_grid(
-    app,
+    ctx,
     *,
     rows: int,
     cols: int,
@@ -40,7 +40,7 @@ def build_image_table_grid(
     List[QComboBox],
     List[QComboBox],
 ]:
-    """Populate ``app._image_table_selector_grid`` with the selector cells.
+    """Populate ``ctx.runtime.image_table.selector_grid`` with the selector cells.
 
     Returns ``(cells, row_chan_cbs, row_well_cbs)``. The per-row colormap / LUT
     levels / display toggles live in the separate per-row table built by
@@ -48,7 +48,7 @@ def build_image_table_grid(
     """
     from well_viewer.core.ui_helpers import btn_secondary, clear_layout
 
-    layout = app._image_table_selector_grid
+    layout = ctx.runtime.image_table.selector_grid
     clear_layout(layout)
 
     cells: List[List[Dict[str, Any]]] = []
@@ -71,7 +71,7 @@ def build_image_table_grid(
             lbl.setStyleSheet("font-size: 9px;")
             col_h.addWidget(lbl)
             col_h.addStretch(1)
-            remove_btn = btn_secondary(col_header, "×", lambda c_=c: on_remove_col(app, c_))
+            remove_btn = btn_secondary(col_header, "×", lambda c_=c: on_remove_col(ctx, c_))
             remove_btn.setFixedSize(24, 24)
             remove_btn.setToolTip(f"Remove column {c + 1}")
             col_h.addWidget(remove_btn)
@@ -104,7 +104,7 @@ def build_image_table_grid(
 
         # Per-row "×" remove button.
         if on_remove_row is not None:
-            remove_row_btn = btn_secondary(row_box, "× Remove row", lambda r_=r: on_remove_row(app, r_))
+            remove_row_btn = btn_secondary(row_box, "× Remove row", lambda r_=r: on_remove_row(ctx, r_))
             remove_row_btn.setToolTip(f"Remove row {r + 1}")
             rbl.addWidget(remove_row_btn)
 
@@ -115,7 +115,7 @@ def build_image_table_grid(
         row_well_cb.addItems(well_opts)
         rbl.addWidget(row_well_cb)
         row_well_cb.currentIndexChanged.connect(
-            lambda _i, ridx=r: on_apply_row_well(app, ridx)
+            lambda _i, ridx=r: on_apply_row_well(ctx, ridx)
         )
 
         chan_lbl = QLabel("Channel:", row_box)
@@ -125,7 +125,7 @@ def build_image_table_grid(
         row_chan_cb.addItems(chan_opts)
         rbl.addWidget(row_chan_cb)
         row_chan_cb.currentIndexChanged.connect(
-            lambda _i, ridx=r: on_apply_row_channel(app, ridx)
+            lambda _i, ridx=r: on_apply_row_channel(ctx, ridx)
         )
 
         layout.addWidget(row_box, r + grid_row_offset, 0)
@@ -183,7 +183,7 @@ def build_selector_cell(
 
 
 def build_lut_row(
-    app,
+    ctx,
     *,
     on_auto_lut,
     lut_color_names=None,
@@ -196,7 +196,7 @@ def build_lut_row(
     and centred (no overlap). All controls are passive — they stage state read by
     the render/export paths (``image_compose._parse_lut`` / ``_row_display_opts``
     / ``_row_cmap_name``); only the explicit **Generate** button renders. The Color
-    selectors are stored in ``app._image_table_row_lut_color_cbs`` (this module
+    selectors are stored in ``ctx.runtime.image_table.row_lut_color_cbs`` (this module
     owns them; ``build_image_table_grid`` no longer builds a colour column).
     """
     from PySide6.QtCore import Qt
@@ -204,7 +204,7 @@ def build_lut_row(
     from well_viewer.core.ui_helpers import btn_secondary, clear_layout
     from widgets.lut_selector import LutSelector
 
-    container = getattr(app, "_image_table_lut_container", None)
+    container = getattr(ctx.runtime.image_table, "lut_container", None)
     if container is None:
         return
     layout = container.layout()
@@ -215,7 +215,7 @@ def build_lut_row(
     # colormap) across rebuilds, keyed by row index. Read the colour selectors
     # *before* clear_layout destroys them.
     prev: Dict[int, dict] = {}
-    for r, entry in (getattr(app, "_image_table_lut", None) or {}).items():
+    for r, entry in (getattr(ctx.runtime.image_table, "lut", None) or {}).items():
         try:
             prev[r] = {
                 "min": entry["min"].text(),
@@ -230,7 +230,7 @@ def build_lut_row(
             swallowed()  # silent except
             continue
     prev_colors: Dict[int, str] = {}
-    for r, cb in enumerate(getattr(app, "_image_table_row_lut_color_cbs", None) or []):
+    for r, cb in enumerate(getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []):
         try:
             name = cb.lut() if hasattr(cb, "lut") else cb.currentText()
             if name:
@@ -239,11 +239,11 @@ def build_lut_row(
             swallowed()  # silent except
 
     clear_layout(layout)
-    app._image_table_lut = {}
+    ctx.runtime.image_table.lut = {}
     color_cbs: List[Any] = []
 
-    cells = getattr(app, "_image_table_cells", None) or []
-    row_chan_cbs = getattr(app, "_image_table_row_chan_cbs", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
+    row_chan_cbs = getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []
     default_cmap = (lut_color_names[0] if lut_color_names else "Greys") or "Greys"
 
     def _row_channel(r: int) -> str:
@@ -309,7 +309,7 @@ def build_lut_row(
             # overwriting it; "Fit" re-enables tracking. No auto-render.
             le.setPlaceholderText("auto")
             le.textEdited.connect(
-                lambda _t, rr=r: app._image_table_lut.get(rr, {}).__setitem__("auto", False)
+                lambda _t, rr=r: ctx.runtime.image_table.lut.get(rr, {}).__setitem__("auto", False)
             )
             return le
 
@@ -318,7 +318,7 @@ def build_lut_row(
         max_edit = _mk_edit(p.get("max", ""))
         layout.addWidget(max_edit, grow, 3)
 
-        fit_btn = btn_secondary(container, "Fit", lambda rr=r: on_auto_lut(app, rr))
+        fit_btn = btn_secondary(container, "Fit", lambda rr=r: on_auto_lut(ctx, rr))
         fit_btn.setToolTip("Re-fit min/max to this row's pooled image range (applies on Generate).")
         try:
             fit_btn.setFixedWidth(46)
@@ -367,13 +367,13 @@ def build_lut_row(
         log_cb.setToolTip("Show this row's image on a log10 intensity scale.")
         layout.addWidget(log_wrap, grow, 8)
 
-        app._image_table_lut[r] = {
+        ctx.runtime.image_table.lut[r] = {
             "min": min_edit, "max": max_edit, "auto": bool(p.get("auto", True)),
             "source": source_cb, "boundaries": bound_cb, "binary": bin_cb,
             "log": log_cb, "chan": chan,
         }
 
-    app._image_table_row_lut_color_cbs = color_cbs
+    ctx.runtime.image_table.row_lut_color_cbs = color_cbs
     # Keep the label + control columns hugging the left; let a trailing spacer
     # column absorb the extra width. Previously column 0 (the "Row N · CHAN"
     # label) was stretched, which shoved every control to the far right and left

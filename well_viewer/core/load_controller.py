@@ -323,8 +323,8 @@ def load_directory(app, d: Path, label=None) -> None:
             from well_viewer.features.image_browser.image_table.controller import (
                 image_table_refresh_picker, image_table_repopulate_dropdowns,
             )
-            image_table_repopulate_dropdowns(app)
-            image_table_refresh_picker(app)
+            image_table_repopulate_dropdowns(app._ctx)
+            image_table_refresh_picker(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh

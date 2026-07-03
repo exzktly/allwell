@@ -109,9 +109,9 @@ def _set_combo_by_data(cb, data) -> bool:
 
 def test_image_table_display_state_round_trips(loaded_app):
     app = loaded_app
-    C.image_table_repopulate_dropdowns(app)
+    C.image_table_repopulate_dropdowns(app._ctx)
     # Build the selector grid + per-row LUT/colormap rows (no render).
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     luts = getattr(app, "_image_table_lut", None) or {}
     color_cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
     if not luts or not color_cbs or 0 not in luts:
@@ -164,8 +164,8 @@ def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
     ``apply_pending_tab_state`` (rather than calling ``_apply_image_table``
     directly). This guards the build-order/axis gap the user hit."""
     app = loaded_app
-    C.image_table_repopulate_dropdowns(app)
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_repopulate_dropdowns(app._ctx)
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     cells = getattr(app, "_image_table_cells", None) or []
     luts = getattr(app, "_image_table_lut", None) or {}
     if not cells or not cells[0] or 0 not in luts:

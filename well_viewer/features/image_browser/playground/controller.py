@@ -56,10 +56,10 @@ def _set_combo(app, attr: str, options, current):
 def playground_repopulate_dropdowns(app) -> None:
     """Refresh the frame selectors from the loaded dataset (idempotent)."""
     st = _st(app)
-    wells = _well_options(app)
-    channels = [c for c in _channel_options(app) if _is_real_channel(c)]
-    tps = _timepoint_options(app)
-    fovs = _fov_options(app)
+    wells = _well_options(app._ctx)
+    channels = [c for c in _channel_options(app._ctx) if _is_real_channel(c)]
+    tps = _timepoint_options(app._ctx)
+    fovs = _fov_options(app._ctx)
     st.well = st.well or (wells[0] if wells else None)
     st.channel = st.channel or (channels[0] if channels else None)
     st.timepoint = st.timepoint or (tps[0] if tps else None)

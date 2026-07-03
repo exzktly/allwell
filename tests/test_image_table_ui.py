@@ -13,24 +13,24 @@ from well_viewer.features.image_browser.image_table import controller as C  # no
 def test_channel_dropdown_populates_and_filters(image_table_app):
     app = image_table_app
     # Activating the tab repopulates the dropdowns (same as the global combos).
-    C.image_table_repopulate_dropdowns(app)
+    C.image_table_repopulate_dropdowns(app._ctx)
     # The layout-row channel dropdown menu exists and is populated.
     menu = getattr(app, "_image_table_channel_menu", None)
     assert menu is not None
     checkable = [a for a in menu.actions() if a.isCheckable()]
-    opts = C._channel_options(app)
+    opts = C._channel_options(app._ctx)
     assert {a.text() for a in checkable} == set(opts)
     # Toggling channels off the dropdown filters the Channels axis.
     app._app_state.image_table.active_channels = set()
-    C.image_table_toggle_channel(app, opts[0], True)
-    assert C._axis_values(app, "channel") == [opts[0]]
+    C.image_table_toggle_channel(app._ctx, opts[0], True)
+    assert C._axis_values(app._ctx, "channel") == [opts[0]]
 
 
 def test_build_does_not_render(image_table_app):
     app = app = image_table_app
     app._app_state.image_table.last_render = {}
     # rows=channels, cols=timepoints
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     # Selector grid was built…
     assert app._image_table_cells, "Build should assemble the selector grid"
     # …but no images were rendered (Build must not auto-generate).
@@ -43,8 +43,8 @@ def test_display_options_are_per_row(image_table_app):
     from well_viewer.features.image_browser.image_table.image_compose import _row_display_opts
 
     app = image_table_app
-    C.image_table_repopulate_dropdowns(app)
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_repopulate_dropdowns(app._ctx)
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     luts = app._image_table_lut or {}
     assert luts, "per-row LUT/Display boxes should exist after a build"
     # Each row has its own source/boundaries/binary widgets.
@@ -61,8 +61,8 @@ def test_display_options_are_per_row(image_table_app):
         if luts[r0]["binary"].itemData(i) == "mask":
             luts[r0]["binary"].setCurrentIndex(i)
             break
-    assert _row_display_opts(app, r0) == (True, True, "mask")
-    assert _row_display_opts(app, r1) == (False, False, "")
+    assert _row_display_opts(app._ctx, r0) == (True, True, "mask")
+    assert _row_display_opts(app._ctx, r1) == (False, False, "")
 
 
 def _row_values(app, dim):
@@ -74,17 +74,17 @@ def _row_values(app, dim):
 
 def test_add_row_uniform_clones_and_varies_channel(image_table_app):
     app = image_table_app
-    C.image_table_repopulate_dropdowns(app)
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_repopulate_dropdowns(app._ctx)
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     n0 = len(app._image_table_cells)
     cols0 = len(app._image_table_cells[0])
     tps_before = _row_values(app, "timepoint")
 
     # Add a row cloned from row 1, uniformly set to a chosen channel.
-    chans = C._channel_options(app)
+    chans = C._channel_options(app._ctx)
     target = chans[-1]
     C.image_table_add_varied_row(
-        app, src_idx=0, dim="channel", mode="uniform", value=target)
+        app._ctx, src_idx=0, dim="channel", mode="uniform", value=target)
 
     assert len(app._image_table_cells) == n0 + 1
     new_row = app._image_table_cells[-1]
@@ -97,17 +97,17 @@ def test_add_row_uniform_clones_and_varies_channel(image_table_app):
 
 def test_add_row_step_advances_each_cell(image_table_app):
     app = image_table_app
-    C.image_table_repopulate_dropdowns(app)
+    C.image_table_repopulate_dropdowns(app._ctx)
     # rows = wells, cols = timepoints so the source row has a single channel
-    C.image_table_apply_preset(app, "well", "timepoint")
-    tp_opts = C._timepoint_options(app)
+    C.image_table_apply_preset(app._ctx, "well", "timepoint")
+    tp_opts = C._timepoint_options(app._ctx)
     if len(tp_opts) < 2:
         import pytest as _pytest
         _pytest.skip("need ≥2 timepoints to test Step mode")
     src_tps = _row_values(app, "timepoint")[0]
 
     C.image_table_add_varied_row(
-        app, src_idx=0, dim="timepoint", mode="step", value="")
+        app._ctx, src_idx=0, dim="timepoint", mode="step", value="")
 
     new_tps = _row_values(app, "timepoint")[-1]
     # each cell advanced one timepoint (clamped at the last value)
@@ -118,7 +118,7 @@ def test_add_row_step_advances_each_cell(image_table_app):
 
 def test_zoom_updates_label(image_table_app):
     app = image_table_app
-    C.image_table_set_zoom(app, 1.5)
+    C.image_table_set_zoom(app._ctx, 1.5)
     assert abs(app._app_state.image_table.zoom - 1.5) < 1e-9
     assert app._image_table_zoom_lbl.text() == "150%"
 
@@ -126,8 +126,8 @@ def test_zoom_updates_label(image_table_app):
 def test_lut_boxes_autofill_real_numbers_from_render(image_table_app):
     import numpy as np
     app = image_table_app
-    C.image_table_repopulate_dropdowns(app)
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_repopulate_dropdowns(app._ctx)
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     cells = app._image_table_cells
     assert cells
     # Synthesize a rendered array per cell (real image discovery is dataset-
@@ -136,7 +136,7 @@ def test_lut_boxes_autofill_real_numbers_from_render(image_table_app):
     for r, row in enumerate(cells):
         for c, _cell in enumerate(row):
             rendered[(r, c)] = (np.arange(16, dtype=np.float32).reshape(4, 4) + r)
-    C._refresh_lut_fields_from_render(app, rendered)
+    C._refresh_lut_fields_from_render(app._ctx, rendered)
 
     luts = app._image_table_lut or {}
     filled = []
@@ -151,5 +151,5 @@ def test_lut_boxes_autofill_real_numbers_from_render(image_table_app):
     chan0 = next(iter(luts))
     luts[chan0]["auto"] = False
     luts[chan0]["min"].setText("999")
-    C._refresh_lut_fields_from_render(app, rendered)
+    C._refresh_lut_fields_from_render(app._ctx, rendered)
     assert luts[chan0]["min"].text() == "999"

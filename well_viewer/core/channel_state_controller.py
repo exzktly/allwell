@@ -79,6 +79,7 @@ def recalculate_threshold(app) -> None:
         if not app._app_state.channel.active_image_channel:
             app._app_state.channel.active_image_channel = fluor_channels[0]
     app._seg_channel_token = seg_tok
+    app._app_state.channel.seg_channel_token = seg_tok
     app._app_state.channel.review_image_channels = detect_review_image_channels(
         sample_df, app._app_state.channel.fluor_channels, seg_tok,
     )

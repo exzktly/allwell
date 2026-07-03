@@ -88,7 +88,7 @@ def build_sidebar(app, parent: QWidget) -> None:
     # alongside the well id, so the rail plate doubles as a quick label
     # readout — useful on tabs where the sidebar doesn't show the labels.
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    plate.setWellTooltipProvider(well_plate_tooltip_provider(app))
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(app._ctx))
 
     # User request: All 96 / Invert / Clear quick-select buttons removed
     # from the sidebar — row and column header clicks on the plate cover
@@ -296,7 +296,7 @@ def _plot_groups_load(app, group_id: str) -> None:
     # writing ``active_wells`` directly so the state is correct when the
     # tab does build.
     try:
-        plate = getattr(app, "_sidebar_image_table_plate", None)
+        plate = getattr(app, "_image_table_sidebar_plate", None)
         if plate is not None:
             try:
                 plate.setSelectedWellIds(sorted(wells))

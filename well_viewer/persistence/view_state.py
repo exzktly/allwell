@@ -909,7 +909,7 @@ def _apply_image_table(app, state: dict) -> None:
                 swallowed()  # was: pass (silent except)
         if changed and image_table_apply_dimensions is not None:
             try:
-                image_table_apply_dimensions(app)
+                image_table_apply_dimensions(app._ctx)
             except Exception:
                 _logger.debug("image_table: apply_dimensions failed", exc_info=True)
 
@@ -988,7 +988,7 @@ def _apply_image_table(app, state: dict) -> None:
     # restored channels before the row_luts values are re-applied below.
     if image_table_rebuild_lut_row is not None:
         try:
-            image_table_rebuild_lut_row(app)
+            image_table_rebuild_lut_row(app._ctx)
         except Exception:
             _logger.debug("image_table: per-row LUT table rebuild failed", exc_info=True)
 
@@ -1089,7 +1089,7 @@ def _apply_image_table(app, state: dict) -> None:
     # Zoom (display-only) via its feature setter (imported once at the top).
     if isinstance(state.get("zoom"), (int, float)) and image_table_set_zoom is not None:
         try:
-            image_table_set_zoom(app, float(state["zoom"]))
+            image_table_set_zoom(app._ctx, float(state["zoom"]))
         except Exception:
             _logger.debug("image_table: zoom restore failed", exc_info=True)
 

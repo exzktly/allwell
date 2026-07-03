@@ -52,7 +52,7 @@ def build_stats_group_editor(app, parent: QWidget) -> None:
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    plate.setWellTooltipProvider(well_plate_tooltip_provider(app))
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(app._ctx))
     # Match the main sidebar plate's geometry so the picker stays in the
     # same screen position when the user switches tabs.
     plate.setMinimumHeight(280)

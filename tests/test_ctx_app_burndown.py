@@ -145,7 +145,30 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              test_cell_gating_gate_state (real QLineEdits, offscreen: sync,
 #              defaults, ratio-key resolution, garbage-keeps-last-committed,
 #              handler fan-out, editingFinished wiring).
-CTX_APP_BUDGET = 241
+#   241 -> 241  Shared render-leaf passes (0-count enablers, all pure typed state
+#              post-R6/R7): R7 export-prefs -> ExportPrefsState; get_all_fluor_gates
+#              + the cell-gating gate accessors -> ctx; the export-style chain
+#              (_ensure_export_style_prefs / figure_prefs [figs via ctx.widgets] /
+#              apply_export_style_to_current) -> ctx; the label tier
+#              (active_channel_label / ratio_label_for / well_display_label /
+#              replicate_display_label) -> ctx; get_thresh_frac_on -> ctx
+#              (guard reframed, behavior-preserving: channel.threshold has no
+#              writers). Count held because ~40+ consumers call each via the
+#              uncounted god-method — but every shared leaf a plot renderer
+#              touches is now ctx, which is what lets a render feature convert
+#              net-negative.
+#   241 -> 239  R3 distribution render tree -> ctx: redraw_distribution + its
+#              helpers (_setup_axes / _apply_card_style / _apply_export_style /
+#              _sync_distribution_tp_to_focus / _display_label_for / _render_
+#              overlay / _render_faceted / _retint_axes_text / _xlabel_for /
+#              _title_for) all take ctx — widgets via ctx.widgets, state via
+#              ctx.state, every shared leaf now ctx-native (zero god-object
+#              residual). _on_changed drops its ctx.app; plot_orchestrator
+#              bridges via app._ctx. FIRST net-negative render conversion.
+#              (Data path covered by test_distribution_log_y / iter_plot_groups
+#              char test; the paint — theme/label pixels — is the only
+#              headless-unverifiable part and wants an interactive smoke.)
+CTX_APP_BUDGET = 239
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

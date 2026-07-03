@@ -5,7 +5,6 @@ via ``WellViewerApp._sel_set_composition`` directly — no controller helpers.)"
 
 from __future__ import annotations
 
-import re
 from typing import Dict, List, Optional
 
 from PySide6.QtWidgets import (
@@ -149,44 +148,13 @@ def rep_add(app) -> None:
 
 
 
-def well_display_label(ctx, lbl: str) -> str:
-    """Custom display label for a well token if defined, else the bare token.
-
-    A8 teardown: the pure body of ``WellViewerApp._well_display_label``, lifted to
-    a ctx free function so renderers can label wells without the god-object."""
-    tok = _extract_well_token(lbl) or lbl
-    return ctx.state.dataset.well_labels.get(tok, tok)
-
-
-def replicate_display_label(ctx, rset: "ReplicateSet") -> str:
-    """Human-friendly x-axis label for a replicate set.
-
-    If the replicate set name appears auto-generated (e.g. ``"1"``,
-    ``"Replicate 2"``, ``"R3"``), use member well labels so the x-axis
-    remains interpretable.
-
-    A8 teardown: pure ``ctx.state`` + the ctx ``well_display_label`` leaf.
-    """
-    name = str(getattr(rset, "name", "") or "").strip()
-    if not name:
-        name = "Replicate"
-
-    generic_name = bool(
-        re.match(
-            r"^(?:\d+|r\s*\d+|rep(?:licate)?\s*\d+|group\s*\d+|set\s*\d+|batch\s*\d+)$",
-            name,
-            re.I,
-        )
-    )
-    if not generic_name:
-        return name
-
-    wells = [well_display_label(ctx, w) for w in rset.wells if w in ctx.state.dataset.well_paths]
-    if not wells:
-        return name
-    if len(wells) <= 3:
-        return ",".join(wells)
-    return f"{','.join(wells[:3])} +{len(wells)-3}"
+# A8 teardown: the display-label leaves now live in the domain layer (shared by
+# core / every plot renderer without a feature import). Re-exported here so the
+# god-method delegates + existing ``grouping.controller`` importers resolve.
+from well_viewer.domain.selections_model import (  # noqa: E402,F401
+    replicate_display_label,
+    well_display_label,
+)
 
 
 

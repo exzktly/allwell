@@ -119,6 +119,39 @@ def color_for_replicate_set(rset: Any, selections: Iterable[Any]) -> str:
     return color_for_wells(getattr(rset, "wells", None))
 
 
+def well_display_label(ctx, lbl: str) -> str:
+    """Custom display label for a well token if defined, else the bare token.
+
+    A8 teardown: the pure body of ``WellViewerApp._well_display_label``, lifted to
+    this low layer so ``core`` / feature renderers share it without a feature
+    import (extract_well_token is itself domain)."""
+    from well_viewer.domain.viewer_state import extract_well_token
+    tok = extract_well_token(lbl) or lbl
+    return ctx.state.dataset.well_labels.get(tok, tok)
+
+
+def replicate_display_label(ctx, rset: Any) -> str:
+    """Human-friendly x-axis label for a replicate set: the group name, or —
+    when that name looks auto-generated (``"1"`` / ``"Replicate 2"`` / ``"R3"``) —
+    its member well labels so the axis stays interpretable. A8 teardown: pure
+    ``ctx.state`` + ``well_display_label`` (moved from grouping.controller)."""
+    name = str(getattr(rset, "name", "") or "").strip()
+    if not name:
+        name = "Replicate"
+    generic_name = bool(re.match(
+        r"^(?:\d+|r\s*\d+|rep(?:licate)?\s*\d+|group\s*\d+|set\s*\d+|batch\s*\d+)$",
+        name, re.I))
+    if not generic_name:
+        return name
+    wells = [well_display_label(ctx, w) for w in getattr(rset, "wells", [])
+             if w in ctx.state.dataset.well_paths]
+    if not wells:
+        return name
+    if len(wells) <= 3:
+        return ",".join(wells)
+    return f"{','.join(wells[:3])} +{len(wells)-3}"
+
+
 def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
     """One ``ReplicateSet`` per visible (non-hidden) selection with ≥1 loaded
     well, in order — the traces drawn on the plots. Pure core of

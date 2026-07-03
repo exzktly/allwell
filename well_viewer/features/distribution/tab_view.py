@@ -171,12 +171,10 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 def _on_changed(ctx) -> None:
     """Common callback for any control change in the Distribution tab.
 
-    A8-teardown T3: takes ``ctx``. The onward redraw is still the app-based
-    renderer (``redraw_distribution``), so it hands off through ``ctx.app`` —
-    the one genuine residual until the shared plot-render helpers (iter_plot_groups
-    / _setup_axes / plot-style) themselves take ``ctx`` (leaf-first, later step)."""
+    A8-teardown R3: fully ctx — ``redraw_distribution`` and every shared render
+    leaf it calls now take ``ctx``, so this names no god-object."""
     from well_viewer.features.distribution.controller import redraw_distribution
-    redraw_distribution(ctx.app)
+    redraw_distribution(ctx)
 
 
 def _on_tp_changed_dist(ctx) -> None:

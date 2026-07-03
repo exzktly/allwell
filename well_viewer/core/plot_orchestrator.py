@@ -72,7 +72,7 @@ def redraw(
     if hasattr(app, "_distribution_canvas"):
         try:
             from well_viewer.features.distribution.controller import redraw_distribution
-            redraw_distribution(app)
+            redraw_distribution(app._ctx)
         except Exception:
             _logger.exception("Distribution redraw failed")
 

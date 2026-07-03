@@ -33,22 +33,24 @@ def test_render_overlay_sets_log_y_scale():
 
     from well_viewer.features.distribution import controller as C
 
-    app = SimpleNamespace(
-        _app_state=SimpleNamespace(
+    # A8 R3: the renderer takes ctx — a minimal ctx over the state it reads.
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(
             channel=SimpleNamespace(
                 active_metric="mean_intensity",
                 active_channel="gfp",
                 active_val_col="gfp_mean_intensity",
                 is_shape_active=lambda: False,
+                ratio_metrics=[],
             ),
+            plot=SimpleNamespace(show_threshold_line=False),
         ),
-        _get_thresh_frac_on=lambda _ch: float("nan"),
     )
     fig = Figure()
     ax = fig.add_subplot(1, 1, 1)
     groups = [("A", "#3366cc", np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))]
 
-    C._render_overlay(app, ax, groups, "Histogram + KDE", 8, False, float("nan"),
+    C._render_overlay(ctx, ax, groups, "Histogram + KDE", 8, False, float("nan"),
                       log_y=True)
     assert ax.get_yscale() == "log"
     assert ax.get_xscale() == "linear"

@@ -238,12 +238,19 @@ only after the shared render graph they call takes `ctx`. Order:
    but its body then names `ctx.app._get_all_fluor_gates()` **and**
    `ctx.app` for `apply_export_style_to_current` (+2) → net +1. So the render
    features must **not** go first. The real next leaves, in order:
-   - **`get_all_fluor_gates` / `get_fluor_gate`** → `ctx`. Blocked like R4: the
-     chain bottoms out in `cell_gating_get_fluor_gate` reading the loose,
-     *persisted* `_cell_gating_fluor_gate_edits` (and `_cell_gating_thresh_frac_edits`
-     for the ThreshFracOn twin). **Prereq = migrate those cell-gating edit dicts
-     to a typed state slice** (an R4-shaped pass), then the gate accessors go
-     pure `ctx.state` and every renderer's fluor-gate residual clears at once.
+   - **`get_all_fluor_gates` / `get_fluor_gate`** → `ctx`. Deeper than R4: the
+     chain bottoms out in `cell_gating_get_fluor_gate`, which reads
+     `_cell_gating_fluor_gate_edits[key].text()` — and those "dicts" are
+     **`{channel_key → QLineEdit}` widget maps**, not plain values
+     (same for `_cell_gating_thresh_frac_edits`, the ThreshFracOn twin). So the
+     gate value is held *on the widget*. **Prereq (R6) = decouple: the gate
+     float per channel lives in a typed cell-gating state slice; the edit writes
+     to state on change; persistence serialises the state (not `edit.text()`);
+     the accessor reads `ctx.state`.** ~44 refs across cell_gating_tab_view (25),
+     channel_state_controller, persistence (cell_gating + sample_definitions),
+     registry, load_controller. Not mechanical — it rewires the cell-gating UI's
+     source of truth, so it needs its own characterization coverage + interactive
+     smoke. Once done, every renderer's fluor-gate residual clears at once.
    - **`apply_export_style_to_current`** → `ctx` (its own small pass).
    - **`_on_plot_channel_selected`** and the channel/axis handlers (overlaps T4).
    Only after these do the per-feature renderers convert **net-negative**. So the

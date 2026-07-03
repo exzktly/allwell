@@ -90,12 +90,22 @@ class _FovApp:
         st = AppState()
         attach_feature_state(st)
         st.dataset.well_paths = {w: w for w in rows_by_well}
+        # Seed the row cache so the ctx-native ``get_rows`` (A8 R-leaf) finds
+        # these in-memory frames without a CSV load.
+        st.dataset.cache = dict(rows_by_well)
         st.channel.active_val_col = "gfp_mean_intensity"
         self.__app_state = st
 
     @property
     def _app_state(self):
         return self.__app_state
+
+    @property
+    def _ctx(self):
+        from types import SimpleNamespace
+        from well_viewer.core.app_runtime import AppRuntime
+        return SimpleNamespace(app=self, state=self.__app_state,
+                               runtime=AppRuntime(self))
 
     def _get_rows(self, label):
         return self._rows.get(label)

@@ -274,7 +274,7 @@ def export_plot_data(app) -> None:
 
     rows_out = []
     for label in selected:
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=app._app_state.channel.active_val_col,
             fluor_gates=fluor_gates,

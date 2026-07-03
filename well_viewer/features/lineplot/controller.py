@@ -252,7 +252,7 @@ def collect_line_series(
             all_tps: set = set()
             cdf_vals: list = []
             for lbl in valid_wells:
-                for t, *_ in aggregate_well(app,
+                for t, *_ in aggregate_well(app._ctx,
                     lbl, threshold=threshold, use_sem=False,
                     val_col=val_col,
                     fluor_gates=fluor_gates,
@@ -321,7 +321,7 @@ def collect_line_series(
     )
     for label in ordered_selected:
         color = app._rank_color_well(label)
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,

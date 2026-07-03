@@ -454,6 +454,6 @@ def _persist_and_redraw(app) -> None:
     if hasattr(app, "_heatmap_canvas"):
         try:
             from well_viewer.features.heatmap.controller import redraw_heatmap
-            redraw_heatmap(app)
+            redraw_heatmap(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)

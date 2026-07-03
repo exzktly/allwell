@@ -449,7 +449,7 @@ def collect_bar_items(
                 label_iter.append((label, color, display, gk))
 
         for label, color, display, gk in label_iter:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 label, threshold=threshold, use_sem=use_sem,
                 val_col=app._app_state.channel.active_val_col,
                 fluor_gates=fluor_gates,
@@ -719,7 +719,7 @@ def collect_bar_items_for_group(
         tp_str = _format_tp(target_t)
         multi_tp = len(target_ts) > 1
         for (key, base_display, wells, rset_name, color) in members:
-            pts = aggregate_group(app,
+            pts = aggregate_group(app._ctx,
                 wells, threshold=threshold, use_sem=use_sem,
                 val_col=val_col,
                 fluor_gates=fluor_gates,

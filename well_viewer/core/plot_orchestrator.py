@@ -80,7 +80,7 @@ def redraw(
     if hasattr(app, "_heatmap_canvas"):
         try:
             from well_viewer.features.heatmap.controller import redraw_heatmap
-            redraw_heatmap(app)
+            redraw_heatmap(app._ctx)
         except Exception:
             _logger.exception("Heat map redraw failed")
 

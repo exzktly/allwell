@@ -168,6 +168,22 @@ def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
     return out
 
 
+def replicate_sets_loaded(selections: Iterable[Any], well_paths: Any):
+    """One ``ReplicateSet`` per selection with ≥1 loaded well, **including
+    hidden ones**, in order — the full pool the Heat Map's rep-set-average
+    expansion walks (it colours a cell by the rep-set its well belongs to
+    regardless of trace visibility). Pure core of the legacy
+    ``WellViewerApp._rep_sets_loaded`` (A8 R-leaf), so the heatmap reads it
+    without a feature import."""
+    from well_viewer.domain.batch_models import ReplicateSet
+    out = []
+    for s in selections:
+        wells = s.get("wells") or []
+        if any(w in well_paths for w in wells):
+            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+    return out
+
+
 def _clean_token(w: Any) -> Optional[str]:
     """Normalise a 96-well token (``"a1"`` → ``"A01"``); drop anything that isn't
     a structurally-valid well token. (We do *not* filter against the currently

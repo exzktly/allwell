@@ -16,11 +16,16 @@ _GATE = {
 
 
 def _app(use_thresh, gates, choices=None):
-    return types.SimpleNamespace(
+    app = types.SimpleNamespace(
         _cell_gating_use_scatter_thresh=use_thresh,
         _scatter_gates=gates,
         _cell_gating_thresh_choices=choices,
     )
+    # A8 R-leaf: ``_gate_cache_sig`` now resolves the gate-on flags through
+    # ``ctx.runtime`` (which stamps back onto these same app attributes).
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = types.SimpleNamespace(app=app, runtime=AppRuntime(app))
+    return app
 
 
 def test_none_in_plain_threshold_mode():

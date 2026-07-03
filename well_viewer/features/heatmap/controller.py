@@ -18,6 +18,7 @@ from matplotlib import colormaps as mpl_colormaps
 
 from well_viewer.data.data_loading import (
     _all_fluor_values_filtered,
+    get_rows,
 )
 from well_viewer.features.heatmap.models import (
     HeatmapLayout,
@@ -27,6 +28,11 @@ from well_viewer.domain.ratio_models import is_ratio_key
 from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.core.channel_state_controller import (
+    active_channel_label,
+    get_all_fluor_gates,
+    get_thresh_frac_on,
+)
 from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
 
 
@@ -43,28 +49,31 @@ METRIC_RATIO = "Ratio value"  # legacy; not exposed in METRIC_OPTIONS — ratios
 METRIC_OPTIONS = [METRIC_MEAN, METRIC_MEAN_ALL, METRIC_FRACTION, METRIC_COUNT]
 
 
-def active_layout(app) -> HeatmapLayout:
+def active_layout(ctx) -> HeatmapLayout:
     """Return the active layout, synthesizing the plate default when needed."""
-    layouts = list(getattr(app, "_heatmap_layouts", []) or [])
-    name = getattr(app, "_active_heatmap_layout_name", None)
+    layouts = list(ctx.runtime.heatmap.layouts or [])
+    # The active-layout *name* does not fit the ``_heatmap_`` runtime prefix
+    # (it's ``app._active_heatmap_layout_name``); read it through the escape
+    # hatch until it gains a typed-state home.
+    name = getattr(ctx.app, "_active_heatmap_layout_name", None)
     if name:
         for lay in layouts:
             if lay.name == name:
                 return lay
     if layouts:
         return layouts[0]
-    return make_plate_layout((app._app_state.dataset.well_paths or {}).keys())
+    return make_plate_layout((ctx.state.dataset.well_paths or {}).keys())
 
 
-def _selected_metric(app) -> str:
-    cb = getattr(app, "_heatmap_metric_cb", None)
+def _selected_metric(ctx) -> str:
+    cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     if cb is None:
         return METRIC_MEAN
     return str(cb.currentText() or METRIC_MEAN)
 
 
-def _selected_cmap(app) -> str:
-    cb = getattr(app, "_heatmap_cmap_cb", None)
+def _selected_cmap(ctx) -> str:
+    cb = ctx.widgets.get_or_none("_heatmap_cmap_cb")
     if cb is None:
         return "viridis"
     # v2 LutSelector exposes lut() + isReversed() rather than currentText().
@@ -76,48 +85,56 @@ def _selected_cmap(app) -> str:
     return str(cb.currentText() or "viridis")
 
 
-def _selected_tp(app) -> Optional[float]:
-    slider = getattr(app, "_heatmap_tp_slider", None)
-    tps: List[float] = list(getattr(app, "_heatmap_tp_values", []) or [])
+def _selected_tp(ctx) -> Optional[float]:
+    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
+    tps: List[float] = list(ctx.runtime.heatmap.tp_values or [])
     if slider is None or not tps:
         return None
     idx = max(0, min(slider.value(), len(tps) - 1))
     return tps[idx]
 
 
-def sync_heatmap_slider_to_focus(app) -> None:
+def sync_heatmap_slider_to_focus(ctx) -> None:
     """Move the slider + label to the shared focus timepoint (N5) when one is set
     and present in this tab's timepoints — so a timepoint chosen on another
     plotting tab (Distribution) is reflected here. Signals are blocked so this
     silent sync never re-fires ``_on_tp_changed``. No-op when no focus is set."""
-    focus = current_focus_tp(app._ctx)
+    focus = current_focus_tp(ctx)
     if focus is None:
         return
-    tps: List[float] = list(getattr(app, "_heatmap_tp_values", []) or [])
+    tps: List[float] = list(ctx.runtime.heatmap.tp_values or [])
     i = nearest_index(tps, focus)
     if i is None:
         return
-    slider = getattr(app, "_heatmap_tp_slider", None)
+    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
     if slider is not None and slider.value() != i:
         blocked = slider.blockSignals(True)
         try:
             slider.setValue(i)
         finally:
             slider.blockSignals(blocked)
-    label = getattr(app, "_heatmap_tp_label", None)
+    label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if label is not None:
         label.setText(f"t = {tps[i]:g} h")
 
 
-def _expand_repset_wells(app, wells: Iterable[str]) -> List[str]:
+def _repsets_loaded(ctx) -> List:
+    """Every loaded replicate set (incl. hidden) over ``ctx.state`` — the
+    pool the heatmap's rep-set-average expansion walks. Derived from the
+    domain resolver so no god-object / feature import is needed."""
+    from well_viewer.domain.selections_model import replicate_sets_loaded
+    return replicate_sets_loaded(ctx.state.selection.selections,
+                                 ctx.state.dataset.well_paths)
+
+
+def _expand_repset_wells(ctx, wells: Iterable[str]) -> List[str]:
     """If the rep-set average toggle is on, expand each input well to every
     well in the rep-set it belongs to. Otherwise return wells as-is.
     """
     src = list(wells)
-    if not bool(app._app_state.heatmap.repset_avg):
+    if not bool(ctx.state.heatmap.repset_avg):
         return src
-    get_loaded = getattr(app, "_rep_sets_loaded", None)
-    rep_sets = list(get_loaded() if callable(get_loaded) else [])
+    rep_sets = _repsets_loaded(ctx)
     if not rep_sets:
         return src
     out: List[str] = []
@@ -141,12 +158,11 @@ def _expand_repset_wells(app, wells: Iterable[str]) -> List[str]:
     return out
 
 
-def _repset_name_for_wells(app, wells: Iterable[str]) -> Optional[str]:
+def _repset_name_for_wells(ctx, wells: Iterable[str]) -> Optional[str]:
     """Return the name of the first rep-set that contains any of *wells*, or None."""
-    if not bool(app._app_state.heatmap.repset_avg):
+    if not bool(ctx.state.heatmap.repset_avg):
         return None
-    get_loaded = getattr(app, "_rep_sets_loaded", None)
-    rep_sets = list(get_loaded() if callable(get_loaded) else [])
+    rep_sets = _repsets_loaded(ctx)
     if not rep_sets:
         return None
     src = list(wells)
@@ -159,7 +175,7 @@ def _repset_name_for_wells(app, wells: Iterable[str]) -> Optional[str]:
 
 
 def _pool_filtered_mean(
-    app,
+    ctx,
     wells,
     *,
     val_col: str,
@@ -176,7 +192,7 @@ def _pool_filtered_mean(
     """
     parts: List[np.ndarray] = []
     for w in wells:
-        df = app._get_rows(w)
+        df = get_rows(ctx, w)
         if df is None or df.empty:
             continue
         vals = _all_fluor_values_filtered(
@@ -194,7 +210,7 @@ def _pool_filtered_mean(
 
 
 def _cell_value(
-    app,
+    ctx,
     wells: Iterable[str],
     target_t: float,
     metric: str,
@@ -204,14 +220,14 @@ def _cell_value(
     ratios: Optional[Dict] = None,
 ) -> float:
     """Compute the heatmap cell value by pooling rows across *wells*."""
-    expanded = _expand_repset_wells(app, wells)
-    valid_wells = [w for w in expanded if w in app._app_state.dataset.well_paths]
+    expanded = _expand_repset_wells(ctx, wells)
+    valid_wells = [w for w in expanded if w in ctx.state.dataset.well_paths]
     if not valid_wells:
         return float("nan")
 
     if metric == METRIC_COUNT:
         # Use aggregate to apply gate logic consistently, then read n_total.
-        pts = aggregate_group(app,
+        pts = aggregate_group(ctx,
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -220,7 +236,7 @@ def _cell_value(
         return float(matched[0][5]) if matched else 0.0
 
     if metric == METRIC_FRACTION:
-        pts = aggregate_group(app,
+        pts = aggregate_group(ctx,
             valid_wells, threshold=threshold, use_sem=False,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -239,7 +255,7 @@ def _cell_value(
         # heatmap redraw — full-frame concat in the hot loop was the
         # bottleneck on slider scrubs.
         return _pool_filtered_mean(
-            app, valid_wells,
+            ctx, valid_wells,
             val_col=val_col,
             fluor_gates=fluor_gates,
             ratios=ratios,
@@ -252,7 +268,7 @@ def _cell_value(
         # properties (Total / Max / Min / Std) where the MFI threshold is
         # semantically irrelevant.
         return _pool_filtered_mean(
-            app, valid_wells,
+            ctx, valid_wells,
             val_col=val_col,
             fluor_gates=fluor_gates,
             ratios=ratios,
@@ -260,7 +276,7 @@ def _cell_value(
         )
 
     # METRIC_MEAN (and fallback)
-    pts = aggregate_group(app,
+    pts = aggregate_group(ctx,
         valid_wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         fluor_gates=fluor_gates,
@@ -271,24 +287,26 @@ def _cell_value(
     return float(matched[0][1])
 
 
-def _resolve_color_scale(arr: np.ndarray, app) -> Tuple[Optional[float], Optional[float]]:
+def _resolve_color_scale(arr: np.ndarray, ctx) -> Tuple[Optional[float], Optional[float]]:
     """Pick (vmin, vmax) for the heatmap.
 
-    Mode is read from ``app._app_state.heatmap.scale_mode`` (Auto/Fixed). For Fixed we
-    read ``app._heatmap_vmin`` / ``app._heatmap_vmax``. For Auto we use the
-    global range pre-computed across every timepoint (kept on
-    ``app._heatmap_global_vmin`` / ``app._heatmap_global_vmax``) so the
-    colormap stays stable while scrubbing the timepoint slider.
+    Mode is read from ``ctx.state.heatmap.scale_mode`` (Auto/Fixed). For Fixed we
+    read ``ctx.runtime.heatmap.vmin`` / ``.vmax``. For Auto we use the global
+    range pre-computed across every timepoint (kept on
+    ``ctx.runtime.heatmap.global_vmin`` / ``.global_vmax``) so the colormap
+    stays stable while scrubbing the timepoint slider.
     """
-    mode = str(app._app_state.heatmap.scale_mode or "Auto")
+    mode = str(ctx.state.heatmap.scale_mode or "Auto")
     if mode == "Fixed":
-        vmin = float(getattr(app, "_heatmap_vmin", float("nan")) or float("nan"))
-        vmax = float(getattr(app, "_heatmap_vmax", float("nan")) or float("nan"))
+        vmin = float((ctx.runtime.heatmap.vmin if ctx.runtime.heatmap.vmin is not None
+                      else float("nan")) or float("nan"))
+        vmax = float((ctx.runtime.heatmap.vmax if ctx.runtime.heatmap.vmax is not None
+                      else float("nan")) or float("nan"))
         if math.isfinite(vmin) and math.isfinite(vmax) and vmax > vmin:
             return vmin, vmax
     # Auto: prefer the global range across all timepoints.
-    g_vmin = getattr(app, "_heatmap_global_vmin", None)
-    g_vmax = getattr(app, "_heatmap_global_vmax", None)
+    g_vmin = ctx.runtime.heatmap.global_vmin
+    g_vmax = ctx.runtime.heatmap.global_vmax
     if (
         g_vmin is not None and g_vmax is not None
         and math.isfinite(g_vmin) and math.isfinite(g_vmax) and g_vmax > g_vmin
@@ -301,7 +319,7 @@ def _resolve_color_scale(arr: np.ndarray, app) -> Tuple[Optional[float], Optiona
 
 
 def _compute_global_range(
-    app,
+    ctx,
     layout,
     metric: str,
     val_col: str,
@@ -311,10 +329,10 @@ def _compute_global_range(
 ) -> Tuple[Optional[float], Optional[float]]:
     """Pool ``_cell_value`` across every (timepoint, cell) and return (vmin, vmax).
 
-    Result is cached on ``app`` keyed on the inputs that influence it so
-    timepoint-slider scrubbing does not retrigger the full sweep.
+    Result is cached on ``ctx.runtime.heatmap`` keyed on the inputs that
+    influence it so timepoint-slider scrubbing does not retrigger the full sweep.
     """
-    tps = list(getattr(app, "_heatmap_tp_values", []) or [])
+    tps = list(ctx.runtime.heatmap.tp_values or [])
     if not tps:
         return None, None
 
@@ -344,10 +362,10 @@ def _compute_global_range(
         tuple(sorted((fluor_gates or {}).items())),
         ratios_fingerprint,
         tuple(tps),
-        bool(app._app_state.heatmap.repset_avg),
-        bool(app._app_state.heatmap.log_scale),
+        bool(ctx.state.heatmap.repset_avg),
+        bool(ctx.state.heatmap.log_scale),
     )
-    cached = getattr(app, "_heatmap_global_range_cache", None)
+    cached = ctx.runtime.heatmap.global_range_cache
     if cached is not None and cached.get("key") == cache_key:
         return cached["vmin"], cached["vmax"]
 
@@ -359,7 +377,7 @@ def _compute_global_range(
                 continue
             try:
                 v = _cell_value(
-                    app, wells, tp, metric, val_col,
+                    ctx, wells, tp, metric, val_col,
                     threshold, fluor_gates, ratios,
                 )
             except Exception:
@@ -368,20 +386,20 @@ def _compute_global_range(
                 vmin = v if vmin is None else min(vmin, v)
                 vmax = v if vmax is None else max(vmax, v)
 
-    app._heatmap_global_range_cache = {"key": cache_key, "vmin": vmin, "vmax": vmax}
+    ctx.runtime.heatmap.global_range_cache = {"key": cache_key, "vmin": vmin, "vmax": vmax}
     return vmin, vmax
 
 
-def redraw_heatmap(app) -> None:
-    ax = getattr(app, "_heatmap_ax", None)
-    canvas = getattr(app, "_heatmap_canvas", None)
-    fig = getattr(app, "_heatmap_fig", None)
+def redraw_heatmap(ctx) -> None:
+    ax = ctx.widgets.get_or_none("_heatmap_ax")
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
+    fig = ctx.widgets.get_or_none("_heatmap_fig")
     if ax is None or canvas is None or fig is None:
         return
 
-    layout = active_layout(app)
-    sync_heatmap_slider_to_focus(app)
-    tp = _selected_tp(app)
+    layout = active_layout(ctx)
+    sync_heatmap_slider_to_focus(ctx)
+    tp = _selected_tp(ctx)
     if tp is None:
         # Try to derive from the data; if still none, leave the canvas blank.
         ax.clear()
@@ -394,17 +412,17 @@ def redraw_heatmap(app) -> None:
         canvas.draw_idle()
         return
 
-    metric = _selected_metric(app)
-    val_col = app._app_state.channel.active_val_col
+    metric = _selected_metric(ctx)
+    val_col = ctx.state.channel.active_val_col
     # Shapes keep every cell (no ON cutoff); smFISH counts honour the
     # channel's ThreshFracOn like intensities (count > cutoff is "on").
-    if app._app_state.channel.is_shape_active():
+    if ctx.state.channel.is_shape_active():
         threshold = -1.0
     else:
-        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-    fluor_gates = app._get_all_fluor_gates()
-    ratios = app._app_state.channel.ratio_index
-    cmap_name = _selected_cmap(app)
+        threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    fluor_gates = get_all_fluor_gates(ctx)
+    ratios = ctx.state.channel.ratio_index
+    cmap_name = _selected_cmap(ctx)
 
     arr = np.full((layout.rows, layout.cols), np.nan, dtype=float)
     cell_well_index: Dict[Tuple[int, int], List[str]] = {}
@@ -415,26 +433,27 @@ def redraw_heatmap(app) -> None:
         cell_well_index[(r, c)] = list(wells)
         try:
             arr[r, c] = _cell_value(
-                app, wells, tp, metric, val_col,
+                ctx, wells, tp, metric, val_col,
                 threshold, fluor_gates, ratios,
             )
         except Exception:
             arr[r, c] = float("nan")
 
-    # Cache for click/hover handlers.
-    app._heatmap_cell_well_index = cell_well_index
-    app._heatmap_array = arr
-    app._heatmap_layout_active = layout
+    # Cache for click/hover handlers (stamped onto ``app._heatmap_*`` by the
+    # runtime namespace so the app-native mouse handlers keep resolving).
+    ctx.runtime.heatmap.cell_well_index = cell_well_index
+    ctx.runtime.heatmap.array = arr
+    ctx.runtime.heatmap.layout_active = layout
 
     # Pool min/max across every timepoint so the colormap stays consistent
-    # while the user scrubs the timepoint slider. Cached on app so this
-    # only recomputes when an input changes.
+    # while the user scrubs the timepoint slider. Cached so this only
+    # recomputes when an input changes.
     g_vmin, g_vmax = _compute_global_range(
-        app, layout, metric, val_col,
+        ctx, layout, metric, val_col,
         threshold, fluor_gates, ratios,
     )
-    app._heatmap_global_vmin = g_vmin
-    app._heatmap_global_vmax = g_vmax
+    ctx.runtime.heatmap.global_vmin = g_vmin
+    ctx.runtime.heatmap.global_vmax = g_vmax
 
     # Render. Resolve the active plot-theme tokens up front so the empty-cell
     # fill, figure background, and axes background all track the theme — the
@@ -444,7 +463,7 @@ def redraw_heatmap(app) -> None:
     _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for(ax)
     fig.patch.set_facecolor(_bg)
 
-    vmin, vmax = _resolve_color_scale(arr, app)
+    vmin, vmax = _resolve_color_scale(arr, ctx)
     cmap = mpl_colormaps.get_cmap(cmap_name).copy()
     cmap.set_bad(color=_bg)  # empty cells blend into the themed background
 
@@ -453,7 +472,7 @@ def redraw_heatmap(app) -> None:
     # Log-scale toggle: route values through a LogNorm so the colorbar
     # spans orders of magnitude. Values ≤ 0 become invalid (masked).
     norm = None
-    log_scale = bool(app._app_state.heatmap.log_scale)
+    log_scale = bool(ctx.state.heatmap.log_scale)
     if log_scale:
         from matplotlib.colors import LogNorm
         positive = masked.filled(np.nan)
@@ -504,7 +523,7 @@ def redraw_heatmap(app) -> None:
     ax.tick_params(length=0)
 
     # Row/col drag-reorder visual: colour source blue, drop-target red.
-    drag = getattr(app, "_heatmap_label_drag", None)
+    drag = ctx.runtime.heatmap.label_drag
     if drag is not None:
         _kind = drag["kind"]
         _src = drag["src"]
@@ -523,7 +542,7 @@ def redraw_heatmap(app) -> None:
         v = arr[r, c]
         if not math.isfinite(v):
             continue
-        rs_name = _repset_name_for_wells(app, wells)
+        rs_name = _repset_name_for_wells(ctx, wells)
         if rs_name:
             text = rs_name
         elif len(wells) == 1:
@@ -542,7 +561,7 @@ def redraw_heatmap(app) -> None:
         )
 
     # Selection rectangles.
-    selected = set(app._app_state.selection.selected_wells or set())
+    selected = set(ctx.state.selection.selected_wells or set())
     for (r, c), wells in cell_well_index.items():
         if any(w in selected for w in wells):
             rect = mpatches.Rectangle(
@@ -559,36 +578,36 @@ def redraw_heatmap(app) -> None:
     # publication↔screen toggle instead of staying mpl-default black.
     # Theme tokens (_bg/_title_fg/_muted_fg/_spine) were resolved up front in
     # the render section above and the figure/axes backgrounds already painted.
-    cax = getattr(app, "_heatmap_cax", None)
+    cax = ctx.widgets.get_or_none("_heatmap_cax")
     if cax is not None:
         try:
             cax.cla()
-            app._heatmap_colorbar = fig.colorbar(im, cax=cax)
-            app._heatmap_colorbar.set_label(_metric_axis_label(metric, app),
-                                            fontsize=8, color=_muted_fg)
+            ctx.runtime.heatmap.colorbar = fig.colorbar(im, cax=cax)
+            ctx.runtime.heatmap.colorbar.set_label(_metric_axis_label(metric, ctx),
+                                                   fontsize=8, color=_muted_fg)
             cax.tick_params(colors=_muted_fg, labelsize=7)
             for _spi in cax.spines.values():
                 _spi.set_color(_spine)
         except Exception:
-            app._heatmap_colorbar = None
+            ctx.runtime.heatmap.colorbar = None
     else:
-        if hasattr(app, "_heatmap_colorbar") and app._heatmap_colorbar is not None:
+        if ctx.runtime.heatmap.colorbar is not None:
             try:
-                app._heatmap_colorbar.remove()
+                ctx.runtime.heatmap.colorbar.remove()
             except Exception:
                 swallowed()  # was: pass (silent except)
         try:
-            app._heatmap_colorbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
-            app._heatmap_colorbar.set_label(_metric_axis_label(metric, app),
-                                            fontsize=8, color=_muted_fg)
-            app._heatmap_colorbar.ax.tick_params(colors=_muted_fg, labelsize=7)
-            for _spi in app._heatmap_colorbar.ax.spines.values():
+            ctx.runtime.heatmap.colorbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
+            ctx.runtime.heatmap.colorbar.set_label(_metric_axis_label(metric, ctx),
+                                                   fontsize=8, color=_muted_fg)
+            ctx.runtime.heatmap.colorbar.ax.tick_params(colors=_muted_fg, labelsize=7)
+            for _spi in ctx.runtime.heatmap.colorbar.ax.spines.values():
                 _spi.set_color(_spine)
         except Exception:
-            app._heatmap_colorbar = None
+            ctx.runtime.heatmap.colorbar = None
 
     title = (
-        f"{app._active_channel_label() if hasattr(app, '_active_channel_label') else app._app_state.channel.active_channel.upper()}"
+        f"{active_channel_label(ctx)}"
         f" — {metric} — t = {tp:g} h"
     )
     # ``pad`` lifts the title away from the heatmap rows so the descenders
@@ -599,7 +618,7 @@ def redraw_heatmap(app) -> None:
     # Apply the Export Style sidebar prefs (font sizes, grid, log scale, …)
     # so toggling those in the configurator survives a redraw.
     try:
-        apply_export_style_to_current(app._ctx, fig, canvas)
+        apply_export_style_to_current(ctx, fig, canvas)
     except Exception:
         swallowed()  # was: pass (silent except)
 
@@ -620,10 +639,10 @@ def _format_cell_value(v: float, metric: str) -> str:
     return f"{v:.3g}"
 
 
-def _metric_axis_label(metric: str, app) -> str:
-    label = app._active_channel_label() if hasattr(app, "_active_channel_label") else ""
+def _metric_axis_label(metric: str, ctx) -> str:
+    label = active_channel_label(ctx)
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB
-    prop_label = _MLB.get(app._app_state.channel.active_metric, "Mean Intensity")
+    prop_label = _MLB.get(ctx.state.channel.active_metric, "Mean Intensity")
     if metric == METRIC_COUNT:
         return "Cell count"
     if metric == METRIC_FRACTION:
@@ -767,7 +786,7 @@ def _nearest_label_in_drag(app, event, kind: str) -> Optional[int]:
 
     layout = getattr(app, "_heatmap_layout_active", None)
     if layout is None:
-        layout = active_layout(app)
+        layout = active_layout(app._ctx)
 
     # Inside the axes: data coords give us the exact row/col directly.
     if event.inaxes is ax:

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from well_viewer.data.data_loading import (
     aggregate_with_threshold_df,
     df_included_mask,
+    get_rows,
     resolve_value_series,
 )
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
@@ -161,11 +162,11 @@ def group_replicate_stats(app, wells, target_t, *, use_fov, val_col, threshold,
     if fluor_gates is None:
         fluor_gates = app._get_all_fluor_gates()
     ratios = app._app_state.channel.ratio_index
-    on_col = _thresh_on_col(app)
+    on_col = _thresh_on_col(app._ctx)
     reps: "List[ReplicateStat]" = []
     if unit == "well":
         for lbl in loaded:
-            pts = aggregate_well(app, lbl, threshold=threshold, use_sem=False,
+            pts = aggregate_well(app._ctx, lbl, threshold=threshold, use_sem=False,
                                  val_col=val_col, fluor_gates=fluor_gates)
             rs = _rep_from(app, _safe_rows(app, lbl), pts, target_t, threshold,
                            val_col, fluor_gates, ratios, on_col)
@@ -178,7 +179,7 @@ def group_replicate_stats(app, wells, target_t, *, use_fov, val_col, threshold,
             # Pre-aggregated backends (MockApp) have no raw rows to split — the
             # well is its own single replicate.
             rs = _rep_from(app, None,
-                           aggregate_well(app, lbl, threshold=threshold,
+                           aggregate_well(app._ctx, lbl, threshold=threshold,
                                           use_sem=False, val_col=val_col,
                                           fluor_gates=fluor_gates),
                            target_t, threshold, val_col, fluor_gates, ratios, on_col)
@@ -213,7 +214,7 @@ def _reduce_reps(reps, field: str, use_sem: bool) -> tuple[float, float]:
     return m, (sd / math.sqrt(n) if (use_sem and n > 1) else sd)
 
 
-def _thresh_on_col(app) -> Optional[str]:
+def _thresh_on_col(ctx) -> Optional[str]:
     """Return ``"Gate_On"`` when scatter-gate *thresholding* is active (mode on
     and a gate selected), else ``None``.
 
@@ -222,16 +223,19 @@ def _thresh_on_col(app) -> Optional[str]:
     gate) instead of ``value > ThreshFracOn``. Inlined here (no
     ``well_viewer.features`` import) to keep the domain layer acyclic — see
     ``tests/test_layering.py``.
+
+    A8 R-leaf: takes ``ctx`` — the scatter-gate / cell-gating flags read through
+    ``ctx.runtime`` (the same stamped attributes, without naming the god-object).
     """
-    if not getattr(app, "_cell_gating_use_scatter_thresh", False):
+    if not ctx.runtime.cell_gating.use_scatter_thresh:
         return None
-    gates = getattr(app, "_scatter_gates", None) or []
+    gates = ctx.runtime.scatter.gates or []
     if not gates:
         return None
     # Thresholding has its own gate selection (a set of names; None ⇒ all). Fall
     # back to the ThreshFracOn cutoff (return None) when the user has explicitly
     # selected no existing gate for the thresholding layer.
-    choices = getattr(app, "_cell_gating_thresh_choices", None)
+    choices = ctx.runtime.cell_gating.thresh_choices
     if choices is not None:
         chosen = set(choices)
         if not any(str(g.get("name") or "") in chosen for g in gates):
@@ -249,7 +253,7 @@ def _gate_cache_sig(app):
     edit from returning a stale cached statistic (audit S4). Returns ``None`` in
     plain threshold mode, leaving the existing keys byte-identical there.
     """
-    if _thresh_on_col(app) is None:
+    if _thresh_on_col(app._ctx) is None:
         return None
     gates = getattr(app, "_scatter_gates", None) or []
     choices = getattr(app, "_cell_gating_thresh_choices", None)
@@ -298,7 +302,7 @@ def well_aggregate_stats(
         if lbl not in app._app_state.dataset.well_paths:
             continue
         pts = aggregate_well(
-            app,
+            app._ctx,
             lbl, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -446,7 +450,7 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
         if lbl not in app._app_state.dataset.well_paths:
             continue
         pts = aggregate_well(
-            app,
+            app._ctx,
             lbl, threshold=threshold, use_sem=False,
             val_col=app._app_state.channel.active_val_col,
             fluor_gates=fluor_gates,
@@ -490,7 +494,7 @@ def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
 
 
 def aggregate_well(
-    app,
+    ctx,
     label: str,
     threshold: float,
     use_sem: bool,
@@ -501,12 +505,15 @@ def aggregate_well(
 ):
     """Aggregate a single well via the vectorized DataFrame path.
 
-    If ``app`` exposes a callable ``_aggregate_well`` (the pure-logic
+    If the app exposes a callable ``_aggregate_well`` (the pure-logic
     test MockApp does, returning precomputed AggPoints from its
     in-memory map), delegate to it. Production ``WellViewerApp`` does
     not define this method, so the DataFrame path is used at runtime.
+
+    A8 R-leaf: takes ``ctx`` — rows via the ctx-native ``get_rows`` data
+    service, ratios/gate-on state via ``ctx.state`` / ``ctx.runtime``.
     """
-    delegate = getattr(app, "_aggregate_well", None)
+    delegate = getattr(ctx.app, "_aggregate_well", None)
     if callable(delegate):
         return delegate(
             label,
@@ -518,20 +525,20 @@ def aggregate_well(
             tp_col=tp_col,
         )
     return aggregate_with_threshold_df(
-        app._get_rows(label),
+        get_rows(ctx, label),
         threshold=threshold,
         use_sem=use_sem,
         tp_col=tp_col,
         val_col=val_col,
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
-        ratios=app._app_state.channel.ratio_index,
-        on_col=_thresh_on_col(app),
+        ratios=ctx.state.channel.ratio_index,
+        on_col=_thresh_on_col(ctx),
     )
 
 
 def aggregate_group(
-    app,
+    ctx,
     wells: List[str],
     threshold: float,
     use_sem: bool,
@@ -540,8 +547,11 @@ def aggregate_group(
     per_fov_spread: bool = False,
     tp_col: str = "timepoint_hours",
 ):
-    """Aggregate a list of wells via the vectorized path (concatenated when len>1)."""
-    delegate = getattr(app, "_aggregate_group", None)
+    """Aggregate a list of wells via the vectorized path (concatenated when len>1).
+
+    A8 R-leaf: takes ``ctx`` — see :func:`aggregate_well`.
+    """
+    delegate = getattr(ctx.app, "_aggregate_group", None)
     if callable(delegate):
         return delegate(
             wells,
@@ -552,12 +562,12 @@ def aggregate_group(
             per_fov_spread=per_fov_spread,
             tp_col=tp_col,
         )
-    valid = [w for w in wells if w in app._app_state.dataset.well_paths]
+    valid = [w for w in wells if w in ctx.state.dataset.well_paths]
     if not valid:
         return []
     if len(valid) == 1:
         return aggregate_well(
-            app,
+            ctx,
             valid[0], threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
@@ -565,7 +575,7 @@ def aggregate_group(
         )
     frames = []
     for w in valid:
-        sub = app._get_rows(w)
+        sub = get_rows(ctx, w)
         if per_fov_spread and len(sub) > 0:
             # Prefix FOV ids with the well label so identical FOV numbers
             # across replicate wells stay distinct when pooled.
@@ -585,8 +595,8 @@ def aggregate_group(
         val_col=val_col,
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
-        ratios=app._app_state.channel.ratio_index,
-        on_col=_thresh_on_col(app),
+        ratios=ctx.state.channel.ratio_index,
+        on_col=_thresh_on_col(ctx),
     )
 
 

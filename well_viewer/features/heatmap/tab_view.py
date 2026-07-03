@@ -80,7 +80,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     cl1.addWidget(QLabel("Aggregation:", ctrl1))
     metric_cb = reg.register("_heatmap_metric_cb", QComboBox(ctrl1))
     metric_cb.addItems(METRIC_OPTIONS)
-    metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx.app))
+    metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx))
     cl1.addWidget(metric_cb)
 
     cl1.addStretch(1)
@@ -120,25 +120,25 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     cmap_cb.setLut(_initial_cmap[:-2] if _initial_rev else _initial_cmap,
                    reversed=_initial_rev)
     cmap_cb.setMaximumWidth(220)
-    cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx.app))
+    cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx))
     cl2.addWidget(cmap_cb)
 
     cl2.addWidget(QLabel("Scale:", ctrl2))
     scale_cb = reg.register("_heatmap_scale_cb", QComboBox(ctrl2))
     scale_cb.addItems(_SCALE_OPTIONS)
-    scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx.app))
+    scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx))
     cl2.addWidget(scale_cb)
 
     cl2.addWidget(QLabel("vmin:", ctrl2))
     vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(ctrl2))
     vmin_edit.setFixedWidth(70)
-    vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx.app))
+    vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     cl2.addWidget(vmin_edit)
 
     cl2.addWidget(QLabel("vmax:", ctrl2))
     vmax_edit = reg.register("_heatmap_vmax_edit", QLineEdit(ctrl2))
     vmax_edit.setFixedWidth(70)
-    vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx.app))
+    vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     cl2.addWidget(vmax_edit)
 
     transpose_btn = QPushButton("⇄ Transpose", ctrl2)
@@ -152,14 +152,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         "When checked, cells whose well belongs to a rep-set show the "
         "average of the whole rep-set instead of the single well."
     )
-    repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(ctx.app))
+    repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(ctx))
     cl2.addWidget(repset_avg_cb)
 
     log_scale_cb = reg.register("_heatmap_log_scale_cb", QCheckBox("Log scale", ctrl2))
     log_scale_cb.setToolTip(
         "Color the heatmap on a log scale (values ≤ 0 are masked)."
     )
-    log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx.app))
+    log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx))
     cl2.addWidget(log_scale_cb)
 
     cl2.addStretch(1)
@@ -275,7 +275,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
             ctx.app._invalidate_stats_cache()
         except Exception:
             swallowed()  # was: pass (silent except)
-    _redraw(ctx.app)
+    _redraw(ctx)
 
 
 # ── helpers attached or referenced from runtime_app ─────────────────────────
@@ -313,7 +313,7 @@ def refresh_heatmap_timepoints(ctx) -> None:
             label.setText(f"t = {tps[start_idx]:g} h")
         else:
             label.setText("—")
-    _redraw(ctx.app)
+    _redraw(ctx)
 
 
 def _on_tp_changed(ctx) -> None:
@@ -334,57 +334,59 @@ def _on_tp_changed(ctx) -> None:
         set_focus_tp(ctx, tps[idx])
     else:
         set_focus_tp(ctx, tps[idx], emit=False)
-        _redraw(ctx.app)
+        _redraw(ctx)
 
 
-def _on_scale_changed(app) -> None:
+def _on_scale_changed(ctx) -> None:
     import math as _math
-    cb = getattr(app, "_heatmap_scale_cb", None)
+    cb = ctx.widgets.get_or_none("_heatmap_scale_cb")
     if cb is not None:
-        app._app_state.heatmap.scale_mode = str(cb.currentText() or "Auto")
+        ctx.state.heatmap.scale_mode = str(cb.currentText() or "Auto")
     # When the user picks Fixed but the vmin/vmax fields are blank, seed them
     # with the current global range so they have concrete numbers to tweak.
-    if app._app_state.heatmap.scale_mode == "Fixed":
-        vmin_edit = getattr(app, "_heatmap_vmin_edit", None)
-        vmax_edit = getattr(app, "_heatmap_vmax_edit", None)
-        g_vmin = getattr(app, "_heatmap_global_vmin", None)
-        g_vmax = getattr(app, "_heatmap_global_vmax", None)
+    if ctx.state.heatmap.scale_mode == "Fixed":
+        vmin_edit = ctx.widgets.get_or_none("_heatmap_vmin_edit")
+        vmax_edit = ctx.widgets.get_or_none("_heatmap_vmax_edit")
+        g_vmin = ctx.runtime.heatmap.global_vmin
+        g_vmax = ctx.runtime.heatmap.global_vmax
         if vmin_edit is not None and not (vmin_edit.text() or "").strip():
             if g_vmin is not None and _math.isfinite(g_vmin):
                 vmin_edit.setText(f"{g_vmin:g}")
-                app._heatmap_vmin = float(g_vmin)
+                ctx.runtime.heatmap.vmin = float(g_vmin)
         if vmax_edit is not None and not (vmax_edit.text() or "").strip():
             if g_vmax is not None and _math.isfinite(g_vmax):
                 vmax_edit.setText(f"{g_vmax:g}")
-                app._heatmap_vmax = float(g_vmax)
-    _persist_settings(app)
-    _redraw(app)
+                ctx.runtime.heatmap.vmax = float(g_vmax)
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _on_vminmax_changed(app) -> None:
+def _on_vminmax_changed(ctx) -> None:
     import math as _math
+    vmin_edit = ctx.widgets.get_or_none("_heatmap_vmin_edit")
+    vmax_edit = ctx.widgets.get_or_none("_heatmap_vmax_edit")
     try:
-        app._heatmap_vmin = float(app._heatmap_vmin_edit.text() or "nan")
+        ctx.runtime.heatmap.vmin = float((vmin_edit.text() if vmin_edit else "") or "nan")
     except (TypeError, ValueError):
-        app._heatmap_vmin = float("nan")
+        ctx.runtime.heatmap.vmin = float("nan")
     try:
-        app._heatmap_vmax = float(app._heatmap_vmax_edit.text() or "nan")
+        ctx.runtime.heatmap.vmax = float((vmax_edit.text() if vmax_edit else "") or "nan")
     except (TypeError, ValueError):
-        app._heatmap_vmax = float("nan")
+        ctx.runtime.heatmap.vmax = float("nan")
     # If the user typed a usable number, force scale mode to Fixed so the
     # value actually takes effect — otherwise the heatmap silently ignores
     # vmin/vmax while Scale stays on Auto.
-    if _math.isfinite(app._heatmap_vmin) or _math.isfinite(app._heatmap_vmax):
-        app._app_state.heatmap.scale_mode = "Fixed"
-        cb = getattr(app, "_heatmap_scale_cb", None)
+    if _math.isfinite(ctx.runtime.heatmap.vmin) or _math.isfinite(ctx.runtime.heatmap.vmax):
+        ctx.state.heatmap.scale_mode = "Fixed"
+        cb = ctx.widgets.get_or_none("_heatmap_scale_cb")
         if cb is not None and cb.currentText() != "Fixed":
             blocked = cb.blockSignals(True)
             try:
                 cb.setCurrentText("Fixed")
             finally:
                 cb.blockSignals(blocked)
-    _persist_settings(app)
-    _redraw(app)
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
 def _on_transpose(app) -> None:
@@ -397,24 +399,24 @@ def _on_transpose(app) -> None:
     refresh_heatmap_layout_sidebar(app)
 
 
-def _on_repset_avg_changed(app) -> None:
-    cb = getattr(app, "_heatmap_repset_avg_cb", None)
+def _on_repset_avg_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_repset_avg_cb")
     if cb is not None:
-        app._app_state.heatmap.repset_avg = bool(cb.isChecked())
-    _persist_settings(app)
-    _redraw(app)
+        ctx.state.heatmap.repset_avg = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _on_log_scale_changed(app) -> None:
-    cb = getattr(app, "_heatmap_log_scale_cb", None)
+def _on_log_scale_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_log_scale_cb")
     if cb is not None:
-        app._app_state.heatmap.log_scale = bool(cb.isChecked())
-    _persist_settings(app)
-    _redraw(app)
+        ctx.state.heatmap.log_scale = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _on_cmap_changed(app) -> None:
-    cb = getattr(app, "_heatmap_cmap_cb", None)
+def _on_cmap_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_cmap_cb")
     if cb is not None:
         if hasattr(cb, "lut"):
             name = cb.lut() or ""
@@ -422,15 +424,15 @@ def _on_cmap_changed(app) -> None:
                 name = f"{name}_r"
         else:
             name = str(cb.currentText() or "")
-        app._heatmap_cmap_name = name
-    _persist_settings(app)
-    _redraw(app)
+        ctx.runtime.heatmap.cmap_name = name
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _persist_settings(app) -> None:
+def _persist_settings(ctx) -> None:
     """Save heatmap visual settings to disk (debounced via the registry)."""
     try:
-        app._persistence.schedule_save("heatmap_layouts")
+        ctx.app._persistence.schedule_save("heatmap_layouts")
     except Exception:
         swallowed()  # was: pass (silent except)
 
@@ -531,6 +533,6 @@ def _on_canvas_release(app, evt) -> None:
     on_heatmap_label_drag_release(app, evt)
 
 
-def _redraw(app) -> None:
+def _redraw(ctx) -> None:
     from well_viewer.features.heatmap.controller import redraw_heatmap
-    redraw_heatmap(app)
+    redraw_heatmap(ctx)

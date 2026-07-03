@@ -168,7 +168,30 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (Data path covered by test_distribution_log_y / iter_plot_groups
 #              char test; the paint — theme/label pixels — is the only
 #              headless-unverifiable part and wants an interactive smoke.)
-CTX_APP_BUDGET = 239
+#   239 -> 233  R-leaf + R2 heatmap (enabler +2, heatmap render -8). The shared
+#              stats aggregation leaf
+#              (aggregate_well / aggregate_group / _thresh_on_col) now takes ctx:
+#              rows via the ctx-native get_rows, ratios via ctx.state, gate-on
+#              flags via ctx.runtime; the ~26 app-native callers (barplot /
+#              fold_change / lineplot / export / batch_export + the internal
+#              stats_compute reducers) bridge via app._ctx (uncounted). Only the
+#              two pure-logic delegate lookups (getattr(ctx.app, "_aggregate_*"))
+#              cost +2. That unblocked R2: the heatmap render tree
+#              (redraw_heatmap + active_layout / _selected_* / sync_slider /
+#              _expand_repset_wells / _repset_name_for_wells / _pool_filtered_mean
+#              / _cell_value / _resolve_color_scale / _compute_global_range /
+#              _metric_axis_label) -> ctx — widgets via ctx.widgets, runtime
+#              state via ctx.runtime.heatmap, aggregation via the ctx leaf; the
+#              redraw-path tab_view handlers (_redraw / _on_cmap|scale|vminmax|
+#              repset|log_changed) drop their ctx.app wiring. Net -8. Residuals:
+#              _persist_settings' ctx.app._persistence, and active_layout's
+#              ctx.app._active_heatmap_layout_name (no runtime-prefix home yet —
+#              a typed-state follow-up). Interactive click/drag/transpose handlers
+#              stay app-native (wired via ctx.app); their consumed caches are
+#              stamped by ctx.runtime.heatmap so they keep resolving. Data path
+#              covered by test_heatmap_cell_value_ctx; the imshow/colorbar paint
+#              wants an interactive smoke.
+CTX_APP_BUDGET = 233
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

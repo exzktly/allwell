@@ -1074,14 +1074,14 @@ def draw_per_well_n_bars(
         col_tp = target_ts_per_col[i] if i < len(target_ts_per_col) else target_ts_per_col[0]
         xi = xs[i] if i < len(xs) else i
         if pool_groups is not None and lbl in pool_groups:
-            pts = aggregate_group(app,
+            pts = aggregate_group(app._ctx,
                 pool_groups[lbl], threshold=threshold, use_sem=use_sem,
                 val_col=app._app_state.channel.active_val_col,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
         else:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 lbl, threshold=threshold, use_sem=use_sem,
                 val_col=app._app_state.channel.active_val_col,
                 fluor_gates=fluor_gates,

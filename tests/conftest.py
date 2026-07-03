@@ -203,6 +203,22 @@ class MockApp:
         return st
 
     @property
+    def _ctx(self):
+        """A minimal ``ViewerContext``-shaped bundle over this MockApp.
+
+        The ctx-native stats leaf (``aggregate_well`` / ``aggregate_group`` /
+        ``_thresh_on_col``, A8 R-leaf) reads ``ctx.app`` for the pure-logic
+        aggregation delegate, ``ctx.state`` for the typed slices, and
+        ``ctx.runtime`` for the scatter/cell-gating gate flags. A SimpleNamespace
+        is enough — the MockApp aggregation path is delegate-driven, so
+        ``get_rows(ctx)`` is never reached here.
+        """
+        from types import SimpleNamespace
+        from well_viewer.core.app_runtime import AppRuntime
+        return SimpleNamespace(app=self, state=self._app_state,
+                               runtime=AppRuntime(self))
+
+    @property
     def _selected_wells(self):
         return set(self.per_well_pts)
 

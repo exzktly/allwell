@@ -750,7 +750,7 @@ def member_n_series(
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -771,7 +771,7 @@ def member_n_series(
                 out[t] = (float(n_total), 0.0)
         return out
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -987,7 +987,7 @@ def control_pts_for_line(app, control_label: str, *, threshold: float,
     wells = resolve_control_wells(app, control_label)
     if not wells:
         return []
-    return aggregate_group(app,
+    return aggregate_group(app._ctx,
         wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         fluor_gates=fluor_gates,
@@ -1048,7 +1048,7 @@ def member_mean_series(
         # only to enumerate the timepoint axis.
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -1071,7 +1071,7 @@ def member_mean_series(
         return out
     # Bare well token.
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -1315,7 +1315,7 @@ def member_stats_series(
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -1340,7 +1340,7 @@ def member_stats_series(
                 out[t] = (float(gm), spread)
         return out
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -1381,7 +1381,7 @@ def member_frac_stats_series(
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col, fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
@@ -1402,7 +1402,7 @@ def member_frac_stats_series(
                 out[t] = (float(gf), spread)
         return out
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col, fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
@@ -1442,7 +1442,7 @@ def member_n_stats_series(
         out: Dict[float, Tuple[float, float]] = {}
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col, fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
@@ -1464,7 +1464,7 @@ def member_n_stats_series(
                     out[t] = (float(n_above), 0.0)
         return out
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=False,
             val_col=val_col, fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
@@ -1644,7 +1644,7 @@ def member_frac_series(
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(app._ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -1669,7 +1669,7 @@ def member_frac_series(
                 out[t] = (float(gf), fs)
         return out
     if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+        pts = aggregate_well(app._ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,

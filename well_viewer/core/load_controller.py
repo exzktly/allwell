@@ -433,7 +433,7 @@ def _kick_off_gating_after_load(app) -> None:
     use_thresh = getattr(app, "_cell_gating_use_scatter_thresh", False)
     if has_non_default_gate or use_scatter or use_thresh:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
-        cell_gating_start_gating_worker(app)
+        cell_gating_start_gating_worker(app._ctx)
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:

@@ -145,7 +145,7 @@ def recalculate_threshold(app) -> None:
             cell_gating_load_cell_areas,
             cell_gating_load_threshold_frac_on,
         )
-        cell_gating_load_cell_areas(app)
+        cell_gating_load_cell_areas(app._ctx)
         # cell_gating_load_cell_areas rebuilds the per-channel fluor-gate rows
         # for the freshly-detected channels as fresh (default 0.0) edits, which
         # discards the values the load above just wrote. Re-apply the persisted
@@ -154,7 +154,7 @@ def recalculate_threshold(app) -> None:
         # re-toggles a field. (The saved value is always current — every gate
         # edit persists immediately — so re-applying never clobbers a live edit.)
         app._load_gating_from_pipeline_info()
-        cell_gating_load_threshold_frac_on(app)
+        cell_gating_load_threshold_frac_on(app._ctx)
 
 
 # ── Active channel switching ────────────────────────────────────────────────
@@ -744,7 +744,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
     if hasattr(app, "_cell_gating_fluor_gate_edits"):
         try:
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
-            cell_gating_load_cell_areas(app)
+            cell_gating_load_cell_areas(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     # Ratio additions become virtual channel entries in every plot-tab
@@ -890,7 +890,7 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
         if callable(build):
             build("Sample Definitions")
         from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
-        build_cell_gating_subtab(app)
+        build_cell_gating_subtab(app._ctx)
     from well_viewer.features.grouping.cell_gating_tab_view import (
         _cell_gating_resolve_key,
         cell_gating_on_threshold_frac_on_change,
@@ -904,7 +904,7 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
         edit.setText(str(float(value)))
     finally:
         edit.blockSignals(blocked)
-    cell_gating_on_threshold_frac_on_change(app)
+    cell_gating_on_threshold_frac_on_change(app._ctx)
 
 
 def refresh_thresh_frac_quick_edit(app) -> None:

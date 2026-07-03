@@ -29,7 +29,7 @@ def test_fluor_gate_applies_on_cold_open(qtbot, mini_dataset):
     base = int(df_included_mask(app1._get_rows(well)).sum())
 
     app1._cell_gating_fluor_gate_edits[ch].setText("130")
-    cg.cell_gating_on_gating_change(app1)
+    cg.cell_gating_on_gating_change(app1._ctx)
     if app1._cell_gating_worker:
         app1._cell_gating_worker.wait()
     gated = int(df_included_mask(app1._get_rows(well)).sum())

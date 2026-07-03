@@ -352,8 +352,8 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     def _on_sample_def_subtab(idx: int) -> None:
         name = sub_tabs.tabText(idx)
         if name == "Cell Gating":
-            build_cell_gating_subtab(app)
-            cell_gating_sync_scatter_gates(app)
+            build_cell_gating_subtab(app._ctx)
+            cell_gating_sync_scatter_gates(app._ctx)
         if name == "Pipeline Info" and hasattr(app, "_pipeline_info_refresh"):
             app._pipeline_info_refresh()      # re-read in case the dataset changed
         # Entering the Groups sub-tab deselects any previously-active
@@ -371,4 +371,4 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     sub_tabs.currentChanged.connect(_on_sample_def_subtab)
     # Cell Gating leads and is the default tab, so build it now (currentChanged
     # won't fire for the already-current index 0).
-    build_cell_gating_subtab(app)
+    build_cell_gating_subtab(app._ctx)

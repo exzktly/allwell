@@ -88,14 +88,14 @@ def test_cell_gating_edit_persists_without_save_button(loaded_app, mini_dataset)
 
     app = loaded_app
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):
-        build_cell_gating_subtab(app)
+        build_cell_gating_subtab(app._ctx)
     edits = getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}
     if not edits:
         pytest.skip("mini dataset exposes no gateable fluor channel")
 
     channel = next(iter(edits))
     edits[channel].setText("42.0")
-    cell_gating_on_threshold_frac_on_change(app)
+    cell_gating_on_threshold_frac_on_change(app._ctx)
 
     block = read_gating_params(mini_dataset)
     assert block is not None, "cell_gating block should be written on edit"

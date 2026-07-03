@@ -9,8 +9,8 @@ Public surface (matches the convention used by every other
   fluorescence CDFs from the currently-selected wells.
 * :func:`cell_gating_load_threshold_frac_on` — push the typed slice's
   ThreshFracOn values onto the line-edits.
-* :func:`cell_gating_get_fluor_gate(app, channel)` /
-  :func:`cell_gating_get_thresh_frac_on(app, channel)` — read the current
+* :func:`cell_gating_get_fluor_gate(ctx, channel)` /
+  :func:`cell_gating_get_thresh_frac_on(ctx, channel)` — read the current
   threshold for *channel* from the typed ``CellGatingState`` slice (R6);
   the line-edits are the input surface, not the source of truth.
 * :func:`cell_gating_on_gating_change` /
@@ -48,7 +48,11 @@ from well_viewer.core.ui_helpers import (
     build_section_header,
     install_canvas_wheel_scroll,
 )
-from well_viewer.data.data_loading import resolve_value_series
+from well_viewer.data.data_loading import resolve_value_series, get_rows
+from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.core.channel_state_controller import get_all_fluor_gates, ratio_label_for
+from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.features.qc.tab_view import build_qc_gate_controls
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
@@ -84,9 +88,9 @@ class GatingWorker(QThread):
     finished_ok = Signal()
     failed = Signal(str)         # emitted with the error message on any crash
 
-    def __init__(self, app, parent: Optional[object] = None) -> None:
+    def __init__(self, ctx, parent: Optional[object] = None) -> None:
         super().__init__(parent)
-        self._app = app
+        self._ctx = ctx
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -108,20 +112,20 @@ class GatingWorker(QThread):
         # Cell-area gating is retired here — it now lives in the QC layer
         # (QC_Pass at the df_included_mask chokepoint). This worker gates on
         # fluorescence only; QC composes with its Included result downstream.
-        fluor_gates = self._app._get_all_fluor_gates()
+        fluor_gates = get_all_fluor_gates(self._ctx)
         # "Use scatter gates" mode replaces the per-channel FluorGating: the
         # filtering gate selected on the Cell Gating tab — a single named gate,
         # or the union of all gates — defines the Included population instead of
         # the intensity floors.
-        use_scatter = getattr(self._app, "_cell_gating_use_scatter_gates", False)
+        use_scatter = bool(self._ctx.runtime.cell_gating.use_scatter_gates)
         # Thresholding has its OWN gate selection (independent of the gating
         # layer): cells inside its gate(s) define the "on" population for
         # fraction-on (Gate_On column).
-        use_thresh = getattr(self._app, "_cell_gating_use_scatter_thresh", False)
-        gating_gates = cell_gating_selected_scatter_gates(self._app, "gating")
-        thresh_gates = cell_gating_selected_scatter_gates(self._app, "thresh")
-        ratios = self._app._app_state.channel.ratio_index or {}
-        labels = list(self._app._app_state.dataset.well_paths)
+        use_thresh = bool(self._ctx.runtime.cell_gating.use_scatter_thresh)
+        gating_gates = cell_gating_selected_scatter_gates(self._ctx, "gating")
+        thresh_gates = cell_gating_selected_scatter_gates(self._ctx, "thresh")
+        ratios = self._ctx.state.channel.ratio_index or {}
+        labels = list(self._ctx.state.dataset.well_paths)
         total = len(labels)
 
         if debug:
@@ -142,7 +146,7 @@ class GatingWorker(QThread):
                     )
                 return
 
-            df = self._app._get_rows(label)
+            df = get_rows(self._ctx, label)
             row_count = 0 if df is None else len(df)
             # Per-well gating math lives in cell_gating_compute.apply_fluor_gating
             # (audit A3) — it writes Included / Gate_Pass / Gate_On and returns
@@ -177,13 +181,13 @@ class GatingWorker(QThread):
             # so per-cell curation in the Segmentation tab is not clobbered by
             # threshold-based recomputes.
             try:
-                apply_review_overrides_to_cache(self._app, )
+                apply_review_overrides_to_cache(self._ctx.app, )
             except Exception:
                 swallowed()  # was: pass (silent except)
             # CRITICAL: Only invalidate stats cache, NOT _refresh_review_csv_rows.
             # That call deep-copies every cached row across every well and
             # blows up memory by orders of magnitude.
-            self._app._invalidate_stats_cache()
+            invalidate_stats_cache(self._ctx)
             if debug:
                 logger.info(
                     "GatingWorker finished: wells=%d included=%d excluded=%d",
@@ -198,7 +202,7 @@ class GatingWorker(QThread):
 def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     """Build the Cell Gating tab inside *parent*.
 
-    State and widget handles are attached to ``ctx.app`` under the
+    State and widget handles are attached to the app under the
     ``_cell_gating_*`` prefix.
     """
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -320,7 +324,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "with the dataset."
     )
     use_sg_cb.toggled.connect(
-        lambda _on, _app=ctx.app: cell_gating_on_use_scatter_gates_change(_app)
+        lambda _on: cell_gating_on_use_scatter_gates_change(ctx)
     )
     reg.register("_cell_gating_use_scatter_gates_cb", use_sg_cb)
     sg_layout.addWidget(use_sg_cb)
@@ -333,7 +337,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "checked gates). Independent of the fraction-on selection below."
     )
     gating_btn.clicked.connect(
-        lambda _=False, _app=ctx.app: _open_gate_filter_menu(_app, "gating")
+        lambda _=False: _open_gate_filter_menu(ctx, "gating")
     )
     reg.register("_cell_gating_gating_gate_btn", gating_btn)
     sg_layout.addWidget(gating_btn)
@@ -357,7 +361,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "ThreshFracOn cutoff. Independent of cell inclusion — no cells removed."
     )
     use_th_cb.toggled.connect(
-        lambda _on, _app=ctx.app: cell_gating_on_use_scatter_thresh_change(_app)
+        lambda _on: cell_gating_on_use_scatter_thresh_change(ctx)
     )
     reg.register("_cell_gating_use_scatter_thresh_cb", use_th_cb)
     th_layout.addWidget(use_th_cb)
@@ -370,7 +374,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "the checked gates). Independent of the inclusion selection above."
     )
     thresh_btn.clicked.connect(
-        lambda _=False, _app=ctx.app: _open_gate_filter_menu(_app, "thresh")
+        lambda _=False: _open_gate_filter_menu(ctx, "thresh")
     )
     reg.register("_cell_gating_thresh_gate_btn", thresh_btn)
     th_layout.addWidget(thresh_btn)
@@ -386,10 +390,10 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # immediately so every other view tracks the gates without waiting for a tab
     # switch. (Safe now that the per-cell scatter never filters itself by the
     # gates — see df_included_mask(include_gate=False).)
-    ctx.runtime.scatter.gates_changed_cb = lambda _app=ctx.app: cell_gating_sync_scatter_gates(_app)
-    _cell_gating_refresh_gate_filter(ctx.app)
-    _cell_gating_refresh_gate_summary(ctx.app)
-    _cell_gating_apply_scatter_gate_mode(ctx.app)
+    ctx.runtime.scatter.gates_changed_cb = lambda: cell_gating_sync_scatter_gates(ctx)
+    _cell_gating_refresh_gate_filter(ctx)
+    _cell_gating_refresh_gate_summary(ctx)
+    _cell_gating_apply_scatter_gate_mode(ctx)
 
     # Auto-threshold all channels: runs the same Otsu pass the pipeline's
     # final stage executes (well_viewer.auto_threshold) and writes the
@@ -418,7 +422,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
         "Progress + per-channel results are written to the log drawer."
     )
-    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx.app))
+    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx))
     auto_row_layout.addWidget(auto_btn)
     auto_row_layout.addStretch(1)
     reg.register("_cell_gating_auto_btn", auto_btn)
@@ -513,7 +517,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "threshold, then apply the threshold that maximizes their "
         "relative fraction-on gap, |Δ| / max(fa, fb)."
     )
-    opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx.app))
+    opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx))
     reg.register("_cell_gating_opt_btn", opt_btn)
     opt_row_layout.addWidget(opt_btn)
     opt_row_layout.addStretch(1)
@@ -576,10 +580,10 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         ctx.widgets.get("_cell_gating_opt_well_b_combo"),
     ):
         _combo.currentIndexChanged.connect(
-            lambda _idx=0, _app=ctx.app: _cell_gating_on_opt_scope_changed(_app)
+            lambda _idx=0: _cell_gating_on_opt_scope_changed(ctx)
         )
     ctx.widgets.get("_cell_gating_opt_timepoint_combo").currentIndexChanged.connect(
-        lambda _idx=0, _app=ctx.app: _cell_gating_autofill_opt_range(_app)
+        lambda _idx=0: _cell_gating_autofill_opt_range(ctx)
     )
     opt_result_label = reg.register("_cell_gating_opt_result_label", QLabel(
         "Choose two wells and a threshold range, then optimize.",
@@ -600,40 +604,40 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     root.addWidget(ctx.widgets.get("_cell_gating_plot_scroll"))
     root.addWidget(ctx.widgets.get("_cell_gating_toolbar"))
 
-    _cell_gating_refresh_optimizer_controls(ctx.app)
+    _cell_gating_refresh_optimizer_controls(ctx)
 
     # Paint the themed empty state now so the canvas is never a bare white
     # block before a dataset loads (it only gets painted on data otherwise).
-    _cell_gating_plot_cdf(ctx.app)
+    _cell_gating_plot_cdf(ctx)
 
 
 # ── public API ────────────────────────────────────────────────────────────
 
 
-def build_cell_gating_subtab(app) -> None:
+def build_cell_gating_subtab(ctx) -> None:
     """Build the Cell Gating sub-tab content if it hasn't been built yet.
 
     Called on first sub-tab activation and from persistence when persisted
     thresholds need to be applied immediately. Idempotent.
     """
-    if getattr(app, "_cell_gating_subtab_built", False):
+    if bool(ctx.runtime.cell_gating.subtab_built):
         return
-    frame = getattr(app, "_cell_gating_subtab_frame", None)
+    frame = ctx.runtime.cell_gating.subtab_frame
     if frame is None:
         return
     try:
-        build_cell_gating_tab(app._ctx, frame)
-        if app._app_state.dataset.well_paths:
+        build_cell_gating_tab(ctx, frame)
+        if ctx.state.dataset.well_paths:
             try:
-                cell_gating_load_cell_areas(app)
-                app._load_gating_from_pipeline_info()
-                cell_gating_load_threshold_frac_on(app)
+                cell_gating_load_cell_areas(ctx)
+                ctx.app._load_gating_from_pipeline_info()
+                cell_gating_load_threshold_frac_on(ctx)
             except Exception:
                 logger.exception("Cell Gating post-build sync failed")
     except Exception:
         logger.exception("Cell Gating sub-tab build failed")
     finally:
-        app._cell_gating_subtab_built = True
+        ctx.runtime.cell_gating.subtab_built = True
 
 
 def _cell_gating_valid_mask(frame_df):
@@ -660,18 +664,18 @@ def _cell_gating_valid_rows(frame_df):
     return frame_df[_cell_gating_valid_mask(frame_df)]
 
 
-def cell_gating_load_cell_areas(app) -> None:
+def cell_gating_load_cell_areas(ctx) -> None:
     """Repopulate cell-area + per-channel fluorescence CDFs from selected wells."""
-    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
+    if not ctx.runtime.cell_gating.fluor_gate_edits is not None:
         return  # tab not built yet
-    app._cell_gating_cell_areas = []
-    app._cell_gating_fluor_data = {}
-    app._cell_gating_ratio_data = {}
-    labels = _cell_gating_source_wells(app)
-    ratios = list(app._app_state.channel.ratio_metrics or [])
+    ctx.runtime.cell_gating.cell_areas = []
+    ctx.runtime.cell_gating.fluor_data = {}
+    ctx.runtime.cell_gating.ratio_data = {}
+    labels = _cell_gating_source_wells(ctx)
+    ratios = list(ctx.state.channel.ratio_metrics or [])
 
     for label in labels:
-        df = app._get_rows(label)
+        df = get_rows(ctx, label)
         if df is None or df.empty:
             continue
         frame_df, _ = _cell_gating_first_frame_rows(df)
@@ -684,17 +688,17 @@ def cell_gating_load_cell_areas(app) -> None:
             continue
         if "area_px" in frame_df.columns:
             area = pd.to_numeric(frame_df["area_px"], errors="coerce").to_numpy()
-            app._cell_gating_cell_areas.extend(
+            ctx.runtime.cell_gating.cell_areas.extend(
                 float(a) for a in area[np.isfinite(area) & (area > 0)]
             )
-        for channel in app._app_state.channel.fluor_channels:
+        for channel in ctx.state.channel.fluor_channels:
             val_col = f"{channel}_mean_intensity"
             if val_col not in frame_df.columns:
                 continue
             v = pd.to_numeric(frame_df[val_col], errors="coerce").to_numpy()
             positive = v[np.isfinite(v) & (v > 0)]
             if positive.size:
-                app._cell_gating_fluor_data.setdefault(channel, []).extend(
+                ctx.runtime.cell_gating.fluor_data.setdefault(channel, []).extend(
                     float(x) for x in positive
                 )
         for rm in ratios:
@@ -709,35 +713,35 @@ def cell_gating_load_cell_areas(app) -> None:
                 ratio = num / (den + eps) if eps else np.where(den != 0, num / den, np.nan)
             keep = np.isfinite(ratio) & (ratio > 0)
             if keep.any():
-                app._cell_gating_ratio_data.setdefault(rm.display_label(), []).extend(
+                ctx.runtime.cell_gating.ratio_data.setdefault(rm.display_label(), []).extend(
                     float(x) for x in ratio[keep]
                 )
 
-    _cell_gating_build_channel_controls(app)
-    _cell_gating_refresh_optimizer_controls(app)
+    _cell_gating_build_channel_controls(ctx)
+    _cell_gating_refresh_optimizer_controls(ctx)
 
-    if app._cell_gating_cell_areas:
-        app._cell_gating_axes_stack = []
-        _cell_gating_plot_cdf(app)
-        app._cell_gating_status_label.setText(
-            f"Loaded {len(app._cell_gating_cell_areas)} cells from "
+    if ctx.runtime.cell_gating.cell_areas:
+        ctx.runtime.cell_gating.axes_stack = []
+        _cell_gating_plot_cdf(ctx)
+        ctx.runtime.cell_gating.status_label.setText(
+            f"Loaded {len(ctx.runtime.cell_gating.cell_areas)} cells from "
             f"{len(labels)} selected well(s), first frame of first FOV"
         )
     else:
-        app._cell_gating_status_label.setText("No cell data found")
+        ctx.runtime.cell_gating.status_label.setText("No cell data found")
 
 
-def cell_gating_load_threshold_frac_on(app) -> None:
+def cell_gating_load_threshold_frac_on(ctx) -> None:
     """Push the typed slice's ThreshFracOn values onto the line-edits (R6)."""
-    edits = getattr(app, "_cell_gating_thresh_frac_edits", None) or {}
+    edits = ctx.runtime.cell_gating.thresh_frac_edits or {}
     if not edits:
         return
-    for channel, value in app._app_state.cell_gating.thresh_frac_on.items():
+    for channel, value in ctx.state.cell_gating.thresh_frac_on.items():
         if channel in edits:
             edits[channel].setText(str(value))
 
 
-def _cell_gating_sync_gate_state(app) -> None:
+def _cell_gating_sync_gate_state(ctx) -> None:
     """Parse every gate edit into the typed ``CellGatingState`` slice (R6).
 
     The line-edits are the input surface; the typed slice is the source of
@@ -752,13 +756,13 @@ def _cell_gating_sync_gate_state(app) -> None:
     keystroke could silently disable a gate for any concurrent redraw. Keeping
     the last-committed value is the strictly safer semantic.)
     """
-    st = app._app_state.cell_gating
-    for channel, edit in (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).items():
+    st = ctx.state.cell_gating
+    for channel, edit in (ctx.runtime.cell_gating.fluor_gate_edits or {}).items():
         try:
             st.fluor_gates[channel] = float(edit.text())
         except ValueError:
             swallowed(f"cell gating: keep last FluorGating for {channel!r} (non-numeric)")
-    for channel, edit in (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).items():
+    for channel, edit in (ctx.runtime.cell_gating.thresh_frac_edits or {}).items():
         try:
             st.thresh_frac_on[channel] = float(edit.text())
         except ValueError:
@@ -798,21 +802,21 @@ def cell_gating_get_thresh_frac_on(ctx, channel: str) -> float:
     return 50.0 if val is None else float(val)
 
 
-def cell_gating_on_gating_change(app) -> None:
+def cell_gating_on_gating_change(ctx) -> None:
     try:
-        for edit in app._cell_gating_fluor_gate_edits.values():
+        for edit in ctx.runtime.cell_gating.fluor_gate_edits.values():
             float(edit.text())
     except ValueError:
         return
 
-    _cell_gating_sync_gate_state(app)
-    app._cell_gating_axes_stack = []
-    _cell_gating_plot_cdf(app)
-    _cell_gating_persist_params(app)
-    cell_gating_start_gating_worker(app)
+    _cell_gating_sync_gate_state(ctx)
+    ctx.runtime.cell_gating.axes_stack = []
+    _cell_gating_plot_cdf(ctx)
+    _cell_gating_persist_params(ctx)
+    cell_gating_start_gating_worker(ctx)
 
 
-def cell_gating_on_use_scatter_gates_change(app) -> None:
+def cell_gating_on_use_scatter_gates_change(ctx) -> None:
     """Toggle scatter-gate inclusion: persist, restyle, and recompute Included.
 
     Mirrors :func:`cell_gating_on_gating_change` — reads the checkbox into the
@@ -820,88 +824,88 @@ def cell_gating_on_use_scatter_gates_change(app) -> None:
     and kicks the background gating pass so every plot/stat/export picks up the
     new population through the ``Included`` chokepoint.
     """
-    cb = getattr(app, "_cell_gating_use_scatter_gates_cb", None)
-    app._cell_gating_use_scatter_gates = bool(cb.isChecked()) if cb is not None else False
-    _cell_gating_apply_scatter_gate_mode(app)
-    _cell_gating_refresh_gate_filter(app)  # enable/disable this layer's Gates button
-    _cell_gating_refresh_gate_summary(app)
-    _cell_gating_persist_params(app)
-    app._cell_gating_last_gate_sig = _scatter_gate_signature(app)
-    cell_gating_start_gating_worker(app)
+    cb = ctx.runtime.cell_gating.use_scatter_gates_cb
+    ctx.runtime.cell_gating.use_scatter_gates = bool(cb.isChecked()) if cb is not None else False
+    _cell_gating_apply_scatter_gate_mode(ctx)
+    _cell_gating_refresh_gate_filter(ctx)  # enable/disable this layer's Gates button
+    _cell_gating_refresh_gate_summary(ctx)
+    _cell_gating_persist_params(ctx)
+    ctx.runtime.cell_gating.last_gate_sig = _scatter_gate_signature(ctx)
+    cell_gating_start_gating_worker(ctx)
 
 
-def cell_gating_on_use_scatter_thresh_change(app) -> None:
+def cell_gating_on_use_scatter_thresh_change(ctx) -> None:
     """Toggle scatter-gate thresholding (fraction-on by gate).
 
     Independent of the gating/inclusion toggle: it only changes how fraction-on
     is computed (Gate_On column vs the ThreshFracOn cutoff). Persist the flag and
     re-run the gating pass so the Gate_On column + the stats cache refresh.
     """
-    cb = getattr(app, "_cell_gating_use_scatter_thresh_cb", None)
-    app._cell_gating_use_scatter_thresh = bool(cb.isChecked()) if cb is not None else False
-    _cell_gating_apply_scatter_gate_mode(app)
-    _cell_gating_refresh_gate_filter(app)  # enable/disable this layer's Gates button
-    _cell_gating_refresh_gate_summary(app)
-    _cell_gating_persist_params(app)
-    app._cell_gating_last_gate_sig = _scatter_gate_signature(app)
-    cell_gating_start_gating_worker(app)
+    cb = ctx.runtime.cell_gating.use_scatter_thresh_cb
+    ctx.runtime.cell_gating.use_scatter_thresh = bool(cb.isChecked()) if cb is not None else False
+    _cell_gating_apply_scatter_gate_mode(ctx)
+    _cell_gating_refresh_gate_filter(ctx)  # enable/disable this layer's Gates button
+    _cell_gating_refresh_gate_summary(ctx)
+    _cell_gating_persist_params(ctx)
+    ctx.runtime.cell_gating.last_gate_sig = _scatter_gate_signature(ctx)
+    cell_gating_start_gating_worker(ctx)
 
 
 # The gating (inclusion) and thresholding (fraction-on) layers each keep their
 # own gate selection so they can be configured separately.
 _GATE_MODES = ("gating", "thresh")
 _GATE_CHOICES_ATTR = {
-    "gating": "_cell_gating_gating_choices",
-    "thresh": "_cell_gating_thresh_choices",
+    "gating": "gating_choices",
+    "thresh": "thresh_choices",
 }
 _GATE_BUTTON_ATTR = {
-    "gating": "_cell_gating_gating_gate_btn",
-    "thresh": "_cell_gating_thresh_gate_btn",
+    "gating": "gating_gate_btn",
+    "thresh": "thresh_gate_btn",
 }
 _GATE_MODE_ACTIVE_ATTR = {
-    "gating": "_cell_gating_use_scatter_gates",
-    "thresh": "_cell_gating_use_scatter_thresh",
+    "gating": "use_scatter_gates",
+    "thresh": "use_scatter_thresh",
 }
 
 
-def cell_gating_selected_scatter_gates(app, mode: str = "gating") -> list:
+def cell_gating_selected_scatter_gates(ctx, mode: str = "gating") -> list:
     """Gates selected for *mode* ("gating" / "thresh"), as a union.
 
     Each layer's selection is a set of gate names; ``None`` means "all gates"
     (the default, which also auto-includes gates drawn later). An explicit
     (possibly empty) set selects exactly those names."""
-    gates = getattr(app, "_scatter_gates", None) or []
-    choices = getattr(app, _GATE_CHOICES_ATTR[mode], None)
+    gates = ctx.runtime.scatter.gates or []
+    choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     if choices is None:
         return list(gates)
     chosen = set(choices)
     return [g for g in gates if str(g.get("name") or "") in chosen]
 
 
-def _cell_gating_gate_names(app) -> list:
+def _cell_gating_gate_names(ctx) -> list:
     return [str(g.get("name") or "")
-            for g in (getattr(app, "_scatter_gates", None) or [])
+            for g in (ctx.runtime.scatter.gates or [])
             if str(g.get("name") or "")]
 
 
-def _cell_gating_set_gate_choices(app, mode: str, choices) -> None:
+def _cell_gating_set_gate_choices(ctx, mode: str, choices) -> None:
     """Commit *mode*'s selection (``None`` = all), then persist + recompute.
 
     Collapses a full explicit set back to ``None`` so newly drawn gates keep
     being auto-included while the user is effectively at "all"."""
-    if choices is not None and set(choices) == set(_cell_gating_gate_names(app)):
+    if choices is not None and set(choices) == set(_cell_gating_gate_names(ctx)):
         choices = None
-    setattr(app, _GATE_CHOICES_ATTR[mode],
+    setattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode],
             None if choices is None else set(choices))
-    _cell_gating_refresh_gate_filter(app)
-    _cell_gating_refresh_gate_summary(app)
-    _cell_gating_persist_params(app)
-    if _cell_gating_scatter_mode_on(app):
-        app._cell_gating_last_gate_sig = _scatter_gate_signature(app)
-        cell_gating_start_gating_worker(app)
+    _cell_gating_refresh_gate_filter(ctx)
+    _cell_gating_refresh_gate_summary(ctx)
+    _cell_gating_persist_params(ctx)
+    if _cell_gating_scatter_mode_on(ctx):
+        ctx.runtime.cell_gating.last_gate_sig = _scatter_gate_signature(ctx)
+        cell_gating_start_gating_worker(ctx)
 
 
-def _open_gate_filter_menu(app, mode: str) -> None:
+def _open_gate_filter_menu(ctx, mode: str) -> None:
     """Pop up a checkbox menu under *mode*'s Gates button (multi-select).
 
     Mirrors the scatter timepoint picker: one checkbox per named gate plus
@@ -909,11 +913,11 @@ def _open_gate_filter_menu(app, mode: str) -> None:
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
 
-    btn = getattr(app, _GATE_BUTTON_ATTR[mode], None)
+    btn = getattr(ctx.runtime.cell_gating, _GATE_BUTTON_ATTR[mode], None)
     if btn is None:
         return
-    names = _cell_gating_gate_names(app)
-    choices = getattr(app, _GATE_CHOICES_ATTR[mode], None)
+    names = _cell_gating_gate_names(ctx)
+    choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     selected = set(names) if choices is None else set(choices)
 
     menu = QMenu(btn)
@@ -927,10 +931,10 @@ def _open_gate_filter_menu(app, mode: str) -> None:
 
         def _make(name=nm):
             def _on(checked: bool) -> None:
-                cur = getattr(app, _GATE_CHOICES_ATTR[mode], None)
+                cur = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
                 cur = set(names) if cur is None else set(cur)
                 cur.add(name) if checked else cur.discard(name)
-                _cell_gating_set_gate_choices(app, mode, cur)
+                _cell_gating_set_gate_choices(ctx, mode, cur)
             return _on
 
         cb.toggled.connect(_make())
@@ -941,20 +945,20 @@ def _open_gate_filter_menu(app, mode: str) -> None:
         menu.addSeparator()
         all_a = QAction("All", menu)
         all_a.triggered.connect(
-            lambda _=False: _cell_gating_set_gate_choices(app, mode, None))
+            lambda _=False: _cell_gating_set_gate_choices(ctx, mode, None))
         menu.addAction(all_a)
         none_a = QAction("None", menu)
         none_a.triggered.connect(
-            lambda _=False: _cell_gating_set_gate_choices(app, mode, set()))
+            lambda _=False: _cell_gating_set_gate_choices(ctx, mode, set()))
         menu.addAction(none_a)
     menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
-def _cell_gating_gate_button_text(app, mode: str) -> str:
-    names = _cell_gating_gate_names(app)
+def _cell_gating_gate_button_text(ctx, mode: str) -> str:
+    names = _cell_gating_gate_names(ctx)
     if not names:
         return "No gates"
-    choices = getattr(app, _GATE_CHOICES_ATTR[mode], None)
+    choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     if choices is None:
         return "All gates"
     chosen = [n for n in names if n in set(choices)]
@@ -965,28 +969,28 @@ def _cell_gating_gate_button_text(app, mode: str) -> str:
     return f"{len(chosen)} of {len(names)} gates"
 
 
-def _cell_gating_refresh_gate_filter(app) -> None:
+def _cell_gating_refresh_gate_filter(ctx) -> None:
     """Sync both Gates buttons (text + enabled) to the current gates, pruning any
     explicitly-selected names that no longer exist (in each layer's set)."""
-    names = set(_cell_gating_gate_names(app))
+    names = set(_cell_gating_gate_names(ctx))
     for mode in _GATE_MODES:
-        choices = getattr(app, _GATE_CHOICES_ATTR[mode], None)
+        choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
         if choices is not None:
             pruned = set(choices) & names
-            setattr(app, _GATE_CHOICES_ATTR[mode],
+            setattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode],
                     None if (pruned == names and names) else pruned)
-        btn = getattr(app, _GATE_BUTTON_ATTR[mode], None)
+        btn = getattr(ctx.runtime.cell_gating, _GATE_BUTTON_ATTR[mode], None)
         if btn is not None:
-            btn.setText(_cell_gating_gate_button_text(app, mode))
+            btn.setText(_cell_gating_gate_button_text(ctx, mode))
             # Each Gates button is only relevant when its own layer is active.
-            btn.setEnabled(bool(getattr(app, _GATE_MODE_ACTIVE_ATTR[mode], False)))
+            btn.setEnabled(bool(getattr(ctx.runtime.cell_gating, _GATE_MODE_ACTIVE_ATTR[mode], False)))
 
 
-def _cell_gating_scatter_mode_on(app) -> bool:
+def _cell_gating_scatter_mode_on(ctx) -> bool:
     """True when either scatter-gate layer (gating or thresholding) is active —
     both consume the selected gate, so the dropdown is relevant for either."""
-    return bool(getattr(app, "_cell_gating_use_scatter_gates", False)
-                or getattr(app, "_cell_gating_use_scatter_thresh", False))
+    return bool(bool(ctx.runtime.cell_gating.use_scatter_gates)
+                or bool(ctx.runtime.cell_gating.use_scatter_thresh))
 
 
 def _gate_geom_sig(gates):
@@ -998,7 +1002,7 @@ def _gate_geom_sig(gates):
     )
 
 
-def _scatter_gate_signature(app):
+def _scatter_gate_signature(ctx):
     """A hashable snapshot of what drives the gating pass — the per-layer gate
     selections (geometry + axis cols) and the two mode flags, so toggling a
     mode or changing either selection re-runs.
@@ -1006,14 +1010,14 @@ def _scatter_gate_signature(app):
     Used to skip a redundant gating pass when re-entering the tab with nothing
     changed — see :func:`cell_gating_sync_scatter_gates`."""
     return (
-        bool(getattr(app, "_cell_gating_use_scatter_gates", False)),
-        bool(getattr(app, "_cell_gating_use_scatter_thresh", False)),
-        _gate_geom_sig(cell_gating_selected_scatter_gates(app, "gating")),
-        _gate_geom_sig(cell_gating_selected_scatter_gates(app, "thresh")),
+        bool(bool(ctx.runtime.cell_gating.use_scatter_gates)),
+        bool(bool(ctx.runtime.cell_gating.use_scatter_thresh)),
+        _gate_geom_sig(cell_gating_selected_scatter_gates(ctx, "gating")),
+        _gate_geom_sig(cell_gating_selected_scatter_gates(ctx, "thresh")),
     )
 
 
-def cell_gating_sync_scatter_gates(app) -> None:
+def cell_gating_sync_scatter_gates(ctx) -> None:
     """Re-sync the Cell Gating tab to the scatter gates.
 
     Called immediately whenever a gate is drawn / edited / cleared on the Scatter
@@ -1025,20 +1029,20 @@ def cell_gating_sync_scatter_gates(app) -> None:
     (``df_included_mask(include_gate=False)``), so recomputing on every change is
     safe — the gated cluster's own points never vanish from under the gate.
     """
-    if not hasattr(app, "_cell_gating_use_scatter_gates_cb"):
+    if not ctx.runtime.cell_gating.use_scatter_gates_cb is not None:
         return  # tab not built yet
-    _cell_gating_refresh_gate_filter(app)
-    _cell_gating_apply_scatter_gate_mode(app)
-    _cell_gating_refresh_gate_summary(app)
-    if not _cell_gating_scatter_mode_on(app):
+    _cell_gating_refresh_gate_filter(ctx)
+    _cell_gating_apply_scatter_gate_mode(ctx)
+    _cell_gating_refresh_gate_summary(ctx)
+    if not _cell_gating_scatter_mode_on(ctx):
         return
-    sig = _scatter_gate_signature(app)
-    if sig != getattr(app, "_cell_gating_last_gate_sig", None):
-        app._cell_gating_last_gate_sig = sig
-        cell_gating_start_gating_worker(app)
+    sig = _scatter_gate_signature(ctx)
+    if sig != ctx.runtime.cell_gating.last_gate_sig:
+        ctx.runtime.cell_gating.last_gate_sig = sig
+        cell_gating_start_gating_worker(ctx)
 
 
-def _cell_gating_apply_scatter_gate_mode(app) -> None:
+def _cell_gating_apply_scatter_gate_mode(ctx) -> None:
     """Grey out the edits each scatter-gate mode replaces, so an editable field
     never misleads:
 
@@ -1049,87 +1053,87 @@ def _cell_gating_apply_scatter_gate_mode(app) -> None:
 
     (Each layer's Gates button is enabled per-layer in
     _cell_gating_refresh_gate_filter.)"""
-    gating_on = bool(getattr(app, "_cell_gating_use_scatter_gates", False))
-    for edit in (getattr(app, "_cell_gating_fluor_gate_edits", {}) or {}).values():
+    gating_on = bool(bool(ctx.runtime.cell_gating.use_scatter_gates))
+    for edit in (ctx.runtime.cell_gating.fluor_gate_edits or {}).values():
         edit.setEnabled(not gating_on)
-    thresh_on = bool(getattr(app, "_cell_gating_use_scatter_thresh", False))
-    for edit in (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).values():
+    thresh_on = bool(bool(ctx.runtime.cell_gating.use_scatter_thresh))
+    for edit in (ctx.runtime.cell_gating.thresh_frac_edits or {}).values():
         edit.setEnabled(not thresh_on)
 
 
-def _gate_target_phrase(app, mode: str) -> str:
+def _gate_target_phrase(ctx, mode: str) -> str:
     """Short description of *mode*'s selected gates for the summary line."""
-    gates = cell_gating_selected_scatter_gates(app, mode)
+    gates = cell_gating_selected_scatter_gates(ctx, mode)
     if not gates:
         return "no gates selected"
-    if getattr(app, _GATE_CHOICES_ATTR[mode], None) is None:
+    if getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None) is None:
         return f"all {len(gates)} gate(s)"
     if len(gates) == 1:
         return f"gate “{gates[0].get('name')}”"
     return "gates " + ", ".join(str(g.get("name")) for g in gates)
 
 
-def _cell_gating_refresh_gate_summary(app) -> None:
+def _cell_gating_refresh_gate_summary(ctx) -> None:
     """Update the gate summary label describing each active layer's selection.
     Refreshed on build, toggle, gate change, and load."""
-    lbl = getattr(app, "_cell_gating_gate_summary", None)
+    lbl = ctx.runtime.cell_gating.gate_summary
     if lbl is None:
         return
-    if not _cell_gating_scatter_mode_on(app):
+    if not _cell_gating_scatter_mode_on(ctx):
         lbl.setText("")
         return
-    if not (getattr(app, "_scatter_gates", None) or []):
+    if not (ctx.runtime.scatter.gates or []):
         lbl.setText(
             "No scatter gates drawn yet — draw one on the Scatter Plot tab."
         )
         return
     parts = []
-    if getattr(app, "_cell_gating_use_scatter_gates", False):
-        parts.append(f"Inclusion: {_gate_target_phrase(app, 'gating')}")
-    if getattr(app, "_cell_gating_use_scatter_thresh", False):
-        parts.append(f"Fraction-on: {_gate_target_phrase(app, 'thresh')}")
+    if bool(ctx.runtime.cell_gating.use_scatter_gates):
+        parts.append(f"Inclusion: {_gate_target_phrase(ctx, 'gating')}")
+    if bool(ctx.runtime.cell_gating.use_scatter_thresh):
+        parts.append(f"Fraction-on: {_gate_target_phrase(ctx, 'thresh')}")
     lbl.setText("  •  ".join(parts))
 
 
-def cell_gating_on_threshold_frac_on_change(app) -> None:
+def cell_gating_on_threshold_frac_on_change(ctx) -> None:
     try:
-        for edit in app._cell_gating_thresh_frac_edits.values():
+        for edit in ctx.runtime.cell_gating.thresh_frac_edits.values():
             float(edit.text())
-        _cell_gating_sync_gate_state(app)
-        _cell_gating_persist_params(app)
-        app._invalidate_stats_cache()
+        _cell_gating_sync_gate_state(ctx)
+        _cell_gating_persist_params(ctx)
+        invalidate_stats_cache(ctx)
         # ``_redraw`` only fans out to the default-scope plots (line /
         # distribution / heat map). Bar and scatter redraw via the fold-change
         # scope registry, so also emit ``plot_options_changed`` — otherwise a
         # ThreshFracOn edit leaves the (now default) Bar Plots tab stale.
-        app._redraw()
-        app._event_bus.plot_options_changed.emit(app._app_state.plot)
+        ctx.app._redraw()
+        ctx.bus.plot_options_changed.emit(ctx.state.plot)
         # Mirror the new value onto the plotting ctxbar quick-edit so it reflects
         # the set threshold (e.g. after auto-threshold or a Cell Gating edit)
         # instead of showing its 50.0 default.
-        refresh = getattr(app, "_refresh_thresh_frac_quick_edit", None)
+        refresh = getattr(ctx.app, "_refresh_thresh_frac_quick_edit", None)
         if callable(refresh):
             refresh()
     except ValueError:
         swallowed("cell gating: non-numeric ThreshFracOn edit ignored")
 
 
-def cell_gating_start_gating_worker(app) -> None:
+def cell_gating_start_gating_worker(ctx) -> None:
     # If a previous worker is still running, cancel it before starting
     # a new pass so threshold edits don't pile up.
-    prev = app._cell_gating_worker
+    prev = ctx.runtime.cell_gating.worker
     if prev is not None and prev.isRunning():
         prev.cancel()
         prev.wait()
 
-    worker = GatingWorker(app)
-    worker.progress.connect(lambda cur, tot: _cell_gating_on_progress(app, cur, tot))
-    worker.finished_ok.connect(lambda: _cell_gating_on_finished(app))
-    worker.failed.connect(lambda msg: _cell_gating_on_failed(app, msg))
-    app._cell_gating_worker = worker
-    bar = getattr(app, "_progress_bar", None)
+    worker = GatingWorker(ctx)
+    worker.progress.connect(lambda cur, tot: _cell_gating_on_progress(ctx, cur, tot))
+    worker.finished_ok.connect(lambda: _cell_gating_on_finished(ctx))
+    worker.failed.connect(lambda msg: _cell_gating_on_failed(ctx, msg))
+    ctx.runtime.cell_gating.worker = worker
+    bar = getattr(ctx.app, "_progress_bar", None)
     if bar is not None:
-        bar.setRange(0, max(1, len(app._app_state.dataset.well_paths)))
+        bar.setRange(0, max(1, len(ctx.state.dataset.well_paths)))
         bar.setValue(0)
         bar.show()
     worker.start()
@@ -1150,10 +1154,10 @@ class _AutoThresholdWorker(QThread):
     done = Signal(object)        # Dict[str, float]
     failed = Signal(str)
 
-    def __init__(self, app, out_dir, channels, *, well_labels=None,
+    def __init__(self, ctx, out_dir, channels, *, well_labels=None,
                  in_dir=None, parent=None) -> None:
         super().__init__(parent)
-        self._app = app
+        self._ctx = ctx
         self._out_dir = out_dir
         self._channels = list(channels)
         self._well_labels = list(well_labels) if well_labels else []
@@ -1186,13 +1190,13 @@ class _AutoThresholdWorker(QThread):
         self.done.emit(result or {})
 
 
-def cell_gating_auto_threshold(app) -> None:
+def cell_gating_auto_threshold(ctx) -> None:
     """Kick off the Auto-threshold pass for every loaded fluorescence channel.
 
     Mirrors what the ``process_microscopy`` pipeline runs as its final
     step: per-cell mean + matched random background pixel pooled across
     every well's first/middle/last timepoint, then Otsu. The result lands
-    in ``app._cell_gating_thresh_frac_edits`` (the **ThreshFracOn** column,
+    in ``ctx.runtime.cell_gating.thresh_frac_edits`` (the **ThreshFracOn** column,
     i.e. the fraction-on cut used by downstream plots) and is persisted
     to ``pipeline_info.json::cell_gating.thresh_frac_on`` so the next load
     picks the new defaults up. The per-cell ``FluorGating`` inclusion
@@ -1202,41 +1206,41 @@ def cell_gating_auto_threshold(app) -> None:
     ``logging.Handler`` installed by ``allwell._attach_log_ring_buffer``
     captures every record).
     """
-    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
+    if not ctx.runtime.cell_gating.fluor_gate_edits is not None:
         return
-    out_dir = app._app_state.dataset.data_dir
+    out_dir = ctx.state.dataset.data_dir
     if not out_dir:
         try:
-            app._set_status(
+            ctx.set_status(
                 "Auto-threshold: load a dataset first."
             )
         except Exception:
             swallowed()  # was: pass (silent except)
         return
-    channels = [str(ch).strip().lower() for ch in (app._app_state.channel.fluor_channels or []) if str(ch).strip()]
+    channels = [str(ch).strip().lower() for ch in (ctx.state.channel.fluor_channels or []) if str(ch).strip()]
     if not channels:
         try:
-            app._set_status(
+            ctx.set_status(
                 "Auto-threshold: no fluorescence channels detected in the loaded dataset."
             )
         except Exception:
             swallowed()  # was: pass (silent except)
         return
     # Stop any previous worker still running.
-    prev = getattr(app, "_cell_gating_auto_worker", None)
+    prev = ctx.runtime.cell_gating.auto_worker
     if prev is not None and prev.isRunning():
         try:
             prev.wait(50)
         except Exception:
             swallowed()  # was: pass (silent except)
-    btn = getattr(app, "_cell_gating_auto_btn", None)
+    btn = ctx.runtime.cell_gating.auto_btn
     if btn is not None:
         btn.setEnabled(False)
         btn.setText("Auto-thresholding…")
 
     def _on_progress(msg: str) -> None:
         try:
-            app._set_status(msg)
+            ctx.set_status(msg)
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -1246,13 +1250,13 @@ def cell_gating_auto_threshold(app) -> None:
             btn.setText("Auto-threshold all channels")
         if not isinstance(result, dict) or not result:
             try:
-                app._set_status(
+                ctx.set_status(
                     "Auto-threshold finished — no thresholds were updated."
                 )
             except Exception:
                 swallowed()  # was: pass (silent except)
             return
-        edits = app._cell_gating_thresh_frac_edits or {}
+        edits = ctx.runtime.cell_gating.thresh_frac_edits or {}
         written: list[str] = []
         for ch, thr in result.items():
             edit = edits.get(ch)
@@ -1267,11 +1271,11 @@ def cell_gating_auto_threshold(app) -> None:
         # Persist + re-render the CDF + kick the gating worker exactly as
         # the user typing a new ThreshFracOn would.
         try:
-            cell_gating_on_threshold_frac_on_change(app)
+            cell_gating_on_threshold_frac_on_change(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
         try:
-            app._set_status(
+            ctx.set_status(
                 "Auto-threshold updated " + ", ".join(written) if written
                 else "Auto-threshold finished — no ThreshFracOn edits were touched."
             )
@@ -1284,25 +1288,25 @@ def cell_gating_auto_threshold(app) -> None:
             "Auto-threshold failed: %s", msg,
         )
         try:
-            app._set_status(f"Auto-threshold failed: {msg}")
+            ctx.set_status(f"Auto-threshold failed: {msg}")
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    well_labels = list(app._app_state.dataset.well_paths or {})
-    in_dir = app._app_state.dataset.in_dir
+    well_labels = list(ctx.state.dataset.well_paths or {})
+    in_dir = ctx.state.dataset.in_dir
     import logging as _logging
     _logging.getLogger("well_viewer.data.auto_threshold").info(
         "Auto-threshold: starting — data_dir=%s in_dir=%s wells=%d channels=%s",
         out_dir, in_dir, len(well_labels), ",".join(channels),
     )
     worker = _AutoThresholdWorker(
-        app, out_dir, channels,
+        ctx, out_dir, channels,
         well_labels=well_labels, in_dir=in_dir,
     )
     worker.progress.connect(_on_progress)
     worker.done.connect(_on_done)
     worker.failed.connect(_on_failed)
-    app._cell_gating_auto_worker = worker
+    ctx.runtime.cell_gating.auto_worker = worker
     worker.start()
 
 
@@ -1314,7 +1318,7 @@ def _earliest_timepoint(df):
     return sorted(tps, key=lambda t: (0, t[1]) if t[0] == "hours" else (1, str(t[1])))[0]
 
 
-def _cell_gating_opt_fc_inputs(app, *, channel_key, well_a, well_b, timepoint, ratios):
+def _cell_gating_opt_fc_inputs(ctx, *, channel_key, well_a, well_b, timepoint, ratios):
     """Resolve the optimizer's fold-change config into optimizer kwargs + a note.
 
     Reads the optimizer-local FC combos (independent of the plot tabs), resolves
@@ -1326,27 +1330,27 @@ def _cell_gating_opt_fc_inputs(app, *, channel_key, well_a, well_b, timepoint, r
     """
     from well_viewer.domain.fold_change import resolve_control_wells
 
-    ctrl_combo = getattr(app, "_cell_gating_opt_fc_control_combo", None)
-    base_combo = getattr(app, "_cell_gating_opt_fc_baseline_combo", None)
+    ctrl_combo = ctx.runtime.cell_gating.opt_fc_control_combo
+    base_combo = ctx.runtime.cell_gating.opt_fc_baseline_combo
     ctrl_label = str(ctrl_combo.currentText()).strip() if ctrl_combo is not None else ""
     baseline_data = base_combo.currentData() if base_combo is not None else None
 
     kwargs: dict = {
-        "op_ctrl": (app._cell_gating_opt_fc_ctrl_op_combo.currentData()
-                    if getattr(app, "_cell_gating_opt_fc_ctrl_op_combo", None) else "ratio") or "ratio",
-        "op_t0": (app._cell_gating_opt_fc_t0_op_combo.currentData()
-                  if getattr(app, "_cell_gating_opt_fc_t0_op_combo", None) else "ratio") or "ratio",
-        "order": (app._cell_gating_opt_fc_order_combo.currentData()
-                  if getattr(app, "_cell_gating_opt_fc_order_combo", None) else "ctrl_first") or "ctrl_first",
+        "op_ctrl": (ctx.runtime.cell_gating.opt_fc_ctrl_op_combo.currentData()
+                    if ctx.runtime.cell_gating.opt_fc_ctrl_op_combo else "ratio") or "ratio",
+        "op_t0": (ctx.runtime.cell_gating.opt_fc_t0_op_combo.currentData()
+                  if ctx.runtime.cell_gating.opt_fc_t0_op_combo else "ratio") or "ratio",
+        "order": (ctx.runtime.cell_gating.opt_fc_order_combo.currentData()
+                  if ctx.runtime.cell_gating.opt_fc_order_combo else "ctrl_first") or "ctrl_first",
     }
     notes: list = []
 
     # vs control — pool the resolved control wells' valid values at this scan tp.
     if ctrl_label and ctrl_label != "—":
-        ctrl_wells = resolve_control_wells(app._ctx, ctrl_label)
+        ctrl_wells = resolve_control_wells(ctx, ctrl_label)
         chunks = [
-            _valid_values_for_channel(app._get_rows(w), channel_key, ratios, timepoint)
-            for w in ctrl_wells if w in (app._app_state.dataset.well_paths or {})
+            _valid_values_for_channel(get_rows(ctx, w), channel_key, ratios, timepoint)
+            for w in ctrl_wells if w in (ctx.state.dataset.well_paths or {})
         ]
         chunks = [c for c in chunks if c.size]
         if chunks:
@@ -1356,7 +1360,7 @@ def _cell_gating_opt_fc_inputs(app, *, channel_key, well_a, well_b, timepoint, r
     # vs baseline timepoint — each well's own population at the baseline tp.
     if baseline_data is not None:
         def _base_vals(well):
-            df = app._get_rows(well)
+            df = get_rows(ctx, well)
             tp = _earliest_timepoint(df) if baseline_data == _OPT_FC_T0_TOKEN else baseline_data
             if tp is None:
                 return np.array([], dtype=float)
@@ -1370,22 +1374,22 @@ def _cell_gating_opt_fc_inputs(app, *, channel_key, well_a, well_b, timepoint, r
     return kwargs, note
 
 
-def cell_gating_optimize_thresh_frac_on(app) -> None:
+def cell_gating_optimize_thresh_frac_on(ctx) -> None:
     """Scan a threshold range and apply the best two-well ThreshFracOn cut."""
-    label = getattr(app, "_cell_gating_opt_result_label", None)
+    label = ctx.runtime.cell_gating.opt_result_label
 
     def _status(msg: str) -> None:
         if label is not None:
             label.setText(msg)
         try:
-            app._set_status(msg)
+            ctx.set_status(msg)
         except Exception:
             swallowed()
 
     try:
-        channel_combo = app._cell_gating_opt_channel_combo
-        well_a_combo = app._cell_gating_opt_well_a_combo
-        well_b_combo = app._cell_gating_opt_well_b_combo
+        channel_combo = ctx.runtime.cell_gating.opt_channel_combo
+        well_a_combo = ctx.runtime.cell_gating.opt_well_a_combo
+        well_b_combo = ctx.runtime.cell_gating.opt_well_b_combo
         channel_key = str(channel_combo.currentData() or channel_combo.currentText()).strip()
         well_a = str(well_a_combo.currentText()).strip()
         well_b = str(well_b_combo.currentText()).strip()
@@ -1398,10 +1402,10 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         if well_a == well_b:
             _status("Optimize ThreshFracOn: choose two different wells.")
             return
-        lo = float(app._cell_gating_opt_min_edit.text())
-        hi = float(app._cell_gating_opt_max_edit.text())
-        steps = int(float(app._cell_gating_opt_steps_edit.text()))
-        tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
+        lo = float(ctx.runtime.cell_gating.opt_min_edit.text())
+        hi = float(ctx.runtime.cell_gating.opt_max_edit.text())
+        steps = int(float(ctx.runtime.cell_gating.opt_steps_edit.text()))
+        tp_combo = ctx.runtime.cell_gating.opt_timepoint_combo
         timepoint = tp_combo.currentData() if tp_combo is not None else None
     except ValueError:
         _status("Optimize ThreshFracOn: Min, Max, and # Points must be numeric.")
@@ -1422,10 +1426,10 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         )
         return
 
-    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     try:
         fc_kwargs, fc_note = _cell_gating_opt_fc_inputs(
-            app, channel_key=channel_key, well_a=well_a, well_b=well_b,
+            ctx, channel_key=channel_key, well_a=well_a, well_b=well_b,
             timepoint=timepoint, ratios=ratios,
         )
     except Exception as exc:
@@ -1434,8 +1438,8 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
 
     try:
         result = _optimize_thresh_frac_on_between_wells(
-            app._get_rows(well_a),
-            app._get_rows(well_b),
+            get_rows(ctx, well_a),
+            get_rows(ctx, well_b),
             channel_key=channel_key,
             min_threshold=lo,
             max_threshold=hi,
@@ -1461,12 +1465,12 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
         )
         return
 
-    edit = (getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}).get(channel_key)
+    edit = (ctx.runtime.cell_gating.thresh_frac_edits or {}).get(channel_key)
     if edit is None:
         _status(f"Optimize ThreshFracOn: no ThreshFracOn field for {channel_key}.")
         return
     edit.setText(f"{result.threshold:.6g}")
-    cell_gating_on_threshold_frac_on_change(app)
+    cell_gating_on_threshold_frac_on_change(ctx)
     _status(
         f"Optimized {channel_key}{tp_note}: threshold={result.threshold:.6g}; "
         f"{well_a} fraction-on={result.frac_a:.3f} (n={result.n_a}), "
@@ -1479,7 +1483,7 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
     # what the full diff curve actually looks like.
     try:
         _cell_gating_show_opt_curve_popup(
-            app,
+            ctx,
             channel_key=channel_key,
             well_a=well_a,
             well_b=well_b,
@@ -1495,7 +1499,7 @@ def cell_gating_optimize_thresh_frac_on(app) -> None:
 
 
 def _cell_gating_show_opt_curve_popup(
-    app,
+    ctx,
     *,
     channel_key: str,
     well_a: str,
@@ -1519,12 +1523,12 @@ def _cell_gating_show_opt_curve_popup(
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
 
-    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     values_a = _valid_values_for_channel(
-        app._get_rows(well_a), channel_key, ratios, timepoint,
+        get_rows(ctx, well_a), channel_key, ratios, timepoint,
     )
     values_b = _valid_values_for_channel(
-        app._get_rows(well_b), channel_key, ratios, timepoint,
+        get_rows(ctx, well_b), channel_key, ratios, timepoint,
     )
     thresholds = np.linspace(lo, hi, int(steps))
     # Use the SAME scan the optimizer ran (raw, or fold-change-adjusted) so the
@@ -1533,9 +1537,9 @@ def _cell_gating_show_opt_curve_popup(
         thresholds, values_a, values_b, **(fc_kwargs or {}),
     )
 
-    popup = getattr(app, "_cell_gating_opt_curve_popup", None)
+    popup = ctx.runtime.cell_gating.opt_curve_popup
     if popup is None or not popup.isVisible():
-        popup = QDialog(getattr(app, "_cell_gating_frame", None) or app)
+        popup = QDialog(ctx.runtime.cell_gating.frame or ctx.window)
         popup.setWindowTitle("Optimizer curve")
         popup.resize(820, 460)
         layout = QVBoxLayout(popup)
@@ -1549,11 +1553,11 @@ def _cell_gating_show_opt_curve_popup(
         toolbar = MplToolbar(canvas, popup)
         layout.addWidget(toolbar)
         popup.finished.connect(
-            lambda _r: setattr(app, "_cell_gating_opt_curve_popup", None)
+            lambda _r: setattr(ctx.runtime.cell_gating, "opt_curve_popup", None)
         )
         popup._fig = fig
         popup._canvas = canvas
-        app._cell_gating_opt_curve_popup = popup
+        ctx.runtime.cell_gating.opt_curve_popup = popup
         popup.show()
 
     fig = popup._fig
@@ -1599,49 +1603,49 @@ def _cell_gating_show_opt_curve_popup(
     popup.activateWindow()
 
 
-def cell_gating_update_theme(app) -> None:
-    fig = getattr(app, "_cell_gating_figure", None)
+def cell_gating_update_theme(ctx) -> None:
+    fig = ctx.runtime.cell_gating.figure
     if fig is not None:
         fig.set_facecolor(get_color("BG_APP"))
-    if (getattr(app, "_cell_gating_cell_areas", None)
-            or getattr(app, "_cell_gating_fluor_data", None)):
-        _cell_gating_plot_cdf(app)
+    if (ctx.runtime.cell_gating.cell_areas
+            or ctx.runtime.cell_gating.fluor_data):
+        _cell_gating_plot_cdf(ctx)
 
 
 # ── internal helpers ──────────────────────────────────────────────────────
 
 
-def _cell_gating_build_channel_controls(app) -> None:
-    inner_layout = app._cell_gating_inner.layout()
+def _cell_gating_build_channel_controls(ctx) -> None:
+    inner_layout = ctx.runtime.cell_gating.inner.layout()
     while inner_layout.count():
         item = inner_layout.takeAt(0)
         w = item.widget()
         if w is not None:
             w.deleteLater()
 
-    channels = list(app._app_state.channel.fluor_channels)
+    channels = list(ctx.state.channel.fluor_channels)
     # Ratios show up as virtual channels in the plot dropdowns; surface
     # them here too so the user can give each ratio a FluorGating /
     # ThreshFracOn entry. They're keyed by ``ratio.key()`` (e.g.
     # ``ratio:gfp_over_mcherry``) in the edits dicts, distinct from the
     # plain fluor channel keys.
-    ratios = list(app._app_state.channel.ratio_metrics or [])
+    ratios = list(ctx.state.channel.ratio_metrics or [])
     row_specs: list[tuple[str, str]] = [(ch, ch.upper() + " Channel:") for ch in channels]
     for r in ratios:
         try:
-            label = app._ratio_label_for(r)
+            label = ratio_label_for(ctx, r)
         except Exception:
             label = r.name
         row_specs.append((r.key(), f"{label} (ratio):"))
 
     if not row_specs:
-        lbl = QLabel("No channels loaded", app._cell_gating_inner)
+        lbl = QLabel("No channels loaded", ctx.runtime.cell_gating.inner)
         lbl.setObjectName("Muted")
         inner_layout.addWidget(lbl)
         return
 
     for channel, row_label in row_specs:
-        ch_row = QWidget(app._cell_gating_inner)
+        ch_row = QWidget(ctx.runtime.cell_gating.inner)
         rl = QHBoxLayout(ch_row)
         rl.setContentsMargins(0, 0, 0, 0)
 
@@ -1652,58 +1656,58 @@ def _cell_gating_build_channel_controls(app) -> None:
         # R6: the typed slice is the source of truth — seed the slice with the
         # historical defaults for new rows, and seed the edit's text FROM the
         # slice (so values persisted/loaded before this row was built appear).
-        gate_state = app._app_state.cell_gating
+        gate_state = ctx.state.cell_gating
 
         rl.addWidget(QLabel("FluorGating:", ch_row))
-        if channel not in app._cell_gating_fluor_gate_edits:
+        if channel not in ctx.runtime.cell_gating.fluor_gate_edits:
             gate_edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), ch_row)
             gate_edit.setFixedWidth(90)
             gate_edit.editingFinished.connect(
-                lambda _app=app: cell_gating_on_gating_change(_app)
+                lambda _c=ctx: cell_gating_on_gating_change(_c)
             )
-            app._cell_gating_fluor_gate_edits[channel] = gate_edit
-        rl.addWidget(app._cell_gating_fluor_gate_edits[channel])
+            ctx.runtime.cell_gating.fluor_gate_edits[channel] = gate_edit
+        rl.addWidget(ctx.runtime.cell_gating.fluor_gate_edits[channel])
 
         rl.addWidget(QLabel("ThreshFracOn:", ch_row))
-        if channel not in app._cell_gating_thresh_frac_edits:
+        if channel not in ctx.runtime.cell_gating.thresh_frac_edits:
             thresh_edit = QLineEdit(str(gate_state.thresh_frac_on.setdefault(channel, 50.0)), ch_row)
             thresh_edit.setFixedWidth(90)
             thresh_edit.editingFinished.connect(
-                lambda _app=app: cell_gating_on_threshold_frac_on_change(_app)
+                lambda _c=ctx: cell_gating_on_threshold_frac_on_change(_c)
             )
-            app._cell_gating_thresh_frac_edits[channel] = thresh_edit
-        rl.addWidget(app._cell_gating_thresh_frac_edits[channel])
+            ctx.runtime.cell_gating.thresh_frac_edits[channel] = thresh_edit
+        rl.addWidget(ctx.runtime.cell_gating.thresh_frac_edits[channel])
         rl.addStretch(1)
 
         inner_layout.addWidget(ch_row)
     inner_layout.addStretch(1)
 
 
-def _cell_gating_optimizer_channel_specs(app) -> list[tuple[str, str]]:
+def _cell_gating_optimizer_channel_specs(ctx) -> list[tuple[str, str]]:
     specs: list[tuple[str, str]] = [
-        (ch, ch.upper()) for ch in list(app._app_state.channel.fluor_channels)
+        (ch, ch.upper()) for ch in list(ctx.state.channel.fluor_channels)
     ]
-    for ratio in list(app._app_state.channel.ratio_metrics or []):
+    for ratio in list(ctx.state.channel.ratio_metrics or []):
         try:
-            label = app._ratio_label_for(ratio)
+            label = ratio_label_for(ctx, ratio)
         except Exception:
             label = ratio.name
         specs.append((ratio.key(), f"{label} (ratio)"))
     return specs
 
 
-def _cell_gating_refresh_optimizer_controls(app) -> None:
+def _cell_gating_refresh_optimizer_controls(ctx) -> None:
     """Refresh optimizer channel/well dropdowns after data or ratios change."""
-    channel_combo = getattr(app, "_cell_gating_opt_channel_combo", None)
-    well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
-    well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
+    channel_combo = ctx.runtime.cell_gating.opt_channel_combo
+    well_a_combo = ctx.runtime.cell_gating.opt_well_a_combo
+    well_b_combo = ctx.runtime.cell_gating.opt_well_b_combo
     if channel_combo is None or well_a_combo is None or well_b_combo is None:
         return
 
     prev_channel = channel_combo.currentData()
     channel_combo.blockSignals(True)
     channel_combo.clear()
-    for key, label in _cell_gating_optimizer_channel_specs(app):
+    for key, label in _cell_gating_optimizer_channel_specs(ctx):
         channel_combo.addItem(label, key)
     if prev_channel:
         idx = channel_combo.findData(prev_channel)
@@ -1711,7 +1715,7 @@ def _cell_gating_refresh_optimizer_controls(app) -> None:
             channel_combo.setCurrentIndex(idx)
     channel_combo.blockSignals(False)
 
-    wells = sorted(list(app._app_state.dataset.well_paths or {}), key=app._parse_rc)
+    wells = sorted(list(ctx.state.dataset.well_paths or {}), key=parse_rc)
     for combo in (well_a_combo, well_b_combo):
         prev = combo.currentText()
         combo.blockSignals(True)
@@ -1725,26 +1729,26 @@ def _cell_gating_refresh_optimizer_controls(app) -> None:
     if well_b_combo.count() > 1 and well_b_combo.currentIndex() == well_a_combo.currentIndex():
         well_b_combo.setCurrentIndex(1)
 
-    btn = getattr(app, "_cell_gating_opt_btn", None)
+    btn = ctx.runtime.cell_gating.opt_btn
     if btn is not None:
         btn.setEnabled(bool(channel_combo.count() and len(wells) >= 2))
 
-    _cell_gating_refresh_opt_timepoints(app)
-    _cell_gating_refresh_opt_fc_controls(app)
-    _cell_gating_autofill_opt_range(app)
+    _cell_gating_refresh_opt_timepoints(ctx)
+    _cell_gating_refresh_opt_fc_controls(ctx)
+    _cell_gating_autofill_opt_range(ctx)
 
 
-def _cell_gating_on_opt_scope_changed(app) -> None:
+def _cell_gating_on_opt_scope_changed(ctx) -> None:
     """React to a channel/well change: re-list timepoints, then re-fit the range."""
-    _cell_gating_refresh_opt_timepoints(app)
-    _cell_gating_refresh_opt_fc_controls(app)
-    _cell_gating_autofill_opt_range(app)
+    _cell_gating_refresh_opt_timepoints(ctx)
+    _cell_gating_refresh_opt_fc_controls(ctx)
+    _cell_gating_autofill_opt_range(ctx)
 
 
 _OPT_FC_T0_TOKEN = "__t0__"
 
 
-def _cell_gating_refresh_opt_fc_controls(app) -> None:
+def _cell_gating_refresh_opt_fc_controls(ctx) -> None:
     """Populate the optimizer's fold-change Control + Baseline combos.
 
     Control candidates mirror the plot tabs' Control combo (well tokens +
@@ -1752,15 +1756,15 @@ def _cell_gating_refresh_opt_fc_controls(app) -> None:
     ``fold_change_controls._all_member_labels``. Baseline offers "—",
     "t0 (first timepoint)", and the explicit timepoints shared by wells A/B.
     Selections are preserved across refreshes; this state is local to the
-    optimizer and never touches ``app._app_state.plot.fc_*``.
+    optimizer and never touches ``ctx.state.plot.fc_*``.
     """
     from well_viewer.domain.fold_change_controls import _all_member_labels
 
-    ctrl = getattr(app, "_cell_gating_opt_fc_control_combo", None)
-    base = getattr(app, "_cell_gating_opt_fc_baseline_combo", None)
+    ctrl = ctx.runtime.cell_gating.opt_fc_control_combo
+    base = ctx.runtime.cell_gating.opt_fc_baseline_combo
     if ctrl is not None:
         prev = ctrl.currentText()
-        items = ["—", *_all_member_labels(app)]
+        items = ["—", *_all_member_labels(ctx.app)]
         if [ctrl.itemText(i) for i in range(ctrl.count())] != items:
             blocked = ctrl.blockSignals(True)
             try:
@@ -1772,17 +1776,17 @@ def _cell_gating_refresh_opt_fc_controls(app) -> None:
                 ctrl.blockSignals(blocked)
 
     if base is not None:
-        well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
-        well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
+        well_a_combo = ctx.runtime.cell_gating.opt_well_a_combo
+        well_b_combo = ctx.runtime.cell_gating.opt_well_b_combo
         seen: set = set()
         tps: list = []
         for combo_w in (well_a_combo, well_b_combo):
             if combo_w is None:
                 continue
             label = str(combo_w.currentText()).strip()
-            if not label or label not in (app._app_state.dataset.well_paths or {}):
+            if not label or label not in (ctx.state.dataset.well_paths or {}):
                 continue
-            for tp in _distinct_timepoints(app._get_rows(label)):
+            for tp in _distinct_timepoints(get_rows(ctx, label)):
                 if tp not in seen:
                     seen.add(tp)
                     tps.append(tp)
@@ -1801,20 +1805,20 @@ def _cell_gating_refresh_opt_fc_controls(app) -> None:
             base.blockSignals(blocked)
 
 
-def _cell_gating_refresh_opt_timepoints(app) -> None:
+def _cell_gating_refresh_opt_timepoints(ctx) -> None:
     """Populate the optimizer timepoint dropdown from the two selected wells."""
-    combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
-    well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
-    well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
+    combo = ctx.runtime.cell_gating.opt_timepoint_combo
+    well_a_combo = ctx.runtime.cell_gating.opt_well_a_combo
+    well_b_combo = ctx.runtime.cell_gating.opt_well_b_combo
     if combo is None or well_a_combo is None or well_b_combo is None:
         return
     seen: set = set()
     tps: list = []
     for combo_w in (well_a_combo, well_b_combo):
         label = str(combo_w.currentText()).strip()
-        if not label or label not in (app._app_state.dataset.well_paths or {}):
+        if not label or label not in (ctx.state.dataset.well_paths or {}):
             continue
-        for tp in _distinct_timepoints(app._get_rows(label)):
+        for tp in _distinct_timepoints(get_rows(ctx, label)):
             if tp not in seen:
                 seen.add(tp)
                 tps.append(tp)
@@ -1836,32 +1840,32 @@ def _cell_gating_refresh_opt_timepoints(app) -> None:
     combo.blockSignals(False)
 
 
-def _cell_gating_autofill_opt_range(app) -> None:
+def _cell_gating_autofill_opt_range(ctx) -> None:
     """Fit Min/Max to the selected channel's data range over the two wells.
 
     Pools the included finite values from Well A and Well B (at the chosen
     timepoint) and writes their min/max into the Min/Max edits, so the scan spans
     where fraction-on actually changes rather than the hardcoded 0–100 default.
     """
-    min_edit = getattr(app, "_cell_gating_opt_min_edit", None)
-    max_edit = getattr(app, "_cell_gating_opt_max_edit", None)
-    channel_combo = getattr(app, "_cell_gating_opt_channel_combo", None)
-    well_a_combo = getattr(app, "_cell_gating_opt_well_a_combo", None)
-    well_b_combo = getattr(app, "_cell_gating_opt_well_b_combo", None)
-    tp_combo = getattr(app, "_cell_gating_opt_timepoint_combo", None)
+    min_edit = ctx.runtime.cell_gating.opt_min_edit
+    max_edit = ctx.runtime.cell_gating.opt_max_edit
+    channel_combo = ctx.runtime.cell_gating.opt_channel_combo
+    well_a_combo = ctx.runtime.cell_gating.opt_well_a_combo
+    well_b_combo = ctx.runtime.cell_gating.opt_well_b_combo
+    tp_combo = ctx.runtime.cell_gating.opt_timepoint_combo
     if not all((min_edit, max_edit, channel_combo, well_a_combo, well_b_combo)):
         return
     channel_key = str(channel_combo.currentData() or channel_combo.currentText()).strip()
     well_a = str(well_a_combo.currentText()).strip()
     well_b = str(well_b_combo.currentText()).strip()
-    valid = app._app_state.dataset.well_paths or {}
+    valid = ctx.state.dataset.well_paths or {}
     if not channel_key or well_a not in valid or well_b not in valid:
         return
     timepoint = tp_combo.currentData() if tp_combo is not None else None
-    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     try:
-        va = _valid_values_for_channel(app._get_rows(well_a), channel_key, ratios, timepoint)
-        vb = _valid_values_for_channel(app._get_rows(well_b), channel_key, ratios, timepoint)
+        va = _valid_values_for_channel(get_rows(ctx, well_a), channel_key, ratios, timepoint)
+        vb = _valid_values_for_channel(get_rows(ctx, well_b), channel_key, ratios, timepoint)
     except Exception:
         swallowed("cell gating: optimizer range autofill failed")
         return
@@ -2110,31 +2114,30 @@ def _cell_gating_first_frame_rows(df) -> tuple:
     return frame_df, frame_desc
 
 
-def _cell_gating_source_wells(app) -> list[str]:
-    active_rsets = []
-    if hasattr(app, "_rep_sets_active"):
-        active_rsets = app._rep_sets_active()
+def _cell_gating_source_wells(ctx) -> list[str]:
+    active_rsets = active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
 
     if active_rsets:
         seen: set[str] = set()
         ordered: list[str] = []
         for rset in active_rsets:
             for well in rset.wells:
-                if well in app._app_state.dataset.well_paths and well not in seen:
+                if well in ctx.state.dataset.well_paths and well not in seen:
                     seen.add(well)
                     ordered.append(well)
-        return sorted(ordered, key=app._parse_rc)
+        return sorted(ordered, key=parse_rc)
 
     selected = [
-        label for label in app._app_state.selection.selected_wells
-        if label in app._app_state.dataset.well_paths
+        label for label in ctx.state.selection.selected_wells
+        if label in ctx.state.dataset.well_paths
     ]
     # Fall back to every loaded well so the CDFs render on the first open
     # after a data load (before the user has made an explicit selection).
     # Once they pick wells in the sidebar, that selection scopes the plot.
     if not selected:
-        selected = list(app._app_state.dataset.well_paths)
-    return sorted(selected, key=app._parse_rc)
+        selected = list(ctx.state.dataset.well_paths)
+    return sorted(selected, key=parse_rc)
 
 
 def _focus_cdf_xaxis(ax, vals) -> None:
@@ -2149,14 +2152,14 @@ def _focus_cdf_xaxis(ax, vals) -> None:
     ax.set_xlim(lo - pad, hi + pad)
 
 
-def _cell_gating_plot_cdf(app) -> None:
-    ratio_data = getattr(app, "_cell_gating_ratio_data", {}) or {}
-    if (not app._cell_gating_cell_areas
-            and not app._cell_gating_fluor_data
+def _cell_gating_plot_cdf(ctx) -> None:
+    ratio_data = ctx.runtime.cell_gating.ratio_data or {}
+    if (not ctx.runtime.cell_gating.cell_areas
+            and not ctx.runtime.cell_gating.fluor_data
             and not ratio_data):
         # No data — paint a themed empty state instead of leaving the default
         # white matplotlib canvas (a giant white block against the dark app).
-        fig = getattr(app, "_cell_gating_figure", None)
+        fig = ctx.runtime.cell_gating.figure
         if fig is not None:
             fig.clf()
             fig.set_facecolor(get_color("BG_APP"))
@@ -2169,7 +2172,7 @@ def _cell_gating_plot_cdf(app) -> None:
                 transform=ax.transAxes, ha="center", va="center",
                 color=get_color("TXT_MUT"), fontsize=11, wrap=True,
             )
-            canvas = getattr(app, "_cell_gating_canvas", None)
+            canvas = ctx.runtime.cell_gating.canvas
             if canvas is not None:
                 canvas.draw_idle()
         return
@@ -2181,11 +2184,11 @@ def _cell_gating_plot_cdf(app) -> None:
     accent = get_color("ACCENT")
     warn = get_color("WARN")
 
-    fig = app._cell_gating_figure
+    fig = ctx.runtime.cell_gating.figure
     fig.clf()
     fig.set_facecolor(bg_app)
 
-    n_plots = 1 + len(app._cell_gating_fluor_data) + len(ratio_data)
+    n_plots = 1 + len(ctx.runtime.cell_gating.fluor_data) + len(ratio_data)
     n_cols = 1 if n_plots == 1 else 2
     n_rows = (n_plots + n_cols - 1) // n_cols
     plot_height_per_row = 3.8
@@ -2196,8 +2199,8 @@ def _cell_gating_plot_cdf(app) -> None:
         ax = fig.add_subplot(n_rows, n_cols, i + 1, facecolor=bg_panel)
         axes.append(ax)
 
-    if app._cell_gating_cell_areas:
-        areas = np.array(sorted(app._cell_gating_cell_areas))
+    if ctx.runtime.cell_gating.cell_areas:
+        areas = np.array(sorted(ctx.runtime.cell_gating.cell_areas))
         cdf = np.arange(1, len(areas) + 1) / len(areas)
         axes[0].plot(areas, cdf, linewidth=2, color=accent, alpha=0.8)
         axes[0].fill_between(areas, cdf, alpha=0.2, color=accent)
@@ -2211,7 +2214,7 @@ def _cell_gating_plot_cdf(app) -> None:
         # Mark the QC layer's min-area gate (cell-area gating is QC-owned now).
         try:
             from well_viewer.features.qc.controller import get_qc_params
-            _qc_min = get_qc_params(app._ctx).min_area
+            _qc_min = get_qc_params(ctx).min_area
             if _qc_min is not None:
                 axes[0].axvline(x=float(_qc_min), color=warn,
                                 linestyle="--", linewidth=2, alpha=0.7)
@@ -2221,7 +2224,7 @@ def _cell_gating_plot_cdf(app) -> None:
 
     colors = [accent, "#FF9500", "#FF3B30", "#34C759"]
     next_idx = 1
-    for channel, values in sorted(app._cell_gating_fluor_data.items()):
+    for channel, values in sorted(ctx.runtime.cell_gating.fluor_data.items()):
         if next_idx >= len(axes):
             break
         ax = axes[next_idx]
@@ -2239,7 +2242,7 @@ def _cell_gating_plot_cdf(app) -> None:
         ax.grid(True, alpha=0.2, color=txt_mut)
         ax.tick_params(colors=txt_mut, labelsize=8)
 
-        fluor_gate = app._app_state.cell_gating.fluor_gates.get(channel)
+        fluor_gate = ctx.state.cell_gating.fluor_gates.get(channel)
         if fluor_gate is not None:
             ax.axvline(x=float(fluor_gate), color=warn,
                        linestyle="--", linewidth=2, alpha=0.7)
@@ -2268,24 +2271,24 @@ def _cell_gating_plot_cdf(app) -> None:
         _focus_cdf_xaxis(ax, vals)
         next_idx += 1
 
-    app._cell_gating_ax = axes[0]
+    ctx.runtime.cell_gating.ax = axes[0]
 
-    if not app._cell_gating_axes_stack:
+    if not ctx.runtime.cell_gating.axes_stack:
         limits = [(ax.get_xlim(), ax.get_ylim()) for ax in axes]
-        app._cell_gating_axes_stack.append(limits)
+        ctx.runtime.cell_gating.axes_stack.append(limits)
 
     fig.tight_layout(pad=1.3)
-    app._cell_gating_canvas.draw_idle()
+    ctx.runtime.cell_gating.canvas.draw_idle()
 
     # Constrain height only; width is driven by the scroll area's
     # setWidgetResizable(True) so the canvas fills the viewport.
     dpi = fig.get_dpi()
     fig_h_px = max(1, int(fig_height * dpi))
-    app._cell_gating_canvas.setMinimumHeight(fig_h_px)
+    ctx.runtime.cell_gating.canvas.setMinimumHeight(fig_h_px)
 
 
-def _cell_gating_on_progress(app, current: int, total: int) -> None:
-    bar = getattr(app, "_progress_bar", None)
+def _cell_gating_on_progress(ctx, current: int, total: int) -> None:
+    bar = getattr(ctx.app, "_progress_bar", None)
     if bar is None:
         return
     if bar.maximum() != total:
@@ -2293,23 +2296,23 @@ def _cell_gating_on_progress(app, current: int, total: int) -> None:
     bar.setValue(current)
 
 
-def _cell_gating_on_finished(app) -> None:
-    bar = getattr(app, "_progress_bar", None)
+def _cell_gating_on_finished(ctx) -> None:
+    bar = getattr(ctx.app, "_progress_bar", None)
     if bar is not None:
         bar.setValue(0)
         bar.hide()
-    app._redraw()
+    ctx.app._redraw()
 
 
-def _cell_gating_on_failed(app, msg: str) -> None:
+def _cell_gating_on_failed(ctx, msg: str) -> None:
     # Release the UI (hide the progress bar) and surface the error instead of
     # leaving the status bar stuck mid-pass (audit E7).
-    bar = getattr(app, "_progress_bar", None)
+    bar = getattr(ctx.app, "_progress_bar", None)
     if bar is not None:
         bar.setValue(0)
         bar.hide()
     logger.error("Cell gating failed: %s", msg)
-    show = getattr(app, "show_status_message", None)
+    show = getattr(ctx.app, "show_status_message", None)
     if callable(show):
         try:
             show(f"Cell gating failed: {msg}")
@@ -2317,9 +2320,9 @@ def _cell_gating_on_failed(app, msg: str) -> None:
             logger.exception("failed to display gating-error status")
 
 
-def _cell_gating_persist_params(app) -> None:
+def _cell_gating_persist_params(ctx) -> None:
     """Save current gating values into pipeline_info.json (no-op when at defaults)."""
-    save = getattr(app, "_save_gating_to_pipeline_info", None)
+    save = getattr(ctx.app, "_save_gating_to_pipeline_info", None)
     if save is None:
         return
     try:

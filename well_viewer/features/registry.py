@@ -160,7 +160,7 @@ def _activate_sample_definitions(app) -> None:
     app._groups_centre_refresh()
     # Cell Gating leads this tab; pick up any scatter gates drawn since the
     # last visit (refresh the summary + recompute Included if they changed).
-    cell_gating_sync_scatter_gates(app)
+    cell_gating_sync_scatter_gates(app._ctx)
 
 
 def _activate_statistics(app) -> None:
@@ -229,8 +229,8 @@ def _activate_cell_gating(app) -> None:
     app._sidebar_main_frame.setVisible(True)
     app._refresh_sidebar_map()
     if hasattr(app, "_cell_gating_fluor_gate_edits"):
-        cell_gating_load_cell_areas(app)
-        cell_gating_sync_scatter_gates(app)
+        cell_gating_load_cell_areas(app._ctx)
+        cell_gating_sync_scatter_gates(app._ctx)
 
 
 def _activate_cell_browser(app) -> None:
@@ -361,7 +361,7 @@ def _sel_sample_definitions(app) -> None:
         from well_viewer.features.grouping.cell_gating_tab_view import (
             cell_gating_load_cell_areas,
         )
-        cell_gating_load_cell_areas(app)
+        cell_gating_load_cell_areas(app._ctx)
 
 
 def _sel_cell_browser(app) -> None:

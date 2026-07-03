@@ -318,7 +318,18 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              banks + widgets via ctx.runtime.scatter / ctx.widgets, domain
 #              leaves called directly). Net drop: the scatter tree already
 #              carried many ctx.app reach-throughs that collapse to typed state.
-CTX_APP_BUDGET = 101
+#   101 -> 97   Cell Gating subsystem → ctx: cell_gating_tab_view (the 2.4k-line
+#              builder + GatingWorker + optimizer + CDF/gate helpers) all take ctx
+#              — _app_state→ctx.state, _cell_gating_*→ctx.runtime.cell_gating,
+#              _scatter_gates→ctx.runtime.scatter.gates, _get_rows→get_rows(ctx),
+#              _get_all_fluor_gates/_ratio_label_for/parse_rc/active_replicate_sets/
+#              invalidate_stats_cache/resolve_control_wells the ctx-native leaves,
+#              _set_status→ctx.set_status, _event_bus→ctx.bus, dialogs→ctx.window.
+#              cell_gating_compute already app-free. Deliberate bridges remain
+#              (redraw/progress-bar/save+load gating/quick-edit refresh/qc controls/
+#              fold-change member labels/status). Callers across well_viewer + tests
+#              pass app._ctx; SimpleNamespace fakes get a ctx w/ AppRuntime.
+CTX_APP_BUDGET = 97
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

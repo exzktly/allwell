@@ -282,8 +282,8 @@ def clear_all(app) -> None:
                 edit.setText("0.0")
             for edit in app._cell_gating_thresh_frac_edits.values():
                 edit.setText("50.0")
-            cell_gating_on_gating_change(app)
-            cell_gating_on_threshold_frac_on_change(app)
+            cell_gating_on_gating_change(app._ctx)
+            cell_gating_on_threshold_frac_on_change(app._ctx)
         except Exception:
             _logger.exception("Cell Gating reset during Clear failed")
 

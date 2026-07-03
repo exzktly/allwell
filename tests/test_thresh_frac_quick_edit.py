@@ -78,13 +78,24 @@ class _FakeBus:
 
 class _FakeState:
     def __init__(self) -> None:
+        from types import SimpleNamespace
         from well_viewer.core.cell_gating_state import CellGatingState
         self.channel = _FakeChannel()
         self.dataset = _FakeDataset()
-        self.plot = object()  # emit payload for plot_options_changed
+        # Doubles as the plot_options_changed emit payload AND the source the
+        # ctx-native invalidate_stats_cache → refresh_fov_btn_state reads.
+        self.plot = SimpleNamespace(use_fov_replicates=False)
+        # invalidate_stats_cache(ctx) discards the group-stats cache; the double
+        # only needs the invalidate() method to exist.
+        self.stats_cache = SimpleNamespace(invalidate=lambda: None)
         # R6: gate values live on the typed slice; the edits are the input
         # surface, synced into the slice by the change handlers.
         self.cell_gating = CellGatingState()
+
+    def feature_slice(self, name):
+        # No Image Browser in this controller-layer double → no review_image
+        # slice (invalidate_stats_cache skips the override-version bump).
+        return None
 
 
 class _FakeApp:
@@ -99,8 +110,14 @@ class _FakeApp:
         }
         self.redraws = 0
         self._event_bus = _FakeBus()
-        # The gate accessors read the slice via ctx (post-R6 pure state).
-        self._ctx = SimpleNamespace(state=self._app_state, app=self)
+        # The gate accessors read the slice via ctx (post-R6 pure state); the
+        # cell_gating change handler also reaches ctx.bus (plot_options_changed)
+        # and ctx.runtime.cell_gating (the edit banks stamped on app._cell_gating_*).
+        from well_viewer.core.app_runtime import AppRuntime
+        self._ctx = SimpleNamespace(
+            state=self._app_state, app=self, bus=self._event_bus,
+            runtime=AppRuntime(self),
+        )
 
     def _redraw(self) -> None:
         self.redraws += 1

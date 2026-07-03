@@ -72,7 +72,7 @@ def load_from_pipeline_info(app) -> bool:
         build = getattr(app, "_centre_build_pending", None)
         if callable(build):
             build("Sample Definitions")
-        build_cell_gating_subtab(app)
+        build_cell_gating_subtab(app._ctx)
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return False
 

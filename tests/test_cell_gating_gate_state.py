@@ -21,6 +21,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QLineEdit
 
+from well_viewer.core.app_runtime import AppRuntime
 from well_viewer.core.cell_gating_state import CellGatingState
 
 
@@ -40,8 +41,12 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
     app._redraw = lambda: app._calls.append("redraw")
     app._event_bus = SimpleNamespace(
         plot_options_changed=SimpleNamespace(emit=lambda s: app._calls.append("emit")))
-    # The gate accessors read the slice via ctx (post-R6 pure state).
-    app._ctx = SimpleNamespace(state=app._app_state, app=app)
+    # The gate accessors + handlers read the slice / live handles via ctx
+    # (post-R6 pure state; runtime stamps back onto app._cell_gating_*).
+    app._ctx = SimpleNamespace(
+        state=app._app_state, app=app, runtime=AppRuntime(app),
+        bus=app._event_bus, set_status=lambda m: None,
+    )
     return app
 
 
@@ -51,7 +56,7 @@ def test_sync_parses_edits_into_slice(qtbot):
     )
     app = _app(fluor=[("gfp", "12.5"), ("ratio:g_over_m", "3")],
                thresh=[("gfp", "40"), ("ratio:g_over_m", "60.5")])
-    _cell_gating_sync_gate_state(app)
+    _cell_gating_sync_gate_state(app._ctx)
     st = app._app_state.cell_gating
     assert st.fluor_gates == {"gfp": 12.5, "ratio:g_over_m": 3.0}
     assert st.thresh_frac_on == {"gfp": 40.0, "ratio:g_over_m": 60.5}
@@ -67,7 +72,7 @@ def test_sync_keeps_last_committed_on_garbage(qtbot):
     )
     st = CellGatingState(fluor_gates={"gfp": 12.5}, thresh_frac_on={"gfp": 40.0})
     app = _app(fluor=[("gfp", "oops")], thresh=[("gfp", "nope")], state=st)
-    _cell_gating_sync_gate_state(app)
+    _cell_gating_sync_gate_state(app._ctx)
     assert st.fluor_gates["gfp"] == 12.5
     assert st.thresh_frac_on["gfp"] == 40.0
     assert cell_gating_get_fluor_gate(app._ctx, "gfp") == 12.5
@@ -99,21 +104,26 @@ def test_load_threshold_frac_on_pushes_slice_to_widgets(qtbot):
     )
     st = CellGatingState(thresh_frac_on={"gfp": 33.0, "mcherry": 75.5})
     app = _app(thresh=[("gfp", "50.0"), ("mcherry", "50.0")], state=st)
-    cell_gating_load_threshold_frac_on(app)
+    cell_gating_load_threshold_frac_on(app._ctx)
     assert app._cell_gating_thresh_frac_edits["gfp"].text() == "33.0"
     assert app._cell_gating_thresh_frac_edits["mcherry"].text() == "75.5"
 
 
-def test_thresh_change_handler_syncs_then_fans_out(qtbot):
+def test_thresh_change_handler_syncs_then_fans_out(qtbot, monkeypatch):
     # The editingFinished flow end-to-end: edit text → handler → slice synced,
     # stats cache invalidated, redraw + plot_options_changed emitted.
+    import well_viewer.features.grouping.cell_gating_tab_view as cg
     from well_viewer.features.grouping.cell_gating_tab_view import (
         cell_gating_on_threshold_frac_on_change,
         cell_gating_get_thresh_frac_on,
     )
     app = _app(fluor=[("gfp", "0.0")], thresh=[("gfp", "50.0")])
+    # The ctx-native invalidate_stats_cache needs the full AppState; on this
+    # pure-logic fake, stub it to record the fan-out step instead.
+    monkeypatch.setattr(cg, "invalidate_stats_cache",
+                        lambda ctx: app._calls.append("invalidate"))
     app._cell_gating_thresh_frac_edits["gfp"].setText("62.5")
-    cell_gating_on_threshold_frac_on_change(app)
+    cell_gating_on_threshold_frac_on_change(app._ctx)
     assert app._app_state.cell_gating.thresh_frac_on["gfp"] == 62.5
     assert cell_gating_get_thresh_frac_on(app._ctx, "gfp") == 62.5
     assert app._calls == ["invalidate", "redraw", "emit"]
@@ -125,21 +135,23 @@ def test_thresh_change_handler_rejects_garbage_without_acting(qtbot):
     )
     st = CellGatingState(thresh_frac_on={"gfp": 40.0})
     app = _app(fluor=[("gfp", "0.0")], thresh=[("gfp", "garbage")], state=st)
-    cell_gating_on_threshold_frac_on_change(app)
+    cell_gating_on_threshold_frac_on_change(app._ctx)
     assert st.thresh_frac_on["gfp"] == 40.0   # untouched
     assert app._calls == []                    # no fan-out on invalid input
 
 
-def test_editing_finished_signal_drives_the_sync(qtbot):
+def test_editing_finished_signal_drives_the_sync(qtbot, monkeypatch):
     # The actual Qt wiring: editingFinished on a real QLineEdit connected the
     # way the build loop does it must land the value in the slice.
+    import well_viewer.features.grouping.cell_gating_tab_view as cg
     from well_viewer.features.grouping.cell_gating_tab_view import (
         cell_gating_on_threshold_frac_on_change,
     )
+    monkeypatch.setattr(cg, "invalidate_stats_cache", lambda ctx: None)
     app = _app(fluor=[("gfp", "0.0")], thresh=[("gfp", "50.0")])
     edit = app._cell_gating_thresh_frac_edits["gfp"]
     edit.editingFinished.connect(
-        lambda _app=app: cell_gating_on_threshold_frac_on_change(_app))
+        lambda _c=app._ctx: cell_gating_on_threshold_frac_on_change(_c))
     edit.setText("71.25")
     edit.editingFinished.emit()
     assert app._app_state.cell_gating.thresh_frac_on["gfp"] == 71.25

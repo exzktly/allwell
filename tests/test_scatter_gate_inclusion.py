@@ -14,6 +14,16 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+from well_viewer.core.app_runtime import AppRuntime
+
+
+def _cg_ctx(app):
+    """Wrap a pure-logic fake app in the minimal ctx shape the cell-gating
+    functions consume (runtime stamps back onto the app's ``_cell_gating_*`` /
+    ``_scatter_*`` attributes, so the fake's attribute assertions still hold)."""
+    app._ctx = SimpleNamespace(app=app, runtime=AppRuntime(app))
+    return app._ctx
+
 from well_viewer.features.scatter.gating import (
     _on_gate_drawn,
     compute_gate_inclusion,
@@ -117,12 +127,13 @@ def test_selected_scatter_gates_honours_choice():
         _cell_gating_gating_choices=None,        # all (union)
         _cell_gating_thresh_choices={"Gate 2"},  # independent thresh selection
     )
-    assert cell_gating_selected_scatter_gates(app, "gating") == [g1, g2, g3]
-    assert cell_gating_selected_scatter_gates(app, "thresh") == [g2]
+    ctx = _cg_ctx(app)
+    assert cell_gating_selected_scatter_gates(ctx, "gating") == [g1, g2, g3]
+    assert cell_gating_selected_scatter_gates(ctx, "thresh") == [g2]
     app._cell_gating_gating_choices = {"Gate 1", "Gate 3"}  # multi-select gating
-    assert cell_gating_selected_scatter_gates(app, "gating") == [g1, g3]
+    assert cell_gating_selected_scatter_gates(ctx, "gating") == [g1, g3]
     app._cell_gating_thresh_choices = set()                 # none for thresh
-    assert cell_gating_selected_scatter_gates(app, "thresh") == []
+    assert cell_gating_selected_scatter_gates(ctx, "thresh") == []
 
 
 def test_rename_gate_rejects_blank_and_duplicate_keeps_choice():
@@ -236,7 +247,7 @@ def test_toggling_a_layer_enables_its_gates_button(qtbot, monkeypatch):
     import well_viewer.features.grouping.cell_gating_tab_view as cg
     from PySide6.QtWidgets import QCheckBox, QPushButton
 
-    monkeypatch.setattr(cg, "cell_gating_start_gating_worker", lambda app: None)
+    monkeypatch.setattr(cg, "cell_gating_start_gating_worker", lambda ctx: None)
     app = SimpleNamespace(
         _scatter_gates=[{"name": "Gate 1", "x_col": "a", "y_col": "b",
                          "x0": 0, "y0": 0, "x1": 1, "y1": 1}],
@@ -251,16 +262,17 @@ def test_toggling_a_layer_enables_its_gates_button(qtbot, monkeypatch):
         _cell_gating_gating_gate_btn=QPushButton(),
         _cell_gating_thresh_gate_btn=QPushButton(),
     )
-    cg._cell_gating_refresh_gate_filter(app)
+    ctx = _cg_ctx(app)
+    cg._cell_gating_refresh_gate_filter(ctx)
     assert not app._cell_gating_gating_gate_btn.isEnabled()  # off → disabled
 
     app._cell_gating_use_scatter_gates_cb.setChecked(True)
-    cg.cell_gating_on_use_scatter_gates_change(app)
+    cg.cell_gating_on_use_scatter_gates_change(ctx)
     assert app._cell_gating_gating_gate_btn.isEnabled()       # now active
     assert not app._cell_gating_thresh_gate_btn.isEnabled()   # thresh still off
 
     app._cell_gating_use_scatter_thresh_cb.setChecked(True)
-    cg.cell_gating_on_use_scatter_thresh_change(app)
+    cg.cell_gating_on_use_scatter_thresh_change(ctx)
     assert app._cell_gating_thresh_gate_btn.isEnabled()
 
 

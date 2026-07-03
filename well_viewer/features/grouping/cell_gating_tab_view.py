@@ -52,6 +52,7 @@ from well_viewer.data.data_loading import resolve_value_series, get_rows
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, ratio_label_for
+from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.features.qc.tab_view import build_qc_gate_controls
 from well_viewer.core.safe import swallowed
@@ -1106,7 +1107,7 @@ def cell_gating_on_threshold_frac_on_change(ctx) -> None:
         # distribution / heat map). Bar and scatter redraw via the fold-change
         # scope registry, so also emit ``plot_options_changed`` — otherwise a
         # ThreshFracOn edit leaves the (now default) Bar Plots tab stale.
-        ctx.app._redraw()
+        redraw_app(ctx)
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
         # Mirror the new value onto the plotting ctxbar quick-edit so it reflects
         # the set threshold (e.g. after auto-threshold or a Cell Gating edit)
@@ -2301,7 +2302,7 @@ def _cell_gating_on_finished(ctx) -> None:
     if bar is not None:
         bar.setValue(0)
         bar.hide()
-    ctx.app._redraw()
+    redraw_app(ctx)
 
 
 def _cell_gating_on_failed(ctx, msg: str) -> None:

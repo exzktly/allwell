@@ -1028,7 +1028,7 @@ class WellViewerApp(QWidget):
 
     # ── Plotting ──────────────────────────────────────────────────────────────
 
-    def _redraw(self) -> None: return redraw_app(self)
+    def _redraw(self) -> None: return redraw_app(self._ctx)
 
     # ── Bar plot tab ──────────────────────────────────────────────────────────
 

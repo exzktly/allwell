@@ -147,9 +147,9 @@ def load_from_pipeline_info(app) -> bool:
                 cb.setChecked(flag)
             finally:
                 cb.blockSignals(blocked)
-    _cell_gating_refresh_gate_filter(app)
-    _cell_gating_apply_scatter_gate_mode(app)
-    _cell_gating_refresh_gate_summary(app)
+    _cell_gating_refresh_gate_filter(app._ctx)
+    _cell_gating_apply_scatter_gate_mode(app._ctx)
+    _cell_gating_refresh_gate_summary(app._ctx)
 
     # Mirror the just-loaded value into the plotting ctxbar quick-edit so it
     # shows the persisted threshold on load (guarded; no-op before it's built).

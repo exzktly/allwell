@@ -718,7 +718,8 @@ def toggle_sem(ctx) -> None:
             obs(is_sem)
         except Exception:
             swallowed()  # was: pass (silent except)
-    ctx.app._redraw()
+    from well_viewer.core.plot_orchestrator import redraw_app
+    redraw_app(ctx)
     # Redraw the bar pane too whenever it is on screen — in Split View it can be
     # visible alongside another pane without being the focused tab.
     _vis = getattr(ctx.app, "_is_tab_visible", None)

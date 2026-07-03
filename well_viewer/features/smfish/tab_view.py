@@ -835,8 +835,9 @@ def _smfish_refresh_app_cache(ctx) -> None:
     # explicit invalidation every line / bar / scatter aggregate keeps
     # returning the pre-apply numbers.
     from well_viewer.core.selection_controller import invalidate_stats_cache
+    from well_viewer.core.plot_orchestrator import redraw_app
     invalidate_stats_cache(ctx)
-    ctx.app._redraw()
+    redraw_app(ctx)
     # Refresh the Review CSV table so the smfish_count column on the
     # active well reflects the new counts. The plot redraw above does
     # not touch the Review CSV widget — it lives outside the plot fan-out.

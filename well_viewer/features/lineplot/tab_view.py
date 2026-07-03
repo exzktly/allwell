@@ -15,6 +15,7 @@ from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
 from functools import partial
+from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.export.service import export_plot_data
 from well_viewer.features.lineplot.controller import on_fig_click
 
@@ -150,9 +151,9 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # The Publication↔Screen toggle is wired through plot_style.apply_ax_style
     # (it consults card.plotTheme() via ax.figure._plot_card). The stats chip is
-    # left hidden — its statsChanged signal isn't wired to ctx.app state yet (the
+    # left hidden — its statsChanged signal isn't wired to typed state yet (the
     # error band lives on the controls row above; Mean/Median is unsupported).
-    card.plotThemeChanged.connect(lambda _m: ctx.app._redraw())
+    card.plotThemeChanged.connect(lambda _m: redraw_app(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
     card.panelCopied.connect(ctx.set_status)
     card.setStatsChipVisible(False)

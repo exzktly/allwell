@@ -558,10 +558,10 @@ def toggle_fov_replicates(ctx) -> None:
     invalidate_stats_cache(ctx)
     refresh_fov_btn_state(ctx)
     refresh_bar_layout_btn_state(ctx)
-    redraw_app(ctx.ctx)
+    redraw_app(ctx)
     # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
-    _vis = getattr(ctx, "_is_tab_visible", None)
-    if _vis("Bar Plots") if callable(_vis) else current_centre_tab(ctx.ctx) == "Bar Plots":
+    _vis = getattr(ctx.app, "_is_tab_visible", None)
+    if _vis("Bar Plots") if callable(_vis) else current_centre_tab(ctx.app) == "Bar Plots":
         redraw_bars(ctx)
 
 

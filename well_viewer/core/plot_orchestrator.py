@@ -185,7 +185,13 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
     )
 
 
-def redraw_app(app) -> None:
+def redraw_app(ctx) -> None:
+    # A8: takes ``ctx`` so features fan out a full redraw without naming the
+    # god-object (``redraw_app(ctx)`` replaces ``ctx.app._redraw()``). The
+    # orchestration body still drives the app's figure/notebook widgets, so it
+    # unwraps the handle once here — a single core-level bridge, not a per-call
+    # feature reach-through.
+    app = ctx.app
     # Keep the EmptyState/figure stacks in sync with the current data
     # state before any matplotlib work. When no data is loaded the plot
     # is hidden behind the EmptyState page, so we can skip the actual
@@ -206,7 +212,7 @@ def redraw_app(app) -> None:
         all_fluor_values_filtered=_all_fluor_values_filtered,
         warn=WARN,
     )
-    apply_export_style_to_current(app._ctx, app._line_fig, getattr(app, "_line_canvas", None))
+    apply_export_style_to_current(ctx, app._line_fig, getattr(app, "_line_canvas", None))
 
     # Keep the Export Configurator's line-order lists in sync with the
     # current selection / replicate sets when the sidebar is open.

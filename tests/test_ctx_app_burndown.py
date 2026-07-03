@@ -329,7 +329,15 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (redraw/progress-bar/save+load gating/quick-edit refresh/qc controls/
 #              fold-change member labels/status). Callers across well_viewer + tests
 #              pass app._ctx; SimpleNamespace fakes get a ctx w/ AppRuntime.
-CTX_APP_BUDGET = 97
+#   97  -> 98   Fix a latent load-path bug surfaced by the cell_gating slow tests:
+#              sample_definitions.load_from_pipeline_info was called with ctx
+#              (since 5504fea) but still took `app` and read app._app_state, so
+#              every dataset open raised AttributeError — silently swallowed by
+#              load_directory's guard, meaning saved replicate sets / groups /
+#              well labels / notes never re-hydrated. Convert the fn to ctx
+#              (ctx.state + invalidate_stats_cache(ctx)); the lone _apply_unified_
+#              state(ctx.app, block) bridge is the +1.
+CTX_APP_BUDGET = 98
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

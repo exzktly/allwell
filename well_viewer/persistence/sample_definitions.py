@@ -203,7 +203,7 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
     return True, well_labels
 
 
-def load_from_pipeline_info(app) -> bool:
+def load_from_pipeline_info(ctx) -> bool:
     """Apply any saved sample_definitions block in pipeline_info.json.
 
     v1 blocks are migrated to the unified ``selections`` model on the fly (the
@@ -211,19 +211,20 @@ def load_from_pipeline_info(app) -> bool:
     Returns True when a block was found and applied.
     """
     from well_viewer.domain.sample_definitions import read_sample_definitions
-    if not app._app_state.dataset.data_dir:
+    if not ctx.state.dataset.data_dir:
         return False
-    block = read_sample_definitions(app._app_state.dataset.data_dir)
+    block = read_sample_definitions(ctx.state.dataset.data_dir)
     if not block:
         return False
-    applied, well_labels = _apply_unified_state(app, block)
+    applied, well_labels = _apply_unified_state(ctx.app, block)
     if not applied:
         return True  # a block existed; we just couldn't upgrade it
-    valid = set(app._app_state.dataset.well_paths.keys())
+    valid = set(ctx.state.dataset.well_paths.keys())
     for tok, lab in (well_labels or {}).items():
         if tok in valid and str(lab).strip():
-            app._app_state.dataset.well_labels[str(tok)] = str(lab).strip()
-    app._invalidate_stats_cache()
+            ctx.state.dataset.well_labels[str(tok)] = str(lab).strip()
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    invalidate_stats_cache(ctx)
     return True
 
 

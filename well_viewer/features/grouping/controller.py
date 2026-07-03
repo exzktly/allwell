@@ -149,12 +149,23 @@ def rep_add(app) -> None:
 
 
 
-def replicate_display_label(app, rset: "ReplicateSet") -> str:
+def well_display_label(ctx, lbl: str) -> str:
+    """Custom display label for a well token if defined, else the bare token.
+
+    A8 teardown: the pure body of ``WellViewerApp._well_display_label``, lifted to
+    a ctx free function so renderers can label wells without the god-object."""
+    tok = _extract_well_token(lbl) or lbl
+    return ctx.state.dataset.well_labels.get(tok, tok)
+
+
+def replicate_display_label(ctx, rset: "ReplicateSet") -> str:
     """Human-friendly x-axis label for a replicate set.
 
     If the replicate set name appears auto-generated (e.g. ``"1"``,
     ``"Replicate 2"``, ``"R3"``), use member well labels so the x-axis
     remains interpretable.
+
+    A8 teardown: pure ``ctx.state`` + the ctx ``well_display_label`` leaf.
     """
     name = str(getattr(rset, "name", "") or "").strip()
     if not name:
@@ -170,7 +181,7 @@ def replicate_display_label(app, rset: "ReplicateSet") -> str:
     if not generic_name:
         return name
 
-    wells = [app._well_display_label(w) for w in rset.wells if w in app._app_state.dataset.well_paths]
+    wells = [well_display_label(ctx, w) for w in rset.wells if w in ctx.state.dataset.well_paths]
     if not wells:
         return name
     if len(wells) <= 3:

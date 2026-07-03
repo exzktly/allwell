@@ -92,10 +92,13 @@ class _AppState:
 
 class _FakeApp:
     def __init__(self):
+        from types import SimpleNamespace
         self._app_state = _AppState()
         self._label_to_channel_key = {
             "GFP": "gfp", "Eccentricity": "shape_eccentricity",
         }
+        # active_channel_label reads ctx.state.channel (A8 teardown).
+        self._ctx = SimpleNamespace(state=self._app_state, app=self)
 
 
 def test_populate_metric_combo_collapses_for_shape(qapp):
@@ -294,7 +297,7 @@ def test_label_key_value_roundtrip():
 
     # activating it via the state mutator, then label round-trips back
     assert app._app_state.channel.set_active_shape_feature(key) is True
-    assert active_channel_label(app) == "Eccentricity"
+    assert active_channel_label(app._ctx) == "Eccentricity"
 
     # the value column resolves directly from the DataFrame (no ratio math)
     df = pd.DataFrame({"shape_eccentricity": [0.1, 0.9, float("nan")]})

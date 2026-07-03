@@ -808,7 +808,7 @@ def channel_key_for_label(app, label: str) -> str:
     # window is lossily lowercased into a bogus real-channel token like
     # ``"gfp/mcherry"`` (audit X5).
     for r in getattr(app._app_state.channel, "ratio_metrics", None) or []:
-        if label == ratio_label_for(app, r):
+        if label == ratio_label_for(app._ctx, r):
             return r.key()
     # Otherwise assume a real channel and lowercase the label.
     return str(label or "").lower()
@@ -945,28 +945,31 @@ def get_fluor_gate(ctx, channel: str) -> float:
 
 
 
-def active_channel_label(app) -> str:
-    """Return the dropdown label corresponding to the active channel."""
-    active_val_col = app._app_state.channel.active_val_col
+def active_channel_label(ctx) -> str:
+    """Return the dropdown label corresponding to the active channel.
+
+    A8 teardown: pure ``ctx.state.channel`` + the ctx ``ratio_label_for`` leaf."""
+    active_val_col = ctx.state.channel.active_val_col
     if is_ratio_key(active_val_col):
         ratio_name = ratio_name_from_key(active_val_col)
-        for r in app._app_state.channel.ratio_metrics:
+        for r in ctx.state.channel.ratio_metrics:
             if r.name == ratio_name:
-                return app._ratio_label_for(r)
+                return ratio_label_for(ctx, r)
         return ratio_name.upper()
     if is_shape_column(active_val_col):
         return shape_label_for(active_val_col) or active_val_col
-    return app._app_state.channel.active_channel.upper()
+    return ctx.state.channel.active_channel.upper()
 
 
 
-def ratio_label_for(app, ratio: RatioMetric) -> str:
+def ratio_label_for(ctx, ratio: RatioMetric) -> str:
     """Return the dropdown label for a ratio (e.g. ``"GFP/MCHERRY"``).
 
     Disambiguates by appending ``[name]`` if two ratios share a label.
-    """
+
+    A8 teardown: pure ``ctx.state.channel``."""
     base = ratio.display_label()
-    same_base = [r for r in app._app_state.channel.ratio_metrics if r.display_label() == base]
+    same_base = [r for r in ctx.state.channel.ratio_metrics if r.display_label() == base]
     if len(same_base) > 1:
         return f"{base} [{ratio.name}]"
     return base

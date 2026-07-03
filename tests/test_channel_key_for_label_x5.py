@@ -27,6 +27,8 @@ def _ratio(name="ng", num="gfp", den="mcherry"):
 def _app(ratios, *, with_map):
     channel = ChannelState(fluor_channels=["gfp", "mcherry"], ratio_metrics=list(ratios))
     app = SimpleNamespace(_app_state=SimpleNamespace(channel=channel))
+    # channel_key_for_label resolves ratio labels via ratio_label_for(ctx) (A8).
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
     if with_map:
         # Simulate the built map (real channels + ratio labels).
         app._label_to_channel_key = {"GFP": "gfp", "MCHERRY": "mcherry"}

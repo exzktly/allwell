@@ -186,7 +186,7 @@ toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, 
 from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
 from well_viewer.features.export.service import export_scatter_agg_data
 from well_viewer.features.export.style import open_export_style_panel
-rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded = _lazy_names("well_viewer.features.grouping.controller", "rep_refresh_map", "rep_add", "rep_quick_pairs_from_dropdowns", "rank_color_wells", "rank_color_rset", "rep_color_for", "replicate_display_label", "rep_sets_loaded")
+rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded, well_display_label = _lazy_names("well_viewer.features.grouping.controller", "rep_refresh_map", "rep_add", "rep_quick_pairs_from_dropdowns", "rank_color_wells", "rank_color_rset", "rep_color_for", "replicate_display_label", "rep_sets_loaded", "well_display_label")
 toggle_sem = _lazy("well_viewer.features.lineplot.controller", "toggle_sem")
 from well_viewer.core.load_controller import load_path_shim
 from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
@@ -841,14 +841,14 @@ class WellViewerApp(QWidget):
 
     # ── Ratio metric helpers ─────────────────────────────────────────────────
 
-    def _ratio_label_for(self, ratio: RatioMetric) -> str: return ratio_label_for(self, ratio)
+    def _ratio_label_for(self, ratio: RatioMetric) -> str: return ratio_label_for(self._ctx, ratio)
 
     def _ratio_dropdown_labels(self) -> List[str]:
         return [self._ratio_label_for(r) for r in self._app_state.channel.ratio_metrics]
 
     def _channel_key_for_label(self, label: str) -> str: return channel_key_for_label(self, label)
 
-    def _active_channel_label(self) -> str: return active_channel_label(self)
+    def _active_channel_label(self) -> str: return active_channel_label(self._ctx)
 
     def _rebuild_ratio_index(self) -> None: return rebuild_ratio_index(self)
 
@@ -1109,13 +1109,11 @@ class WellViewerApp(QWidget):
     # ── Bar plot export ───────────────────────────────────────────────────────
 
     def _well_display_label(self, lbl: str) -> str:
-        """Return the custom display label for *lbl* if defined, else its token."""
-        tok = _extract_well_token(lbl) or lbl
-        return self._app_state.dataset.well_labels.get(tok, tok)
+        return well_display_label(self._ctx, lbl)
 
     def _bar_well_display_label(self, lbl: str) -> str: return bar_well_display_label(self, lbl)
 
-    def _replicate_display_label(self, rset: 'ReplicateSet') -> str: return replicate_display_label(self, rset)
+    def _replicate_display_label(self, rset: 'ReplicateSet') -> str: return replicate_display_label(self._ctx, rset)
 
     def _rep_sets_loaded(self) -> 'List[ReplicateSet]': return rep_sets_loaded(self)
 

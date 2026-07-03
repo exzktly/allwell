@@ -251,7 +251,14 @@ only after the shared render graph they call takes `ctx`. Order:
      registry, load_controller. Not mechanical — it rewires the cell-gating UI's
      source of truth, so it needs its own characterization coverage + interactive
      smoke. Once done, every renderer's fluor-gate residual clears at once.
-   - **`apply_export_style_to_current`** → `ctx` (its own small pass).
+   - **`apply_export_style_to_current`** → `ctx`. **Storage prereq DONE** (commit
+     dab9823): `_export_style_prefs` / `_export_axis_prefs` moved to a typed
+     `ExportPrefsState` core slice (`AppState.export_prefs`). What remains is the
+     signature conversion of the accessor chain (`_ensure_export_style_prefs` /
+     `_ensure_axis_prefs_store` / `figure_pref_key` — the last resolves figs via
+     `ctx.widgets`) and `apply_export_style_to_current` itself to take `ctx`; the
+     accessors have many feature callers so it's a bounded signature pass, no
+     longer blocked on god-object state.
    - **`_on_plot_channel_selected`** and the channel/axis handlers (overlaps T4).
    Only after these do the per-feature renderers convert **net-negative**. So the
    next concrete task is the **cell-gating fluor/thresh edits → typed state**

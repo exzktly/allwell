@@ -871,7 +871,7 @@ class WellViewerApp(QWidget):
 
 
 
-    def _toggle_sem(self) -> None: return toggle_sem(self)
+    def _toggle_sem(self) -> None: return toggle_sem(self._ctx)
         # _toggle_sem stays off the bus until Phase 9 relocates it (see teardown doc).
 
     # ── Per-FOV-replicates toggle ────────────────────────────────────────────

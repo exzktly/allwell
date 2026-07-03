@@ -186,6 +186,10 @@ class MockApp:
         st.selection.selected_wells = set(self.per_well_pts)
         st.dataset.well_paths = {w: w for w in self.per_well_pts}
         st.plot.use_sem = True
+        # Per-FOV-replicates flag: controllers that migrated onto ``ctx.state``
+        # (A8) read the toggle here instead of the ``_use_fov_spread_active``
+        # method, so mirror the MockApp override field into typed state.
+        st.plot.use_fov_replicates = getattr(self, "_use_fov_replicates", False)
         st.plot.fc_vs_control_on = self.fc_vs_control_on
         st.plot.fc_control_label = self.fc_control_label
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on

@@ -169,4 +169,4 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)
-    canvas.mpl_connect("button_press_event", partial(on_fig_click, ctx.app))
+    canvas.mpl_connect("button_press_event", partial(on_fig_click, ctx))

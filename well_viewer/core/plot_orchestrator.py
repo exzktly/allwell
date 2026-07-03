@@ -60,7 +60,7 @@ def redraw(
     # 1. Line plot — always present (eager-built); the entry point that
     # established the orchestrator's name.
     lineplot_redraw(
-        app,
+        app._ctx,
         apply_ax_style=apply_ax_style,
         all_fluor_values=all_fluor_values,
         all_fluor_values_filtered=all_fluor_values_filtered,

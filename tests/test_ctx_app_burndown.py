@@ -305,7 +305,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              literal token (viewer_context window/persistence docstrings,
 #              image_table picker + playground comments) per the no-literal-in-
 #              comments convention; ui_helpers plotting-notebook lookup -> ctx.window.
-CTX_APP_BUDGET = 114
+#   114 -> 118  Lineplot subsystem -> ctx (controller collect/paint/finalize/
+#              redraw/on_fig_click/toggle_sem take ctx; state via ctx.state,
+#              widgets via ctx.widgets, domain leaves called directly). The
+#              whole-tree count RISES because the controller previously took a
+#              raw `app` param invisible to this ratchet; conversion surfaces the
+#              residual toggle_sem bridges (_sem_btns/_sem_observers/_redraw/
+#              _is_tab_visible/_current_centre_tab) as counted ctx.app tokens.
+CTX_APP_BUDGET = 118
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -767,16 +767,17 @@ def _cell_gating_sync_gate_state(app) -> None:
             swallowed(f"cell gating: keep last ThreshFracOn for {channel!r} (non-numeric)")
 
 
-def _cell_gating_resolve_key(app, channel: str) -> str:
+def _cell_gating_resolve_key(ctx, channel: str) -> str:
     """Map a channel arg onto the key used for the Cell Gating rows.
 
     Real fluor channels (``"gfp"``, ``"mcherry"``) are stored under their
     bare name. Ratios are stored under their full key (``"ratio:<name>"``).
-    Callers can pass either the bare ratio name (``app._app_state.channel.active_channel``
+    Callers can pass either the bare ratio name (``ctx.state.channel.active_channel``
     after a ratio switch) or the full ``ratio:`` key — resolve to whichever
     form actually exists in the typed slice so the user's edit is honoured.
-    """
-    known = app._app_state.cell_gating.thresh_frac_on
+
+    A8 teardown: pure ``ctx.state.cell_gating`` (post-R6), so it takes ``ctx``."""
+    known = ctx.state.cell_gating.thresh_frac_on
     if channel in known:
         return channel
     candidate = f"ratio:{channel}"
@@ -785,17 +786,17 @@ def _cell_gating_resolve_key(app, channel: str) -> str:
     return channel
 
 
-def cell_gating_get_fluor_gate(app, channel: str) -> float:
+def cell_gating_get_fluor_gate(ctx, channel: str) -> float:
     """FluorGating threshold for *channel* from the typed slice (0.0 = off)."""
-    key = _cell_gating_resolve_key(app, channel)
-    val = app._app_state.cell_gating.fluor_gates.get(key)
+    key = _cell_gating_resolve_key(ctx, channel)
+    val = ctx.state.cell_gating.fluor_gates.get(key)
     return 0.0 if val is None else float(val)
 
 
-def cell_gating_get_thresh_frac_on(app, channel: str) -> float:
+def cell_gating_get_thresh_frac_on(ctx, channel: str) -> float:
     """ThreshFracOn cutoff for *channel* from the typed slice (default 50.0)."""
-    key = _cell_gating_resolve_key(app, channel)
-    val = app._app_state.cell_gating.thresh_frac_on.get(key)
+    key = _cell_gating_resolve_key(ctx, channel)
+    val = ctx.state.cell_gating.thresh_frac_on.get(key)
     return 50.0 if val is None else float(val)
 
 

@@ -91,6 +91,7 @@ class _FakeApp:
     """A SimpleNamespace-ish app exposing exactly what the controller touches."""
 
     def __init__(self) -> None:
+        from types import SimpleNamespace
         self._app_state = _FakeState()
         self._cell_gating_thresh_frac_edits = {
             "gfp": _FakeEdit("50.0"),
@@ -98,6 +99,8 @@ class _FakeApp:
         }
         self.redraws = 0
         self._event_bus = _FakeBus()
+        # The gate accessors read the slice via ctx (post-R6 pure state).
+        self._ctx = SimpleNamespace(state=self._app_state, app=self)
 
     def _redraw(self) -> None:
         self.redraws += 1

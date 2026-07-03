@@ -27,7 +27,7 @@ def save_to_pipeline_info(app) -> None:
     # (keyed by ``ratio:<name>``). Iterating only ``app._app_state.channel.fluor_channels``
     # silently dropped ratio thresholds and forced the default on next load.
     thresh_frac_on = {
-        key: cell_gating_get_thresh_frac_on(app, key)
+        key: cell_gating_get_thresh_frac_on(app._ctx, key)
         for key in (app._cell_gating_thresh_frac_edits or {}).keys()
     }
     def _sorted_or_none(s):

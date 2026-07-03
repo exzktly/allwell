@@ -388,9 +388,9 @@ class WellViewerApp(QWidget):
         return
 
     # ── Threshold helpers ─────────────────────────────────────────────────────
-    def _get_fluor_gate(self, channel: str) -> float: return get_fluor_gate(self, channel)
+    def _get_fluor_gate(self, channel: str) -> float: return get_fluor_gate(self._ctx, channel)
 
-    def _get_all_fluor_gates(self) -> Dict[str, float]: return get_all_fluor_gates(self)
+    def _get_all_fluor_gates(self) -> Dict[str, float]: return get_all_fluor_gates(self._ctx)
 
     def _get_thresh_frac_on(self, channel: Optional[str] = None) -> float: return get_thresh_frac_on(self, channel)
 

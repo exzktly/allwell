@@ -834,16 +834,19 @@ def rebuild_ratio_index(app) -> None:
 
 
 
-def get_all_fluor_gates(app) -> Dict[str, float]:
+def get_all_fluor_gates(ctx) -> Dict[str, float]:
     """Get FluorGating thresholds for all loaded channels.
 
     Returns a dict mapping channel name -> gate threshold, e.g., {"gfp": 10.0, "mcherry": 20.0}.
     Used by aggregate_with_threshold_df to apply consistent gating across all channels.
-    """
-    gates = {}
-    for channel in app._app_state.channel.fluor_channels:
-        gates[channel] = app._get_fluor_gate(channel)
-    return gates
+
+    A8 teardown: pure typed state (post-R6 the values live on
+    ``ctx.state.cell_gating``), so it takes ``ctx`` — the shared render leaf every
+    plot's gating reads."""
+    return {
+        channel: get_fluor_gate(ctx, channel)
+        for channel in ctx.state.channel.fluor_channels
+    }
 
 
 
@@ -856,7 +859,7 @@ def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):
         return app._app_state.channel.threshold
     from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
-    return cell_gating_get_thresh_frac_on(app, channel)
+    return cell_gating_get_thresh_frac_on(app._ctx, channel)
 
 
 def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
@@ -887,7 +890,7 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
         cell_gating_on_threshold_frac_on_change,
     )
     edits = getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}
-    edit = edits.get(_cell_gating_resolve_key(app, channel))
+    edit = edits.get(_cell_gating_resolve_key(app._ctx, channel))
     if edit is None:
         return
     blocked = edit.blockSignals(True)
@@ -930,12 +933,15 @@ def refresh_thresh_frac_quick_edit(app) -> None:
             stepper.blockSignals(blocked)
 
 
-def get_fluor_gate(app, channel: str) -> float:
-    """Get FluorGating threshold for a channel."""
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
-        from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_fluor_gate
-        return cell_gating_get_fluor_gate(app, channel)
-    return 0.0
+def get_fluor_gate(ctx, channel: str) -> float:
+    """Get FluorGating threshold for a channel.
+
+    A8 teardown: reads the typed ``CellGatingState`` slice (post-R6), so it takes
+    ``ctx``. The slice defaults an unset channel to 0.0 (gate off) — the same
+    value the old tab-not-built guard returned — independent of whether the
+    lazily-built Cell Gating tab exists."""
+    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_fluor_gate
+    return cell_gating_get_fluor_gate(ctx, channel)
 
 
 

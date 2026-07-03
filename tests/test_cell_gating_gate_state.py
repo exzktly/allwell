@@ -40,6 +40,8 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
     app._redraw = lambda: app._calls.append("redraw")
     app._event_bus = SimpleNamespace(
         plot_options_changed=SimpleNamespace(emit=lambda s: app._calls.append("emit")))
+    # The gate accessors read the slice via ctx (post-R6 pure state).
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
     return app
 
 
@@ -68,7 +70,7 @@ def test_sync_keeps_last_committed_on_garbage(qtbot):
     _cell_gating_sync_gate_state(app)
     assert st.fluor_gates["gfp"] == 12.5
     assert st.thresh_frac_on["gfp"] == 40.0
-    assert cell_gating_get_fluor_gate(app, "gfp") == 12.5
+    assert cell_gating_get_fluor_gate(app._ctx, "gfp") == 12.5
 
 
 def test_accessors_read_slice_with_defaults_and_ratio_resolution(qtbot):
@@ -81,14 +83,14 @@ def test_accessors_read_slice_with_defaults_and_ratio_resolution(qtbot):
         thresh_frac_on={"gfp": 33.0, "ratio:top": 66.0},
     )
     app = _app(state=st, with_edits=False)   # no widgets at all → slice suffices
-    assert cell_gating_get_fluor_gate(app, "gfp") == 7.0
-    assert cell_gating_get_thresh_frac_on(app, "gfp") == 33.0
+    assert cell_gating_get_fluor_gate(app._ctx, "gfp") == 7.0
+    assert cell_gating_get_thresh_frac_on(app._ctx, "gfp") == 33.0
     # Bare ratio name resolves onto the ratio: key (the active_channel form).
-    assert cell_gating_get_fluor_gate(app, "top") == 2.0
-    assert cell_gating_get_thresh_frac_on(app, "top") == 66.0
+    assert cell_gating_get_fluor_gate(app._ctx, "top") == 2.0
+    assert cell_gating_get_thresh_frac_on(app._ctx, "top") == 66.0
     # Unknown channel → the historical defaults.
-    assert cell_gating_get_fluor_gate(app, "mcherry") == 0.0
-    assert cell_gating_get_thresh_frac_on(app, "mcherry") == 50.0
+    assert cell_gating_get_fluor_gate(app._ctx, "mcherry") == 0.0
+    assert cell_gating_get_thresh_frac_on(app._ctx, "mcherry") == 50.0
 
 
 def test_load_threshold_frac_on_pushes_slice_to_widgets(qtbot):
@@ -113,7 +115,7 @@ def test_thresh_change_handler_syncs_then_fans_out(qtbot):
     app._cell_gating_thresh_frac_edits["gfp"].setText("62.5")
     cell_gating_on_threshold_frac_on_change(app)
     assert app._app_state.cell_gating.thresh_frac_on["gfp"] == 62.5
-    assert cell_gating_get_thresh_frac_on(app, "gfp") == 62.5
+    assert cell_gating_get_thresh_frac_on(app._ctx, "gfp") == 62.5
     assert app._calls == ["invalidate", "redraw", "emit"]
 
 

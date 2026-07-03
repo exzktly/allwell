@@ -38,7 +38,7 @@ from well_viewer.features.smfish.controller import (
     scan_well_zip,
 )
 from well_viewer.features.smfish.worker import apply_global_threshold_async
-from well_viewer.domain.viewer_state import make_schema_extractor, extract_well_token
+from well_viewer.domain.viewer_state import make_schema_extractor, extract_well_token, parse_rc
 from well_viewer.core.channel_state_controller import recalculate_threshold
 from well_viewer.data.data_loading import load_well_csv
 from well_viewer.core.safe import swallowed
@@ -535,7 +535,7 @@ def _smfish_show_no_smfish_state(ctx) -> None:
 
 
 def _smfish_selected_well_token(ctx) -> str | None:
-    sels = sorted(ctx.state.selection.selected_wells, key=lambda lbl: ctx.app._parse_rc(lbl))
+    sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
     if len(sels) != 1:
         return None
     tok = extract_well_token(sels[0]) or sels[0]

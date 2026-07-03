@@ -211,7 +211,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              tail — _redraw / _invalidate_stats_cache / _parse_rc /
 #              _refresh_review_csv / persistence save+restore / recalculate_threshold
 #              — bridged through ctx.app pending their own ctx conversion.
-CTX_APP_BUDGET = 202
+#   202 -> 201  Extract the pure WellViewerApp._parse_rc god-method to a free
+#              function domain.viewer_state.parse_rc (a well-label sort key that
+#              never touched self); the delegate now forwards to it and the smFISH
+#              well-sort drops its ctx.app._parse_rc. First core god-method fully
+#              decomposed (the delegate is now a pure passthrough, deletable once
+#              its bare-app callers migrate).
+CTX_APP_BUDGET = 201
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

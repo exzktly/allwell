@@ -29,6 +29,18 @@ def extract_well_token(label: str) -> Optional[str]:
     return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else None
 
 
+def parse_rc(label: str) -> Tuple[Optional[str], Optional[str]]:
+    """Split a well label into its (row-letter, zero-padded-column) sort key.
+
+    ``"A1"`` / ``"measurements_a01"`` -> ``("A", "01")``; junk -> ``(None, None)``.
+    Pure — the ctx-free replacement for the ``WellViewerApp._parse_rc``
+    god-method, usable directly as a ``sorted(key=parse_rc)`` callable."""
+    m = re.search(r"([A-Ha-h])(\d{1,2})$", label)
+    if not m:
+        return None, None
+    return m.group(1).upper(), f"{int(m.group(2)):02d}"
+
+
 def read_pipeline_info(
     out_dir: Path,
     *,

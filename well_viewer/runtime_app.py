@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -96,6 +95,7 @@ _stats_collect_group_values = _lazy("well_viewer.features.stats.controller", "co
 _stats_draw_ks_cdf = _lazy("well_viewer.features.stats.controller", "draw_ks_cdf")
 
 from well_viewer.domain.viewer_state import read_pipeline_info as _read_pipeline_info_shared
+from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.core.ui_helpers import (
     ask_name_dialog as _ui_ask_name_dialog,
 )
@@ -782,10 +782,7 @@ class WellViewerApp(QWidget):
     # ── Plate-map sidebar helpers ─────────────────────────────────────────────
 
     def _parse_rc(self, label: str) -> Tuple[Optional[str], Optional[str]]:
-        m = re.search(r"([A-Ha-h])(\d{1,2})$", label)
-        if not m:
-            return None, None
-        return m.group(1).upper(), f"{int(m.group(2)):02d}"
+        return parse_rc(label)
 
 
     def _rebuild_all_timepoints_cache(self) -> None:

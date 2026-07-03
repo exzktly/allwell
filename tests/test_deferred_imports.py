@@ -54,7 +54,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # removable feature, so it can't be imported at module scope). The other
 # inter-feature decouplings use the core/lazy.py proxy (a call, not an import
 # statement), so they add nothing here.
-MAX_DEFERRED_FEATURE_IMPORTS = 131
+# Lowered to 130 in the X3 batch-export atomicity work: base_panel's two
+# function-local `batch_export.service` imports (`_save_figure` and the new
+# staging call in `_run_batch_jobs`) were hoisted to a single module-level
+# import — `service.py` is Qt-free, so it's safe at module scope — net-dropping
+# the count by one.
+MAX_DEFERRED_FEATURE_IMPORTS = 130
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

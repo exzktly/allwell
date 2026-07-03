@@ -588,8 +588,13 @@ class RemoteFormDialog(QDialog):
         result_q: queue.Queue = queue.Queue()
 
         def _runner() -> None:
-            ok, profiles, detail = remote_config.query_jupyterhub_profiles(host, timeout=25)
-            result_q.put((ok, profiles, detail))
+            # Always put a result — if the query raises, _poll would otherwise
+            # spin forever with the button stuck disabled (audit E17).
+            try:
+                ok, profiles, detail = remote_config.query_jupyterhub_profiles(host, timeout=25)
+                result_q.put((ok, profiles, detail))
+            except Exception as exc:  # noqa: BLE001
+                result_q.put((False, [], f"error: {exc}"))
 
         threading.Thread(target=_runner, daemon=True).start()
 
@@ -674,10 +679,15 @@ class RemoteFormDialog(QDialog):
         result_q: queue.Queue = queue.Queue()
 
         def _runner() -> None:
-            ok, detail = ssh_key_setup.probe_ssh_connection(
-                alias, key_path, timeout=15,
-            )
-            result_q.put(("ok" if ok else "fail", detail))
+            # Always put a result — a raised probe would otherwise leave _poll
+            # spinning forever with the Test button stuck disabled (audit E17).
+            try:
+                ok, detail = ssh_key_setup.probe_ssh_connection(
+                    alias, key_path, timeout=15,
+                )
+                result_q.put(("ok" if ok else "fail", detail))
+            except Exception as exc:  # noqa: BLE001
+                result_q.put(("fail", f"error: {exc}"))
 
         threading.Thread(target=_runner, daemon=True).start()
 

@@ -27,6 +27,14 @@ PIPELINE_FILES = [
     REPO_ROOT / "pipeline/cellpose.py",
     REPO_ROOT / "pipeline/stardist.py",
     REPO_ROOT / "pipeline/io.py",
+    # Code-review G4: close the coverage gap — these Qt-free pipeline modules
+    # were audited and are currently free of broad silent-pass handlers, so
+    # guard them too. (Extending the check to tuple/typed ``pass`` and broad
+    # ``return None`` needs a frozen offender baseline first — G4's remaining
+    # scope.)
+    REPO_ROOT / "pipeline/auto_threshold.py",
+    REPO_ROOT / "pipeline/flatfield.py",
+    REPO_ROOT / "pipeline/shape_features.py",
 ]
 
 

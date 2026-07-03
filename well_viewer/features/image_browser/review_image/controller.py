@@ -16,13 +16,8 @@ from well_viewer.features.image_browser.review_image.box_select import (
 from well_viewer.core.channel_state_controller import set_active_image_channel
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.data.data_loading import parse_timepoint_hours
-from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
-from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 import numpy as _np
-import numpy as np
-import pandas as pd
 
-from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 from well_viewer.core.safe import swallowed
 
 # Pure data/query helpers live in review_image/collect.py (T4). The Qt event

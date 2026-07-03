@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from well_viewer.domain.ratio_models import RatioMetric, is_ratio_key
+from well_viewer.domain.tp_match import tp_close_mask
 
 
 _logger = logging.getLogger("well_viewer")
@@ -109,8 +110,10 @@ def load_well_csv(path: Path) -> pd.DataFrame:
             from math import pi
             per = pd.to_numeric(df["shape_perimeter"], errors="coerce")
             area = pd.to_numeric(df[area_col], errors="coerce")
-            circ = (4.0 * pi * area) / (per * per)
-            df["shape_circularity"] = circ.where(per > 0)
+            # Mask non-positive perimeters BEFORE dividing (audit S8) so
+            # per == 0 yields NaN directly instead of inf/NaN + a RuntimeWarning.
+            safe_per = per.where(per > 0)
+            df["shape_circularity"] = (4.0 * pi * area) / (safe_per * safe_per)
 
     return df
 
@@ -304,7 +307,11 @@ def resolve_value_series(
         lc = key.lower()
         match = next((c for c in df.columns if c.lower() == lc), None)
         if match is None:
-            warn_key = f"resolve_value_series::{id(df)}::{key}"
+            # Key the dedupe by (column, schema fingerprint) rather than
+            # ``id(df)`` — object ids are reused after GC, which could suppress
+            # a legitimately-new warning (or fail to), and grow the set
+            # unbounded across a session.
+            warn_key = f"resolve_value_series::{key}::{hash(tuple(sorted(df.columns)))}"
             if warn_key not in _missing_col_warned:
                 _missing_col_warned.add(warn_key)
                 _logger.warning(
@@ -608,7 +615,7 @@ def _all_fluor_values_filtered(
             return np.empty(0, dtype=float)
         tp = pd.to_numeric(df[tp_col], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(tp) & (np.abs(tp - tp_filter) <= 1e-6)
+            mask &= np.isfinite(tp) & tp_close_mask(tp, tp_filter)
 
     if not mask.any():
         return np.empty(0, dtype=float)

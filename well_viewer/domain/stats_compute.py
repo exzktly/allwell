@@ -10,8 +10,8 @@ imports surface, breaks the cycle.
 
 from __future__ import annotations
 
+import json
 import math
-import statistics
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -24,6 +24,7 @@ from well_viewer.data.data_loading import (
     df_included_mask,
     resolve_value_series,
 )
+from well_viewer.domain.tp_match import tp_close, tp_close_mask
 
 
 # ── Unified replicate model (single source of truth for BOTH stats and plots) ──
@@ -90,7 +91,7 @@ def _point_at(pts, target_t):
     or None. Shared by every consumer so mean/frac/n come from the one aggregator
     the plots already use (delegate-aware via :func:`aggregate_well`)."""
     for pt in pts or []:
-        if abs(pt[0] - target_t) < 1e-6:
+        if tp_close(pt[0], target_t):
             return pt
     return None
 
@@ -116,7 +117,7 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
     tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
     val = resolve_value_series(df, val_col, ratios).to_numpy()
     with np.errstate(invalid="ignore"):
-        mask &= np.isfinite(tp) & (np.abs(tp - target_t) <= 1e-6) & np.isfinite(val)
+        mask &= np.isfinite(tp) & tp_close_mask(tp, target_t) & np.isfinite(val)
     if not mask.any():
         return float("nan"), float("nan")
     all_vals = val[mask]
@@ -238,6 +239,28 @@ def _thresh_on_col(app) -> Optional[str]:
     return "Gate_On"
 
 
+def _gate_cache_sig(app):
+    """Signature of the scatter-gate on-population state for the stats cache.
+
+    ``threshold`` alone does not capture gate-based fraction-on: when scatter-gate
+    thresholding is active, the on-population is *gate membership*, so a gate
+    resize/rename changes the computed fraction/n without changing ``threshold``.
+    Folding the active gates' full definition into the cache key stops a gate
+    edit from returning a stale cached statistic (audit S4). Returns ``None`` in
+    plain threshold mode, leaving the existing keys byte-identical there.
+    """
+    if _thresh_on_col(app) is None:
+        return None
+    gates = getattr(app, "_scatter_gates", None) or []
+    choices = getattr(app, "_cell_gating_thresh_choices", None)
+    try:
+        gates_key = json.dumps(gates, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        gates_key = repr(gates)
+    choices_key = None if choices is None else tuple(sorted(map(str, choices)))
+    return ("Gate_On", choices_key, gates_key)
+
+
 def well_aggregate_stats(
     app,
     wells,
@@ -282,7 +305,7 @@ def well_aggregate_stats(
             per_fov_spread=per_fov_spread,
         )
         for pt in pts:
-            if abs(pt[0] - target_t) < 1e-6:
+            if tp_close(pt[0], target_t):
                 _, m, sd, f, fsd, *_ = pt
                 if not math.isnan(m):
                     well_means.append(m)
@@ -345,7 +368,7 @@ def compute_rep_stats(
     """
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
-                  app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())))
+                  app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
     if cache_key in app._app_state.stats_cache.cache:
         return app._app_state.stats_cache.cache[cache_key]
 
@@ -380,7 +403,7 @@ def compute_rep_per_fov_stats(
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
                  use_sem, app._app_state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())))
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
     if cache_key in app._app_state.stats_cache.cache:
         return app._app_state.stats_cache.cache[cache_key]
 
@@ -414,7 +437,7 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
                  app._app_state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())))
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
     if cache_key in app._app_state.stats_cache.cache:
         return app._app_state.stats_cache.cache[cache_key]
 
@@ -428,7 +451,7 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
             val_col=app._app_state.channel.active_val_col,
             fluor_gates=fluor_gates,
         )
-        matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
+        matched = [pt for pt in pts if tp_close(pt[0], target_t)]
         if matched:
             # AggPoint index 4 = n_above; index 5 = n_total.
             total += int(matched[0][4])
@@ -451,7 +474,7 @@ def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
     fluor_gates = app._get_all_fluor_gates()
     cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
                  threshold, use_sem, app._app_state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())))
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
     if cache_key in app._app_state.stats_cache.cache:
         return app._app_state.stats_cache.cache[cache_key]
 

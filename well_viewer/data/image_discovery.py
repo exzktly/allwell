@@ -336,6 +336,204 @@ def scan_folder_members(
     return fluor, overlay, mask, tophat_fluor, smfish
 
 
+def _merge_scan(targets, scan_result) -> None:
+    """First-hit-wins merge of one ``scan_*_members`` result into the four
+    accumulator dicts.
+
+    ``targets`` is ``(fluor, overlay, mask, tophat_fluor)``; ``scan_result`` is
+    the ``(g, ov, mk, th, smfish)`` tuple returned by :func:`scan_zip_members` /
+    :func:`scan_folder_members`. Mirrors the per-section ``setdefault`` loops
+    the discovery function repeated once per layout (audit A4) — ``setdefault``
+    preserves the first layout to supply a given ``(fov, tp)``.
+    """
+    fluor, overlay, mask, tophat_fluor = targets
+    g, ov, mk, th, _sm = scan_result
+    for k, v in g.items():
+        fluor.setdefault(k, v)
+    for k, v in ov.items():
+        overlay.setdefault(k, v)
+    for k, v in mk.items():
+        mask.setdefault(k, v)
+    for k, v in th.items():
+        tophat_fluor.setdefault(k, v)
+
+
+def _raw_file_well_passes(
+    p: Path,
+    well_token: str,
+    _fov_tp_extractor,
+    _pipeline_info: Optional[dict],
+    image_load_debug: bool,
+) -> bool:
+    """Whether a raw on-disk file belongs to *well_token* (Section 3 filter).
+
+    Returns ``False`` (skip) when the filename resolves to a *different* well,
+    or — in the default-extractor path — carries no recognisable well token at
+    all. Preserves the original three-way branch verbatim: schema-parsed well,
+    then the legacy 5-field regex, then a free-text token match.
+    """
+    parsed = extract_pipeline_fields(p.stem, _pipeline_info)
+    parsed_well = _norm_well(str(parsed.get("well", ""))) if parsed else None
+    if parsed_well:
+        if parsed_well != well_token:
+            if image_load_debug:
+                _logger.info(
+                    "[image-load-debug] skip %s parsed_well=%s token=%s",
+                    p.name, parsed_well, well_token,
+                )
+            return False
+        return True
+    if _fov_tp_extractor is None:
+        m = _FNAME_RE.match(p.stem)
+        fw = _norm_well(m.group("well")) if m else None
+        if fw and fw != well_token:
+            if image_load_debug:
+                _logger.info(
+                    "[image-load-debug] skip %s legacy_well=%s token=%s",
+                    p.name, fw, well_token,
+                )
+            return False
+        if not fw and not _well_token_matches_text(p.name, well_token):
+            if image_load_debug:
+                _logger.info(
+                    "[image-load-debug] skip %s no well token match target=%s",
+                    p.name, well_token,
+                )
+            return False
+        return True
+    if not _well_token_matches_text(p.name, well_token):
+        if image_load_debug:
+            _logger.info(
+                "[image-load-debug] skip %s schema path no well token match target=%s",
+                p.name, well_token,
+            )
+        return False
+    return True
+
+
+def _scan_raw_disk_files(
+    search_dirs,
+    well_token: str,
+    fluor_lower: str,
+    _fov_tp_extractor,
+    _pipeline_info: Optional[dict],
+    image_load_debug: bool,
+    targets,
+) -> None:
+    """Section 3 fallback: classify raw image files found by a depth-capped
+    ``rglob`` and merge them into the accumulators (audit A4).
+
+    Only reached when no fluor was discovered through the structured layouts.
+    """
+    fluor, overlay, mask, tophat_fluor = targets
+    # Cap rglob recursion depth so a user who accidentally points the viewer at
+    # their home directory or a project root doesn't trigger a full filesystem
+    # scan. 3 levels covers the canonical data-dir / well-subdir / channel-subdir
+    # layout with headroom.
+    _MAX_DEPTH = 3
+    for search_root in search_dirs:
+        search_root_parts = len(search_root.parts)
+        for p in sorted(search_root.rglob("*")):
+            if (len(p.parts) - search_root_parts) > _MAX_DEPTH:
+                continue
+            if p.suffix.lower() not in _IMAGE_EXTS or p.name.startswith("."):
+                continue
+            kind, fov, tp = classify_member(
+                p.name, fluor_lower, _fov_tp_extractor, _pipeline_info=_pipeline_info,
+            )
+            if not kind:
+                continue
+            if well_token and not _raw_file_well_passes(
+                p, well_token, _fov_tp_extractor, _pipeline_info, image_load_debug,
+            ):
+                continue
+            ref = ImgRef(disk_path=p)
+            if kind == "fluor":
+                fluor.setdefault((fov, tp), ref)
+            elif kind == "tophat":
+                tophat_fluor.setdefault((fov, tp), ref)
+            elif kind == "overlay":
+                overlay.setdefault((fov, tp), ref)
+            else:
+                mask.setdefault((fov, tp), ref)
+
+
+def _discover_from_layouts(
+    in_dir: Optional[Path],
+    data_dir: Optional[Path],
+    well_token: str,
+    fluor_lower: str,
+    image_load_debug: bool,
+    targets,
+    _fov_tp_extractor,
+    _pipeline_info: Optional[dict],
+) -> None:
+    """Run the four structured discovery layouts (audit A4), merging each into
+    ``targets``: (1) ``in_dir`` plain zips + ``data_dir`` ``_out.zip``,
+    (1b) ``in_dir`` / ``data_dir`` ``<well>/`` subfolders, (2) flat zips in
+    ``data_dir``, (2b) flat ``<well>/`` subfolder in ``data_dir``. Sections 2/2b
+    are the ``in_dir is None`` flat-directory modes. Order is significant —
+    ``_merge_scan`` is first-hit-wins, so earlier layouts take precedence."""
+    scan_kw = dict(_fov_tp_extractor=_fov_tp_extractor, _pipeline_info=_pipeline_info)
+
+    # ── 1. Structured in/out directory layout ────────────────────────────────
+    if in_dir and in_dir.is_dir() and well_token:
+        for wzip in find_plain_well_zips_in_dir(in_dir, well_token):
+            _merge_scan(targets, scan_zip_members(wzip, fluor_lower, **scan_kw))
+
+    if in_dir and data_dir and data_dir.is_dir() and well_token:
+        for wzip in find_out_well_zips_in_dir(data_dir, well_token):
+            _merge_scan(targets, scan_zip_members(wzip, fluor_lower, **scan_kw))
+
+    # ── 1b. Well subfolder layout (folder mode, no zips) ─────────────────────
+    if in_dir and in_dir.is_dir() and well_token:
+        in_folder = find_well_subfolder(in_dir, well_token)
+        if in_folder:
+            if image_load_debug:
+                _logger.info("[image-load-debug] in_folder resolved for %s -> %s", well_token, in_folder)
+            _merge_scan(targets, scan_folder_members(in_folder, fluor_lower, **scan_kw))
+        elif image_load_debug:
+            _logger.info("[image-load-debug] in_folder missing for token=%s in %s", well_token, in_dir)
+
+    if in_dir and data_dir and data_dir.is_dir() and well_token:
+        out_folder = find_well_subfolder(data_dir, well_token)
+        if out_folder:
+            if image_load_debug:
+                _logger.info("[image-load-debug] out_folder resolved for %s -> %s", well_token, out_folder)
+            _merge_scan(targets, scan_folder_members(out_folder, fluor_lower, **scan_kw))
+        elif image_load_debug:
+            _logger.info("[image-load-debug] out_folder missing for token=%s in %s", well_token, data_dir)
+
+    # ── 2. Flat directory: all zips in data_dir ───────────────────────────────
+    if in_dir is None and data_dir and data_dir.is_dir() and well_token:
+        for wzip in find_well_zips_in_dir(data_dir, well_token):
+            _merge_scan(targets, scan_zip_members(wzip, fluor_lower, **scan_kw))
+
+    # ── 2b. Flat directory: <well>/ subfolders in data_dir ───────────────────
+    if in_dir is None and data_dir and data_dir.is_dir() and well_token:
+        flat_folder = find_well_subfolder(data_dir, well_token)
+        if flat_folder:
+            _merge_scan(targets, scan_folder_members(flat_folder, fluor_lower, **scan_kw))
+
+
+def _log_find_result(well_label, well_token, targets, channel_switch_debug: bool) -> None:
+    """Emit the not-found warnings + the channel-switch trace (audit A4)."""
+    fluor, overlay, mask, tophat_fluor = targets
+    if not fluor:
+        _logger.warning("No fluor images found for %r (token=%r)", well_label, well_token)
+    if not overlay:
+        _logger.info("No overlay images found for %r (token=%r)", well_label, well_token)
+    if not mask:
+        _logger.warning("No masks found for %r (token=%r)", well_label, well_token)
+    if tophat_fluor:
+        _logger.info("Pre-filtered tophat images found for %r (%d)", well_label, len(tophat_fluor))
+    if channel_switch_debug:
+        _logger.debug(
+            "[RI-CHSW step 5] find_well_images_and_masks done fluor=%d tophat=%d overlay=%d mask=%d",
+            len(fluor), len(tophat_fluor), len(overlay), len(mask),
+        )
+
+
 def find_well_images_and_masks(
     data_dir: Optional[Path],
     well_label: str,
@@ -369,193 +567,25 @@ def find_well_images_and_masks(
             well_label, well_token, fluor_lower,
         )
 
-    # ── 1. Structured in/out directory layout ────────────────────────────────
-    if in_dir and in_dir.is_dir() and well_token:
-        in_zips = find_plain_well_zips_in_dir(in_dir, well_token)
-        for wzip in in_zips:
-            g, ov, mk, th, _sm = scan_zip_members(
-                wzip, fluor_lower,
-                _fov_tp_extractor=_fov_tp_extractor, _pipeline_info=_pipeline_info,
-            )
-            for k, v in g.items():
-                fluor.setdefault(k, v)
-            for k, v in ov.items():
-                overlay.setdefault(k, v)
-            for k, v in mk.items():
-                mask.setdefault(k, v)
-            for k, v in th.items():
-                tophat_fluor.setdefault(k, v)
+    targets = (fluor, overlay, mask, tophat_fluor)
 
-    if in_dir and data_dir and data_dir.is_dir() and well_token:
-        out_zips = find_out_well_zips_in_dir(data_dir, well_token)
-        for wzip in out_zips:
-            g, ov, mk, th, _sm = scan_zip_members(
-                wzip, fluor_lower,
-                _fov_tp_extractor=_fov_tp_extractor, _pipeline_info=_pipeline_info,
-            )
-            for k, v in g.items():
-                fluor.setdefault(k, v)
-            for k, v in ov.items():
-                overlay.setdefault(k, v)
-            for k, v in mk.items():
-                mask.setdefault(k, v)
-            for k, v in th.items():
-                tophat_fluor.setdefault(k, v)
-
-    # ── 1b. Well subfolder layout (folder mode, no zips) ─────────────────────
-    if in_dir and in_dir.is_dir() and well_token:
-        in_folder = find_well_subfolder(in_dir, well_token)
-        if in_folder:
-            if image_load_debug:
-                _logger.info("[image-load-debug] in_folder resolved for %s -> %s", well_token, in_folder)
-            g, ov, mk, th, _sm = scan_folder_members(
-                in_folder, fluor_lower,
-                _fov_tp_extractor=_fov_tp_extractor, _pipeline_info=_pipeline_info,
-            )
-            for k, v in g.items():
-                fluor.setdefault(k, v)
-            for k, v in ov.items():
-                overlay.setdefault(k, v)
-            for k, v in mk.items():
-                mask.setdefault(k, v)
-            for k, v in th.items():
-                tophat_fluor.setdefault(k, v)
-        elif image_load_debug:
-            _logger.info("[image-load-debug] in_folder missing for token=%s in %s", well_token, in_dir)
-
-    if in_dir and data_dir and data_dir.is_dir() and well_token:
-        out_folder = find_well_subfolder(data_dir, well_token)
-        if out_folder:
-            if image_load_debug:
-                _logger.info("[image-load-debug] out_folder resolved for %s -> %s", well_token, out_folder)
-            g, ov, mk, th, _sm = scan_folder_members(
-                out_folder, fluor_lower,
-                _fov_tp_extractor=_fov_tp_extractor, _pipeline_info=_pipeline_info,
-            )
-            for k, v in g.items():
-                fluor.setdefault(k, v)
-            for k, v in ov.items():
-                overlay.setdefault(k, v)
-            for k, v in mk.items():
-                mask.setdefault(k, v)
-            for k, v in th.items():
-                tophat_fluor.setdefault(k, v)
-        elif image_load_debug:
-            _logger.info("[image-load-debug] out_folder missing for token=%s in %s", well_token, data_dir)
-
-    # ── 2. Flat directory: all zips in data_dir ───────────────────────────────
-    if in_dir is None and data_dir and data_dir.is_dir() and well_token:
-        for wzip in find_well_zips_in_dir(data_dir, well_token):
-            g, ov, mk, th, _sm = scan_zip_members(
-                wzip, fluor_lower,
-                _fov_tp_extractor=_fov_tp_extractor, _pipeline_info=_pipeline_info,
-            )
-            for k, v in g.items():
-                fluor.setdefault(k, v)
-            for k, v in ov.items():
-                overlay.setdefault(k, v)
-            for k, v in mk.items():
-                mask.setdefault(k, v)
-            for k, v in th.items():
-                tophat_fluor.setdefault(k, v)
-
-    # ── 2b. Flat directory: <well>/ subfolders in data_dir ───────────────────
-    if in_dir is None and data_dir and data_dir.is_dir() and well_token:
-        flat_folder = find_well_subfolder(data_dir, well_token)
-        if flat_folder:
-            g, ov, mk, th, _sm = scan_folder_members(
-                flat_folder, fluor_lower,
-                _fov_tp_extractor=_fov_tp_extractor, _pipeline_info=_pipeline_info,
-            )
-            for k, v in g.items():
-                fluor.setdefault(k, v)
-            for k, v in ov.items():
-                overlay.setdefault(k, v)
-            for k, v in mk.items():
-                mask.setdefault(k, v)
-            for k, v in th.items():
-                tophat_fluor.setdefault(k, v)
+    # ── 1/1b/2/2b. Structured + flat directory layouts ───────────────────────
+    _discover_from_layouts(
+        in_dir, data_dir, well_token, fluor_lower, image_load_debug,
+        targets, _fov_tp_extractor, _pipeline_info,
+    )
 
     # ── 3. Raw files on disk fallback ─────────────────────────────────────────
     search_dirs = [d for d in (in_dir, data_dir) if d and d.is_dir()] if in_dir else (
         [data_dir] if data_dir and data_dir.is_dir() else []
     )
     if not fluor and search_dirs:
-        # Cap rglob recursion depth so a user who accidentally points
-        # the viewer at their home directory or a project root doesn't
-        # trigger a full filesystem scan. 3 levels covers the canonical
-        # data-dir / well-subdir / channel-subdir layout with headroom.
-        _MAX_DEPTH = 3
-        for search_root in search_dirs:
-            search_root_parts = len(search_root.parts)
-            for p in sorted(search_root.rglob("*")):
-                if (len(p.parts) - search_root_parts) > _MAX_DEPTH:
-                    continue
-                if p.suffix.lower() not in _IMAGE_EXTS or p.name.startswith("."):
-                    continue
-                kind, fov, tp = classify_member(
-                    p.name, fluor_lower, _fov_tp_extractor, _pipeline_info=_pipeline_info,
-                )
-                if not kind:
-                    continue
-                if well_token:
-                    parsed = extract_pipeline_fields(p.stem, _pipeline_info)
-                    parsed_well = _norm_well(str(parsed.get("well", ""))) if parsed else None
-                    if parsed_well:
-                        if parsed_well != well_token:
-                            if image_load_debug:
-                                _logger.info(
-                                    "[image-load-debug] skip %s parsed_well=%s token=%s",
-                                    p.name, parsed_well, well_token,
-                                )
-                            continue
-                    elif _fov_tp_extractor is None:
-                        m = _FNAME_RE.match(p.stem)
-                        fw = _norm_well(m.group("well")) if m else None
-                        if fw and fw != well_token:
-                            if image_load_debug:
-                                _logger.info(
-                                    "[image-load-debug] skip %s legacy_well=%s token=%s",
-                                    p.name, fw, well_token,
-                                )
-                            continue
-                        if not fw and not _well_token_matches_text(p.name, well_token):
-                            if image_load_debug:
-                                _logger.info(
-                                    "[image-load-debug] skip %s no well token match target=%s",
-                                    p.name, well_token,
-                                )
-                            continue
-                    elif not _well_token_matches_text(p.name, well_token):
-                        if image_load_debug:
-                            _logger.info(
-                                "[image-load-debug] skip %s schema path no well token match target=%s",
-                                p.name, well_token,
-                            )
-                        continue
-                ref = ImgRef(disk_path=p)
-                if kind == "fluor":
-                    fluor.setdefault((fov, tp), ref)
-                elif kind == "tophat":
-                    tophat_fluor.setdefault((fov, tp), ref)
-                elif kind == "overlay":
-                    overlay.setdefault((fov, tp), ref)
-                else:
-                    mask.setdefault((fov, tp), ref)
-
-    if not fluor:
-        _logger.warning("No fluor images found for %r (token=%r)", well_label, well_token)
-    if not overlay:
-        _logger.info("No overlay images found for %r (token=%r)", well_label, well_token)
-    if not mask:
-        _logger.warning("No masks found for %r (token=%r)", well_label, well_token)
-    if tophat_fluor:
-        _logger.info("Pre-filtered tophat images found for %r (%d)", well_label, len(tophat_fluor))
-    if channel_switch_debug:
-        _logger.debug(
-            "[RI-CHSW step 5] find_well_images_and_masks done fluor=%d tophat=%d overlay=%d mask=%d",
-            len(fluor), len(tophat_fluor), len(overlay), len(mask),
+        _scan_raw_disk_files(
+            search_dirs, well_token, fluor_lower,
+            _fov_tp_extractor, _pipeline_info, image_load_debug, targets,
         )
+
+    _log_find_result(well_label, well_token, targets, channel_switch_debug)
 
     return (
         dict(sorted(fluor.items())),

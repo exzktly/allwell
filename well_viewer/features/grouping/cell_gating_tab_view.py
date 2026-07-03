@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -57,20 +56,16 @@ from well_viewer.core.lazy import lazy as _lazy
 apply_review_overrides_to_cache = _lazy("well_viewer.features.image_browser.review_image.controller", "apply_review_overrides_to_cache")
 compute_gate_inclusion = _lazy("well_viewer.features.scatter.gating", "compute_gate_inclusion")
 
+# Pure domain compute lives in cell_gating_compute (audit A3). ``_scan_fc_fractions``
+# keeps its old private name here as an alias so existing importers/tests resolve.
+from well_viewer.features.grouping.cell_gating_compute import (
+    ThreshFracOptimizationResult,
+    apply_fluor_gating,
+    scan_fc_fractions as _scan_fc_fractions,
+)
+
 
 logger = logging.getLogger("well_viewer.gating_worker")
-
-
-@dataclass(frozen=True)
-class ThreshFracOptimizationResult:
-    """Best threshold scan result for a two-well fraction-on comparison."""
-
-    threshold: float
-    frac_a: float
-    frac_b: float
-    difference: float
-    n_a: int
-    n_b: int
 
 
 class GatingWorker(QThread):
@@ -86,6 +81,7 @@ class GatingWorker(QThread):
 
     progress = Signal(int, int)  # (current, total)
     finished_ok = Signal()
+    failed = Signal(str)         # emitted with the error message on any crash
 
     def __init__(self, app, parent: Optional[object] = None) -> None:
         super().__init__(parent)
@@ -96,7 +92,15 @@ class GatingWorker(QThread):
         self._cancelled = True
 
     def run(self) -> None:
-        self._run_inner()
+        # A raise in _run_inner previously killed the QThread with no signal:
+        # finished_ok never fired, the UI stayed stuck, and the exception
+        # vanished into sys.excepthook (audit E7). Route it through ``failed``
+        # so the caller can release the UI and report it.
+        try:
+            self._run_inner()
+        except Exception as exc:
+            logger.exception("gating worker failed")
+            self.failed.emit(str(exc))
 
     def _run_inner(self) -> None:
         debug = _debug_flags.cell_gating_debug_enabled()
@@ -139,50 +143,19 @@ class GatingWorker(QThread):
 
             df = self._app._get_rows(label)
             row_count = 0 if df is None else len(df)
-            if df is None or df.empty:
-                well_included = 0
-            else:
-                # Gating layer → Included / Gate_Pass.
-                if use_scatter:
-                    # Scatter-gate inclusion REPLACES the per-channel FluorGating:
-                    # Included is all-pass for this layer and the gate membership
-                    # lives in Gate_Pass, so the per-cell scatter keeps the full
-                    # cloud while every other view filters via df_included_mask.
-                    # Mode on + no selected gates ⇒ no restriction.
-                    if gating_gates:
-                        gate_mask = pd.Series(
-                            compute_gate_inclusion(df, gating_gates, ratios),
-                            index=df.index,
-                        )
-                    else:
-                        gate_mask = pd.Series(True, index=df.index)
-                    df["Included"] = 1
-                    df["Gate_Pass"] = gate_mask.astype(int)
-                    well_included = int(gate_mask.sum())
-                else:
-                    mask = pd.Series(True, index=df.index)
-                    for channel, gate_threshold in fluor_gates.items():
-                        col = f"{channel}_mean_intensity"
-                        if col not in df.columns:
-                            mask = pd.Series(False, index=df.index)
-                            break
-                        v = pd.to_numeric(df[col], errors="coerce")
-                        mask &= v.notna() & (v > gate_threshold)
-                    df["Included"] = mask.astype(int)
-                    # Neutralise any Gate_Pass left over from a previous
-                    # scatter-gate pass so intensity gating isn't still filtered.
-                    df["Gate_Pass"] = 1
-                    well_included = int(mask.sum())
-
-                # Thresholding layer → Gate_On (fraction-on by gate), using its
-                # OWN gate selection. Only read by the aggregation when
-                # thresholding is active (see stats_compute._thresh_on_col);
-                # neutral (1) otherwise so a stale membership can't leak in.
-                if use_thresh and thresh_gates:
-                    df["Gate_On"] = compute_gate_inclusion(
-                        df, thresh_gates, ratios).astype(int)
-                else:
-                    df["Gate_On"] = 1
+            # Per-well gating math lives in cell_gating_compute.apply_fluor_gating
+            # (audit A3) — it writes Included / Gate_Pass / Gate_On and returns
+            # the included count. Pure (df + gate config in), so it's unit-tested
+            # without a GUI fixture.
+            well_included = apply_fluor_gating(
+                df,
+                fluor_gates=fluor_gates,
+                use_scatter=use_scatter,
+                gating_gates=gating_gates,
+                use_thresh=use_thresh,
+                thresh_gates=thresh_gates,
+                ratios=ratios,
+            )
 
             included_total += well_included
             excluded_total += row_count - well_included
@@ -230,15 +203,20 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
 
-    ctx.app._cell_gating_frame = parent
-    ctx.app._cell_gating_cell_areas = []
+    # A8 burn-down: Qt widget handles go through the WidgetRegistry (``ctx.widgets``),
+    # which stamps ``app._cell_gating_*`` so the controller's legacy readers resolve.
+    # The (many) non-widget state fields + optimizer choices stay on the app.
+    reg = ctx.widgets
+
+    reg.register("_cell_gating_frame", parent)
+    ctx.runtime.cell_gating.cell_areas = []
     ctx.app._cell_gating_fluor_gate_edits = {}
     ctx.app._cell_gating_thresh_frac_edits = {}
-    ctx.app._cell_gating_fluor_data = {}
-    ctx.app._cell_gating_ratio_data = {}
-    ctx.app._cell_gating_ax = None
-    ctx.app._cell_gating_axes_stack = []
-    ctx.app._cell_gating_worker = None
+    ctx.runtime.cell_gating.fluor_data = {}
+    ctx.runtime.cell_gating.ratio_data = {}
+    ctx.runtime.cell_gating.ax = None
+    ctx.runtime.cell_gating.axes_stack = []
+    ctx.runtime.cell_gating.worker = None
     # Scatter-gate inclusion mode: when on, the Scatter Plot's rectangular gates
     # define Included instead of the per-channel FluorGating. The gating and
     # thresholding layers each pick their OWN set of gates (a set of names, or
@@ -341,7 +319,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     use_sg_cb.toggled.connect(
         lambda _on, _app=ctx.app: cell_gating_on_use_scatter_gates_change(_app)
     )
-    ctx.app._cell_gating_use_scatter_gates_cb = use_sg_cb
+    reg.register("_cell_gating_use_scatter_gates_cb", use_sg_cb)
     sg_layout.addWidget(use_sg_cb)
     sg_layout.addSpacing(8)
     sg_layout.addWidget(QLabel("Gates:", sg_row))
@@ -354,7 +332,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     gating_btn.clicked.connect(
         lambda _=False, _app=ctx.app: _open_gate_filter_menu(_app, "gating")
     )
-    ctx.app._cell_gating_gating_gate_btn = gating_btn
+    reg.register("_cell_gating_gating_gate_btn", gating_btn)
     sg_layout.addWidget(gating_btn)
     sg_layout.addStretch(1)
     cf_layout.addWidget(sg_row)
@@ -378,7 +356,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     use_th_cb.toggled.connect(
         lambda _on, _app=ctx.app: cell_gating_on_use_scatter_thresh_change(_app)
     )
-    ctx.app._cell_gating_use_scatter_thresh_cb = use_th_cb
+    reg.register("_cell_gating_use_scatter_thresh_cb", use_th_cb)
     th_layout.addWidget(use_th_cb)
     th_layout.addSpacing(8)
     th_layout.addWidget(QLabel("Gates:", th_row))
@@ -391,21 +369,21 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     thresh_btn.clicked.connect(
         lambda _=False, _app=ctx.app: _open_gate_filter_menu(_app, "thresh")
     )
-    ctx.app._cell_gating_thresh_gate_btn = thresh_btn
+    reg.register("_cell_gating_thresh_gate_btn", thresh_btn)
     th_layout.addWidget(thresh_btn)
     th_layout.addStretch(1)
     cf_layout.addWidget(th_row)
 
-    ctx.app._cell_gating_gate_summary = QLabel("", control_frame)
-    ctx.app._cell_gating_gate_summary.setObjectName("Muted")
-    ctx.app._cell_gating_gate_summary.setWordWrap(True)
-    cf_layout.addWidget(ctx.app._cell_gating_gate_summary)
+    reg.register("_cell_gating_gate_summary", QLabel("", control_frame))
+    ctx.widgets.get("_cell_gating_gate_summary").setObjectName("Muted")
+    ctx.widgets.get("_cell_gating_gate_summary").setWordWrap(True)
+    cf_layout.addWidget(ctx.widgets.get("_cell_gating_gate_summary"))
     # The scatter gating module fires this whenever a gate is drawn / edited /
     # cleared on the Scatter Plot tab: refresh the summary AND recompute Included
     # immediately so every other view tracks the gates without waiting for a tab
     # switch. (Safe now that the per-cell scatter never filters itself by the
     # gates — see df_included_mask(include_gate=False).)
-    ctx.app._scatter_gates_changed_cb = lambda _app=ctx.app: cell_gating_sync_scatter_gates(_app)
+    ctx.runtime.scatter.gates_changed_cb = lambda _app=ctx.app: cell_gating_sync_scatter_gates(_app)
     _cell_gating_refresh_gate_filter(ctx.app)
     _cell_gating_refresh_gate_summary(ctx.app)
     _cell_gating_apply_scatter_gate_mode(ctx.app)
@@ -440,38 +418,38 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx.app))
     auto_row_layout.addWidget(auto_btn)
     auto_row_layout.addStretch(1)
-    ctx.app._cell_gating_auto_btn = auto_btn
+    reg.register("_cell_gating_auto_btn", auto_btn)
     cf_layout.addWidget(auto_row)
 
-    ctx.app._cell_gating_scroll = QScrollArea(control_frame)
-    ctx.app._cell_gating_scroll.setWidgetResizable(True)
-    ctx.app._cell_gating_scroll.setFrameShape(QFrame.NoFrame)
-    ctx.app._cell_gating_scroll.setFixedHeight(120)
-    ctx.app._cell_gating_inner = QWidget()
-    QVBoxLayout(ctx.app._cell_gating_inner)
-    ctx.app._cell_gating_scroll.setWidget(ctx.app._cell_gating_inner)
-    cf_layout.addWidget(ctx.app._cell_gating_scroll)
+    reg.register("_cell_gating_scroll", QScrollArea(control_frame))
+    ctx.widgets.get("_cell_gating_scroll").setWidgetResizable(True)
+    ctx.widgets.get("_cell_gating_scroll").setFrameShape(QFrame.NoFrame)
+    ctx.widgets.get("_cell_gating_scroll").setFixedHeight(120)
+    reg.register("_cell_gating_inner", QWidget())
+    QVBoxLayout(ctx.widgets.get("_cell_gating_inner"))
+    ctx.widgets.get("_cell_gating_scroll").setWidget(ctx.widgets.get("_cell_gating_inner"))
+    cf_layout.addWidget(ctx.widgets.get("_cell_gating_scroll"))
     root.addWidget(control_frame)
 
     # CDF plot area
-    ctx.app._cell_gating_figure = Figure(figsize=(8, 5), dpi=100)
-    ctx.app._cell_gating_canvas = FigureCanvas(ctx.app._cell_gating_figure)
+    reg.register("_cell_gating_figure", Figure(figsize=(8, 5), dpi=100))
+    reg.register("_cell_gating_canvas", FigureCanvas(ctx.widgets.get("_cell_gating_figure")))
 
-    ctx.app._cell_gating_plot_scroll = QScrollArea(parent)
-    ctx.app._cell_gating_plot_scroll.setWidgetResizable(True)
-    ctx.app._cell_gating_plot_scroll.setFrameShape(QFrame.NoFrame)
-    ctx.app._cell_gating_plot_scroll.setWidget(ctx.app._cell_gating_canvas)
+    reg.register("_cell_gating_plot_scroll", QScrollArea(parent))
+    ctx.widgets.get("_cell_gating_plot_scroll").setWidgetResizable(True)
+    ctx.widgets.get("_cell_gating_plot_scroll").setFrameShape(QFrame.NoFrame)
+    ctx.widgets.get("_cell_gating_plot_scroll").setWidget(ctx.widgets.get("_cell_gating_canvas"))
     # Floor the plot height so the gating controls above can never squeeze the
     # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
-    ctx.app._cell_gating_plot_scroll.setMinimumHeight(420)
-    install_canvas_wheel_scroll(ctx.app._cell_gating_canvas, ctx.app._cell_gating_plot_scroll)
+    ctx.widgets.get("_cell_gating_plot_scroll").setMinimumHeight(420)
+    install_canvas_wheel_scroll(ctx.widgets.get("_cell_gating_canvas"), ctx.widgets.get("_cell_gating_plot_scroll"))
 
     from widgets.mpl_toolbar import MplToolbar
-    ctx.app._cell_gating_toolbar = MplToolbar(ctx.app._cell_gating_canvas, parent)
+    reg.register("_cell_gating_toolbar", MplToolbar(ctx.widgets.get("_cell_gating_canvas"), parent))
 
-    ctx.app._cell_gating_status_label = QLabel("No data loaded", parent)
-    ctx.app._cell_gating_status_label.setObjectName("Muted")
-    root.addWidget(ctx.app._cell_gating_status_label)
+    reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
+    ctx.widgets.get("_cell_gating_status_label").setObjectName("Muted")
+    root.addWidget(ctx.widgets.get("_cell_gating_status_label"))
 
     opt_panel = QWidget(parent)
     opt_layout = QVBoxLayout(opt_panel)
@@ -484,45 +462,45 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     opt_row_layout = QHBoxLayout(opt_row)
     opt_row_layout.setContentsMargins(0, 0, 0, 0)
     opt_row_layout.addWidget(QLabel("Channel:", opt_row))
-    ctx.app._cell_gating_opt_channel_combo = QComboBox(opt_row)
-    ctx.app._cell_gating_opt_channel_combo.setMinimumWidth(140)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_channel_combo)
+    reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
+    ctx.widgets.get("_cell_gating_opt_channel_combo").setMinimumWidth(140)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_channel_combo"))
     opt_row_layout.addWidget(QLabel("Well A:", opt_row))
-    ctx.app._cell_gating_opt_well_a_combo = QComboBox(opt_row)
-    ctx.app._cell_gating_opt_well_a_combo.setMinimumWidth(90)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_well_a_combo)
+    reg.register("_cell_gating_opt_well_a_combo", QComboBox(opt_row))
+    ctx.widgets.get("_cell_gating_opt_well_a_combo").setMinimumWidth(90)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_well_a_combo"))
     opt_row_layout.addWidget(QLabel("Well B:", opt_row))
-    ctx.app._cell_gating_opt_well_b_combo = QComboBox(opt_row)
-    ctx.app._cell_gating_opt_well_b_combo.setMinimumWidth(90)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_well_b_combo)
+    reg.register("_cell_gating_opt_well_b_combo", QComboBox(opt_row))
+    ctx.widgets.get("_cell_gating_opt_well_b_combo").setMinimumWidth(90)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_well_b_combo"))
     opt_row_layout.addWidget(QLabel("Timepoint:", opt_row))
-    ctx.app._cell_gating_opt_timepoint_combo = QComboBox(opt_row)
-    ctx.app._cell_gating_opt_timepoint_combo.setMinimumWidth(110)
-    ctx.app._cell_gating_opt_timepoint_combo.setToolTip(
+    reg.register("_cell_gating_opt_timepoint_combo", QComboBox(opt_row))
+    ctx.widgets.get("_cell_gating_opt_timepoint_combo").setMinimumWidth(110)
+    ctx.widgets.get("_cell_gating_opt_timepoint_combo").setToolTip(
         "Restrict the fraction-on comparison to one timepoint, or pool all "
         "timepoints. Pooling across timepoints where the wells are both 'off' "
         "early dilutes the difference, so picking the relevant timepoint gives a "
         "sharper threshold."
     )
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_timepoint_combo)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_timepoint_combo"))
     opt_row_layout.addWidget(QLabel("Min:", opt_row))
-    ctx.app._cell_gating_opt_min_edit = QLineEdit("0.0", opt_row)
-    ctx.app._cell_gating_opt_min_edit.setFixedWidth(80)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_min_edit)
+    reg.register("_cell_gating_opt_min_edit", QLineEdit("0.0", opt_row))
+    ctx.widgets.get("_cell_gating_opt_min_edit").setFixedWidth(80)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_min_edit"))
     opt_row_layout.addWidget(QLabel("Max:", opt_row))
-    ctx.app._cell_gating_opt_max_edit = QLineEdit("100.0", opt_row)
-    ctx.app._cell_gating_opt_max_edit.setFixedWidth(80)
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_max_edit)
+    reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
+    ctx.widgets.get("_cell_gating_opt_max_edit").setFixedWidth(80)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_max_edit"))
     opt_row_layout.addWidget(QLabel("# Points:", opt_row))
-    ctx.app._cell_gating_opt_steps_edit = QLineEdit("101", opt_row)
-    ctx.app._cell_gating_opt_steps_edit.setFixedWidth(64)
-    ctx.app._cell_gating_opt_steps_edit.setToolTip(
+    reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
+    ctx.widgets.get("_cell_gating_opt_steps_edit").setFixedWidth(64)
+    ctx.widgets.get("_cell_gating_opt_steps_edit").setToolTip(
         "Number of thresholds scanned across the Min–Max range, evenly "
         "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
         "thresholds (every 1 unit across a 0–100 range). Higher values "
         "give a finer scan at the cost of a little compute."
     )
-    opt_row_layout.addWidget(ctx.app._cell_gating_opt_steps_edit)
+    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_steps_edit"))
     from PySide6.QtWidgets import QPushButton as _QPushButton
     opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
     opt_btn.setProperty("variant", "secondary")
@@ -533,7 +511,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "relative fraction-on gap, |Δ| / max(fa, fb)."
     )
     opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx.app))
-    ctx.app._cell_gating_opt_btn = opt_btn
+    reg.register("_cell_gating_opt_btn", opt_btn)
     opt_row_layout.addWidget(opt_btn)
     opt_row_layout.addStretch(1)
     opt_layout.addWidget(opt_row)
@@ -548,9 +526,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     fc_row_layout = QHBoxLayout(fc_row)
     fc_row_layout.setContentsMargins(0, 0, 0, 0)
     fc_row_layout.addWidget(QLabel("Fold change —  Control:", fc_row))
-    ctx.app._cell_gating_opt_fc_control_combo = QComboBox(fc_row)
-    ctx.app._cell_gating_opt_fc_control_combo.setMinimumWidth(120)
-    ctx.app._cell_gating_opt_fc_control_combo.setToolTip(
+    reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
+    ctx.widgets.get("_cell_gating_opt_fc_control_combo").setMinimumWidth(120)
+    ctx.widgets.get("_cell_gating_opt_fc_control_combo").setToolTip(
         "Divide (or subtract) each well's fraction-on by a control well / "
         "replicate set's fraction-on at the same scanned threshold. \"—\" "
         "optimises over the raw fraction-on (the original behaviour).\n\n"
@@ -559,28 +537,28 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "has signal — use Subtract, or a Baseline, to actually reshape the "
         "A-vs-B separation."
     )
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_control_combo)
-    ctx.app._cell_gating_opt_fc_ctrl_op_combo = QComboBox(fc_row)
-    ctx.app._cell_gating_opt_fc_ctrl_op_combo.addItem("Ratio", "ratio")
-    ctx.app._cell_gating_opt_fc_ctrl_op_combo.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_ctrl_op_combo)
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_control_combo"))
+    reg.register("_cell_gating_opt_fc_ctrl_op_combo", QComboBox(fc_row))
+    ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo").addItem("Ratio", "ratio")
+    ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo").addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo"))
     fc_row_layout.addWidget(QLabel("Baseline:", fc_row))
-    ctx.app._cell_gating_opt_fc_baseline_combo = QComboBox(fc_row)
-    ctx.app._cell_gating_opt_fc_baseline_combo.setMinimumWidth(110)
-    ctx.app._cell_gating_opt_fc_baseline_combo.setToolTip(
+    reg.register("_cell_gating_opt_fc_baseline_combo", QComboBox(fc_row))
+    ctx.widgets.get("_cell_gating_opt_fc_baseline_combo").setMinimumWidth(110)
+    ctx.widgets.get("_cell_gating_opt_fc_baseline_combo").setToolTip(
         "Divide (or subtract) each well's fraction-on by its own fraction-on at "
         "a baseline timepoint. \"t0\" uses each well's earliest timepoint."
     )
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_baseline_combo)
-    ctx.app._cell_gating_opt_fc_t0_op_combo = QComboBox(fc_row)
-    ctx.app._cell_gating_opt_fc_t0_op_combo.addItem("Ratio", "ratio")
-    ctx.app._cell_gating_opt_fc_t0_op_combo.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_t0_op_combo)
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_baseline_combo"))
+    reg.register("_cell_gating_opt_fc_t0_op_combo", QComboBox(fc_row))
+    ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo").addItem("Ratio", "ratio")
+    ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo").addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo"))
     fc_row_layout.addWidget(QLabel("Order:", fc_row))
-    ctx.app._cell_gating_opt_fc_order_combo = QComboBox(fc_row)
-    ctx.app._cell_gating_opt_fc_order_combo.addItem("Control first", "ctrl_first")
-    ctx.app._cell_gating_opt_fc_order_combo.addItem("Baseline first", "t0_first")
-    fc_row_layout.addWidget(ctx.app._cell_gating_opt_fc_order_combo)
+    reg.register("_cell_gating_opt_fc_order_combo", QComboBox(fc_row))
+    ctx.widgets.get("_cell_gating_opt_fc_order_combo").addItem("Control first", "ctrl_first")
+    ctx.widgets.get("_cell_gating_opt_fc_order_combo").addItem("Baseline first", "t0_first")
+    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_order_combo"))
     fc_row_layout.addStretch(1)
     opt_layout.addWidget(fc_row)
 
@@ -590,23 +568,23 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # why a fresh Optimize used to return the range minimum). Changing only the
     # timepoint just re-derives the range.
     for _combo in (
-        ctx.app._cell_gating_opt_channel_combo,
-        ctx.app._cell_gating_opt_well_a_combo,
-        ctx.app._cell_gating_opt_well_b_combo,
+        ctx.widgets.get("_cell_gating_opt_channel_combo"),
+        ctx.widgets.get("_cell_gating_opt_well_a_combo"),
+        ctx.widgets.get("_cell_gating_opt_well_b_combo"),
     ):
         _combo.currentIndexChanged.connect(
             lambda _idx=0, _app=ctx.app: _cell_gating_on_opt_scope_changed(_app)
         )
-    ctx.app._cell_gating_opt_timepoint_combo.currentIndexChanged.connect(
+    ctx.widgets.get("_cell_gating_opt_timepoint_combo").currentIndexChanged.connect(
         lambda _idx=0, _app=ctx.app: _cell_gating_autofill_opt_range(_app)
     )
-    ctx.app._cell_gating_opt_result_label = QLabel(
+    opt_result_label = reg.register("_cell_gating_opt_result_label", QLabel(
         "Choose two wells and a threshold range, then optimize.",
         opt_panel,
-    )
-    ctx.app._cell_gating_opt_result_label.setObjectName("Muted")
-    ctx.app._cell_gating_opt_result_label.setWordWrap(True)
-    opt_layout.addWidget(ctx.app._cell_gating_opt_result_label)
+    ))
+    opt_result_label.setObjectName("Muted")
+    opt_result_label.setWordWrap(True)
+    opt_layout.addWidget(opt_result_label)
     root.addWidget(opt_panel)
 
     # CDFs anchor the bottom of the tab — controls + optimizer sit above,
@@ -616,8 +594,8 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     root.addWidget(build_section_header(
         parent, "Cumulative distributions (CDF)",
     ))
-    root.addWidget(ctx.app._cell_gating_plot_scroll)
-    root.addWidget(ctx.app._cell_gating_toolbar)
+    root.addWidget(ctx.widgets.get("_cell_gating_plot_scroll"))
+    root.addWidget(ctx.widgets.get("_cell_gating_toolbar"))
 
     _cell_gating_refresh_optimizer_controls(ctx.app)
 
@@ -1122,6 +1100,7 @@ def cell_gating_start_gating_worker(app) -> None:
     worker = GatingWorker(app)
     worker.progress.connect(lambda cur, tot: _cell_gating_on_progress(app, cur, tot))
     worker.finished_ok.connect(lambda: _cell_gating_on_finished(app))
+    worker.failed.connect(lambda msg: _cell_gating_on_failed(app, msg))
     app._cell_gating_worker = worker
     bar = getattr(app, "_progress_bar", None)
     if bar is not None:
@@ -1869,87 +1848,6 @@ def _cell_gating_autofill_opt_range(app) -> None:
     max_edit.setText(f"{hi:.6g}")
 
 
-def _fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
-    if values.size == 0:
-        return float("nan")
-    return float(np.count_nonzero(values > threshold) / values.size)
-
-
-def _frac_curve(values: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
-    """Fraction-on of *values* at each scanned threshold."""
-    return np.array(
-        [_fraction_on_for_threshold(values, float(t)) for t in thresholds],
-        dtype=float,
-    )
-
-
-def _scan_fc_fractions(
-    thresholds: np.ndarray,
-    values_a: np.ndarray,
-    values_b: np.ndarray,
-    *,
-    ctrl_values: "np.ndarray | None" = None,
-    base_values_a: "np.ndarray | None" = None,
-    base_values_b: "np.ndarray | None" = None,
-    op_ctrl: str = "ratio",
-    op_t0: str = "ratio",
-    order: str = "ctrl_first",
-):
-    """Per-threshold (fa, fb, relative-gap) curves, optionally fold-changed.
-
-    Each well's raw fraction-on is computed at every scanned threshold, then —
-    when control / baseline value arrays are supplied — adjusted at the SAME
-    threshold via :func:`fold_change.scale_bar_value` (so numerator and the
-    fold-change denominators stay self-consistent). ``ctrl_values`` is the pooled
-    control population; ``base_values_*`` are each well's baseline-timepoint
-    population. With all three ``None`` the result is the raw fraction-on scan
-    (identical to the pre-fold-change behaviour). Returns ``(fa, fb, diffs)``
-    where ``diffs`` is the relative gap ``|fa-fb| / max(|fa|, |fb|)`` (non-finite
-    / zero-magnitude coerced to ``0.0`` so ``argmax`` is meaningful).
-
-    The denominator uses the **magnitude** ``max(|fa|, |fb|)`` rather than
-    ``max(fa, fb)``: under the *subtract* fold-change operator the adjusted
-    fractions are differences that can go negative (a well below its control /
-    baseline), and a signed ``max(fa, fb)`` denominator would zero the gap across
-    the whole negative region and spike at the sign crossing — inverting the
-    curve and the chosen threshold. Magnitude is sign-safe and, for the
-    non-negative raw / ratio cases, identical to the old ``max(fa, fb)``.
-    """
-    from well_viewer.domain.fold_change import scale_bar_value
-
-    fa = _frac_curve(values_a, thresholds)
-    fb = _frac_curve(values_b, thresholds)
-
-    fc_on = ctrl_values is not None or base_values_a is not None or base_values_b is not None
-    if fc_on:
-        fc = ctrl_values is not None and ctrl_values.size > 0
-        fctrl = _frac_curve(ctrl_values, thresholds) if fc else None
-        fbase_a = _frac_curve(base_values_a, thresholds) if base_values_a is not None else None
-        fbase_b = _frac_curve(base_values_b, thresholds) if base_values_b is not None else None
-        for i in range(len(thresholds)):
-            fa[i], _ = scale_bar_value(
-                fa[i], 0.0,
-                control_mean=(fctrl[i] if fctrl is not None else None),
-                t0_mean=(fbase_a[i] if fbase_a is not None else None),
-                op_ctrl=op_ctrl, op_t0=op_t0, order=order,
-            )
-            fb[i], _ = scale_bar_value(
-                fb[i], 0.0,
-                control_mean=(fctrl[i] if fctrl is not None else None),
-                t0_mean=(fbase_b[i] if fbase_b is not None else None),
-                op_ctrl=op_ctrl, op_t0=op_t0, order=order,
-            )
-
-    abs_gap = np.abs(fa - fb)
-    # Sign-safe denominator: magnitude, not signed max — see docstring. For
-    # non-negative raw / ratio fractions this equals the old max(fa, fb).
-    larger = np.maximum(np.abs(fa), np.abs(fb))
-    with np.errstate(invalid="ignore", divide="ignore"):
-        diffs = np.divide(abs_gap, larger, out=np.zeros_like(abs_gap), where=larger > 0)
-    diffs = np.where(np.isfinite(diffs), diffs, 0.0)
-    return fa, fb, diffs
-
-
 def _opt_curve_ylim(*series) -> tuple:
     """Y-limits for the optimizer-curve popup.
 
@@ -2299,6 +2197,8 @@ def _cell_gating_plot_cdf(app) -> None:
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
         vals = np.array(sorted(values))
+        if vals.size == 0:
+            continue  # empty channel → no CDF (audit S8; avoids 0/0)
         cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)
@@ -2326,6 +2226,8 @@ def _cell_gating_plot_cdf(app) -> None:
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
         vals = np.array(sorted(values))
+        if vals.size == 0:
+            continue  # empty channel → no CDF (audit S8; avoids 0/0)
         cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)
@@ -2369,6 +2271,22 @@ def _cell_gating_on_finished(app) -> None:
         bar.setValue(0)
         bar.hide()
     app._redraw()
+
+
+def _cell_gating_on_failed(app, msg: str) -> None:
+    # Release the UI (hide the progress bar) and surface the error instead of
+    # leaving the status bar stuck mid-pass (audit E7).
+    bar = getattr(app, "_progress_bar", None)
+    if bar is not None:
+        bar.setValue(0)
+        bar.hide()
+    logger.error("Cell gating failed: %s", msg)
+    show = getattr(app, "show_status_message", None)
+    if callable(show):
+        try:
+            show(f"Cell gating failed: {msg}")
+        except Exception:
+            logger.exception("failed to display gating-error status")
 
 
 def _cell_gating_persist_params(app) -> None:

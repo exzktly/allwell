@@ -31,3 +31,11 @@ class BarPlotState:
     """
 
     tp_selections: dict[str, bool] = field(default_factory=dict)
+
+    # Per-cell overlay mode (A8 state migration: moved off the god-object
+    # ``app._bar_swarm`` / ``app._bar_violin`` attributes). Mutually exclusive —
+    # the controller's toggles clear the other. Bar-tab-local (only the bar
+    # renderer's per-cell path reads them), so they belong here, not on core
+    # PlotState.
+    swarm: bool = False
+    violin: bool = False

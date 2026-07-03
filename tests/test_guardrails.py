@@ -63,7 +63,9 @@ _HARD_FAIL = True
 RUNTIME_APP_LINE_BUDGET = 1298
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
-RUNTIME_APP_ATTR_BUDGET = 71
+# Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,
+# _bar_quick_pair_dir, _bar_quick_iter_order) → 71 - 3 = 68.
+RUNTIME_APP_ATTR_BUDGET = 68
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only

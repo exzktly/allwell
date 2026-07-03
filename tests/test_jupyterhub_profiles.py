@@ -9,14 +9,11 @@ stub-importer path is exercised).
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
-from pathlib import Path
 
 from unittest.mock import patch
 
-import pytest
 
 from services.remote_config import (
     RemoteHost,

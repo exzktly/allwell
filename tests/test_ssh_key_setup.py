@@ -100,6 +100,34 @@ def test_generate_keypair_runs_ssh_keygen_when_missing(tmp_path, monkeypatch):
     assert captured["cmd"][n_idx + 1] == ""
 
 
+def test_generate_keypair_hardens_private_key_perms(tmp_path, monkeypatch):
+    """Audit X11 — the passphrase-less private key is a bearer credential, so it
+    must be owner-only (0600). ssh-keygen writes it that way; we chmod
+    explicitly as defense-in-depth and lock the mitigation in here."""
+    import os
+    import stat
+    import sys
+
+    if sys.platform.startswith("win"):
+        import pytest
+        pytest.skip("POSIX permission bits are not meaningful on Windows")
+
+    key = tmp_path / "newkey"
+
+    def fake_run(cmd, **kwargs):
+        # ssh-keygen would write a group/world-readable file on a bad umask;
+        # simulate the loose perms so the explicit chmod is what tightens it.
+        key.write_text("priv")
+        os.chmod(key, 0o644)
+        key.with_suffix(".pub").write_text("ssh-ed25519 AAAA...")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("services.ssh_key_setup.subprocess.run", fake_run)
+    created, err = generate_keypair(key)
+    assert created is True and err == ""
+    assert stat.S_IMODE(os.stat(key).st_mode) == 0o600
+
+
 def test_generate_keypair_surfaces_ssh_keygen_error(tmp_path, monkeypatch):
     key = tmp_path / "newkey"
 

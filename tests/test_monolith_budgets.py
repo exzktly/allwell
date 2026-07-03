@@ -51,7 +51,25 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # --incremental CLI flags, dispatch, per-task diff/merge branches and driver
 # routing (+154); analyze_tab's one-line integration hook (+8). Resume ratcheting
 # down from these.
-PROCESS_MICROSCOPY_BUDGET = 4696
+# Code-review E2/E3 (+11): narrowed the image-loader catch to log skips instead
+# of swallowing (E2), and back-up-and-surface a corrupt existing pipeline_info
+# sidecar instead of silently clobbering user blocks (E3) — mandatory
+# correctness handling, not appended features. Resume ratcheting down from 4707.
+# Code-review E9 (+22): the auto-threshold estimator now counts per-channel image
+# decode failures and WARNs when a biased fraction was dropped (a silently biased
+# Otsu threshold otherwise). Mandatory correctness surfacing. Resume from 4729.
+# Code-review A1 (+26): the divergent directory- and zip-image-group parsers were
+# unified onto one shared core (_collect_image_groups) + shared parsing primitives
+# (_is_nuclear_filename / _derive_fluor_filename), so segmentation-critical
+# filename parsing can no longer drift between the two paths. This is the
+# sanctioned "structural refactor adds def/docstring scaffolding while behaviour
+# stays byte-identical" case (verified by test_image_grouping_characterization) —
+# the duplication is gone even though the raw count ticks up. Resume from 4755.
+# Code-review A10 (-48): parametrized the two ~130-line process_well_zips /
+# process_well_folders drivers onto one shared _run_well_worker_pool (+ a shared
+# _sweep_stale_scratch_dirs); the mode-specific skip/sweep/submit become
+# callables. Genuine dedup — ratcheted the budget down to the new 4707.
+PROCESS_MICROSCOPY_BUDGET = 4707
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731
@@ -59,7 +77,11 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 963
 # Ratcheted back to 1176: the loose-TIFs-in-``in/`` work centralized the
 # well-count + layout detection into input_resolution_service.count_expected_wells,
 # removing the duplicated counter from the tab.
-ANALYZE_TAB_BUDGET = 1176
+# Code-review X4/X6 (+30): the entry-boundary numeric validator
+# (_numeric_option_errors + _INT_FIELDS) that blocks a bad radius/FFT/mesh/QC
+# value up front instead of silently dropping it. Then L2 (+5): the `_alive`
+# flag + guarded log-poller re-arm so it stops on app close. Resume from 1211.
+ANALYZE_TAB_BUDGET = 1211
 
 
 def _line_count(rel: str) -> int:

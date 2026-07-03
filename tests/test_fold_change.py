@@ -12,7 +12,7 @@ import math
 
 from well_viewer.domain.fold_change import (
     _match_control_mean, _TP_REL_TOL, _rel_err_sq, _propagate_spread,
-    build_cell_scaling,
+    apply_cell_scale, build_cell_scaling,
     control_mean_at_for_bar, control_stats_at_for_bar,
     fold_change_state, fold_change_suffix,
     member_first_tp_stats, member_first_tp_value,
@@ -342,51 +342,80 @@ def test_member_first_tp_value_unknown(mock_app):
 
 # ── build_cell_scaling ──────────────────────────────────────────────────────
 
+def _apply_one(resolver, well, tp, value):
+    """Resolve the spec and apply it to a single-element array; return the
+    scalar (or nan when the spec is missing)."""
+    import numpy as np
+    spec = resolver(well, tp)
+    if spec.missing:
+        return float("nan")
+    out = apply_cell_scale(np.array([float(value)], dtype=float), spec)
+    return float(out[0])
+
+
 def test_build_cell_scaling_off():
-    fc_state = (False, "", False)
-    scale = build_cell_scaling(
-        None, ["A01"], fc_state=fc_state, target_t=0.0, **_kw(),
+    # No fold-change axes → spec is a no-op (apply leaves the value untouched).
+    resolver = build_cell_scaling(
+        None, ["A01"], fc_state=(False, "", False), **_kw(),
     )
-    assert scale["A01"] == 1.0
+    spec = resolver("A01", 0.0)
+    assert not spec.missing
+    assert math.isclose(_apply_one(resolver, "A01", 0.0, 42.0), 42.0)
 
 
-def test_build_cell_scaling_control_only(mock_app):
-    fc_state = (True, "CTRL", False)
-    scale = build_cell_scaling(
-        mock_app, ["B01", "B02"], fc_state=fc_state, target_t=1.0, **_kw(),
+def test_build_cell_scaling_control_only_divides(mock_app):
+    # vs CTRL, ratio: cell value 200 / control mean 100 = 2.0.
+    resolver = build_cell_scaling(
+        mock_app, ["B01", "B02"], fc_state=(True, "CTRL", False), **_kw(),
     )
-    # CTRL mean at t=1.0 is 100.0
-    assert math.isclose(scale["B01"], 100.0)
-    assert math.isclose(scale["B02"], 100.0)
+    assert math.isclose(_apply_one(resolver, "B01", 1.0, 200.0), 2.0)
+    assert math.isclose(_apply_one(resolver, "B02", 1.0, 200.0), 2.0)
+
+
+def test_build_cell_scaling_control_subtract(mock_app):
+    # S1: with op_ctrl="subtract" the overlay SUBTRACTS the control mean
+    # (200 - 100 = 100) instead of always dividing (which gave 2.0).
+    resolver = build_cell_scaling(
+        mock_app, ["B01"], fc_state=(True, "CTRL", False),
+        op_ctrl="subtract", **_kw(),
+    )
+    assert math.isclose(_apply_one(resolver, "B01", 1.0, 200.0), 100.0)
 
 
 def test_build_cell_scaling_t0_only(mock_app):
-    fc_state = (False, "", True)
-    scale = build_cell_scaling(
-        mock_app, ["B01", "C01"], fc_state=fc_state, target_t=2.0, **_kw(),
+    # vs t0, ratio: B01/C01 baselines are 100 / 50.
+    resolver = build_cell_scaling(
+        mock_app, ["B01", "C01"], fc_state=(False, "", True), **_kw(),
     )
-    # B01's first tp value is 100.0 (B01 is a solo well in this mock view)
-    # C01's first tp value is 50.0
-    assert math.isclose(scale["B01"], 100.0)
-    assert math.isclose(scale["C01"], 50.0)
+    assert math.isclose(_apply_one(resolver, "B01", 2.0, 300.0), 3.0)
+    assert math.isclose(_apply_one(resolver, "C01", 2.0, 300.0), 6.0)
 
 
 def test_build_cell_scaling_both(mock_app):
-    fc_state = (True, "CTRL", True)
-    scale = build_cell_scaling(
-        mock_app, ["B01"], fc_state=fc_state, target_t=1.0, **_kw(),
+    # control_mean (100) then t0_mean (100), both ratio: 10000 / 100 / 100 = 1.0.
+    resolver = build_cell_scaling(
+        mock_app, ["B01"], fc_state=(True, "CTRL", True), **_kw(),
     )
-    # control_mean (100) * t0_mean (100) = 10000
-    assert math.isclose(scale["B01"], 10000.0)
+    assert math.isclose(_apply_one(resolver, "B01", 1.0, 10000.0), 1.0)
 
 
-def test_build_cell_scaling_control_missing_yields_nan(mock_app):
-    fc_state = (True, "CTRL", False)
-    # tp doesn't exist in CTRL data
-    scale = build_cell_scaling(
-        mock_app, ["B01"], fc_state=fc_state, target_t=99.0, **_kw(),
+def test_build_cell_scaling_control_missing_is_blank(mock_app):
+    # tp 99 doesn't exist in CTRL data → spec.missing → caller blanks the slot.
+    resolver = build_cell_scaling(
+        mock_app, ["B01"], fc_state=(True, "CTRL", False), **_kw(),
     )
-    assert math.isnan(scale["B01"])
+    assert resolver("B01", 99.0).missing
+
+
+def test_build_cell_scaling_per_tp_control(mock_app):
+    # S3: the resolver honours each column's own tp — control C01's mean differs
+    # between t=0 (50) and t=1 (100), so the same cell value scales differently
+    # instead of collapsing to the first tp.
+    resolver = build_cell_scaling(
+        mock_app, ["B01"], fc_state=(True, "C01", False), **_kw(),
+    )
+    assert math.isclose(_apply_one(resolver, "B01", 0.0, 100.0), 2.0)   # /50
+    assert math.isclose(_apply_one(resolver, "B01", 1.0, 100.0), 1.0)   # /100
 
 
 # ── Error propagation ───────────────────────────────────────────────────────

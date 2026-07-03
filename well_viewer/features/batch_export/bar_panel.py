@@ -230,7 +230,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
         used_stems: set = set()
 
-        def _run_job(job) -> Optional[str]:
+        def _run_job(job, write_dir) -> Optional[str]:
             grp, tp_strs = job
             safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
             try:
@@ -244,7 +244,8 @@ class BarBatchExportPanel(BatchExportPanel):
             else:
                 stem = f"bar_{safe_grp}_t_multi"
             # Uniquify so same-after-sanitise group names don't overwrite.
-            base = out_dir / unique_export_stem(stem, used_stems)
+            # Stage into write_dir (audit X3); committed to out_dir on success.
+            base = write_dir / unique_export_stem(stem, used_stems)
 
             try:
                 from well_viewer.features.barplot.controller import (
@@ -380,6 +381,7 @@ class BarBatchExportPanel(BatchExportPanel):
             run_job_fn=_run_job,
             success_text=f"\u2713 {len(groups_with_data)}g \u00d7 {len(selected_tps)}t \u2192 {out_dir.name}/",
             status_text=f"Bar batch export complete \u2192 {out_dir}",
+            out_dir=out_dir,
         )
 
     def _render_bar_group_figure(

@@ -195,16 +195,19 @@ def draw_violin(
         # Apply fold-change scaling to the per-cell values (above-threshold
         # set only). The threshold filter ran on raw values above, so we
         # scale post-filter — that keeps the "above-threshold" semantics
-        # consistent across the bar / line / violin renderers.
+        # consistent across the bar / line / violin renderers. ``cell_scale``
+        # is a ``scale_for(well, tp)`` resolver: it honours the per-axis
+        # operator / order / baseline-tp of the bars (audit S1) at this
+        # column's own timepoint (S3).
         if cell_scale is not None:
-            factor = cell_scale.get(lbl, 1.0)
-            if not (isinstance(factor, (int, float)) and math.isfinite(factor)
-                    and factor != 0):
-                # NaN factor means we lost the denominator for this well
-                # — render a blank slot instead of misleading raw values.
+            from well_viewer.domain import fold_change as _fc
+            spec = cell_scale(lbl, col_tp)
+            if spec.missing:
+                # Baseline unresolved — render a blank slot instead of
+                # misleading raw values.
                 continue
-            if factor != 1.0:
-                vals = vals / factor
+            vals = _fc.apply_cell_scale(vals, spec)
+            vals = vals[np.isfinite(vals)]
 
         xi = xs[i] if i < len(xs) else i
         if vals.size < 3:
@@ -350,15 +353,18 @@ def draw_beeswarm(
             if n_total > 0:
                 frac_val = n_above / n_total
 
-        # Fold-change per-cell scaling — same contract as draw_violin.
+        # Fold-change per-cell scaling — same contract as draw_violin: a
+        # ``scale_for(well, tp)`` resolver honouring per-axis operator / order
+        # / baseline-tp (audit S1) at this column's timepoint (S3).
         skipped_scale = False
         if cell_scale is not None:
-            factor = cell_scale.get(lbl, 1.0)
-            if not (isinstance(factor, (int, float)) and math.isfinite(factor)
-                    and factor != 0):
+            from well_viewer.domain import fold_change as _fc
+            spec = cell_scale(lbl, col_tp)
+            if spec.missing:
                 skipped_scale = True
-            elif factor != 1.0 and cell_vals.size:
-                cell_vals = cell_vals / factor
+            elif cell_vals.size:
+                cell_vals = _fc.apply_cell_scale(cell_vals, spec)
+                cell_vals = cell_vals[np.isfinite(cell_vals)]
 
         if skipped_scale:
             ax_mean.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
@@ -861,7 +867,7 @@ def draw_per_cell_bar_mode(
     # The Properties "Show: All points" option also routes here so per-cell
     # dots overlay the bars, reusing the beeswarm path.
     show_mode = str(getattr(app._app_state.plot, "bar_show_mode", "mean_spread") or "mean_spread")
-    use_per_cell = app._bar_violin or app._bar_swarm or show_mode == "all_pts"
+    use_per_cell = app._app_state.bar.violin or app._app_state.bar.swarm or show_mode == "all_pts"
     if not use_per_cell:
         return False
     ordered_keys = app._bar_current_keys()
@@ -970,24 +976,27 @@ def draw_per_cell_bar_mode(
                 group_keys.append(full if multi_tp else "")
 
     if _debug_flags.review_bar_debug_enabled():
-        mode = "violin" if app._bar_violin else "beeswarm"
+        mode = "violin" if app._app_state.bar.violin else "beeswarm"
         _logger.debug(
             "per-cell mode=%s wells=%r labels=%r tps=%r",
             mode, plot_wells, plot_labels, plot_tps,
         )
-    # Build the per-well scale dict ONCE — same denominator each well uses for
-    # its cell values. Pass through to violin / beeswarm so fold-change
-    # participation no longer ends at the bar renderer. Fold-change resolves
-    # against the FIRST selected tp when multiple are chosen (legacy
-    # single-tp behaviour preserved for the common case).
+    # Build the per-(well, tp) fold-change resolver ONCE and pass it through to
+    # violin / beeswarm so the overlay applies the SAME operator / order /
+    # baseline-tp the bars use (audit S1) and scales each column at its own
+    # timepoint instead of collapsing multi-tp selections to the first (S3).
     _fc_state = _fc.fold_change_state(app)
     if _fc_state[0] or _fc_state[2]:
         cell_scale = _fc.build_cell_scaling(
-            app, base_wells, fc_state=_fc_state, target_t=target_ts[0],
+            app, base_wells, fc_state=_fc_state,
             threshold=threshold, val_col=app._app_state.channel.active_val_col,
             use_sem=app._app_state.plot.use_sem,
             per_fov_spread=app._use_fov_spread_active(),
             fluor_gates=app._get_all_fluor_gates(),
+            op_ctrl=_fc.parse_fc_op_ctrl(app),
+            op_t0=_fc.parse_fc_op_t0(app),
+            order=_fc.parse_fc_order(app),
+            baseline_tp=_fc.parse_baseline_tp(app),
         )
     else:
         cell_scale = None
@@ -998,7 +1007,7 @@ def draw_per_cell_bar_mode(
     # doesn't match simply falls back to integer positions).
     app._bar_xs = list(xs)
     app._bar_xs_keys = list(ordered_keys)
-    if app._bar_violin:
+    if app._app_state.bar.violin:
         draw_violin(
             app, ax_mean, ax_frac, plot_wells, plot_colors, plot_labels,
             plot_tps, tp_str, threshold,

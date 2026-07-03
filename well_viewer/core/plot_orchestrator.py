@@ -102,23 +102,23 @@ def save_matplotlib_fig(app, fig, default_name: str, *, plot_bg: str) -> None:
         return
 
     fmt = Path(out).suffix.lstrip(".").lower() or "png"
-    orig_svg = _mpl.rcParams.get("svg.fonttype", "path")
-    orig_ps = _mpl.rcParams.get("ps.fonttype", 3)
+    # rc_context restores *every* rcParam it touched on exit — including on an
+    # exception — so a savefig that raises can't leak a mutated svg/ps.fonttype
+    # into later plots (audit X17). Only the format-specific overrides go in.
+    overrides: dict = {}
+    if fmt == "svg":
+        overrides["svg.fonttype"] = "none"
+    elif fmt == "eps":
+        overrides["ps.fonttype"] = 42
     try:
-        if fmt == "svg":
-            _mpl.rcParams["svg.fonttype"] = "none"
-        elif fmt == "eps":
-            _mpl.rcParams["ps.fonttype"] = 42
         kw: dict = dict(bbox_inches="tight", facecolor=plot_bg, format=fmt)
         if fmt == "png":
             kw["dpi"] = 300
-        fig.savefig(out, **kw)
+        with _mpl.rc_context(overrides):
+            fig.savefig(out, **kw)
         app._set_status(f"Figure saved → {Path(out).name}")
     except Exception as exc:
         QMessageBox.critical(app, "Save failed", str(exc))
-    finally:
-        _mpl.rcParams["svg.fonttype"] = orig_svg
-        _mpl.rcParams["ps.fonttype"] = orig_ps
 
 
 def _launch_editor_or_save(app, fig, default_name: str, *, plot_bg: str, canvas=None) -> None:

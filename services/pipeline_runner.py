@@ -268,6 +268,14 @@ class PipelineRunner:
         # separately so a Stop click during grouping cancels it instead
         # of waiting for it to finish before reaching the pipeline.
         self._zipper_proc: Optional[subprocess.Popen] = None
+        # Guards ``_proc``/``_zipper_proc`` across the worker thread (which
+        # assigns them at launch) and the GUI thread (which reads them in
+        # stop()). Without it a Stop click racing a subprocess launch could
+        # read _proc as None *after* the worker already passed its stop check,
+        # orphaning the subprocess (audit E21). The launch path checks
+        # _stop_requested and assigns _proc under this lock so the two are
+        # atomic with respect to stop().
+        self._proc_lock: threading.Lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._last_output_dir: Optional[Path] = None
         self._log_overflow_warned: bool = False
@@ -359,7 +367,25 @@ class PipelineRunner:
     def _track_zipper_proc(self, proc: Optional[subprocess.Popen]) -> None:
         """Register / clear the grouping subprocess so ``stop()`` can
         signal it. Passed to ``resolve_input_output`` as ``proc_hook``."""
-        self._zipper_proc = proc
+        with self._proc_lock:
+            self._zipper_proc = proc
+
+    def _spawn_tracked(self, spawn_fn: Callable[[], subprocess.Popen]):
+        """Launch the pipeline subprocess and record it in ``_proc`` under the
+        lock, but only if a Stop has not already been requested.
+
+        Making the stop-check and the assignment atomic (w.r.t. ``stop()``,
+        which sets ``_stop_requested`` then reads ``_proc`` under the same
+        lock) closes the launch-after-stop race in audit E21: either stop()
+        wins and we never launch, or we launch and stop() sees the assigned
+        ``_proc`` and signals it. Returns the ``Popen`` or ``None`` if the run
+        was already cancelled.
+        """
+        with self._proc_lock:
+            if self._stop_requested.is_set():
+                return None
+            self._proc = spawn_fn()
+            return self._proc
 
     def stop(self) -> None:
         # Flag the in-progress run as cancelled — used by the worker
@@ -368,20 +394,27 @@ class PipelineRunner:
         # doesn't slip through and start the pipeline.
         self._stop_requested.set()
 
+        # Snapshot both subprocess handles under the lock so we can't read a
+        # half-assigned _proc mid-launch (audit E21). Signalling is done on the
+        # snapshot outside the lock — a SIGTERM must not block a launch racing
+        # on the same lock.
+        with self._proc_lock:
+            zipper_proc, proc = self._zipper_proc, self._proc
+
         # Reach both the grouping subprocess (if active) and the pipeline
         # subprocess. Signal each one's whole process group so any
         # multiprocessing workers it spawned get torn down too.
-        for proc in (self._zipper_proc, self._proc):
-            self._signal_subprocess(proc)
+        for p in (zipper_proc, proc):
+            self._signal_subprocess(p)
 
         # For remote runs, the local SIGTERM above tears down the ssh
         # client; ssh -tt propagates SIGHUP to the remote pipeline. The
         # second channel here is belt-and-braces — a fresh ssh that kills
         # the PID we wrote on startup, in case the PTY hangup didn't
         # propagate (older OpenSSH on the remote, NAT teardown, etc.).
-        if self._remote_runner is not None and self._proc is not None:
+        if self._remote_runner is not None and proc is not None:
             try:
-                inner = getattr(self._proc, "_ssh", None) or self._proc
+                inner = getattr(proc, "_ssh", None) or proc
                 self._remote_runner.cancel(inner)
             except Exception:  # noqa: BLE001 — best-effort kill
                 swallowed()  # was: pass (silent except)
@@ -471,6 +504,12 @@ class PipelineRunner:
                 )
             else:
                 self._run_pipeline_subprocess(args, on_success=on_success)
+        except Exception as exc:
+            # A setup-phase failure (grouping/zipper RuntimeError, a bad
+            # build_pipeline_args value, etc.) must surface as an ``error`` so
+            # the GUI shows *why* — the bare try/finally previously fell
+            # straight through to ``finished`` with no reason (audit E6).
+            self._enqueue(("error", f"Pipeline setup failed: {exc}\n"))
         finally:
             self._enqueue(("finished", None))
 
@@ -481,12 +520,15 @@ class PipelineRunner:
         on_success: Callable[[], None] | None = None,
     ) -> None:
         try:
-            self._proc = spawn_pipeline(args)
-            assert self._proc.stdout is not None
-            for line in self._proc.stdout:
+            proc = self._spawn_tracked(lambda: spawn_pipeline(args))
+            if proc is None:
+                self._enqueue(("line", "[info] Run cancelled before launch.\n"))
+                return
+            assert proc.stdout is not None
+            for line in proc.stdout:
                 self._enqueue(("line", line))
-            self._proc.wait()
-            rc = self._proc.returncode
+            proc.wait()
+            rc = proc.returncode
             if rc == 0:
                 # v5.x.x: zipper-fired-this-run source cleanup. Only
                 # runs on a clean exit (rc == 0); any failure leaves
@@ -576,7 +618,7 @@ class PipelineRunner:
                 batch_size = int(opts.get("remote_batch_size", 0) or 0)
             except (ValueError, TypeError):
                 batch_size = 0
-            self._proc = self._remote_runner.spawn(
+            proc = self._spawn_tracked(lambda: self._remote_runner.spawn(
                 zipped,
                 output_dir,
                 args,
@@ -584,12 +626,15 @@ class PipelineRunner:
                 log_fn=lambda m: self._enqueue(("line", m)),
                 progress_fn=_on_xfer_progress,
                 batch_size=max(0, batch_size),
-            )
-            assert self._proc.stdout is not None
-            for line in self._proc.stdout:
+            ))
+            if proc is None:
+                self._enqueue(("line", "[info] Remote run cancelled before launch.\n"))
+                return
+            assert proc.stdout is not None
+            for line in proc.stdout:
                 self._enqueue(("line", line))
-            self._proc.wait()
-            rc = self._proc.returncode
+            proc.wait()
+            rc = proc.returncode
 
             ok = self._remote_runner.verify_and_cleanup(
                 ok=(rc == 0),

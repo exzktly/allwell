@@ -132,8 +132,24 @@ def _write_counts_to_csvs(
     counts: dict[tuple[str, str, str, str], int],
     column: str,
     well_to_csv: dict[str, Path] | None = None,
-) -> None:
+    should_abort: Callable[[], bool] | None = None,
+) -> int:
+    """Write the counts column into each well's CSV.
+
+    ``should_abort`` (when supplied) is re-checked at the top of every
+    iteration so a dataset swap / cancel that lands *mid-loop* stops further
+    writes into the now-wrong dataset (audit E19: the identity check only ran
+    once, before the loop). Returns the number of wells actually written.
+    """
+    written = 0
     for well in sorted(well_to_zip):
+        if should_abort is not None and should_abort():
+            logger.warning(
+                "smFISH apply-global: dataset changed or run cancelled mid-write "
+                "after %d well(s); stopping to avoid writing into the wrong "
+                "dataset.", written,
+            )
+            break
         csv_path = _resolve_csv_path(well, well_to_csv, out_dir)
         if csv_path is None:
             continue
@@ -188,6 +204,8 @@ def _write_counts_to_csvs(
                 csv_path, exc,
             )
             continue
+        written += 1
+    return written
 
 
 def apply_global_threshold_async(
@@ -276,11 +294,34 @@ def apply_global_threshold_async(
                 "the run was started."
             )
             return
-        _write_counts_to_csvs(out_dir, well_to_zip, counts, column, well_to_csv)
+
+        # Re-check per-well inside the write loop: a dataset swap or cancel
+        # that lands *after* the guard above but *during* the (potentially
+        # slow, many-well) write loop would otherwise keep writing late wells
+        # into the swapped dataset (audit E19 TOCTOU).
+        def _abort_write() -> bool:
+            return _cancelled() or expected != out_dir or not out_dir.exists()
+
+        _write_counts_to_csvs(
+            out_dir, well_to_zip, counts, column, well_to_csv,
+            should_abort=_abort_write,
+        )
         if after_csv_cb is not None:
             after_csv_cb()
         done_cb("Apply to All complete. Line/Bar plots refreshed.")
 
-    thread = threading.Thread(target=_run, daemon=True)
+    def _run_guarded() -> None:
+        # A raise anywhere in _run (e.g. a pd.read_csv ParserError in
+        # _write_counts_to_csvs) previously killed the daemon thread with
+        # done_cb never firing, so "Apply Global Threshold" hung forever
+        # (audit E8). Route any unhandled failure through done_cb so the UI
+        # always gets a terminal signal.
+        try:
+            _run()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("smFISH Apply to All worker crashed")
+            done_cb(f"Apply to All failed: {exc}")
+
+    thread = threading.Thread(target=_run_guarded, daemon=True)
     thread.start()
     return thread

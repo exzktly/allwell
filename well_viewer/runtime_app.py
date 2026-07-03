@@ -54,6 +54,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.core.app_state import AppState
+from well_viewer.core.app_runtime import AppRuntime
 from well_viewer.features.registry import attach_feature_state, build_feature_registry
 from well_viewer.core.event_bus import EventBus
 from well_viewer.core.bus_wiring import wire_event_bus
@@ -192,7 +193,7 @@ from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_ap
 from well_viewer.features.preview.controller import refresh_preview_picker_shim, sync_preview_well_for_image_tabs
 review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv, refresh_review_csv_rows, review_effective_included, review_load_rows = _lazy_names("well_viewer.features.image_browser.review_image.controller", "review_row_keys", "review_norm_fov", "review_collect_timepoints", "refresh_review_csv", "refresh_review_csv_rows", "review_effective_included", "review_load_rows")
 set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache")
-open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.callbacks", "open_scatter_cell_viewer")
+open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.cell_viewer_view", "open_scatter_cell_viewer")
 col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display")
 from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
 stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("well_viewer.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
@@ -201,6 +202,39 @@ from well_viewer.core.tab_controller import on_central_pane_changed, build_centr
 from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.features.preview.panel_view import refresh_fov_btn_state
+
+
+def teardown_review_pane(app) -> None:
+    """App-close teardown for the Review pane.
+
+    ``WellViewerApp`` is mounted as a child widget of ``AllWellApp``, so its own
+    ``closeEvent`` never fires — ``AllWellApp.closeEvent`` calls this instead
+    (audit L3/L4). It (L3) signals any in-flight smFISH "Apply to All" worker to
+    abort so it can't write CSVs after the UI is gone, and (L4) disconnects the
+    application-global ``focusChanged`` watcher installed for Split View.
+    """
+    if app is None:
+        return
+    ev = getattr(app, "_smfish_cancel_event", None)
+    if ev is not None:
+        try:
+            ev.set()
+        except Exception:
+            _logger.debug("teardown: smFISH cancel event set failed", exc_info=True)
+    # Supersede any in-flight Cell Browser loader (audit E22) so its daemon
+    # thread stops reading the zipfile cache once the pane is going away.
+    loader = getattr(app, "_cell_browser_loader", None)
+    if loader is not None:
+        try:
+            loader.cancel()
+        except Exception:
+            _logger.debug("teardown: cell-browser loader cancel failed", exc_info=True)
+    try:
+        from well_viewer.core.split_view import _remove_split_focus_filter
+        _remove_split_focus_filter(app)
+    except Exception:
+        _logger.debug("teardown: split-focus-filter removal failed", exc_info=True)
+
 
 class WellViewerApp(QWidget):
 
@@ -230,14 +264,20 @@ class WellViewerApp(QWidget):
         # legacy ``app._<widget>`` reads to it so reader call sites are
         # untouched while writers migrate tab by tab.
         self._widget_registry = WidgetRegistry(self)
+        # Per-feature live-object namespaces (workers, decoded arrays, popup
+        # figures) — A8 teardown T2. Stamps app._<feature>_<name> so legacy
+        # readers resolve while builders write through ctx.runtime.
+        self._runtime = AppRuntime(self)
         # The dependency-injection context handed to tab builders and
         # controllers in place of ``self``. Bundles the typed state, the bus,
-        # and the widget registry (+ a transitional ``app`` escape hatch).
+        # the widget registry, the runtime namespaces (+ a transitional ``app``
+        # escape hatch).
         self._ctx = ViewerContext(
             app=self,
             state=self._app_state,
             bus=self._event_bus,
             widgets=self._widget_registry,
+            runtime=self._runtime,
         )
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
         wire_event_bus(self, self._event_bus)
@@ -285,7 +325,6 @@ class WellViewerApp(QWidget):
         self._fov_observers: List = []   # callables (use_fov: bool) -> None
         # Channel / timepoint comboboxes are assigned to these attrs in the view builders.
         self._plot_chan_cb = None
-        self._montage_chan_cb = None
         self._review_image_chan_cb = None
         self._bar_tp_cb = None
         self._bar_swarm_cb = None
@@ -303,8 +342,6 @@ class WellViewerApp(QWidget):
         # remain as @property shims further down.
         self._rep_quick_pair_dir   = "row"
         self._rep_quick_iter_order = "row"
-        self._bar_quick_pair_dir   = "row"
-        self._bar_quick_iter_order = "row"
         self._entry_edit = None
         self._cdf_xmin_edit = None
         self._cdf_xmax_edit = None

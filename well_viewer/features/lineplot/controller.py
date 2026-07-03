@@ -358,6 +358,145 @@ def collect_line_series(
     return series_out, band_lbl
 
 
+def _paint_series(app, series, *, fov_active: bool) -> "tuple[bool, bool, bool]":
+    """Draw one collected line series onto the mean / fraction / N / CDF axes
+    (audit A5). Returns ``(painted_ts, painted_cdf, painted_n)`` — the caller
+    ORs these across series to decide legend/empty handling. Pure side effect on
+    the axes; the drawing sequence mirrors the original inline loop exactly."""
+    any_ts = any_cdf = any_n = False
+    color = series.color
+    agg_times = [p.t for p in series.points if p.has_mean]
+    agg_means = [p.mean for p in series.points if p.has_mean]
+    agg_errs = [p.spread for p in series.points if p.has_mean]
+    if agg_times:
+        app._line_ax_mean.plot(
+            agg_times, agg_means, color=color, lw=2,
+            marker="o", markersize=4, label=series.display, zorder=3,
+        )
+        app._line_ax_mean.fill_between(
+            agg_times,
+            [m - e for m, e in zip(agg_means, agg_errs)],
+            [m + e for m, e in zip(agg_means, agg_errs)],
+            color=color, alpha=0.15, zorder=2,
+        )
+        vf = [(p.t, p.frac, p.frac_spread) for p in series.points if p.has_frac]
+        if vf:
+            vt2, vf2, vfe = zip(*vf)
+            app._line_ax_frac.plot(
+                vt2, vf2, color=color, lw=2,
+                marker="s", markersize=3, label=series.display, zorder=3,
+            )
+            if any(e > 0 for e in vfe):
+                # FOV / replicate spread present (e.g. "FOV errors" mode):
+                # draw a ±error band around the fraction line, matching the
+                # mean subplot — NOT a fill down to the x-axis (which read as
+                # "colouring the area underneath" and carried no error info).
+                lo = [max(0.0, f - e) for f, e in zip(vf2, vfe)]
+                hi = [f + e for f, e in zip(vf2, vfe)]
+                app._line_ax_frac.fill_between(
+                    vt2, lo, hi, color=color, alpha=0.15, zorder=2,
+                )
+            else:
+                # No spread (single FOV / no error mode): keep the light
+                # area shading under the curve as before.
+                app._line_ax_frac.fill_between(
+                    vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
+                )
+        any_ts = True
+        # N events panel
+        if fov_active:
+            vn = [(p.t, p.n_above_pf_mean, p.n_above_pf_spread)
+                  for p in series.points if p.has_mean]
+        else:
+            vn = [(p.t, float(p.n_above), 0.0)
+                  for p in series.points if p.has_mean]
+        if vn:
+            vnt, vnv, vne = zip(*vn)
+            app._line_ax_n.plot(
+                vnt, vnv, color=color, lw=2,
+                marker="^", markersize=3, label=series.display, zorder=3,
+            )
+            if any(e > 0 for e in vne):
+                lo = [max(0.0, v - e) for v, e in zip(vnv, vne)]
+                hi = [v + e for v, e in zip(vnv, vne)]
+                app._line_ax_n.fill_between(vnt, lo, hi, color=color, alpha=0.15, zorder=2)
+            any_n = True
+    if series.cdf_vals:
+        fluor_s = sorted(series.cdf_vals)
+        n = len(fluor_s)
+        cdf_label = (
+            f"{series.display} (n={n:,})"
+            if series.kind == "repset"
+            else f"{series.display} (n={n:,})"
+        )
+        app._line_ax_cdf.plot(
+            fluor_s, [(k + 1) / n for k in range(n)],
+            color=color, lw=1.8, label=cdf_label, zorder=3,
+        )
+        any_cdf = True
+    return any_ts, any_cdf, any_n
+
+
+def _has_labeled(ax) -> bool:
+    """True if *ax* has at least one real (non-underscore) legend label."""
+    handles, labels = ax.get_legend_handles_labels()
+    return any(lbl and not str(lbl).startswith("_") for lbl in labels)
+
+
+def _finalize_line_axes(
+    app, *, any_ts: bool, any_cdf: bool, any_n: bool,
+    fov_active: bool, fc_active: bool, legend_kw: dict,
+    threshold: float, warn: str, muted_fg,
+) -> None:
+    """Post-paint axis finishing (audit A5): N-panel integer ticks, per-panel
+    legends (honouring saved visibility), and the CDF threshold line / x-range /
+    empty message. Extracted verbatim from ``redraw_line_plots``."""
+    if any_n:
+        cur_lo, cur_hi = app._line_ax_n.get_ylim()
+        app._line_ax_n.set_ylim(0, max(cur_hi, 1))
+        if not fov_active and not fc_active:
+            # Raw counts → integer ticks. Under fold change the N panel shows a
+            # ratio, so let matplotlib pick fractional ticks.
+            from matplotlib.ticker import MaxNLocator
+            app._line_ax_n.yaxis.set_major_locator(MaxNLocator(integer=True))
+    if any_ts:
+        if _has_labeled(app._line_ax_mean):
+            leg_mean = app._line_ax_mean.legend(**legend_kw)
+            leg_mean.set_draggable(True)
+            leg_mean.set_visible(app._app_state.plot.legend_visible["mean"])
+        if _has_labeled(app._line_ax_frac):
+            leg_frac = app._line_ax_frac.legend(**legend_kw)
+            leg_frac.set_draggable(True)
+            leg_frac.set_visible(app._app_state.plot.legend_visible["frac"])
+        if any_n and _has_labeled(app._line_ax_n):
+            leg_n = app._line_ax_n.legend(**legend_kw)
+            leg_n.set_draggable(True)
+            leg_n.set_visible(app._app_state.plot.legend_visible.get("n", True))
+    if any_cdf:
+        _show_thr = getattr(app._app_state.plot, "show_threshold_line", False)
+        if _show_thr:
+            app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
+        try:
+            cdf_lo = float(app._cdf_xmin_edit.text())
+        except (ValueError, AttributeError):
+            cdf_lo = 0.0
+        try:
+            cdf_hi = float(app._cdf_xmax_edit.text())
+        except (ValueError, AttributeError):
+            cdf_hi = 300.0
+        if cdf_hi <= cdf_lo:
+            cdf_hi = cdf_lo + 1.0
+        if _show_thr:
+            app._line_ax_cdf.axvspan(threshold, cdf_hi, alpha=0.05, color=warn, zorder=1)
+        if _has_labeled(app._line_ax_cdf):
+            leg_cdf = app._line_ax_cdf.legend(**legend_kw)
+            leg_cdf.set_draggable(True)
+            leg_cdf.set_visible(app._app_state.plot.legend_visible["cdf"])
+        app._line_ax_cdf.set_xlim(cdf_lo, cdf_hi)
+    else:
+        app._line_ax_cdf.text(0.5, 0.5, f"No {app._app_state.channel.active_channel.upper()} data found.", transform=app._line_ax_cdf.transAxes, ha="center", va="center", color=muted_fg, fontsize=10)
+
+
 def redraw_line_plots(
     app,
     *,
@@ -475,125 +614,16 @@ def redraw_line_plots(
         all_fluor_values_filtered=all_fluor_values_filtered,
     )
     for series in series_list:
-        color = series.color
-        agg_times = [p.t for p in series.points if p.has_mean]
-        agg_means = [p.mean for p in series.points if p.has_mean]
-        agg_errs = [p.spread for p in series.points if p.has_mean]
-        if agg_times:
-            app._line_ax_mean.plot(
-                agg_times, agg_means, color=color, lw=2,
-                marker="o", markersize=4, label=series.display, zorder=3,
-            )
-            app._line_ax_mean.fill_between(
-                agg_times,
-                [m - e for m, e in zip(agg_means, agg_errs)],
-                [m + e for m, e in zip(agg_means, agg_errs)],
-                color=color, alpha=0.15, zorder=2,
-            )
-            vf = [(p.t, p.frac, p.frac_spread) for p in series.points if p.has_frac]
-            if vf:
-                vt2, vf2, vfe = zip(*vf)
-                app._line_ax_frac.plot(
-                    vt2, vf2, color=color, lw=2,
-                    marker="s", markersize=3, label=series.display, zorder=3,
-                )
-                if any(e > 0 for e in vfe):
-                    # FOV / replicate spread present (e.g. "FOV errors" mode):
-                    # draw a ±error band around the fraction line, matching the
-                    # mean subplot — NOT a fill down to the x-axis (which read as
-                    # "colouring the area underneath" and carried no error info).
-                    lo = [max(0.0, f - e) for f, e in zip(vf2, vfe)]
-                    hi = [f + e for f, e in zip(vf2, vfe)]
-                    app._line_ax_frac.fill_between(
-                        vt2, lo, hi, color=color, alpha=0.15, zorder=2,
-                    )
-                else:
-                    # No spread (single FOV / no error mode): keep the light
-                    # area shading under the curve as before.
-                    app._line_ax_frac.fill_between(
-                        vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
-                    )
-            any_ts = True
-            # N events panel
-            if _fov_active:
-                vn = [(p.t, p.n_above_pf_mean, p.n_above_pf_spread)
-                      for p in series.points if p.has_mean]
-            else:
-                vn = [(p.t, float(p.n_above), 0.0)
-                      for p in series.points if p.has_mean]
-            if vn:
-                vnt, vnv, vne = zip(*vn)
-                app._line_ax_n.plot(
-                    vnt, vnv, color=color, lw=2,
-                    marker="^", markersize=3, label=series.display, zorder=3,
-                )
-                if any(e > 0 for e in vne):
-                    lo = [max(0.0, v - e) for v, e in zip(vnv, vne)]
-                    hi = [v + e for v, e in zip(vnv, vne)]
-                    app._line_ax_n.fill_between(vnt, lo, hi, color=color, alpha=0.15, zorder=2)
-                any_n = True
-        if series.cdf_vals:
-            fluor_s = sorted(series.cdf_vals)
-            n = len(fluor_s)
-            cdf_label = (
-                f"{series.display} (n={n:,})"
-                if series.kind == "repset"
-                else f"{series.display} (n={n:,})"
-            )
-            app._line_ax_cdf.plot(
-                fluor_s, [(k + 1) / n for k in range(n)],
-                color=color, lw=1.8, label=cdf_label, zorder=3,
-            )
-            any_cdf = True
+        ts, cdf, n = _paint_series(app, series, fov_active=_fov_active)
+        any_ts = any_ts or ts
+        any_cdf = any_cdf or cdf
+        any_n = any_n or n
 
-    def _has_labeled(ax) -> bool:
-        handles, labels = ax.get_legend_handles_labels()
-        return any(lbl and not str(lbl).startswith("_") for lbl in labels)
-
-    if any_n:
-        cur_lo, cur_hi = app._line_ax_n.get_ylim()
-        app._line_ax_n.set_ylim(0, max(cur_hi, 1))
-        if not _fov_active and not (fc_vs_ctrl or fc_vs_t0):
-            # Raw counts → integer ticks. Under fold change the N panel shows a
-            # ratio, so let matplotlib pick fractional ticks.
-            from matplotlib.ticker import MaxNLocator
-            app._line_ax_n.yaxis.set_major_locator(MaxNLocator(integer=True))
-    if any_ts:
-        if _has_labeled(app._line_ax_mean):
-            leg_mean = app._line_ax_mean.legend(**legend_kw)
-            leg_mean.set_draggable(True)
-            leg_mean.set_visible(app._app_state.plot.legend_visible["mean"])
-        if _has_labeled(app._line_ax_frac):
-            leg_frac = app._line_ax_frac.legend(**legend_kw)
-            leg_frac.set_draggable(True)
-            leg_frac.set_visible(app._app_state.plot.legend_visible["frac"])
-        if any_n and _has_labeled(app._line_ax_n):
-            leg_n = app._line_ax_n.legend(**legend_kw)
-            leg_n.set_draggable(True)
-            leg_n.set_visible(app._app_state.plot.legend_visible.get("n", True))
-    if any_cdf:
-        _show_thr = getattr(app._app_state.plot, "show_threshold_line", False)
-        if _show_thr:
-            app._line_ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
-        try:
-            cdf_lo = float(app._cdf_xmin_edit.text())
-        except (ValueError, AttributeError):
-            cdf_lo = 0.0
-        try:
-            cdf_hi = float(app._cdf_xmax_edit.text())
-        except (ValueError, AttributeError):
-            cdf_hi = 300.0
-        if cdf_hi <= cdf_lo:
-            cdf_hi = cdf_lo + 1.0
-        if _show_thr:
-            app._line_ax_cdf.axvspan(threshold, cdf_hi, alpha=0.05, color=warn, zorder=1)
-        if _has_labeled(app._line_ax_cdf):
-            leg_cdf = app._line_ax_cdf.legend(**legend_kw)
-            leg_cdf.set_draggable(True)
-            leg_cdf.set_visible(app._app_state.plot.legend_visible["cdf"])
-        app._line_ax_cdf.set_xlim(cdf_lo, cdf_hi)
-    else:
-        app._line_ax_cdf.text(0.5, 0.5, f"No {app._app_state.channel.active_channel.upper()} data found.", transform=app._line_ax_cdf.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
+    _finalize_line_axes(
+        app, any_ts=any_ts, any_cdf=any_cdf, any_n=any_n,
+        fov_active=_fov_active, fc_active=bool(fc_vs_ctrl or fc_vs_t0),
+        legend_kw=legend_kw, threshold=threshold, warn=warn, muted_fg=_muted_fg,
+    )
 
     if fc_misses:
         # Tell the user which timepoints lost their bars/points to a

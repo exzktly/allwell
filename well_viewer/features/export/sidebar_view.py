@@ -254,7 +254,7 @@ class ExportStyleSidebar(QWidget):
 
             s_gates = section("Gates", expanded=True)
             show_tog = ToggleSwitch("Show gates")
-            show_tog.setChecked(not bool(getattr(self._app, "_scatter_gates_hidden", False)))
+            show_tog.setChecked(not bool(self._app._app_state.scatter.gates_hidden))
             show_tog.toggled.connect(lambda on: self._on_show_gates_toggled(on))
             add_row(s_gates, "", show_tog)
             # One-shot "Draw gate" button (not a toggle): clicking arms a
@@ -1075,7 +1075,7 @@ class ExportStyleSidebar(QWidget):
 
     def _on_show_gates_toggled(self, on: bool) -> None:
         """Show/hide stored gates without discarding them."""
-        self._app._scatter_gates_hidden = not bool(on)
+        self._app._app_state.scatter.gates_hidden = not bool(on)
         try:
             self._redraw_bound_figure()
         except Exception:

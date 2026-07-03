@@ -546,12 +546,10 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
     can't be packaged into a corrupt archive.
     """
     include_exts = {".tif", ".tiff", ".png"}
-    exclude_exts = {".csv"}
     candidate_files = sorted(
         p for p in image_dir.iterdir()
         if p.is_file()
         and p.suffix.lower() in include_exts
-        and p.suffix.lower() not in exclude_exts
         and not p.name.endswith(".tmp")
         # Stale _safe_imwrite / _AtomicTextHandle scratch files. The
         # `__aw_tmp_` prefix is unique enough that user filenames
@@ -944,7 +942,11 @@ def _load_image_source(source) -> "np.ndarray | None":
                 arr = arr[0]
             return arr.astype(np.float32)
         return load_2d_gray(source)
-    except Exception:
+    except (OSError, zipfile.BadZipFile, ValueError, KeyError) as exc:
+        log.debug("skipping unreadable image source %r: %s", source, exc)
+        return None
+    except Exception:  # unexpected (a bug, not bad data) — surface, still skip
+        log.warning("unexpected error loading image %r; skipping", source, exc_info=True)
         return None
 
 
@@ -1219,42 +1221,6 @@ from pipeline.flatfield import (  # noqa: E402,F401
 )
 
 
-def filter_debris(
-    labels: np.ndarray,
-    *,
-    min_area: "float | None" = None,
-    max_area: "float | None" = None,
-    min_solidity: "float | None" = None,
-) -> "tuple[np.ndarray, int]":
-    """Zero out label regions outside the size / solidity bounds (debris, merged
-    blobs, fragments). Reuses the §C ``regionprops`` pass. Returns
-    ``(cleaned_labels, n_removed)``; a no-op (returns the input) when nothing
-    matches or no bounds are given.
-    """
-    if labels is None or not np.any(labels):
-        return labels, 0
-    if min_area is None and max_area is None and min_solidity is None:
-        return labels, 0
-    from skimage.measure import regionprops_table
-    props = ["label", "area"]
-    if min_solidity is not None:
-        props.append("solidity")
-    table = regionprops_table(labels, properties=tuple(props))
-    remove = np.zeros(len(table["label"]), dtype=bool)
-    if min_area is not None:
-        remove |= table["area"] < float(min_area)
-    if max_area is not None:
-        remove |= table["area"] > float(max_area)
-    if min_solidity is not None:
-        remove |= table["solidity"] < float(min_solidity)
-    bad_ids = [int(lbl) for lbl, rm in zip(table["label"], remove) if rm]
-    if not bad_ids:
-        return labels, 0
-    cleaned = labels.copy()
-    cleaned[np.isin(labels, bad_ids)] = 0
-    return cleaned, len(bad_ids)
-
-
 def compute_region_areas(
     image: np.ndarray,
     labels: np.ndarray,
@@ -1482,6 +1448,14 @@ def _estimate_thresholds_standalone(
 
     rng = _random.Random(rng_seed)
     per_channel: "dict[str, list[float]]" = {c: [] for c in channels}
+    # Track how many candidate (label, fluor) image pairs we attempted to
+    # decode per channel and how many failed (audit E9). A decode failure was
+    # only logged at DEBUG — invisible at the default level — so a channel
+    # whose tophat images are mostly corrupt would silently compute its Otsu
+    # threshold from a small, biased subset. We surface a WARN in the summary
+    # when a meaningful fraction was dropped.
+    per_channel_attempted: "dict[str, int]" = {c: 0 for c in channels}
+    per_channel_decode_failed: "dict[str, int]" = {c: 0 for c in channels}
 
     well_zips = sorted(p for p in output_dir.glob("*_out.zip") if not p.name.startswith("."))
     if not well_zips:
@@ -1555,10 +1529,12 @@ def _estimate_thresholds_standalone(
                     fluor_name = tophat_members.get((ch, fov, tp))
                     if fluor_name is None:
                         continue
+                    per_channel_attempted[ch] += 1
                     try:
                         labels_arr = imread(_io.BytesIO(zf.read(label_name)))
                         fluor_arr = imread(_io.BytesIO(zf.read(fluor_name)))
                     except Exception as exc:
+                        per_channel_decode_failed[ch] += 1
                         log.debug("Auto-threshold: skipping %s / %s: %s",
                                   label_name, fluor_name, exc)
                         continue
@@ -1579,6 +1555,18 @@ def _estimate_thresholds_standalone(
 
     thresholds: "dict[str, float]" = {}
     for ch in channels:
+        # A biased threshold reports itself: if a large fraction of this
+        # channel's tophat/label pairs failed to decode, the Otsu estimate is
+        # computed from a non-representative subset (audit E9).
+        attempted = per_channel_attempted.get(ch, 0)
+        failed = per_channel_decode_failed.get(ch, 0)
+        if attempted and failed / attempted >= 0.25:
+            log.warning(
+                "Auto-threshold: %s — %d/%d image pair(s) failed to decode "
+                "(%.0f%%); the threshold is estimated from the remaining "
+                "subset and may be biased. Check for corrupt *_out.zip members.",
+                ch.upper(), failed, attempted, 100.0 * failed / attempted,
+            )
         values = per_channel.get(ch) or []
         if len(values) < 2:
             log.info("Auto-threshold: skipping %s — only %d sample(s)",
@@ -2060,9 +2048,6 @@ def process_image_group(
     background_method: str = "sliding_disk",
     background_models: "dict | None" = None,
     qc_remove_debris: bool = False,
-    qc_min_area: "float | None" = None,
-    qc_max_area: "float | None" = None,
-    qc_min_solidity: "float | None" = None,
     cellpose_diameter: float = 0.0,
     cellpose_model: str = "cyto3",
     cellpose_flow_threshold: float = 0.4,
@@ -2141,6 +2126,83 @@ def process_image_group(
 # Directory scan
 # ---------------------------------------------------------------------------
 
+_GROUP_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+
+
+def _grouping_channel_idx(schema: "list[str]") -> "int | None":
+    """The schema's ``channel`` slot index, or None for substring-fallback mode."""
+    return schema.index("channel") if "channel" in schema else None
+
+
+def _is_nuclear_filename(
+    name: str, stem: str, nuclear_token: str, channel_idx: "int | None", sep: str,
+) -> bool:
+    """Whether *name* is a nuclear file (audit A1) — schema ``channel`` slot, or
+    substring fallback. Shared so dir + zip scanners classify identically."""
+    if channel_idx is not None:
+        parts = stem.split(sep)
+        return channel_idx < len(parts) and parts[channel_idx] == nuclear_token
+    return nuclear_token in name
+
+
+def _derive_fluor_filename(
+    name: str, stem: str, suffix: str, nuclear_token: str, fluor_token: str,
+    channel_idx: "int | None", sep: str,
+) -> str:
+    """Derive one fluor channel's *filename* from a nuclear name (audit A1);
+    ``""`` if the channel slot is out of range. Shared by both scanners."""
+    if channel_idx is not None:
+        parts = stem.split(sep)
+        if channel_idx >= len(parts):
+            return ""
+        parts[channel_idx] = fluor_token
+        return sep.join(parts) + suffix
+    return name.replace(nuclear_token, fluor_token)
+
+
+def _collect_image_groups(
+    entries,
+    *,
+    nuclear_token: str,
+    fluor_tokens: "list[str]",
+    channel_idx: "int | None",
+    sep: str,
+    exists,
+    on_missing_fluor,
+):
+    """Core nuclear+fluor grouping shared by the dir and zip scanners (audit A1
+    — segmentation depends on both parsing identically).
+
+    *entries* is ``[(name, ctx)]`` — ``name`` the parseable basename, ``ctx``
+    opaque per-caller state (nuclear ``Path`` for dir, ``None`` for zip).
+    ``exists(ctx, fluor_name)`` tests presence; missing fluors go to
+    ``on_missing_fluor(fluor_name)``. Returns ``(groups, incomplete)`` =
+    ``([(name, ctx, [fluor_name...])], [(name, ctx)])``.
+    """
+    groups: list = []
+    incomplete: list = []
+    for name, ctx in entries:
+        p = Path(name)
+        stem, suffix = p.stem, p.suffix
+        if not _is_nuclear_filename(name, stem, nuclear_token, channel_idx, sep):
+            continue
+        fluor_names = [
+            _derive_fluor_filename(name, stem, suffix, nuclear_token, tok, channel_idx, sep)
+            for tok in fluor_tokens
+        ]
+        if any(not fn for fn in fluor_names):
+            incomplete.append((name, ctx))
+            continue
+        missing = [fn for fn in fluor_names if not exists(ctx, fn)]
+        if missing:
+            incomplete.append((name, ctx))
+            for fn in missing:
+                on_missing_fluor(fn)
+            continue
+        groups.append((name, ctx, fluor_names))
+    return groups, incomplete
+
+
 def find_image_groups_in_zip(
     zip_path: Path,
     nuclear_token: str,
@@ -2158,9 +2220,7 @@ def find_image_groups_in_zip(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
-
-    channel_idx: "int | None" = schema.index("channel") if "channel" in schema else None
-    image_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
+    channel_idx = _grouping_channel_idx(schema)
 
     by_name: set[str] = set()
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -2168,7 +2228,7 @@ def find_image_groups_in_zip(
             base = Path(member.filename).name
             if not base or base.startswith("."):
                 continue
-            if Path(base).suffix.lower() not in image_exts:
+            if Path(base).suffix.lower() not in _GROUP_IMAGE_EXTS:
                 continue
             if base in by_name:
                 log.warning(
@@ -2179,40 +2239,18 @@ def find_image_groups_in_zip(
                 continue
             by_name.add(base)
 
-    def _derive_fluor_name(nuclear_name: str, fluor_token: str) -> str:
-        p = Path(nuclear_name)
-        if channel_idx is not None:
-            parts = p.stem.split(sep)
-            if channel_idx >= len(parts):
-                return ""
-            parts[channel_idx] = fluor_token
-            return sep.join(parts) + p.suffix
-        return p.name.replace(nuclear_token, fluor_token)
+    grp, incomplete = _collect_image_groups(
+        [(base, None) for base in sorted(by_name)],
+        nuclear_token=nuclear_token, fluor_tokens=fluor_tokens,
+        channel_idx=channel_idx, sep=sep,
+        exists=lambda _ctx, fn: fn in by_name,
+        on_missing_fluor=lambda fn: log.warning(
+            "  missing fluor file in zip %s: %s", zip_path.name, fn),
+    )
 
     groups: list[tuple[Path, list[Path]]] = []
     needed_members: set[str] = set()
-    incomplete: list[str] = []
-
-    for base in sorted(by_name):
-        p = Path(base)
-        if channel_idx is not None:
-            stem_parts = p.stem.split(sep)
-            if channel_idx >= len(stem_parts) or stem_parts[channel_idx] != nuclear_token:
-                continue
-        elif nuclear_token not in p.name:
-            continue
-
-        fluor_names = [_derive_fluor_name(base, tok) for tok in fluor_tokens]
-        if any(not fn for fn in fluor_names):
-            incomplete.append(base)
-            continue
-        missing = [fn for fn in fluor_names if fn not in by_name]
-        if missing:
-            incomplete.append(base)
-            for fn in missing:
-                log.warning("  missing fluor file in zip %s: %s", zip_path.name, fn)
-            continue
-
+    for base, _ctx, fluor_names in grp:
         needed_members.add(base)
         needed_members.update(fluor_names)
         groups.append((dest_dir / base, [dest_dir / fn for fn in fluor_names]))
@@ -2251,64 +2289,37 @@ def find_image_groups(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
+    channel_idx = _grouping_channel_idx(schema)
 
-    extensions = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
-    groups: "list[tuple[Path, list[Path]]]" = []
-    incomplete: list[Path] = []
     all_images = [
         p for p in sorted(input_dir.rglob("*"))
         if p.is_file()
         and not p.name.startswith(".")
         and not any(part.startswith(".") for part in p.parts)
-        and p.suffix.lower() in extensions
+        and p.suffix.lower() in _GROUP_IMAGE_EXTS
     ]
     all_set = set(all_images)
 
-    channel_idx: "int | None" = (
-        schema.index("channel") if "channel" in schema else None
+    grp, incomplete = _collect_image_groups(
+        [(p.name, p) for p in all_images],
+        nuclear_token=nuclear_token, fluor_tokens=fluor_tokens,
+        channel_idx=channel_idx, sep=sep,
+        exists=lambda ctx, fn: (ctx.parent / fn) in all_set,
+        on_missing_fluor=lambda fn: log.warning("  missing fluor file: %s", fn),
     )
 
-    def _derive_fluor_path(nuclear_path: Path, fluor_token: str) -> Path:
-        """Return the expected path for one fluorescent channel file."""
-        if channel_idx is not None:
-            parts = nuclear_path.stem.split(sep)
-            parts[channel_idx] = fluor_token
-            return nuclear_path.parent / (sep.join(parts) + nuclear_path.suffix)
-        # Legacy fallback: simple substring replacement.
-        return nuclear_path.parent / nuclear_path.name.replace(
-            nuclear_token, fluor_token
-        )
-
-    for path in all_images:
-
-        # Filter to nuclear channel files only.
-        if channel_idx is not None:
-            stem_parts = path.stem.split(sep)
-            if channel_idx >= len(stem_parts):
-                continue
-            if stem_parts[channel_idx] != nuclear_token:
-                continue
-        else:
-            if nuclear_token not in path.name:
-                continue
-
-        # Build the expected path for each fluorescent channel.
-        fluor_paths = [_derive_fluor_path(path, tok) for tok in fluor_tokens]
-        missing = [fp for fp in fluor_paths if fp not in all_set]
-        if missing:
-            incomplete.append(path)
-            for fp in missing:
-                log.warning("  missing fluor file: %s", fp.name)
-        else:
-            groups.append((path, fluor_paths))
+    groups: "list[tuple[Path, list[Path]]]" = [
+        (ctx, [ctx.parent / fn for fn in fluor_names])
+        for _name, ctx, fluor_names in grp
+    ]
 
     if incomplete:
         log.warning(
             "%d nuclear file(s) skipped due to missing fluorescent channel(s):",
             len(incomplete),
         )
-        for p in incomplete:
-            log.warning("  %s", p.name)
+        for _name, ctx in incomplete:
+            log.warning("  %s", ctx.name)
 
     log.info(
         "Found %d image group(s) in %s  (%d fluor channel(s): %s)",
@@ -3524,6 +3535,124 @@ def _unique_tokens_preserve_order(tokens: "list[str]") -> "list[str]":
 # Zip-aware orchestration
 # ---------------------------------------------------------------------------
 
+def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool) -> None:
+    """Remove stale ``_tmp_*`` staging dirs from a previous crashed run under
+    *root*, but keep any ``_tmp_images_*`` dir holding ``.fov_*.done`` checkpoint
+    markers (v5.2.0) so the worker resumes from them. ``extra_extract`` also
+    sweeps the zip-mode ``_tmp_extract_*`` scratch (audit A10)."""
+    if extra_extract:
+        for _stale in sorted(root.glob("_tmp_extract_*")):
+            if _stale.is_dir():
+                log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+                remove_directory(_stale)
+    for _stale in sorted(root.glob("_tmp_images_*")):
+        if not _stale.is_dir():
+            continue
+        if any(_stale.glob(".fov_*.done")):
+            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
+            log.info(
+                "Keeping checkpoint dir %s (%d FOV(s) already done)",
+                _stale.name, n_done,
+            )
+            continue
+        log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+        remove_directory(_stale)
+
+
+def _run_well_worker_pool(
+    *,
+    items: "list[tuple[str, Path]]",
+    output_dir: Path,
+    workers: int,
+    force: bool,
+    incremental: bool,
+    force_cpu: bool,
+    threads_per_worker: int,
+    shared_kwargs_template: dict,
+    mode_label: str,
+    stale_sweep,
+    output_exists,
+    submit_task,
+) -> None:
+    """Shared per-well ``ProcessPoolExecutor`` driver for the zip / folder modes
+    (audit A10 — both hand-rolled the identical skip / dispatch / collect / log
+    scaffolding). The mode-specific bits are callables: *stale_sweep(output_dir)*,
+    *output_exists(well_label) -> bool*, and *submit_task(executor, well_label,
+    path) -> Future* (the future resolves to ``(records, failed)``).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stale_sweep(output_dir)
+
+    # Skip already-complete wells unless --force. In --incremental mode nothing
+    # is skipped up front: every well is routed to the task, which decides
+    # new-well / merge-new-FOVs / up-to-date per well.
+    n_skipped = 0
+    to_process: list[tuple[str, Path]] = []
+    for well_label, path in items:
+        if not force and not incremental and output_exists(well_label):
+            log.info(
+                "SKIP well %s — output already exists. Use --force to reprocess.",
+                well_label,
+            )
+            n_skipped += 1
+        else:
+            to_process.append((well_label, path))
+
+    if not to_process:
+        log.info("All wells already complete.")
+        log.info("%s mode complete. %d skipped.", mode_label, n_skipped)
+        return []
+
+    _ensure_stardist_runtime_deps()
+
+    if incremental:
+        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
+                 len(to_process))
+    log.info("%s mode: %d well(s) to process, %d worker(s).", mode_label, len(to_process), workers)
+
+    all_records: list[dict] = []
+    all_failed:  list[str]  = []
+
+    ctx = mp.get_context("spawn")
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=ctx,
+        initializer=_worker_init,
+        initargs=(force_cpu, threads_per_worker,
+                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
+    ) as executor:
+        future_to_well = {
+            submit_task(executor, well_label, path): well_label
+            for well_label, path in to_process
+        }
+        for future in as_completed(future_to_well):
+            well_label = future_to_well[future]
+            try:
+                records, failed = future.result()
+                all_records.extend(records)
+                all_failed.extend(failed)
+            except Exception as exc:           # noqa: BLE001
+                _report_worker_failure(well_label, output_dir, exc)
+                all_failed.append(well_label)
+
+    log.info("=" * 60)
+    log.info("%s mode complete.", mode_label)
+    log.info(
+        "Total wells : %d  |  processed : %d  |  skipped : %d  |  "
+        "nuclei : %d  |  failed wells : %d",
+        len(items), len(to_process), n_skipped,
+        len(all_records), len(all_failed),
+    )
+    if all_failed:
+        log.warning("Failed wells/pairs:")
+        for name in all_failed:
+            log.warning("  %s", name)
+    # Surfaced to main() so a run with per-well failures sets a non-zero exit
+    # code — otherwise an all-failed run exits 0 and the remote layer treats it
+    # as success and cleans up the inputs (audit E5).
+    return all_failed
+
+
 def process_well_zips(
     input_dir: Path,
     output_dir: Path,
@@ -3540,7 +3669,7 @@ def process_well_zips(
     threads_per_worker: int = 0,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
-) -> None:
+) -> "list[str]":
     """
     Dispatch one worker process per well zip.
 
@@ -3555,109 +3684,26 @@ def process_well_zips(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sweep stale dirs from previous crashed runs. v5.2.0: a
-    # _tmp_images_* dir that holds any .fov_*.done marker is treated
-    # as per-FOV checkpoint state (not garbage) and survives the sweep —
-    # the worker will pick up where the previous attempt left off.
-    # _tmp_extract_* dirs are always per-run scratch.
-    for _stale in sorted(scratch_base_for(output_dir).glob("_tmp_extract_*")):
-        if _stale.is_dir():
-            log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
-            remove_directory(_stale)
-    for _stale in sorted(scratch_base_for(output_dir).glob("_tmp_images_*")):
-        if not _stale.is_dir():
-            continue
-        if any(_stale.glob(".fov_*.done")):
-            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
-            log.info(
-                "Keeping checkpoint dir %s (%d FOV(s) already done)",
-                _stale.name, n_done,
-            )
-            continue
-        log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
-        remove_directory(_stale)
+    def _submit(executor, well_label, zip_path):
+        return executor.submit(
+            process_well_zip_task,
+            well_label, zip_path, output_dir, shared_kwargs_template,
+            nuclear_token, fluor_tokens, csv_prefix, schema, sep,
+            incremental, incremental_prior_dir,
+        )
 
-    # Skip already-complete wells unless --force. In --incremental mode nothing
-    # is skipped up front: every well is routed to the task, which decides
-    # new-well / merge-new-FOVs / up-to-date per well.
-    n_skipped = 0
-    to_process: list[tuple[str, Path]] = []
-    for well_label, zip_path in well_zips:
-        if (not force and not incremental
-                and output_exists_for_well(output_dir, well_label, csv_prefix)):
-            log.info(
-                "SKIP well %s — output already exists. Use --force to reprocess.",
-                well_label,
-            )
-            n_skipped += 1
-        else:
-            to_process.append((well_label, zip_path))
-
-    if not to_process:
-        log.info("All wells already complete.")
-        log.info("Zip mode complete. %d skipped.", n_skipped)
-        return
-
-    _ensure_stardist_runtime_deps()
-
-    if incremental:
-        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
-                 len(to_process))
-    log.info("Zip mode: %d well(s) to process, %d worker(s).", len(to_process), workers)
-
-    # Submit one worker per well zip directly.
-    all_records: list[dict] = []
-    all_failed:  list[str]  = []
-
-    ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=ctx,
-        initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker,
-                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
-    ) as executor:
-        future_to_well = {
-            executor.submit(
-                process_well_zip_task,
-                well_label,
-                zip_path,
-                output_dir,
-                shared_kwargs_template,
-                nuclear_token,
-                fluor_tokens,
-                csv_prefix,
-                schema,
-                sep,
-                incremental,
-                incremental_prior_dir,
-            ): well_label
-            for well_label, zip_path in to_process
-        }
-        for future in as_completed(future_to_well):
-            well_label = future_to_well[future]
-            try:
-                records, failed = future.result()
-                all_records.extend(records)
-                all_failed.extend(failed)
-            except Exception as exc:           # noqa: BLE001
-                _report_worker_failure(well_label, output_dir, exc)
-                all_failed.append(well_label)
-
-    log.info("=" * 60)
-    log.info("Zip mode complete.")
-    log.info(
-        "Total wells : %d  |  processed : %d  |  skipped : %d  |  "
-        "nuclei : %d  |  failed wells : %d",
-        len(well_zips), len(to_process), n_skipped,
-        len(all_records), len(all_failed),
+    return _run_well_worker_pool(
+        items=well_zips, output_dir=output_dir, workers=workers,
+        force=force, incremental=incremental, force_cpu=force_cpu,
+        threads_per_worker=threads_per_worker,
+        shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
+        # Zip staging (extract + images) lives under the scratch base.
+        stale_sweep=lambda out: _sweep_stale_scratch_dirs(
+            scratch_base_for(out), extra_extract=True),
+        output_exists=lambda well: output_exists_for_well(output_dir, well, csv_prefix),
+        submit_task=_submit,
     )
-    if all_failed:
-        log.warning("Failed wells/pairs:")
-        for name in all_failed:
-            log.warning("  %s", name)
 
 
 def process_well_folders(
@@ -3678,7 +3724,7 @@ def process_well_folders(
     threads_per_worker: int = 0,
     schema: "list[str] | None" = None,
     sep: str = DEFAULT_SEP,
-) -> None:
+) -> "list[str]":
     """
     Dispatch one worker process per well folder (uncompressed input).
 
@@ -3692,108 +3738,29 @@ def process_well_folders(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sweep stale staging dirs left by a previous crashed run, but
-    # keep any _tmp_images_* dir that holds per-FOV checkpoint markers
-    # (v5.2.0) — the matching worker will resume from those.
-    for _stale in sorted(output_dir.glob("_tmp_images_*")):
-        if not _stale.is_dir():
-            continue
-        if any(_stale.glob(".fov_*.done")):
-            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
-            log.info(
-                "Keeping checkpoint dir %s (%d FOV(s) already done)",
-                _stale.name, n_done,
-            )
-            continue
-        log.warning("Removing stale staging directory from previous run: %s", _stale.name)
-        remove_directory(_stale)
+    def _submit(executor, well_label, folder_path):
+        return executor.submit(
+            process_well_folder_task,
+            well_label, folder_path, output_dir, shared_kwargs_template,
+            nuclear_token, fluor_tokens, csv_prefix,
+            compress_input_well_folders, compress_output_well_folders,
+            schema, sep, incremental, incremental_prior_dir,
+        )
 
-    # Skip already-complete wells unless --force. In --incremental mode the
-    # task decides per well (new / merge-new-FOVs / up-to-date), so nothing is
-    # skipped up front.
-    n_skipped = 0
-    to_process: list[tuple[str, Path]] = []
-    for well_label, folder_path in well_folders:
-        if (not force and not incremental and output_exists_for_well_folder(
-            output_dir,
-            well_label,
-            csv_prefix,
-            compressed_output=compress_output_well_folders,
-        )):
-            log.info(
-                "SKIP well %s — output already exists. Use --force to reprocess.",
-                well_label,
-            )
-            n_skipped += 1
-        else:
-            to_process.append((well_label, folder_path))
-
-    if not to_process:
-        log.info("All wells already complete.")
-        log.info("Folder mode complete. %d skipped.", n_skipped)
-        return
-
-    _ensure_stardist_runtime_deps()
-
-    if incremental:
-        log.info("Incremental: %d well(s) total — merging only new FOV-groups.",
-                 len(to_process))
-    log.info("Folder mode: %d well(s) to process, %d worker(s).", len(to_process), workers)
-
-    all_records: list[dict] = []
-    all_failed:  list[str]  = []
-
-    ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=ctx,
-        initializer=_worker_init,
-        initargs=(force_cpu, threads_per_worker,
-                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
-    ) as executor:
-        future_to_well = {
-            executor.submit(
-                process_well_folder_task,
-                well_label,
-                folder_path,
-                output_dir,
-                shared_kwargs_template,
-                nuclear_token,
-                fluor_tokens,
-                csv_prefix,
-                compress_input_well_folders,
-                compress_output_well_folders,
-                schema,
-                sep,
-                incremental,
-                incremental_prior_dir,
-            ): well_label
-            for well_label, folder_path in to_process
-        }
-        for future in as_completed(future_to_well):
-            well_label = future_to_well[future]
-            try:
-                records, failed = future.result()
-                all_records.extend(records)
-                all_failed.extend(failed)
-            except Exception as exc:           # noqa: BLE001
-                _report_worker_failure(well_label, output_dir, exc)
-                all_failed.append(well_label)
-
-    log.info("=" * 60)
-    log.info("Folder mode complete.")
-    log.info(
-        "Total wells : %d  |  processed : %d  |  skipped : %d  |  "
-        "nuclei : %d  |  failed wells : %d",
-        len(well_folders), len(to_process), n_skipped,
-        len(all_records), len(all_failed),
+    return _run_well_worker_pool(
+        items=well_folders, output_dir=output_dir, workers=workers,
+        force=force, incremental=incremental, force_cpu=force_cpu,
+        threads_per_worker=threads_per_worker,
+        shared_kwargs_template=shared_kwargs_template, mode_label="Folder",
+        # Folder-mode staging (_tmp_images_*) lives directly under output_dir;
+        # there is no zip-extract scratch to sweep.
+        stale_sweep=lambda out: _sweep_stale_scratch_dirs(out, extra_extract=False),
+        output_exists=lambda well: output_exists_for_well_folder(
+            output_dir, well, csv_prefix,
+            compressed_output=compress_output_well_folders),
+        submit_task=_submit,
     )
-    if all_failed:
-        log.warning("Failed wells/pairs:")
-        for name in all_failed:
-            log.warning("  %s", name)
 
 # ---------------------------------------------------------------------------
 # pipeline_info.json sidecar
@@ -3912,8 +3879,8 @@ def _collect_available_timepoints(
     def _sort_key(tp: str):
         h = _parse_timepoint_hours(tp)
         return (
-            (isinstance(h, float) and h != h),  # NaN sentinel sorts last
-            (h if (isinstance(h, float) and h == h) else 0.0),
+            h != h,  # NaN sentinel sorts last (_parse_timepoint_hours -> float)
+            (h if h == h else 0.0),
             tp,
         )
     return _collect_available_schema_values(
@@ -4003,17 +3970,28 @@ def write_pipeline_info(
     if p.exists():
         try:
             existing = json.loads(p.read_text())
-            if isinstance(existing, dict):
-                for preserved_key in (
-                    "cell_gating",
-                    "sample_definitions",
-                    "ratios",
-                    "notes",
-                ):
-                    if preserved_key in existing and preserved_key not in info:
-                        info[preserved_key] = existing[preserved_key]
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as exc:
+            # Corrupt existing sidecar: back it up + surface at ERROR rather
+            # than silently overwriting (which drops the user-side blocks —
+            # cell_gating/sample_definitions/ratios/notes — audit E3).
+            backup = p.with_suffix(p.suffix + ".corrupt.bak")
+            try:
+                if not backup.exists():
+                    shutil.copy2(p, backup)
+            except OSError:
+                backup = None
+            log.error("existing %s unreadable (%s); backed up to %s",
+                      p.name, exc, backup if backup is not None else "(backup failed)")
+            existing = None
+        if isinstance(existing, dict):
+            for preserved_key in (
+                "cell_gating",
+                "sample_definitions",
+                "ratios",
+                "notes",
+            ):
+                if preserved_key in existing and preserved_key not in info:
+                    info[preserved_key] = existing[preserved_key]
     tmp = p.with_suffix(p.suffix + ".tmp")
     try:
         tmp.write_text(json.dumps(info, indent=2))
@@ -4425,10 +4403,8 @@ def main() -> None:
         # pin as many CPU threads — Metal does its own thread management.
         workers            = max(1, args.tf_threads if args.tf_threads > 0 else 2)
         threads_per_worker = tf_threads
-    else:
-        # Non-Mac CPU-only default: full worker pool
-        workers            = max(1, available // tf_threads)
-        threads_per_worker = tf_threads
+    # else: non-Mac CPU-only default already set above (workers = available //
+    # tf_threads), so no branch needed.
 
     workers_override = False
     if args.workers > 0:
@@ -4509,9 +4485,6 @@ def main() -> None:
         background_method=args.background,
         background_models={},
         qc_remove_debris=args.qc_remove_debris,
-        qc_min_area=(args.qc_min_area or None),
-        qc_max_area=(args.qc_max_area or None),
-        qc_min_solidity=(args.qc_min_solidity or None),
         cellpose_diameter=args.cellpose_diameter,
         cellpose_model=args.cellpose_model,
         cellpose_flow_threshold=args.cellpose_flow_threshold,
@@ -4557,9 +4530,12 @@ def main() -> None:
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
 
+    # Per-well failures are surfaced here so main() can signal them via the
+    # process exit code (audit E5) rather than always exiting 0.
+    failed_wells: "list[str]" = []
     if well_zips:
         log.info("Zip mode: %d well zip(s) detected.", len(well_zips))
-        process_well_zips(
+        failed_wells = process_well_zips(
             input_dir=input_dir,
             output_dir=output_dir,
             well_zips=well_zips,
@@ -4581,7 +4557,7 @@ def main() -> None:
         )
     elif well_folders:
         log.info("Folder mode: %d well folder(s) detected.", len(well_folders))
-        process_well_folders(
+        failed_wells = process_well_folders(
             input_dir=input_dir,
             output_dir=output_dir,
             well_folders=well_folders,
@@ -4639,6 +4615,7 @@ def main() -> None:
         if not all_records and not failed:
             log.error("No valid image pairs found. Exiting.")
             return
+        failed_wells = failed
         write_csvs_per_well(all_records, output_dir, args.csv_prefix)
         log.info("=" * 60)
         log.info("Total rows : %d", len(all_records))
@@ -4670,26 +4647,38 @@ def main() -> None:
     # the runner re-runs it once locally after all batches drain).
     if args.no_auto_threshold:
         log.info("Auto-threshold skipped (--no_auto_threshold).")
-        return
-    try:
-        thresholds = _estimate_thresholds_standalone(
-            output_dir,
-            fluor_channels=fluor_tokens_for_quant,
-            filename_schema=args.filename_schema,
-            filename_sep=args.filename_sep,
-            log=log,
-        )
-        written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
-        if written:
-            log.info(
-                "Auto-threshold defaults written for %d channel(s): %s",
-                len(written),
-                ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
+    else:
+        try:
+            thresholds = _estimate_thresholds_standalone(
+                output_dir,
+                fluor_channels=fluor_tokens_for_quant,
+                filename_schema=args.filename_schema,
+                filename_sep=args.filename_sep,
+                log=log,
             )
-        else:
-            log.info("Auto-threshold pass produced no new defaults.")
-    except Exception as exc:
-        log.warning("Auto-threshold pass failed: %s", exc)
+            written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
+            if written:
+                log.info(
+                    "Auto-threshold defaults written for %d channel(s): %s",
+                    len(written),
+                    ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
+                )
+            else:
+                log.info("Auto-threshold pass produced no new defaults.")
+        except Exception as exc:
+            log.warning("Auto-threshold pass failed: %s", exc)
+
+    # audit E5: a run with per-well failures must not exit 0 — otherwise the
+    # remote layer reads success and deletes the inputs for wells that never
+    # produced output. Auto-threshold (informational) still runs above so a
+    # partly-successful run keeps its thresholds; the exit code reflects the
+    # failures.
+    if failed_wells:
+        import sys as _sys
+        log.error(
+            "%d well(s)/pair(s) failed — exiting non-zero.", len(failed_wells)
+        )
+        _sys.exit(1)
 
 
 if __name__ == "__main__":

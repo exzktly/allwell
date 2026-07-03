@@ -44,7 +44,10 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.segmented_control import SegmentedControl
     from well_viewer.core.ui_helpers import make_popover_button, wrap_with_empty_state
 
-    st = ctx.app._app_state.feature_slice("multivariate")
+    st = ctx.state.feature_slice("multivariate")
+    # A8 burn-down: widget handles go through the WidgetRegistry
+    # (``ctx.widgets``), which stamps ``app._mv_*`` so legacy readers resolve.
+    reg = ctx.widgets
 
     layout = parent.layout()
     if layout is None:
@@ -65,7 +68,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     mode_seg.setCurrentByData(st.mode)
     mode_seg.currentChanged.connect(
         lambda idx: mv_ctrl.mv_set_mode(ctx.app, _MODE_ORDER[idx][0]))
-    ctx.app._mv_mode_seg = mode_seg
+    reg.register("_mv_mode_seg", mode_seg)
     r1.addWidget(mode_seg)
 
     feat_btn, _feat_panel, feat_lay = make_popover_button("Features ▾", row1)
@@ -78,7 +81,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     std_cb.setToolTip("Z-score each feature before PCA / clustering "
                       "(essential when features span different units)")
     std_cb.toggled.connect(lambda on: mv_ctrl.mv_set_standardize(ctx.app, on))
-    ctx.app._mv_standardize_cb = std_cb
+    reg.register("_mv_standardize_cb", std_cb)
     r1.addWidget(std_cb)
 
     r1.addStretch(1)
@@ -111,7 +114,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     corr_seg.currentChanged.connect(
         lambda idx: mv_ctrl.mv_set_corr_view(ctx.app, "heatmap" if idx == 0 else "splom"))
     cf.addWidget(corr_seg)
-    ctx.app._mv_corr_frame = corr_frame
+    reg.register("_mv_corr_frame", corr_frame)
     r2.addWidget(corr_frame)
 
     # Dim-reduction: method + colour-by.
@@ -133,7 +136,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     _select_combo_by_data(method_cb, st.dimred_method)
     method_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_dimred_method(ctx.app, method_cb.currentData()))
-    ctx.app._mv_method_cb = method_cb
+    reg.register("_mv_method_cb", method_cb)
     df.addWidget(method_cb)
     df.addWidget(QLabel("Colour by:", dr_frame))
     color_cb = QComboBox(dr_frame)
@@ -142,9 +145,9 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     _select_combo_by_data(color_cb, st.color_by)
     color_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_color_by(ctx.app, color_cb.currentData()))
-    ctx.app._mv_color_cb = color_cb
+    reg.register("_mv_color_cb", color_cb)
     df.addWidget(color_cb)
-    ctx.app._mv_dimred_frame = dr_frame
+    reg.register("_mv_dimred_frame", dr_frame)
     r2.addWidget(dr_frame)
 
     # Clustering: method + count + linkage.
@@ -158,7 +161,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     _select_combo_by_data(cmethod_cb, st.cluster_method)
     cmethod_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_cluster_method(ctx.app, cmethod_cb.currentData()))
-    ctx.app._mv_cmethod_cb = cmethod_cb
+    reg.register("_mv_cmethod_cb", cmethod_cb)
     clf.addWidget(cmethod_cb)
     clf.addWidget(QLabel("k:", cl_frame))
     kspin = QSpinBox(cl_frame)
@@ -169,7 +172,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     kspin.setMinimumWidth(64)
     kspin.setValue(int(st.cluster_count))
     kspin.valueChanged.connect(lambda v: mv_ctrl.mv_set_cluster_count(ctx.app, v))
-    ctx.app._mv_kspin = kspin
+    reg.register("_mv_kspin", kspin)
     clf.addWidget(kspin)
     linkage_cb = QComboBox(cl_frame)
     for m in ("ward", "average", "complete", "single"):
@@ -177,9 +180,9 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     _select_combo_by_data(linkage_cb, st.linkage_method)
     linkage_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_linkage(ctx.app, linkage_cb.currentData()))
-    ctx.app._mv_linkage_cb = linkage_cb
+    reg.register("_mv_linkage_cb", linkage_cb)
     clf.addWidget(linkage_cb)
-    ctx.app._mv_cluster_frame = cl_frame
+    reg.register("_mv_cluster_frame", cl_frame)
     r2.addWidget(cl_frame)
 
     # Faceting: value + row + col + agg.
@@ -191,7 +194,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     fvalue_cb.setMinimumWidth(140)
     fvalue_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_facet_value(ctx.app, fvalue_cb.currentData() or ""))
-    ctx.app._mv_facet_value_cb = fvalue_cb
+    reg.register("_mv_facet_value_cb", fvalue_cb)
     fcf.addWidget(fvalue_cb)
     fcf.addWidget(QLabel("Rows:", fc_frame))
     frow_cb = QComboBox(fc_frame)
@@ -216,7 +219,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     agg_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_facet_agg(ctx.app, agg_cb.currentData()))
     fcf.addWidget(agg_cb)
-    ctx.app._mv_facet_frame = fc_frame
+    reg.register("_mv_facet_frame", fc_frame)
     r2.addWidget(fc_frame)
 
     r2.addStretch(1)
@@ -228,7 +231,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     tp_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_timepoints(
             ctx.app, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
-    ctx.app._mv_tp_cb = tp_cb
+    reg.register("_mv_tp_cb", tp_cb)
     r2.addWidget(tp_cb)
     layout.addWidget(row2)
 
@@ -240,9 +243,9 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         card.setStatsChipVisible(False)
     except Exception:
         swallowed()
-    ctx.app._mv_card = card
-    ctx.app._mv_fig = card.figure
-    ctx.app._mv_canvas = card.canvas
+    reg.register("_mv_card", card)
+    reg.register("_mv_fig", card.figure)
+    reg.register("_mv_canvas", card.canvas)
     card.plotThemeChanged.connect(lambda _m: mv_ctrl.mv_recompute(ctx.app))
     layout.addWidget(wrap_with_empty_state(
         ctx.app, card, icon="scatter-chart",
@@ -289,9 +292,9 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         std_cb.setEnabled(mode != mv_state.MODE_CORRELATION)
         mode_seg.setCurrentByData(mode)
 
-    ctx.app._mv_refresh_timepoints = _refresh_timepoints
-    ctx.app._mv_refresh_facet_values = _refresh_facet_values
-    ctx.app._mv_sync_controls = _sync_controls
+    ctx.runtime.multivariate.refresh_timepoints = _refresh_timepoints
+    ctx.runtime.multivariate.refresh_facet_values = _refresh_facet_values
+    ctx.runtime.multivariate.sync_controls = _sync_controls
 
     _refresh_timepoints()
     _refresh_facet_values()

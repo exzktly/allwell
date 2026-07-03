@@ -6,6 +6,7 @@ via ``WellViewerApp._sel_set_composition`` directly — no controller helpers.)"
 from __future__ import annotations
 
 import re
+from typing import Dict, List, Optional
 
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
@@ -21,7 +22,7 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.domain.selections_model import well_rank as _sel_well_rank
 
 
-def make_replicate_pairs(toks, prefix: str):
+def make_replicate_pairs(toks):
     """Pair adjacent tokens into ReplicateSets; singletons become solo sets."""
     sets = []
     i = 0
@@ -48,13 +49,13 @@ def rep_quick_pairs(app) -> None:
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
                           if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
-                new_sets.extend(make_replicate_pairs(loaded, row_ltr))
+                new_sets.extend(make_replicate_pairs(loaded))
         else:
             by_col = {}
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
                           if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
-                row_sets = make_replicate_pairs(loaded, row_ltr)
+                row_sets = make_replicate_pairs(loaded)
                 for s in row_sets:
                     if s.wells:
                         col = _extract_well_token(s.wells[0])
@@ -69,13 +70,13 @@ def rep_quick_pairs(app) -> None:
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
                           if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
-                new_sets.extend(make_replicate_pairs(loaded, col))
+                new_sets.extend(make_replicate_pairs(loaded))
         else:
             by_row = {}
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
                           if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
-                col_sets = make_replicate_pairs(loaded, col)
+                col_sets = make_replicate_pairs(loaded)
                 for s in col_sets:
                     if s.wells:
                         tok = _extract_well_token(s.wells[0])

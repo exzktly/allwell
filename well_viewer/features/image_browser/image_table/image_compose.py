@@ -10,8 +10,12 @@ external importers (playground, grid_view) are unchanged.
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Optional, Tuple
 
+from well_viewer.domain.tp_match import tp_close
+
+logger = logging.getLogger(__name__)
 
 
 LUT_COLORS: Dict[str, Optional[Tuple[float, float, float]]] = {
@@ -421,6 +425,66 @@ def _load_well_channel(
         cache.setdefault((well, chan_lower, "raw"), fluor)
     return result
 
+def _match_image_ref(images: Dict, fov: str, tp: str):
+    """Resolve an image ref for ``(fov, tp)``; return ``(ref, kind)``.
+
+    ``kind`` ∈ ``{"exact", "normalized", "numeric", ""}`` (``""`` = no match),
+    letting the caller annotate non-exact resolutions (audit S5).
+
+    Tiers, in order: exact tuple key → normalized-token (``"1.0"`` ↔ ``"1"``)
+    → numeric-close (``"T01"`` ↔ ``"1"``, timepoints matched with the S2
+    relative tolerance). When ``fov`` is empty (empty dropdown) and MORE THAN
+    ONE distinct FOV would satisfy the timepoint, prefer "no image" —
+    ``(None, "ambiguous_fov")`` — rather than silently surfacing an arbitrary
+    first FOV; a genuinely single-FOV dataset still resolves unambiguously.
+    """
+    exact = images.get((str(fov), str(tp)))
+    if exact is not None:
+        return exact, "exact"
+
+    def _pick(pred):
+        # Returns (val, "ok") for a unique resolution, (None, "ambiguous_fov")
+        # when an empty fov spans multiple FOVs, or (None, "") for no match.
+        hits = [(cf, val) for (cf, ct), val in images.items() if pred(cf, ct)]
+        if not hits:
+            return None, ""
+        if not str(fov or "").strip():
+            distinct = {cf for cf, _ in hits}
+            if len(distinct) > 1:
+                return None, "ambiguous_fov"
+        return hits[0][1], "ok"
+
+    target_fov = _norm_token(fov)
+    target_tp = _norm_token(tp)
+    val, status = _pick(lambda cf, ct:
+        ((not target_tp) or _norm_token(ct) == target_tp)
+        and ((not target_fov) or _norm_token(cf) == target_fov))
+    if status == "ambiguous_fov":
+        return None, "ambiguous_fov"
+    if val is not None:
+        return val, "normalized"
+
+    # Numeric-close: cache keys like ``"T01"`` and dropdown values like ``"1"``
+    # both reduce to the same number, rescuing runs where pipeline_info.json's
+    # timepoints were stored numerically but the filenames carry a ``T`` prefix
+    # (or vice versa). Timepoints use the S2 relative tolerance, so distinct
+    # timepoints never merge.
+    target_fov_n = _numeric_token(fov)
+    target_tp_n = _numeric_token(tp)
+
+    def _close(a, b) -> bool:
+        return a is not None and b is not None and tp_close(a, b)
+
+    val, status = _pick(lambda cf, ct:
+        (target_tp_n is None or _close(_numeric_token(ct), target_tp_n))
+        and (target_fov_n is None or _close(_numeric_token(cf), target_fov_n)))
+    if status == "ambiguous_fov":
+        return None, "ambiguous_fov"
+    if val is not None:
+        return val, "numeric"
+    return None, ""
+
+
 def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str, *, use_tophat: bool = False):
     """Load the float32 array for one (well, channel, timepoint, fov).
 
@@ -444,38 +508,17 @@ def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str,
     if not fluor:
         return None
 
-    ref = fluor.get((str(fov), str(tp)))
-    if ref is None:
-        target_fov = _norm_token(fov)
-        target_tp = _norm_token(tp)
-        for (cache_fov, cache_tp), val in fluor.items():
-            tp_match = (not target_tp) or _norm_token(cache_tp) == target_tp
-            fov_match = (not target_fov) or _norm_token(cache_fov) == target_fov
-            if tp_match and fov_match:
-                ref = val
-                break
-    if ref is None:
-        # Final fallback: numeric-only match. Cache keys like ``"T01"`` and
-        # dropdown values like ``"1"`` both reduce to integer 1 here, which
-        # rescues runs where pipeline_info.json's available_timepoints were
-        # stored numerically while the on-disk filenames carry a ``T``
-        # prefix (or vice versa).
-        target_fov_n = _numeric_token(fov)
-        target_tp_n = _numeric_token(tp)
-
-        def _close(a, b) -> bool:
-            return a is not None and b is not None and abs(a - b) < 1e-6
-
-        for (cache_fov, cache_tp), val in fluor.items():
-            tp_n = _numeric_token(cache_tp)
-            fov_n = _numeric_token(cache_fov)
-            tp_match = target_tp_n is None or _close(tp_n, target_tp_n)
-            fov_match = target_fov_n is None or _close(fov_n, target_fov_n)
-            if tp_match and fov_match:
-                ref = val
-                break
+    ref, kind = _match_image_ref(fluor, fov, tp)
     if ref is None:
         return None
+    if kind != "exact":
+        # Annotate any non-exact resolution so a surfaced neighbouring
+        # frame is diagnosable rather than silently misread as QC truth
+        # (audit S5).
+        logger.debug(
+            "image_table: (%s, tp=%r, fov=%r) resolved via %s fallback",
+            well, tp, fov, kind,
+        )
     try:
         from well_viewer.data.image_discovery import open_imgref_as_array
         # Overlay PNGs are RGB — load them in colour so the segmentation
@@ -483,6 +526,9 @@ def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str,
         greyscale = not _is_nuc_seg(chan_upper)
         return open_imgref_as_array(ref, greyscale=greyscale)
     except Exception:
+        # A corrupt/undecodable image renders as "no tile". Leave a breadcrumb
+        # so it's diagnosable rather than silently blank (audit E15).
+        logger.debug("image_table: failed to load %r: skipping tile", ref, exc_info=True)
         return None
 
 def _load_mask_array(app, cache, well, tp, fov):
@@ -514,6 +560,9 @@ def _load_mask_array(app, cache, well, tp, fov):
             return None
         return _np.rint(_np.asarray(arr)).astype(_np.int32)
     except Exception:
+        # A corrupt mask must not silently render as "no overlay" — that reads
+        # as a clean QC/segmentation view (audit E15). Leave a breadcrumb.
+        logger.debug("image_table: failed to load mask %r: no overlay", ref, exc_info=True)
         return None
 
 def _load_ratio_array(app, cache, well, ratio, tp, fov, *, use_tophat):

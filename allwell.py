@@ -36,6 +36,34 @@ REVIEW_BAR_DEBUG = False
 REVIEW_SCATTER_DEBUG = False
 
 
+def _stop_analyze_runner(analyze) -> None:
+    """Stop an in-flight pipeline run on the Analyze pane at app close.
+
+    ``AnalyzeTab`` is mounted as a *child* widget, so in Qt its own
+    ``closeEvent`` never fires — quitting mid-run therefore orphaned the local
+    pipeline subprocess (and its process group) and, for a remote run, killed
+    the worker thread before its cleanup ``finally`` could ``scancel`` the SLURM
+    job / remove the remote staging + local scratch (audit L1). The app root's
+    ``closeEvent`` calls this so the runner is stopped from a live top-level
+    window instead.
+    """
+    if analyze is None:
+        return
+    # Stop the self-rescheduling log poller re-arming its QTimer (audit L2).
+    try:
+        analyze._alive = False
+    except Exception:
+        swallowed()
+    runner = getattr(analyze, "_runner", None)
+    if runner is None:
+        return
+    try:
+        if getattr(runner, "is_running", False):
+            runner.stop()
+    except Exception:
+        swallowed()
+
+
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
 
@@ -95,7 +123,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v8.2")
+        self._version_pill = QLabel("v8.3")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "
@@ -927,6 +955,19 @@ class AllWellApp(QMainWindow):
                 self._review._cleanup_tmp()
             except Exception:
                 swallowed()  # was: pass (silent except)
+        # Stop any in-flight Analyze run — AnalyzeTab's own closeEvent never
+        # fires (it's a child widget), so without this a mid-run quit leaks the
+        # local subprocess / remote SLURM allocation + scratch (audit L1). Also
+        # stops the log poller re-arming (L2).
+        _stop_analyze_runner(self._analyze)
+        # Review pane is also a child widget: signal its smFISH worker to abort
+        # and disconnect the app-global focus watcher on close (audit L3/L4).
+        if self._review is not None:
+            try:
+                from well_viewer.runtime_app import teardown_review_pane
+                teardown_review_pane(self._review)
+            except Exception:
+                swallowed()
         super().closeEvent(event)
 
     # ── Cross-tab threshold ───────────────────────────────────────────────
@@ -997,6 +1038,15 @@ def main() -> None:
         import faulthandler
         if sys.stderr is not None and getattr(sys.stderr, "fileno", None) is not None:
             faulthandler.enable()
+    except Exception:
+        swallowed()  # diagnostics-only; never block startup
+
+    # Surface any misconfigured ALLWELL_* overrides once at startup (audit
+    # X12) instead of letting a mistyped scratch/remotes path fall back
+    # silently and only misbehave much later, mid-run.
+    try:
+        from services.env import log_env_validation
+        log_env_validation()
     except Exception:
         swallowed()  # diagnostics-only; never block startup
 

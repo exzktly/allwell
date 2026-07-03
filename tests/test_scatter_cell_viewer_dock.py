@@ -21,7 +21,7 @@ def _build_scatter_tab(app) -> None:
 def test_cell_viewer_is_a_widget_not_a_dialog():
     # It must be dockable (a plain QWidget), never a modal dialog window.
     from PySide6.QtWidgets import QDialog, QWidget
-    from well_viewer.features.scatter.callbacks import ScatterCellViewer
+    from well_viewer.features.scatter.cell_viewer_view import ScatterCellViewer
 
     assert issubclass(ScatterCellViewer, QWidget)
     assert not issubclass(ScatterCellViewer, QDialog)

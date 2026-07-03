@@ -67,6 +67,21 @@ def generate_keypair(
     every ssh call has to prompt for it (defeating the purpose of using
     a key over a password); users who want a passphrase can encrypt the
     key separately with ``ssh-keygen -p`` and configure ``ssh-agent``.
+
+    Residual risk (audit X11): a passphrase-less private key is a bearer
+    credential — anyone who can read the file gains the same cluster access
+    the user has, with no second factor. This is the standard trade-off for
+    unattended HPC automation (rsync/SLURM under ``BatchMode=yes`` can't
+    answer an interactive prompt), and is mitigated, not eliminated, by:
+
+    * ``~/.ssh`` forced to ``0700`` and the private key to ``0600`` below, so
+      only the owner can read it (ssh itself refuses looser permissions);
+    * the key granting access to the *analysis* account only, scoped by the
+      cluster's own ``authorized_keys``/account policy;
+    * users for whom that residual risk is unacceptable encrypting the key
+      with ``ssh-keygen -p`` + ``ssh-agent`` (AllWell detects a
+      passphrase-protected key via :func:`key_has_passphrase` and guides the
+      user rather than failing opaquely).
     """
     pub = path.with_suffix(path.suffix + ".pub") if path.suffix else Path(str(path) + ".pub")
     if path.is_file() and pub.is_file():
@@ -98,6 +113,14 @@ def generate_keypair(
         return False, f"could not run ssh-keygen: {exc}"
     if result.returncode != 0:
         return False, result.stderr.strip() or f"ssh-keygen exited {result.returncode}"
+    # Defense-in-depth (audit X11): ssh-keygen already writes the private key
+    # 0600, but make the owner-only mitigation explicit so the passphrase-less
+    # key can't be left group/world-readable. No-op on Windows (POSIX perms
+    # ignored; the NTFS ACL is inherited from ~/.ssh).
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
     return True, ""
 
 

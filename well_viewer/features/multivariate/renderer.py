@@ -124,6 +124,42 @@ def _legend(ax, legend_entries, muted_fg, title=""):
     style_legend(leg, ax)
 
 
+# ── shared annotated-heatmap helper (audit A13) ──────────────────────────────
+
+def _annotated_matrix(
+    ax, mat, *, cmap, vmin, vmax, row_labels, col_labels, muted_fg,
+    fmt, annotate, annot_color, x_rotation=45, mask_invalid=False,
+):
+    """Draw a value-annotated heatmap onto *ax*; return the ``AxesImage``.
+
+    The shared scaffolding behind the four multivariate heatmaps (correlation,
+    PCA loadings, cluster profile, facet grid): ``imshow`` + tick labels + the
+    per-cell value-annotation loop. Everything that differed between the four is
+    a parameter — ``cmap`` / ``vmin`` / ``vmax``, the tick labels (+ optional
+    ``x_rotation``), the ``annotate`` predicate, the ``str.format`` ``fmt``, and
+    an ``annot_color(v) -> colour`` callback. ``mask_invalid`` routes NaNs
+    through ``masked_invalid`` for the image (the facet grid) while the
+    annotation loop still reads the raw values.
+    """
+    im = ax.imshow(np.ma.masked_invalid(mat) if mask_invalid else mat,
+                   cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(len(col_labels)))
+    ax.set_yticks(range(len(row_labels)))
+    xkw = dict(fontsize=7, color=muted_fg)
+    if x_rotation:
+        xkw.update(rotation=x_rotation, ha="right")
+    ax.set_xticklabels(col_labels, **xkw)
+    ax.set_yticklabels(row_labels, fontsize=7, color=muted_fg)
+    if annotate:
+        for i in range(mat.shape[0]):
+            for j in range(mat.shape[1]):
+                v = mat[i, j]
+                if np.isfinite(v):
+                    ax.text(j, i, fmt.format(v), ha="center", va="center",
+                            fontsize=6, color=annot_color(v))
+    return im
+
+
 # ── correlation / pair-matrix ────────────────────────────────────────────────
 
 def _render_correlation(fig, res) -> None:
@@ -135,21 +171,14 @@ def _render_correlation(fig, res) -> None:
     ax = fig.add_subplot(111)
     apply_ax_style(ax, "Feature correlation", "")
     ax.grid(False)
-    im = ax.imshow(corr, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
-    ax.set_xticks(range(len(labels)))
-    ax.set_yticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7, color=muted_fg)
-    ax.set_yticklabels(labels, fontsize=7, color=muted_fg)
     # Annotate r values when the matrix is small enough to stay legible.
-    if len(labels) <= 12:
-        for i in range(len(labels)):
-            for j in range(len(labels)):
-                v = corr[i, j]
-                if np.isfinite(v):
-                    ax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                            fontsize=6,
-                            color="white" if abs(v) > 0.5 else muted_fg)
+    im = _annotated_matrix(
+        ax, corr, cmap="RdBu_r", vmin=-1, vmax=1,
+        row_labels=labels, col_labels=labels, muted_fg=muted_fg,
+        fmt="{:.2f}", annotate=len(labels) <= 12,
+        annot_color=lambda v: "white" if abs(v) > 0.5 else muted_fg,
+    )
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.ax.tick_params(labelsize=7, colors=muted_fg)
     fig.subplots_adjust(left=0.28, bottom=0.30, right=0.98, top=0.94)
@@ -233,19 +262,12 @@ def _draw_loadings(fig, ax, loadings) -> None:
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     vmax = float(np.nanmax(np.abs(mat))) if mat.size else 1.0
     vmax = vmax if vmax > 0 else 1.0
-    ax.imshow(mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
-    ax.set_xticks(range(n_pc))
-    ax.set_xticklabels([f"PC{i + 1}" for i in range(n_pc)], fontsize=7,
-                       color=muted_fg)
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels(labels, fontsize=7, color=muted_fg)
-    if len(labels) <= 20:
-        for i in range(mat.shape[0]):
-            for j in range(n_pc):
-                v = mat[i, j]
-                if np.isfinite(v):
-                    ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=6,
-                            color="white" if abs(v) > 0.5 * vmax else muted_fg)
+    _annotated_matrix(
+        ax, mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax,
+        row_labels=labels, col_labels=[f"PC{i + 1}" for i in range(n_pc)],
+        muted_fg=muted_fg, x_rotation=0, fmt="{:.2f}", annotate=len(labels) <= 20,
+        annot_color=lambda v: "white" if abs(v) > 0.5 * vmax else muted_fg,
+    )
 
 
 # ── clustering / phenotyping ─────────────────────────────────────────────────
@@ -312,18 +334,12 @@ def _draw_cluster_profile(ax, profile) -> None:
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
     vmax = float(np.nanmax(np.abs(mat))) if mat.size else 1.0
     vmax = vmax if vmax > 0 else 1.0
-    ax.imshow(mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7, color=muted_fg)
-    ax.set_yticks(range(len(cids)))
-    ax.set_yticklabels([f"C{c}" for c in cids], fontsize=7, color=muted_fg)
-    if mat.shape[0] * mat.shape[1] <= 120:
-        for i in range(mat.shape[0]):
-            for j in range(mat.shape[1]):
-                v = mat[i, j]
-                if np.isfinite(v):
-                    ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=6,
-                            color="white" if abs(v) > 0.5 * vmax else muted_fg)
+    _annotated_matrix(
+        ax, mat, cmap="RdBu_r", vmin=-vmax, vmax=vmax,
+        row_labels=[f"C{c}" for c in cids], col_labels=labels, muted_fg=muted_fg,
+        fmt="{:.1f}", annotate=mat.shape[0] * mat.shape[1] <= 120,
+        annot_color=lambda v: "white" if abs(v) > 0.5 * vmax else muted_fg,
+    )
 
 
 # ── multi-factor faceting ────────────────────────────────────────────────────
@@ -336,22 +352,14 @@ def _render_facet(fig, res) -> None:
                        f"by {res['row_factor']} x {res['col_factor']}", "")
     ax.grid(False)
     _bg, _t, muted_fg, _g, _s = tokens_for(ax)
-    masked = np.ma.masked_invalid(values)
-    im = ax.imshow(masked, cmap="viridis", aspect="auto")
-    ax.set_xticks(range(len(pivot.col_labels)))
-    ax.set_yticks(range(len(pivot.row_labels)))
-    ax.set_xticklabels(pivot.col_labels, rotation=45, ha="right", fontsize=7,
-                       color=muted_fg)
-    ax.set_yticklabels(pivot.row_labels, fontsize=7, color=muted_fg)
+    im = _annotated_matrix(
+        ax, values, cmap="viridis", vmin=None, vmax=None,
+        row_labels=pivot.row_labels, col_labels=pivot.col_labels,
+        muted_fg=muted_fg, fmt="{:.3g}", annotate=values.size <= 200,
+        annot_color=lambda v: "white", mask_invalid=True,
+    )
     ax.set_xlabel(res["col_factor"], fontsize=8, color=muted_fg)
     ax.set_ylabel(res["row_factor"], fontsize=8, color=muted_fg)
-    if values.size <= 200:
-        for i in range(values.shape[0]):
-            for j in range(values.shape[1]):
-                v = values[i, j]
-                if np.isfinite(v):
-                    ax.text(j, i, f"{v:.3g}", ha="center", va="center",
-                            fontsize=6, color="white")
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.ax.tick_params(labelsize=7, colors=muted_fg)
     fig.subplots_adjust(left=0.20, bottom=0.28, right=0.98, top=0.92)

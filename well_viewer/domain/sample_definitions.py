@@ -33,8 +33,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
-from well_viewer.domain.bar_groups import bar_groups_from_data, bar_groups_to_dict
-from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.domain import selections_model as _sel_model
 
 

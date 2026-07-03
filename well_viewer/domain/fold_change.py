@@ -56,7 +56,7 @@ implementation; that's fixed here.
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import compute_rep_n_above
@@ -1106,63 +1106,167 @@ def control_mean_at_for_bar(
     return _match_control_mean(target_t, series)
 
 
+class CellScaleSpec(NamedTuple):
+    """Per-(well, tp) fold-change transform for a per-cell overlay.
+
+    Mirrors the axis arguments of :func:`scale_bar_value` so an overlaid
+    per-cell distribution lands on the *same* fold-change axis as its bar.
+    ``missing`` is set when a requested baseline could not be resolved (or a
+    ratio denominator is non-finite/zero) — the caller renders a blank slot
+    rather than misleading raw values.
+    """
+    control_mean: Optional[float]
+    op_ctrl: str
+    t0_mean: Optional[float]
+    op_t0: str
+    order: str
+    missing: bool
+
+
+def apply_cell_scale(vals, spec: Optional["CellScaleSpec"]):
+    """Apply *spec* to a 1-D array of per-cell values.
+
+    Uses the same per-axis operator (``"ratio"`` → divide, ``"subtract"`` →
+    subtract) and application ``order`` as :func:`scale_bar_value`, but
+    element-wise and without error propagation (individual cells carry no
+    spread). Returns the transformed array; an all-``nan`` array when a ratio
+    denominator is bad (so the caller can drop it). A ``None`` spec is a
+    no-op.
+    """
+    import numpy as _np
+
+    if spec is None:
+        return vals
+    out = _np.asarray(vals, dtype=float)
+
+    def _axis(a, denom, op):
+        if denom is None:
+            return a
+        if op == "subtract":
+            return a - float(denom)
+        # ratio
+        if not (isinstance(denom, (int, float)) and math.isfinite(denom) and denom != 0):
+            return _np.full_like(a, _np.nan)
+        return a / float(denom)
+
+    if spec.order == "t0_first":
+        out = _axis(out, spec.t0_mean, spec.op_t0)
+        out = _axis(out, spec.control_mean, spec.op_ctrl)
+    else:
+        out = _axis(out, spec.control_mean, spec.op_ctrl)
+        out = _axis(out, spec.t0_mean, spec.op_t0)
+    return out
+
+
 def build_cell_scaling(
-    app, wells, *, fc_state: Tuple[bool, str, bool], target_t: float,
+    app, wells, *, fc_state: Tuple[bool, str, bool],
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Dict[str, float]:
-    """Per-well multiplicative denominator for per-cell violin/beeswarm plots.
+    op_ctrl: str = "ratio", op_t0: str = "ratio",
+    order: str = "ctrl_first", baseline_tp: Optional[float] = None,
+) -> Callable[[str, float], CellScaleSpec]:
+    """Build a ``scale_for(well, tp) -> CellScaleSpec`` resolver for per-cell
+    violin/beeswarm fold-change overlays.
 
-    Returns ``{well: factor}`` where each cell's value should be DIVIDED
-    by ``factor`` before plotting. With no fold-change active, factor is
-    1.0 for every well (the dict acts as a no-op).
+    The returned spec applies the SAME per-axis operator (ratio vs subtract),
+    application ``order``, and ``baseline_tp`` the bars use
+    (:func:`scale_bar_value` / :func:`baseline_from_points`), so an overlaid
+    per-cell distribution sits on the same fold-change axis as its bar —
+    fixing the old always-divide behaviour (audit S1). ``tp`` is honoured per
+    call, so a multi-timepoint selection scales each column at its own
+    timepoint instead of collapsing to the first (audit S3).
 
-    Stacking matches :func:`normalize_pts`: factor = control_mean * t0_mean,
-    where:
-
-      * control_mean — single scalar across all wells, from
-        :func:`control_mean_at_for_bar` (uses the bar's stat). ``None``
-        when vs-control is off; the entire well is set to NaN when
-        vs-control is requested but unresolved (no silent fall-back).
-      * t0_mean — each well's own earliest mean from
-        :func:`member_first_tp_value`. Returns NaN for that well when
-        no t0 sample exists.
+      * control_mean — single scalar across all wells at the requested tp,
+        from :func:`control_mean_at_for_bar` (the bar's stat), cached per tp.
+        ``None`` / ``missing`` when vs-control is requested but unresolved.
+      * t0_mean — each well's own baseline from :func:`member_baseline_value`
+        (honouring ``baseline_tp``), resolved once per well.
     """
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
-    control_mean: Optional[float] = None
-    control_missing = False
-    if fc_vs_ctrl and fc_ctrl_lbl:
-        control_mean = control_mean_at_for_bar(
-            app, fc_ctrl_lbl, target_t,
-            threshold=threshold, val_col=val_col,
-            use_sem=use_sem, per_fov_spread=per_fov_spread,
-            fluor_gates=fluor_gates,
-        )
-        if control_mean is None:
-            control_missing = True
 
-    out: Dict[str, float] = {}
-    for w in wells:
-        if control_missing:
-            out[w] = float("nan")
-            continue
-        factor = 1.0
-        if control_mean is not None:
-            factor *= control_mean
-        if fc_vs_t0:
-            t0 = member_first_tp_value(
-                app, w,
+    # t0 baseline is per-well and tp-independent — resolve once up front.
+    t0_by_well: Dict[str, Optional[float]] = {}
+    if fc_vs_t0:
+        for w in wells:
+            t0_by_well[w] = member_baseline_value(
+                app, w, baseline_tp=baseline_tp,
                 threshold=threshold, val_col=val_col, use_sem=use_sem,
-                per_fov_spread=per_fov_spread,
-                fluor_gates=fluor_gates,
+                per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
-            if t0 is None or not math.isfinite(t0) or t0 == 0:
-                out[w] = float("nan")
-                continue
-            factor *= t0
-        out[w] = factor
-    return out
+
+    control_cache: Dict[float, Optional[float]] = {}
+
+    def _control_at(tp: float) -> Optional[float]:
+        if not (fc_vs_ctrl and fc_ctrl_lbl):
+            return None
+        if tp not in control_cache:
+            control_cache[tp] = control_mean_at_for_bar(
+                app, fc_ctrl_lbl, tp,
+                threshold=threshold, val_col=val_col, use_sem=use_sem,
+                per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+            )
+        return control_cache[tp]
+
+    def scale_for(well: str, tp: float) -> CellScaleSpec:
+        missing = False
+        cm: Optional[float] = None
+        if fc_vs_ctrl and fc_ctrl_lbl:
+            cm = _control_at(float(tp))
+            if cm is None:
+                missing = True
+            elif op_ctrl == "ratio" and (not math.isfinite(cm) or cm == 0):
+                missing = True
+        t0: Optional[float] = None
+        if fc_vs_t0:
+            t0 = t0_by_well.get(well)
+            if t0 is None:
+                missing = True
+            elif op_t0 == "ratio" and (not math.isfinite(t0) or t0 == 0):
+                missing = True
+        return CellScaleSpec(
+            control_mean=cm if fc_vs_ctrl else None,
+            op_ctrl=op_ctrl,
+            t0_mean=t0 if fc_vs_t0 else None,
+            op_t0=op_t0,
+            order=order,
+            missing=missing,
+        )
+
+    return scale_for
+
+
+def member_baseline_value(
+    app, label: str, *,
+    baseline_tp: Optional[float],
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool,
+    fluor_gates,
+) -> Optional[float]:
+    """Member baseline honouring *baseline_tp* (audit S1).
+
+    Picks the member's own mean at ``baseline_tp`` when set and sampled;
+    otherwise falls back to the earliest finite mean — matching
+    :func:`baseline_from_points` / :func:`member_first_tp_value` so the
+    per-cell overlay baseline agrees with the bar's.
+    """
+    series = member_mean_series(
+        app, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread,
+        fluor_gates=fluor_gates,
+    )
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, m in series.items():
+            if (abs(float(t) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(t)), abs(tgt))
+                    and isinstance(m, (int, float)) and math.isfinite(m) and m != 0):
+                return float(m)
+        # Requested tp not sampled — fall through to earliest (mirrors the bar).
+    earliest = min(series)
+    return series[earliest]
 
 
 def member_first_tp_value(

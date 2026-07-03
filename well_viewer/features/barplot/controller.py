@@ -5,17 +5,10 @@ from __future__ import annotations
 import logging
 import math
 import re
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.core import debug_flags as debug_flags
-from well_viewer.domain import fold_change as _fc
-from well_viewer.domain.stats_compute import compute_rep_stats
-from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
-from well_viewer.domain.stats_compute import compute_rep_n_above
-from well_viewer.domain.stats_compute import aggregate_well
-from well_viewer.domain.stats_compute import aggregate_group
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import parse_float_edit as _parse_float_edit
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
@@ -496,13 +489,14 @@ def update_bar_tp_menu(app) -> None:
 def toggle_swarm(app) -> None:
     """Toggle beeswarm / bar mode and update the button appearance."""
     from well_viewer.features.barplot.renderer import redraw_bars
-    app._bar_swarm = not app._bar_swarm
-    on = app._bar_swarm
+    bs = app._app_state.bar
+    bs.swarm = not bs.swarm
+    on = bs.swarm
     app._swarm_btn.setChecked(on)
     app._swarm_btn.setText("Beeswarm: On" if on else "Beeswarm: Off")
-    if on and app._bar_violin:
+    if on and bs.violin:
         # Swarm and violin are mutually exclusive
-        app._bar_violin = False
+        bs.violin = False
         app._violin_btn.setChecked(False)
         app._violin_btn.setText("Violin: Off")
         app._violin_slider.setEnabled(False)
@@ -514,14 +508,15 @@ def toggle_swarm(app) -> None:
 def toggle_violin(app) -> None:
     """Toggle violin / bar mode and update the button appearance."""
     from well_viewer.features.barplot.renderer import redraw_bars
-    app._bar_violin = not app._bar_violin
-    on = app._bar_violin
+    bs = app._app_state.bar
+    bs.violin = not bs.violin
+    on = bs.violin
     app._violin_btn.setChecked(on)
     app._violin_btn.setText("Violin: On" if on else "Violin: Off")
     app._violin_slider.setEnabled(on)
-    if on and app._bar_swarm:
+    if on and bs.swarm:
         # Mutually exclusive with beeswarm
-        app._bar_swarm = False
+        bs.swarm = False
         app._swarm_btn.setChecked(False)
         app._swarm_btn.setText("Beeswarm: Off")
     app._refresh_bar_layout_btn_state()
@@ -699,7 +694,7 @@ def refresh_bar_layout_btn_state(app) -> None:
     pool_btn = getattr(app, "_bar_pool_reps_btn", None)
     pool_cells_btn = getattr(app, "_bar_pool_rset_cells_btn", None)
     has_rsets = bool(app._rep_sets_active())
-    use_per_cell = bool(getattr(app, "_bar_violin", False) or getattr(app, "_bar_swarm", False))
+    use_per_cell = bool(app._app_state.bar.violin or app._app_state.bar.swarm)
     if group_btn is not None:
         # Two-way mode selector: label names the current mode, highlight tracks
         # the non-default "timepoint" mode so label and highlight never conflict.

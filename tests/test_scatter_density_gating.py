@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from well_viewer.features.scatter.gating import (
     compute_gate_stats,
     compute_point_density,
 )
+from well_viewer.features.scatter.state import ScatterState
 
 
 # ── compute_point_density ────────────────────────────────────────────────────
@@ -168,6 +168,7 @@ def _render_app(*, density: bool, gates):
         channel=SimpleNamespace(ratio_index={}),
         selection=SimpleNamespace(selected_wells=["A01"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
+        scatter=ScatterState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: df
@@ -237,7 +238,7 @@ def test_hidden_gates_are_not_drawn():
 
     gate = {"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}
     app, ax = _render_app(density=False, gates=[gate])
-    app._scatter_gates_hidden = True
+    app._app_state.scatter.gates_hidden = True
     redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
 
@@ -301,6 +302,7 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
         channel=SimpleNamespace(ratio_index={}),
         selection=SimpleNamespace(selected_wells=["A01", "B02"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
+        scatter=ScatterState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
@@ -367,6 +369,7 @@ def test_gates_appear_on_every_separate_axis():
         channel=SimpleNamespace(ratio_index={}),
         selection=SimpleNamespace(selected_wells=["A01", "B02"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
+        scatter=ScatterState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
@@ -402,6 +405,7 @@ def _sidebar_stub_app(fig):
         dataset=SimpleNamespace(data_dir=None),
         plot=SimpleNamespace(line_order_rsets=[], line_order_wells=[], use_sem=True),
         selection=SimpleNamespace(selected_wells=["A01"]),
+        scatter=ScatterState(),
     )
     app._scatter_fig = fig  # makes _is_scatter_cells_fig / _supports_well_order true
     app._rep_sets_active = lambda: []
@@ -487,10 +491,10 @@ def _edit_app_with_gate(gate, xlim=(0.0, 10.0), ylim=(0.0, 10.0)):
     canvas.draw()  # populate transData
 
     app = SimpleNamespace()
+    app._app_state = SimpleNamespace(scatter=ScatterState())
     app._ax_scatter = ax
     app._scatter_canvas = canvas
     app._scatter_gates = [dict(gate)]
-    app._scatter_gates_hidden = False
     app._scatter_gate_draw_mode = False
     app._scatter_gate_edit = None
     app._scatter_gate_ctx = ({}, [], "#888888")
@@ -527,7 +531,7 @@ def test_gate_edge_at_interior_returns_none():
 def test_gate_edge_at_hidden_returns_none():
     from well_viewer.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
-    app._scatter_gates_hidden = True
+    app._app_state.scatter.gates_hidden = True
     assert gate_edge_at(app, _ev(ax, 8, 5)) is None
 
 
@@ -667,6 +671,7 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
         channel=SimpleNamespace(ratio_index={}),
         selection=SimpleNamespace(selected_wells=["A01", "B02"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
+        scatter=ScatterState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()

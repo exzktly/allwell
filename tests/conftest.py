@@ -303,6 +303,33 @@ def loaded_app(viewer_app, mini_dataset):
 
 
 @pytest.fixture
+def image_table_app(loaded_app):
+    """``loaded_app`` with the Image Table sub-tab actually built.
+
+    The Image Table is a lazy *sub*-tab of Image Browser: draining the centre
+    builders constructs the Image Browser parent with its default sub-tab
+    (Segmentation), so the Image Table's widgets (``_image_table_selector_grid``,
+    ``_image_table_zoom_lbl``, …) are only created when its sub-tab is first
+    shown. Tests that drive the Image Table controller need those widgets, so
+    build the sub-tab explicitly here.
+    """
+    from well_viewer.features.image_browser.controller import build_image_browser_subtab
+    app = loaded_app
+    # Image Browser is a lazy-only centre tab (built on first user click, not by
+    # the background drain), so force its parent build, then the sub-tab.
+    build_pending = getattr(app, "_centre_build_pending", None)
+    if build_pending is not None:
+        build_pending("Image Browser")
+    sub = getattr(app, "_image_browser_subtabs", None)
+    assert sub is not None, "Image Browser parent tab was not built"
+    idx = next((i for i in range(sub.count())
+                if sub.tabText(i) == "Image Table"), None)
+    assert idx is not None, "Image Table sub-tab not found"
+    build_image_browser_subtab(app, idx)
+    return app
+
+
+@pytest.fixture
 def mini_dataset_shape(tmp_path):
     """Mini dataset that additionally carries per-cell shape-feature columns."""
     from tests.fixtures.mini_dataset import build_mini_dataset

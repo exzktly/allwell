@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from well_viewer.core.plot_card_actions import (
+    copy_active_card_as_svg, save_active_card_figure,
+)
+
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
@@ -27,8 +31,13 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
+    # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``),
+    # which stamps ``app._<name>`` so legacy ``app._chan_cb_line`` / ``_line_*``
+    # readers keep resolving. Non-widget state and behaviour calls still reach app.
+    reg = ctx.widgets
+
     plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    ctx.app._widget_registry.register("_line_export_dock", export_dock)
+    reg.register("_line_export_dock", export_dock)
     parent = plot_area
 
     # ── controls row above the card (Channel / Metric / style / Export CSV) ──
@@ -37,39 +46,37 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     cl = QHBoxLayout(line_ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
-    # Channel combo: kept as an offscreen widget so the rest of the ctx.app can
-    # still read/write the per-renderer channel through ``ctx.app._chan_cb_line``
+    # Channel combo: kept as an offscreen widget so the rest of the app can
+    # still read/write the per-renderer channel through ``app._chan_cb_line``
     # and ``_plot_chan_var``; the global ctxbar combo is the only visible
     # channel control.
-    ctx.app._chan_cb_line = QComboBox()
-    ctx.app._chan_cb_line.addItems(["GFP"])
-    ctx.app._chan_cb_line.currentIndexChanged.connect(
-        lambda _i, _src=ctx.app._chan_cb_line: ctx.app._on_plot_channel_selected(_src)
+    chan_cb = reg.register("_chan_cb_line", QComboBox())
+    chan_cb.addItems(["GFP"])
+    chan_cb.currentIndexChanged.connect(
+        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
     )
-    ctx.app._chan_cb_line.hide()
-    if not hasattr(ctx.app, "_plot_chan_var"):
-        ctx.app._plot_chan_var = ctx.app._chan_cb_line
-        ctx.app._chan_var = ctx.app._plot_chan_var
+    chan_cb.hide()
+    if not ctx.widgets.has("_plot_chan_var"):
+        reg.register("_plot_chan_var", chan_cb)   # legacy aliases → same widget
+        reg.register("_chan_var", chan_cb)
 
     # The visible metric selector now lives in the global plotting ctxbar
     # (``_plotting_metric_cb``). This hidden per-tab combo stays as a
     # back-compat shim for code that still reads ``_metric_var`` /
     # ``_metric_cb``; the global combo wins when present.
     from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
-    ctx.app._metric_selector_frame = QWidget(line_ctrl)
-    mfl = QHBoxLayout(ctx.app._metric_selector_frame)
+    metric_frame = reg.register("_metric_selector_frame", QWidget(line_ctrl))
+    mfl = QHBoxLayout(metric_frame)
     mfl.setContentsMargins(0, 0, 0, 0)
-    mfl.addWidget(QLabel("Property:", ctx.app._metric_selector_frame))
-    ctx.app._metric_cb = QComboBox(ctx.app._metric_selector_frame)
-    ctx.app._metric_cb.addItems(_METRIC_ORDER)
-    ctx.app._metric_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_metric_selected())
-    mfl.addWidget(ctx.app._metric_cb)
-    if getattr(ctx.app, "_plotting_metric_cb", None) is not None:
-        ctx.app._metric_var = ctx.app._plotting_metric_cb
-    else:
-        ctx.app._metric_var = ctx.app._metric_cb
-    cl.addWidget(ctx.app._metric_selector_frame)
-    ctx.app._metric_selector_frame.hide()
+    mfl.addWidget(QLabel("Property:", metric_frame))
+    metric_cb = reg.register("_metric_cb", QComboBox(metric_frame))
+    metric_cb.addItems(_METRIC_ORDER)
+    metric_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_metric_selected())
+    mfl.addWidget(metric_cb)
+    _plotting_metric_cb = getattr(ctx.app, "_plotting_metric_cb", None)
+    reg.register("_metric_var", _plotting_metric_cb if _plotting_metric_cb is not None else metric_cb)
+    cl.addWidget(metric_frame)
+    metric_frame.hide()
 
     # Fold-change normalization collapses into a popover button (C1) so it no
     # longer needs its own row; the stretch pushes the action buttons right.
@@ -97,10 +104,10 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     _export_btn.clicked.connect(lambda _=False: export_plot_data(ctx.app))
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", line_ctrl, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: ctx.app._copy_active_card_as_svg())
+    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
     cl.addWidget(_copy_btn)
     _save_btn = _IconButton("save", line_ctrl, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: ctx.app._save_active_card_figure())
+    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
     cl.addWidget(_save_btn)
     # Properties button last in the row so it sits flush with the right
     # edge of the plot area — adjacent to where the figure-properties
@@ -109,7 +116,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
         "sliders-horizontal", line_ctrl,
         tooltip="Show / hide the figure properties panel",
     )
-    style_btn.clicked.connect(lambda _=False: ctx.app._open_export_style_panel("line"))
+    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("line"))
     cl.addWidget(style_btn)
     layout.addWidget(line_ctrl)
 
@@ -117,7 +124,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
     wire_save_to_gallery(ctx.app, card, "Line Graphs")
-    _sw = make_plot_view_switcher(ctx.app, 'Line Graphs')
+    _sw = make_plot_view_switcher(ctx, 'Line Graphs')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
     # Hide the per-card header — the ctxbar above already carries the same controls.
@@ -125,7 +132,6 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     card.setFigureTitle("")          # the tab name is the title; keep the header lean
     # Widget handles go through the WidgetRegistry; legacy ``ctx.app._line_*``
     # reads are forwarded to it by WellViewerApp.__getattr__.
-    reg = ctx.app._widget_registry
     reg.register("_line_card", card)
     fig = reg.register("_line_fig", card.figure)
     ax_mean = reg.register("_line_ax_mean", fig.add_subplot(4, 1, 1))
@@ -163,4 +169,4 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)
-    ctx.app._line_canvas.mpl_connect("button_press_event", partial(on_fig_click, ctx.app))
+    canvas.mpl_connect("button_press_event", partial(on_fig_click, ctx.app))

@@ -590,70 +590,10 @@ def build_centre(app, parent: QWidget) -> None:
         app._plot_config_subplots = _config_subplots
         app._plot_edit_axes = _edit_axes
 
-        def _copy_svg() -> None:
-            """Copy the active card's figure to the clipboard, preferring
-            vector.
-
-            On macOS the figure is written natively to ``NSPasteboard`` so
-            Illustrator pastes true editable vector; elsewhere a Qt
-            clipboard payload is used (see ``copy_figure_to_clipboard``).
-            The figure is captured in publication mode.
-            """
-            from well_viewer.features.export.style import copy_figure_to_clipboard
-            for attr in ("_line_card", "_bar_card", "_scatter_card",
-                         "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
-                card = getattr(app, attr, None)
-                if card is None or not card.isVisible():
-                    continue
-                fig = getattr(card, "_figure", None) or getattr(card, "figure", None)
-                canvas = getattr(card, "_canvas", None)
-                if fig is None and canvas is not None:
-                    fig = getattr(canvas, "figure", None)
-                if fig is None:
-                    return
-                prev_theme = getattr(card, "_plot_theme", "screen")
-                try:
-                    if hasattr(card, "setPlotTheme") and prev_theme != "publication":
-                        card.setPlotTheme("publication")
-
-                    status = copy_figure_to_clipboard(fig)
-                finally:
-                    if (hasattr(card, "setPlotTheme")
-                            and getattr(card, "_plot_theme", "screen") != prev_theme):
-                        try:
-                            card.setPlotTheme(prev_theme)
-                        except Exception:
-                            swallowed()  # was: pass (silent except)
-                if hasattr(app, "_set_status"):
-                    app._set_status(status)
-                return
-        app._copy_active_card_as_svg = _copy_svg
-
-        def _save_active_card_figure() -> None:
-            """Open a Save-As dialog for the active visible plot card's
-            figure. Uses the existing ``app._save_matplotlib_fig`` helper
-            so all renderers honour the same file-type filter and the
-            active dataset directory as the starting location."""
-            for attr, default in (
-                ("_line_card", "lines.png"),
-                ("_bar_card", "bars.png"),
-                ("_scatter_card", "scatter.png"),
-                ("_scatter_agg_card", "scatter_agg.png"),
-                ("_distribution_card", "distribution.png"),
-                ("_heatmap_card", "heatmap.png"),
-            ):
-                card = getattr(app, attr, None)
-                if card is None or not card.isVisible():
-                    continue
-                fig = getattr(card, "_figure", None) or getattr(card, "figure", None)
-                if fig is None:
-                    return
-                try:
-                    app._save_matplotlib_fig(fig, default)
-                except Exception:
-                    swallowed()  # was: pass (silent except)
-                return
-        app._save_active_card_figure = _save_active_card_figure
+        # The active-card Copy / Save actions now live in
+        # ``core.plot_card_actions`` as ctx-based functions (A8 P3.3); the plot
+        # builders wire their Copy/Save buttons to those directly, so no
+        # closures are stamped on the app here any more.
 
         _refresh_channel_chip(_PLOT_SUBTABS[0])
 

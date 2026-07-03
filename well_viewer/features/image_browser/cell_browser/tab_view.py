@@ -37,13 +37,17 @@ __all__ = [
 
 
 def build_cell_browser_tab(ctx, parent: QWidget) -> None:
+    # A8 burn-down: Qt widget handles go through the WidgetRegistry
+    # (``ctx.widgets``), which stamps ``app._cell_browser_*`` so legacy
+    # readers resolve. State dicts + the loader/refreshers stay on app.
+    reg = ctx.widgets
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    ctx.app._cell_browser_state = CellBrowserState()
+    ctx.runtime.cell_browser.state = CellBrowserState()
 
     # ── controls row ────────────────────────────────────────────────────────
     ctrl = QWidget(parent)
@@ -56,8 +60,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     chan_host = QWidget(ctrl)
     QHBoxLayout(chan_host).setContentsMargins(0, 0, 0, 0)
     cl.addWidget(chan_host)
-    ctx.app._cell_browser_channel_host = chan_host
-    ctx.app._cell_browser_channel_chips = {}
+    reg.register("_cell_browser_channel_host", chan_host)
+    ctx.runtime.cell_browser.channel_chips = {}
 
     # Per-channel LUT editor (min/max) in a popover. Edits the SHARED
     # per-channel display LUT (AppState.image_view, S4), so brightness tuned
@@ -69,15 +73,15 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         "Per-channel display brightness (min/max). Blank / Auto = auto-scale each "
         "cell. Shared with the other image viewers.")
     cl.addWidget(lut_btn)
-    ctx.app._cell_browser_lut_btn = lut_btn
-    ctx.app._cell_browser_lut_panel = lut_panel
-    ctx.app._cell_browser_lut_layout = lut_lay
-    ctx.app._cell_browser_lut_rows = {}
+    reg.register("_cell_browser_lut_btn", lut_btn)
+    reg.register("_cell_browser_lut_panel", lut_panel)
+    reg.register("_cell_browser_lut_layout", lut_lay)
+    ctx.runtime.cell_browser.lut_rows = {}
 
     boundary_cb = QCheckBox("Boundaries", ctrl)
     boundary_cb.setChecked(True)
     cl.addWidget(boundary_cb)
-    ctx.app._cell_browser_boundary_cb = boundary_cb
+    reg.register("_cell_browser_boundary_cb", boundary_cb)
 
     # N9: caption each crop with the active channel's smFISH spot count. Staged
     # like the other display controls — applied on Generate.
@@ -87,7 +91,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         "Label each cell with the active channel's smFISH spot count "
         "(its <channel>_smfish_count). Sort by that metric to rank cells by count.")
     cl.addWidget(label_spot_cb)
-    ctx.app._cell_browser_label_spot_cb = label_spot_cb
+    reg.register("_cell_browser_label_spot_cb", label_spot_cb)
 
     # Source: which stage of the fluorescence image to crop from. Raw (default)
     # or Corrected (top-hat). Staged like the rest — applied on Generate.
@@ -102,20 +106,20 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         "• Raw — unprocessed fluorescence.\n"
         "• Corrected — top-hat / background-subtracted image.")
     cl.addWidget(source_seg)
-    ctx.app._cell_browser_source_seg = source_seg
+    reg.register("_cell_browser_source_seg", source_seg)
 
     cl.addWidget(QLabel("Per page:", ctrl))
     pagesize_edit = QLineEdit("50", ctrl)
     pagesize_edit.setFixedWidth(48)
     cl.addWidget(pagesize_edit)
-    ctx.app._cell_browser_pagesize_edit = pagesize_edit
+    reg.register("_cell_browser_pagesize_edit", pagesize_edit)
 
     load_more = QPushButton("Load next", ctrl)
     load_more.setProperty("variant", "secondary")
     load_more.clicked.connect(lambda _=False: ctl.load_next_page(ctx.app))
     load_more.setEnabled(False)
     cl.addWidget(load_more)
-    ctx.app._cell_browser_load_more_btn = load_more
+    reg.register("_cell_browser_load_more_btn", load_more)
 
     # Generate: the display controls (channels / LUT / color / source /
     # boundaries) only *stage* their state; pressing Generate re-composites the
@@ -127,12 +131,12 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         "source. Display settings are staged until you press this.")
     generate_btn.clicked.connect(lambda _=False: ctl.apply_filters(ctx.app))
     cl.addWidget(generate_btn)
-    ctx.app._cell_browser_generate_btn = generate_btn
+    reg.register("_cell_browser_generate_btn", generate_btn)
 
     count_lbl = QLabel("Showing 0 / 0 cells", ctrl)
     count_lbl.setObjectName("Muted")
     cl.addWidget(count_lbl)
-    ctx.app._cell_browser_count_label = count_lbl
+    reg.register("_cell_browser_count_label", count_lbl)
     cl.addStretch(1)
     layout.addWidget(ctrl)
 
@@ -147,19 +151,19 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     scroll.setWidget(grid_host)
     layout.addWidget(scroll, 1)
-    ctx.app._cell_browser_grid = grid
-    ctx.app._cell_browser_grid_host = grid_host
+    reg.register("_cell_browser_grid", grid)
+    reg.register("_cell_browser_grid_host", grid_host)
 
     # ── worker (connect once) ────────────────────────────────────────────────
     loader = CellImageLoader(ctx.app)
     loader.cell_ready.connect(partial(_dispatch_cell_ready, ctx.app))
     loader.page_finished.connect(partial(_dispatch_page_finished, ctx.app))
-    ctx.app._cell_browser_loader = loader
+    ctx.runtime.cell_browser.loader = loader
 
     # Expose the on-show refreshers so ``tab_controller.on_tab_change`` can
     # repopulate channels/criteria/timepoints on every visit without a
     # function-local feature import (keeps the deferred-import budget flat).
-    ctx.app._cell_browser_refreshers = (
+    ctx.runtime.cell_browser.refreshers = (
         cell_browser_refresh,
         cell_browser_sidebar_refresh,
     )

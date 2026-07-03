@@ -203,7 +203,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     # The groups card-list — a widgets.SavedSelectionsList (composable)
     # over app._app_state.selection.selections.
     from widgets.saved_selections_list import SavedSelectionsList
-    from well_viewer.features.grouping.view import wire_selections_list as _wire
+    from well_viewer.features.grouping.tab_view import wire_selections_list as _wire
     app._rep_list = SavedSelectionsList(parent)
     app._rep_list.setComposable(True)
     layout.addWidget(app._rep_list, 1)

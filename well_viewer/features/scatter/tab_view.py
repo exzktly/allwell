@@ -60,14 +60,16 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
     build_scatter_agg_tab(ctx, agg_page)
     tab_widget.addTab(agg_page, "Per-well aggregate")
 
-    ctx.app._scatter_mode = _MODE_CELLS
-    ctx.app._scatter_tab_widget = tab_widget
+    # A8 burn-down: the sub-tab QTabWidget handle goes through the WidgetRegistry
+    # (``ctx.widgets``), which stamps ``app._scatter_tab_widget``. The active-mode
+    # is typed state (``ctx.state.scatter.mode``); the set-mode callback stays.
+    ctx.widgets.register("_scatter_tab_widget", tab_widget)
 
     def _set_mode(mode: str) -> None:
         if mode == _MODE_AGG:
             if tab_widget.currentIndex() != 1:
                 tab_widget.setCurrentIndex(1)
-            ctx.app._scatter_mode = _MODE_AGG
+            ctx.state.scatter.mode = _MODE_AGG
             try:
                 update_scatter_menus(ctx.app)
             except Exception:
@@ -79,7 +81,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
         else:
             if tab_widget.currentIndex() != 0:
                 tab_widget.setCurrentIndex(0)
-            ctx.app._scatter_mode = _MODE_CELLS
+            ctx.state.scatter.mode = _MODE_CELLS
             try:
                 update_scatter_menus(ctx.app)
             except Exception:
@@ -88,7 +90,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
                 redraw_scatter_orchestrate(ctx.app)
             except Exception:
                 swallowed()  # was: pass (silent except)
-    ctx.app._scatter_set_mode = _set_mode
+    ctx.runtime.scatter.set_mode = _set_mode
 
     tab_widget.currentChanged.connect(
         lambda idx: _set_mode(_MODE_AGG if idx == 1 else _MODE_CELLS)
@@ -97,7 +99,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
 
 def scatter_active_mode(app) -> str:
     """Return ``"cells"`` or ``"aggregate"``; defaults to ``"cells"``."""
-    return getattr(app, "_scatter_mode", _MODE_CELLS) or _MODE_CELLS
+    return app._app_state.scatter.mode or _MODE_CELLS
 
 
 def scatter_redraw_active(app) -> None:

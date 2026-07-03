@@ -23,13 +23,14 @@ def _collect_settings(app) -> dict:
             return float(v)
         return None
     slider = getattr(app, "_heatmap_tp_slider", None)
+    hm = app._app_state.feature_slice("heatmap")
     return {
         "cmap": str(getattr(app, "_heatmap_cmap_name", "") or ""),
-        "scale_mode": str(getattr(app, "_heatmap_scale_mode", "Auto") or "Auto"),
+        "scale_mode": str((hm.scale_mode if hm is not None else "Auto") or "Auto"),
         "vmin": _f("_heatmap_vmin"),
         "vmax": _f("_heatmap_vmax"),
-        "repset_avg": bool(getattr(app, "_heatmap_repset_avg", False)),
-        "log_scale": bool(getattr(app, "_heatmap_log_scale", False)),
+        "repset_avg": bool(hm.repset_avg if hm is not None else False),
+        "log_scale": bool(hm.log_scale if hm is not None else False),
         # Timepoint-slider position so the scrubbed timepoint restores between
         # sessions (clamped to the live slider range on restore).
         "tp_index": int(slider.value()) if slider is not None else 0,
@@ -100,6 +101,7 @@ def apply_persisted_settings(app) -> None:
             cmap_cb.blockSignals(blocked)
         app._heatmap_cmap_name = cmap
 
+    hm = app._app_state.feature_slice("heatmap")
     scale_mode = str(settings.get("scale_mode") or "Auto")
     if scale_cb is not None:
         idx = scale_cb.findText(scale_mode)
@@ -109,7 +111,8 @@ def apply_persisted_settings(app) -> None:
                 scale_cb.setCurrentIndex(idx)
             finally:
                 scale_cb.blockSignals(blocked)
-    app._heatmap_scale_mode = scale_mode
+    if hm is not None:
+        hm.scale_mode = scale_mode
 
     def _set_edit(edit, key):
         v = settings.get(key)
@@ -125,7 +128,8 @@ def apply_persisted_settings(app) -> None:
     _set_edit(vmax_edit, "vmax")
 
     repset_avg = bool(settings.get("repset_avg", False))
-    app._heatmap_repset_avg = repset_avg
+    if hm is not None:
+        hm.repset_avg = repset_avg
     if rs_cb is not None:
         blocked = rs_cb.blockSignals(True)
         try:
@@ -134,7 +138,8 @@ def apply_persisted_settings(app) -> None:
             rs_cb.blockSignals(blocked)
 
     log_scale = bool(settings.get("log_scale", False))
-    app._heatmap_log_scale = log_scale
+    if hm is not None:
+        hm.log_scale = log_scale
     log_cb = getattr(app, "_heatmap_log_scale_cb", None)
     if log_cb is not None:
         blocked = log_cb.blockSignals(True)

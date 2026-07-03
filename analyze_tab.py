@@ -13,7 +13,6 @@ process_microscopy.py must live alongside this file.
 from __future__ import annotations
 
 import queue
-import sys as _sys
 import time as _time
 from pathlib import Path
 from typing import Callable, Optional
@@ -21,9 +20,8 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
 from services.input_resolution_service import (
@@ -38,18 +36,14 @@ from services.pipeline_runner import (
     classify_log_line,
 )
 from services.pipeline_service import find_pipeline_script
-from services.remote_config import default_remote_index, load_remotes
+from services.remote_config import default_remote_index
 from ui.theme import (
     CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
 )
-from widgets.checkable_dropdown import CheckableDropdown
-from widgets.run_dashboard import RunDashboard
-from widgets.wrap_checkbox import WrapCheckBox
-import pipeline.shape_features as _sfc
 from well_viewer.core.safe import swallowed
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
-    DEFAULT_SCHEMA, DEFAULT_SEP, SCHEMA_FIELDS,
+    DEFAULT_SEP, SCHEMA_FIELDS,
     _FIELD_TO_LABEL, _LABEL_TO_FIELD, _SCHEMA_LABELS,
 )
 
@@ -60,6 +54,58 @@ def _safe_qc_float(text: str) -> float:
         return float(str(text).strip() or "0")
     except (TypeError, ValueError):
         return 0.0
+
+
+# Numeric fields are plain QLineEdits with no validators, and bad values used to
+# be swallowed deep in the pipeline (a non-integer radius silently dropped its
+# flag; mesh_ratio=0 caused a downstream division-by-zero). Validate them at the
+# entry boundary instead (audit X4/X6). Pure + module-level so it's unit-tested.
+_INT_FIELDS = {
+    "tophat_radius_nir": "Nuclear tophat radius",
+    "tophat_radius_fluor": "Fluor tophat radius",
+    "fft_small_nir": "Nuclear FFT small-object px",
+    "fft_small_fluor": "Fluor FFT small-object px",
+    "tf_threads": "TF threads",
+    "workers": "Workers",
+    "remote_batch_size": "Remote batch size",
+}
+
+
+def _numeric_option_errors(opts: dict) -> list[str]:
+    """Return human-readable errors for out-of-range / unparseable numeric run
+    options. Empty/blank means "use the pipeline default" and is allowed."""
+    errors: list[str] = []
+    for key, label in _INT_FIELDS.items():
+        raw = str(opts.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            if int(raw) < 0:
+                errors.append(f"{label} must be a whole number ≥ 0 (got {raw!r}).")
+        except ValueError:
+            errors.append(f"{label} must be a whole number (got {raw!r}).")
+    for key, label, allow_zero in (("mesh_ratio", "Mesh tile ratio", False),
+                                   ("mesh_sigma", "Mesh sigma", True)):
+        raw = str(opts.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            val = float(raw)
+        except ValueError:
+            errors.append(f"{label} must be a number (got {raw!r}).")
+            continue
+        if allow_zero and val < 0:
+            errors.append(f"{label} must be ≥ 0.")
+        elif not allow_zero and val <= 0:
+            errors.append(f"{label} must be > 0.")   # 0 → downstream div-by-zero
+    mn = opts.get("qc_min_area") or 0.0
+    mx = opts.get("qc_max_area") or 0.0
+    if mn and mx and mn > mx:
+        errors.append("QC minimum area must be ≤ maximum area.")
+    sol = opts.get("qc_min_solidity") or 0.0
+    if not (0.0 <= sol <= 1.0):
+        errors.append("QC minimum solidity must be between 0 and 1.")
+    return errors
 
 # ---------------------------------------------------------------------------
 # Schema vocabulary — kept in sync with process_microscopy.py
@@ -132,6 +178,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         self._log_q: queue.Queue[tuple[str, object]] = self._runner.log_q
         self._progress_tracker = ProgressTracker()
         self._running = False
+        # Cleared on app close so the self-rescheduling log poller stops
+        # re-arming its QTimer (audit L2) — AnalyzeTab is a child widget whose
+        # own closeEvent never fires.
+        self._alive = True
         self._well_total = 0
         self._well_done  = 0
         self._zipper_done = 0
@@ -704,6 +754,13 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         if seg_errors:
             QMessageBox.critical(self, "Segmentation Error", "\n".join(seg_errors))
             return None
+        # Numeric fields (radius / FFT / mesh / threads / workers / batch / QC
+        # bounds) — block a bad value at the boundary instead of silently
+        # dropping the flag or dividing by zero downstream (audit X4/X6).
+        num_errors = _numeric_option_errors(self._collect_run_options())
+        if num_errors:
+            QMessageBox.critical(self, "Input Error", "\n".join(num_errors))
+            return None
         # Empty-well flat-field / background reads its reference images from a
         # named background well — require it to be specified AND to exist in the
         # input before starting, rather than letting the run no-op (empty model)
@@ -1121,7 +1178,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             pass
         except Exception:  # noqa: BLE001 — a bad event must not kill the poller
             swallowed()    # (would freeze the live log/dashboard permanently)
-        QTimer.singleShot(80, self._poll_log)
+        if getattr(self, "_alive", True):
+            QTimer.singleShot(80, self._poll_log)
 
     def closeEvent(self, event) -> None:
         if self._runner.is_running:

@@ -359,14 +359,15 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 grp, tp_h = job
                 return f"'{grp.name}' @ t={tp_h:.1f}h ({step}/{total})"
 
-            def _run_job(job) -> Optional[str]:
+            def _run_job(job, write_dir) -> Optional[str]:
                 grp, tp_h = job
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
                 safe_tp = f"{tp_h:.1f}".replace(".", "_")
                 stem = unique_export_stem(
                     f"scatter_{self._scatter_mode}_{safe_grp}_t{safe_tp}", used_stems)
-                csv_path = out_dir / f"{stem}.csv"
-                fig_path = out_dir / f"{stem}.{fmt}"
+                # Stage into write_dir (audit X3); committed to out_dir on success.
+                csv_path = write_dir / f"{stem}.csv"
+                fig_path = write_dir / f"{stem}.{fmt}"
                 if self._scatter_mode == "cells":
                     return self._run_scatter_cells_job(grp, tp_h, csv_path, fig_path, fmt)
                 return self._run_scatter_agg_job(grp, tp_h, csv_path, fig_path, fmt)
@@ -377,13 +378,14 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 grp = job
                 return f"'{grp.name}' all selected tps ({step}/{total})"
 
-            def _run_job(job) -> Optional[str]:
+            def _run_job(job, write_dir) -> Optional[str]:
                 grp = job
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
                 stem = unique_export_stem(
                     f"scatter_{self._scatter_mode}_{safe_grp}_all_tps", used_stems)
-                csv_path = out_dir / f"{stem}.csv"
-                fig_path = out_dir / f"{stem}.{fmt}"
+                # Stage into write_dir (audit X3); committed to out_dir on success.
+                csv_path = write_dir / f"{stem}.csv"
+                fig_path = write_dir / f"{stem}.{fmt}"
                 if self._scatter_mode == "cells":
                     return self._run_scatter_cells_multi_tp_job(grp, timepoints, csv_path, fig_path, fmt)
                 return self._run_scatter_agg_multi_tp_job(grp, timepoints, csv_path, fig_path, fmt)
@@ -394,6 +396,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             run_job_fn=_run_job,
             success_text=f"\u2713 {len(jobs)} group(s) \u2192 {out_dir.name}/",
             status_text=f"Scatter batch export ({self._scatter_mode}): {len(jobs)} group(s) \u2192 {out_dir}",
+            out_dir=out_dir,
         )
 
     @contextmanager

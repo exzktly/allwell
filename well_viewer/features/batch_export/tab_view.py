@@ -178,5 +178,5 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "mode_segmented": switch_row,
         "band_row": band_row,
     }
-    ctx.app._batch_export_set_mode = lambda mode="line": _show_batch_mode(ctx.app, mode)
-    ctx.app._batch_export_set_mode("line")
+    ctx.runtime.batch_export.set_mode = lambda mode="line": _show_batch_mode(ctx.app, mode)
+    ctx.runtime.batch_export.set_mode("line")

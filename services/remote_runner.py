@@ -40,6 +40,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import contextlib
 from functools import lru_cache
 import tempfile
@@ -57,6 +58,14 @@ from services.remote_config import (
     resolve_ssh_for_rsync,
     to_rsync_path,
     update_bandwidth,
+)
+# Stdlib-only (fov, tp) done-key helpers — shared with pipeline.io (audit A2).
+# This module import must stay imaging-stack-free; incremental_keys is csv/
+# zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
+from pipeline.incremental_keys import (
+    fov_tp_from_name,
+    read_done_fov_keys,
+    read_done_fov_keys_from_zip,
 )
 from util.aw_safe import swallowed
 
@@ -77,8 +86,14 @@ def _scratch_dir() -> Path:
             p = Path(override).expanduser()
             p.mkdir(parents=True, exist_ok=True)
             return p
-        except OSError:
-            pass
+        except OSError as exc:
+            # Don't silently ignore a user-set scratch dir — falling back to the
+            # OS temp can later fill a small system drive with GB of staging
+            # (audit E14). Surface it so the misconfiguration is visible.
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "ALLWELL_SCRATCH_DIR=%r is unusable (%s); falling back to the "
+                "OS temp dir", override, exc)
     return Path(tempfile.gettempdir())
 
 
@@ -652,25 +667,23 @@ def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
             zip_wells.add(label)
 
     folder_wells: set[str] = set()
-    try:
-        for p in input_dir.iterdir():
-            if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+    # A raised OSError from iterdir() (e.g. the drive was yanked) propagates
+    # naturally to the caller — no wrapping handler needed.
+    for p in input_dir.iterdir():
+        if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+            continue
+        label = _canonical_well_from_path(p.name)
+        if label is None:
+            continue
+        # Empty folders don't count — they're often leftovers from
+        # ``compress_folder_images_to_zip_and_remove`` that
+        # interrupted between zip-write and folder-delete.
+        try:
+            if not any(p.iterdir()):
                 continue
-            label = _canonical_well_from_path(p.name)
-            if label is None:
-                continue
-            # Empty folders don't count — they're often leftovers from
-            # ``compress_folder_images_to_zip_and_remove`` that
-            # interrupted between zip-write and folder-delete.
-            try:
-                if not any(p.iterdir()):
-                    continue
-            except OSError:
-                continue
-            folder_wells.add(label)
-    except OSError:
-        # Drive yanked? Re-raise as a clearer error upstream.
-        raise
+        except OSError:
+            continue
+        folder_wells.add(label)
 
     # MIXED iff there's at least one well with a folder that has no
     # matching zip AND at least one well that DOES have a zip.
@@ -1045,72 +1058,6 @@ def _member_matches(member: str, keep_tokens: set[str]) -> bool:
     return any(tok in base for tok in keep_tokens)
 
 
-def _read_done_fov_keys_csv(csv_path: Path) -> "set[tuple[str, str]]":
-    """``(fov, timepoint)`` pairs already present in a per-well CSV.
-
-    A stdlib-only twin of ``pipeline.io.read_done_fov_keys`` — kept here so the
-    client-side split needs no imaging-stack import. Missing / column-less /
-    unreadable CSVs yield an empty set (process everything).
-    """
-    import csv
-
-    if not csv_path.exists():
-        return set()
-    keys: "set[tuple[str, str]]" = set()
-    try:
-        with open(csv_path, newline="") as fh:
-            reader = csv.DictReader(fh)
-            if not reader.fieldnames or "fov" not in reader.fieldnames \
-                    or "timepoint" not in reader.fieldnames:
-                return set()
-            for row in reader:
-                keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
-    except OSError:
-        return set()
-    return keys
-
-
-def _read_done_fov_keys_zip(
-    out_zip: Path, fields: "list[str]", sep: str,
-) -> "set[tuple[str, str]]":
-    """``(fov, timepoint)`` pairs recoverable from a local ``<well>_out.zip``.
-
-    Stdlib-only twin of ``pipeline.io.read_done_fov_keys_from_zip`` (keeps the
-    client-side split imaging-stack-free). The archive's image members keep the
-    input stem, so their tokens recover which FOV-groups are already processed —
-    used as a fallback when the per-well CSV is absent but the well's output zip
-    is present, so the split doesn't re-upload already-done FOVs for a full
-    remote re-segmentation. Missing / unreadable archive ⇒ empty set.
-    """
-    if not out_zip.exists():
-        return set()
-    keys: "set[tuple[str, str]]" = set()
-    try:
-        with zipfile.ZipFile(out_zip, "r") as zf:
-            names = zf.namelist()
-    except (OSError, zipfile.BadZipFile):
-        return set()
-    for name in names:
-        if name.endswith("/"):
-            continue
-        keys.add(_member_fov_tp(name, fields, sep))
-    keys.discard(("", ""))
-    return keys
-
-
-def _member_fov_tp(member: str, fields: "list[str]", sep: str) -> "tuple[str, str]":
-    """Extract the ``(fov, timepoint)`` tokens from a zip member's basename,
-    using the same schema-index discipline ``parse_filename`` applies (so the
-    key compares equal to what's stored in the per-well CSV)."""
-    base = Path(member).stem
-    parts = base.split(sep)
-    fi = fields.index("fov") if "fov" in fields else -1
-    ti = fields.index("timepoint") if "timepoint" in fields else -1
-    fov = parts[fi] if 0 <= fi < len(parts) else ""
-    tp = parts[ti] if 0 <= ti < len(parts) else ""
-    return (fov, tp)
-
-
 def _filter_new_fovs_in_staging(
     well_zips: tuple[Path, ...],
     *,
@@ -1129,7 +1076,6 @@ def _filter_new_fovs_in_staging(
     copies only — never the user's originals. Returns
     ``(surviving_well_zips, up_to_date_wells)``.
     """
-    fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
     survivors: list[Path] = []
     up_to_date: list[str] = []
     n_total = len(well_zips)
@@ -1142,19 +1088,31 @@ def _filter_new_fovs_in_staging(
         # CSV is the primary done-set; fall back to the well's local output zip
         # so a missing/lost CSV doesn't make us re-upload already-done FOVs for a
         # full remote re-segmentation ("reanalyzed previously processed images").
-        done = _read_done_fov_keys_csv(prior_output_dir / f"{csv_prefix}_{well}.csv")
-        done |= _read_done_fov_keys_zip(
-            prior_output_dir / f"{well}_out.zip", fields, filename_sep)
+        # The (fov, tp) key readers are the shared stdlib-only helpers in
+        # pipeline.incremental_keys (audit A2) — no imaging-stack import.
+        done = read_done_fov_keys(prior_output_dir / f"{csv_prefix}_{well}.csv")
+        done |= read_done_fov_keys_from_zip(
+            prior_output_dir / f"{well}_out.zip",
+            schema=filename_schema, sep=filename_sep)
         if not done:
             survivors.append(wz)  # genuinely new well → upload in full
             continue
         try:
             with zipfile.ZipFile(wz, "r") as zf:
                 members = zf.namelist()
-        except (OSError, zipfile.BadZipFile):
+        except (OSError, zipfile.BadZipFile) as exc:
+            # A corrupt input zip is uploaded whole rather than incrementally —
+            # name it so the user can tell why a "done" well re-uploads in full
+            # (audit E11).
+            if log_fn:
+                log_fn(f"[remote] WARN {well}: input zip unreadable ({exc}); "
+                       f"uploading in full — {wz.name}\n")
             survivors.append(wz)
             continue
-        keep = [m for m in members if _member_fov_tp(m, fields, filename_sep) not in done]
+        keep = [
+            m for m in members
+            if fov_tp_from_name(m, schema=filename_schema, sep=filename_sep) not in done
+        ]
         if not keep:
             # Every input FOV already processed locally — skip the upload.
             try:
@@ -1667,29 +1625,11 @@ class DatasetCache:
         # ``--partial`` flag means each retry resumes where the previous
         # attempt left off, so a flaky link doesn't restart the whole
         # upload from zero. Non-transient errors (permission, bad path)
-        # break out of the loop on the first attempt.
-        t0 = time.monotonic()
-        sent_bytes = 0
-        rc = -1
-        attempts_run = 0  # v5.2.15: actual count, for the error message
-        for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
-            if stop_event is not None and stop_event.is_set():
-                break
-            if delay > 0:
-                if log_fn:
-                    log_fn(
-                        f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
-                        f"in {delay:.0f}s (last exit code {rc})\n"
-                    )
-                time.sleep(delay)
-            attempt_bytes, rc = _run_rsync_streaming(
-                cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
-            )
-            sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
-            attempts_run += 1
-            if rc == 0 or rc not in _RSYNC_RETRY_CODES:
-                break
-        elapsed = max(time.monotonic() - t0, 1e-6)
+        # break out of the loop on the first attempt. Shared with
+        # ``upload_subset`` via ``_stream_rsync_with_retry`` (audit A11).
+        sent_bytes, elapsed, rc, attempts_run = _stream_rsync_with_retry(
+            cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+        )
 
         # v5.2.14: pre-v5.2.14 ``ensure_uploaded`` returned even when
         # rsync exited non-zero (e.g. rc=23 "partial transfer due to
@@ -1809,26 +1749,10 @@ class DatasetCache:
                 f"({len(sources)} file(s))\n"
             )
         cmd += [*sources, dest]
-        t0 = time.monotonic()
-        sent_bytes = 0
-        rc = -1
-        for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
-            if stop_event is not None and stop_event.is_set():
-                break
-            if delay > 0:
-                if log_fn:
-                    log_fn(
-                        f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
-                        f"in {delay:.0f}s (last exit code {rc})\n"
-                    )
-                time.sleep(delay)
-            attempt_bytes, rc = _run_rsync_streaming(
-                cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
-            )
-            sent_bytes += attempt_bytes
-            if rc == 0 or rc not in _RSYNC_RETRY_CODES:
-                break
-        elapsed = max(time.monotonic() - t0, 1e-6)
+        # Shared streaming retry loop (audit A11).
+        sent_bytes, elapsed, rc, _attempts = _stream_rsync_with_retry(
+            cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+        )
         return sent_bytes, elapsed, rc
 
     def gc(
@@ -2083,8 +2007,6 @@ def _run_rsync_streaming(
             if stop_event and stop_event.is_set():
                 proc.terminate()
                 break
-            if not line:
-                continue
             # Progress lines (--info=progress2) print to a TTY-ish format
             # with carriage returns. We now read \r-delimited and can
             # surface them as percentage updates.
@@ -2145,6 +2067,50 @@ _RSYNC_RETRY_CODES = {10, 12, 30, 35}
 # across the three retries is 14 s, an upper bound the user can sit
 # through without thinking the run is hung.
 _RSYNC_RETRY_DELAYS = (2.0, 4.0, 8.0)
+
+
+def _stream_rsync_with_retry(
+    cmd: list[str],
+    *,
+    log_fn: Callable[[str], None] | None = None,
+    progress_fn=None,
+    stop_event: threading.Event | None = None,
+) -> "tuple[int, float, int, int]":
+    """Run a *streaming* rsync (:func:`_run_rsync_streaming`) with bounded retry
+    on transient network failures, resuming via ``--partial`` each attempt.
+
+    The progress-streaming twin of :func:`_rsync_with_retry` (which *captures*
+    output for small control-plane rsyncs). Consolidates the two byte-identical
+    retry loops the ``ensure_uploaded`` + ``upload_subset`` transfer paths
+    hand-rolled (audit A11). Non-transient rsync errors break out on the first
+    attempt; a set ``stop_event`` breaks at the top of the next iteration.
+
+    Returns ``(sent_bytes, elapsed_s, rc, attempts_run)`` — ``sent_bytes``
+    accumulates the incremental bytes each resumed attempt sent.
+    """
+    t0 = time.monotonic()
+    sent_bytes = 0
+    rc = -1
+    attempts_run = 0  # v5.2.15: actual count, for the error message
+    for attempt, delay in enumerate((0.0,) + _RSYNC_RETRY_DELAYS):
+        if stop_event is not None and stop_event.is_set():
+            break
+        if delay > 0:
+            if log_fn:
+                log_fn(
+                    f"[remote] rsync retry {attempt}/{len(_RSYNC_RETRY_DELAYS)} "
+                    f"in {delay:.0f}s (last exit code {rc})\n"
+                )
+            time.sleep(delay)
+        attempt_bytes, rc = _run_rsync_streaming(
+            cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+        )
+        sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
+        attempts_run += 1
+        if rc == 0 or rc not in _RSYNC_RETRY_CODES:
+            break
+    elapsed = max(time.monotonic() - t0, 1e-6)
+    return sent_bytes, elapsed, rc, attempts_run
 
 
 def _rsync_with_retry(
@@ -2474,6 +2440,9 @@ class _BatchedRemoteProcess:
         self._line_q: "queue.Queue[Optional[str]]" = queue.Queue()
         self._lines = _QueueLineIterator(self._line_q)
         self._current_proc: Optional[subprocess.Popen] = None
+        # Guards _current_proc: the worker thread reassigns it per batch while
+        # the GUI thread reads it in terminate()/kill()/pid/send_signal (E20).
+        self._current_proc_lock = threading.Lock()
 
         # Set up the shared run identifiers and remote dirs.
         # Keep the single-shot path's layout: input goes into the
@@ -2535,7 +2504,9 @@ class _BatchedRemoteProcess:
 
     @property
     def pid(self) -> int:
-        return self._current_proc.pid if self._current_proc else -1
+        with self._current_proc_lock:
+            proc = self._current_proc
+        return proc.pid if proc else -1
 
     @property
     def returncode(self) -> Optional[int]:
@@ -2552,23 +2523,40 @@ class _BatchedRemoteProcess:
 
     def wait(self, timeout: Optional[float] = None) -> int:
         self._worker.join(timeout=timeout)
-        return self._returncode if self._returncode is not None else 0
+        if self._worker.is_alive():
+            # Timed out; the worker is still running — not a completion, so
+            # report the current (possibly None→0) state without inventing a
+            # success code.
+            return self._returncode if self._returncode is not None else 0
+        # The worker finished. A ``None`` code here means it crashed before
+        # setting one — surface that as a failure rather than coercing it to 0
+        # (which previously made a crashed batched run look successful and
+        # triggered verify_and_cleanup to delete remote data — audit E1).
+        if self._returncode is None:
+            self._returncode = 1
+        return self._returncode
 
     def terminate(self) -> None:
         self._stop.set()
-        if self._current_proc is not None:
-            self._current_proc.terminate()
+        with self._current_proc_lock:
+            proc = self._current_proc
+        if proc is not None:
+            proc.terminate()
         self._fetcher.cancel()
 
     def kill(self) -> None:
         self._stop.set()
-        if self._current_proc is not None:
-            self._current_proc.kill()
+        with self._current_proc_lock:
+            proc = self._current_proc
+        if proc is not None:
+            proc.kill()
         self._fetcher.cancel()
 
     def send_signal(self, sig: int) -> None:
-        if self._current_proc is not None:
-            self._current_proc.send_signal(sig)
+        with self._current_proc_lock:
+            proc = self._current_proc
+        if proc is not None:
+            proc.send_signal(sig)
 
     # Internals ────────────────────────────────────────────────────────
 
@@ -2768,7 +2756,7 @@ class _BatchedRemoteProcess:
                     self._runner.host.ssh_argv(allocate_tty=True)
                     + [remote_cmd]
                 )
-                self._current_proc = subprocess.Popen(
+                proc = subprocess.Popen(
                     ssh_argv,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -2784,15 +2772,21 @@ class _BatchedRemoteProcess:
                     env={**os.environ, "PYTHONUNBUFFERED": "1"},
                     start_new_session=(os.name == "posix"),
                 )
-                assert self._current_proc.stdout is not None
-                for line in self._current_proc.stdout:
+                # Publish under the lock so a concurrent Stop (terminate/kill on
+                # the GUI thread) reads a consistent handle, not a half-updated
+                # attribute or a stale value at a batch boundary (audit E20).
+                with self._current_proc_lock:
+                    self._current_proc = proc
+                assert proc.stdout is not None
+                for line in proc.stdout:
                     if self._stop.is_set():
-                        self._current_proc.terminate()
+                        proc.terminate()
                         break
                     self._fetcher.observe(line)
                     self._line_q.put(line)
-                rc = self._current_proc.wait()
-                self._current_proc = None
+                rc = proc.wait()
+                with self._current_proc_lock:
+                    self._current_proc = None
 
                 if rc != 0:
                     self._log(
@@ -2807,21 +2801,40 @@ class _BatchedRemoteProcess:
                 )
 
             self._returncode = 0
+        except BaseException as exc:
+            # A crash anywhere in the batch loop (ssh spawn failure, argv
+            # build, upload, stdout iteration) must NOT leave ``_returncode``
+            # at None — that made ``wait()`` report success and
+            # verify_and_cleanup delete remote data though nothing ran
+            # (audit E1). Record a non-zero code and surface the error in the
+            # GUI log; the ``finally`` below still drains the fetcher and, now
+            # that rc != 0, skips the auto-threshold pass.
+            import logging as _logging
+            self._returncode = 1
+            self._log(f"[remote] batched run failed: {exc}\n")
+            _logging.getLogger(__name__).exception("batched remote run crashed")
         finally:
-            # Drain the Fetcher first so every well's CSV + zip lands
-            # locally BEFORE we attempt auto-threshold against
-            # local_output_dir.
-            self._fetcher.flush_and_join()
-            # v5.4.7: single auto-threshold pass over the FULL
-            # downloaded output. The per-batch passes were suppressed
-            # via ``--no_auto_threshold`` so that a batch wouldn't
-            # write thresholds derived from a sliver of the plate.
-            # Fires only when the whole run succeeded — a mid-run
-            # abort leaves the previous run's pipeline_info.json (if
-            # any) untouched.
-            if self._returncode == 0:
-                self._run_local_auto_threshold()
-            self._line_q.put(None)
+            # The stdout sentinel MUST be enqueued no matter what — if
+            # flush_and_join (or the auto-threshold pass) raises, the reader
+            # loop in pipeline_runner would otherwise block forever waiting on
+            # a None that never arrives (audit X10). Keep it in an inner
+            # ``finally`` so it's still emitted last on the happy path (after
+            # the fetcher's progress lines) but guaranteed on any failure.
+            try:
+                # Drain the Fetcher first so every well's CSV + zip lands
+                # locally BEFORE we attempt auto-threshold against
+                # local_output_dir.
+                self._fetcher.flush_and_join()
+                # v5.4.7: single auto-threshold pass over the FULL downloaded
+                # output. The per-batch passes were suppressed via
+                # ``--no_auto_threshold`` so a batch wouldn't write thresholds
+                # derived from a sliver of the plate. Fires only when the whole
+                # run succeeded — a mid-run abort leaves the previous run's
+                # pipeline_info.json (if any) untouched.
+                if self._returncode == 0:
+                    self._run_local_auto_threshold()
+            finally:
+                self._line_q.put(None)
 
     def _run_local_auto_threshold(self) -> None:
         """Re-run the pipeline's auto-threshold pass locally against
@@ -3042,7 +3055,18 @@ class Fetcher:
                 continue
             if item is None:
                 return
-            self._fetch_one(item)
+            try:
+                self._fetch_one(item)
+            except Exception:
+                # A crash in one well's fetch must not kill the fetcher thread
+                # — that left the remaining wells silently un-downloaded behind
+                # a misleading "N/M downloaded" line (audit E12). Log it and
+                # move on to the next item; the verify/retry step re-pulls the
+                # gap.
+                import logging as _logging
+                _logging.getLogger(__name__).exception(
+                    "fetcher: error downloading %r; continuing", item)
+                self._log(f"[remote] ↓ fetcher: error on {item!r}; continuing\n")
 
     @contextlib.contextmanager
     def _transfer_heartbeat(self, label: str, dest_path: Path, interval: float = 8.0):
@@ -3135,6 +3159,10 @@ class Fetcher:
                 f"[remote] ↓ {well}: WARN could not pull {well}_out.zip from "
                 f"{self.run.remote_output_dir}; will retry at end of run.\n"
             )
+            try:
+                tmp_zip.unlink()   # don't leave a partial in scratch (audit X9)
+            except OSError:
+                pass
             return
         if not ok:
             self._log(
@@ -3182,11 +3210,20 @@ class Fetcher:
 
         # Now materialize the well's output in the user's output_dir
         # according to local input mode.
-        self._materialize(well, tmp_zip)
+        materialized = self._materialize(well, tmp_zip)
         try:
             tmp_zip.unlink()
         except OSError:
             pass
+        if not materialized:
+            # The local artifact isn't safely in place — do NOT mark the well
+            # fetched or delete the remote copy (audit X2); leave it for the
+            # end-of-run retry to re-pull.
+            self._log(
+                f"[remote] ↓ {well}: WARN local materialize failed; keeping the "
+                f"remote copy and leaving the well for retry.\n"
+            )
+            return
         self.run.fetched_wells.add(well)
         total_elapsed = time.monotonic() - t0
         position_done = len(self.run.fetched_wells)
@@ -3283,22 +3320,28 @@ class Fetcher:
                 f"into {self.run.local_output_dir.name}/\n"
             )
 
-    def _materialize(self, well: str, well_zip: Path) -> None:
+    def _materialize(self, well: str, well_zip: Path) -> bool:
         """Place the well's outputs in ``local_output_dir`` so the result
-        matches what a local run would have produced."""
+        matches what a local run would have produced.
+
+        Returns True iff the local artifact is now in place. The caller gates
+        ``fetched_wells.add`` + remote deletion on this (audit X2): the copy
+        goes to a temp path then ``os.replace`` (atomic), so an interrupted
+        copy can't leave a truncated ``{well}_out.zip`` — and a failed copy
+        returns False so the only complete (remote) copy is NOT deleted.
+        """
         dest = self.run.local_output_dir
         dest.mkdir(parents=True, exist_ok=True)
 
         if self.output_filter is OutputFilter.CSV_ONLY:
             # Nothing to extract — the CSV was pulled separately. Drop
             # the well zip on the floor.
-            return
+            return True
 
         if self.run.incremental:
             # The fetched zip holds only the new FOVs' images. Merge them into
             # the existing local <well>_out.zip instead of overwriting.
-            self._materialize_incremental(well, well_zip, dest)
-            return
+            return self._materialize_incremental(well, well_zip, dest)
 
         # Output is always a per-well .zip now (compression is mandatory), so
         # the fetched zip IS the expected local artifact for every input mode.
@@ -3306,13 +3349,27 @@ class Fetcher:
         # which left no <well>_out.zip and no <well>/ dir, so the verify step
         # failed and the post-run cleanup (delete local well folders) was
         # skipped.
+        final = dest / f"{well}_out.zip"
+        tmp = dest / f".{well}_out.zip.tmp"
         try:
-            shutil.copyfile(well_zip, dest / f"{well}_out.zip")
+            shutil.copyfile(well_zip, tmp)
+            os.replace(tmp, final)
         except OSError as exc:
             self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            return False
+        return True
 
-    def _materialize_incremental(self, well: str, well_zip: Path, dest: Path) -> None:
-        """Merge a partial fetched well zip into the existing local output."""
+    def _materialize_incremental(self, well: str, well_zip: Path, dest: Path) -> bool:
+        """Merge a partial fetched well zip into the existing local output.
+
+        Returns True on a successful merge, False if the partial zip couldn't be
+        extracted (so the caller won't mark the well fetched / delete the remote
+        copy — audit X2)."""
         from pipeline.io import merge_images_into_zip
 
         tmp_dir = _new_scratch_dir(f"allwell-merge-{well}-")
@@ -3322,9 +3379,10 @@ class Fetcher:
                     zf.extractall(tmp_dir)
             except (OSError, zipfile.BadZipFile) as exc:
                 self._log(f"[remote] warn: extracting partial {well}_out.zip failed: {exc}\n")
-                return
+                return False
             n = merge_images_into_zip(dest / f"{well}_out.zip", tmp_dir)
             self._log(f"[remote] merge: {well}_out.zip → +{n} new image(s)\n")
+            return True
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -3980,10 +4038,16 @@ class RemoteRunner:
         # rsync --timeout=120 (I/O-idle) + ssh ConnectTimeout bound real stalls,
         # so timeout=None is safe; stop_event makes Stop interrupt an in-flight
         # re-pull.
+        # FOLDER must be included: _verify_local_manifest requires the
+        # {well}_out.zip for *any* FULL run (including FOLDER input), so the
+        # retry re-pull has to be able to fetch it too — otherwise a
+        # FOLDER+FULL run whose out-zip failed to land loops verify→retry
+        # forever and remote cleanup never happens (audit G2).
         want_zip = (
             run.output_filter is OutputFilter.FULL
             and run.local_input_mode in (
-                LocalInputMode.ZIP, LocalInputMode.FLAT, LocalInputMode.MIXED)
+                LocalInputMode.ZIP, LocalInputMode.FLAT,
+                LocalInputMode.MIXED, LocalInputMode.FOLDER)
         )
 
         def _pull(remote_src: str) -> None:
@@ -4175,7 +4239,11 @@ class RemoteRunner:
                 self.host.ssh_argv(allocate_tty=False) + [cmd],
                 capture_output=True, text=True, timeout=10,
             )
-        except (subprocess.TimeoutExpired, OSError):
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            # A failed teardown ssh must not be silent — an orphaned SLURM
+            # allocation could keep running (and billing) unnoticed (audit E13).
+            log(f"[remote] WARN scheduler: could not confirm scancel of the "
+                f"remote job ({exc}); a SLURM allocation may still be running.\n")
             return
         out = (result.stdout or "")
         if "AW_SCANCELLED" in out:
@@ -4225,8 +4293,14 @@ class RemoteRunner:
                 ],
                 capture_output=True, timeout=10,
             )
-        except (subprocess.TimeoutExpired, OSError):
-            pass
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            # Best-effort (the local process-group kill is primary), but don't
+            # swallow it silently — record that this teardown channel failed
+            # (audit E13); close_remote_job() below is the scheduler backstop.
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "remote cancel: ssh kill failed (%s); relying on the local "
+                "process-group kill + scancel backstop", exc)
         # Belt-and-braces: also cancel the scheduler job (no-op on
         # direct-execution hosts / when no job id was recorded).
         self.close_remote_job()

@@ -219,6 +219,13 @@ def compute_auto_thresholds(
     pipeline_info = _read_pipeline_info(out_dir)
     rng = random.Random(rng_seed)
     per_channel: Dict[str, List[float]] = {ch: [] for ch in channels}
+    # Count decode attempts vs failures per channel (audit E9). ``_open_image_at``
+    # swallows a decode error to DEBUG and returns None, so a channel whose
+    # tophat images are largely unreadable would silently estimate its Otsu
+    # threshold from a biased subset. We WARN in the summary when a meaningful
+    # fraction was dropped.
+    per_channel_attempted: Dict[str, int] = {ch: 0 for ch in channels}
+    per_channel_decode_failed: Dict[str, int] = {ch: 0 for ch in channels}
 
     well_list = [str(w).strip() for w in (well_labels or []) if str(w).strip()]
     in_dir_path = Path(in_dir) if in_dir else None
@@ -273,9 +280,11 @@ def compute_auto_thresholds(
                 fluor_ref = fluor_refs.get((fov, tp))
                 if fluor_ref is None:
                     continue
+                per_channel_attempted[ch] += 1
                 labels = _open_image_at(mask_ref)
                 fluor = _open_image_at(fluor_ref)
                 if labels is None or fluor is None:
+                    per_channel_decode_failed[ch] += 1
                     continue
                 cell_means, bg_values = _sample_cell_and_bg(
                     labels, fluor, cap=cells_per_image_cap, rng=rng,
@@ -289,6 +298,15 @@ def compute_auto_thresholds(
 
     thresholds: Dict[str, float] = {}
     for ch in channels:
+        attempted = per_channel_attempted.get(ch, 0)
+        failed = per_channel_decode_failed.get(ch, 0)
+        if attempted and failed / attempted >= 0.25:
+            logger.warning(
+                "auto_threshold: %s — %d/%d image pair(s) failed to decode "
+                "(%.0f%%); the threshold is estimated from the remaining "
+                "subset and may be biased.",
+                ch.upper(), failed, attempted, 100.0 * failed / attempted,
+            )
         values = per_channel.get(ch) or []
         if len(values) < 2:
             _emit(f"Auto-threshold: skipping {ch.upper()} — only "

@@ -31,7 +31,8 @@ def build_feature_picker(ctx, panel_layout) -> None:
     listw.setMinimumSize(240, 260)
     listw.setUniformItemSizes(False)
     panel_layout.addWidget(listw)
-    ctx.app._mv_feature_list = listw
+    # A8 burn-down: widget handle via the WidgetRegistry (stamps app._mv_feature_list).
+    ctx.widgets.register("_mv_feature_list", listw)
 
     def _on_item_changed(_item=None):
         if getattr(ctx.app, "_mv_picker_refreshing", False):
@@ -47,10 +48,10 @@ def build_feature_picker(ctx, panel_layout) -> None:
     listw.itemChanged.connect(_on_item_changed)
 
     def refresh() -> None:
-        st = ctx.app._app_state.feature_slice("multivariate")
+        st = ctx.state.feature_slice("multivariate")
         if st is None:
             return
-        ctx.app._mv_picker_refreshing = True
+        ctx.runtime.multivariate.picker_refreshing = True
         try:
             listw.clear()
             families = available_feature_columns(ctx.app)
@@ -76,7 +77,7 @@ def build_feature_picker(ctx, panel_layout) -> None:
             if kept != st.feature_cols:
                 st.feature_cols = kept
         finally:
-            ctx.app._mv_picker_refreshing = False
+            ctx.runtime.multivariate.picker_refreshing = False
 
-    ctx.app._mv_refresh_feature_picker = refresh
+    ctx.runtime.multivariate.refresh_feature_picker = refresh
     refresh()

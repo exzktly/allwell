@@ -15,11 +15,13 @@ Replaces the ~17 thin ``WellViewerApp._<domain>_{save,load}_to_data_dir`` /
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional
 
 from PySide6.QtCore import QTimer
 
 _DEBOUNCE_MS = 500
+_logger = logging.getLogger("well_viewer")
 
 
 class PersistenceRegistry:
@@ -62,7 +64,17 @@ class PersistenceRegistry:
 
     def _flush(self, name: str) -> None:
         self._pending.discard(name)
-        self.save(name)
+        # A debounced autosave runs from a QTimer with no caller to catch a
+        # raise — an exception here (e.g. a disk-full write in
+        # ``view_state``/``sample_definitions``) would otherwise vanish into
+        # the Qt event loop, so the user's edits silently fail to persist with
+        # no trace (audit E16). Log it so the failure is at least diagnosable.
+        try:
+            self.save(name)
+        except Exception:
+            _logger.exception(
+                "persistence: debounced autosave for %r failed; the edit was "
+                "not written to disk", name)
 
 
 def build_persistence_registry(app) -> PersistenceRegistry:

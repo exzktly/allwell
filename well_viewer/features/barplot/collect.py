@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import math
-import re
 from collections import Counter
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -83,6 +82,26 @@ def _bar_debug(msg: str) -> None:
     """Emit opt-in bar-plot diagnostics for draw-time label debugging."""
     if debug_flags.review_bar_debug_enabled():
         _logger.debug("%s", msg)
+
+
+def _fc_scale(value, err, *, eff_ctrl, eff_ctrl_spread, t0, t0_spread,
+              fc_vs_ctrl, fc_vs_t0, fc_op_ctrl, fc_op_t0, fc_order):
+    """One axis' fold-change ``scale_bar_value`` call (audit A12).
+
+    The mean / fraction / N triplet applied this exact call three times in each
+    of two code paths (6× paste); the only per-axis difference is which
+    ``(value, err)`` and resolved ``eff_ctrl`` / ``t0`` baselines feed in, so
+    they become arguments. Returns the scaled ``(value, err)``.
+    """
+    return _fc.scale_bar_value(
+        value, err,
+        control_mean=eff_ctrl if fc_vs_ctrl else None,
+        control_spread=eff_ctrl_spread if fc_vs_ctrl else None,
+        t0_mean=t0 if fc_vs_t0 else None,
+        t0_spread=t0_spread if fc_vs_t0 else None,
+        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
+        order=fc_order,
+    )
 
 
 FC_STATE_OFF: Tuple[bool, str, bool] = (False, "", False)
@@ -358,33 +377,21 @@ def collect_bar_items(
                     n_above_val = float("nan")
                     n_above_err = 0.0
                 elif fc_vs_ctrl or fc_vs_t0:
-                    gm, g_err_m = _fc.scale_bar_value(
-                        gm, g_err_m,
-                        control_mean=eff_ctrl_mean if fc_vs_ctrl else None,
-                        control_spread=eff_ctrl_spread if fc_vs_ctrl else None,
-                        t0_mean=t0_mean if fc_vs_t0 else None,
-                        t0_spread=t0_spread if fc_vs_t0 else None,
-                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
-                        order=fc_order,
-                    )
-                    gf, g_err_f = _fc.scale_bar_value(
-                        gf, g_err_f,
-                        control_mean=eff_ctrl_frac if fc_vs_ctrl else None,
-                        control_spread=eff_ctrl_frac_spread if fc_vs_ctrl else None,
-                        t0_mean=t0_frac if fc_vs_t0 else None,
-                        t0_spread=t0_frac_spread if fc_vs_t0 else None,
-                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
-                        order=fc_order,
-                    )
-                    n_above_val, n_above_err = _fc.scale_bar_value(
-                        n_above_val, n_above_err,
-                        control_mean=eff_ctrl_n if fc_vs_ctrl else None,
-                        control_spread=eff_ctrl_n_spread if fc_vs_ctrl else None,
-                        t0_mean=t0_n if fc_vs_t0 else None,
-                        t0_spread=t0_n_spread if fc_vs_t0 else None,
-                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
-                        order=fc_order,
-                    )
+                    _fc_kw = dict(fc_vs_ctrl=fc_vs_ctrl, fc_vs_t0=fc_vs_t0,
+                                  fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0,
+                                  fc_order=fc_order)
+                    gm, g_err_m = _fc_scale(
+                        gm, g_err_m, eff_ctrl=eff_ctrl_mean,
+                        eff_ctrl_spread=eff_ctrl_spread, t0=t0_mean,
+                        t0_spread=t0_spread, **_fc_kw)
+                    gf, g_err_f = _fc_scale(
+                        gf, g_err_f, eff_ctrl=eff_ctrl_frac,
+                        eff_ctrl_spread=eff_ctrl_frac_spread, t0=t0_frac,
+                        t0_spread=t0_frac_spread, **_fc_kw)
+                    n_above_val, n_above_err = _fc_scale(
+                        n_above_val, n_above_err, eff_ctrl=eff_ctrl_n,
+                        eff_ctrl_spread=eff_ctrl_n_spread, t0=t0_n,
+                        t0_spread=t0_n_spread, **_fc_kw)
                 has_mean = not math.isnan(gm)
                 has_frac = has_mean and not math.isnan(gf)
                 gk = rset_disp if group_mode == "well" else tp_str
@@ -550,33 +557,21 @@ def collect_bar_items(
                                         t0_n, t0_n_spread,
                                         ctrl_bn[0], ctrl_bn[1], fc_op_ctrl,
                                     )
-                    m, s = _fc.scale_bar_value(
-                        m, s,
-                        control_mean=eff_ctrl_mean if fc_vs_ctrl else None,
-                        control_spread=eff_ctrl_spread if fc_vs_ctrl else None,
-                        t0_mean=t0_mean if fc_vs_t0 else None,
-                        t0_spread=t0_spread if fc_vs_t0 else None,
-                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
-                        order=fc_order,
-                    )
-                    f, fs = _fc.scale_bar_value(
-                        f, fs,
-                        control_mean=eff_ctrl_frac if fc_vs_ctrl else None,
-                        control_spread=eff_ctrl_frac_spread if fc_vs_ctrl else None,
-                        t0_mean=t0_frac if fc_vs_t0 else None,
-                        t0_spread=t0_frac_spread if fc_vs_t0 else None,
-                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
-                        order=fc_order,
-                    )
-                    n_above_val, n_above_err = _fc.scale_bar_value(
-                        n_above_val, n_above_err,
-                        control_mean=eff_ctrl_n if fc_vs_ctrl else None,
-                        control_spread=eff_ctrl_n_spread if fc_vs_ctrl else None,
-                        t0_mean=t0_n if fc_vs_t0 else None,
-                        t0_spread=t0_n_spread if fc_vs_t0 else None,
-                        op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
-                        order=fc_order,
-                    )
+                    _fc_kw = dict(fc_vs_ctrl=fc_vs_ctrl, fc_vs_t0=fc_vs_t0,
+                                  fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0,
+                                  fc_order=fc_order)
+                    m, s = _fc_scale(
+                        m, s, eff_ctrl=eff_ctrl_mean,
+                        eff_ctrl_spread=eff_ctrl_spread, t0=t0_mean,
+                        t0_spread=t0_spread, **_fc_kw)
+                    f, fs = _fc_scale(
+                        f, fs, eff_ctrl=eff_ctrl_frac,
+                        eff_ctrl_spread=eff_ctrl_frac_spread, t0=t0_frac,
+                        t0_spread=t0_frac_spread, **_fc_kw)
+                    n_above_val, n_above_err = _fc_scale(
+                        n_above_val, n_above_err, eff_ctrl=eff_ctrl_n,
+                        eff_ctrl_spread=eff_ctrl_n_spread, t0=t0_n,
+                        t0_spread=t0_n_spread, **_fc_kw)
                 has_mean = not math.isnan(m)
                 has_frac = not math.isnan(f)
                 out.append(BarItem(

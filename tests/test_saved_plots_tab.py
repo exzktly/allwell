@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QWidget
 
+from well_viewer.core.app_runtime import AppRuntime
+from well_viewer.core.widget_registry import WidgetRegistry
 from well_viewer.features.saved_plots.state import SavedPlot, get_store
 from well_viewer.features.saved_plots.tab_view import (
     build_saved_plots_tab,
@@ -32,7 +34,12 @@ def _rec():
 def test_empty_state_until_a_plot_is_saved(qapp, tmp_path):
     app = _app(tmp_path)
     parent = QWidget()  # retain so Qt doesn't delete the child stack
-    build_saved_plots_tab(SimpleNamespace(app=app), parent)
+    # A real ViewerContext always carries a WidgetRegistry (``ctx.widgets``); the
+    # builder registers its handles through it and register() stamps ``app._x``.
+    build_saved_plots_tab(
+        SimpleNamespace(app=app, widgets=WidgetRegistry(app), runtime=AppRuntime(app)),
+        parent,
+    )
 
     # No saved plots → empty-state page, regardless of dataset presence.
     assert app._saved_plots_stack.currentIndex() == 0

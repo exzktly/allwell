@@ -83,7 +83,7 @@ def _nondefault_export_prefs(app) -> dict:
     app is constructed with.
     """
     from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
-    cur = getattr(app, "_export_style_prefs", None) or {}
+    cur = app._app_state.export_prefs.style_prefs or {}
     return {
         k: v for k, v in cur.items()
         if k not in DEFAULT_EXPORT_STYLE_PREFS or v != DEFAULT_EXPORT_STYLE_PREFS[k]
@@ -133,7 +133,7 @@ def snapshot(app) -> dict:
         "export_style_prefs": _nondefault_export_prefs(app),
         "export_axis_prefs": {
             str(k): dict(v)
-            for k, v in (getattr(app, "_export_axis_prefs", {}) or {}).items()
+            for k, v in (app._app_state.export_prefs.axis_prefs or {}).items()
             if isinstance(v, dict)
         },
         "tabs": _snapshot_tabs(app),
@@ -528,15 +528,15 @@ def restore(app, state: dict) -> None:
         # tab (or the batch-export path) on load.
         from well_viewer.core.plot_style import AXIS_SCOPED_PREF_KEYS
         clean_in = {k: v for k, v in prefs_in.items() if k not in AXIS_SCOPED_PREF_KEYS}
-        existing = getattr(app, "_export_style_prefs", None)
+        existing = app._app_state.export_prefs.style_prefs
         if isinstance(existing, dict):
             existing.update(clean_in)
         else:
-            app._export_style_prefs = dict(clean_in)
+            app._app_state.export_prefs.style_prefs = dict(clean_in)
 
     axis_in = state.get("export_axis_prefs")
     if isinstance(axis_in, dict):
-        app._export_axis_prefs = {
+        app._app_state.export_prefs.axis_prefs = {
             str(k): dict(v) for k, v in axis_in.items() if isinstance(v, dict)
         }
 

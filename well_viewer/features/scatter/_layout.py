@@ -114,7 +114,7 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
     """
     items = list(scatter_data.items())
     axes = _setup_scatter_axes(app, len(items))
-    prefs = getattr(app, "_export_style_prefs", None) or {}
+    prefs = app._app_state.export_prefs.style_prefs or {}
     density_on = bool(prefs.get("scatter_density", False))
     x_log = bool(prefs.get("scatter_x_log", True))
     y_log = bool(prefs.get("scatter_y_log", True))

@@ -250,9 +250,12 @@ def apply_axis_log_scale(ax, which: str, on: bool) -> None:
 
 
 def _ensure_export_style_prefs(app) -> dict:
-    if not hasattr(app, "_export_style_prefs"):
-        app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    return app._export_style_prefs
+    # A8 teardown: backed by the typed ExportPrefsState slice; seeded lazily on
+    # first access (None → defaults) exactly as the old loose attr was.
+    ep = app._app_state.export_prefs
+    if ep.style_prefs is None:
+        ep.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    return ep.style_prefs
 
 
 # Prefs that describe a single plot's *view* (axis limits, log scaling, and the
@@ -289,9 +292,8 @@ def figure_pref_key(app, fig) -> str:
 
 
 def _ensure_axis_prefs_store(app) -> dict:
-    if not hasattr(app, "_export_axis_prefs"):
-        app._export_axis_prefs = {}
-    return app._export_axis_prefs
+    # A8 teardown: backed by the typed ExportPrefsState slice (per-figure store).
+    return app._app_state.export_prefs.axis_prefs
 
 
 class _FigurePrefs(MutableMapping):

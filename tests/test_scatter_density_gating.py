@@ -9,6 +9,7 @@ from well_viewer.features.scatter.gating import (
     compute_point_density,
 )
 from well_viewer.features.scatter.state import ScatterState
+from well_viewer.core.export_prefs_state import ExportPrefsState
 
 
 # ── compute_point_density ────────────────────────────────────────────────────
@@ -169,6 +170,7 @@ def _render_app(*, density: bool, gates):
         selection=SimpleNamespace(selected_wells=["A01"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: df
@@ -177,7 +179,7 @@ def _render_app(*, density: bool, gates):
     app._ax_scatter = ax
     app._scatter_fig = fig
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = prefs
+    app._app_state.export_prefs.style_prefs = prefs
     app._scatter_gates = list(gates)
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
@@ -303,6 +305,7 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
         selection=SimpleNamespace(selected_wells=["A01", "B02"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
@@ -311,7 +314,7 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
     app._scatter_fig = fig
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
     app._scatter_gates = []
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
@@ -370,6 +373,7 @@ def test_gates_appear_on_every_separate_axis():
         selection=SimpleNamespace(selected_wells=["A01", "B02"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
@@ -378,7 +382,7 @@ def test_gates_appear_on_every_separate_axis():
     app._scatter_fig = fig
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
     app._scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
@@ -406,6 +410,7 @@ def _sidebar_stub_app(fig):
         plot=SimpleNamespace(line_order_rsets=[], line_order_wells=[], use_sem=True),
         selection=SimpleNamespace(selected_wells=["A01"]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
     )
     app._scatter_fig = fig  # makes _is_scatter_cells_fig / _supports_well_order true
     app._rep_sets_active = lambda: []
@@ -591,8 +596,8 @@ def test_scatter_defaults_to_log_and_survives_restyle():
 
     app, ax = _render_app(density=False, gates=[])
     # Shared keys are linear (their default) — scatter must ignore them.
-    app._export_style_prefs["x_log"] = False
-    app._export_style_prefs["y_log"] = False
+    app._app_state.export_prefs.style_prefs["x_log"] = False
+    app._app_state.export_prefs.style_prefs["y_log"] = False
     redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     assert ax.get_xscale() == "function"
@@ -605,7 +610,7 @@ def test_scatter_defaults_to_log_and_survives_restyle():
 def test_scatter_log_off_via_scatter_pref():
     from well_viewer.features.scatter.controller import redraw_scatter
     app, ax = _render_app(density=False, gates=[])
-    app._export_style_prefs["scatter_x_log"] = False
+    app._app_state.export_prefs.style_prefs["scatter_x_log"] = False
     redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     assert ax.get_xscale() == "linear"
@@ -672,6 +677,7 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
         selection=SimpleNamespace(selected_wells=["A01", "B02"]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
     )
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
@@ -680,7 +686,7 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
     app._scatter_fig = fig
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
     app._scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
@@ -729,7 +735,7 @@ def test_density_respects_open_circle_marker():
     from well_viewer.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=True, gates=[])
-    app._export_style_prefs["marker_style"] = "o_open"
+    app._app_state.export_prefs.style_prefs["marker_style"] = "o_open"
     redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     coll = [c for c in ax.collections if getattr(c, "_aw_density_collection", False)][0]
@@ -744,7 +750,7 @@ def test_density_filled_keeps_per_point_gradient():
     from well_viewer.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=True, gates=[])
-    app._export_style_prefs["marker_style"] = "o"
+    app._app_state.export_prefs.style_prefs["marker_style"] = "o"
     redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     coll = [c for c in ax.collections if getattr(c, "_aw_density_collection", False)][0]

@@ -118,7 +118,7 @@ class BatchExportPanel(QWidget):
         self._suppress_persist: bool = True
 
         default_out = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
-        export_prefs = getattr(app, "_export_style_prefs", {}) or {}
+        export_prefs = app._app_state.export_prefs.style_prefs or {}
         default_fmt = str(export_prefs.get("format", "png")).lower()
         if default_fmt not in {"png", "svg", "eps", "pdf"}:
             default_fmt = "png"

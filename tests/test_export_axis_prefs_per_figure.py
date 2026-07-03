@@ -16,7 +16,10 @@ from well_viewer.core import plot_style as PS  # noqa: E402
 
 
 def _app():
-    return SimpleNamespace(_line_fig=Figure(), _bar_fig=Figure())
+    from well_viewer.core.export_prefs_state import ExportPrefsState
+    return SimpleNamespace(
+        _line_fig=Figure(), _bar_fig=Figure(),
+        _app_state=SimpleNamespace(export_prefs=ExportPrefsState()))
 
 
 def test_axis_prefs_do_not_leak_between_figures():
@@ -50,7 +53,7 @@ def test_axis_writes_route_to_per_figure_store_not_global():
     # Global style dict must NOT carry the axis edit…
     assert PS._ensure_export_style_prefs(app).get("x_log") in (False, None)
     # …it lives in the per-figure store under the stable key.
-    assert app._export_axis_prefs["line"]["x_log"] is True
+    assert app._app_state.export_prefs.axis_prefs["line"]["x_log"] is True
 
 
 def test_apply_uses_per_figure_axis_state():

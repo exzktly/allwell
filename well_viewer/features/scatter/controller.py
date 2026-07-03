@@ -129,7 +129,7 @@ def redraw_scatter(
     # ``render_scatter_points`` owns the solid / density / color-by-time branch,
     # returning the click-interaction points and the legend handles. Density mode
     # + log state come from the shared export-style prefs, re-read each redraw.
-    prefs = getattr(app, "_export_style_prefs", None) or {}
+    prefs = app._app_state.export_prefs.style_prefs or {}
     density_on = bool(prefs.get("scatter_density", False))
     interaction_points, legend_handles = render_scatter_points(
         app, app._ax_scatter, scatter_data,

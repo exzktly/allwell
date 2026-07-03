@@ -859,7 +859,7 @@ def rebuild_all(app) -> None:
     app._redraw()
     try:
         from well_viewer.features.scatter.tab_view import scatter_redraw_active
-        scatter_redraw_active(app)
+        scatter_redraw_active(app._ctx)
     except Exception:
         __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
     # Group edits change which wells the plots draw from, and the Cell Browser

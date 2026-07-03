@@ -30,9 +30,9 @@ def test_slice_defaults(viewer_app):
 
 def test_active_mode_reads_the_slice(viewer_app):
     app = viewer_app
-    assert scatter_active_mode(app) == "cells"
+    assert scatter_active_mode(app._ctx) == "cells"
     app._app_state.scatter.mode = "aggregate"
-    assert scatter_active_mode(app) == "aggregate"
+    assert scatter_active_mode(app._ctx) == "aggregate"
 
 
 def test_mode_persists_through_snapshot(viewer_app):

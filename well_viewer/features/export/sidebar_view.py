@@ -264,7 +264,7 @@ class ExportStyleSidebar(QWidget):
             draw_btn = QPushButton("Draw gate")
 
             def _arm_draw(_=False, _b=draw_btn) -> None:
-                set_gate_draw_mode(self._app, True)
+                set_gate_draw_mode(self._app._ctx, True)
                 _b.setText("Drag on the plot…")
             draw_btn.clicked.connect(_arm_draw)
             add_full(s_gates, draw_btn)
@@ -945,7 +945,7 @@ class ExportStyleSidebar(QWidget):
                 redraw_bars(app._ctx)
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
-                scatter_redraw_active(app)
+                scatter_redraw_active(app._ctx)
             else:
                 app._redraw()
         except Exception:
@@ -1115,7 +1115,7 @@ class ExportStyleSidebar(QWidget):
             def _commit(_i=idx, _e=edit) -> None:
                 self._gate_rename_in_progress = True
                 try:
-                    ok = rename_gate(self._app, _i, _e.text())
+                    ok = rename_gate(self._app._ctx, _i, _e.text())
                 finally:
                     self._gate_rename_in_progress = False
                 if not ok:
@@ -1126,7 +1126,7 @@ class ExportStyleSidebar(QWidget):
             layout.addWidget(edit)
 
     def _on_clear_gates(self) -> None:
-        clear_gates(self._app)
+        clear_gates(self._app._ctx)
         self._refresh_gate_count()
 
     def _supports_well_order(self) -> bool:
@@ -1196,10 +1196,10 @@ class ExportStyleSidebar(QWidget):
                 redraw_bars(app._ctx)
                 return
             if getattr(app, "_scatter_fig", None) is self._fig:
-                redraw_scatter_orchestrate(app)
+                redraw_scatter_orchestrate(app._ctx)
                 return
             if getattr(app, "_scatter_agg_fig", None) is self._fig:
-                redraw_scatter_agg_orchestrate(app)
+                redraw_scatter_agg_orchestrate(app._ctx)
                 return
             app._redraw()
         except Exception:

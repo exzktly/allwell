@@ -14,6 +14,9 @@ from well_viewer.core.lazy import lazy as _lazy
 # features deletable. Each proxy resolves its target on first call.
 _scatter_collect_agg_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_agg_data")
 _scatter_collect_data = _lazy("well_viewer.features.scatter.collect", "collect_scatter_data")
+_scatter_axis_metric_key = _lazy("well_viewer.features.scatter.controller", "scatter_axis_metric_key")
+_scatter_col_for_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
+_scatter_sync_agg_stat_combos = _lazy("well_viewer.features.scatter.controller", "sync_scatter_agg_stat_combos")
 resolve_bar_timepoints = _lazy("well_viewer.features.barplot.renderer", "resolve_bar_timepoints")
 
 
@@ -431,19 +434,22 @@ def export_bar_plot_data(app) -> None:
         _error(app, "Export failed", str(exc))
 
 
-def export_scatter_data(app) -> None:
+def export_scatter_data(ctx) -> None:
     """Export scatter plot data to CSV."""
+    from well_viewer.core.channel_state_controller import get_fluor_gate
+    ch_x_cb = ctx.widgets.get_or_none("_scatter_ch_x_cb")
+    ch_y_cb = ctx.widgets.get_or_none("_scatter_ch_y_cb")
     try:
-        ch_x_entry = app._scatter_ch_x_cb.currentText()
-        ch_y_entry = app._scatter_ch_y_cb.currentText()
+        ch_x_entry = ch_x_cb.currentText()
+        ch_y_entry = ch_y_cb.currentText()
     except (ValueError, AttributeError):
-        _warn(app, "Export", "Select channels and timepoint first.")
+        _warn(ctx.window, "Export", "Select channels and timepoint first.")
         return
 
     # Pick every active timepoint from the multi-tp selector, falling
     # back to the legacy single-tp combo when the picker hasn't been
     # populated (very first build).
-    selections = getattr(app, "_scatter_tp_selections", None) or {}
+    selections = ctx.runtime.scatter.tp_selections or {}
     timepoints_h: list[float] = []
     for tp_str, on in selections.items():
         if not on:
@@ -454,40 +460,35 @@ def export_scatter_data(app) -> None:
             continue
     if not timepoints_h:
         try:
-            tp_str = app._scatter_tp_cb.currentText()
+            tp_str = ctx.widgets.get_or_none("_scatter_tp_cb").currentText()
             if tp_str:
                 timepoints_h = [float(tp_str)]
         except (TypeError, ValueError, AttributeError):
             pass
     if not timepoints_h:
-        _warn(app, "Export", "Select at least one timepoint first.")
+        _warn(ctx.window, "Export", "Select at least one timepoint first.")
         return
 
     ch_x_base = ch_x_entry.split(" ")[0]
     ch_y_base = ch_y_entry.split(" ")[0]
-    # Per-axis Property combos drive column selection now; fall back to
-    # the legacy single-entry resolver if those combos aren't present.
-    if hasattr(app, "_scatter_axis_metric_key"):
-        metric_x = app._scatter_axis_metric_key("x")
-        metric_y = app._scatter_axis_metric_key("y")
-        col_x = app._col_for_scatter_axis(ch_x_entry, metric_x)
-        col_y = app._col_for_scatter_axis(ch_y_entry, metric_y)
-    else:
-        col_x = app._col_for_scatter_entry(ch_x_entry)
-        col_y = app._col_for_scatter_entry(ch_y_entry)
+    # Per-axis Property combos drive column selection.
+    metric_x = _scatter_axis_metric_key(ctx, "x")
+    metric_y = _scatter_axis_metric_key(ctx, "y")
+    col_x = _scatter_col_for_axis(ctx, ch_x_entry, metric_x)
+    col_y = _scatter_col_for_axis(ctx, ch_y_entry, metric_y)
 
-    fluor_gate_x = app._get_fluor_gate(ch_x_base)
-    fluor_gate_y = app._get_fluor_gate(ch_y_base)
+    fluor_gate_x = get_fluor_gate(ctx, ch_x_base)
+    fluor_gate_y = get_fluor_gate(ctx, ch_y_base)
 
     scatter_data = _scatter_collect_data(
-        app, col_x, col_y, timepoints_h,
+        ctx, col_x, col_y, timepoints_h,
         well_colors=[],
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )
 
-    well_labels = _well_labels_map(app)
-    well_paths = _well_paths_keys(app)
+    well_labels = dict(ctx.state.dataset.well_labels or {})
+    well_paths = set(ctx.state.dataset.well_paths or {})
     rows_out = []
     for label, data in scatter_data.items():
         x_vals = data['x']
@@ -505,13 +506,13 @@ def export_scatter_data(app) -> None:
             })
 
     if not rows_out:
-        _warn(app, "Export", "No data to export for the current selection.")
+        _warn(ctx.window, "Export", "No data to export for the current selection.")
         return
 
     tp_tag = (f"t{timepoints_h[0]:g}" if len(timepoints_h) == 1
               else f"t{min(timepoints_h):g}-{max(timepoints_h):g}")
     out_path = _ask_save_csv(
-        app, "Export scatter plot data",
+        ctx.window, "Export scatter plot data",
         f"scatter_{ch_x_base}_vs_{ch_y_base}_{tp_tag}.csv",
     )
     if not out_path:
@@ -522,26 +523,26 @@ def export_scatter_data(app) -> None:
             writer = csv.DictWriter(fh, fieldnames=["group_well", "well_name", f"{col_x}", f"{col_y}", "timepoint_h"])
             writer.writeheader()
             writer.writerows(rows_out)
-        app._set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
+        ctx.set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
     except OSError as exc:
-        _error(app, "Export failed", str(exc))
+        _error(ctx.window, "Export failed", str(exc))
 
 
-def export_scatter_agg_data(app) -> None:
+def export_scatter_agg_data(ctx) -> None:
     """Export aggregate scatter plot data to CSV."""
     # Keep the legacy stat combos in sync with the new per-axis
     # (channel, property) state — the export reads from those.
     try:
-        app._sync_scatter_agg_stat_combos()
+        _scatter_sync_agg_stat_combos(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
 
     try:
-        stat_x = app._scatter_agg_stat_x_cb.currentText()
-        stat_y = app._scatter_agg_stat_y_cb.currentText()
+        stat_x = ctx.widgets.get_or_none("_scatter_agg_stat_x_cb").currentText()
+        stat_y = ctx.widgets.get_or_none("_scatter_agg_stat_y_cb").currentText()
 
         selected_timepoints: list[float] = []
-        tp_checks = getattr(app, "_scatter_agg_tp_checks", None)
+        tp_checks = ctx.runtime.scatter.agg_tp_checks
         if tp_checks:
             for tp_str, widget in tp_checks.items():
                 try:
@@ -552,20 +553,20 @@ def export_scatter_agg_data(app) -> None:
             selected_timepoints.sort()
 
         if not selected_timepoints:
-            _warn(app, "Export", "Please select at least one timepoint.")
+            _warn(ctx.window, "Export", "Please select at least one timepoint.")
             return
 
     except (ValueError, AttributeError, IndexError):
-        _warn(app, "Export", "Select statistics and timepoints first.")
+        _warn(ctx.window, "Export", "Select statistics and timepoints first.")
         return
 
     scatter_data = _scatter_collect_agg_data(
-        app, stat_x, stat_y, selected_timepoints,
+        ctx, stat_x, stat_y, selected_timepoints,
         well_colors=[],
     )
 
-    well_labels = _well_labels_map(app)
-    well_paths = _well_paths_keys(app)
+    well_labels = dict(ctx.state.dataset.well_labels or {})
+    well_paths = set(ctx.state.dataset.well_paths or {})
     rows_out = []
     for label, data in scatter_data.items():
         x_val = data['x'][0]
@@ -587,7 +588,7 @@ def export_scatter_agg_data(app) -> None:
         })
 
     if not rows_out:
-        _warn(app, "Export", "No data to export for the current selection.")
+        _warn(ctx.window, "Export", "No data to export for the current selection.")
         return
 
     tp_range = f"t{min(selected_timepoints):.1f}-{max(selected_timepoints):.1f}"
@@ -595,7 +596,7 @@ def export_scatter_agg_data(app) -> None:
     stat_y_safe = stat_y.replace(" ", "_").lower()
 
     out_path = _ask_save_csv(
-        app, "Export aggregate scatter plot data",
+        ctx.window, "Export aggregate scatter plot data",
         f"scatter_agg_{stat_x_safe}_vs_{stat_y_safe}_{tp_range}.csv",
     )
     if not out_path:
@@ -607,9 +608,9 @@ def export_scatter_agg_data(app) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        app._set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
+        ctx.set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
     except OSError as exc:
-        _error(app, "Export failed", str(exc))
+        _error(ctx.window, "Export failed", str(exc))
 
 
 def export_heatmap_data(app) -> None:

@@ -145,7 +145,7 @@ DENSITY_GAMMA = 0.6
 # ── point rendering ──────────────────────────────────────────────────────────
 
 def render_scatter_points(
-    app,
+    ctx,
     ax,
     scatter_data: Dict[str, Dict[str, Any]],
     *,
@@ -289,9 +289,11 @@ def render_scatter_points(
                     swallowed()
             first_well_in_group = False
 
-        if not hasattr(app, "_scatter_metadata"):
-            app._scatter_metadata = {}
-        app._scatter_metadata[label] = data["metadata"]
+        md = ctx.runtime.scatter.metadata
+        if md is None:
+            md = {}
+            ctx.runtime.scatter.metadata = md
+        md[label] = data["metadata"]
         interaction_points.extend(
             (x, y, meta)
             for x, y, meta in zip(data["x"], data["y"], data["metadata"])
@@ -302,14 +304,14 @@ def render_scatter_points(
 
 # ── gate statistics ──────────────────────────────────────────────────────────
 
-def _gate_on_current_axes(app, gate) -> bool:
+def _gate_on_current_axes(ctx, gate) -> bool:
     """True when *gate* was drawn on the axes currently displayed.
 
     A gate's box is in the data space of its own ``x_col``/``y_col``; on any
     other axis pair those coordinates are meaningless, so the gate must not be
-    drawn or hit-tested there. ``app._scatter_axes_cols`` is set each redraw
-    (scatter.controller). Absent (no redraw yet) ⇒ don't hide."""
-    cols = getattr(app, "_scatter_axes_cols", None)
+    drawn or hit-tested there. ``ctx.runtime.scatter.axes_cols`` is set each
+    redraw (scatter.controller). Absent (no redraw yet) ⇒ don't hide."""
+    cols = ctx.runtime.scatter.axes_cols
     if not cols:
         return True
     gx, gy = gate.get("x_col"), gate.get("y_col")
@@ -429,29 +431,28 @@ def compute_gate_stats(
 
 # ── gate rendering ───────────────────────────────────────────────────────────
 
-def _notify_gates_changed(app) -> None:
+def _notify_gates_changed(ctx) -> None:
     """Tell listeners the gate set changed so their gate-count UI stays accurate
     after a gate is drawn / cleared / deleted.
 
     Three independent listeners may register: the Properties sidebar's
-    ``_scatter_gate_count_cb`` (the "N gate(s)" label), the Cell Gating tab's
-    ``_scatter_gates_changed_cb`` (its scatter-gate summary), and the Cell
-    Browser's ``_cell_browser_gates_changed_cb`` (the live gate-sourced gallery,
-    N1). All are optional.
+    ``gate_count_cb`` (the "N gate(s)" label), the Cell Gating tab's
+    ``gates_changed_cb`` (its scatter-gate summary), and the Cell Browser's
+    ``cell_browser.gates_changed_cb`` (the live gate-sourced gallery, N1). All
+    are optional.
     """
     # A gate change alters the scatter-gate on-population, so cached stats keyed
     # off it are stale — drop the cache (audit S4). The cache key also folds in
     # the gate signature; invalidating here keeps the cache from accumulating
     # dead entries per edit.
-    inv = getattr(app, "_invalidate_stats_cache", None)
-    if callable(inv):
-        try:
-            inv()
-        except Exception:
-            swallowed()
-    for attr in ("_scatter_gate_count_cb", "_scatter_gates_changed_cb",
-                 "_cell_browser_gates_changed_cb"):
-        cb = getattr(app, attr, None)
+    try:
+        from well_viewer.core.selection_controller import invalidate_stats_cache
+        invalidate_stats_cache(ctx)
+    except Exception:
+        swallowed()
+    for cb in (ctx.runtime.scatter.gate_count_cb,
+               ctx.runtime.scatter.gates_changed_cb,
+               ctx.runtime.cell_browser.gates_changed_cb):
         if callable(cb):
             try:
                 cb()
@@ -459,7 +460,7 @@ def _notify_gates_changed(app) -> None:
                 swallowed()
 
 
-def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
+def draw_gates(ctx, ax, scatter_data, tps_list, ink_color: str,
                *, handles: bool = True) -> None:
     """Draw every stored gate on *ax* as a dashed rectangle + its percentage label.
 
@@ -468,16 +469,16 @@ def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
     "Separate axes" layout).
     """
     # "Show gates" toggle off → keep the gates in memory but don't render them.
-    if app._app_state.scatter.gates_hidden:
+    if ctx.state.scatter.gates_hidden:
         return
     from matplotlib.patches import Rectangle
-    gates = getattr(app, "_scatter_gates", None) or []
+    gates = ctx.runtime.scatter.gates or []
     # Edit handles are only meaningful when not drawing a new gate (the
     # RectangleSelector owns the drag in draw mode) and on an interactive panel.
-    editable = handles and not getattr(app, "_scatter_gate_draw_mode", False)
+    editable = handles and not ctx.runtime.scatter.gate_draw_mode
     for gate in gates:
         # Only draw gates belonging to the axes currently on screen.
-        if not _gate_on_current_axes(app, gate):
+        if not _gate_on_current_axes(ctx, gate):
             continue
         gn = _norm_gate(gate)  # drag may transiently flip a corner past another
         w = gn["x1"] - gn["x0"]
@@ -535,12 +536,12 @@ def draw_gates(app, ax, scatter_data, tps_list, ink_color: str,
 
 # ── gate interaction (RectangleSelector) ─────────────────────────────────────
 
-def _make_selector(app, ax):
+def _make_selector(ctx, ax):
     """Construct a RectangleSelector across matplotlib versions (props vs rectprops)."""
     from matplotlib.widgets import RectangleSelector
 
     def _onselect(eclick, erelease):
-        _on_gate_drawn(app, eclick, erelease)
+        _on_gate_drawn(ctx, eclick, erelease)
 
     style = dict(facecolor="none", edgecolor=GATE_COLOR,
                  linewidth=1.2, linestyle="--")
@@ -556,13 +557,13 @@ def _make_selector(app, ax):
         )
 
 
-def set_gate_draw_mode(app, on: bool) -> None:
+def set_gate_draw_mode(ctx, on: bool) -> None:
     """Arm / disarm rectangular-gate drawing on the per-cell scatter axes."""
-    app._scatter_gate_draw_mode = bool(on)
-    ax = getattr(app, "_ax_scatter", None)
+    ctx.runtime.scatter.gate_draw_mode = bool(on)
+    ax = ctx.widgets.get_or_none("_ax_scatter")
     if ax is None:
         return
-    sel = getattr(app, "_scatter_gate_selector", None)
+    sel = ctx.runtime.scatter.gate_selector
     if on:
         # Always rebuild the selector against the CURRENT axes. A cached selector
         # is bound to whatever ``_ax_scatter`` was when it was made, and an
@@ -584,12 +585,12 @@ def set_gate_draw_mode(app, on: bool) -> None:
             except Exception:
                 swallowed()
         try:
-            sel = _make_selector(app, ax)
+            sel = _make_selector(ctx, ax)
         except Exception:
             swallowed()
-            app._scatter_gate_selector = None
+            ctx.runtime.scatter.gate_selector = None
             return
-        app._scatter_gate_selector = sel
+        ctx.runtime.scatter.gate_selector = sel
         try:
             sel.set_active(True)
         except Exception:
@@ -601,11 +602,11 @@ def set_gate_draw_mode(app, on: bool) -> None:
             swallowed()
 
 
-def _next_gate_name(app) -> str:
+def _next_gate_name(ctx) -> str:
     """Default ``Gate N`` name, N = first integer not already taken."""
     existing = {
         str(g.get("name") or "")
-        for g in (getattr(app, "_scatter_gates", None) or [])
+        for g in (ctx.runtime.scatter.gates or [])
     }
     n = 1
     while f"Gate {n}" in existing:
@@ -613,14 +614,14 @@ def _next_gate_name(app) -> str:
     return f"Gate {n}"
 
 
-def rename_gate(app, idx: int, name: str) -> bool:
+def rename_gate(ctx, idx: int, name: str) -> bool:
     """Rename gate *idx* to *name*, keeping names non-empty and unique.
 
     Returns ``True`` when the rename took effect (and notifies listeners so the
     Cell Gating dropdown + inclusion recompute follow). A blank or duplicate
     name is rejected (returns ``False``) so the caller can revert its field.
     """
-    gates = getattr(app, "_scatter_gates", None) or []
+    gates = ctx.runtime.scatter.gates or []
     if not (0 <= idx < len(gates)):
         return False
     new = str(name).strip()
@@ -632,17 +633,17 @@ def rename_gate(app, idx: int, name: str) -> bool:
     gates[idx]["name"] = new
     # Follow the rename in both Cell Gating selection sets (gating + thresh) so
     # the selection isn't lost (None means "all", nothing to update).
-    for attr in ("_cell_gating_gating_choices", "_cell_gating_thresh_choices"):
-        choices = getattr(app, attr, None)
+    for choices in (ctx.runtime.cell_gating.gating_choices,
+                    ctx.runtime.cell_gating.thresh_choices):
         if isinstance(choices, set) and old in choices:
             choices.discard(old)
             choices.add(new)
-    _notify_gates_changed(app)
-    _redraw(app)
+    _notify_gates_changed(ctx)
+    _redraw(ctx)
     return True
 
 
-def _on_gate_drawn(app, eclick, erelease) -> None:
+def _on_gate_drawn(ctx, eclick, erelease) -> None:
     """RectangleSelector callback: store the dragged box and redraw."""
     coords = (eclick.xdata, eclick.ydata, erelease.xdata, erelease.ydata)
     if any(c is None for c in coords):
@@ -651,85 +652,85 @@ def _on_gate_drawn(app, eclick, erelease) -> None:
     y0, y1 = sorted((float(eclick.ydata), float(erelease.ydata)))
     if x1 - x0 <= 0 or y1 - y0 <= 0:  # ignore zero-area click-drags
         return
-    if not getattr(app, "_scatter_gates", None):
-        app._scatter_gates = []
+    if not ctx.runtime.scatter.gates:
+        ctx.runtime.scatter.gates = []
     # Stamp the gate with the metric columns of the axes it was drawn on so it
     # can be re-applied to a dataframe out of context (the Cell Gating tab uses
     # this to turn a gate into an inclusion mask). The active columns are already
     # cached on the last redraw — see scatter.controller.redraw_scatter.
-    cache = getattr(app, "_scatter_interaction_cache", None) or {}
+    cache = ctx.runtime.scatter.interaction_cache or {}
     # Snapshot the wells the scatter was showing when the gate was drawn, so a
     # downstream consumer (the Cell Browser gate-source gallery) can honour the
     # gate's well context instead of an independent selection. Empty ⇒ "all".
     try:
-        drawn_wells = sorted(app._app_state.selection.selected_wells)
+        drawn_wells = sorted(ctx.state.selection.selected_wells)
     except Exception:
         drawn_wells = []
     # Auto-name silently (Gate 1, Gate 2, …); rename via the sidebar gate list.
-    app._scatter_gates.append({
+    ctx.runtime.scatter.gates.append({
         "x0": x0, "y0": y0, "x1": x1, "y1": y1,
         "x_col": cache.get("col_x"), "y_col": cache.get("col_y"),
-        "name": _next_gate_name(app),
+        "name": _next_gate_name(ctx),
         "wells": drawn_wells,
     })
-    _notify_gates_changed(app)
+    _notify_gates_changed(ctx)
     # One gate per arming: exit create mode so the next press edits/clicks
     # rather than drawing another box. Sync the sidebar's "Draw gate" toggle.
-    set_gate_draw_mode(app, False)
-    sync = getattr(app, "_scatter_gate_draw_sync", None)
+    set_gate_draw_mode(ctx, False)
+    sync = ctx.runtime.scatter.gate_draw_sync
     if callable(sync):
         sync(False)
-    _redraw(app)
+    _redraw(ctx)
 
 
-def clear_gates(app) -> None:
+def clear_gates(ctx) -> None:
     """Drop every gate and redraw."""
-    app._scatter_gates = []
-    _notify_gates_changed(app)
-    _redraw(app)
+    ctx.runtime.scatter.gates = []
+    _notify_gates_changed(ctx)
+    _redraw(ctx)
 
 
-def refresh_gate_selector(app) -> None:
+def refresh_gate_selector(ctx) -> None:
     """Rebuild the selector after a redraw (``ax.clear()`` voids the old one)."""
-    if not getattr(app, "_scatter_gate_draw_mode", False):
+    if not ctx.runtime.scatter.gate_draw_mode:
         return
-    app._scatter_gate_selector = None
-    set_gate_draw_mode(app, True)
+    ctx.runtime.scatter.gate_selector = None
+    set_gate_draw_mode(ctx, True)
 
 
-def _redraw(app) -> None:
+def _redraw(ctx) -> None:
     """Trigger a scatter redraw via the callback the tab wires at build time.
 
-    The callback (``redraw_scatter_orchestrate``) is stashed on the app by
+    The callback (``redraw_scatter_orchestrate``) is stashed on the runtime by
     ``build_scatter_cells_tab`` so this module never imports the controller —
     keeping the scatter package free of an internal import cycle.
     """
-    cb = getattr(app, "_scatter_gate_redraw_cb", None)
+    cb = ctx.runtime.scatter.gate_redraw_cb
     if callable(cb):
-        cb(app)
+        cb(ctx)
 
 
 # ── gate editing (drag the edges / corners of an existing gate) ───────────────
 
-def gate_edge_at(app, event, tol_px: float = 8.0):
+def gate_edge_at(ctx, event, tol_px: float = 8.0):
     """Hit-test: return ``(gate_idx, handle)`` for the edge/corner under the
     pointer, else ``None``. ``handle`` is one of
     ``l/r/t/b/tl/tr/bl/br``. Works in display (pixel) space so the tolerance is
     uniform regardless of axis scale (incl. log). Hidden gates are not hittable.
     """
-    if app._app_state.scatter.gates_hidden:
+    if ctx.state.scatter.gates_hidden:
         return None
-    ax = getattr(app, "_ax_scatter", None)
+    ax = ctx.widgets.get_or_none("_ax_scatter")
     if ax is None or getattr(event, "inaxes", None) is not ax:
         return None
     if event.x is None or event.y is None:
         return None
     px, py = float(event.x), float(event.y)
-    gates = getattr(app, "_scatter_gates", None) or []
+    gates = ctx.runtime.scatter.gates or []
     # Iterate top-most (last drawn) first so the gate visually on top wins.
     for idx in range(len(gates) - 1, -1, -1):
         # Gates from other axes aren't drawn here, so they're not hittable.
-        if not _gate_on_current_axes(app, gates[idx]):
+        if not _gate_on_current_axes(ctx, gates[idx]):
             continue
         gn = _norm_gate(gates[idx])
         x0d, y0d = ax.transData.transform((gn["x0"], gn["y0"]))
@@ -765,30 +766,30 @@ def gate_edge_at(app, event, tol_px: float = 8.0):
     return None
 
 
-def on_gate_edit_press(app, event) -> None:
+def on_gate_edit_press(ctx, event) -> None:
     """Begin editing if the press landed on an existing gate's edge/corner."""
     if getattr(event, "button", None) != 1:
         return
-    if getattr(app, "_scatter_gate_draw_mode", False):
+    if ctx.runtime.scatter.gate_draw_mode:
         return  # draw mode owns the drag (creating a new gate)
-    hit = gate_edge_at(app, event)
+    hit = gate_edge_at(ctx, event)
     if hit is None:
         return
     idx, handle = hit
-    app._scatter_gate_edit = {"idx": idx, "handle": handle}
+    ctx.runtime.scatter.gate_edit = {"idx": idx, "handle": handle}
 
 
-def on_gate_edit_motion(app, event) -> None:
+def on_gate_edit_motion(ctx, event) -> None:
     """Resize the active gate while dragging; otherwise hint the cursor."""
-    ed = getattr(app, "_scatter_gate_edit", None)
+    ed = ctx.runtime.scatter.gate_edit
     if not ed:
-        _update_gate_cursor(app, event)
+        _update_gate_cursor(ctx, event)
         return
     if event.xdata is None or event.ydata is None:
         return
-    gates = getattr(app, "_scatter_gates", None) or []
+    gates = ctx.runtime.scatter.gates or []
     if not (0 <= ed["idx"] < len(gates)):
-        app._scatter_gate_edit = None
+        ctx.runtime.scatter.gate_edit = None
         return
     g = gates[ed["idx"]]
     handle = ed["handle"]
@@ -800,16 +801,16 @@ def on_gate_edit_motion(app, event) -> None:
         g["y0"] = float(event.ydata)
     if "t" in handle:
         g["y1"] = float(event.ydata)
-    redraw_gates_only(app)
+    redraw_gates_only(ctx)
 
 
-def on_gate_edit_release(app, event) -> None:
+def on_gate_edit_release(ctx, event) -> None:
     """Finalise an edit: normalise the box, dropping it if collapsed to zero area."""
-    ed = getattr(app, "_scatter_gate_edit", None)
+    ed = ctx.runtime.scatter.gate_edit
     if not ed:
         return
-    app._scatter_gate_edit = None
-    gates = getattr(app, "_scatter_gates", None) or []
+    ctx.runtime.scatter.gate_edit = None
+    gates = ctx.runtime.scatter.gates or []
     if not (0 <= ed["idx"] < len(gates)):
         return
     g = gates[ed["idx"]]
@@ -821,18 +822,18 @@ def on_gate_edit_release(app, event) -> None:
         g["x0"], g["x1"], g["y0"], g["y1"] = nx0, nx1, ny0, ny1
     # A resize changes gate membership too, so notify on every finalised edit
     # (not just deletes) — listeners recompute the gated inclusion.
-    _notify_gates_changed(app)
-    redraw_gates_only(app)
+    _notify_gates_changed(ctx)
+    redraw_gates_only(ctx)
 
 
-def paint_gates(app, entries, cols=None) -> None:
+def paint_gates(ctx, entries, cols=None) -> None:
     """Draw gates across one or more panels and remember how, so an edit drag
     can repaint them all.
 
     *entries* is a list of ``(ax, scatter_data, tps_list, ink, handles)`` — one
     per panel. The overlay layout passes a single entry; "Separate axes" passes
     one per stacked panel (handles only on the interactive top panel). Stored on
-    ``app._scatter_gate_render`` so :func:`redraw_gates_only` repaints every
+    ``ctx.runtime.scatter.gate_render`` so :func:`redraw_gates_only` repaints every
     panel during a drag — fixing the case where resizing on the top panel left
     the panels below stale.
 
@@ -840,22 +841,23 @@ def paint_gates(app, entries, cols=None) -> None:
     rendering / hit-testing can hide gates drawn on a different X/Y pair.
     """
     if cols is not None:
-        app._scatter_axes_cols = cols
-    app._scatter_gate_render = list(entries)
-    for ax, scatter_data, tps_list, ink, handles in app._scatter_gate_render:
-        draw_gates(app, ax, scatter_data, tps_list, ink, handles=handles)
+        ctx.runtime.scatter.axes_cols = cols
+    entries = list(entries)
+    ctx.runtime.scatter.gate_render = entries
+    for ax, scatter_data, tps_list, ink, handles in entries:
+        draw_gates(ctx, ax, scatter_data, tps_list, ink, handles=handles)
 
 
-def redraw_gates_only(app) -> None:
+def redraw_gates_only(ctx) -> None:
     """Repaint just the gate artists on every recorded panel (no point re-plot).
 
     Points don't move during an edit drag — only the gate does — so this clears
     and redraws the gate artists on each panel from the stored render entries.
     Falls back to a full redraw when nothing has been recorded yet.
     """
-    entries = getattr(app, "_scatter_gate_render", None)
+    entries = ctx.runtime.scatter.gate_render
     if not entries:
-        _redraw(app)
+        _redraw(ctx)
         return
     for ax, scatter_data, tps_list, ink, handles in entries:
         for group in (list(ax.collections), list(ax.patches), list(ax.texts)):
@@ -865,18 +867,18 @@ def redraw_gates_only(app) -> None:
                         artist.remove()
                     except Exception:
                         swallowed()
-        draw_gates(app, ax, scatter_data, tps_list, ink, handles=handles)
-    canvas = getattr(app, "_scatter_canvas", None)
+        draw_gates(ctx, ax, scatter_data, tps_list, ink, handles=handles)
+    canvas = ctx.widgets.get_or_none("_scatter_canvas")
     if canvas is not None:
         canvas.draw_idle()
 
 
-def _update_gate_cursor(app, event) -> None:
+def _update_gate_cursor(ctx, event) -> None:
     """Show a resize cursor when hovering a gate edge/corner (discoverability)."""
-    canvas = getattr(app, "_scatter_canvas", None)
+    canvas = ctx.widgets.get_or_none("_scatter_canvas")
     if canvas is None or not hasattr(canvas, "setCursor"):
         return
-    hit = gate_edge_at(app, event)
+    hit = gate_edge_at(ctx, event)
     try:
         from PySide6.QtCore import Qt as _Qt
     except Exception:
@@ -889,7 +891,7 @@ def _update_gate_cursor(app, event) -> None:
     }
     if hit is not None:
         canvas.setCursor(cursors.get(hit[1], _Qt.ArrowCursor))
-        app._scatter_gate_cursor_set = True
-    elif getattr(app, "_scatter_gate_cursor_set", False):
+        ctx.runtime.scatter.gate_cursor_set = True
+    elif ctx.runtime.scatter.gate_cursor_set:
         canvas.unsetCursor()
-        app._scatter_gate_cursor_set = False
+        ctx.runtime.scatter.gate_cursor_set = False

@@ -289,8 +289,8 @@ def _activate_scatter(app) -> None:
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
     app._sidebar_main_frame.setVisible(True)
     app._refresh_sidebar_map()
-    update_scatter_menus(app)
-    scatter_redraw_active(app)
+    update_scatter_menus(app._ctx)
+    scatter_redraw_active(app._ctx)
 
 
 def _activate_heatmap(app) -> None:
@@ -330,8 +330,8 @@ def _sel_bar_plots(app) -> None:
 def _sel_scatter(app) -> None:
     from well_viewer.features.scatter.controller import update_scatter_menus
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
-    update_scatter_menus(app)
-    scatter_redraw_active(app)
+    update_scatter_menus(app._ctx)
+    scatter_redraw_active(app._ctx)
 
 
 def _sel_review_csv(app) -> None:
@@ -437,9 +437,9 @@ def _channel_scatter(app) -> None:
                 redraw_scatter_orchestrate,
                 update_scatter_menus,
             )
-            update_scatter_menus(app)
-            redraw_scatter_orchestrate(app)
-            redraw_scatter_agg_orchestrate(app)
+            update_scatter_menus(app._ctx)
+            redraw_scatter_orchestrate(app._ctx)
+            redraw_scatter_agg_orchestrate(app._ctx)
         except Exception:
             _logger.exception("Scatter menu refresh failed")
 

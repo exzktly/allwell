@@ -87,7 +87,7 @@ def on_tab_change(app, _e=None) -> None:
                 redraw_bars(app._ctx)
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
-                scatter_redraw_active(app)
+                scatter_redraw_active(app._ctx)
             elif tab == "Distribution":
                 app._redraw()
 

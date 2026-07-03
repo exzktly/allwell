@@ -20,6 +20,22 @@ from well_viewer.features.scatter.gating import (
 )
 
 
+def _mk_ctx(app):
+    from types import SimpleNamespace
+    from well_viewer.core.app_runtime import AppRuntime
+    return SimpleNamespace(
+        app=app,
+        state=getattr(app, "_app_state", None),
+        runtime=AppRuntime(app),
+        widgets=SimpleNamespace(
+            get_or_none=lambda n: getattr(app, n, None),
+            register=lambda n, w: (setattr(app, n, w), w)[1],
+        ),
+        set_status=lambda _m: None,
+    )
+
+
+
 # ── gate stamping ─────────────────────────────────────────────────────────────
 
 def test_on_gate_drawn_stamps_axis_columns_from_interaction_cache():
@@ -33,7 +49,7 @@ def test_on_gate_drawn_stamps_axis_columns_from_interaction_cache():
         },
         _scatter_gate_redraw_cb=lambda _a: None,
     )
-    _on_gate_drawn(app, SimpleNamespace(xdata=1.0, ydata=2.0),
+    _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=1.0, ydata=2.0),
                    SimpleNamespace(xdata=5.0, ydata=8.0))
 
     assert len(app._scatter_gates) == 1
@@ -54,7 +70,7 @@ def test_on_gate_drawn_notifies_both_gate_changed_listeners():
         _scatter_gates_changed_cb=lambda: calls.append("summary"),
         _scatter_gate_redraw_cb=lambda _a: None,
     )
-    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+    _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=1.0, ydata=1.0))
     assert calls == ["count", "summary"]
 
@@ -63,9 +79,9 @@ def test_on_gate_drawn_assigns_default_name():
     """Gates are nameable: with no Qt canvas (headless), each gets the next
     default ``Gate N`` name so the Cell Gating dropdown always has a label."""
     app = SimpleNamespace(_scatter_gates=[], _scatter_gate_redraw_cb=lambda _a: None)
-    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+    _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=1.0, ydata=1.0))
-    _on_gate_drawn(app, SimpleNamespace(xdata=2.0, ydata=2.0),
+    _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=2.0, ydata=2.0),
                    SimpleNamespace(xdata=3.0, ydata=3.0))
     assert [g["name"] for g in app._scatter_gates] == ["Gate 1", "Gate 2"]
 
@@ -78,14 +94,14 @@ def test_gate_only_shown_on_its_own_axes():
     gate = {"x_col": "gfp_mean_intensity", "y_col": "mcherry_mean_intensity"}
     app = SimpleNamespace()
     app._scatter_axes_cols = ("gfp_mean_intensity", "mcherry_mean_intensity")
-    assert _gate_on_current_axes(app, gate) is True
+    assert _gate_on_current_axes(_mk_ctx(app), gate) is True
     app._scatter_axes_cols = ("shape_area", "shape_eccentricity")
-    assert _gate_on_current_axes(app, gate) is False
+    assert _gate_on_current_axes(_mk_ctx(app), gate) is False
     # No recorded axes yet → don't hide; unstamped gate → can't match → don't hide.
     app._scatter_axes_cols = None
-    assert _gate_on_current_axes(app, gate) is True
+    assert _gate_on_current_axes(_mk_ctx(app), gate) is True
     app._scatter_axes_cols = ("shape_area", "shape_eccentricity")
-    assert _gate_on_current_axes(app, {"x0": 0, "x1": 1}) is True
+    assert _gate_on_current_axes(_mk_ctx(app), {"x0": 0, "x1": 1}) is True
 
 
 def test_selected_scatter_gates_honours_choice():
@@ -120,10 +136,10 @@ def test_rename_gate_rejects_blank_and_duplicate_keeps_choice():
         _cell_gating_thresh_choices={"Gate 1"},
         _scatter_gate_redraw_cb=lambda _a: None,
     )
-    assert rename_gate(app, 0, "") is False           # blank rejected
-    assert rename_gate(app, 0, "Gate 2") is False      # duplicate rejected
+    assert rename_gate(_mk_ctx(app), 0, "") is False           # blank rejected
+    assert rename_gate(_mk_ctx(app), 0, "Gate 2") is False      # duplicate rejected
     assert g1["name"] == "Gate 1"                       # unchanged
-    assert rename_gate(app, 0, "Live") is True          # valid rename
+    assert rename_gate(_mk_ctx(app), 0, "Live") is True          # valid rename
     assert g1["name"] == "Live"
     # Both selection sets follow the rename so the gate stays selected.
     assert app._cell_gating_gating_choices == {"Live"}
@@ -134,7 +150,7 @@ def test_on_gate_drawn_without_cache_leaves_columns_none():
     """No prior redraw (no interaction cache) ⇒ the gate is still created but its
     columns are None, so the inclusion pass simply skips it."""
     app = SimpleNamespace(_scatter_gates=[], _scatter_gate_redraw_cb=lambda _a: None)
-    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+    _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=1.0, ydata=1.0))
     g = app._scatter_gates[0]
     assert g["x_col"] is None and g["y_col"] is None

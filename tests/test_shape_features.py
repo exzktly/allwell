@@ -233,7 +233,7 @@ def test_scatter_draw_with_shape_axis(loaded_app_shape):
 
     app = loaded_app_shape
     app._set_selected_wells(set(WELLS))
-    update_scatter_menus(app)
+    update_scatter_menus(app._ctx)
     app._scatter_ch_x_cb.setCurrentIndex(app._scatter_ch_x_cb.findText("Eccentricity"))
     # Fluor channels display upper-case now (GFP, not gfp); the column still
     # resolves to gfp_mean_intensity (case-insensitive).
@@ -241,7 +241,7 @@ def test_scatter_draw_with_shape_axis(loaded_app_shape):
     for tp in list(app._scatter_tp_selections):
         app._scatter_tp_selections[tp] = True
 
-    redraw_scatter_orchestrate(app)
+    redraw_scatter_orchestrate(app._ctx)
     cache = app._scatter_interaction_cache
     assert cache["col_x"] == "shape_eccentricity"
     assert cache["col_y"] == "gfp_mean_intensity"
@@ -264,7 +264,7 @@ def test_scatter_menus_preserve_timepoint_selection(loaded_app_shape):
     app = loaded_app_shape
     wells = list(WELLS)
     app._set_selected_wells({wells[0]})
-    update_scatter_menus(app)
+    update_scatter_menus(app._ctx)
 
     tp = next(iter(app._scatter_tp_selections))
     app._scatter_tp_selections[tp] = False                 # user unchecks one tp
@@ -273,7 +273,7 @@ def test_scatter_menus_preserve_timepoint_selection(loaded_app_shape):
 
     # Add another well → selection_controller fires update_scatter_menus again.
     app._set_selected_wells(set(wells))
-    update_scatter_menus(app)
+    update_scatter_menus(app._ctx)
 
     assert app._scatter_tp_selections[tp] is False         # stays unchecked
     assert app._scatter_agg_tp_selections[agg_tp] is False

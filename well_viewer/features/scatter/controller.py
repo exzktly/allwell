@@ -14,7 +14,8 @@ from typing import List
 _logger = logging.getLogger(__name__)
 
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
-from well_viewer.core.channel_state_controller import populate_metric_combo
+from well_viewer.core.channel_state_controller import populate_metric_combo, get_fluor_gate
+from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
@@ -34,9 +35,13 @@ from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
+#: Agg-scatter Property labels that map to a synthetic aggregation key rather
+#: than a metric-intensity column (mirrors ``WellViewerApp._SCATTER_AGG_METRIC_EXTRA``).
+SCATTER_AGG_METRIC_EXTRA = {"Fraction above threshold": "fraction_above_threshold"}
+
 
 def redraw_scatter(
-    app,
+    ctx,
     col_x: str,
     col_y: str,
     timepoints_h,
@@ -51,7 +56,7 @@ def redraw_scatter(
     list — every cell at any of the supplied timepoints is plotted.
 
     Args:
-        app: WellViewerApp instance
+        ctx: ViewerContext with typed state, widgets, and runtime
         col_x: X-axis column name (e.g., "gfp_mean_intensity" or "gfp_smfish_count")
         col_y: Y-axis column name (e.g., "mcherry_mean_intensity" or "mcherry_smfish_count")
         timepoints_h: One timepoint or a list of timepoints in hours
@@ -59,43 +64,45 @@ def redraw_scatter(
         fluor_gate_x: FluorGating threshold for X channel; cells below are excluded
         fluor_gate_y: FluorGating threshold for Y channel; cells below are excluded
     """
+    ax_scatter = ctx.widgets.get_or_none("_ax_scatter")
+    scatter_fig = ctx.widgets.get_or_none("_scatter_fig")
+    scatter_canvas = ctx.widgets.get_or_none("_scatter_canvas")
     # Lazy-build guard. The Scatter tab is built on demand; if a redraw
     # is fanned out before the tab body exists, no-op rather than
     # AttributeError-ing.
-    if not all(
-        hasattr(app, attr)
-        for attr in ("_ax_scatter", "_scatter_fig", "_scatter_canvas")
-    ):
+    if ax_scatter is None or scatter_fig is None or scatter_canvas is None:
         return
 
     # Collapse any prior "Separate axes" panels back to the single overlay axis.
-    if len(getattr(app._scatter_fig, "axes", []) or []) > 1:
-        _setup_scatter_axes(app, 1)
+    if len(getattr(scatter_fig, "axes", []) or []) > 1:
+        _setup_scatter_axes(ctx, 1)
+        ax_scatter = ctx.widgets.get_or_none("_ax_scatter")
 
-    active_rsets = app._rep_sets_active()
-    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths]
+    active_rsets = active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    selected_wells = [lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths]
 
     # Clear existing plot
-    app._ax_scatter.clear()
+    ax_scatter.clear()
     # Honour Screen / Publication mode — the scatter axes used to default
     # to matplotlib's white background, so dark-mode users saw a glaring
     # white block. Shared with the faceted + aggregate paths (audit A16).
-    _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(app, app._ax_scatter)
+    _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(ctx, ax_scatter)
 
     if not selected_wells and not active_rsets:
-        app._scatter_interaction_cache = {"points": []}
-        app._ax_scatter.text(
+        ctx.runtime.scatter.interaction_cache = {"points": []}
+        ax_scatter.text(
             0.5,
             0.5,
             NO_SELECTION_MSG,
             ha='center',
             va='center',
-            transform=app._ax_scatter.transAxes,
+            transform=ax_scatter.transAxes,
             fontsize=10,
             color=_muted_fg,
         )
-        app._ax_scatter.set_axis_off()
-        app._scatter_canvas.draw()
+        ax_scatter.set_axis_off()
+        scatter_canvas.draw()
         return
 
     # Normalise the timepoint argument so single-float legacy callers
@@ -107,7 +114,7 @@ def redraw_scatter(
 
     # Collect scatter data
     scatter_data = collect_scatter_data(
-        app,
+        ctx,
         col_x,
         col_y,
         tps_list,
@@ -119,20 +126,20 @@ def redraw_scatter(
     # Stack one group per panel (>1 group) when Layout is "Separate axes", or
     # whenever "Color by time" is on — overlaid time-coloured clouds are noise,
     # so each well gets its own time-coloured panel via _render_scatter_faceted.
-    color_by_tp = bool(app._app_state.scatter.color_by_tp)
-    _lay = getattr(app, "_scatter_layout_var", None)
+    color_by_tp = bool(ctx.state.scatter.color_by_tp)
+    _lay = ctx.widgets.get_or_none("_scatter_layout_var")
     _separate = _lay is not None and str(_lay.currentText()).startswith("Separate")
     if len(scatter_data) > 1 and (color_by_tp or _separate):
-        _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list)
+        _render_scatter_faceted(ctx, scatter_data, col_x, col_y, tps_list)
         return
 
     # ``render_scatter_points`` owns the solid / density / color-by-time branch,
     # returning the click-interaction points and the legend handles. Density mode
     # + log state come from the shared export-style prefs, re-read each redraw.
-    prefs = app._app_state.export_prefs.style_prefs or {}
+    prefs = ctx.state.export_prefs.style_prefs or {}
     density_on = bool(prefs.get("scatter_density", False))
     interaction_points, legend_handles = render_scatter_points(
-        app, app._ax_scatter, scatter_data,
+        ctx, ax_scatter, scatter_data,
         density_on=density_on,
         x_log=bool(prefs.get("scatter_x_log", True)),
         y_log=bool(prefs.get("scatter_y_log", True)),
@@ -155,42 +162,42 @@ def redraw_scatter(
             return f"{ch} smFISH Count"
         return label
 
-    app._ax_scatter.set_xlabel(_col_label(col_x) + log1p_axis_suffix(bool(prefs.get("scatter_x_log", True))))
-    app._ax_scatter.set_ylabel(_col_label(col_y) + log1p_axis_suffix(bool(prefs.get("scatter_y_log", True))))
+    ax_scatter.set_xlabel(_col_label(col_x) + log1p_axis_suffix(bool(prefs.get("scatter_x_log", True))))
+    ax_scatter.set_ylabel(_col_label(col_y) + log1p_axis_suffix(bool(prefs.get("scatter_y_log", True))))
     if not tps_list:
         tp_tag = ""
     elif len(tps_list) == 1:
         tp_tag = f" (t={tps_list[0]:g}h)"
     else:
         tp_tag = f" (t={min(tps_list):g}h–{max(tps_list):g}h, {len(tps_list)} tps)"
-    app._ax_scatter.set_title(
+    ax_scatter.set_title(
         f"Scatter: {_col_label(col_x)} vs {_col_label(col_y)}{tp_tag}",
         color=_title_fg,
     )
-    app._ax_scatter.grid(True, alpha=0.3, color=_grid)
+    ax_scatter.grid(True, alpha=0.3, color=_grid)
     if scatter_data:
         # Transparent frame keeps the legend off the plot background. Density and
         # color-by-time supply explicit handles; plain solid mode uses labels.
         if legend_handles:
-            _leg = app._ax_scatter.legend(
+            _leg = ax_scatter.legend(
                 handles=legend_handles, loc='best', fontsize=8,
                 framealpha=0.0, facecolor="none",
             )
         else:
-            _leg = app._ax_scatter.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
-        style_legend(_leg, app._ax_scatter)
+            _leg = ax_scatter.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+        style_legend(_leg, ax_scatter)
 
     # Draw stored rectangular gates + their percentage labels on top of the
     # points. Gate coords are data-space, so they track log scale / limits.
-    paint_gates(app, [(app._ax_scatter, scatter_data, tps_list, _muted_fg, True)], cols=(col_x, col_y))
+    paint_gates(ctx, [(ax_scatter, scatter_data, tps_list, _muted_fg, True)], cols=(col_x, col_y))
 
     # Redraw canvas
-    app._scatter_interaction_cache = {
+    ctx.runtime.scatter.interaction_cache = {
         "points": interaction_points,
         # Overlay is a single panel: pair the points with the one axis so the
         # click/hover handlers share one panel-resolution path with the
         # "Separate axes" layout (see _layout._render_scatter_faceted).
-        "axes_points": [(app._ax_scatter, interaction_points)],
+        "axes_points": [(ax_scatter, interaction_points)],
         # Single-tp callers used ``timepoint_h``; preserve that key when
         # exactly one tp was passed so downstream consumers (export CSV,
         # click metadata) don't need to know about the new list shape.
@@ -202,14 +209,13 @@ def redraw_scatter(
     # Re-apply Export Style sidebar prefs so axis limits / log scale /
     # font sizes survive a redraw — matches bar/heatmap/distribution.
     try:
-        apply_export_style_to_current(app._ctx, app._scatter_fig,
-                                      getattr(app, "_scatter_canvas", None))
+        apply_export_style_to_current(ctx, scatter_fig, scatter_canvas)
     except Exception:  # pragma: no cover
         swallowed()  # was: pass (silent except)
     # ax.clear() at the top of this redraw voids any live RectangleSelector;
     # rebuild it against the fresh axes when gate-draw mode is armed.
-    refresh_gate_selector(app)
-    app._scatter_canvas.draw()
+    refresh_gate_selector(ctx)
+    scatter_canvas.draw()
 
 
 def _finite_positive(v) -> bool:
@@ -222,7 +228,7 @@ def _finite_positive(v) -> bool:
 
 
 def redraw_scatter_agg(
-    app,
+    ctx,
     stat_x: str,
     stat_y: str,
     timepoints_h: List[float],
@@ -232,47 +238,48 @@ def redraw_scatter_agg(
     """Redraw aggregate scatter plot with statistics for multiple timepoints.
 
     Args:
-        app: WellViewerApp instance
+        ctx: ViewerContext with typed state, widgets, and runtime
         stat_x: X-axis statistic (e.g., "Mean Fluorescence GFP")
         stat_y: Y-axis statistic (e.g., "Fraction On GFP")
         timepoints_h: List of timepoints in hours
         well_colors: List of colors for replicates/wells
     """
+    ax_agg = ctx.widgets.get_or_none("_ax_scatter_agg")
+    agg_fig = ctx.widgets.get_or_none("_scatter_agg_fig")
+    agg_canvas = ctx.widgets.get_or_none("_scatter_agg_canvas")
     # Lazy-build guard — Scatter Aggregate is a sub-tab of the Scatter
     # tab, built on first activation.
-    if not all(
-        hasattr(app, attr)
-        for attr in ("_ax_scatter_agg", "_scatter_agg_fig", "_scatter_agg_canvas")
-    ):
+    if ax_agg is None or agg_fig is None or agg_canvas is None:
         return
 
-    active_rsets = app._rep_sets_active()
-    selected_wells = [lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths]
+    active_rsets = active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    selected_wells = [lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths]
 
     # Clear existing plot
-    app._ax_scatter_agg.clear()
+    ax_agg.clear()
     # Shared axis theming (audit A16); the aggregate figure tracks the theme bg.
     _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(
-        app, app._ax_scatter_agg, fig=app._scatter_agg_fig)
+        ctx, ax_agg, fig=agg_fig)
 
     if not selected_wells and not active_rsets:
-        app._ax_scatter_agg.text(
+        ax_agg.text(
             0.5,
             0.5,
             NO_SELECTION_MSG,
             ha='center',
             va='center',
-            transform=app._ax_scatter_agg.transAxes,
+            transform=ax_agg.transAxes,
             fontsize=10,
             color=_muted_fg,
         )
-        app._ax_scatter_agg.set_axis_off()
-        app._scatter_agg_canvas.draw()
+        ax_agg.set_axis_off()
+        agg_canvas.draw()
         return
 
     # Collect aggregate scatter data
     scatter_data = collect_scatter_agg_data(
-        app,
+        ctx,
         stat_x,
         stat_y,
         timepoints_h,
@@ -280,11 +287,11 @@ def redraw_scatter_agg(
     )
 
     if not scatter_data:
-        app._ax_scatter_agg.text(
+        ax_agg.text(
             0.5, 0.5,
             "No data available.\nPlease select wells/groups and timepoints.",
             ha='center', va='center',
-            transform=app._ax_scatter_agg.transAxes,
+            transform=ax_agg.transAxes,
             fontsize=10,
             color=_muted_fg,
         )
@@ -300,7 +307,7 @@ def redraw_scatter_agg(
             y_err_seq = data.get('y_err') or []
             xerr = x_err_seq if any(_finite_positive(e) for e in x_err_seq) else None
             yerr = y_err_seq if any(_finite_positive(e) for e in y_err_seq) else None
-            container = app._ax_scatter_agg.errorbar(
+            container = ax_agg.errorbar(
                 data['x'],
                 data['y'],
                 xerr=xerr,
@@ -322,27 +329,26 @@ def redraw_scatter_agg(
                 swallowed()  # was: pass (silent except)
 
         # Format axes
-        app._ax_scatter_agg.set_xlabel(stat_x)
-        app._ax_scatter_agg.set_ylabel(stat_y)
+        ax_agg.set_xlabel(stat_x)
+        ax_agg.set_ylabel(stat_y)
         tp_range = f"t={min(timepoints_h)}h to {max(timepoints_h)}h" if timepoints_h else ""
-        app._ax_scatter_agg.set_title(
+        ax_agg.set_title(
             f"Per-well aggregate ({tp_range})" if tp_range else "Per-well aggregate",
             color=_title_fg,
         )
-        app._ax_scatter_agg.grid(True, alpha=0.3, color=_grid)
-        _leg_agg = app._ax_scatter_agg.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
-        style_legend(_leg_agg, app._ax_scatter_agg)
+        ax_agg.grid(True, alpha=0.3, color=_grid)
+        _leg_agg = ax_agg.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
+        style_legend(_leg_agg, ax_agg)
 
     # Redraw canvas
     try:
-        apply_export_style_to_current(app._ctx, app._scatter_agg_fig,
-                                      getattr(app, "_scatter_agg_canvas", None))
+        apply_export_style_to_current(ctx, agg_fig, agg_canvas)
     except Exception:  # pragma: no cover
         swallowed()  # was: pass (silent except)
-    app._scatter_agg_canvas.draw()
+    agg_canvas.draw()
 
 
-def redraw_scatter_orchestrate(app) -> None:
+def redraw_scatter_orchestrate(ctx) -> None:
     """Redraw the scatter plot with current selections.
 
     Mirrors redraw_scatter_agg_orchestrate's empty-state handling: no
@@ -351,29 +357,34 @@ def redraw_scatter_orchestrate(app) -> None:
     """
     # Scatter Plot: Cells tab body is built lazily -- bail out if the
     # user triggers a redraw before that builder has run.
-    if not hasattr(app, "_scatter_ch_x_var"):
+    ch_x_var = ctx.widgets.get_or_none("_scatter_ch_x_var")
+    ch_y_var = ctx.widgets.get_or_none("_scatter_ch_y_var")
+    if ch_x_var is None or ch_y_var is None:
         return
     try:
-        ch_x_entry = app._scatter_ch_x_var.currentText()
-        ch_y_entry = app._scatter_ch_y_var.currentText()
+        ch_x_entry = ch_x_var.currentText()
+        ch_y_entry = ch_y_var.currentText()
     except ValueError:
         return
 
-    if not hasattr(app, "_scatter_tp_selections") or not app._scatter_tp_selections:
-        if hasattr(app, "_ax_scatter"):
-            app._ax_scatter.clear()
-            app._ax_scatter.text(
+    ax_scatter = ctx.widgets.get_or_none("_ax_scatter")
+    scatter_canvas = ctx.widgets.get_or_none("_scatter_canvas")
+    tp_selections = ctx.runtime.scatter.tp_selections
+    if not tp_selections:
+        if ax_scatter is not None:
+            ax_scatter.clear()
+            ax_scatter.text(
                 0.5, 0.5, "No timepoints available.",
                 ha='center', va='center',
-                transform=app._ax_scatter.transAxes,
+                transform=ax_scatter.transAxes,
                 fontsize=10, color='gray',
             )
-            if hasattr(app, "_scatter_canvas"):
-                app._scatter_canvas.draw()
+            if scatter_canvas is not None:
+                scatter_canvas.draw()
         return
 
     tps_h: list = []
-    for tp_str, on in app._scatter_tp_selections.items():
+    for tp_str, on in tp_selections.items():
         if not on:
             continue
         try:
@@ -381,43 +392,44 @@ def redraw_scatter_orchestrate(app) -> None:
         except (TypeError, ValueError):
             continue
     if not tps_h:
-        if hasattr(app, "_ax_scatter"):
-            app._ax_scatter.clear()
-            app._ax_scatter.text(
+        if ax_scatter is not None:
+            ax_scatter.clear()
+            ax_scatter.text(
                 0.5, 0.5, "Please select timepoints to plot.",
                 ha='center', va='center',
-                transform=app._ax_scatter.transAxes,
+                transform=ax_scatter.transAxes,
                 fontsize=10, color='gray',
             )
-            if hasattr(app, "_scatter_canvas"):
-                app._scatter_canvas.draw()
+            if scatter_canvas is not None:
+                scatter_canvas.draw()
         return
 
     # Mirror the first selected tp into the legacy combo so the
     # save-figure / export-CSV paths that still read it see a value.
-    if getattr(app, "_scatter_tp_cb", None) is not None:
+    tp_cb = ctx.widgets.get_or_none("_scatter_tp_cb")
+    if tp_cb is not None:
         first_str = f"{tps_h[0]:.1f}"
-        if app._scatter_tp_cb.findText(first_str) >= 0:
-            blocked = app._scatter_tp_cb.blockSignals(True)
+        if tp_cb.findText(first_str) >= 0:
+            blocked = tp_cb.blockSignals(True)
             try:
-                app._scatter_tp_cb.setCurrentText(first_str)
+                tp_cb.setCurrentText(first_str)
             finally:
-                app._scatter_tp_cb.blockSignals(blocked)
+                tp_cb.blockSignals(blocked)
 
     ch_x_base = ch_x_entry.split(" ")[0]
     ch_y_base = ch_y_entry.split(" ")[0]
 
-    fluor_gate_x = app._get_fluor_gate(ch_x_base)
-    fluor_gate_y = app._get_fluor_gate(ch_y_base)
+    fluor_gate_x = get_fluor_gate(ctx, ch_x_base)
+    fluor_gate_y = get_fluor_gate(ctx, ch_y_base)
 
-    metric_x = app._scatter_axis_metric_key("x")
-    metric_y = app._scatter_axis_metric_key("y")
-    col_x = app._col_for_scatter_axis(ch_x_entry, metric_x)
-    col_y = app._col_for_scatter_axis(ch_y_entry, metric_y)
+    metric_x = scatter_axis_metric_key(ctx, "x")
+    metric_y = scatter_axis_metric_key(ctx, "y")
+    col_x = col_for_scatter_axis(ctx, ch_x_entry, metric_x)
+    col_y = col_for_scatter_axis(ctx, ch_y_entry, metric_y)
 
     from well_viewer.domain.plate_layout import WELL_COLORS
     redraw_scatter(
-        app,
+        ctx,
         col_x,
         col_y,
         tps_h,
@@ -425,36 +437,41 @@ def redraw_scatter_orchestrate(app) -> None:
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
     )
-    apply_export_style_to_current(app._ctx, app._scatter_fig, getattr(app, "_scatter_canvas", None))
+    apply_export_style_to_current(ctx, ctx.widgets.get_or_none("_scatter_fig"),
+                                  ctx.widgets.get_or_none("_scatter_canvas"))
 
 
-def redraw_scatter_agg_orchestrate(app) -> None:
+def redraw_scatter_agg_orchestrate(ctx) -> None:
     """Redraw the aggregate scatter plot with current selections."""
-    if not hasattr(app, "_scatter_agg_stat_x_var"):
+    stat_x_var = ctx.widgets.get_or_none("_scatter_agg_stat_x_var")
+    if stat_x_var is None:
         return
     # Sync the hidden stat-string combos with the new per-axis
     # (channel, metric) state so downstream code (export_service,
     # save-figure helpers) sees a coherent view.
-    app._sync_scatter_agg_stat_combos()
+    sync_scatter_agg_stat_combos(ctx)
+    ax_agg = ctx.widgets.get_or_none("_ax_scatter_agg")
+    agg_canvas = ctx.widgets.get_or_none("_scatter_agg_canvas")
     try:
-        stat_x = app._scatter_agg_stat_x_var.currentText()
-        stat_y = app._scatter_agg_stat_y_var.currentText()
+        stat_x = stat_x_var.currentText()
+        stat_y = ctx.widgets.get_or_none("_scatter_agg_stat_y_var").currentText()
 
-        if not hasattr(app, '_scatter_agg_tp_selections') or not app._scatter_agg_tp_selections:
-            app._ax_scatter_agg.clear()
-            app._ax_scatter_agg.text(
+        agg_tp_selections = ctx.runtime.scatter.agg_tp_selections
+        if not agg_tp_selections:
+            ax_agg.clear()
+            ax_agg.text(
                 0.5, 0.5,
                 "No timepoints available.",
                 ha='center', va='center',
-                transform=app._ax_scatter_agg.transAxes,
+                transform=ax_agg.transAxes,
                 fontsize=10,
                 color='gray'
             )
-            app._scatter_agg_canvas.draw()
+            agg_canvas.draw()
             return
 
         selected_timepoints = []
-        for tp_str, selected in app._scatter_agg_tp_selections.items():
+        for tp_str, selected in agg_tp_selections.items():
             if selected:
                 try:
                     selected_timepoints.append(float(tp_str))
@@ -462,16 +479,16 @@ def redraw_scatter_agg_orchestrate(app) -> None:
                     pass
 
         if not selected_timepoints:
-            app._ax_scatter_agg.clear()
-            app._ax_scatter_agg.text(
+            ax_agg.clear()
+            ax_agg.text(
                 0.5, 0.5,
                 "Please select timepoints to plot.",
                 ha='center', va='center',
-                transform=app._ax_scatter_agg.transAxes,
+                transform=ax_agg.transAxes,
                 fontsize=10,
                 color='gray'
             )
-            app._scatter_agg_canvas.draw()
+            agg_canvas.draw()
             return
 
     except (ValueError, AttributeError):
@@ -479,24 +496,37 @@ def redraw_scatter_agg_orchestrate(app) -> None:
 
     from well_viewer.domain.plate_layout import WELL_COLORS
     redraw_scatter_agg(
-        app,
+        ctx,
         stat_x,
         stat_y,
         selected_timepoints,
         well_colors=WELL_COLORS,
     )
-    apply_export_style_to_current(app._ctx, app._scatter_agg_fig, getattr(app, "_scatter_agg_canvas", None))
+    apply_export_style_to_current(ctx, ctx.widgets.get_or_none("_scatter_agg_fig"),
+                                  ctx.widgets.get_or_none("_scatter_agg_canvas"))
 
 
-def update_scatter_menus(app) -> None:
+def on_scatter_axis_change(ctx, axis: str) -> None:
+    """Cells-scatter axis (channel) change: reshape its Property combo + redraw."""
+    refresh_scatter_metric_for_axis(ctx, axis)
+    redraw_scatter_orchestrate(ctx)
+
+
+def on_scatter_agg_axis_change(ctx, axis: str) -> None:
+    """Agg-scatter axis (channel) change: reshape its Property combo + redraw."""
+    refresh_scatter_agg_metric_for_axis(ctx, axis)
+    redraw_scatter_agg_orchestrate(ctx)
+
+
+def update_scatter_menus(ctx) -> None:
     """Populate scatter plot dropdowns with available channels and timepoints."""
     # Channel options for both scatter tabs: real fluor channels +
     # ratio labels. Drops the legacy "(spots)" channel variants — the
     # per-axis Property combo now expresses smFISH count via the
     # ``smFISH Count`` metric entry, so we no longer overload the
     # channel column with aggregation flavour.
-    channels = list(app._app_state.channel.fluor_channels) if app._app_state.channel.fluor_channels else ["gfp"]
-    ratio_labels = app._ratio_dropdown_labels()
+    channels = list(ctx.state.channel.fluor_channels) if ctx.state.channel.fluor_channels else ["gfp"]
+    ratio_labels = ctx.app._ratio_dropdown_labels()
     scatter_ch_options = [str(c).upper() for c in channels] + ratio_labels
 
     # The per-cell scatter additionally offers the shape-feature virtual
@@ -506,37 +536,43 @@ def update_scatter_menus(app) -> None:
     # scatter keeps fluor+ratio only — its stat-string aggregation has no
     # shape-feature path. ``_label_to_channel_key`` (built by
     # ``_update_channel_selector``) maps each label back to its ``shape_*``
-    # column so ``_col_for_scatter_axis`` resolves it like a ratio.
+    # column so ``col_for_scatter_axis`` resolves it like a ratio.
     from pipeline.shape_features import label_for as _shape_label_for
     from well_viewer.core.ui_helpers import set_combo_values_sectioned as _set_combo_values_sectioned
-    shape_cols = list(app._app_state.channel.shape_features or [])
+    shape_cols = list(ctx.state.channel.shape_features or [])
     shape_labels = [_shape_label_for(c) or c for c in shape_cols]
     cells_ch_options = scatter_ch_options + shape_labels
     cells_sections = [("", list(scatter_ch_options))]
     if shape_labels:
         cells_sections.append(("Shape Features", shape_labels))
 
-    _set_combo_values_sectioned(app._scatter_ch_x_cb, cells_sections)
-    _set_combo_values_sectioned(app._scatter_ch_y_cb, cells_sections)
+    ch_x_cb = ctx.widgets.get_or_none("_scatter_ch_x_cb")
+    ch_y_cb = ctx.widgets.get_or_none("_scatter_ch_y_cb")
+    _set_combo_values_sectioned(ch_x_cb, cells_sections)
+    _set_combo_values_sectioned(ch_y_cb, cells_sections)
 
+    ch_x_var = ctx.widgets.get_or_none("_scatter_ch_x_var")
+    ch_y_var = ctx.widgets.get_or_none("_scatter_ch_y_var")
     if cells_ch_options:
-        if app._scatter_ch_x_var.currentText() not in cells_ch_options:
-            app._scatter_ch_x_var.setCurrentText(cells_ch_options[0])
-        if app._scatter_ch_y_var.currentText() not in cells_ch_options:
-            app._scatter_ch_y_var.setCurrentText(cells_ch_options[0 if len(cells_ch_options) == 1 else 1])
+        if ch_x_var.currentText() not in cells_ch_options:
+            ch_x_var.setCurrentText(cells_ch_options[0])
+        if ch_y_var.currentText() not in cells_ch_options:
+            ch_y_var.setCurrentText(cells_ch_options[0 if len(cells_ch_options) == 1 else 1])
 
     # Refresh per-axis metric combo enable state to match the
     # currently-selected channels.
     for axis in ("x", "y"):
-        app._refresh_scatter_metric_for_axis(axis)
+        refresh_scatter_metric_for_axis(ctx, axis)
 
     # Update timepoint dropdown for cells scatter
-    timepoints = list(app._app_state.dataset.all_timepoints_cache) or get_all_timepoints(app._ctx)
+    timepoints = list(ctx.state.dataset.all_timepoints_cache) or get_all_timepoints(ctx)
     tp_strs = [f"{tp:.1f}" for tp in timepoints] if timepoints else ["0"]
-    _set_combo_values(app._scatter_tp_cb, tp_strs)
+    tp_cb = ctx.widgets.get_or_none("_scatter_tp_cb")
+    _set_combo_values(tp_cb, tp_strs)
 
-    if tp_strs and app._scatter_tp_var.currentText() not in tp_strs:
-        app._scatter_tp_var.setCurrentText(tp_strs[0])
+    tp_var = ctx.widgets.get_or_none("_scatter_tp_var")
+    if tp_strs and tp_var.currentText() not in tp_strs:
+        tp_var.setCurrentText(tp_strs[0])
 
     # Repopulate the multi-tp picker. PRESERVE the user's per-timepoint checks
     # across refreshes: the available timepoints are dataset-wide and don't
@@ -544,16 +580,16 @@ def update_scatter_menus(app) -> None:
     # well to the plot) must not reset the timepoint filter. New timepoints
     # default to checked; ones no longer present are dropped; a fresh dataset
     # (no prior selections) lands in the "everything visible" state.
-    prior_tp = getattr(app, "_scatter_tp_selections", None) or {}
-    app._scatter_tp_selections = {
+    prior_tp = ctx.runtime.scatter.tp_selections or {}
+    ctx.runtime.scatter.tp_selections = {
         tp_str: bool(prior_tp.get(tp_str, True)) for tp_str in tp_strs
     }
-    app._update_scatter_tp_selection_display()
+    update_scatter_tp_selection_display(ctx)
 
     # Aggregate scatter — propagate the same channel list to its own
     # per-axis Channel combo.
     for cb_attr in ("_scatter_agg_ch_x_cb", "_scatter_agg_ch_y_cb"):
-        cb = getattr(app, cb_attr, None)
+        cb = ctx.widgets.get_or_none(cb_attr)
         if cb is None:
             continue
         current = cb.currentText()
@@ -564,7 +600,7 @@ def update_scatter_menus(app) -> None:
             default_idx = 0 if cb_attr.endswith("_x_cb") else (1 if len(scatter_ch_options) > 1 else 0)
             cb.setCurrentText(scatter_ch_options[default_idx])
     for axis in ("x", "y"):
-        app._refresh_scatter_agg_metric_for_axis(axis)
+        refresh_scatter_agg_metric_for_axis(ctx, axis)
 
     # Legacy stat-string combos — kept hidden but in sync so old
     # exporters and the save-figure helpers continue to work.
@@ -572,46 +608,46 @@ def update_scatter_menus(app) -> None:
     for ch in channels:
         statistics.append(f"Mean Fluorescence {ch.upper()}")
         statistics.append(f"Fraction On {ch.upper()}")
-        if ch in app._app_state.channel.smfish_channels:
+        if ch in ctx.state.channel.smfish_channels:
             statistics.append(f"smFISH Count {ch.upper()}")
     for ratio_label in ratio_labels:
         statistics.append(f"Mean Ratio {ratio_label}")
     for cb_attr in ("_scatter_agg_stat_x_cb", "_scatter_agg_stat_y_cb"):
-        cb = getattr(app, cb_attr, None)
+        cb = ctx.widgets.get_or_none(cb_attr)
         if cb is None:
             continue
         _set_combo_values(cb, statistics or ["Mean Fluorescence GFP"])
     # Sync the legacy stat combos to whatever the new per-axis combos
     # express right now.
-    app._sync_scatter_agg_stat_combos()
+    sync_scatter_agg_stat_combos(ctx)
 
     # Update timepoint selections for aggregate scatter — preserve the user's
     # checks across refreshes (same rationale as the per-cell picker above): a
     # well add/remove must not reset the timepoint filter. New tps default
     # checked; missing ones dropped; a fresh dataset checks all.
-    prior_agg_tp = getattr(app, "_scatter_agg_tp_selections", None) or {}
-    app._scatter_agg_tp_selections = {
+    prior_agg_tp = ctx.runtime.scatter.agg_tp_selections or {}
+    ctx.runtime.scatter.agg_tp_selections = {
         tp_str: bool(prior_agg_tp.get(tp_str, True)) for tp_str in tp_strs
     }
 
-    app._update_tp_selection_display()
+    update_tp_selection_display(ctx)
 
 
 
-def sync_scatter_agg_stat_combos(app) -> None:
+def sync_scatter_agg_stat_combos(ctx) -> None:
     """Mirror the new per-axis (channel, metric) state into the legacy
     ``_scatter_agg_stat_x/y_cb`` string combos so any code path that still
     reads them (export_service, save-figure) sees a valid stat string.
     """
     for axis in ("x", "y"):
-        stat_cb = getattr(app, f"_scatter_agg_stat_{axis}_cb", None)
+        stat_cb = ctx.widgets.get_or_none(f"_scatter_agg_stat_{axis}_cb")
         if stat_cb is None:
             continue
-        ch_cb = getattr(app, f"_scatter_agg_ch_{axis}_cb", None)
-        m_cb = getattr(app, f"_scatter_agg_metric_{axis}_cb", None)
+        ch_cb = ctx.widgets.get_or_none(f"_scatter_agg_ch_{axis}_cb")
+        m_cb = ctx.widgets.get_or_none(f"_scatter_agg_metric_{axis}_cb")
         channel = str(ch_cb.currentText() if ch_cb else "")
         metric_label = str(m_cb.currentText() if m_cb else "Mean Intensity")
-        stat_str = app._compose_scatter_agg_stat(channel, metric_label)
+        stat_str = compose_scatter_agg_stat(ctx, channel, metric_label)
         blocked = stat_cb.blockSignals(True)
         try:
             if stat_cb.findText(stat_str) < 0:
@@ -622,14 +658,14 @@ def sync_scatter_agg_stat_combos(app) -> None:
 
 
 
-def col_for_scatter_entry(app, entry: str) -> str:
+def col_for_scatter_entry(ctx, entry: str) -> str:
     """Legacy single-string entry → column resolver (kept for stats/export back-compat).
 
     "gfp" -> "gfp_mean_intensity"
     "gfp (spots)" -> "gfp_smfish_count"
     "GFP/MCHERRY" (a ratio dropdown label) -> "ratio:GFP/MCHERRY"
     """
-    mapped_key = (getattr(app, "_label_to_channel_key", None) or {}).get(entry)
+    mapped_key = (getattr(ctx.app, "_label_to_channel_key", None) or {}).get(entry)
     if mapped_key and is_ratio_key(mapped_key):
         return mapped_key
     if mapped_key and is_shape_column(mapped_key):
@@ -638,7 +674,7 @@ def col_for_scatter_entry(app, entry: str) -> str:
         ch = entry[:-8]  # Remove " (spots)"
         return f"{ch.lower()}_smfish_count"
     else:
-        metric = app._app_state.channel.active_metric or "mean_intensity"
+        metric = ctx.state.channel.active_metric or "mean_intensity"
         if metric == "smfish_count":
             # The scatter dropdown uses the " (spots)" suffix for smfish;
             # fall back to mean intensity for the plain channel entry.
@@ -647,7 +683,7 @@ def col_for_scatter_entry(app, entry: str) -> str:
 
 
 
-def col_for_scatter_axis(app, channel_entry: str, metric_key: str) -> str:
+def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
     """Map a scatter (channel_entry, metric_key) pair to a CSV column or ratio key.
 
     Ratio channels collapse to the ratio key regardless of metric (ratios
@@ -656,7 +692,7 @@ def col_for_scatter_axis(app, channel_entry: str, metric_key: str) -> str:
     — that's a synthetic key that downstream aggregation code treats as a
     Fraction-On aggregation against the channel's mean-intensity column.
     """
-    mapped_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    mapped_key = (getattr(ctx.app, "_label_to_channel_key", None) or {}).get(channel_entry)
     if mapped_key and is_ratio_key(mapped_key):
         return mapped_key
     # Shape features are a single per-cell value (the ``shape_*`` column itself);
@@ -673,14 +709,14 @@ def col_for_scatter_axis(app, channel_entry: str, metric_key: str) -> str:
 
 
 
-def compose_scatter_agg_stat(app, channel_entry: str, metric_label: str) -> str:
+def compose_scatter_agg_stat(ctx, channel_entry: str, metric_label: str) -> str:
     """Build the legacy stat-string from a (channel, metric) pair.
 
     Mirrors ``parse_statistic`` in scatter_controller: keeps the same
     prefix vocabulary so older callers and the savefile naming still
     recognise the result.
     """
-    ratio_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    ratio_key = (getattr(ctx.app, "_label_to_channel_key", None) or {}).get(channel_entry)
     if ratio_key and is_ratio_key(ratio_key):
         return f"Mean Ratio {channel_entry}"
     ch_upper = (channel_entry or "").upper()
@@ -695,73 +731,76 @@ def compose_scatter_agg_stat(app, channel_entry: str, metric_label: str) -> str:
 
 
 
-def refresh_scatter_agg_metric_for_axis(app, axis: str) -> None:
+def refresh_scatter_agg_metric_for_axis(ctx, axis: str) -> None:
     """Reshape the agg-scatter Property combo for the selected channel.
 
     Real channels get the full intensity set plus ``Fraction above
     threshold``; ratio channels collapse to ``Calculated Val``.
     """
-    ch_cb = getattr(app, f"_scatter_agg_ch_{axis}_cb", None)
-    m_cb = getattr(app, f"_scatter_agg_metric_{axis}_cb", None)
+    ch_cb = ctx.widgets.get_or_none(f"_scatter_agg_ch_{axis}_cb")
+    m_cb = ctx.widgets.get_or_none(f"_scatter_agg_metric_{axis}_cb")
     if ch_cb is None or m_cb is None:
         return
     channel = str(ch_cb.currentText() or "")
-    populate_metric_combo(app,
+    populate_metric_combo(ctx.app,
         m_cb, channel_entry=channel, smfish_channel=channel,
         include_fraction=True,
     )
 
 
 
-def scatter_axis_metric_key(app, axis: str, *, agg: bool = False) -> str:
+def scatter_axis_metric_key(ctx, axis: str, *, agg: bool = False) -> str:
     """Return the metric key for axis ``x``/``y`` on the active scatter tab."""
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
     attr = (
         f"_scatter_agg_metric_{axis}_cb" if agg
         else f"_scatter_metric_{axis}_cb"
     )
-    cb = getattr(app, attr, None)
+    cb = ctx.widgets.get_or_none(attr)
     if cb is None:
         return "mean_intensity"
     label = str(cb.currentText() or "")
-    if agg and label in app._SCATTER_AGG_METRIC_EXTRA:
-        return app._SCATTER_AGG_METRIC_EXTRA[label]
+    if agg and label in SCATTER_AGG_METRIC_EXTRA:
+        return SCATTER_AGG_METRIC_EXTRA[label]
     return METRIC_LABEL_TO_KEY.get(label, "mean_intensity")
 
 
 
-def update_scatter_tp_selection_display(app) -> None:
+def update_scatter_tp_selection_display(ctx) -> None:
     """Update the per-cell scatter label showing selected timepoints.
 
     Mirrors _update_tp_selection_display so the two pickers behave
     identically (label format included).
     """
-    count = sum(1 for v in app._scatter_tp_selections.values() if v)
-    total = len(app._scatter_tp_selections)
+    tp_selections = ctx.runtime.scatter.tp_selections or {}
+    count = sum(1 for v in tp_selections.values() if v)
+    total = len(tp_selections)
     label_text = f"(All {count} selected)" if count == total else f"({count}/{total} selected)"
-    if hasattr(app, "_scatter_tp_label") and app._scatter_tp_label is not None:
-        app._scatter_tp_label.setText(label_text)
+    tp_label = ctx.widgets.get_or_none("_scatter_tp_label")
+    if tp_label is not None:
+        tp_label.setText(label_text)
 
 
 
-def refresh_scatter_metric_for_axis(app, axis: str) -> None:
+def refresh_scatter_metric_for_axis(ctx, axis: str) -> None:
     """Reshape the cells-scatter Property combo for the selected channel."""
-    ch_cb = getattr(app, f"_scatter_ch_{axis}_cb", None)
-    m_cb = getattr(app, f"_scatter_metric_{axis}_cb", None)
+    ch_cb = ctx.widgets.get_or_none(f"_scatter_ch_{axis}_cb")
+    m_cb = ctx.widgets.get_or_none(f"_scatter_metric_{axis}_cb")
     if ch_cb is None or m_cb is None:
         return
     channel = str(ch_cb.currentText() or "")
-    populate_metric_combo(app,
+    populate_metric_combo(ctx.app,
         m_cb, channel_entry=channel, smfish_channel=channel,
     )
 
 
 
-def update_tp_selection_display(app) -> None:
+def update_tp_selection_display(ctx) -> None:
     """Update the aggregate scatter label showing selected timepoints."""
-    count = sum(1 for v in app._scatter_agg_tp_selections.values() if v)
-    total = len(app._scatter_agg_tp_selections)
+    agg_tp_selections = ctx.runtime.scatter.agg_tp_selections or {}
+    count = sum(1 for v in agg_tp_selections.values() if v)
+    total = len(agg_tp_selections)
     label_text = f"(All {count} selected)" if count == total else f"({count}/{total} selected)"
-    if hasattr(app, "_scatter_agg_tp_label") and app._scatter_agg_tp_label is not None:
-        app._scatter_agg_tp_label.setText(label_text)
-
+    tp_label = ctx.widgets.get_or_none("_scatter_agg_tp_label")
+    if tp_label is not None:
+        tp_label.setText(label_text)

@@ -312,7 +312,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              raw `app` param invisible to this ratchet; conversion surfaces the
 #              residual toggle_sem bridges (_sem_btns/_sem_observers/_redraw/
 #              _is_tab_visible/_current_centre_tab) as counted ctx.app tokens.
-CTX_APP_BUDGET = 118
+#   118 -> 101  Scatter subsystem -> ctx (controller / gating / collect / _layout /
+#              callbacks / cells+agg tab views / export service + sidebar /
+#              batch_export scatter_panel take ctx; state via ctx.state, gate
+#              banks + widgets via ctx.runtime.scatter / ctx.widgets, domain
+#              leaves called directly). Net drop: the scatter tree already
+#              carried many ctx.app reach-throughs that collapse to typed state.
+CTX_APP_BUDGET = 101
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

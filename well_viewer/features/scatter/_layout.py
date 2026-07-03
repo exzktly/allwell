@@ -43,18 +43,18 @@ def _scatter_col_label(col: str) -> str:
     return label
 
 
-def _style_scatter_ax(app, ax, fig=None):
+def _style_scatter_ax(ctx, ax, fig=None):
     """Apply Screen/Publication theme tokens to one scatter axis. Returns the
     ``(bg, title_fg, muted_fg, grid, spine)`` tuple for the caller.
 
     *fig* is the figure whose facecolor should track the theme bg; it defaults
-    to ``app._scatter_fig`` (the single / faceted scatter). The aggregate scatter
-    passes ``app._scatter_agg_fig``. (audit A16 — this was re-inlined at both
+    to the single / faceted scatter figure (``_scatter_fig``). The aggregate
+    scatter passes ``_scatter_agg_fig``. (audit A16 — this was re-inlined at both
     scatter/controller.py call sites.)"""
     from well_viewer.core.plot_style import tokens_for as _tokens_for_ax
     _bg, _title_fg, _muted_fg, _grid, _spine = _tokens_for_ax(ax)
     if fig is None:
-        fig = app._scatter_fig
+        fig = ctx.widgets.get_or_none("_scatter_fig")
     try:
         fig.set_facecolor(_bg)
     except Exception:
@@ -70,12 +70,12 @@ def _style_scatter_ax(app, ax, fig=None):
     return _bg, _title_fg, _muted_fg, _grid, _spine
 
 
-def _setup_scatter_axes(app, n_axes: int):
+def _setup_scatter_axes(ctx, n_axes: int):
     """Reconfigure the scatter figure to host *n_axes* stacked panels (shared x
     and y so the clouds are directly comparable). Reuses existing axes when the
-    count matches; otherwise rebuilds. ``app._ax_scatter`` is aliased to the
-    first axis for the overlay path + gate tooling. Mirrors the Distribution
-    tab's ``_setup_axes``."""
+    count matches; otherwise rebuilds. ``_ax_scatter`` is aliased to the first
+    axis for the overlay path + gate tooling. Mirrors the Distribution tab's
+    ``_setup_axes``."""
     from well_viewer.core.plot_style import reconfigure_stacked_axes
 
     def _build(fig):
@@ -92,12 +92,12 @@ def _setup_scatter_axes(app, n_axes: int):
             fig.subplots_adjust(top=0.95, bottom=0.10, left=0.16, right=0.97, hspace=0.08)
         return axes
 
-    axes = reconfigure_stacked_axes(app._scatter_fig, n_axes, _build)
-    app._ax_scatter = axes[0]
-    app._scatter_axes = axes
+    axes = reconfigure_stacked_axes(ctx.widgets.get_or_none("_scatter_fig"), n_axes, _build)
+    ctx.widgets.register("_ax_scatter", axes[0])
+    ctx.runtime.scatter.axes = axes
     # Keep a reasonable minimum height per panel so stacked panels don't squish:
     # the card grows downward and the scroll area scrolls (overlay = no minimum).
-    card = getattr(app, "_scatter_card", None)
+    card = ctx.widgets.get_or_none("_scatter_card")
     if card is not None:
         try:
             card.setMinimumHeight(n_axes * SCATTER_PANEL_MIN_PX if n_axes > 1 else 0)
@@ -106,31 +106,31 @@ def _setup_scatter_axes(app, n_axes: int):
     return axes
 
 
-def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
+def _render_scatter_faceted(ctx, scatter_data, col_x, col_y, tps_list) -> None:
     """View-only stacked layout: one scatter panel per group, axes shared.
 
     Gates and click-to-view-cell are overlay-only, so this path renders points
     (with density shading if enabled) and clears the interaction cache.
     """
     items = list(scatter_data.items())
-    axes = _setup_scatter_axes(app, len(items))
-    prefs = app._app_state.export_prefs.style_prefs or {}
+    axes = _setup_scatter_axes(ctx, len(items))
+    prefs = ctx.state.export_prefs.style_prefs or {}
     density_on = bool(prefs.get("scatter_density", False))
     x_log = bool(prefs.get("scatter_x_log", True))
     y_log = bool(prefs.get("scatter_y_log", True))
     marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
     # "Color by time" colours each panel's points by timepoint (see
     # render_scatter_points); each panel then legends the timepoints it shows.
-    color_by_tp = bool(app._app_state.scatter.color_by_tp)
+    color_by_tp = bool(ctx.state.scatter.color_by_tp)
     xlabel = _scatter_col_label(col_x) + log1p_axis_suffix(x_log)
     ylabel = _scatter_col_label(col_y) + log1p_axis_suffix(y_log)
 
     gate_entries = []
     axes_points = []
     for ax, (label, data) in zip(axes, items):
-        _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(app, ax)
+        _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(ctx, ax)
         _ipts, legend_handles = render_scatter_points(
-            app, ax, {label: data}, density_on=density_on,
+            ctx, ax, {label: data}, density_on=density_on,
             x_log=x_log, y_log=y_log, marker_size=marker_size,
             color_by_tp=color_by_tp,
         )
@@ -147,17 +147,17 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
             ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
         # Gates appear on every panel, each labelled with that group's own
         # in-gate %. Handles only on the top panel — the one the edge-drag
-        # editor is bound to (app._ax_scatter); a drag there repaints them all.
+        # editor is bound to (_ax_scatter); a drag there repaints them all.
         gate_entries.append((ax, {label: data}, tps_list, _muted_fg, ax is axes[0]))
     axes[-1].set_xlabel(xlabel)
-    paint_gates(app, gate_entries, cols=(col_x, col_y))
+    paint_gates(ctx, gate_entries, cols=(col_x, col_y))
 
     # Editing the gate on the top panel mirrors to the panels below. Click- and
     # hover-to-view-cell now work per panel: ``axes_points`` pairs each panel's
     # points with its axis; ``points`` is the flattened union kept for callers
     # that don't care which panel a point came from.
     flat_points = [pt for _ax, pts in axes_points for pt in pts]
-    app._scatter_interaction_cache = {
+    ctx.runtime.scatter.interaction_cache = {
         "points": flat_points,
         "axes_points": axes_points,
         "timepoint_h": tps_list[0] if len(tps_list) == 1 else None,
@@ -165,14 +165,16 @@ def _render_scatter_faceted(app, scatter_data, col_x, col_y, tps_list) -> None:
         "col_x": col_x,
         "col_y": col_y,
     }
+    canvas = ctx.widgets.get_or_none("_scatter_canvas")
     try:
         apply_export_style_to_current(
-            app._ctx, app._scatter_fig, getattr(app, "_scatter_canvas", None))
+            ctx, ctx.widgets.get_or_none("_scatter_fig"), canvas)
     except Exception:
         swallowed()
     # Re-arm the gate selector against the new top panel (axes[0]). The figure
     # was just rebuilt, so a previously-armed selector is bound to a dead axis;
     # mirror the overlay redraw's refresh so drawing in "Separate axes" mode
     # captures coordinates on the live panel. No-op when draw mode is off.
-    refresh_gate_selector(app)
-    app._scatter_canvas.draw()
+    refresh_gate_selector(ctx)
+    if canvas is not None:
+        canvas.draw()

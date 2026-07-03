@@ -193,7 +193,7 @@ from well_viewer.features.preview.controller import refresh_preview_picker_shim,
 review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv, refresh_review_csv_rows, review_effective_included, review_load_rows = _lazy_names("well_viewer.features.image_browser.review_image.controller", "review_row_keys", "review_norm_fov", "review_collect_timepoints", "refresh_review_csv", "refresh_review_csv_rows", "review_effective_included", "review_load_rows")
 set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache")
 open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.cell_viewer_view", "open_scatter_cell_viewer")
-col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display")
+col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display, on_scatter_axis_change, on_scatter_agg_axis_change = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display", "on_scatter_axis_change", "on_scatter_agg_axis_change")
 from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
 stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("well_viewer.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
 from well_viewer.core import tab_controller as _tabctl
@@ -1178,39 +1178,37 @@ class WellViewerApp(QWidget):
     # ── Scatter Plot tab ───────────────────────────────────────────────────────
 
     def _col_for_scatter_axis(self, channel_entry: str, metric_key: str) -> str:
-        return col_for_scatter_axis(self, channel_entry, metric_key)
+        return col_for_scatter_axis(self._ctx, channel_entry, metric_key)
 
-    def _col_for_scatter_entry(self, entry: str) -> str: return col_for_scatter_entry(self, entry)
+    def _col_for_scatter_entry(self, entry: str) -> str: return col_for_scatter_entry(self._ctx, entry)
 
     # ── Per-axis scatter metric helpers ────────────────────────────────────
 
     _SCATTER_AGG_METRIC_EXTRA = {"Fraction above threshold": "fraction_above_threshold"}
 
     def _scatter_axis_metric_key(self, axis: str, *, agg = False) -> str:
-        return scatter_axis_metric_key(self, axis, agg=agg)
+        return scatter_axis_metric_key(self._ctx, axis, agg=agg)
 
-    def _refresh_scatter_metric_for_axis(self, axis: str) -> None: return refresh_scatter_metric_for_axis(self, axis)
+    def _refresh_scatter_metric_for_axis(self, axis: str) -> None: return refresh_scatter_metric_for_axis(self._ctx, axis)
 
     def _refresh_scatter_agg_metric_for_axis(self, axis: str) -> None:
-        return refresh_scatter_agg_metric_for_axis(self, axis)
+        return refresh_scatter_agg_metric_for_axis(self._ctx, axis)
 
     def _on_scatter_axis_change(self, axis: str) -> None:
-        self._refresh_scatter_metric_for_axis(axis)
-        redraw_scatter_orchestrate(self)
+        return on_scatter_axis_change(self._ctx, axis)
 
     def _on_scatter_agg_axis_change(self, axis: str) -> None:
-        self._refresh_scatter_agg_metric_for_axis(axis)
-        redraw_scatter_agg_orchestrate(self)
+        return on_scatter_agg_axis_change(self._ctx, axis)
 
-    def _sync_scatter_agg_stat_combos(self) -> None: return sync_scatter_agg_stat_combos(self)
+    def _sync_scatter_agg_stat_combos(self) -> None: return sync_scatter_agg_stat_combos(self._ctx)
 
     def _compose_scatter_agg_stat(self, channel_entry: str, metric_label: str) -> str:
-        return compose_scatter_agg_stat(self, channel_entry, metric_label)
+        return compose_scatter_agg_stat(self._ctx, channel_entry, metric_label)
 
 
-    def _update_tp_selection_display(self) -> None: return update_tp_selection_display(self)
+    def _update_tp_selection_display(self) -> None: return update_tp_selection_display(self._ctx)
 
-    def _update_scatter_tp_selection_display(self) -> None: return update_scatter_tp_selection_display(self)
+    def _update_scatter_tp_selection_display(self) -> None: return update_scatter_tp_selection_display(self._ctx)
 
 
 
@@ -1225,7 +1223,7 @@ class WellViewerApp(QWidget):
         _plot_save_scatter_figure_orchestrator(self, plot_bg=PLOT_BG)
 
 
-    def _export_scatter_agg_data(self) -> None: return export_scatter_agg_data(self)
+    def _export_scatter_agg_data(self) -> None: return export_scatter_agg_data(self._ctx)
 
     def _save_scatter_agg_figure(self) -> None:
         """Save the current aggregate scatter plot figure at high resolution."""

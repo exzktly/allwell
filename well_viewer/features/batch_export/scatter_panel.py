@@ -434,7 +434,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
             ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
             scatter_data = _collect_scatter_data(
-                self._app, col_x, col_y, tp_h,
+                self._app._ctx, col_x, col_y, tp_h,
                 well_colors=WELL_COLORS,
                 fluor_gate_x=self._app._get_fluor_gate(ch_x_base),
                 fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
@@ -486,7 +486,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
         with self._app_group_scope(grp):
             scatter_data = _collect_scatter_agg_data(
-                self._app, stat_x, stat_y, [tp_h],
+                self._app._ctx, stat_x, stat_y, [tp_h],
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:
@@ -554,7 +554,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
                 ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
                 scatter_data = _collect_scatter_data(
-                    self._app, col_x, col_y, tp_h,
+                    self._app._ctx, col_x, col_y, tp_h,
                     well_colors=WELL_COLORS,
                     fluor_gate_x=self._app._get_fluor_gate(ch_x_base),
                     fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
@@ -610,7 +610,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
         with self._app_group_scope(grp):
             scatter_data = _collect_scatter_agg_data(
-                self._app, stat_x, stat_y, sorted(timepoints),
+                self._app._ctx, stat_x, stat_y, sorted(timepoints),
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:

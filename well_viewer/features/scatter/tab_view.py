@@ -71,11 +71,11 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
                 tab_widget.setCurrentIndex(1)
             ctx.state.scatter.mode = _MODE_AGG
             try:
-                update_scatter_menus(ctx.app)
+                update_scatter_menus(ctx)
             except Exception:
                 swallowed()  # was: pass (silent except)
             try:
-                redraw_scatter_agg_orchestrate(ctx.app)
+                redraw_scatter_agg_orchestrate(ctx)
             except Exception:
                 swallowed()  # was: pass (silent except)
         else:
@@ -83,11 +83,11 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
                 tab_widget.setCurrentIndex(0)
             ctx.state.scatter.mode = _MODE_CELLS
             try:
-                update_scatter_menus(ctx.app)
+                update_scatter_menus(ctx)
             except Exception:
                 swallowed()  # was: pass (silent except)
             try:
-                redraw_scatter_orchestrate(ctx.app)
+                redraw_scatter_orchestrate(ctx)
             except Exception:
                 swallowed()  # was: pass (silent except)
     ctx.runtime.scatter.set_mode = _set_mode
@@ -97,14 +97,14 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
     )
 
 
-def scatter_active_mode(app) -> str:
+def scatter_active_mode(ctx) -> str:
     """Return ``"cells"`` or ``"aggregate"``; defaults to ``"cells"``."""
-    return app._app_state.scatter.mode or _MODE_CELLS
+    return ctx.state.scatter.mode or _MODE_CELLS
 
 
-def scatter_redraw_active(app) -> None:
+def scatter_redraw_active(ctx) -> None:
     """Redraw whichever scatter mode is currently visible."""
-    if scatter_active_mode(app) == _MODE_AGG:
-        redraw_scatter_agg_orchestrate(app)
+    if scatter_active_mode(ctx) == _MODE_AGG:
+        redraw_scatter_agg_orchestrate(ctx)
     else:
-        redraw_scatter_orchestrate(app)
+        redraw_scatter_orchestrate(ctx)

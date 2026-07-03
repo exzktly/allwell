@@ -888,7 +888,7 @@ class WellViewerApp(QWidget):
 
     def _toggle_fov_replicates(self) -> None: return toggle_fov_replicates(self)
 
-    def _refresh_fov_btn_state(self) -> None: return refresh_fov_btn_state(self)
+    def _refresh_fov_btn_state(self) -> None: return refresh_fov_btn_state(self._ctx)
     def _refresh_bar_layout_btn_state(self) -> None: return refresh_bar_layout_btn_state(self)
     def _update_bar_tp_selection_display(self) -> None: return update_bar_tp_selection_display(self)
 
@@ -1128,7 +1128,7 @@ class WellViewerApp(QWidget):
 
 
 
-    def _invalidate_stats_cache(self) -> None: return invalidate_stats_cache(self)
+    def _invalidate_stats_cache(self) -> None: return invalidate_stats_cache(self._ctx)
 
     def _invalidate_review_image_frame_cache(self) -> None: return invalidate_review_image_frame_cache(self)
 

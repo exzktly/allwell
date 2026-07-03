@@ -246,7 +246,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #   178 -> 177  Multivariate collect drops its ctx.app._rep_sets_active bridge —
 #              rep_sets_active is just active_replicate_sets over ctx.state, so
 #              collect calls the domain resolver directly (no god-object).
-CTX_APP_BUDGET = 177
+#   177 -> 173  Core-spine enabler: invalidate_stats_cache + refresh_fov_btn_state
+#              go ctx-native (per-FOV button bank moved onto ctx.runtime.fov),
+#              letting the heatmap and smfish tabs drop their
+#              ctx.app._invalidate_stats_cache() calls for invalidate_stats_cache(ctx)
+#              (the guarded hasattr + silent-except wrapper goes with them).
+CTX_APP_BUDGET = 173
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

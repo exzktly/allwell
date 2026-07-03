@@ -47,7 +47,7 @@ class AppRuntime:
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
-                 "batch_export", "saved_plots", "split")
+                 "batch_export", "saved_plots", "split", "fov")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -76,3 +76,8 @@ class AppRuntime:
         # split_view.py still writes ``app._split_active`` directly; ctx-based
         # plot handlers read the flag here instead of naming the god-object.
         object.__setattr__(self, "split", _FeatureRuntime(app, "_split_"))
+        # App-global per-FOV toggle button bank + observers (shared by the plot
+        # tabs and batch-export panels): ``ctx.runtime.fov.btns`` <-> the
+        # in-place-mutated ``app._fov_btns`` list, ``ctx.runtime.fov.observers``
+        # <-> ``app._fov_observers``. Transient live widgets, never persisted.
+        object.__setattr__(self, "fov", _FeatureRuntime(app, "_fov_"))

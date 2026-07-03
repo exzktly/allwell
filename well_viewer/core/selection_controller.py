@@ -956,19 +956,19 @@ def select_invert(app) -> None:
 
 
 
-def invalidate_stats_cache(app) -> None:
+def invalidate_stats_cache(ctx) -> None:
     """Discard cached group statistics. Call whenever group definitions change."""
-    app._app_state.stats_cache.invalidate()
+    ctx.state.stats_cache.invalidate()
     # Replicate-set visibility may have shifted, so re-check whether the
-    # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
-    if hasattr(app, "_refresh_fov_btn_state"):
-        app._refresh_fov_btn_state()
+    # per-FOV toggle is still applicable. Cheap; only walks the FOV btn bank.
+    from well_viewer.features.preview.panel_view import refresh_fov_btn_state
+    refresh_fov_btn_state(ctx)
     # Cell gating writes new ``Included`` flags onto cached rows, which
     # the Review Image include map mirrors. Bumping the version key
     # forces the next refresh to recompute the include map (cheap)
     # while reusing the cached image arrays + boundary mask (expensive).
     # No-op when Image Browser is disabled (no review_image slice).
-    _review_image = app._app_state.feature_slice("review_image")
+    _review_image = ctx.state.feature_slice("review_image")
     if _review_image is not None:
         _review_image.override_version += 1
 

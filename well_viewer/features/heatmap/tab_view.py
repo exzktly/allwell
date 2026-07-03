@@ -270,11 +270,8 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # global colormap range cache populated with NaNs, which produced
     # empty cells until the user wiggled the channel).
     ctx.runtime.heatmap.global_range_cache = None
-    if hasattr(ctx.app, "_invalidate_stats_cache"):
-        try:
-            ctx.app._invalidate_stats_cache()
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    invalidate_stats_cache(ctx)
     _redraw(ctx)
 
 

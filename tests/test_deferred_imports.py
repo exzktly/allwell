@@ -59,7 +59,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # staging call in `_run_batch_jobs`) were hoisted to a single module-level
 # import — `service.py` is Qt-free, so it's safe at module scope — net-dropping
 # the count by one.
-MAX_DEFERRED_FEATURE_IMPORTS = 130
+# Raised to 131 in the A8 core-spine burn-down: ``invalidate_stats_cache`` went
+# ctx-native and reaches the (Qt) per-FOV button refresh in
+# ``features.preview.panel_view`` through a function-local import — the
+# sanctioned escape hatch for a core module invoking a feature UI side-effect
+# without naming the god-object.
+MAX_DEFERRED_FEATURE_IMPORTS = 131
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

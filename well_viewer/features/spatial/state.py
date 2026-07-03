@@ -37,6 +37,16 @@ SUMMARY_DISPLAY_HEATMAP = "heatmap"
 SUMMARY_DISPLAY_LINE = "line"
 SUMMARY_DISPLAYS = (SUMMARY_DISPLAY_HEATMAP, SUMMARY_DISPLAY_LINE)
 
+# Vizs that do NOT consume the per-cell Metric picker. The tab greys the
+# picker on these so the UI stops promising an effect that never happens.
+# Everything else (spatial map on any level, per-colony distribution,
+# radial profile, boundary/interior, summary panel) uses the metric.
+METRIC_IGNORED_VIZS = frozenset({
+    VIZ_NND_HISTOGRAM,
+    VIZ_RIPLEY,
+    VIZ_COLONY_SIZE,
+})
+
 
 @dataclass
 class SpatialState:

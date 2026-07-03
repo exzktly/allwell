@@ -105,15 +105,33 @@ def _render_spatial_map(fig, st) -> None:
                 xlabel="x (px)", ylabel="y (px)")
 
     level = st.level
-    if level == sp_state.LEVEL_COLONY:
-        labels = payload.get("colony_labels")
+    metric = payload.get("metric")
+    has_metric = (
+        metric is not None
+        and hasattr(metric, "shape")
+        and metric.shape == (pts.shape[0],)
+    )
+    labels = payload.get("colony_labels")
+
+    # A picked metric wins the colouring at any level — the user's selection
+    # is what they want to see, so Cell / Colony / Intra all obey it. The
+    # colony-ID / r/R colouring is the fallback for "no metric picked".
+    if has_metric:
+        sc = ax.scatter(pts[:, 0], pts[:, 1], c=metric, s=8,
+                        cmap="viridis", edgecolors="none")
+        cbar = ax.figure.colorbar(sc, ax=ax, shrink=0.8, pad=0.02)
+        cbar.set_label(payload.get("metric_col", ""), color=_tokens(ax)[2],
+                       fontsize=8)
+        if st.show_hulls and level in (sp_state.LEVEL_COLONY, sp_state.LEVEL_INTRA):
+            _overlay_hulls(ax, pts, labels)
+    elif level == sp_state.LEVEL_COLONY:
         _scatter_by_colony(ax, pts, labels)
         if st.show_hulls:
             _overlay_hulls(ax, pts, labels)
     elif level == sp_state.LEVEL_INTRA:
         colours = payload.get("intra_colour")
         if colours is None or colours.shape[0] != pts.shape[0]:
-            _scatter_by_colony(ax, pts, payload.get("colony_labels"))
+            _scatter_by_colony(ax, pts, labels)
         else:
             sc = ax.scatter(pts[:, 0], pts[:, 1], c=colours, s=8,
                             cmap="viridis", edgecolors="none")
@@ -121,17 +139,10 @@ def _render_spatial_map(fig, st) -> None:
             cbar.set_label(payload.get("intra_colour_label", "r/R"),
                            color=_tokens(ax)[2], fontsize=8)
         if st.show_hulls:
-            _overlay_hulls(ax, pts, payload.get("colony_labels"))
+            _overlay_hulls(ax, pts, labels)
     else:
-        metric = payload.get("metric")
-        if metric is not None and metric.shape[0] == pts.shape[0]:
-            sc = ax.scatter(pts[:, 0], pts[:, 1], c=metric, s=8,
-                            cmap="viridis", edgecolors="none")
-            cbar = ax.figure.colorbar(sc, ax=ax, shrink=0.8, pad=0.02)
-            cbar.set_label(payload.get("metric_col", ""), color=_tokens(ax)[2],
-                           fontsize=8)
-        else:
-            ax.scatter(pts[:, 0], pts[:, 1], s=8, color="#4aa3ff", edgecolors="none")
+        ax.scatter(pts[:, 0], pts[:, 1], s=8, color="#4aa3ff",
+                   edgecolors="none")
 
     ax.invert_yaxis()  # image-space y grows downward
     ax.set_aspect("equal", adjustable="datalim")

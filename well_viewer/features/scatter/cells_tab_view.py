@@ -207,7 +207,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     _scroll.setWidgetResizable(True)
     _scroll.setFrameShape(_QFrame.NoFrame)
     _scroll.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff)
-    _scroll.setWidget(wrap_with_empty_state(ctx.app, card, icon="scatter-chart"))
+    _scroll.setWidget(wrap_with_empty_state(ctx.window, card, icon="scatter-chart"))
     layout.addWidget(_scroll, 1)
 
     canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx.app))

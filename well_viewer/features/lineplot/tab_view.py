@@ -165,7 +165,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # Wrap the scroll area in an EmptyState stack — page 0 is the
     # placeholder shown until a dataset is loaded, page 1 is the figure.
     from well_viewer.core.ui_helpers import wrap_with_empty_state
-    layout.addWidget(wrap_with_empty_state(ctx.app, scroll), 1)
+    layout.addWidget(wrap_with_empty_state(ctx.window, scroll), 1)
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)

@@ -22,14 +22,23 @@ _ALLOWED = {
     "set_status",
     "save_figure_dialog",
     "open_export_style_panel",
+    # ``window`` exposes the WellViewerApp *qua QMainWindow* for the operations
+    # that genuinely need the widget (dialog parenting, isinstance/findChildren)
+    # and can never be god-object-free. Named so those needs don't count against
+    # the ctx.app burn-down while staying enumerable + frozen here.
+    "window",
 }
 
 
 def _public_methods() -> set[str]:
+    # Count both plain methods and property accessors: a property is just as much
+    # a named surface onto WellViewerApp, so it must be frozen here too (else a
+    # property could smuggle in unreviewed coupling the isfunction check misses).
     return {
         name
         for name, member in inspect.getmembers(ViewerContext)
-        if not name.startswith("_") and inspect.isfunction(member)
+        if not name.startswith("_") and (inspect.isfunction(member)
+                                         or isinstance(member, property))
     }
 
 

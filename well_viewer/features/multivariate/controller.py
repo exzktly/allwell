@@ -411,7 +411,7 @@ def mv_export_csv(ctx) -> None:
         data = collect_feature_matrix(ctx, feature_cols=st.feature_cols,
                                       timepoints=st.timepoints)
     if data["n_cells"] == 0 or not data["feature_cols"]:
-        QMessageBox.information(ctx.app, "Nothing to export",
+        QMessageBox.information(ctx.window, "Nothing to export",
                                "The current selection produced no feature matrix.")
         return
     init_dir = str(ctx.state.dataset.data_dir or "")
@@ -459,7 +459,7 @@ def mv_export_csv(ctx) -> None:
             msg += f"  ·  cluster profiles → {prof_path}"
         ctx.set_status(msg)
     except Exception as exc:
-        QMessageBox.critical(ctx.app, "Export failed", f"Could not write CSV:\n{exc}")
+        QMessageBox.critical(ctx.window, "Export failed", f"Could not write CSV:\n{exc}")
 
 
 def _write_cluster_profile_csv(ctx, st, res, matrix_path: str):

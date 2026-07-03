@@ -162,7 +162,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
-        ctx.app, card, icon="line-chart",
+        ctx.window, card, icon="line-chart",
     ), 1)
 
     refresh_distribution_timepoints(ctx)

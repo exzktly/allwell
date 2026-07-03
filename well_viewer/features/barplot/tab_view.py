@@ -302,7 +302,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     install_canvas_wheel_scroll(canvas, scroll_canvas)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     right_l.addWidget(wrap_with_empty_state(
-        ctx.app, scroll_canvas, icon="bar-chart-horizontal",
+        ctx.window, scroll_canvas, icon="bar-chart-horizontal",
     ), 1)
 
     # Drag-to-reorder bars

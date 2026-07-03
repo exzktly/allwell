@@ -143,7 +143,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
-        ctx.app, card, icon="scatter-chart",
+        ctx.window, card, icon="scatter-chart",
     ), 1)
 
 

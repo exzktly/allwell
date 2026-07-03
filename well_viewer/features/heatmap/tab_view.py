@@ -231,7 +231,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
-        ctx.app, card, icon="layout-grid",
+        ctx.window, card, icon="layout-grid",
     ), 1)
 
     # ── Mouse hooks ─────────────────────────────────────────────────────────

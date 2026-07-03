@@ -248,7 +248,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_canvas", card.canvas)
     card.plotThemeChanged.connect(lambda _m: mv_ctrl.mv_recompute(ctx))
     layout.addWidget(wrap_with_empty_state(
-        ctx.app, card, icon="scatter-chart",
+        ctx.window, card, icon="scatter-chart",
         text="Load a directory to explore the feature space.",
     ), 1)
 

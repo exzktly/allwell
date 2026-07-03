@@ -251,7 +251,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              letting the heatmap and smfish tabs drop their
 #              ctx.app._invalidate_stats_cache() calls for invalidate_stats_cache(ctx)
 #              (the guarded hasattr + silent-except wrapper goes with them).
-CTX_APP_BUDGET = 173
+#   173 -> 165  New frozen ctx.window accessor (the WellViewerApp *qua QMainWindow*)
+#              gives genuine Qt widget-parenting a non-god-object home. The
+#              wrap_with_empty_state(...) parents across the plot tabs and the two
+#              multivariate QMessageBox parents move ctx.app -> ctx.window — a
+#              widget-parenting need is not behaviour coupling, so it shouldn't
+#              count. Behaviour-identical (window returns the same object).
+CTX_APP_BUDGET = 165
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

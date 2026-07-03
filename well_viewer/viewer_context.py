@@ -55,6 +55,20 @@ class ViewerContext:
     # wraps one genuine WellViewerApp service so feature code names it instead of
     # reaching through the ``app`` escape hatch.
 
+    @property
+    def window(self):
+        """The top-level ``QMainWindow`` (the ``WellViewerApp`` *qua widget*).
+
+        The escape-hatch ``app`` field names the god-object as a *behaviour*
+        provider; ``window`` names it purely as the **Qt widget** for the
+        handful of operations that legitimately need the main window and can
+        never be god-object-free: dialog parenting
+        (``QFileDialog``/``QMessageBox``), ``isinstance(..., QWidget)`` guards,
+        and ``findChildren`` tree walks. Routing those through ``window`` keeps
+        the ``ctx.app`` burn-down ratchet honest — a ``ctx.window`` call is a
+        widget-parenting need, not un-migrated behaviour coupling."""
+        return self.app
+
     def set_status(self, message: str) -> None:
         """Show *message* in the main-window status bar (no-op if unavailable)."""
         fn = getattr(self.app, "_set_status", None)

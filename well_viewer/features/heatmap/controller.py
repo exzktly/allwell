@@ -52,10 +52,7 @@ METRIC_OPTIONS = [METRIC_MEAN, METRIC_MEAN_ALL, METRIC_FRACTION, METRIC_COUNT]
 def active_layout(ctx) -> HeatmapLayout:
     """Return the active layout, synthesizing the plate default when needed."""
     layouts = list(ctx.runtime.heatmap.layouts or [])
-    # The active-layout *name* does not fit the ``_heatmap_`` runtime prefix
-    # (it's ``app._active_heatmap_layout_name``); read it through the escape
-    # hatch until it gains a typed-state home.
-    name = getattr(ctx.app, "_active_heatmap_layout_name", None)
+    name = ctx.state.heatmap.active_layout_name
     if name:
         for lay in layouts:
             if lay.name == name:

@@ -18,7 +18,9 @@ def test_reset_clears_all_leaky_gating_attrs():
         _cell_gating_use_scatter_thresh=True,
         _cell_gating_gating_choices={"G1"},
         _cell_gating_thresh_choices={"G1"},
-        _active_heatmap_layout_name="old-layout",
+        _app_state=types.SimpleNamespace(
+            heatmap=types.SimpleNamespace(active_layout_name="old-layout"),
+        ),
     )
 
     _reset_gating_state(app)
@@ -29,4 +31,4 @@ def test_reset_clears_all_leaky_gating_attrs():
     assert app._cell_gating_use_scatter_thresh is False
     assert app._cell_gating_gating_choices is None
     assert app._cell_gating_thresh_choices is None
-    assert app._active_heatmap_layout_name is None
+    assert app._app_state.heatmap.active_layout_name is None

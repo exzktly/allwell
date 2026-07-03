@@ -11,6 +11,7 @@ Qt-free: imports only stdlib.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -26,3 +27,7 @@ class HeatmapState:
     scale_mode: str = "Auto"
     repset_avg: bool = False
     log_scale: bool = False
+    # Name of the active heat-map layout (``None`` ⇒ first / plate default).
+    # Was the loose ``app._active_heatmap_layout_name`` — a poor fit for the
+    # ``_heatmap_`` runtime prefix, so it lives here as typed state (A8).
+    active_layout_name: Optional[str] = None

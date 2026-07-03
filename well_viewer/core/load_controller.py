@@ -135,7 +135,7 @@ def _reset_gating_state(app) -> None:
     app._cell_gating_use_scatter_thresh = False
     app._cell_gating_gating_choices = None
     app._cell_gating_thresh_choices = None
-    app._active_heatmap_layout_name = None
+    app._app_state.heatmap.active_layout_name = None
 
 
 def load_directory(app, d: Path, label=None) -> None:

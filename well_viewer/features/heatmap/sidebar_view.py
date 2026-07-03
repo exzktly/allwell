@@ -269,7 +269,7 @@ def _ensure_sidebar_layout(app) -> HeatmapLayout:
     lay = HeatmapLayout(name=SIDEBAR_LAYOUT_NAME, rows=8, cols=12)
     layouts.append(lay)
     app._heatmap_layouts = layouts
-    app._active_heatmap_layout_name = SIDEBAR_LAYOUT_NAME
+    app._app_state.heatmap.active_layout_name = SIDEBAR_LAYOUT_NAME
     return lay
 
 

@@ -299,7 +299,6 @@ class WellViewerApp(QWidget):
         # 8×12 plate. When empty, the heatmap controller synthesizes a plate
         # layout on the fly.
         self._heatmap_layouts: List = []
-        self._active_heatmap_layout_name: Optional[str] = None
 
         # Per-tab view-state values waiting to apply on first tab visit
         # (populated by view_state.load_from_data_dir, drained by

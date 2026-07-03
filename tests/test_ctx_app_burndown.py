@@ -238,7 +238,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              container inits (cells / lut / crop_tool) through it instead of
 #              hasattr/assign on ctx.app. Unblocks the full image_table controller
 #              conversion (its ~30 fns + helper files) as a later pass.
-CTX_APP_BUDGET = 179
+#   179 -> 178  Migrate the odd-prefix app._active_heatmap_layout_name onto the
+#              typed HeatmapState.active_layout_name slice — reader (active_layout)
+#              via ctx.state, writers (sidebar set / load reset) via the slice,
+#              dead runtime_app init removed. Clears heatmap controller's last
+#              ctx.app residual.
+CTX_APP_BUDGET = 178
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -123,6 +123,33 @@ interactive smoke after.** This is the god-object teardown proper.
 - **Depends on:** T2 (runtime holders, done) so live objects have a `ctx` home.
 - **Risk:** High — interactive-behaviour regressions that headless CI cannot catch.
 
+**Pilot finding (distribution `_on_changed`, 249 → 246) — the sequencing is
+LEAF-FIRST, not feature-first.** The function *bodies* use the bare `app`
+parameter, which the ratchet does **not** count, so a conversion only nets down
+at the *call sites*, and only if the body doesn't relocate calls into new
+`ctx.app`. Measured on distribution:
+  - `_on_changed` → `ctx`: **net −3** (5 builder wirings cleared; 1 residual —
+    the handoff to the still-`app` renderer `redraw_distribution`).
+  - `_on_tp_changed_dist` → `ctx`: **net ~0** — clearing 1 builder site is undone
+    by `set_focus_tp(app)` and `app._split_active` relocating to `ctx.app`.
+  - `refresh_distribution_timepoints` → `ctx`: **net ~+1** — `get_all_timepoints`
+    / `current_focus_tp` relocate.
+  So the per-feature handler conversions are near-zero until the **shared leaves
+  they call take `ctx` first**: `core/timepoint_sync.py` (`set_focus_tp` /
+  `current_focus_tp` — these convert *cleanly* to pure `ctx.state`/`ctx.bus`,
+  zero residual), `data/data_loading.py` (`get_all_timepoints`), and the
+  plot-render tree (`iter_plot_groups` / `_setup_axes` / plot-style /
+  `_display_label_for`). Those leaves are **cross-feature** (a `timepoint_sync`
+  conversion touches distribution *and* heatmap), so T3's real unit of work is
+  "**convert a shared leaf across all its callers**", after which each feature's
+  handlers + renderer fall out net-positive. Revised order:
+  1. **Shared leaves** — `timepoint_sync` (cleanest, pure ctx.state/bus) →
+     `data_loading.get_all_timepoints` → the plot-render helpers. Each is one
+     coordinated PR across its callers (app-machinery callers bridge via
+     `app._ctx`).
+  2. **Feature handlers + renderers** — now net-positive; one feature per PR.
+  3. **Shared controllers** (`plot_orchestrator` / channel / selection) last.
+
 ### T4 — Extract cross-cutting services · `[ ]`
 Category (c). `_invalidate_stats_cache` operates on the already-typed
 `stats_cache` slice → replace the ~20 scattered calls with a
@@ -151,7 +178,7 @@ intentional surface between features and the window shell.
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[x]` | already in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[ ]` | 249 → 0 — the remaining core; one feature per PR, interactive-validated |
+| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 246 (distribution `_on_changed` pilot); rest is leaf-first |
 | T4 | Extract cross-cutting services | T1 | Med | `[ ]` | |
 | T5 | Saved-plots service | — | Med | `[ ]` | |
 | T6 | Retire `ctx.app` | T1–T5 | Low | `[ ]` | → 0 |

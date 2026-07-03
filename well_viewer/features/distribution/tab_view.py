@@ -70,7 +70,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     mode_cb = reg.register("_distribution_mode_cb", QComboBox(ctrl))
     mode_cb.addItems(_MODE_OPTIONS)
     mode_cb.setCurrentText("Histogram + KDE")
-    mode_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx.app))
+    mode_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
     cl.addWidget(mode_cb)
     reg.register("_distribution_mode_var", mode_cb)   # legacy alias → same widget
 
@@ -86,7 +86,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     def _on_bins_changed(val: int) -> None:
         ctx.state.distribution.bins = int(val)
-        _on_changed(ctx.app)
+        _on_changed(ctx)
     bins_spin.valueChanged.connect(_on_bins_changed)
     cl.addWidget(bins_spin)
 
@@ -99,7 +99,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     layout_cb = reg.register("_distribution_layout_cb", QComboBox(ctrl))
     layout_cb.addItems(_LAYOUT_OPTIONS)
     layout_cb.setCurrentText("Overlay")
-    layout_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx.app))
+    layout_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
     cl.addWidget(layout_cb)
     reg.register("_distribution_layout_var", layout_cb)   # legacy alias → same widget
 
@@ -107,7 +107,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     def _on_log_changed(state: int) -> None:
         ctx.state.distribution.log_x = bool(state)
-        _on_changed(ctx.app)
+        _on_changed(ctx)
     log_x_cb.stateChanged.connect(_on_log_changed)
     cl.addWidget(log_x_cb)
 
@@ -115,7 +115,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     def _on_log_y_changed(state: int) -> None:
         ctx.state.distribution.log_y = bool(state)
-        _on_changed(ctx.app)
+        _on_changed(ctx)
     log_y_cb.stateChanged.connect(_on_log_y_changed)
     cl.addWidget(log_y_cb)
 
@@ -168,10 +168,15 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     refresh_distribution_timepoints(ctx.app)
 
 
-def _on_changed(app) -> None:
-    """Common callback for any control change in the Distribution tab."""
+def _on_changed(ctx) -> None:
+    """Common callback for any control change in the Distribution tab.
+
+    A8-teardown T3: takes ``ctx``. The onward redraw is still the app-based
+    renderer (``redraw_distribution``), so it hands off through ``ctx.app`` —
+    the one genuine residual until the shared plot-render helpers (iter_plot_groups
+    / _setup_axes / plot-style) themselves take ``ctx`` (leaf-first, later step)."""
     from well_viewer.features.distribution.controller import redraw_distribution
-    redraw_distribution(app)
+    redraw_distribution(ctx.app)
 
 
 def _on_tp_changed_dist(app) -> None:
@@ -189,7 +194,7 @@ def _on_tp_changed_dist(app) -> None:
         set_focus_tp(app, tp)
     else:
         set_focus_tp(app, tp, emit=False)
-        _on_changed(app)
+        _on_changed(app._ctx)
 
 
 def refresh_distribution_timepoints(app) -> None:

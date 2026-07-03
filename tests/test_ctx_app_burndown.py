@@ -96,7 +96,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (set_mode, gates_changed_cb), batch_export (set_mode),
 #              saved_plots (repopulate), multivariate (refresh_* / sync_
 #              controls). Live closures stamped for other layers to call.
-CTX_APP_BUDGET = 249
+#   249 -> 246  T3 pilot: distribution _on_changed(ctx). 5 builder control
+#              wirings drop ctx.app; the onward app-based renderer handoff
+#              (redraw_distribution) is the one residual ctx.app. Internal
+#              caller bridged via app._ctx (uncounted). Demonstrates the T3
+#              signature-flip + builder(ctx)/machinery(app._ctx) caller split.
+CTX_APP_BUDGET = 246
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

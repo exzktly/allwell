@@ -291,7 +291,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              redraw_bars callers pass ._ctx; fold-change bar scope wraps
 #              redraw_bars(a._ctx). tab_view keeps 6 deliberate shared-service
 #              bridges. Test fakes updated to ctx shape.
-CTX_APP_BUDGET = 128
+#   128 -> 124  ctx.persistence frozen accessor (app-level view-state save/load
+#              service) replaces ctx.app._persistence in heatmap + multivariate;
+#              multivariate refresh_plot_empty_states + export QFileDialog parent
+#              move to ctx.window. Self-contained, behaviour-identical.
+CTX_APP_BUDGET = 124
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

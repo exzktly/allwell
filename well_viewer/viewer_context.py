@@ -69,6 +69,15 @@ class ViewerContext:
         widget-parenting need, not un-migrated behaviour coupling."""
         return self.app
 
+    @property
+    def persistence(self):
+        """The app's persistence registry (``schedule_save`` / ``load`` per slice).
+
+        A genuine app-level *service* (view-state autosave/load), not lazy
+        behaviour coupling — features name it here instead of reaching through
+        ``ctx.app._persistence``. Kept in the frozen accessor set."""
+        return self.app._persistence
+
     def set_status(self, message: str) -> None:
         """Show *message* in the main-window status bar (no-op if unavailable)."""
         fn = getattr(self.app, "_set_status", None)

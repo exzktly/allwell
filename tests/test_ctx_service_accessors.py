@@ -27,6 +27,7 @@ _ALLOWED = {
     # and can never be god-object-free. Named so those needs don't count against
     # the ctx.app burn-down while staying enumerable + frozen here.
     "window",
+    "persistence",
 }
 
 

@@ -429,7 +429,7 @@ def _on_cmap_changed(ctx) -> None:
 def _persist_settings(ctx) -> None:
     """Save heatmap visual settings to disk (debounced via the registry)."""
     try:
-        ctx.app._persistence.schedule_save("heatmap_layouts")
+        ctx.persistence.schedule_save("heatmap_layouts")
     except Exception:
         swallowed()  # was: pass (silent except)
 

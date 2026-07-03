@@ -89,7 +89,7 @@ def mv_on_activate(ctx) -> None:
         return
     if not ctx.runtime.multivariate.config_loaded:
         try:
-            ctx.app._persistence.load("multivariate")
+            ctx.persistence.load("multivariate")
         except Exception:
             swallowed()
         ctx.runtime.multivariate.config_loaded = True
@@ -128,7 +128,7 @@ def mv_recompute(ctx) -> None:
     # Flip the empty-state stack off its placeholder now that this lazily-built
     # tab exists — the global refresh at load time ran before the tab was built,
     # so its stack would otherwise stay on the "load a directory" page.
-    refresh_plot_empty_states(ctx.app)
+    refresh_plot_empty_states(ctx.window)
     st.reset_result()
     data = collect_feature_matrix(
         ctx, feature_cols=st.feature_cols, timepoints=st.timepoints,
@@ -321,7 +321,7 @@ def _apply(ctx, **changes) -> None:
     for key, val in changes.items():
         setattr(st, key, val)
     try:
-        ctx.app._persistence.schedule_save("multivariate")
+        ctx.persistence.schedule_save("multivariate")
     except Exception:
         swallowed()
     if ctx.runtime.multivariate.sync_controls is not None:
@@ -416,7 +416,7 @@ def mv_export_csv(ctx) -> None:
         return
     init_dir = str(ctx.state.dataset.data_dir or "")
     path, _ = QFileDialog.getSaveFileName(
-        ctx.app, "Export feature matrix", init_dir, "CSV files (*.csv)")
+        ctx.window, "Export feature matrix", init_dir, "CSV files (*.csv)")
     if not path:
         return
     try:

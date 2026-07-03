@@ -337,7 +337,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              well labels / notes never re-hydrated. Convert the fn to ctx
 #              (ctx.state + invalidate_stats_cache(ctx)); the lone _apply_unified_
 #              state(ctx.app, block) bridge is the +1.
-CTX_APP_BUDGET = 98
+CTX_APP_BUDGET = 95
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

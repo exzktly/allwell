@@ -2,10 +2,11 @@
 
 Assembles the tab's controls (mode switch, dynamic feature picker, per-mode
 option rows, timepoint filter, export/copy/save) and the matplotlib ``PlotCard``,
-then wires every control to the ``controller`` functions. References ``ctx.app``
-directly (guardrail ``TAB_CTX_APP_UNWRAP_BUDGET = 0`` forbids an ``app = ctx.app``
-unwrap); figure/canvas/widget handles are stashed on ``ctx.app._mv_*`` here (not
-as ``self._*`` in ``runtime_app.py``), exactly like ``barplot/tab_view.py``.
+then wires every control to the ``controller`` functions. Threads the frozen
+``ViewerContext`` throughout — feature state via ``ctx.state``, live objects via
+``ctx.runtime.multivariate``, and figure/canvas/widget handles via ``ctx.widgets``
+(the registry stamps ``app._mv_*`` so legacy readers keep resolving), exactly like
+``barplot/tab_view.py``.
 """
 
 from __future__ import annotations

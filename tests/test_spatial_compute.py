@@ -216,3 +216,54 @@ def test_variance_decomposition_matches_hand_calc():
 def test_variance_decomposition_shape_mismatch_raises():
     with pytest.raises(ValueError):
         spc.variance_decomposition(np.array([1.0, 2.0]), np.array([0]))
+
+
+# ── frame summary + summary matrix ────────────────────────────────────────────
+
+
+def test_summarise_frame_empty_returns_nan_scalars():
+    s = spc.summarise_frame(np.empty((0, 2)))
+    assert s.n_cells == 0
+    assert s.n_colonies == 0
+    assert np.isnan(s.nnd_median)
+    assert np.isnan(s.icc)
+    assert np.isnan(s.colony_size_mean)
+
+
+def test_summarise_frame_populates_scalars_on_two_blobs():
+    blob_a = np.array([[i, j] for i in range(4) for j in range(4)], dtype=float)
+    blob_b = blob_a + np.array([100.0, 0.0])
+    pts = np.vstack([blob_a, blob_b])
+    s = spc.summarise_frame(pts, eps_mult=2.0, min_samples=3)
+    assert s.n_cells == 32
+    assert s.n_colonies == 2
+    assert np.isfinite(s.nnd_median)
+    # Colonies are populated; hull area of each 4x4 square = 9 (3x3 hull).
+    assert s.colony_size_mean == pytest.approx(16.0)
+    assert np.isfinite(s.hull_area_median)
+
+
+def test_summarise_frame_icc_uses_supplied_metric():
+    # Two well-separated blobs with the metric constant within each →
+    # ICC = 1 (all variance is between colonies).
+    blob_a = np.array([[i, j] for i in range(4) for j in range(4)], dtype=float)
+    blob_b = blob_a + np.array([100.0, 0.0])
+    pts = np.vstack([blob_a, blob_b])
+    metric = np.concatenate([np.ones(16) * 1.0, np.ones(16) * 5.0])
+    s = spc.summarise_frame(pts, metric=metric, eps_mult=2.0, min_samples=3)
+    assert s.n_colonies == 2
+    assert s.icc == pytest.approx(1.0, abs=1e-9)
+
+
+def test_summarise_frame_icc_nan_when_no_metric():
+    pts = np.array([[i, j] for i in range(3) for j in range(3)], dtype=float)
+    s = spc.summarise_frame(pts, eps_mult=2.0, min_samples=2)
+    assert np.isnan(s.icc)
+
+
+def test_summary_metrics_catalog_shape():
+    keys = {k for k, _lbl, _u in spc.SUMMARY_METRICS}
+    fields = {"n_cells", "n_colonies", "nnd_median", "knn5_mean_median",
+              "local_density_median", "colony_size_mean", "hull_area_median",
+              "packing_density_median", "icc"}
+    assert keys == fields

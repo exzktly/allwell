@@ -180,7 +180,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     tp_slider = reg.register("_heatmap_tp_slider", _StyledSlider(Qt.Horizontal, slider_row))
     tp_slider.setMinimum(0)
     tp_slider.setMaximum(0)
-    tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx.app))
+    tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx))
     sl.addWidget(tp_slider, 1)
     tp_label = reg.register("_heatmap_tp_label", QLabel("—", slider_row))
     tp_label.setMinimumWidth(80)
@@ -244,7 +244,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     canvas.mpl_connect("button_release_event",
                        lambda evt: _on_canvas_release(ctx.app, evt))
 
-    refresh_heatmap_timepoints(ctx.app)
+    refresh_heatmap_timepoints(ctx)
 
     # Push any settings loaded from heatmap_layouts.json into the widgets.
     try:
@@ -280,22 +280,26 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
 # ── helpers attached or referenced from runtime_app ─────────────────────────
 
-def refresh_heatmap_timepoints(app) -> None:
-    slider = getattr(app, "_heatmap_tp_slider", None)
-    label = getattr(app, "_heatmap_tp_label", None)
+def refresh_heatmap_timepoints(ctx) -> None:
+    # A8-teardown T3: modern infrastructure — slider/label via ``ctx.widgets``,
+    # the timepoint-value cache via ``ctx.runtime.heatmap``, timepoints/focus via
+    # the ctx leaves. The onward ``_redraw`` is the one render handoff residual
+    # (the heatmap render tree still takes ``app`` — a later one-feature pass).
+    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
+    label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if slider is None:
         return
     try:
         from well_viewer.features.scatter.controller import get_all_timepoints
-        tps = list(get_all_timepoints(app._ctx))
+        tps = list(get_all_timepoints(ctx))
     except Exception:
         tps = []
-    app._heatmap_tp_values = tps
+    ctx.runtime.heatmap.tp_values = tps
     # Seed the slider from the shared focus timepoint (N5) when one is set and
     # present, so opening Heat Map after picking a timepoint on Distribution
     # lands on the same point; else default to the first timepoint.
     from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
-    focus_idx = nearest_index(tps, current_focus_tp(app._ctx)) if tps else None
+    focus_idx = nearest_index(tps, current_focus_tp(ctx)) if tps else None
     start_idx = focus_idx if focus_idx is not None else 0
     blocked = slider.blockSignals(True)
     try:
@@ -309,13 +313,13 @@ def refresh_heatmap_timepoints(app) -> None:
             label.setText(f"t = {tps[start_idx]:g} h")
         else:
             label.setText("—")
-    _redraw(app)
+    _redraw(ctx.app)
 
 
-def _on_tp_changed(app) -> None:
-    tps: List[float] = list(getattr(app, "_heatmap_tp_values", []) or [])
-    slider = getattr(app, "_heatmap_tp_slider", None)
-    label = getattr(app, "_heatmap_tp_label", None)
+def _on_tp_changed(ctx) -> None:
+    tps: List[float] = list(ctx.runtime.heatmap.tp_values or [])
+    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
+    label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if not tps or slider is None:
         return
     idx = max(0, min(slider.value(), len(tps) - 1))
@@ -326,11 +330,11 @@ def _on_tp_changed(app) -> None:
     # redraw only this tab — keeps slider scrubbing as cheap as before (no
     # offscreen fan-out). Other tabs pick the value up on next show.
     from well_viewer.core.timepoint_sync import set_focus_tp
-    if getattr(app, "_split_active", False):
-        set_focus_tp(app._ctx, tps[idx])
+    if ctx.runtime.split.active:
+        set_focus_tp(ctx, tps[idx])
     else:
-        set_focus_tp(app._ctx, tps[idx], emit=False)
-        _redraw(app)
+        set_focus_tp(ctx, tps[idx], emit=False)
+        _redraw(ctx.app)
 
 
 def _on_scale_changed(app) -> None:

@@ -47,7 +47,7 @@ class AppRuntime:
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "heatmap", "barplot", "cell_gating", "multivariate",
-                 "batch_export", "saved_plots")
+                 "batch_export", "saved_plots", "split")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -69,3 +69,8 @@ class AppRuntime:
         # through the stamp — the closures are live objects, not serialized data.
         object.__setattr__(self, "batch_export", _FeatureRuntime(app, "_batch_export_"))
         object.__setattr__(self, "saved_plots", _FeatureRuntime(app, "_saved_plots_"))
+        # App-global split-view mode flag (transient session state, never
+        # persisted): ``ctx.runtime.split.active`` <-> ``app._split_active``.
+        # split_view.py still writes ``app._split_active`` directly; ctx-based
+        # plot handlers read the flag here instead of naming the god-object.
+        object.__setattr__(self, "split", _FeatureRuntime(app, "_split_"))

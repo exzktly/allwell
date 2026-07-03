@@ -401,7 +401,7 @@ def _channel_distribution(app) -> None:
             from well_viewer.features.distribution.tab_view import (
                 refresh_distribution_timepoints,
             )
-            refresh_distribution_timepoints(app)
+            refresh_distribution_timepoints(app._ctx)
         except Exception:
             _logger.exception("Distribution timepoint refresh failed")
 
@@ -412,7 +412,7 @@ def _channel_heatmap(app) -> None:
             from well_viewer.features.heatmap.tab_view import (
                 refresh_heatmap_timepoints,
             )
-            refresh_heatmap_timepoints(app)
+            refresh_heatmap_timepoints(app._ctx)
         except Exception:
             _logger.exception("Heatmap timepoint refresh failed")
 

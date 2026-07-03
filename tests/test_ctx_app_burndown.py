@@ -111,7 +111,22 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              read ctx (combo via ctx.widgets), dropping their builder-site
 #              touches; the other callers (heatmap/scatter/distribution) bridge
 #              through app._ctx (uncounted) pending their own handler passes.
-CTX_APP_BUDGET = 245
+#   245 -> 244  T3 timepoint-handler modernization: the distribution + heatmap
+#              timepoint handlers now read the modern infra end-to-end — combo/
+#              slider via ctx.widgets, the tp-value cache via ctx.runtime.heatmap,
+#              and the split-view mode flag via a new ctx.runtime.split namespace
+#              (_split_active gets a ctx home; split_view.py still writes it
+#              directly, the runtime read bridges). distribution _on_tp_changed_
+#              dist -> ctx is a clean -1 (split was its only residual); the two
+#              heatmap handlers -> ctx net 0 (the onward _redraw render handoff
+#              is the one residual, mirroring distribution _on_changed) but are
+#              fully off the god-object otherwise. Also fixes a latent bug the
+#              first pass introduced: registry.py's channel reactors still passed
+#              bare app to the now-ctx refresh handlers, silently swallowed by
+#              their except — now app._ctx, locked by test_timepoint_refresh_
+#              ctx_contract. Fully zeroing the heatmap handlers waits on the
+#              redraw_heatmap render-tree conversion (High-risk one-feature pass).
+CTX_APP_BUDGET = 244
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

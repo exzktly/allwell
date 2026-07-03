@@ -62,7 +62,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(QLabel("t (h):", ctrl))
     tp_cb = reg.register("_distribution_tp_cb", QComboBox(ctrl))
     tp_cb.setMinimumContentsLength(8)
-    tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx.app))
+    tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
     cl.addWidget(tp_cb)
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget
 
@@ -179,22 +179,26 @@ def _on_changed(ctx) -> None:
     redraw_distribution(ctx.app)
 
 
-def _on_tp_changed_dist(app) -> None:
+def _on_tp_changed_dist(ctx) -> None:
     """Timepoint combo changed — publish the shared focus timepoint (N5). In
     Split View, emit so the Heat Map pane redraws live; otherwise update the
-    value silently and redraw only this tab. Other tabs pick it up on next show."""
+    value silently and redraw only this tab. Other tabs pick it up on next show.
+
+    A8-teardown T3: fully on modern infrastructure — combo via ``ctx.widgets``,
+    split-mode flag via ``ctx.runtime.split``, focus via the ctx timepoint
+    leaves. No god-object reach."""
     from well_viewer.core.timepoint_sync import set_focus_tp
-    cb = getattr(app, "_distribution_tp_cb", None)
+    cb = ctx.widgets.get_or_none("_distribution_tp_cb")
     txt = cb.currentText() if cb is not None else ""
     try:
         tp = float(txt) if txt not in ("", "—", None) else None
     except (ValueError, TypeError):
         tp = None
-    if getattr(app, "_split_active", False):
-        set_focus_tp(app._ctx, tp)
+    if ctx.runtime.split.active:
+        set_focus_tp(ctx, tp)
     else:
-        set_focus_tp(app._ctx, tp, emit=False)
-        _on_changed(app._ctx)
+        set_focus_tp(ctx, tp, emit=False)
+        _on_changed(ctx)
 
 
 def refresh_distribution_timepoints(ctx) -> None:

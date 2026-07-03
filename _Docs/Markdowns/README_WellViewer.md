@@ -874,10 +874,26 @@ manually annotated:
 | Do edge cells look different from centre cells? | Intra-colony | Radial profile | Metric ± SEM binned by normalised radius `r/R` (0 = colony centre, 1 = furthest cell). |
 | Do boundary cells look different from interior cells? | Intra-colony | Boundary vs interior | Split violin of the metric partitioned by the Boundary % percentile. |
 | Where are my cells / colonies in the well? | any | Spatial map | Scatter of centroids in the well plane, coloured by metric / colony id / r/R, with optional convex-hull overlays per colony. |
+| **How do wells / timepoints compare *grossly*?** | **Summary** | **Summary panel** | Per-(well, timepoint) matrix of one summary scalar (median NND, colony count, mean colony size, packing density, ICC on the picked metric, …). Renders as either a wells × timepoints heatmap or one line per well over time. Click **Export CSV** to write one long-format row per (well, timepoint) with every summary column. This is the cross-condition view — everything else on the tab is a single-frame view. |
 
 Every metric name, control label, and viz option carries a hover tooltip
 with the same one-line reading — the table above is what's on screen when
 you rest the mouse.
+
+**Summary panel — the "gross comparison" viz.** Selecting Level → *Summary*
+switches the tab into an aggregate mode: instead of one well + one
+timepoint, it walks every well in your plate selection × every loaded
+timepoint and computes a small dataclass (`FrameSummary`) of scalar
+summaries per frame — cell count, colony count, median NND, median k-NN
+mean distance, median local density, mean colony size, median hull area,
+median packing density, and (if you picked a per-cell Metric) the
+between-vs-within ICC on that column. Pick which one to plot from the
+**Summary metric** dropdown and choose *Heatmap* or *Line plot* from
+**Display**. **Export CSV** writes every summary column at once (long
+format: one row per `well × timepoint_hours`), so downstream analysis
+in pandas or Excel isn't restricted to whichever summary is currently
+plotted. The single-timepoint picker in row 1 is disabled at Summary
+level — timepoints are already the X-axis.
 
 ---
 

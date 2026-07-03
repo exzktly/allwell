@@ -455,6 +455,7 @@ class WellViewerApp(QWidget):
         "Plotting":           "line-chart",
         "Statistics":         "sigma",
         "Multivariate":       "scatter-chart",
+        "Spatial":            "waypoints",
         "Image Browser":      "layout-grid",
         "smFISH":             "dna",
         "Review CSV":         "file-spreadsheet",

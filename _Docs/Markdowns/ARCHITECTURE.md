@@ -1029,6 +1029,38 @@ tip, Qt.ToolTipRole)` puts a distinct tooltip on each dropdown option
 so hovering `Per-colony distribution` explains the ICC without the
 user having to open the docs.
 
+**The Summary level and CSV export.** In addition to the per-frame Cell /
+Colony / Intra-colony levels, the tab also exposes a **Summary** level
+whose only viz — *Summary panel* — walks the *whole* well selection ×
+every loaded timepoint and calls
+`spatial_compute.summarise_frame(points, metric, colony_params)` on each
+frame. Each call returns a `FrameSummary` dataclass of scalars: cell
+count, colony count, median NND, median k-NN mean distance, median local
+density, mean colony size, median hull area, median packing density, and
+the between-vs-within ICC on the picked metric (`NaN` when no metric is
+selected). `collect.collect_summary_matrix` stacks those into a
+`(n_wells, n_timepoints)` object array; the renderer picks the chosen
+`summary_metric_key` field and draws either a wells × timepoints imshow
+heatmap or one line-per-well `matplotlib.pyplot.plot` — selectable via
+the `summary_display` combo (`SUMMARY_DISPLAY_HEATMAP` /
+`SUMMARY_DISPLAY_LINE`). Same colony-detection params as the per-frame
+vizs, so the Summary matrix agrees with what the user sees when they
+switch back to Cell / Colony / Intra-colony and scrub through
+(well, tp) pairs. This is the only viz that consumes more than one
+frame's worth of data.
+
+**CSV export** lives in the top row alongside Copy / Save Figure and is
+enabled only when Level = Summary. It calls
+`controller.sp_export_summary_csv`, which flattens the matrix via
+`collect.summary_matrix_to_csv_rows` — one dict per (well, timepoint)
+with every `FrameSummary` field materialised as its own column — and
+writes the result via a `QFileDialog.getSaveFileName` dialog. Output
+format is *long*, not wide (row = one frame; columns include every
+summary at once), so downstream pandas / Excel work isn't restricted
+to whichever summary is currently plotted. `metric_col` (the ICC column
+used at capture time) is echoed in every row so post-hoc filtering
+can distinguish ICCs computed with different signals.
+
 ---
 
 ## 6. The Analyze side

@@ -595,6 +595,129 @@ def radial_profile(
                           n_per_bin=counts)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Frame-level summary (one scalar-per-summary per (well, timepoint))
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class FrameSummary:
+    """One-scalar-per-metric summary of a single (well, timepoint) frame.
+
+    Every field is a plain ``float`` (``nan`` when the frame lacks enough
+    cells for that summary — e.g. ``nnd_median`` is ``nan`` for ``n_cells < 2``,
+    ``icc`` is ``nan`` when no metric was supplied or colonies collapsed to
+    noise). The Summary-panel viz stacks these into a per-(well, timepoint)
+    matrix and the CSV export writes one row per frame.
+    """
+
+    n_cells: int
+    n_colonies: int
+    nnd_median: float
+    knn5_mean_median: float
+    local_density_median: float
+    colony_size_mean: float
+    hull_area_median: float
+    packing_density_median: float
+    icc: float
+
+
+def _finite_median(arr: np.ndarray) -> float:
+    finite = arr[np.isfinite(arr)] if arr is not None else np.array([])
+    if finite.size == 0:
+        return float("nan")
+    return float(np.median(finite))
+
+
+def _finite_mean(arr: np.ndarray) -> float:
+    finite = arr[np.isfinite(arr)] if arr is not None else np.array([])
+    if finite.size == 0:
+        return float("nan")
+    return float(np.mean(finite))
+
+
+def summarise_frame(
+    points: np.ndarray,
+    metric: np.ndarray | None = None,
+    *,
+    colony_method: str = METHOD_DBSCAN,
+    eps_mult: float = 3.0,
+    min_samples: int = 4,
+    knn_k: int = 5,
+) -> FrameSummary:
+    """Compute the per-frame scalar summaries of a single (well, timepoint).
+
+    Runs the same colony detection the tab uses at Colony / Intra-colony
+    level, so the Summary-panel matrix agrees with what the user sees when
+    they scrub through the well/timepoint pickers.
+    """
+    pts = _as_points(points) if points is not None and len(points) else np.empty((0, 2))
+    n_cells = int(pts.shape[0])
+    if n_cells == 0:
+        return FrameSummary(
+            n_cells=0, n_colonies=0,
+            nnd_median=float("nan"), knn5_mean_median=float("nan"),
+            local_density_median=float("nan"), colony_size_mean=float("nan"),
+            hull_area_median=float("nan"), packing_density_median=float("nan"),
+            icc=float("nan"),
+        )
+
+    nnd = nearest_neighbour_distance(pts)
+    knn = knn_mean_distance(pts, k=knn_k)
+    dens = local_density(pts, k=knn_k)
+
+    colonies = detect_colonies(
+        pts, method=colony_method, eps_mult=eps_mult, min_samples=min_samples,
+    )
+    n_colonies = colonies.n_colonies
+    if n_colonies:
+        stats = colony_stats(pts, colonies.labels)
+        colony_size_mean = float(np.mean(stats.size)) if stats.size.size else float("nan")
+        hull_area_median = _finite_median(stats.hull_area)
+        packing_density_median = _finite_median(stats.packing_density)
+    else:
+        colony_size_mean = float("nan")
+        hull_area_median = float("nan")
+        packing_density_median = float("nan")
+
+    if metric is not None and n_colonies:
+        metric_arr = np.asarray(metric, dtype=float)
+        if metric_arr.shape == (n_cells,):
+            decomp = variance_decomposition(metric_arr, colonies.labels)
+            icc = float(decomp.icc) if decomp.n_cells > 0 else float("nan")
+        else:
+            icc = float("nan")
+    else:
+        icc = float("nan")
+
+    return FrameSummary(
+        n_cells=n_cells,
+        n_colonies=n_colonies,
+        nnd_median=_finite_median(nnd),
+        knn5_mean_median=_finite_median(knn),
+        local_density_median=_finite_median(dens),
+        colony_size_mean=colony_size_mean,
+        hull_area_median=hull_area_median,
+        packing_density_median=packing_density_median,
+        icc=icc,
+    )
+
+
+#: Ordered display list of the Summary-panel's selectable summary metrics.
+#: Keys match ``FrameSummary`` field names; values are ``(label, units)``.
+SUMMARY_METRICS: tuple[tuple[str, str, str], ...] = (
+    ("n_cells",                 "Cell count",              ""),
+    ("n_colonies",              "Colony count",            ""),
+    ("nnd_median",              "Median NND",              "px"),
+    ("knn5_mean_median",        "Median k-NN mean (k=5)",   "px"),
+    ("local_density_median",    "Median local density",     "cells/px²"),
+    ("colony_size_mean",        "Mean colony size",         "cells"),
+    ("hull_area_median",        "Median hull area",         "px²"),
+    ("packing_density_median",  "Median packing density",   "cells/px²"),
+    ("icc",                     "ICC (metric)",             ""),
+)
+
+
 __all__ = [
     "METHOD_DBSCAN",
     "METHOD_SINGLE_LINKAGE",
@@ -604,6 +727,8 @@ __all__ = [
     "IntraColonyGeometry",
     "RadialProfile",
     "VarianceDecomposition",
+    "FrameSummary",
+    "SUMMARY_METRICS",
     "nearest_neighbour_distance",
     "knn_mean_distance",
     "local_density",
@@ -613,4 +738,5 @@ __all__ = [
     "intra_colony_geometry",
     "radial_profile",
     "variance_decomposition",
+    "summarise_frame",
 ]

@@ -46,6 +46,8 @@ def render_spatial(ctx) -> None:
                 _render_radial_profile(fig, st)
             elif viz == sp_state.VIZ_BOUNDARY_INTERIOR:
                 _render_boundary_interior(fig, st)
+            elif viz == sp_state.VIZ_SUMMARY_PANEL:
+                _render_summary_panel(fig, st)
             else:  # pragma: no cover
                 _draw_message(fig, f"Unknown visualization: {viz!r}")
     except Exception as exc:  # pragma: no cover - defensive
@@ -358,3 +360,100 @@ def _render_boundary_interior(fig, st) -> None:
     ax.set_xticks(positions)
     ax.set_xticklabels([f"Interior (n={interior.size})",
                         f"Boundary (n={boundary.size})"])
+
+
+# ── viz: Summary panel (per-(well, timepoint) matrix) ────────────────────────
+
+
+def _summary_matrix(payload, key: str) -> tuple[np.ndarray, list, list]:
+    """Extract the (n_wells, n_timepoints) float matrix for the chosen summary
+    field, plus parallel row / column label lists."""
+    wells = payload.get("wells", [])
+    tps = payload.get("timepoints", [])
+    summaries = payload.get("summaries")
+    n_w, n_t = len(wells), len(tps)
+    if summaries is None or n_w == 0 or n_t == 0:
+        return np.zeros((0, 0)), wells, tps
+    matrix = np.full((n_w, n_t), np.nan, dtype=float)
+    for i in range(n_w):
+        for j in range(n_t):
+            s = summaries[i, j]
+            if s is None:
+                continue
+            val = getattr(s, key, None)
+            if val is None:
+                continue
+            matrix[i, j] = float(val)
+    return matrix, wells, tps
+
+
+def _summary_metric_label(key: str) -> tuple[str, str]:
+    """Return ``(label, units)`` for a summary field, or the key if unknown."""
+    for k, lbl, units in sp_state_metric_catalog():
+        if k == key:
+            return lbl, units
+    return key, ""
+
+
+def sp_state_metric_catalog():
+    """Local import to avoid a module-scope cycle."""
+    from well_viewer.domain.spatial_compute import SUMMARY_METRICS
+    return SUMMARY_METRICS
+
+
+def _render_summary_panel(fig, st) -> None:
+    payload = st.last_result
+    key = payload.get("summary_metric_key") or "nnd_median"
+    display = payload.get("summary_display") or sp_state.SUMMARY_DISPLAY_HEATMAP
+    matrix, wells, tps = _summary_matrix(payload, key)
+    if matrix.size == 0:
+        _draw_message(fig, "No wells / timepoints in the current selection.")
+        return
+    label, units = _summary_metric_label(key)
+    ylabel = f"{label} ({units})" if units else label
+
+    if display == sp_state.SUMMARY_DISPLAY_HEATMAP:
+        _render_summary_heatmap(fig, matrix, wells, tps, label, units)
+    else:
+        _render_summary_lines(fig, matrix, wells, tps, ylabel)
+
+
+def _render_summary_heatmap(fig, matrix, wells, tps, label, units) -> None:
+    ax = fig.add_subplot(111)
+    _style_axes(ax, title=f"{label} · well × timepoint",
+                xlabel="Timepoint (h)", ylabel="Well")
+    finite = matrix[np.isfinite(matrix)]
+    if finite.size:
+        vmin, vmax = float(finite.min()), float(finite.max())
+    else:
+        vmin, vmax = 0.0, 1.0
+    im = ax.imshow(matrix, aspect="auto", cmap="viridis",
+                   vmin=vmin, vmax=vmax, origin="lower",
+                   interpolation="nearest")
+    ax.set_xticks(range(len(tps)))
+    ax.set_xticklabels([f"{t:g}" for t in tps])
+    ax.set_yticks(range(len(wells)))
+    ax.set_yticklabels(wells)
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+    cbar_label = f"{label} ({units})" if units else label
+    cbar.set_label(cbar_label, color=_tokens(ax)[2], fontsize=8)
+
+
+def _render_summary_lines(fig, matrix, wells, tps, ylabel: str) -> None:
+    ax = fig.add_subplot(111)
+    _style_axes(ax, title="Summary vs timepoint · one line per well",
+                xlabel="Timepoint (h)", ylabel=ylabel)
+    import matplotlib
+    cmap = matplotlib.colormaps["tab20"]
+    for i, w in enumerate(wells):
+        y = matrix[i]
+        # Drop NaN gaps so lines don't dive to zero when a well is missing a tp.
+        mask = np.isfinite(y)
+        if not mask.any():
+            continue
+        ax.plot(np.asarray(tps)[mask], y[mask],
+                marker="o", markersize=3, lw=1.1,
+                color=cmap(i % cmap.N), label=w)
+    if len(wells) <= 12:
+        ax.legend(fontsize=7, frameon=False,
+                  loc="upper right", ncol=min(2, len(wells)))

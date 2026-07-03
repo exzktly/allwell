@@ -28,6 +28,7 @@ _LEVEL_ORDER = (
     (sp_state.LEVEL_CELL, "Cell"),
     (sp_state.LEVEL_COLONY, "Colony"),
     (sp_state.LEVEL_INTRA, "Intra-colony"),
+    (sp_state.LEVEL_SUMMARY, "Summary"),
 )
 
 _LEVEL_TOOLTIP = (
@@ -37,7 +38,10 @@ _LEVEL_TOOLTIP = (
     "• Colony — one aggregate per auto-detected colony "
     "(size, hull area, packing density, per-colony metric spread).\n"
     "• Intra-colony — each cell's position relative to its colony "
-    "(distance to centroid, distance to hull edge, boundary/interior flag)."
+    "(distance to centroid, distance to hull edge, boundary/interior flag).\n"
+    "• Summary — one scalar per (well, timepoint) frame across the "
+    "current well selection. Gross cross-condition comparison, not a "
+    "single-frame view. Export CSV writes one row per (well, timepoint)."
 )
 
 _VIZ_LABELS = {
@@ -48,6 +52,7 @@ _VIZ_LABELS = {
     sp_state.VIZ_COLONY_METRIC_DIST: "Per-colony distribution",
     sp_state.VIZ_RADIAL_PROFILE: "Radial profile",
     sp_state.VIZ_BOUNDARY_INTERIOR: "Boundary vs interior",
+    sp_state.VIZ_SUMMARY_PANEL: "Summary panel",
 }
 
 _VIZ_TOOLTIPS = {
@@ -83,6 +88,13 @@ _VIZ_TOOLTIPS = {
         "Split violin of the selected metric partitioned by distance to the "
         "colony hull edge — the bottom-N % of d_edge are 'boundary' cells, "
         "the rest are 'interior' cells. N is set by the Boundary % spinbox.",
+    sp_state.VIZ_SUMMARY_PANEL:
+        "Per-(well, timepoint) matrix of one summary scalar (median NND, "
+        "colony count, mean colony size, packing density, ICC, …) walked "
+        "across the current well selection and every loaded timepoint. Pick "
+        "Heatmap for a wells × timepoints matrix or Line plot for one series "
+        "per well. Export CSV writes one long-format row per (well, timepoint) "
+        "with every summary column at once.",
 }
 
 _METHOD_ORDER = (
@@ -171,7 +183,66 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_tp_cb", tp_cb)
     r1.addWidget(tp_cb)
 
+    # Summary-only controls: metric key + display mode. Hidden on other levels.
+    summary_metric_label = QLabel("Summary metric:", row1)
+    r1.addWidget(summary_metric_label)
+    summary_metric_cb = QComboBox(row1)
+    summary_metric_cb.setMinimumWidth(180)
+    for key, label, units in _summary_metric_catalog():
+        summary_metric_cb.addItem(
+            f"{label} ({units})" if units else label, key)
+    _select_combo_by_data(summary_metric_cb, st.summary_metric_key)
+    summary_metric_cb.setToolTip(
+        "Which per-frame scalar to summarise across the (well × timepoint) "
+        "grid. ICC needs a per-cell Metric selected."
+    )
+    summary_metric_cb.currentIndexChanged.connect(
+        lambda _i: sp_ctrl.sp_set_summary_metric(
+            ctx, summary_metric_cb.currentData() or "nnd_median"))
+    reg.register("_sp_summary_metric_cb", summary_metric_cb)
+    r1.addWidget(summary_metric_cb)
+
+    summary_display_label = QLabel("Display:", row1)
+    r1.addWidget(summary_display_label)
+    summary_display_cb = QComboBox(row1)
+    summary_display_cb.addItem("Heatmap", sp_state.SUMMARY_DISPLAY_HEATMAP)
+    summary_display_cb.addItem("Line plot", sp_state.SUMMARY_DISPLAY_LINE)
+    _select_combo_by_data(summary_display_cb, st.summary_display)
+    summary_display_cb.setToolTip(
+        "Heatmap: wells × timepoints matrix, coloured by the summary metric.\n"
+        "Line plot: one line per well, X = timepoint, Y = summary metric."
+    )
+    summary_display_cb.currentIndexChanged.connect(
+        lambda _i: sp_ctrl.sp_set_summary_display(
+            ctx, summary_display_cb.currentData()
+            or sp_state.SUMMARY_DISPLAY_HEATMAP))
+    reg.register("_sp_summary_display_cb", summary_display_cb)
+    r1.addWidget(summary_display_cb)
+
     r1.addStretch(1)
+
+    recompute_btn = IconButton(
+        "check", row1,
+        tooltip=(
+            "Force a fresh compute.\n"
+            "Per-frame levels (Cell / Colony / Intra-colony) auto-recompute "
+            "on every control change, so the button is only strictly needed "
+            "at Summary level — where colony parameter / metric / well-"
+            "selection changes are queued until you click it (one DBSCAN "
+            "per (well × timepoint) frame is expensive to run on every "
+            "keystroke)."
+        ))
+    recompute_btn.clicked.connect(lambda _=False: sp_ctrl.sp_recompute(ctx))
+    reg.register("_sp_recompute_btn", recompute_btn)
+    r1.addWidget(recompute_btn)
+
+    export_csv_btn = IconButton(
+        "download", row1,
+        tooltip="Export Summary matrix as CSV (Summary level only)")
+    export_csv_btn.clicked.connect(
+        lambda _=False: sp_ctrl.sp_export_summary_csv(ctx))
+    reg.register("_sp_export_csv_btn", export_csv_btn)
+    r1.addWidget(export_csv_btn)
 
     copy_btn = IconButton("copy", row1, tooltip="Copy figure")
     copy_btn.clicked.connect(lambda _=False: _copy_spatial_figure(ctx))
@@ -181,6 +252,19 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     r1.addWidget(save_btn)
 
     layout.addWidget(row1)
+
+    def _sync_summary_only_visibility() -> None:
+        is_summary = st.level == sp_state.LEVEL_SUMMARY
+        summary_metric_label.setVisible(is_summary)
+        summary_metric_cb.setVisible(is_summary)
+        summary_display_label.setVisible(is_summary)
+        summary_display_cb.setVisible(is_summary)
+        export_csv_btn.setEnabled(is_summary)
+        # Single-timepoint picker is meaningless at Summary level (all tps
+        # are walked). Keep it enabled but hint that it's ignored via tooltip.
+        tp_cb.setEnabled(not is_summary)
+    reg.register("_sp_sync_summary_visibility", _sync_summary_only_visibility)
+    _sync_summary_only_visibility()
 
     # ── row 2: colony detection controls ─────────────────────────────────────
     row2 = QWidget(parent)
@@ -337,6 +421,12 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
 
 
 # ── module helpers ───────────────────────────────────────────────────────────
+
+
+def _summary_metric_catalog():
+    """Small indirection so the module-level lookup is import-cycle-safe."""
+    from well_viewer.domain.spatial_compute import SUMMARY_METRICS
+    return SUMMARY_METRICS
 
 def _tooltip_role():
     """Qt's per-item tooltip role, as an int the combobox APIs accept."""

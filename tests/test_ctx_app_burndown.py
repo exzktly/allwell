@@ -370,7 +370,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              ctx.runtime.batch_export — no core unwrap added); tab_view dispatch
 #              calls fn(ctx); delegators pass self._ctx. _build_spread_row /
 #              _show_batch_mode stay app bridges (converting adds ctx.app).
-CTX_APP_BUDGET = 74
+#   74 -> 73    cell_gating _cell_gating_on_failed uses ctx.set_status instead of
+#              a getattr(ctx.app,"show_status_message") probe — which was a dead
+#              no-op (WellViewerApp has no show_status_message), so gating-failure
+#              messages never surfaced. Now they do (latent silent-failure fix).
+CTX_APP_BUDGET = 73
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

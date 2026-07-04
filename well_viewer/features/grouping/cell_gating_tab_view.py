@@ -2313,12 +2313,10 @@ def _cell_gating_on_failed(ctx, msg: str) -> None:
         bar.setValue(0)
         bar.hide()
     logger.error("Cell gating failed: %s", msg)
-    show = getattr(ctx.app, "show_status_message", None)
-    if callable(show):
-        try:
-            show(f"Cell gating failed: {msg}")
-        except Exception:
-            logger.exception("failed to display gating-error status")
+    try:
+        ctx.set_status(f"Cell gating failed: {msg}")
+    except Exception:
+        logger.exception("failed to display gating-error status")
 
 
 def _cell_gating_persist_params(ctx) -> None:

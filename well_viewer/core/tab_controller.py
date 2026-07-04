@@ -328,7 +328,7 @@ def is_tab_visible(ctx, name: str) -> bool:
     return name in visible_centre_tabs(ctx)
 
 
-def sync_heatmap_well_drag_mode(app, enable: bool) -> None:
+def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
     """Toggle WELL_MIME drag/drop on the sidebar plate widget.
 
     When *enable* is True, the plate exports the well under the pointer via
@@ -338,7 +338,7 @@ def sync_heatmap_well_drag_mode(app, enable: bool) -> None:
     ``_on_sidebar_plate_well_dropped``). When False, drag/drop is disabled
     and the plate reverts to plain selection behaviour.
     """
-    plate = getattr(app, "_sidebar_plate", None)
+    plate = ctx.widgets.get_or_none("_sidebar_plate")
     if plate is None:
         return
     from well_viewer.features.heatmap.sidebar_view import WELL_MIME

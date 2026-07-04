@@ -65,7 +65,7 @@ def build_sidebar(app, parent: QWidget) -> None:
     _sp.setHeightForWidth(True)
     plate.setSizePolicy(_sp)
     layout.addWidget(plate)
-    app._sidebar_plate = plate
+    app._sidebar_plate = app._ctx.widgets.register("_sidebar_plate", plate)
     app._sidebar_map_outer = plate
 
     # Select all / Select none are now driven by the small toggle circle

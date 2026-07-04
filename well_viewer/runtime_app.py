@@ -1042,7 +1042,7 @@ class WellViewerApp(QWidget):
     def _is_tab_visible(self, name: str) -> bool: return is_tab_visible(self._ctx, name)
 
 
-    def _sync_heatmap_well_drag_mode(self, enable: bool) -> None: return sync_heatmap_well_drag_mode(self, enable)
+    def _sync_heatmap_well_drag_mode(self, enable: bool) -> None: return sync_heatmap_well_drag_mode(self._ctx, enable)
             # Don't force-disable wells here — the per-tab branch in
             # ``_on_tab_change`` either hides the sidebar (preview / image
             # table tabs) or calls ``_refresh_sidebar_map`` which restores the

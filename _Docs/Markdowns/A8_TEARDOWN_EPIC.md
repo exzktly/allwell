@@ -2,10 +2,20 @@
 
 > Successor to the A8 burn-down in `CODE_REVIEW_AUDIT.md`. That audit drove
 > `ctx.app` from **894 → 293 (67%)** — every reduction achievable *without*
-> restructuring the runtime. This epic takes the remaining **293 → 0** and
-> deletes the transitional `app` field from `ViewerContext`.
+> restructuring the runtime. This epic took the remaining runtime-pinned refs
+> from **293 → 51 (94% overall)** by wiring the EventBus, adding per-feature
+> runtime holders, threading `ctx` through the render tree + shared leaves, and
+> migrating the god-object's loose state onto typed `AppState` slices. The
+> endgame — **51 → 0** and deleting the transitional `app` field from
+> `ViewerContext` — is the **focused campaign** in [§ Endgame](#endgame--the-51-file-by-file-focused-campaign)
+> below.
 >
-> **Status:** proposed / not started. **Owner:** _tbd_. **Gate:** merge PR #597 first.
+> **Status:** `[~]` IN PROGRESS — **51** `ctx.app` refs remain (ratchet
+> `CTX_APP_BUDGET = 51`, `tests/test_ctx_app_burndown.py`). ~13 are the
+> structural **floor** (the runtime stamp + sanctioned persistence unwraps +
+> two shared-helper touches) that only T6 dissolves; the other ~38 are the
+> convertible controller/feature/registry residue this campaign burns down.
+> **Branch:** `claude/code-review-audit-framework-se53zd` (PR #597).
 
 ---
 
@@ -52,13 +62,19 @@ inventing new abstractions:
   coordinator makes today is exactly what `redraw_requested("scatter")` was
   designed to replace.
 
-## The residual 293, categorized (evidence-backed)
+## The residual 293, categorized (evidence-backed) — now 51
 
-| # | Category | ~refs | Technique | Workstream |
-|---|----------|------|-----------|------------|
-| a | Runtime-object stashes — smFISH worker bridge / extractor / figures / current arrays, scatter gate state, image-table cells | 60–80 | Per-feature **runtime holders** (live-object namespaces, like AppState slices but non-persisted) | **T2** |
-| b | Orchestration functions pinned to `app` by the controller layer | ~150 | **Invert via EventBus** (T1) + **thread `ctx` through the controllers** (T3) | **T1, T3** |
-| c | Cross-cutting app operations — `_invalidate_stats_cache` (called app-wide), `_refresh_review_csv_rows`, channel/axis `_on_*` handlers | ~50 | **Extract collaborators** / **bus events** (`stats_cache` is already a typed slice) | **T4** |
+The three original categories have been almost entirely worked through; what
+remains (51) is the tail of each plus the structural floor. See
+[§ Endgame](#endgame--the-51-file-by-file-focused-campaign) for the current
+file-by-file map.
+
+| # | Category | 293-era | now | Technique | Workstream |
+|---|----------|--------|-----|-----------|------------|
+| a | Runtime-object stashes — smFISH worker bridge / extractor / figures / current arrays, scatter gate state, image-table cells | 60–80 | ~0 | Per-feature **runtime holders** (live-object namespaces, like AppState slices but non-persisted) | **T2 done** |
+| b | Orchestration functions pinned to `app` by the controller layer | ~150 | ~25 | **Invert via EventBus** (T1) + **thread `ctx` through the controllers** (T3) | **T1 done, T3 tail** |
+| c | Cross-cutting app operations — `_invalidate_stats_cache` (called app-wide), `_refresh_review_csv_rows`, channel/axis `_on_*` handlers | ~50 | ~13 | **Extract collaborators** / **bus events** (`stats_cache` is already a typed slice) | **T4 tail** |
+| d | Structural floor — the `AppRuntime` stamp (3), sanctioned persistence unwraps (8), two shared-helper touches (2) | — | ~13 | Only **T6** (delete the field) dissolves these | **T6** |
 
 ---
 
@@ -299,7 +315,81 @@ only after the shared render graph they call takes `ctx`. Order:
 Legit residuals that stay: `core/app_runtime.py` (the runtime stamps `ctx.app`),
 and the one shared-helper touch each in `ui_helpers` / `plot_card_actions`.
 
-### T4 — Extract cross-cutting services · `[ ]`
+---
+
+## Endgame — the 51, file by file (focused campaign)
+
+> Measured `2026-07-04` on `claude/code-review-audit-framework-se53zd`
+> (ratchet `CTX_APP_BUDGET = 51`). Command:
+> `python -c "import re,pathlib;C=re.compile(r'\bctx\.app\b');print(sum(len(C.findall(p.read_text())) for p in pathlib.Path('well_viewer').rglob('*.py')))"`
+
+Every remaining `ctx.app` reference, classified **FLOOR** (structural — only T6
+dissolves it) or **CONVERT** (this campaign burns it down), with the technique.
+
+| refs | File | Class | Note / technique |
+|-----:|------|-------|------------------|
+| 3 | `core/app_runtime.py` | **FLOOR** | The stamp back-end (`_FeatureRuntime(app, …)`). Gone when the `app` field is deleted at T6. |
+| 2 | `persistence/view_state.py` | **FLOOR** | Sanctioned single `app = ctx.app` unwrap ×2 fns (`snapshot`/`restore`). Persistence MAY unwrap. |
+| 2 | `persistence/cell_gating.py` | **FLOOR** | Sanctioned unwrap (`save`/`load_from_pipeline_info`). |
+| 2 | `persistence/_doc.py` | **FLOOR** | `get_section`/`set_section` unwrap (the doc-store leaf). |
+| 1 | `persistence/sample_definitions.py` | **FLOOR** | Sanctioned unwrap. |
+| 1 | `persistence/heatmap_layouts.py` | **FLOOR** | Sanctioned unwrap. |
+| 1 | `core/ui_helpers.py` | **FLOOR** | Documented shared-helper touch. |
+| 1 | `core/plot_card_actions.py` | **FLOOR** | Documented shared-helper touch. |
+| 5 | `features/registry.py` | **CONVERT** | 4 sub-builder handoffs (`build_stats_tab(ctx.app)`, `build_stats_group_editor`, `_build_review_csv_tab`, `build_sample_definitions_centre`) + 1. **Batch F1** — thread `ctx` into the four sub-builders (each currently takes `app`). |
+| 5 | `core/channel_state_controller.py` | **CONVERT** | 5 `app = ctx.app` unwraps in the channel/axis handlers. **Batch F4** — the controller cluster; overlaps T4 (`channel_changed` bus route). |
+| 3 | `features/image_browser/cell_browser/controller.py` | **CONVERT** | **Batch F2** (running worker `aea67a3`). |
+| 3 | `features/grouping/cell_gating_tab_view.py` | **CONVERT** | Post-R6 tail; **Batch F3**. |
+| 2 | `features/smfish/tab_view.py` | **CONVERT** | `recalculate_threshold(ctx.app)` + review-csv bridge; **Batch F5**. |
+| 2 | `features/image_browser/tab_view.py` | **CONVERT** | **Batch F2** (image_browser cluster). |
+| 2 | `features/image_browser/review_image/controller.py` | **CONVERT** | **Batch F2** (running worker `aea67a3`). |
+| 2 | `features/heatmap/controller.py` | **CONVERT** | Render-tree tail (post-R2); **Batch F5**. |
+| 2 | `features/batch_export/tab_view.py` | **CONVERT** | **Batch F5**. |
+| 2 | `domain/stats_compute.py` | **CONVERT** | `getattr(ctx.app, "_aggregate_well"/"_aggregate_group")` delegate hooks → thread the aggregators through `ctx`. **Batch F4** (enabler). |
+| 2 | `core/tab_controller.py` | **CONVERT** | 2 `app = ctx.app` unwraps; **Batch F4** (controller layer). |
+| 2 | `core/plot_orchestrator.py` | **CONVERT** | 1 comment + `app = ctx.app` in `redraw_app`; **Batch F4**. |
+| 1 | `features/scatter/callbacks.py` | **CONVERT** | **Batch F5**. |
+| 1 | `features/saved_plots/controller.py` | **CONVERT** | Post-T5 tail; **Batch F5**. |
+| 1 | `features/lineplot/tab_view.py` | **CONVERT** | **Batch F5**. |
+| 1 | `features/image_browser/image_table/picker_view.py` | **CONVERT** | **Batch F2**. |
+| 1 | `features/heatmap/tab_view.py` | **CONVERT** | **Batch F5**. |
+| 1 | `domain/fold_change_controls.py` | **CONVERT** | `app = ctx.app`; **Batch F4** enabler. |
+| **51** | | | **~13 FLOOR + ~38 CONVERT** |
+
+### Campaign batches (parallelizable; one PR-shaped commit each)
+
+The CONVERT residue clusters into five independent batches. Each is a
+characterization-test-first, one-cluster conversion; the shared-leaf work that
+gated them (R1/R2/R3/R4/R6/R7, colour + label + export-style leaves) is **done**,
+so these now convert **net-negative**.
+
+- **F1 · registry sub-builders (5).** Thread `ctx` into `build_stats_tab`,
+  `build_stats_group_editor`, `_build_review_csv_tab`, `build_sample_definitions_centre`
+  so `registry.py` stops passing `ctx.app`. Bounded signature pass; low risk.
+- **F2 · image_browser cluster (8):** `cell_browser/controller` (3),
+  `image_browser/tab_view` (2), `review_image/controller` (2),
+  `image_table/picker_view` (1). The running worker `aea67a3` targets the
+  cell_browser + review_image half — integrate its net-positive output, then
+  finish tab_view + picker_view.
+- **F3 · cell_gating tail (3).** `cell_gating_tab_view` post-R6 residue —
+  the last handler touches now that gate values are typed state.
+- **F4 · controller layer + aggregators (12):** `channel_state_controller` (5),
+  `tab_controller` (2), `plot_orchestrator` (2), `stats_compute` aggregator hooks
+  (2), `fold_change_controls` (1). **Overlaps T4** — thread `ctx` through the
+  channel/axis handlers and the `_aggregate_well/_aggregate_group` delegates;
+  the channel handlers fold into the `channel_changed` bus route. Highest-value
+  cluster (unpins category b's controller tail). Do the `stats_compute` +
+  `fold_change` aggregator enablers first, then the three core controllers.
+- **F5 · feature render/tab tails (9):** `smfish/tab_view` (2),
+  `heatmap/controller` (2), `batch_export/tab_view` (2), `scatter/callbacks` (1),
+  `saved_plots/controller` (1), `lineplot/tab_view` (1), `heatmap/tab_view` (1).
+  Independent one-liners riding on the now-`ctx` render tree; sweep in one pass.
+
+After F1–F5 land, the count is at the **~13 FLOOR**, and **T6** takes it to 0.
+
+---
+
+### T4 — Extract cross-cutting services · `[~]`
 Category (c). `_invalidate_stats_cache` operates on the already-typed
 `stats_cache` slice → replace the ~20 scattered calls with a
 `bus.plot_options_changed`/dedicated invalidation event, or a small `StatsCache`
@@ -308,16 +398,36 @@ bus events. `_on_plot_channel_selected` / axis handlers fold into the
 `channel_changed` signal.
 - **Depends on:** T1 for the event route.
 
-### T5 — Saved-plots / capture decomposition · `[ ]`
+### T5 — Saved-plots / capture decomposition · `[x]` LARGELY DONE
 The `wire_save_to_gallery` → `save_plot_from_card` → `get_store` / `capture_params`
-/ `build_summary` seam becomes a `SavedPlotsService` bound to `ctx`. Deepest
-single cluster; own sub-plan.
+/ `build_summary` seam is now `ctx`-native (persistence + stats capture take
+`ctx`; commit `226d0af`). A single `saved_plots/controller.py` residual remains
+(Batch F5 tail). The dedicated `SavedPlotsService` object is a future refactor,
+not required to reach 0.
 
-### T6 — Retire `ctx.app` · `[ ]`
-When the count reaches the last handful, delete the `app` field from
-`ViewerContext`, flip the ratchet from "≤ N" to "== 0 / hard ban", and remove the
-strangler docstring. The named-accessor set (frozen) is the *entire* remaining,
-intentional surface between features and the window shell.
+### T6 — Retire `ctx.app` · `[ ]` THE CAPSTONE
+Once F1–F5 land the count at the ~13 **FLOOR**, delete the `app` field from
+`ViewerContext` and dissolve the floor in one coordinated change:
+
+1. **Persistence unwraps (8).** Replace each `app = ctx.app` in `persistence/`
+   with direct `ctx.persistence` / typed-state access, or pass the concrete
+   `data_dir` + slice the caller already holds. These modules never needed the
+   whole app — only `app._app_state.dataset` + the persistence doc, both on `ctx`.
+2. **`AppRuntime` stamp (3).** `_FeatureRuntime` holds `app` only to `setattr`
+   the legacy `app._<prefix><name>` mirror. When every reader has migrated onto
+   `ctx.runtime.<feature>.<name>` (a mechanical sweep the runtime holders already
+   enable), the mirror write is dropped and the holder stores its own dict — no
+   `app` reference.
+3. **Shared-helper touches (2).** `ui_helpers` / `plot_card_actions` — inline the
+   one window-service call each through a named `ViewerContext` accessor.
+4. **Delete `ViewerContext.app`**, flip the ratchet from `<= N` to `== 0` (hard
+   ban), and remove the strangler docstring. The frozen named-accessor set is the
+   *entire* remaining, intentional surface between features and the window shell.
+
+**Order within T6:** step 2 (runtime reader sweep) is independent and can run in
+parallel with F1–F5; steps 1+3+4 are the final atomic commit that removes the
+field. Everything must be green on the fast lane; the closeEvent/teardown tests
+(`test_app_runtime.py`, layering guards) gate the merge.
 
 ---
 
@@ -325,23 +435,30 @@ intentional surface between features and the window shell.
 
 | ID | Workstream | Depends on | Risk | Status | Metric |
 |----|------------|-----------|------|--------|--------|
-| T1 | Wire the EventBus | — | Med | `[x]` | already in place (state→redraw paths); per-control redraws are T3, not bus |
+| T1 | Wire the EventBus | — | Med | `[x]` | in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 246 (distribution `_on_changed` pilot); rest is leaf-first |
-| T4 | Extract cross-cutting services | T1 | Med | `[ ]` | |
-| T5 | Saved-plots service | — | Med | `[ ]` | |
-| T6 | Retire `ctx.app` | T1–T5 | Low | `[ ]` | → 0 |
+| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 51 (render tree + shared leaves R1–R7 done; F1–F5 tail remains) |
+| T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into Batch F4 (channel/axis handlers + aggregators) |
+| T5 | Saved-plots service | — | Med | `[x]` | capture/persistence ctx-native (`226d0af`); 1 controller tail (F5) |
+| T6 | Retire `ctx.app` | F1–F5 | Low | `[ ]` | ~13 floor → 0 (delete field) |
 
-Suggested order: **T2 ∥ T1 → T4 → T3 (feature by feature) → T5 → T6.**
-(T2 is a safe parallel warm-up; T1 unlocks T3/T4; T6 is the capstone.)
+**Focused campaign (51 → 0):** run **F1–F5 in parallel** (all shared leaves
+that gated them are done, so each converts net-negative), plus the independent
+**T6 step-2 runtime-reader sweep**; then the final **T6 atomic commit** deletes
+`ViewerContext.app` and flips the ratchet to `== 0`. See
+[§ Endgame](#endgame--the-51-file-by-file-focused-campaign).
 
 ## Ratchet evolution
 
-- `test_ctx_app_burndown.py` keeps counting down from 293.
-- **New guards:** (1) every EventBus signal has a subscriber + catalogue capped at
-  five; (2) runtime holders untouched by `persistence/`; (3) controllers hold
-  `ctx`, not `app` (a layering assertion); (4) at T6, `ViewerContext.app` removed
-  and the count is pinned at 0.
+- `test_ctx_app_burndown.py` counted down 293 → **51** (`CTX_APP_BUDGET = 51`);
+  budget is monotone-decreasing and drops with every F-batch commit.
+- **Guards in place:** `test_guardrails.py::test_tab_ctx_app_unwrap_budget == 0`
+  (bans `app = ctx.app` in `features/**`), `test_deferred_imports.py` (caps
+  cross-feature function-local imports for deletability), `test_app_runtime.py`
+  (stamp write-through + `persistence/` never imports `app_runtime`),
+  `test_monolith_budgets.py` (per-file line ceilings).
+- **At T6:** delete `ViewerContext.app`, flip the ratchet from `<= N` to `== 0`
+  (hard ban), and the count is pinned at 0.
 
 ## Risks & mitigations
 
@@ -361,4 +478,6 @@ Suggested order: **T2 ∥ T1 → T4 → T3 (feature by feature) → T5 → T6.**
 
 ---
 
-**Last updated:** 2026-07-02
+**Last updated:** 2026-07-04 — refreshed to the **51** state; added the
+file-by-file Endgame map + the F1–F5 focused campaign and the concrete T6
+floor-dissolution plan.

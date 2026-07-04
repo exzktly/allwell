@@ -78,6 +78,42 @@ class ViewerContext:
         the raw app persistence handle. Kept in the frozen accessor set."""
         return self.app._persistence
 
+    @property
+    def features(self):
+        """The feature-descriptor registry (``{tab_name: FeatureDescriptor}``).
+
+        A genuine app-level *catalogue service* — the app's own record of which
+        tabs exist and their metadata (``single_well_selection`` / ``per_well_
+        selection`` / lifecycle hooks). Controllers reason about tab behaviour
+        through it (is this tab a single-well selector?) without naming the
+        god-object; exposing it here keeps that access enumerable and frozen
+        rather than a scattered ``app._features`` reach-through. Kept in the
+        frozen accessor set."""
+        return getattr(self.app, "_features", None)
+
+    def rebuild_all(self) -> None:
+        """Run the app's master redraw fan-out after a data/selection change.
+
+        A genuine app-level *orchestration service* (invalidate stats cache →
+        refresh sidebar map + Sample-Definitions groups → redraw bars/lines/
+        scatter → per-tab follow-ups). It has no ctx form — it fans out into a
+        dozen god-object methods — so callers name it here rather than reaching
+        through the ``app`` escape hatch to call ``_rebuild_all``. Kept in the
+        frozen accessor set; one of the irreducible teardown-endgame services."""
+        self.app._rebuild_all()
+
+    def refresh_sidebar_map(self) -> None:
+        """Repaint the line-graph well-picker's rep-colour map (debounced).
+
+        A genuine app-level *orchestration service* — the debounced sidebar-map
+        refresh every selection/group edit triggers. No ctx form (it schedules a
+        QTimer that repaints registered plate widgets), so callers name it here
+        instead of reaching ``app._refresh_sidebar_map`` through the escape
+        hatch. Kept in the frozen accessor set."""
+        fn = getattr(self.app, "_refresh_sidebar_map", None)
+        if callable(fn):
+            fn()
+
     def set_status(self, message: str) -> None:
         """Show *message* in the main-window status bar (no-op if unavailable)."""
         fn = getattr(self.app, "_set_status", None)

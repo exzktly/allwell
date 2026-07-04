@@ -741,7 +741,25 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (new ctx.runtime.centre namespace, prefix _centre_ — a live callback
 #              like the other stamped closures). So persistence-load + the plotting
 #              ThreshFracOn quick-edit reach the lazy build fully ctx-natively.
-CTX_APP_BUDGET = 7
+#   7 -> 5    teardown-endgame orchestration accessors: -2   the two remaining
+#              "genuine app-orchestration service" seams were named on the context
+#              rather than reached through ctx.app, matching the ratchet's own
+#              "reach for a dedicated context accessor" guidance:
+#              (1) saved_plots restore called ctx.app._rebuild_all() — the master
+#              redraw fan-out (invalidate stats cache → sidebar map + groups →
+#              redraw bars/lines/scatter). It has no ctx form (a dozen god-methods),
+#              so it is named ctx.rebuild_all() (new frozen accessor). -1.
+#              (2) selection_controller.set_selected_wells drove _refresh_sidebar_map
+#              (debounce) + on_plate_sel_change. The debounce is now ctx.refresh_
+#              sidebar_map() (new frozen accessor — a genuine orchestration service),
+#              and on_plate_sel_change + _is_single_well_tab went fully ctx-native
+#              (ctx.state.selection / ctx.window._notebook / ctx.bus / ctx.features —
+#              the feature-registry catalogue, a new frozen accessor). Its 8 in-file
+#              callers thread app._ctx. So set_selected_wells drops its last unwrap. -1.
+#              The three new accessors (rebuild_all / refresh_sidebar_map / features)
+#              are the teardown endgame: each names an irreducible god-object service
+#              in one frozen place instead of an escape-hatch reach-through.
+CTX_APP_BUDGET = 5
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

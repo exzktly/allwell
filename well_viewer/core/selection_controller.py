@@ -26,8 +26,8 @@ def _is_per_well_tab(app, tab_name: str) -> bool:
     return tab_name in _PER_WELL_TAB_NAMES
 
 
-def _is_single_well_tab(app, tab_name: str) -> bool:
-    feats = getattr(app, "_features", None)
+def _is_single_well_tab(ctx, tab_name: str) -> bool:
+    feats = ctx.features
     if feats is not None:
         d = feats.get(tab_name)
         return bool(d and d.single_well_selection)
@@ -169,19 +169,20 @@ class SelectionRefreshCoordinator(QObject):
         apply_selection_refresh(self._app)
 
 
-def on_plate_sel_change(app) -> None:
+def on_plate_sel_change(ctx) -> None:
     # SelectionState diffs the new selection against its prev_sel snapshot to
     # resolve last_sel, then re-snapshots.
-    sel = app._app_state.selection
+    sel = ctx.state.selection
     sel.commit_plate_change()
-    if hasattr(app, "_notebook"):
-        tab = app._notebook.currentName()
-        if _is_single_well_tab(app, tab) and len(sel.selected_wells) > 1:
+    nb = getattr(ctx.window, "_notebook", None)
+    if nb is not None:
+        tab = nb.currentName()
+        if _is_single_well_tab(ctx, tab) and len(sel.selected_wells) > 1:
             keep = (sel.last_sel if sel.last_sel in sel.selected_wells
                     else next(iter(sel.selected_wells)))
             sel.selected_wells = {keep}
             sel.prev_sel = set(sel.selected_wells)
-    app._event_bus.selection_changed.emit(app._app_state.selection)
+    ctx.bus.selection_changed.emit(ctx.state.selection)
 
 
 def _well_rc(app, w):
@@ -236,7 +237,7 @@ def select_row(app, row: str) -> None:
             app._app_state.selection.selected_wells.update(row_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(row_labels)
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def select_col(app, col: str) -> None:
@@ -257,7 +258,7 @@ def select_col(app, col: str) -> None:
             app._app_state.selection.selected_wells.update(col_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(col_labels)
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def select_all(app) -> None:
@@ -339,7 +340,7 @@ def on_sidebar_plate_drag_finished(app) -> None:
     # Cancel any pending deferred commit from the paint events that
     # led here -- we're committing right now.
     app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(app)
+    on_plate_sel_change(app._ctx)
 
 
 def on_sidebar_plate_corner_toggled(app, select_all_target: bool) -> None:
@@ -378,7 +379,7 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
         else:
             app._app_state.selection.active_solo_wells.add(well_id)
         app._refresh_sidebar_map()
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
         return
     # Legacy fallback for non-plotting tabs that still receive
     # wellActivated in rep-set mode (Image Table / smFISH / etc):
@@ -397,14 +398,14 @@ def on_sidebar_plate_row_activated(app, row: str) -> None:
     else:
         # The widget already toggled the row and synced _selected_wells via
         # the preceding selectionChanged; do the heavy refresh once.
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def on_sidebar_plate_col_activated(app, col: str) -> None:
     if app._app_state.selection.selections:
         select_col(app, col)
     else:
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:
@@ -629,7 +630,7 @@ def refresh_sidebar_map_now(app) -> None:
         visible = set(visible_centre_tabs(app._ctx)) or {tab_name}
     except Exception:
         visible = {tab_name}
-    smfish = bool(visible) and all(_is_single_well_tab(app, t) for t in visible)
+    smfish = bool(visible) and all(_is_single_well_tab(app._ctx, t) for t in visible)
 
     plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
     plate.setSelectionMode("passive" if rep_mode else "select")
@@ -823,13 +824,11 @@ def set_selected_wells(ctx, new_set, *, commit: bool = True) -> None:
     # compute an accurate diff if it runs after this.
     sel.prev_sel = set(sel.selected_wells)
     sel.selected_wells = new_set
-    # The sidebar-map debounce and the plate-change commit remain app-native
-    # god-services; bridge to them through one app handle (core may).
-    app = ctx.app
-    if hasattr(app, "_refresh_sidebar_map"):
-        app._refresh_sidebar_map()
+    # The sidebar-map debounce and the plate-change commit are named on the
+    # context (genuine app-orchestration service + ctx-native commit).
+    ctx.refresh_sidebar_map()
     if commit:
-        on_plate_sel_change(app)
+        on_plate_sel_change(ctx)
 
 
 
@@ -962,7 +961,7 @@ def select_invert(app) -> None:
     app._app_state.selection.selected_wells = new
     # Re-use the standard refresh path the click handlers go through.
     app._refresh_sidebar_map()
-    on_plate_sel_change(app)
+    on_plate_sel_change(app._ctx)
 
 
 
@@ -1083,7 +1082,7 @@ def plate_commit_deferred(app) -> None:
     if not app._app_state.selection.plate_commit_pending:
         return
     app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(app)
+    on_plate_sel_change(app._ctx)
 
 
 

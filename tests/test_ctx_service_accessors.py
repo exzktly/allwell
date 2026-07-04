@@ -28,6 +28,17 @@ _ALLOWED = {
     # the ctx.app burn-down while staying enumerable + frozen here.
     "window",
     "persistence",
+    # ``features`` names the feature-descriptor registry — a genuine app-level
+    # catalogue (which tabs exist + their metadata) controllers read to reason
+    # about tab behaviour, not arbitrary god-object access.
+    "features",
+    # ``rebuild_all`` / ``refresh_sidebar_map`` name the two genuine app-level
+    # *orchestration* services (master redraw fan-out; debounced sidebar-map
+    # repaint) that the final ctx.app seams bottomed into. Each fans out into a
+    # dozen god-object methods with no ctx form, so they are named here as the
+    # teardown endgame — not convenience wrappers for arbitrary access.
+    "rebuild_all",
+    "refresh_sidebar_map",
 }
 
 

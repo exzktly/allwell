@@ -105,9 +105,9 @@ def _restore_selections(ctx, sels, solo_wells=None) -> None:
             sel_state.active_solo_wells = {w for w in solo_wells if w in paths}
             changed = True
         if changed:
-            # ``_rebuild_all`` is an app-level orchestration service (sidebar map
-            # + groups + redraw) with no ctx form yet → bridged via the app handle.
-            ctx.app._rebuild_all()
+            # Master redraw fan-out (sidebar map + groups + bars/lines/scatter),
+            # named as a genuine app-orchestration service on the context.
+            ctx.rebuild_all()
     except Exception:
         _logger.debug("saved_plots: selection restore failed", exc_info=True)
 

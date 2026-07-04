@@ -240,7 +240,7 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
     # Register widget refs (also stamps ``app._heatmap_sidebar_*`` so legacy
     # attribute readers keep resolving) so ``ctx.widgets`` can find them.
     reg = app._ctx.widgets
-    app._heatmap_sidebar_frame = outer
+    app._heatmap_sidebar_frame = reg.register("_heatmap_sidebar_frame", outer)
     reg.register("_heatmap_sidebar_table", table)
     reg.register("_heatmap_sidebar_rows_spin", rows_spin)
     reg.register("_heatmap_sidebar_cols_spin", cols_spin)

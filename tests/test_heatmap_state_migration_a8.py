@@ -53,11 +53,12 @@ def test_persistence_round_trip_through_slice(viewer_app, qtbot):
     settings = hl._collect_settings(app)
 
     # Flip the live slice back to defaults, then restore through the real apply
-    # path (which reads app._heatmap_persisted_settings) — the slice must follow.
+    # path (which reads ctx.state.heatmap.persisted_settings) — the slice must
+    # follow.
     app._app_state.heatmap.scale_mode = "Auto"
     app._app_state.heatmap.repset_avg = False
     app._app_state.heatmap.log_scale = False
-    app._heatmap_persisted_settings = settings
+    app._app_state.heatmap.persisted_settings = settings
     hl.apply_persisted_settings(app._ctx)
     assert app._app_state.heatmap.scale_mode == "Fixed"
     assert app._app_state.heatmap.repset_avg is True

@@ -17,18 +17,19 @@ _logger = logging.getLogger("well_viewer")
 
 
 def _collect_settings(app) -> dict:
-    def _f(name):
-        v = getattr(app, name, None)
+    def _f(v):
         if isinstance(v, (int, float)) and math.isfinite(float(v)):
             return float(v)
         return None
     slider = getattr(app, "_heatmap_tp_slider", None)
     hm = app._app_state.feature_slice("heatmap")
     return {
-        "cmap": str(getattr(app, "_heatmap_cmap_name", "") or ""),
+        # cmap / vmin / vmax are the typed HeatmapState display stamps (D-persist;
+        # they moved off the loose ``app._heatmap_*`` runtime attrs).
+        "cmap": str((hm.cmap_name if hm is not None else "") or ""),
         "scale_mode": str((hm.scale_mode if hm is not None else "Auto") or "Auto"),
-        "vmin": _f("_heatmap_vmin"),
-        "vmax": _f("_heatmap_vmax"),
+        "vmin": _f(hm.vmin) if hm is not None else None,
+        "vmax": _f(hm.vmax) if hm is not None else None,
         "repset_avg": bool(hm.repset_avg if hm is not None else False),
         "log_scale": bool(hm.log_scale if hm is not None else False),
         # Timepoint-slider position so the scrubbed timepoint restores between
@@ -57,8 +58,11 @@ def load_from_data_dir(app) -> None:
     from well_viewer.features.heatmap.models import layouts_from_dict
     app._heatmap_layouts = layouts_from_dict(data.get("layouts", []) or [])
     settings = data.get("settings", {}) or {}
-    if isinstance(settings, dict):
-        app._heatmap_persisted_settings = settings
+    hm = app._app_state.feature_slice("heatmap")
+    if isinstance(settings, dict) and hm is not None:
+        # Deposit onto the typed slice; ``apply_persisted_settings`` reads it back
+        # via ``ctx.state`` (was the loose ``app._heatmap_persisted_settings``).
+        hm.persisted_settings = settings
     if hasattr(app, "_heatmap_sidebar_table"):
         try:
             from well_viewer.features.heatmap.sidebar_view import (
@@ -74,18 +78,22 @@ def apply_persisted_settings(ctx) -> None:
     """Push any settings loaded from disk into the heatmap UI widgets.
 
     Safe to call before the heatmap tab is built — does nothing in that case.
+
+    Fully ctx-native (D-persist): the loaded settings + the cmap/vmin/vmax
+    display stamps live on the typed ``ctx.state.heatmap`` slice, and every
+    widget handle resolves through ``ctx.widgets`` (they self-register at their
+    heatmap tab build sites). Persistence names neither the god-object nor the
+    never-serialised ``AppRuntime`` namespace.
     """
-    # persistence/ may unwrap the god-object once; the body reads the many
-    # legacy ``app._heatmap_*`` widget/state stamps directly.
-    app = ctx.app
-    settings = getattr(app, "_heatmap_persisted_settings", None)
+    hm = ctx.state.feature_slice("heatmap")
+    settings = hm.persisted_settings if hm is not None else None
     if not isinstance(settings, dict) or not settings:
         return
-    cmap_cb = getattr(app, "_heatmap_cmap_cb", None)
-    scale_cb = getattr(app, "_heatmap_scale_cb", None)
-    vmin_edit = getattr(app, "_heatmap_vmin_edit", None)
-    vmax_edit = getattr(app, "_heatmap_vmax_edit", None)
-    rs_cb = getattr(app, "_heatmap_repset_avg_cb", None)
+    cmap_cb = ctx.widgets.get_or_none("_heatmap_cmap_cb")
+    scale_cb = ctx.widgets.get_or_none("_heatmap_scale_cb")
+    vmin_edit = ctx.widgets.get_or_none("_heatmap_vmin_edit")
+    vmax_edit = ctx.widgets.get_or_none("_heatmap_vmax_edit")
+    rs_cb = ctx.widgets.get_or_none("_heatmap_repset_avg_cb")
     # Bail until the tab is built; init/build will call us again.
     if cmap_cb is None and scale_cb is None and rs_cb is None:
         return
@@ -102,9 +110,9 @@ def apply_persisted_settings(ctx) -> None:
             cmap_cb.setLut(base, rev)
         finally:
             cmap_cb.blockSignals(blocked)
-        app._heatmap_cmap_name = cmap
+        if hm is not None:
+            hm.cmap_name = cmap
 
-    hm = app._app_state.feature_slice("heatmap")
     scale_mode = str(settings.get("scale_mode") or "Auto")
     if scale_cb is not None:
         idx = scale_cb.findText(scale_mode)
@@ -125,7 +133,8 @@ def apply_persisted_settings(ctx) -> None:
                 edit.setText(f"{float(v):g}")
             finally:
                 edit.blockSignals(blocked)
-            setattr(app, f"_heatmap_{key}", float(v))
+            if hm is not None:
+                setattr(hm, key, float(v))
 
     _set_edit(vmin_edit, "vmin")
     _set_edit(vmax_edit, "vmax")
@@ -143,7 +152,7 @@ def apply_persisted_settings(ctx) -> None:
     log_scale = bool(settings.get("log_scale", False))
     if hm is not None:
         hm.log_scale = log_scale
-    log_cb = getattr(app, "_heatmap_log_scale_cb", None)
+    log_cb = ctx.widgets.get_or_none("_heatmap_log_scale_cb")
     if log_cb is not None:
         blocked = log_cb.blockSignals(True)
         try:
@@ -158,7 +167,7 @@ def apply_persisted_settings(ctx) -> None:
     # path here.
     tp_idx = settings.get("tp_index")
     if isinstance(tp_idx, int):
-        slider = getattr(app, "_heatmap_tp_slider", None)
+        slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
         if slider is not None:
             clamped = max(0, min(tp_idx, slider.maximum()))
             blocked = slider.blockSignals(True)
@@ -166,8 +175,8 @@ def apply_persisted_settings(ctx) -> None:
                 slider.setValue(clamped)
             finally:
                 slider.blockSignals(blocked)
-            tps = list(getattr(app, "_heatmap_tp_values", []) or [])
-            label = getattr(app, "_heatmap_tp_label", None)
+            tps = list((hm.tp_values if hm is not None else None) or [])
+            label = ctx.widgets.get_or_none("_heatmap_tp_label")
             if label is not None and tps and clamped < len(tps):
                 label.setText(f"t = {tps[clamped]:g} h")
 

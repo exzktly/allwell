@@ -297,7 +297,7 @@ def refresh_heatmap_timepoints(ctx) -> None:
         tps = list(get_all_timepoints(ctx))
     except Exception:
         tps = []
-    ctx.runtime.heatmap.tp_values = tps
+    ctx.state.heatmap.tp_values = tps
     # Seed the slider from the shared focus timepoint (N5) when one is set and
     # present, so opening Heat Map after picking a timepoint on Distribution
     # lands on the same point; else default to the first timepoint.
@@ -320,7 +320,7 @@ def refresh_heatmap_timepoints(ctx) -> None:
 
 
 def _on_tp_changed(ctx) -> None:
-    tps: List[float] = list(ctx.runtime.heatmap.tp_values or [])
+    tps: List[float] = list(ctx.state.heatmap.tp_values or [])
     slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
     label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if not tps or slider is None:
@@ -355,11 +355,11 @@ def _on_scale_changed(ctx) -> None:
         if vmin_edit is not None and not (vmin_edit.text() or "").strip():
             if g_vmin is not None and _math.isfinite(g_vmin):
                 vmin_edit.setText(f"{g_vmin:g}")
-                ctx.runtime.heatmap.vmin = float(g_vmin)
+                ctx.state.heatmap.vmin = float(g_vmin)
         if vmax_edit is not None and not (vmax_edit.text() or "").strip():
             if g_vmax is not None and _math.isfinite(g_vmax):
                 vmax_edit.setText(f"{g_vmax:g}")
-                ctx.runtime.heatmap.vmax = float(g_vmax)
+                ctx.state.heatmap.vmax = float(g_vmax)
     _persist_settings(ctx)
     _redraw(ctx)
 
@@ -369,17 +369,17 @@ def _on_vminmax_changed(ctx) -> None:
     vmin_edit = ctx.widgets.get_or_none("_heatmap_vmin_edit")
     vmax_edit = ctx.widgets.get_or_none("_heatmap_vmax_edit")
     try:
-        ctx.runtime.heatmap.vmin = float((vmin_edit.text() if vmin_edit else "") or "nan")
+        ctx.state.heatmap.vmin = float((vmin_edit.text() if vmin_edit else "") or "nan")
     except (TypeError, ValueError):
-        ctx.runtime.heatmap.vmin = float("nan")
+        ctx.state.heatmap.vmin = float("nan")
     try:
-        ctx.runtime.heatmap.vmax = float((vmax_edit.text() if vmax_edit else "") or "nan")
+        ctx.state.heatmap.vmax = float((vmax_edit.text() if vmax_edit else "") or "nan")
     except (TypeError, ValueError):
-        ctx.runtime.heatmap.vmax = float("nan")
+        ctx.state.heatmap.vmax = float("nan")
     # If the user typed a usable number, force scale mode to Fixed so the
     # value actually takes effect — otherwise the heatmap silently ignores
     # vmin/vmax while Scale stays on Auto.
-    if _math.isfinite(ctx.runtime.heatmap.vmin) or _math.isfinite(ctx.runtime.heatmap.vmax):
+    if _math.isfinite(ctx.state.heatmap.vmin) or _math.isfinite(ctx.state.heatmap.vmax):
         ctx.state.heatmap.scale_mode = "Fixed"
         cb = ctx.widgets.get_or_none("_heatmap_scale_cb")
         if cb is not None and cb.currentText() != "Fixed":
@@ -427,7 +427,7 @@ def _on_cmap_changed(ctx) -> None:
                 name = f"{name}_r"
         else:
             name = str(cb.currentText() or "")
-        ctx.runtime.heatmap.cmap_name = name
+        ctx.state.heatmap.cmap_name = name
     _persist_settings(ctx)
     _redraw(ctx)
 

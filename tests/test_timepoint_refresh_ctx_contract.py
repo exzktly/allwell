@@ -36,6 +36,9 @@ def _ctx(widgets_map):
         # reaching the god-object _get_rows row-fetch.
         dataset=SimpleNamespace(well_paths={}),
         plot=SimpleNamespace(focus_timepoint=None),
+        # Heat Map slice: refresh_heatmap_timepoints stamps tp_values here (the
+        # session-transient timepoint list moved off the runtime namespace).
+        heatmap=SimpleNamespace(tp_values=[]),
     )
     ctx = SimpleNamespace(
         app=app,
@@ -72,5 +75,6 @@ def test_refresh_heatmap_timepoints_takes_ctx(qtbot):
     refresh_heatmap_timepoints(ctx)  # must not raise
     assert slider.maximum() == 0
     assert label.text() == "—"
-    # The timepoint-value cache is stamped through the runtime namespace.
-    assert ctx.app._heatmap_tp_values == []
+    # The timepoint-value cache now lives on the typed Heat Map state slice
+    # (moved off the runtime namespace so persistence can read it via ctx.state).
+    assert ctx.state.heatmap.tp_values == []

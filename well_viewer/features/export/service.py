@@ -632,7 +632,7 @@ def export_heatmap_data(ctx) -> None:
     if arr is None or layout is None:
         _warn(ctx.window, "Export", "No heatmap data — draw the heatmap first.")
         return
-    tp_values = list(ctx.runtime.heatmap.tp_values or [])
+    tp_values = list(ctx.state.heatmap.tp_values or [])
     slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
     tp = None
     if slider is not None and tp_values:

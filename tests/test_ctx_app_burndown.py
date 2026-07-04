@@ -624,7 +624,29 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              through the now-registered _notes_edit widget (ctx.widgets). The
 #              _notes_text memory cache moved off the god-object into the typed
 #              selection slice (SelectionState.notes_text).
-CTX_APP_BUDGET = 17
+#   D-persist heatmap/cell-gating persistence: -1   heatmap_layouts
+#              apply_persisted_settings went fully ctx-native — its lone
+#              ``app = ctx.app`` unwrap is gone. The heat-map widget handles
+#              (cmap/scale/vmin/vmax/repset/log combos + tp slider/label) were
+#              already registered, so they resolve via ctx.widgets; the loose
+#              display stamps the applier wrote (``app._heatmap_cmap_name`` /
+#              ``_vmin`` / ``_vmax``) moved onto the typed HeatmapState slice
+#              (migrating their tab_view writers + controller reader off the
+#              runtime namespace), and the loaded-settings bridge +
+#              session-transient timepoint list moved onto the slice too
+#              (``persisted_settings`` / ``tp_values``) so the applier reads them
+#              via ctx.state without touching AppRuntime. The E6 note's "net-0
+#              because it writes loose app._heatmap_* stamps" no longer holds now
+#              that those stamps are typed state. Cell Gating persistence
+#              (save/load_from_pipeline_info) was assessed and LEFT at its two
+#              sanctioned unwraps: load genuinely drives the ``_centre_build_pending``
+#              god-method to force-build the lazy tab, and save reaches the loose
+#              ``app._scatter_gates`` list + the runtime-backed use-scatter flags
+#              (``_cell_gating_use_scatter_*`` / ``_gating_choices`` /
+#              ``_thresh_choices``) whose ctx home would be a broad cross-feature
+#              (scatter/stats) state migration — out of scope for this pass, so
+#              converting either is net-0.
+CTX_APP_BUDGET = 16
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -84,7 +84,7 @@ def _selected_cmap(ctx) -> str:
 
 def _selected_tp(ctx) -> Optional[float]:
     slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
-    tps: List[float] = list(ctx.runtime.heatmap.tp_values or [])
+    tps: List[float] = list(ctx.state.heatmap.tp_values or [])
     if slider is None or not tps:
         return None
     idx = max(0, min(slider.value(), len(tps) - 1))
@@ -99,7 +99,7 @@ def sync_heatmap_slider_to_focus(ctx) -> None:
     focus = current_focus_tp(ctx)
     if focus is None:
         return
-    tps: List[float] = list(ctx.runtime.heatmap.tp_values or [])
+    tps: List[float] = list(ctx.state.heatmap.tp_values or [])
     i = nearest_index(tps, focus)
     if i is None:
         return
@@ -288,16 +288,16 @@ def _resolve_color_scale(arr: np.ndarray, ctx) -> Tuple[Optional[float], Optiona
     """Pick (vmin, vmax) for the heatmap.
 
     Mode is read from ``ctx.state.heatmap.scale_mode`` (Auto/Fixed). For Fixed we
-    read ``ctx.runtime.heatmap.vmin`` / ``.vmax``. For Auto we use the global
-    range pre-computed across every timepoint (kept on
+    read the persisted ``ctx.state.heatmap.vmin`` / ``.vmax``. For Auto we use the
+    global range pre-computed across every timepoint (kept on
     ``ctx.runtime.heatmap.global_vmin`` / ``.global_vmax``) so the colormap
     stays stable while scrubbing the timepoint slider.
     """
     mode = str(ctx.state.heatmap.scale_mode or "Auto")
     if mode == "Fixed":
-        vmin = float((ctx.runtime.heatmap.vmin if ctx.runtime.heatmap.vmin is not None
+        vmin = float((ctx.state.heatmap.vmin if ctx.state.heatmap.vmin is not None
                       else float("nan")) or float("nan"))
-        vmax = float((ctx.runtime.heatmap.vmax if ctx.runtime.heatmap.vmax is not None
+        vmax = float((ctx.state.heatmap.vmax if ctx.state.heatmap.vmax is not None
                       else float("nan")) or float("nan"))
         if math.isfinite(vmin) and math.isfinite(vmax) and vmax > vmin:
             return vmin, vmax
@@ -329,7 +329,7 @@ def _compute_global_range(
     Result is cached on ``ctx.runtime.heatmap`` keyed on the inputs that
     influence it so timepoint-slider scrubbing does not retrigger the full sweep.
     """
-    tps = list(ctx.runtime.heatmap.tp_values or [])
+    tps = list(ctx.state.heatmap.tp_values or [])
     if not tps:
         return None, None
 

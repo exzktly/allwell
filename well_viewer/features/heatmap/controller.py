@@ -930,6 +930,4 @@ def _apply_label_reorder(ctx, kind: str, src: int, dst: int) -> None:
     else:
         layout.reorder_cols(src, dst)
     _persist_and_redraw(ctx)
-    # ``refresh_heatmap_layout_sidebar`` is still app-native (called from the
-    # banned registry.py / load_controller.py) — bridge via the app handle.
-    refresh_heatmap_layout_sidebar(ctx.app)
+    refresh_heatmap_layout_sidebar(ctx)

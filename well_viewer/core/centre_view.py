@@ -343,7 +343,8 @@ def build_centre(app, parent: QWidget) -> None:
         )
         arl.addWidget(prop_lbl)
         app._plotting_metric_lbl = prop_lbl
-        app._plotting_metric_cb = _QComboBox()
+        app._plotting_metric_cb = app._ctx.widgets.register(
+            "_plotting_metric_cb", _QComboBox())
         app._plotting_metric_cb.setMinimumContentsLength(8)
         app._plotting_metric_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "

@@ -691,7 +691,7 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
 
 def refresh_stats_property_combo(app) -> None:
     """Reshape the stats Property combo to match the stats channel combo."""
-    ch_cb = getattr(app, "_stats_channel_cb", None)
+    ch_cb = app._ctx.widgets.get_or_none("_stats_channel_cb")
     m_cb = getattr(app, "_stats_property_cb", None)
     if m_cb is None:
         return

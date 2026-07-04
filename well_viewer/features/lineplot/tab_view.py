@@ -78,7 +78,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     metric_cb.addItems(_METRIC_ORDER)
     metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))
     mfl.addWidget(metric_cb)
-    _plotting_metric_cb = getattr(ctx.app, "_plotting_metric_cb", None)
+    _plotting_metric_cb = ctx.widgets.get_or_none("_plotting_metric_cb")
     reg.register("_metric_var", _plotting_metric_cb if _plotting_metric_cb is not None else metric_cb)
     cl.addWidget(metric_frame)
     metric_frame.hide()

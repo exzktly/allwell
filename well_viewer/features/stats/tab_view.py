@@ -174,7 +174,8 @@ def build_stats_results_panel(app, parent: QWidget) -> None:
     app._stats_channel_label = QLabel("Channel:", app._stats_ctrl)
     cl.addWidget(app._stats_channel_label, 2, 0, Qt.AlignLeft)
 
-    app._stats_channel_cb = QComboBox(app._stats_ctrl)
+    app._stats_channel_cb = app._ctx.widgets.register(
+        "_stats_channel_cb", QComboBox(app._stats_ctrl))
     app._stats_channel_cb.addItems(["—"])
     app._stats_channel_cb.currentIndexChanged.connect(
         lambda _i: stats_on_test_change(app)

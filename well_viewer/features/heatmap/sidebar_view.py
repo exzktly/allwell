@@ -237,11 +237,13 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
     table.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
     body_layout.addWidget(table, 1)
 
-    # Stash widget refs on the app so callbacks/refresh can find them.
+    # Register widget refs (also stamps ``app._heatmap_sidebar_*`` so legacy
+    # attribute readers keep resolving) so ``ctx.widgets`` can find them.
+    reg = app._ctx.widgets
     app._heatmap_sidebar_frame = outer
-    app._heatmap_sidebar_table = table
-    app._heatmap_sidebar_rows_spin = rows_spin
-    app._heatmap_sidebar_cols_spin = cols_spin
+    reg.register("_heatmap_sidebar_table", table)
+    reg.register("_heatmap_sidebar_rows_spin", rows_spin)
+    reg.register("_heatmap_sidebar_cols_spin", cols_spin)
 
     rows_spin.valueChanged.connect(lambda _v: _on_size_changed(app))
     cols_spin.valueChanged.connect(lambda _v: _on_size_changed(app))
@@ -254,7 +256,7 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
     # ``addStretch(1)`` would grab everything and the matrix gets squashed.
     parent_layout.addWidget(outer, 1)
 
-    refresh_heatmap_layout_sidebar(app)
+    refresh_heatmap_layout_sidebar(app._ctx)
     return outer
 
 
@@ -282,15 +284,15 @@ def _find_cell_for_token(layout: HeatmapLayout, token: str) -> Optional[Tuple[in
 
 # ── Refresh + drop handlers ──────────────────────────────────────────────────
 
-def refresh_heatmap_layout_sidebar(app) -> None:
-    """Re-render the table from ``app._heatmap_layouts``."""
-    table: _LayoutTable = getattr(app, "_heatmap_sidebar_table", None)
-    rows_spin: QSpinBox = getattr(app, "_heatmap_sidebar_rows_spin", None)
-    cols_spin: QSpinBox = getattr(app, "_heatmap_sidebar_cols_spin", None)
+def refresh_heatmap_layout_sidebar(ctx) -> None:
+    """Re-render the table from the sidebar heatmap layout."""
+    table: _LayoutTable = ctx.widgets.get_or_none("_heatmap_sidebar_table")
+    rows_spin: QSpinBox = ctx.widgets.get_or_none("_heatmap_sidebar_rows_spin")
+    cols_spin: QSpinBox = ctx.widgets.get_or_none("_heatmap_sidebar_cols_spin")
     if table is None:
         return
 
-    layout = _ensure_sidebar_layout(app._ctx)
+    layout = _ensure_sidebar_layout(ctx)
 
     if rows_spin is not None and rows_spin.value() != layout.rows:
         rows_spin.blockSignals(True)
@@ -373,7 +375,7 @@ def _on_size_changed(app) -> None:
         layout.col_labels = layout.col_labels[:new_cols]
     layout.resize(new_rows, new_cols)
     _persist_and_redraw(app._ctx)
-    refresh_heatmap_layout_sidebar(app)
+    refresh_heatmap_layout_sidebar(app._ctx)
 
 
 def _on_drop_event(app, kind: str, rc: Optional[Tuple[int, int]], token: str) -> None:
@@ -392,7 +394,7 @@ def _on_drop_event(app, kind: str, rc: Optional[Tuple[int, int]], token: str) ->
             layout.assign(src[0], src[1], existing)  # tenant goes back to source
         layout.assign(target_r, target_c, [token])
     _persist_and_redraw(app._ctx)
-    refresh_heatmap_layout_sidebar(app)
+    refresh_heatmap_layout_sidebar(app._ctx)
 
 
 def _clear_cell(app, r: int, c: int) -> None:
@@ -400,7 +402,7 @@ def _clear_cell(app, r: int, c: int) -> None:
     if (r, c) in layout.cells:
         layout.assign(r, c, [])
         _persist_and_redraw(app._ctx)
-        refresh_heatmap_layout_sidebar(app)
+        refresh_heatmap_layout_sidebar(app._ctx)
 
 
 def _on_autopopulate(app) -> None:
@@ -443,7 +445,7 @@ def _on_autopopulate(app) -> None:
         layout.assign(r, c, [w])
 
     _persist_and_redraw(app._ctx)
-    refresh_heatmap_layout_sidebar(app)
+    refresh_heatmap_layout_sidebar(app._ctx)
 
 
 def _persist_and_redraw(ctx) -> None:

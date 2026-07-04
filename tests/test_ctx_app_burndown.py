@@ -455,7 +455,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              object reach and net-add ctx.app. Also drops 3 deferred feature
 #              imports (the two redraw_bars function-locals + selection_controller's
 #              preview import become core/lazy references).
-CTX_APP_BUDGET = 43
+#   E1 register orphan widgets: -3   registered _plotting_metric_cb (centre_view),
+#              the heatmap sidebar trio (_heatmap_sidebar_table/_rows_spin/_cols_spin),
+#              and _stats_channel_cb into ctx.widgets. refresh_heatmap_layout_sidebar
+#              re-signatured onto ctx (both feature call sites drop ctx.app); lineplot
+#              reads the metric combo via ctx.widgets. _stats_channel_cb registered for
+#              resolvability but its sole channel-controller reader takes app (no
+#              droppable unwrap), so it clears no ctx.app.
+CTX_APP_BUDGET = 40
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -399,9 +399,7 @@ def _on_transpose(ctx) -> None:
     layout = _ensure_sidebar_layout(ctx)
     layout.transpose()
     _persist_and_redraw(ctx)
-    # ``refresh_heatmap_layout_sidebar`` is still app-native (called from the
-    # banned registry.py / load_controller.py) — bridge via the app handle.
-    refresh_heatmap_layout_sidebar(ctx.app)
+    refresh_heatmap_layout_sidebar(ctx)
 
 
 def _on_repset_avg_changed(ctx) -> None:

@@ -382,7 +382,7 @@ def load_directory(app, d: Path, label=None) -> None:
             from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
-            refresh_heatmap_layout_sidebar(app)
+            refresh_heatmap_layout_sidebar(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     display = label or str(d)

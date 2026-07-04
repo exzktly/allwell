@@ -306,7 +306,7 @@ def _activate_heatmap(app) -> None:
             from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
-            refresh_heatmap_layout_sidebar(app)
+            refresh_heatmap_layout_sidebar(app._ctx)
         except Exception:
             _logger.exception("Heatmap sidebar refresh failed")
     app._redraw()

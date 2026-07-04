@@ -333,7 +333,7 @@ def load_directory(app, d: Path, label=None) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-    label_grid_refresh(app)
+    label_grid_refresh(app._ctx)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
     # appear without requiring a tab switch.
     if hasattr(app, "_groups_centre_refresh"):

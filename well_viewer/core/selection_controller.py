@@ -521,7 +521,7 @@ def labels_apply_affix(app, *, where: str) -> None:
             app._app_state.dataset.well_labels.pop(tok, None)
 
     app._invalidate_stats_cache()
-    label_grid_refresh(app)
+    label_grid_refresh(app._ctx)
     _schedule_sample_def_autosave(app)
     app._set_status(
         f"Added {where} '{text}' to {len(selected)} well label{plural}."
@@ -795,8 +795,8 @@ def groups_centre_refresh(app) -> None:
     if tab_visible:
         from well_viewer.features.grouping.label_grid_view import label_grid_refresh
         from well_viewer.features.grouping.tab_view import rep_panel_refresh
-        rep_panel_refresh(app)
-        label_grid_refresh(app)
+        rep_panel_refresh(app._ctx)
+        label_grid_refresh(app._ctx)
     app._rep_refresh_map()
     update_active_group_label(app._ctx)
 
@@ -1091,7 +1091,7 @@ def labels_clear_all(app) -> None:
     if app._app_state.dataset.well_labels:
         from well_viewer.features.grouping.label_grid_view import label_grid_refresh
         app._app_state.dataset.well_labels.clear()
-        label_grid_refresh(app)
+        label_grid_refresh(app._ctx)
         app._invalidate_stats_cache()
         _schedule_sample_def_autosave(app)
 

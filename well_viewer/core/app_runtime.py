@@ -49,7 +49,7 @@ class AppRuntime:
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
-                 "centre", "view_state", "tab")
+                 "centre", "view_state", "tab", "grouping")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -154,3 +154,8 @@ class AppRuntime:
         # (``ctx.runtime.tab.selection_model_identity``). Debug-only, never
         # persisted; read exclusively by the tab controller.
         object.__setattr__(self, "tab", _FeatureRuntime(app, "_tab_"))
+        # Sample-Definitions GROUPS-list transient scratch (prefix ``_grp_``): the
+        # pending inline-rename row index (``ctx.runtime.grouping.inline_edit_idx``
+        # <-> ``app._grp_inline_edit_idx``) the rename action sets and the panel
+        # refresh consumes. Session-only, never persisted.
+        object.__setattr__(self, "grouping", _FeatureRuntime(app, "_grp_"))

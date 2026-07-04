@@ -56,18 +56,18 @@ def wire_selections_list(app, lst) -> None:
         lst.importRequested.connect(load_cb)
 
 
-def rep_panel_refresh(app) -> None:
-    """Refresh the GROUPS list (a widgets.SavedSelectionsList over app._app_state.selection.selections)."""
-    lst = getattr(app, "_rep_list", None)
+def rep_panel_refresh(ctx) -> None:
+    """Refresh the GROUPS list (a widgets.SavedSelectionsList over ctx.state.selection.selections)."""
+    lst = ctx.widgets.get_or_none("_rep_list")
     if lst is None:
         return
     try:
-        lst.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
+        lst.setEnabledWells(list(ctx.state.dataset.well_paths.keys()))
     except Exception:
         swallowed()  # was: pass (silent except)
-    sels = list(app._app_state.selection.selections or [])
+    sels = list(ctx.state.selection.selections or [])
     lst.updateSelections(sels)
-    cur = app._app_state.selection.current_selection_id
+    cur = ctx.state.selection.current_selection_id
     # When the app has explicitly cleared the active group (e.g. the user
     # just entered the Groups sub-tab), force the list's current row to
     # "" so no row paints with the active stripe. The list otherwise
@@ -82,11 +82,12 @@ def rep_panel_refresh(app) -> None:
             swallowed()  # was: pass (silent except)
     # honour a pending inline-rename request (set by the "Rename" action — it
     # stores a position into _selections; see _sel_request_inline_rename)
-    idx = getattr(app, "_grp_inline_edit_idx", -1)
+    idx = ctx.runtime.grouping.inline_edit_idx
+    idx = idx if isinstance(idx, int) else -1
     if 0 <= idx < len(sels):
-        app._grp_inline_edit_idx = -1
+        ctx.runtime.grouping.inline_edit_idx = -1
         row = getattr(lst, "_rows", {}).get(sels[idx].get("id"))
         if row is not None and hasattr(row, "trigger_rename"):
             QTimer.singleShot(0, row.trigger_rename)
-    if hasattr(app, "_rep_refresh_map"):
-        app._rep_refresh_map()
+    from well_viewer.features.grouping.controller import rep_refresh_map
+    rep_refresh_map(ctx)

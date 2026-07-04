@@ -244,7 +244,7 @@ def clear_all(app) -> None:
             # (see test_layering) — same escape hatch the cell-gating reset below
             # already uses.
             from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-            label_grid_refresh(app)
+            label_grid_refresh(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
 

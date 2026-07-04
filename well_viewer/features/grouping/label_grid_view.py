@@ -416,16 +416,16 @@ def build_label_grid(app, parent: QWidget) -> None:
     grid = LabelGrid(app, parent)
     grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     layout.addWidget(grid, 1)
-    app._lbl_grid = grid
+    app._lbl_grid = app._ctx.widgets.register("_lbl_grid", grid)
 
 
-def label_grid_refresh(app) -> None:
-    """Re-load the grid cells from ``app._app_state.dataset.well_labels`` and update the
-    enabled set from ``_well_paths``."""
-    grid = getattr(app, "_lbl_grid", None)
+def label_grid_refresh(ctx) -> None:
+    """Re-load the grid cells from ``ctx.state.dataset.well_labels`` and update the
+    enabled set from the loaded well paths."""
+    grid = ctx.widgets.get_or_none("_lbl_grid")
     if grid is None:
         return
-    enabled = list((app._app_state.dataset.well_paths or {}).keys())
+    enabled = list((ctx.state.dataset.well_paths or {}).keys())
     grid.setEnabledWells(enabled)
     grid.refresh()
 

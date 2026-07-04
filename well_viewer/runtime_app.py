@@ -642,7 +642,7 @@ class WellViewerApp(QWidget):
 
     def _sel_duplicate(self, sid): return sel_duplicate(self, sid)
 
-    def _enforce_well_exclusivity(self) -> None: return enforce_well_exclusivity(self)
+    def _enforce_well_exclusivity(self) -> None: return enforce_well_exclusivity(self._ctx)
 
     def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self)
 

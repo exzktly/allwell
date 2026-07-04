@@ -832,13 +832,13 @@ def set_selected_wells(ctx, new_set, *, commit: bool = True) -> None:
 
 
 
-def enforce_well_exclusivity(app) -> None:
+def enforce_well_exclusivity(ctx) -> None:
     """Invariant: a well belongs to **at most one group**. Keep each well in
     the first selection that has it; strip it from the rest. The edit
     helpers already enforce this (edited group wins); this is a safety net
     and cleans up pre-existing overlaps from old saved data."""
     seen: set = set()
-    for s in app._app_state.selection.selections:
+    for s in ctx.state.selection.selections:
         if not isinstance(s, dict):
             continue
         kept = []

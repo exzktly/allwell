@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_metric_selected
+
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
 from well_viewer.features.barplot.controller import (bar_reset_order, open_bar_timepoint_selector, toggle_bar_group_mode, toggle_bar_pool_replicates, toggle_bar_pool_rset_cells, toggle_swarm, toggle_violin, on_bar_drag_press, on_bar_drag_release)
@@ -87,7 +89,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     mf_l.addWidget(QLabel("Property:", metric_frame))
     metric_cb = reg.register("_metric_cb_bar", QComboBox(metric_frame))
     metric_cb.addItems(_METRIC_ORDER)
-    metric_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_metric_selected())
+    metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))
     mf_l.addWidget(metric_cb)
     cl.addWidget(metric_frame)
     metric_frame.hide()
@@ -98,7 +100,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import make_popover_button
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", bar_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
-    install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="bar")
+    install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="bar")
     cl.addWidget(_fc_btn)
 
     cl.addStretch(1)

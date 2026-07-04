@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_metric_selected
+
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
 from well_viewer.core.plot_card_actions import (
@@ -74,7 +76,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     mfl.addWidget(QLabel("Property:", metric_frame))
     metric_cb = reg.register("_metric_cb", QComboBox(metric_frame))
     metric_cb.addItems(_METRIC_ORDER)
-    metric_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_metric_selected())
+    metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))
     mfl.addWidget(metric_cb)
     _plotting_metric_cb = getattr(ctx.app, "_plotting_metric_cb", None)
     reg.register("_metric_var", _plotting_metric_cb if _plotting_metric_cb is not None else metric_cb)
@@ -87,7 +89,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import make_popover_button
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", line_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
-    install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="line")
+    install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="line")
     cl.addWidget(_fc_btn)
 
     # Error band (SEM/SD + Spread) collapses into a "Display ▾" popover (C1)

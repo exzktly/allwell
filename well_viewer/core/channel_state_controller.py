@@ -986,8 +986,9 @@ def ratio_label_for(ctx, ratio: RatioMetric) -> str:
 
 
 
-def on_metric_selected(app) -> None:
+def on_metric_selected(ctx) -> None:
     """Handle the per-tab (legacy hidden) metric selector change."""
+    app = ctx.app
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
     metric_label = app._metric_var.currentText()
     metric = METRIC_LABEL_TO_KEY.get(metric_label, "mean_intensity")

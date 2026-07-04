@@ -315,13 +315,17 @@ def set_fold_change_state(
     app._event_bus.plot_options_changed.emit(app._app_state.plot)
 
 
-def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) -> None:
+def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) -> None:
     """Insert the Fold-change Control + Baseline dropdowns into *layout*.
 
     ``scope`` is "bar" or "line" — used to namespace the per-tab widget
     references stashed on ``app``. The dropdowns write through to the
     shared ``app._fc_*`` state so both tabs stay in lockstep.
+
+    A8: takes ``ctx``; the combos stash per-tab handles on the app and write the
+    shared fold-change state, so it unwraps the handle once at this boundary.
     """
+    app = ctx.app
     title = QLabel("Fold change:", parent)
     f = title.font(); f.setBold(True); title.setFont(f)
     layout.addWidget(title)

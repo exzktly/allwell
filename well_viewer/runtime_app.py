@@ -858,7 +858,7 @@ class WellViewerApp(QWidget):
 
     def _on_preview_channel_selected(self, _e = None) -> None: return on_preview_channel_selected(self, _e)
 
-    def _on_metric_selected(self) -> None: return on_metric_selected(self)
+    def _on_metric_selected(self) -> None: return on_metric_selected(self._ctx)
 
     def _on_metric_selected_global(self) -> None: return on_metric_selected_global(self)
 

@@ -351,7 +351,11 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              on_plot_channel_selected(ctx, src) and the 4 band-control
 #              tab_views (line/bar/distribution/scatter-agg) call
 #              make_band_controls(ctx, ...); delegator + legacy toolbar bridge.
-CTX_APP_BUDGET = 84
+#   84 -> 82    More shared plot-tab builders -> ctx: install_fold_change_controls
+#              (domain) and on_metric_selected (core channel_state_controller)
+#              take ctx (unwrap once); line + bar tab_views wire the fold-change
+#              popover + hidden metric combo through ctx, delegator via self._ctx.
+CTX_APP_BUDGET = 82
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

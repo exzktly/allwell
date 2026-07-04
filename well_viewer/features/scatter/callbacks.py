@@ -2,14 +2,14 @@
 
 The single-cell image viewer they open lives in ``cell_viewer_view.py`` (audit
 A7); these handlers resolve which cell a canvas click/hover landed on and route
-to the app's ``_open_scatter_cell_viewer`` (the viewer widget is not yet
-ctx-native — a residual bridge through the ``app`` field). ``cells_tab_view``
+to the ctx-native ``open_scatter_cell_viewer`` opener there. ``cells_tab_view``
 wires them to the canvas events.
 """
 
 from __future__ import annotations
 
 from well_viewer.core.safe import swallowed
+from well_viewer.features.scatter.cell_viewer_view import open_scatter_cell_viewer
 from well_viewer.features.scatter.gating import gate_edge_at
 
 
@@ -69,10 +69,8 @@ def on_scatter_click(ctx, event) -> None:
                 nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx = meta
 
         if nearest_well is not None:
-            # Residual bridge: the single-cell image viewer widget is not yet
-            # ctx-native, so it is opened through the app method.
-            ctx.app._open_scatter_cell_viewer(
-                nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx)
+            open_scatter_cell_viewer(
+                ctx, nearest_well, nearest_filename, nearest_nuclear_id, nearest_row_idx)
 
     except Exception as e:
         # The user clicked expecting a popup -- surface the failure instead of

@@ -432,7 +432,17 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              sample-definitions / review-csv builders stay on the app bridge (their
 #              bodies drive app-taking controllers + god methods, so converting them
 #              would ADD ctx.app, not remove it).
-CTX_APP_BUDGET = 45
+#   E2 ScatterCellViewer ctx-native: -1   the single-cell image viewer + its
+#              open_scatter_cell_viewer factory take ctx: __init__ stores ctx and
+#              reads state via ctx.state (dataset/channel slices) + rows via the
+#              ctx-native data_loading.get_rows; the factory resolves the dock via
+#              ctx.widgets and stashes the live viewer through ctx.runtime.scatter.
+#              cell_viewer. scatter/callbacks on_scatter_click calls the opener
+#              directly (ctx.app._open_scatter_cell_viewer -> open_scatter_cell_
+#              viewer(ctx, ...)). The app-native _open_scatter_cell_viewer shim
+#              stays (test_scatter_cell_viewer_dock drives it) but now threads
+#              self._ctx, not self.
+CTX_APP_BUDGET = 44
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

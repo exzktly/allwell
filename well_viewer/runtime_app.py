@@ -1214,7 +1214,9 @@ class WellViewerApp(QWidget):
 
 
     def _open_scatter_cell_viewer(self, well_label: str, filename: str, nuclear_id: str, row_idx: int) -> None:
-        return open_scatter_cell_viewer(self, well_label, filename, nuclear_id, row_idx)
+        # App-native shim: still exercised by tests/test_scatter_cell_viewer_dock.py.
+        # The opener + viewer are ctx-native — thread the context, not the god-object.
+        return open_scatter_cell_viewer(self._ctx, well_label, filename, nuclear_id, row_idx)
 
 
     def _save_scatter_figure(self) -> None:

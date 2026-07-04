@@ -356,7 +356,24 @@ clears it. None falls to a piecemeal conversion (all measured net-0/net-add).
 | 2 | `persistence/view_state.py:95,421` | `snapshot`/`restore` — broad app-widget surface (`_current_leaf_tab`/`_snapshot_tabs`/`_set_selected_wells`). Sanctioned persistence unwrap; **T6**. |
 | **10** | | god-service decompositions + T6 (was 14; −4 via tab providers, A14, fold-change) |
 
-**Status 2026-07-04 (session end): 8 refs (99.1% overall).** Epic-A14 (batch
+**Status 2026-07-04 (session end): 7 refs (99.2% overall).** `channel:942`
+(`ensure_cell_gating_tab_built`) cleared inline — the `_centre_build_pending`
+lazy-build closure got a runtime home (`ctx.runtime.centre`, a live callback like
+the other stamped closures), so the last cell-gating seam is ctx-native. **The
+final 7 are each a large subsystem decomposition** (all traced): `channel:64`
+(`_features` hook + `update_channel_selector` + `_load_gating`); `selection:828`
+(`_refresh_sidebar_map` debounce + `on_plate_sel_change`'s `_features`/`_parse_rc`);
+`tab_controller:138` (`build_review_image_panel` ~30 lambdas); `tab_controller:164`
+(sample-def builder tree); `saved_plots:110` (`rebuild_all` `_features` web);
+`view_state:95` (`snapshot` → `_snapshot_tabs` → bar/dist/scatter widget cascade);
+`view_state:421` (`restore` → `_refresh_sidebar_map`/`_set_selected_wells`). Three
+(`channel:64`, `selection:828`, `saved_plots:110`) are blocked on the `_features`
+registry-ctx-home architecture decision (proven net-0 without it); the rest are
+subsystem rewrites (`build_review_image_panel`, the sample-def tree, the
+view_state snapshot/restore surface) → each a focused, individually-reviewed pass,
+and the view_state pair is the final **T6** territory.
+
+_(Earlier — 8 refs.)_ Epic-A14 (batch
 panels, −1) and Epic-cellgating (scatter-gate config → typed `CellGatingState`,
 −2 — the full state migration that D-persist had declined as out-of-scope;
 persistence stops unwrapping, `_centre_build_pending` bundled into one

@@ -677,7 +677,15 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              that trades a crash for one documented unwrap — cleared when the
 #              cell-gating edits dict migrates to typed state. Locked by
 #              test_thresh_quickedit (was failing on the pristine tree).
-CTX_APP_BUDGET = 15
+#   15 -> 14   cell_gating quick-edit refresh: -1   the ThreshFracOn change handler
+#              (cell_gating_tab_view) called getattr(ctx.app, "_refresh_thresh_frac_
+#              quick_edit")(); now that D-thresh made refresh_thresh_frac_quick_edit
+#              ctx-native, it calls that core fn directly (module-level import from
+#              channel_state_controller — core, not a cross-feature import).
+#              Behaviourally identical (the app shim was just a self._ctx forward);
+#              the fake's ctx gained widgets + a channel slice the transitive
+#              get_thresh_frac_on now reads.
+CTX_APP_BUDGET = 14
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

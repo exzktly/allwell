@@ -22,6 +22,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QLineEdit
 
 from well_viewer.core.app_runtime import AppRuntime
+from well_viewer.core.widget_registry import WidgetRegistry
 from well_viewer.core.cell_gating_state import CellGatingState
 
 
@@ -30,6 +31,11 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
         cell_gating=state if state is not None else CellGatingState(),
+        # The post-D-thresh change-handler mirrors the value onto the ctxbar
+        # quick-edit via refresh_thresh_frac_quick_edit → get_thresh_frac_on,
+        # which reads the active channel + its 50.0 threshold default off the
+        # channel slice (no steppers registered here → the mirror is a no-op).
+        channel=SimpleNamespace(active_channel="gfp", threshold=50.0),
         plot=SimpleNamespace(),
         # The thresh change-handler persists via cell_gating.save_to_pipeline_info
         # (now ctx-native); with no data dir it returns early, so the pure-logic
@@ -49,6 +55,7 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
     # (post-R6 pure state; runtime stamps back onto app._cell_gating_*).
     app._ctx = SimpleNamespace(
         state=app._app_state, app=app, runtime=AppRuntime(app),
+        widgets=WidgetRegistry(app),
         bus=app._event_bus, set_status=lambda m: None,
     )
     return app

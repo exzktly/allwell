@@ -51,7 +51,11 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.data.data_loading import resolve_value_series, get_rows
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import active_replicate_sets
-from well_viewer.core.channel_state_controller import get_all_fluor_gates, ratio_label_for
+from well_viewer.core.channel_state_controller import (
+    get_all_fluor_gates,
+    ratio_label_for,
+    refresh_thresh_frac_quick_edit,
+)
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.features.qc.tab_view import build_qc_gate_controls
@@ -1114,10 +1118,9 @@ def cell_gating_on_threshold_frac_on_change(ctx) -> None:
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
         # Mirror the new value onto the plotting ctxbar quick-edit so it reflects
         # the set threshold (e.g. after auto-threshold or a Cell Gating edit)
-        # instead of showing its 50.0 default.
-        refresh = getattr(ctx.app, "_refresh_thresh_frac_quick_edit", None)
-        if callable(refresh):
-            refresh()
+        # instead of showing its 50.0 default. Now ctx-native (D-thresh); it
+        # no-ops per-stepper for any quick-edit not yet built.
+        refresh_thresh_frac_quick_edit(ctx)
     except ValueError:
         swallowed("cell gating: non-numeric ThreshFracOn edit ignored")
 

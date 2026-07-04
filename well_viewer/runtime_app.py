@@ -193,7 +193,7 @@ review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv,
 set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache")
 open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.cell_viewer_view", "open_scatter_cell_viewer")
 col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display, on_scatter_axis_change, on_scatter_agg_axis_change = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display", "on_scatter_axis_change", "on_scatter_agg_axis_change")
-from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
+from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_index_of, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
 stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("well_viewer.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
 from well_viewer.core import tab_controller as _tabctl
 from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks, apply_sidebar_visibility, toggle_sidebar, visible_centre_tabs, is_tab_visible
@@ -593,13 +593,10 @@ class WellViewerApp(QWidget):
 
     # ── unified-model (app._app_state.selection.selections) — the in-memory source of truth ──────
 
-    def _sel_by_id(self, sid): return sel_by_id(self, sid)
+    def _sel_by_id(self, sid): return sel_by_id(self._ctx, sid)
 
     def _sel_index_of(self, sid) -> int:
-        for i, s in enumerate(self._app_state.selection.selections):
-            if s.get("id") == sid:
-                return i
-        return -1
+        return sel_index_of(self._ctx, sid)
 
     def _sel_id_for_well(self, tok):
         for s in self._app_state.selection.selections:
@@ -607,19 +604,19 @@ class WellViewerApp(QWidget):
                 return s.get("id")
         return None
 
-    def _sel_strip_wells(self, wells, *, keep_id = None) -> None: return sel_strip_wells(self, wells, keep_id=keep_id)
+    def _sel_strip_wells(self, wells, *, keep_id = None) -> None: return sel_strip_wells(self._ctx, wells, keep_id=keep_id)
 
     def _sel_add(self, name = None, wells = None, replicates = None, source = 'user', *, make_current = True):
-        return sel_add(self, name, wells, replicates, source, make_current=make_current)
+        return sel_add(self._ctx, name, wells, replicates, source, make_current=make_current)
 
-    def _sel_rename(self, sid, name) -> None: return sel_rename(self, sid, name)
+    def _sel_rename(self, sid, name) -> None: return sel_rename(self._ctx, sid, name)
 
-    def _sel_delete(self, sid) -> None: return sel_delete(self, sid)
+    def _sel_delete(self, sid) -> None: return sel_delete(self._ctx, sid)
 
     def _sel_set_hidden(self, sid, hidden, *, light = False) -> None:
         return sel_set_hidden(self, sid, hidden, light=light)
 
-    def _sel_set_color(self, sid, color) -> None: return sel_set_color(self, sid, color)
+    def _sel_set_color(self, sid, color) -> None: return sel_set_color(self._ctx, sid, color)
 
     def _sel_export_one(self, sid) -> None: return sel_export_one(self, sid)
 
@@ -629,18 +626,18 @@ class WellViewerApp(QWidget):
             self._sel_set_hidden(sid, not bool(s.get("hidden")))
 
     def _sel_set_composition(self, sid, wells = None, replicates = None) -> None:
-        return sel_set_composition(self, sid, wells, replicates)
+        return sel_set_composition(self._ctx, sid, wells, replicates)
 
-    def _sel_select(self, sid) -> None: return sel_select(self, sid)
+    def _sel_select(self, sid) -> None: return sel_select(self._ctx, sid)
 
-    def _sel_reorder(self, ids) -> None: return sel_reorder(self, ids)
+    def _sel_reorder(self, ids) -> None: return sel_reorder(self._ctx, ids)
 
     def _sel_clear_all(self) -> None:
         self._app_state.selection.selections = []
         self._app_state.selection.current_selection_id = None
         self._rebuild_all()
 
-    def _sel_duplicate(self, sid): return sel_duplicate(self, sid)
+    def _sel_duplicate(self, sid): return sel_duplicate(self._ctx, sid)
 
     def _enforce_well_exclusivity(self) -> None: return enforce_well_exclusivity(self._ctx)
 

@@ -731,34 +731,35 @@ def sel_export_one(app, sid) -> None:
 
 
 
-def sel_strip_wells(app, wells, *, keep_id=None) -> None:
+def sel_strip_wells(ctx, wells, *, keep_id=None) -> None:
     """A well belongs to ≤1 group: remove ``wells`` from every selection but
     ``keep_id``, pruning their replicates to the survivors. Also drop the
-    same wells from ``app._app_state.selection.selected_wells`` so the plotting tabs don't
+    same wells from ``ctx.state.selection.selected_wells`` so the plotting tabs don't
     keep treating them as solo wells once they've joined a group (the
     sidebar plate becomes passive in rep_mode and the user can't update
     the set themselves)."""
     from well_viewer.domain.selections_model import _deoverlap_replicates
+    sel_state = ctx.state.selection
     wset = set(wells or [])
     if not wset:
         return
-    for s in app._app_state.selection.selections:
+    for s in sel_state.selections:
         if s.get("id") == keep_id:
             continue
         nw = [w for w in (s.get("wells") or []) if w not in wset]
         if nw != s.get("wells"):
             s["wells"] = nw
             s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(nw))
-    if wset & app._app_state.selection.selected_wells:
-        app._app_state.selection.selected_wells = app._app_state.selection.selected_wells - wset
+    if wset & sel_state.selected_wells:
+        sel_state.selected_wells = sel_state.selected_wells - wset
 
 
 
-def sel_set_color(app, sid, color) -> None:
+def sel_set_color(ctx, sid, color) -> None:
     """Recolour a saved selection. ``color`` is a ``#RRGGBB`` hex string
     (or anything accepted by QColor); empty / falsy clears the override
     and lets the rank-based colour fall back through."""
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     try:
@@ -773,7 +774,7 @@ def sel_set_color(app, sid, color) -> None:
         s["color"] = new
     else:
         s.pop("color", None)
-    app._rebuild_all()
+    ctx.rebuild_all()
 
 
 
@@ -908,19 +909,20 @@ def _schedule_sample_def_autosave(app) -> None:
         p.schedule_save("sample_definitions")
 
 
-def sel_add(app, name=None, wells=None, replicates=None, source="user",
+def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
              *, make_current=True):
     from well_viewer.domain.selections_model import make_selection
-    used_names = {s.get("name") for s in app._app_state.selection.selections}
-    used_ids = {s.get("id") for s in app._app_state.selection.selections}
+    sel_state = ctx.state.selection
+    used_names = {s.get("name") for s in sel_state.selections}
+    used_ids = {s.get("id") for s in sel_state.selections}
     sel = make_selection(name=name, wells=wells, replicates=replicates,
                          source=source, used_names=used_names, used_ids=used_ids,
-                         fallback_color_idx=len(app._app_state.selection.selections))
-    app._sel_strip_wells(sel["wells"], keep_id=sel["id"])
-    app._app_state.selection.selections.append(sel)
+                         fallback_color_idx=len(sel_state.selections))
+    sel_strip_wells(ctx, sel["wells"], keep_id=sel["id"])
+    sel_state.selections.append(sel)
     if make_current:
-        app._app_state.selection.current_selection_id = sel["id"]
-    app._rebuild_all()
+        sel_state.current_selection_id = sel["id"]
+    ctx.rebuild_all()
     return sel["id"]
 
 
@@ -940,17 +942,17 @@ def sel_set_hidden(app, sid, hidden, *, light=False) -> None:
 
 
 
-def sel_set_composition(app, sid, wells=None, replicates=None) -> None:
+def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
     from well_viewer.domain.selections_model import _clean_wells, _deoverlap_replicates
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     if wells is not None:
         s["wells"] = _clean_wells(wells)
-        app._sel_strip_wells(s["wells"], keep_id=sid)
+        sel_strip_wells(ctx, s["wells"], keep_id=sid)
     src = replicates if replicates is not None else s.get("replicates")
     s["replicates"] = _deoverlap_replicates(src, allowed=set(s.get("wells") or []))
-    app._rebuild_all()
+    ctx.rebuild_all()
 
 
 
@@ -999,69 +1001,79 @@ def rep_clear_all(app) -> None:
 
 
 
-def sel_rename(app, sid, name) -> None:
+def sel_rename(ctx, sid, name) -> None:
     from well_viewer.domain.selections_model import _unique_name as _uq
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
-    new = _uq(name, {x.get("name") for x in app._app_state.selection.selections if x.get("id") != sid})
+    new = _uq(name, {x.get("name") for x in ctx.state.selection.selections if x.get("id") != sid})
     if new == s.get("name"):
         return
     s["name"] = new
-    app._rebuild_all()
+    ctx.rebuild_all()
 
 
 
-def sel_delete(app, sid) -> None:
-    i = app._sel_index_of(sid)
+def sel_delete(ctx, sid) -> None:
+    sel_state = ctx.state.selection
+    i = sel_index_of(ctx, sid)
     if i < 0:
         return
-    app._app_state.selection.selections.pop(i)
-    if app._app_state.selection.current_selection_id == sid:
-        app._app_state.selection.current_selection_id = (
-            app._app_state.selection.selections[min(i, len(app._app_state.selection.selections) - 1)].get("id")
-            if app._app_state.selection.selections else None)
-    app._rebuild_all()
+    sel_state.selections.pop(i)
+    if sel_state.current_selection_id == sid:
+        sel_state.current_selection_id = (
+            sel_state.selections[min(i, len(sel_state.selections) - 1)].get("id")
+            if sel_state.selections else None)
+    ctx.rebuild_all()
 
 
 
-def sel_select(app, sid) -> None:
-    if sid not in {s.get("id") for s in app._app_state.selection.selections}:
+def sel_select(ctx, sid) -> None:
+    sel_state = ctx.state.selection
+    if sid not in {s.get("id") for s in sel_state.selections}:
         return
-    if sid == app._app_state.selection.current_selection_id:
+    if sid == sel_state.current_selection_id:
         return
-    app._app_state.selection.current_selection_id = sid
-    app._groups_centre_refresh()
-    app._refresh_sidebar_map()
+    sel_state.current_selection_id = sid
+    groups_centre_refresh(ctx)
+    ctx.refresh_sidebar_map()
 
 
 
-def sel_reorder(app, ids) -> None:
-    by_id = {s.get("id"): s for s in app._app_state.selection.selections}
+def sel_reorder(ctx, ids) -> None:
+    sel_state = ctx.state.selection
+    by_id = {s.get("id"): s for s in sel_state.selections}
     new = [by_id[i] for i in ids if i in by_id]
-    for s in app._app_state.selection.selections:
+    for s in sel_state.selections:
         if s not in new:
             new.append(s)
-    if new != app._app_state.selection.selections:
-        app._app_state.selection.selections = new
-        app._rebuild_all()
+    if new != sel_state.selections:
+        sel_state.selections = new
+        ctx.rebuild_all()
 
 
 
-def sel_duplicate(app, sid):
-    s = app._sel_by_id(sid)
+def sel_duplicate(ctx, sid):
+    s = sel_by_id(ctx, sid)
     if s is None:
         return None
-    return app._sel_add(name=f"{s.get('name', 'Selection')} copy",
-                         wells=[], replicates=None, source="user")
+    return sel_add(ctx, name=f"{s.get('name', 'Selection')} copy",
+                   wells=[], replicates=None, source="user")
 
 
 
-def sel_by_id(app, sid):
-    for s in app._app_state.selection.selections:
+def sel_by_id(ctx, sid):
+    for s in ctx.state.selection.selections:
         if s.get("id") == sid:
             return s
     return None
+
+
+def sel_index_of(ctx, sid) -> int:
+    for i, s in enumerate(ctx.state.selection.selections):
+        if s.get("id") == sid:
+            return i
+    return -1
 
 
 

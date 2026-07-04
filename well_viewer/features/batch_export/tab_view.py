@@ -18,9 +18,9 @@ from well_viewer.core.plot_toggles import (
 )
 
 
-def _refresh_mode_buttons(app, mode: str) -> None:
+def _refresh_mode_buttons(ctx, mode: str) -> None:
     """Sync the SegmentedControl's selected segment with the active builder."""
-    state = getattr(app, "_batch_export_inline_state", None)
+    state = ctx.runtime.batch_export.inline_state
     if not state:
         return
     sc = state.get("mode_segmented")
@@ -86,8 +86,8 @@ def _build_spread_row(ctx, parent: QWidget) -> QWidget:
     return row
 
 
-def _show_batch_mode(app, mode: str) -> None:
-    state = getattr(app, "_batch_export_inline_state", None)
+def _show_batch_mode(ctx, mode: str) -> None:
+    state = ctx.runtime.batch_export.inline_state
     if not state:
         return
 
@@ -102,16 +102,16 @@ def _show_batch_mode(app, mode: str) -> None:
         # It deliberately does NOT default to the sidebar replicate sets —
         # replicate groups are not the right unit for batch exports (reverts N10).
         if mode == "line":
-            panel = BatchExportPanel(app, host, use_sidebar_groups=False)
+            panel = BatchExportPanel(ctx, host, use_sidebar_groups=False)
         elif mode == "bar":
-            panel = BarBatchExportPanel(app, host, use_sidebar_groups=False)
+            panel = BarBatchExportPanel(ctx, host, use_sidebar_groups=False)
         elif mode == "scatter_cells":
             panel = ScatterBatchExportPanel(
-                app, host, scatter_mode="cells", use_sidebar_groups=False,
+                ctx, host, scatter_mode="cells", use_sidebar_groups=False,
             )
         else:
             panel = ScatterBatchExportPanel(
-                app, host, scatter_mode="aggregate", use_sidebar_groups=False,
+                ctx, host, scatter_mode="aggregate", use_sidebar_groups=False,
             )
         host_layout.addWidget(panel)
         panels[mode] = panel
@@ -131,7 +131,7 @@ def _show_batch_mode(app, mode: str) -> None:
         band_row.setVisible(mode in ("line", "bar"))
 
     state["mode"] = mode
-    _refresh_mode_buttons(app, mode)
+    _refresh_mode_buttons(ctx, mode)
 
 
 def build_batch_export_tab(ctx, parent: QWidget) -> None:
@@ -191,5 +191,5 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "mode_segmented": switch_row,
         "band_row": band_row,
     }
-    ctx.runtime.batch_export.set_mode = lambda mode="line": _show_batch_mode(ctx.app, mode)
+    ctx.runtime.batch_export.set_mode = lambda mode="line": _show_batch_mode(ctx, mode)
     ctx.runtime.batch_export.set_mode("line")

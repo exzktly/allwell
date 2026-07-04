@@ -48,7 +48,7 @@ class AppRuntime:
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
-                 "review_image", "review", "stats", "plot_groups")
+                 "review_image", "review", "stats", "plot_groups", "export")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -126,3 +126,8 @@ class AppRuntime:
         # drawer builder + refresh reach the registry list without the god-object
         # handle. The per-drawer Qt widgets go through ``ctx.widgets``.
         object.__setattr__(self, "plot_groups", _FeatureRuntime(app, "_plot_groups_"))
+        # Export-style session scratch (prefix ``_export_style_``): the custom
+        # export-profile dict (``ctx.runtime.export.custom_profiles`` <->
+        # ``app._export_style_custom_profiles``). Session-only, never persisted —
+        # lets the export + batch-export panels list/apply profiles ctx-natively.
+        object.__setattr__(self, "export", _FeatureRuntime(app, "_export_style_"))

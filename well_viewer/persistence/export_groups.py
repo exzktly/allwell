@@ -5,8 +5,10 @@ line / bar / scatter-cells / scatter-aggregate) are stored under the consolidate
 ``persistence.json`` document, keyed by panel, so they survive across sessions
 without a separate Save/Load file route.
 
-The canonical in-memory copy is ``app._export_groups_doc`` — a ``{panel_key:
-[group, ...]}`` dict mirrored by the panels whenever their group editor changes.
+The canonical in-memory copy is ``app._batch_export_export_groups_doc`` (reached
+by the panels as ``ctx.runtime.batch_export.export_groups_doc``) — a
+``{panel_key: [group, ...]}`` dict mirrored by the panels whenever their group
+editor changes.
 """
 
 from __future__ import annotations
@@ -22,14 +24,14 @@ SECTION = "export_groups"
 
 def save_to_data_dir(app) -> None:
     """Persist the batch-export groups to the consolidated persistence document."""
-    doc = getattr(app, "_export_groups_doc", None) or None
+    doc = getattr(app, "_batch_export_export_groups_doc", None) or None
     _doc.set_section(app._ctx, SECTION, doc)
 
 
 def load_from_data_dir(app) -> None:
     """Load persisted batch-export groups and refresh any open Batch Export panels."""
     raw = _doc.get_section(app._ctx, SECTION)
-    app._export_groups_doc = raw if isinstance(raw, dict) else {}
+    app._batch_export_export_groups_doc = raw if isinstance(raw, dict) else {}
     state = getattr(app, "_batch_export_inline_state", None)
     if not state:
         return

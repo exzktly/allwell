@@ -67,6 +67,27 @@ def _get_all_profile_names(app) -> list[str]:
     return [*EXPORT_PROFILES.keys(), *custom.keys()]
 
 
+def ensure_custom_export_profiles_ctx(ctx) -> dict:
+    """ctx-native form of :func:`_ensure_custom_export_profiles`.
+
+    Reads/creates the session custom-profile dict through
+    ``ctx.runtime.export.custom_profiles`` (backed by the same
+    ``app._export_style_custom_profiles`` attribute) so feature panels list and
+    apply export profiles without naming the god-object.
+    """
+    profiles = ctx.runtime.export.custom_profiles
+    if profiles is None:
+        profiles = {}
+        ctx.runtime.export.custom_profiles = profiles
+    return profiles
+
+
+def get_all_profile_names_ctx(ctx) -> list[str]:
+    """ctx-native form of :func:`_get_all_profile_names`."""
+    custom = ensure_custom_export_profiles_ctx(ctx)
+    return [*EXPORT_PROFILES.keys(), *custom.keys()]
+
+
 class _ExportEditorSession:
     def __init__(self, sidebar) -> None:
         self.sidebar = sidebar

@@ -685,7 +685,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              Behaviourally identical (the app shim was just a self._ctx forward);
 #              the fake's ctx gained widgets + a channel slice the transitive
 #              get_thresh_frac_on now reads.
-#   14 -> 12   tab-controller split providers → ctx.window/ctx.runtime.split: -2
+#   tab-controller split providers → ctx.window/ctx.runtime.split: -2
 #              current_centre_tab + visible_centre_tabs dropped their app=ctx.app
 #              unwraps. The centre notebook is a genuine Qt widget-nav need, so it
 #              routes through the blessed ctx.window accessor (_notebook /
@@ -697,7 +697,22 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              Epic-registry analysis flagged as separate from (and unblocked
 #              without) the feature-registry — booked under its own line, not the
 #              registry, per attribution discipline.
-CTX_APP_BUDGET = 12
+#   Epic-A14 batch panels ctx: -1   the Batch Export tab_view held the
+#              feature's last ctx.app at ``_show_batch_mode(ctx.app, mode)``. The
+#              three batch panels (base/bar/scatter) + _show_batch_mode/_refresh_
+#              mode_buttons + the _line_series_runner collector now take ``ctx``
+#              (store self._ctx, read ctx.state/ctx.runtime/ctx.widgets); the
+#              god-methods route to their existing core/domain ctx forms
+#              (get_rows/well_display_label/get_*_fluor_gate*/ratio_label_for) or,
+#              for the sibling-feature forms (rank_color_rset/rep_sets_loaded/
+#              col_for_scatter_axis/compose_scatter_agg_stat/update_bar_tp_menu),
+#              through core.lazy proxies — a call, not an import, so no new
+#              deferred-feature import and no ctx.app reintroduced. The export
+#              groups doc moved to ctx.runtime.batch_export.export_groups_doc and
+#              the custom-profile scratch to the new ctx.runtime.export namespace;
+#              two ctx-form helpers were added in export.style. tab_view was this
+#              feature's sole ctx.app, so it retires cleanly to zero.
+CTX_APP_BUDGET = 11
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

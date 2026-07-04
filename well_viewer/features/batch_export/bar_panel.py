@@ -37,6 +37,17 @@ from well_viewer.features.batch_export._common import (
     _CLR_ERR_BAR,
 )
 from well_viewer.features.batch_export.base_panel import BatchExportPanel
+# ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
+from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.channel_state_controller import (
+    get_all_fluor_gates as _get_all_fluor_gates,
+    get_thresh_frac_on as _get_thresh_frac_on,
+)
+from well_viewer.domain.selections_model import (
+    well_display_label as _well_display_label,
+    replicate_display_label as _replicate_display_label,
+)
+_update_bar_tp_menu = _lazy("well_viewer.features.barplot.controller", "update_bar_tp_menu")
 
 
 class BarBatchExportPanel(BatchExportPanel):
@@ -44,12 +55,12 @@ class BarBatchExportPanel(BatchExportPanel):
 
     def __init__(
         self,
-        app,
+        ctx,
         parent: Optional[QWidget] = None,
         *,
         use_sidebar_groups: bool = False,
     ) -> None:
-        super().__init__(app, parent, use_sidebar_groups=use_sidebar_groups)
+        super().__init__(ctx, parent, use_sidebar_groups=use_sidebar_groups)
 
     def _compute_persist_key(self) -> str:
         return "bar"
@@ -63,9 +74,9 @@ class BarBatchExportPanel(BatchExportPanel):
 
         self._build_timepoints_section(layout)
 
-        self._app._update_bar_tp_menu()
-        tp_vals = [self._app._bar_tp_cb.itemText(i)
-                   for i in range(self._app._bar_tp_cb.count())]
+        _update_bar_tp_menu(self._ctx)
+        _tp_cb = self._ctx.runtime.barplot.tp_cb
+        tp_vals = [_tp_cb.itemText(i) for i in range(_tp_cb.count())]
         for tp in tp_vals:
             if tp and tp != "\u2014":
                 self._tp_lb.addItem(QListWidgetItem(tp))
@@ -168,7 +179,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
     def _run_batch(self) -> None:
         groups_with_data = _groups_with_loaded_wells(
-            self._groups_for_export(), self._app._app_state.dataset.well_paths,
+            self._groups_for_export(), self._ctx.state.dataset.well_paths,
         )
         if not groups_with_data:
             msg = (
@@ -189,15 +200,15 @@ class BarBatchExportPanel(BatchExportPanel):
         if out_dir is None:
             return
 
-        _ch_selected = self._selected_export_channel() or self._app._app_state.channel.active_channel
+        _ch_selected = self._selected_export_channel() or self._ctx.state.channel.active_channel
         # Threshold lookup keys by the canonical channel/ratio key, not
         # the dropdown's display label — translate ratio labels first so
         # the bar plot draws against the user-configured ThreshFracOn
         # instead of the 50.0 default.
-        threshold = self._app._get_thresh_frac_on(
+        threshold = _get_thresh_frac_on(self._ctx, 
             self._resolved_channel_key(_ch_selected)
         )
-        use_sem = self._app._app_state.plot.use_sem
+        use_sem = self._ctx.state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"
         fmt = self._fmt_cb.currentText()
         fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = self._fc_state()
@@ -260,13 +271,13 @@ class BarBatchExportPanel(BatchExportPanel):
                 _val_col = self._export_val_col_for("_bar_channel_cb")
                 _ch = _ch_selected
                 _metric = self._selected_export_metric_key("_bar_channel_cb")
-                _well_labels = _well_labels_map(self._app._ctx)
-                _fluor_gates = self._app._get_all_fluor_gates()
-                _per_fov_spread = self._app._use_fov_spread_active()
+                _well_labels = _well_labels_map(self._ctx)
+                _fluor_gates = _get_all_fluor_gates(self._ctx)
+                _per_fov_spread = bool(self._ctx.state.plot.use_fov_replicates)
 
                 panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
                 items_raw = collect_bar_items_for_group(
-                    self._app, grp, target_ts,
+                    self._ctx, grp, target_ts,
                     val_col=_val_col, threshold=threshold,
                     use_sem=use_sem, per_fov_spread=_per_fov_spread,
                     fc_state=FC_STATE_OFF,
@@ -276,7 +287,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 )
                 if fc_active:
                     items_fc = collect_bar_items_for_group(
-                        self._app, grp, target_ts,
+                        self._ctx, grp, target_ts,
                         val_col=_val_col, threshold=threshold,
                         use_sem=use_sem, per_fov_spread=_per_fov_spread,
                         fc_state=panel_fc_state,
@@ -292,7 +303,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 # name (pooled) or individual well (expanded).
                 _meta_by_key: Dict[str, tuple] = {}
                 for rset in grp.members:
-                    valid = [w for w in rset.wells if w in self._app._app_state.dataset.well_paths]
+                    valid = [w for w in rset.wells if w in self._ctx.state.dataset.well_paths]
                     if not valid:
                         continue
                     if pool_replicates:
@@ -305,7 +316,7 @@ class BarBatchExportPanel(BatchExportPanel):
                                 f"replicate_set_member:{rset.name}", w, 1,
                             )
                 for w in grp.solo_wells:
-                    if w in self._app._app_state.dataset.well_paths and w not in _meta_by_key:
+                    if w in self._ctx.state.dataset.well_paths and w not in _meta_by_key:
                         _meta_by_key[w] = ("solo_well", w, 1)
 
                 rows_csv: List[dict] = []
@@ -418,7 +429,7 @@ class BarBatchExportPanel(BatchExportPanel):
                             left=0.13, right=0.97)
         fig.suptitle(f"{grp.name}  \u2014  t = {tp_title} h",
                      fontsize=10, fontweight="bold", color=get_color("PLOT_TXT"), y=0.97)
-        _ch = (self._selected_export_channel() or self._app._app_state.channel.active_channel).upper()
+        _ch = (self._selected_export_channel() or self._ctx.state.channel.active_channel).upper()
         from well_viewer.data.metric_labels import (
             METRIC_KEY_TO_LABEL as _MLB,
             threshold_qualifier, fraction_title,
@@ -450,7 +461,7 @@ class BarBatchExportPanel(BatchExportPanel):
                            f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}",
                            f"{_ch} {_metric_label}{_fc_suffix}")
         apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
-        if self._app._use_fov_spread_active():
+        if bool(self._ctx.state.plot.use_fov_replicates):
             apply_ax_style(
                 ax_n, events_per_fov_title(_metric_key, band_lbl), "N(above)/FOV",
             )
@@ -474,10 +485,10 @@ class BarBatchExportPanel(BatchExportPanel):
             return fig
 
         draw_items = collect_bar_items_for_group(
-            self._app, grp, target_ts,
+            self._ctx, grp, target_ts,
             val_col=self._export_val_col_for("_bar_channel_cb"),
             threshold=threshold, use_sem=use_sem,
-            per_fov_spread=self._app._use_fov_spread_active(),
+            per_fov_spread=bool(self._ctx.state.plot.use_fov_replicates),
             fc_state=fc_state,
             pool_replicates=pool_replicates,
             group_mode=group_mode,
@@ -492,7 +503,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # display (e.g. "t=0") so we leave it alone.
         if len(target_ts) == 1 and pool_replicates:
             rset_display_by_name = {
-                r.name: self._app._replicate_display_label(r)
+                r.name: _replicate_display_label(self._ctx, r)
                 for r in grp.members
             }
             for item in draw_items:
@@ -547,37 +558,37 @@ class BarBatchExportPanel(BatchExportPanel):
         if pool_replicates:
             for ri, rset in enumerate(grp.members):
                 color = _WELL_COLORS[ri % len(_WELL_COLORS)]
-                valid = [w for w in rset.wells if w in self._app._app_state.dataset.well_paths]
+                valid = [w for w in rset.wells if w in self._ctx.state.dataset.well_paths]
                 for w in valid:
                     base_wells.append(w)
                     base_colors.append(color)
-                    base_full.append(f"{self._app._well_display_label(w)} [{rset.name}]")
+                    base_full.append(f"{_well_display_label(self._ctx, w)} [{rset.name}]")
             for w in grp.solo_wells:
-                if w not in self._app._app_state.dataset.well_paths:
+                if w not in self._ctx.state.dataset.well_paths:
                     continue
                 color = _WELL_COLORS[len(base_wells) % len(_WELL_COLORS)]
                 base_wells.append(w)
                 base_colors.append(color)
-                base_full.append(self._app._well_display_label(w))
+                base_full.append(_well_display_label(self._ctx, w))
         else:
             seen: set = set()
             for ri, rset in enumerate(grp.members):
                 color = _WELL_COLORS[ri % len(_WELL_COLORS)]
                 for w in rset.wells:
-                    if w in seen or w not in self._app._app_state.dataset.well_paths:
+                    if w in seen or w not in self._ctx.state.dataset.well_paths:
                         continue
                     seen.add(w)
                     base_wells.append(w)
                     base_colors.append(color)
-                    base_full.append(f"{self._app._well_display_label(w)} [{rset.name}]")
+                    base_full.append(f"{_well_display_label(self._ctx, w)} [{rset.name}]")
             for w in grp.solo_wells:
-                if w in seen or w not in self._app._app_state.dataset.well_paths:
+                if w in seen or w not in self._ctx.state.dataset.well_paths:
                     continue
                 seen.add(w)
                 color = _WELL_COLORS[len(base_wells) % len(_WELL_COLORS)]
                 base_wells.append(w)
                 base_colors.append(color)
-                base_full.append(self._app._well_display_label(w))
+                base_full.append(_well_display_label(self._ctx, w))
 
         if not base_wells:
             return
@@ -611,7 +622,7 @@ class BarBatchExportPanel(BatchExportPanel):
         tp_str_combined = ", ".join(tp_strs)
         if display_mode == "violin":
             draw_violin(
-                self._app, ax_mean, ax_frac,
+                self._ctx, ax_mean, ax_frac,
                 plot_wells, plot_colors, plot_labels,
                 plot_tps, tp_str_combined, threshold,
                 xs=xs, group_keys=group_keys,
@@ -619,14 +630,14 @@ class BarBatchExportPanel(BatchExportPanel):
             )
         else:
             draw_beeswarm(
-                self._app, ax_mean, ax_frac,
+                self._ctx, ax_mean, ax_frac,
                 plot_wells, plot_colors, plot_labels,
                 plot_tps, tp_str_combined, threshold,
                 xs=xs, group_keys=group_keys,
             )
         if ax_n is not None:
             draw_per_well_n_bars(
-                self._app, ax_n,
+                self._ctx, ax_n,
                 plot_wells, plot_colors, plot_labels,
                 plot_tps, threshold,
                 xs=xs, group_keys=group_keys,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.core.plot_orchestrator import redraw_app
-from well_viewer.core.tab_controller import current_centre_tab
+from well_viewer.core.tab_controller import is_tab_visible
 from well_viewer.features.preview.panel_view import refresh_fov_btn_state
 from well_viewer.core.selection_controller import invalidate_stats_cache
 
@@ -560,8 +560,7 @@ def toggle_fov_replicates(ctx) -> None:
     refresh_bar_layout_btn_state(ctx)
     redraw_app(ctx)
     # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
-    _vis = getattr(ctx.app, "_is_tab_visible", None)
-    if _vis("Bar Plots") if callable(_vis) else current_centre_tab(ctx.app) == "Bar Plots":
+    if is_tab_visible(ctx, "Bar Plots"):
         redraw_bars(ctx)
 
 

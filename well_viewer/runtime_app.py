@@ -1032,11 +1032,11 @@ class WellViewerApp(QWidget):
 
     # ── Bar plot tab ──────────────────────────────────────────────────────────
 
-    def _current_centre_tab(self) -> str: return current_centre_tab(self)
+    def _current_centre_tab(self) -> str: return current_centre_tab(self._ctx)
 
-    def _visible_centre_tabs(self) -> "set[str]": return visible_centre_tabs(self)
+    def _visible_centre_tabs(self) -> "set[str]": return visible_centre_tabs(self._ctx)
 
-    def _is_tab_visible(self, name: str) -> bool: return is_tab_visible(self, name)
+    def _is_tab_visible(self, name: str) -> bool: return is_tab_visible(self._ctx, name)
 
 
     def _sync_heatmap_well_drag_mode(self, enable: bool) -> None: return sync_heatmap_well_drag_mode(self, enable)

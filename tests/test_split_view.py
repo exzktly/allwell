@@ -108,6 +108,10 @@ def _split_app(*, install=True):
     top = QWidget()
     QHBoxLayout(top)
     app._top_bar = top
+    # tab_controller's current_centre_tab/visible_centre_tabs/is_tab_visible take
+    # ctx now (A8) and unwrap ctx.app; give the double a ctx pointing back to it.
+    from types import SimpleNamespace
+    app._ctx = SimpleNamespace(app=app)
     if install:
         sv.install_split_view(app)
     return app, st, widgets
@@ -122,8 +126,8 @@ def test_not_installed_is_single_tab():
     assert tc.split_visible_provider is None
     assert tc.split_focus_provider is None
     assert getattr(app, "_split_toggle_btn", None) is None
-    assert tc.visible_centre_tabs(app) == {tc.current_centre_tab(app)}
-    assert len(tc.visible_centre_tabs(app)) == 1
+    assert tc.visible_centre_tabs(app._ctx) == {tc.current_centre_tab(app._ctx)}
+    assert len(tc.visible_centre_tabs(app._ctx)) == 1
 
 
 def test_install_registers_hooks_and_widgets():
@@ -147,9 +151,9 @@ def test_enter_split_reparents_and_reports_both_panes():
     assert app._split_active is True
     assert app._split_pane.count() == 2
     assert st.pageNames() == ["Statistics"]          # the two panes detached
-    assert tc.visible_centre_tabs(app) == {"Plotting", "Saved Plots"}
-    assert tc.is_tab_visible(app, "Saved Plots")
-    assert tc.current_centre_tab(app) == "Plotting"  # pane A is focused
+    assert tc.visible_centre_tabs(app._ctx) == {"Plotting", "Saved Plots"}
+    assert tc.is_tab_visible(app._ctx, "Saved Plots")
+    assert tc.current_centre_tab(app._ctx) == "Plotting"  # pane A is focused
 
 
 def test_exit_split_restores_notebook_order():
@@ -180,10 +184,10 @@ def test_focus_split_switches_focused_pane():
 
     app, _, _ = _split_app()
     sv.enter_split(app, "Plotting", "Saved Plots")
-    assert tc.current_centre_tab(app) == "Plotting"
+    assert tc.current_centre_tab(app._ctx) == "Plotting"
     sv.focus_split(app, "Saved Plots")
     assert app._split_focused == "Saved Plots"
-    assert tc.current_centre_tab(app) == "Saved Plots"
+    assert tc.current_centre_tab(app._ctx) == "Saved Plots"
 
 
 # ── Full-app integration (real WellViewerApp via the loaded_app fixture) ──────
@@ -205,7 +209,7 @@ def test_real_app_enter_exit_split(loaded_app):
 
     assert app._split_active is True
     assert app._split_pane.count() == 2
-    visible = tc.visible_centre_tabs(app)
+    visible = tc.visible_centre_tabs(app._ctx)
     assert "Statistics" in visible
     assert visible & _PLOT_LEAVES               # Plotting resolved to a plot leaf
     assert app._current_centre_tab() in _PLOT_LEAVES  # pane A focused

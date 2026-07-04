@@ -64,7 +64,7 @@ def _plate_passive_in_group_mode(app) -> bool:
         return False
     try:
         from well_viewer.core.tab_controller import visible_centre_tabs
-        visible = set(visible_centre_tabs(app)) or {_active_tab(app)}
+        visible = set(visible_centre_tabs(app._ctx)) or {_active_tab(app)}
     except Exception:
         visible = {_active_tab(app)}
     return not any(_is_well_editing_tab(app, t) for t in visible)
@@ -626,7 +626,7 @@ def refresh_sidebar_map_now(app) -> None:
     # the current leaf, so behaviour is unchanged.
     try:
         from well_viewer.core.tab_controller import visible_centre_tabs
-        visible = set(visible_centre_tabs(app)) or {tab_name}
+        visible = set(visible_centre_tabs(app._ctx)) or {tab_name}
     except Exception:
         visible = {tab_name}
     smfish = bool(visible) and all(_is_single_well_tab(app, t) for t in visible)

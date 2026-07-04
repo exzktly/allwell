@@ -337,7 +337,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              well labels / notes never re-hydrated. Convert the fn to ctx
 #              (ctx.state + invalidate_stats_cache(ctx)); the lone _apply_unified_
 #              state(ctx.app, block) bridge is the +1.
-CTX_APP_BUDGET = 92
+#   92 -> 90    tab_controller current_centre_tab / visible_centre_tabs /
+#              is_tab_visible take ctx (unwrap ctx.app once at the core boundary;
+#              app-method delegators pass self._ctx, core callers bridge via
+#              app._ctx). barplot toggle_fov_replicates + lineplot toggle_sem
+#              drop their ctx.app tab-visibility probes for is_tab_visible(ctx);
+#              also fixes cell_browser controller which already passed ctx to the
+#              app-typed is_tab_visible (always-False bug).
+CTX_APP_BUDGET = 90
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

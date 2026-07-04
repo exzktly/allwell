@@ -197,7 +197,7 @@ def _resolve_leaf(app, top: str) -> str:
     return top
 
 
-def current_centre_tab(app) -> str:
+def current_centre_tab(ctx) -> str:
     """Return the effective current (focused) leaf tab name.
 
     When the "Plotting" top-level tab is active the real content lives in a
@@ -211,7 +211,11 @@ def current_centre_tab(app) -> str:
     "current" tab is the *focused* pane's leaf so sidebar / per-tab dispatch
     follow whichever pane the user last clicked — supplied by
     ``split_focus_provider`` (installed by ``split_view``; ``None`` otherwise).
+
+    A8: takes ``ctx`` so features name the tab state without the god-object; the
+    body drives the app's notebook widget, so it unwraps the handle once here.
     """
+    app = ctx.app
     if split_focus_provider is not None:
         leaf = split_focus_provider(app)
         if leaf:
@@ -226,25 +230,26 @@ def current_centre_tab(app) -> str:
     return _resolve_leaf(app, tab)
 
 
-def visible_centre_tabs(app) -> "set[str]":
+def visible_centre_tabs(ctx) -> "set[str]":
     """Leaf names of every centre tab currently on screen.
 
-    Normally ``{current_centre_tab(app)}``. When ``split_visible_provider`` is
+    Normally ``{current_centre_tab(ctx)}``. When ``split_visible_provider`` is
     installed (Split View) it returns both panes' leaves, so live-refresh fan-out
     (selection / channel / plot options) updates both panes even when only one is
     focused.
     """
+    app = ctx.app
     if split_visible_provider is not None:
         tabs = split_visible_provider(app)
         if tabs:
             return set(tabs)
-    cur = current_centre_tab(app)
+    cur = current_centre_tab(ctx)
     return {cur} if cur else set()
 
 
-def is_tab_visible(app, name: str) -> bool:
+def is_tab_visible(ctx, name: str) -> bool:
     """True when *name* (a leaf tab) is currently on screen in either pane."""
-    return name in visible_centre_tabs(app)
+    return name in visible_centre_tabs(ctx)
 
 
 def sync_heatmap_well_drag_mode(app, enable: bool) -> None:

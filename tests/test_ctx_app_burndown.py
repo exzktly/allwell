@@ -521,7 +521,23 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              reach; the two get_section/set_section unwraps are gone. (read/write/
 #              path_for/delete have no external callers; delete's 3 test callers +
 #              the crop_region/plot_groups fake ctx now pass state.)
-CTX_APP_BUDGET = 27
+#   27 -> 26   E6 final honest wins: -1   refresh_heatmap_aggregation_options
+#              (core/channel_state_controller) dropped its ctx.app unwrap: the
+#              heatmap metric combo is already registered (heatmap/tab_view
+#              reg.register("_heatmap_metric_cb", ...)) so it reads via
+#              ctx.widgets, and the active-metric check reads ctx.state.channel
+#              instead of app._app_state.channel. Pure widget-registry + typed-
+#              state conversion, no god-object behaviour. Remaining 26 are the
+#              irreducible floor: core/domain single-handle boundary unwraps that
+#              pass app to behaviour (redraw/set_active_channel/split providers/
+#              _refresh_sidebar_map/fold-change combos), sanctioned persistence
+#              widget/state unwraps (view_state/cell_gating/sample_definitions/
+#              heatmap_layouts apply_persisted_settings — the last writes loose
+#              app._heatmap_* stamps so registering the combos is net-0), and the
+#              feature->god-method bridges (smfish/registry/image_browser/
+#              saved_plots/review_image/cell_gating quick-edit/batch_export) which
+#              net-ADD if converted piecemeal.
+CTX_APP_BUDGET = 26
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

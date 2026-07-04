@@ -653,16 +653,16 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
     user picks Total / Max / Min / Std / smFISH Count, those options
     disable so they're not silently misapplied.
 
-    A8: takes ``ctx``; reads the app's heatmap metric combo, unwrapped once here.
+    A8: takes ``ctx``; the heatmap metric combo comes from ``ctx.widgets`` and
+    the active metric from typed state, so it names no god-object.
     """
-    app = ctx.app
-    cb = getattr(app, "_heatmap_metric_cb", None)
+    cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     if cb is None:
         return
     from well_viewer.features.heatmap.controller import (
         METRIC_MEAN, METRIC_FRACTION,
     )
-    is_mfi = app._app_state.channel.active_metric == "mean_intensity"
+    is_mfi = ctx.state.channel.active_metric == "mean_intensity"
     model = cb.model()
     if model is None:
         return

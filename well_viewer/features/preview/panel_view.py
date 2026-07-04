@@ -348,27 +348,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # (ForbiddenCursor when remove-cell mode is active).
     self._apply_review_image_cursor()
 
-
-def refresh_fov_btn_state(ctx) -> None:
-    """Sync every per-FOV toggle button's text/variant state."""
-    is_on = bool(ctx.state.plot.use_fov_replicates)
-    text = "FOV ✓" if is_on else "FOV"
-    variant = "toggle_active" if is_on else "toggle"
-    tooltip = (
-        "Compute error bands across per-FOV means.\n"
-        "With replicate sets active, FOVs are pooled across all wells in each set;\n"
-        "otherwise FOVs are pooled within each well. Pairs with the SEM/SD toggle."
-    )
-    for btn in list(ctx.runtime.fov.btns or []):
-        btn.setEnabled(True)
-        btn.setText(text)
-        btn.setToolTip(tooltip)
-        btn.setProperty("variant", variant)
-        btn.style().unpolish(btn)
-        btn.style().polish(btn)
-    for obs in list(ctx.runtime.fov.observers or []):
-        try:
-            obs(is_on)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+# ``refresh_fov_btn_state`` moved to ``well_viewer.core.plot_toggles`` (A8
+# enabler E3) alongside the SEM/FOV toggles it pairs with, so any feature can
+# refresh the shared per-FOV button bank through ctx with a core import.
 

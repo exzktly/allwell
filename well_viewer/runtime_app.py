@@ -181,12 +181,11 @@ redraw_scatter_orchestrate = _lazy("well_viewer.features.scatter.controller", "r
 stats_refresh_map = _lazy("well_viewer.features.stats.controller", "stats_refresh_map")
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.selection_controller import labels_apply_affix
-toggle_fov_replicates, update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("well_viewer.features.barplot.controller", "toggle_fov_replicates", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
+update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("well_viewer.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
 from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
 from well_viewer.features.export.service import export_scatter_agg_data
 from well_viewer.features.export.style import open_export_style_panel
 rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded, well_display_label = _lazy_names("well_viewer.features.grouping.controller", "rep_refresh_map", "rep_add", "rep_quick_pairs_from_dropdowns", "rank_color_wells", "rank_color_rset", "rep_color_for", "replicate_display_label", "rep_sets_loaded", "well_display_label")
-toggle_sem = _lazy("well_viewer.features.lineplot.controller", "toggle_sem")
 from well_viewer.core.load_controller import load_path_shim
 from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
 from well_viewer.features.preview.controller import refresh_preview_picker_shim, sync_preview_well_for_image_tabs
@@ -200,7 +199,7 @@ from well_viewer.core import tab_controller as _tabctl
 from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks, apply_sidebar_visibility, toggle_sidebar, visible_centre_tabs, is_tab_visible
 from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
-from well_viewer.features.preview.panel_view import refresh_fov_btn_state
+from well_viewer.core.plot_toggles import toggle_sem, toggle_fov_replicates, refresh_fov_btn_state
 
 
 def teardown_review_pane(app) -> None:

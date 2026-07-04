@@ -64,7 +64,14 @@ FEATURE_PREFIX = "well_viewer.features"
 # ``features.preview.panel_view`` through a function-local import — the
 # sanctioned escape hatch for a core module invoking a feature UI side-effect
 # without naming the god-object.
-MAX_DEFERRED_FEATURE_IMPORTS = 131
+# Lowered to 128 in the E3 shared-plot-toggle relocation: toggle_sem /
+# toggle_fov_replicates / refresh_fov_btn_state moved into core.plot_toggles,
+# which reaches the bar renderer + bar-layout refresh through core.lazy proxies
+# (a call, not an import statement) rather than the two function-local
+# ``from features.barplot...`` imports the toggles used to carry; and
+# invalidate_stats_cache's per-FOV refresh import now targets core.plot_toggles
+# instead of features.preview — three deferred feature imports removed.
+MAX_DEFERRED_FEATURE_IMPORTS = 128
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

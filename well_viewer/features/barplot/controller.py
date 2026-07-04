@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from well_viewer.domain.selections_model import well_display_label, active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.core.plot_orchestrator import redraw_app
-from well_viewer.core.tab_controller import is_tab_visible
-from well_viewer.features.preview.panel_view import refresh_fov_btn_state
-from well_viewer.core.selection_controller import invalidate_stats_cache
 
 import logging
 import math
@@ -552,16 +548,11 @@ def bar_well_display_label(ctx, lbl: str) -> str:
 
 
 
-def toggle_fov_replicates(ctx) -> None:
-    from well_viewer.features.barplot.renderer import redraw_bars
-    ctx.state.plot.toggle_fov_replicates()
-    invalidate_stats_cache(ctx)
-    refresh_fov_btn_state(ctx)
-    refresh_bar_layout_btn_state(ctx)
-    redraw_app(ctx)
-    # Split View: redraw the bar pane whenever it is on screen, even if unfocused.
-    if is_tab_visible(ctx, "Bar Plots"):
-        redraw_bars(ctx)
+# ``toggle_fov_replicates`` moved to ``well_viewer.core.plot_toggles`` (A8
+# enabler E3): it drives an app-global control shared by the plot tabs and the
+# batch-export inline row, so it lives in core where any feature can call it
+# through ctx. Its bar-renderer / bar-layout wiring is reached there via
+# core.lazy proxies to keep core feature-import-free.
 
 
 def toggle_bar_group_mode(ctx) -> None:

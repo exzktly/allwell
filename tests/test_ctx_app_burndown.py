@@ -442,7 +442,20 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              viewer(ctx, ...)). The app-native _open_scatter_cell_viewer shim
 #              stays (test_scatter_cell_viewer_dock drives it) but now threads
 #              self._ctx, not self.
-CTX_APP_BUDGET = 44
+#   E3 relocate shared plot toggles: -1   toggle_sem / toggle_fov_replicates /
+#              refresh_fov_btn_state moved from the lineplot/barplot/preview
+#              feature modules into the new core.plot_toggles (ctx-native over
+#              ctx.state.plot + ctx.runtime.sem/fov; the bar-renderer/bar-layout
+#              wiring reached via core.lazy proxies so core imports no feature at
+#              load time). batch_export's _build_spread_row now takes ctx and calls
+#              the toggles directly (a core import, not a banned cross-feature one),
+#              dropping its ctx.app at the call site. _show_batch_mode stays an app
+#              bridge: it constructs the batch panels, which take the WellViewerApp
+#              god-object, so converting it would relocate (not remove) the god-
+#              object reach and net-add ctx.app. Also drops 3 deferred feature
+#              imports (the two redraw_bars function-locals + selection_controller's
+#              preview import become core/lazy references).
+CTX_APP_BUDGET = 43
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

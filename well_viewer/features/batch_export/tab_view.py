@@ -9,6 +9,13 @@ from well_viewer.features.batch_export import (
     BarBatchExportPanel,
     ScatterBatchExportPanel,
 )
+# Shared plot toggles now live in core (A8 enabler E3), so this feature can drive
+# the SEM/SD + per-FOV controls through ctx without a cross-feature import.
+from well_viewer.core.plot_toggles import (
+    toggle_sem,
+    toggle_fov_replicates,
+    refresh_fov_btn_state,
+)
 
 
 def _refresh_mode_buttons(app, mode: str) -> None:
@@ -26,14 +33,14 @@ def _refresh_mode_buttons(app, mode: str) -> None:
         sc.blockSignals(blocked)
 
 
-def _build_spread_row(app, parent: QWidget) -> QWidget:
+def _build_spread_row(ctx, parent: QWidget) -> QWidget:
     """Build the Error Band (SEM/SD) + per-FOV-spread toggle row.
 
-    The buttons register into the same ``app._sem_btns`` / ``app._fov_btns``
-    lists used by the matplotlib toolbars, so toggling here propagates
-    everywhere and the visuals stay in sync. The line/bar batch panels read
-    ``app._app_state.plot.use_sem`` / ``app._use_fov_spread_active()`` directly, so toggling
-    these immediately changes what the next "Generate" produces.
+    The buttons register into the same ``ctx.runtime.sem.btns`` /
+    ``ctx.runtime.fov.btns`` banks used by the matplotlib toolbars, so toggling
+    here propagates everywhere and the visuals stay in sync. The line/bar batch
+    panels read ``ctx.state.plot.use_sem`` / the per-FOV flag directly, so
+    toggling these immediately changes what the next "Generate" produces.
     """
     row = QWidget(parent)
     rl = QHBoxLayout(row)
@@ -44,7 +51,7 @@ def _build_spread_row(app, parent: QWidget) -> QWidget:
     eb_lbl.setObjectName("Muted")
     rl.addWidget(eb_lbl)
 
-    initial_sem = bool(app._app_state.plot.use_sem)
+    initial_sem = bool(ctx.state.plot.use_sem)
     sem_btn = QPushButton("SEM" if initial_sem else "SD", row)
     sem_btn.setProperty("variant", "sem" if initial_sem else "sem_warn")
     sem_btn.setToolTip(
@@ -52,13 +59,13 @@ def _build_spread_row(app, parent: QWidget) -> QWidget:
         "SEM (Standard Error of the Mean) and SD (Standard Deviation).\n"
         "Mirrors the SEM/SD toggle in the plot toolbars."
     )
-    sem_btn.clicked.connect(lambda _=False: app._toggle_sem())
+    sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
     rl.addWidget(sem_btn)
-    if not hasattr(app, "_sem_btns") or app._sem_btns is None:
-        app._sem_btns = []
-    app._sem_btns.append(sem_btn)
-    if not getattr(app, "_sem_btn", None):
-        app._sem_btn = sem_btn
+    if ctx.runtime.sem.btns is None:
+        ctx.runtime.sem.btns = []
+    ctx.runtime.sem.btns.append(sem_btn)
+    if not ctx.runtime.sem.btn:
+        ctx.runtime.sem.btn = sem_btn
 
     spread_lbl = QLabel("  Per-FOV points:", row)
     spread_lbl.setObjectName("Muted")
@@ -66,15 +73,14 @@ def _build_spread_row(app, parent: QWidget) -> QWidget:
 
     fov_btn = QPushButton("FOV", row)
     fov_btn.setProperty("variant", "toggle")
-    fov_btn.clicked.connect(lambda _=False: app._toggle_fov_replicates())
+    fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
     rl.addWidget(fov_btn)
-    if not hasattr(app, "_fov_btns") or app._fov_btns is None:
-        app._fov_btns = []
-    app._fov_btns.append(fov_btn)
-    if not getattr(app, "_fov_btn", None):
-        app._fov_btn = fov_btn
-    if hasattr(app, "_refresh_fov_btn_state"):
-        app._refresh_fov_btn_state()
+    if ctx.runtime.fov.btns is None:
+        ctx.runtime.fov.btns = []
+    ctx.runtime.fov.btns.append(fov_btn)
+    if not ctx.runtime.fov.btn:
+        ctx.runtime.fov.btn = fov_btn
+    refresh_fov_btn_state(ctx)
 
     rl.addStretch(1)
     return row
@@ -171,7 +177,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     # Error-Band / per-FOV row — beneath the chart-type selector, and only
     # shown for the line/bar modes it actually affects (toggled in
     # ``_show_batch_mode``).
-    band_row = _build_spread_row(ctx.app, parent)
+    band_row = _build_spread_row(ctx, parent)
     layout.addWidget(band_row)
 
     host = QWidget(parent)

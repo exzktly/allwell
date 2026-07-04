@@ -20,7 +20,6 @@ from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates, get_thresh_frac_on,
 )
-from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.data.data_loading import get_rows
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
@@ -702,28 +701,7 @@ def on_fig_click(ctx, event) -> None:
     state = "shown" if legend_visible[key] else "hidden"
     ctx.set_status(f"Legend for '{key}' plot {state}  (right-click to toggle)")
 
-
-def toggle_sem(ctx) -> None:
-    invalidate_stats_cache(ctx)
-    is_sem = ctx.state.plot.toggle_sem()
-    text = "SEM" if is_sem else "SD"
-    variant = "sem" if is_sem else "sem_warn"
-    for btn in list(ctx.runtime.sem.btns or []):
-        btn.setText(text)
-        btn.setProperty("variant", variant)
-        btn.style().unpolish(btn)
-        btn.style().polish(btn)
-    for obs in list(ctx.runtime.sem.observers or []):
-        try:
-            obs(is_sem)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    from well_viewer.core.plot_orchestrator import redraw_app
-    from well_viewer.core.tab_controller import is_tab_visible
-    redraw_app(ctx)
-    # Redraw the bar pane too whenever it is on screen — in Split View it can be
-    # visible alongside another pane without being the focused tab.
-    if is_tab_visible(ctx, "Bar Plots"):
-        from well_viewer.features.barplot.renderer import redraw_bars
-        redraw_bars(ctx)
+# ``toggle_sem`` moved to ``well_viewer.core.plot_toggles`` (A8 enabler E3) so
+# non-plot features (batch-export's inline Error-Band row) can drive the SEM/SD
+# toggle through ctx without a cross-feature import.
 

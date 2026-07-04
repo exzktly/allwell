@@ -961,7 +961,7 @@ def invalidate_stats_cache(ctx) -> None:
     ctx.state.stats_cache.invalidate()
     # Replicate-set visibility may have shifted, so re-check whether the
     # per-FOV toggle is still applicable. Cheap; only walks the FOV btn bank.
-    from well_viewer.features.preview.panel_view import refresh_fov_btn_state
+    from well_viewer.core.plot_toggles import refresh_fov_btn_state
     refresh_fov_btn_state(ctx)
     # Cell gating writes new ``Included`` flags onto cached rows, which
     # the Review Image include map mirrors. Bumping the version key

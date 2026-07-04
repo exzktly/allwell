@@ -23,6 +23,7 @@ from well_viewer.core.ui_helpers import btn_primary, btn_secondary
 from well_viewer.features.grouping.label_grid_view import build_label_grid
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.selection_controller import update_active_group_label
+from well_viewer.core.selection_controller import groups_centre_refresh
 from well_viewer.core.safe import swallowed
 
 
@@ -46,7 +47,7 @@ class _NotesEdit(QPlainTextEdit):
             swallowed()  # was: pass (silent except)
 
 
-def build_replicate_panel(app, parent: QWidget) -> None:
+def build_replicate_panel(ctx, parent: QWidget) -> None:
     """Sample-Definitions LEFT sidebar: the plate map only.
 
     The GROUPS panel (header + Quick Replicates + SavedSelectionsList +
@@ -69,7 +70,7 @@ def build_replicate_panel(app, parent: QWidget) -> None:
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    plate.setWellTooltipProvider(well_plate_tooltip_provider(app._ctx))
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
     # The plate is the only widget in this sidebar now — give it room to
     # expand vertically with the column. heightForWidth keeps the aspect.
     plate.setMinimumHeight(280)
@@ -82,7 +83,7 @@ def build_replicate_panel(app, parent: QWidget) -> None:
     plate.setSizePolicy(sp)
     layout.addWidget(plate, 0)
     layout.addStretch(1)
-    app._rep_map_plate = app._ctx.widgets.register("_rep_map_plate", plate)
+    ctx.widgets.register("_rep_map_plate", plate)
 
     def _commit_plate_to_current(*_a) -> None:
         # Well-membership edits should only land while the user is on the
@@ -92,41 +93,44 @@ def build_replicate_panel(app, parent: QWidget) -> None:
         # refresh ticks) and silently rewrite the current group's
         # composition — exactly the "wells get reassigned even though I'm
         # not on the Groups tab" bug. Guard against it here.
-        sub_tabs = getattr(app, "_sample_definitions_subtabs", None)
+        sub_tabs = getattr(ctx.window, "_sample_definitions_subtabs", None)
         if sub_tabs is not None:
             try:
                 if sub_tabs.tabText(sub_tabs.currentIndex()) != "Groups":
                     return
             except Exception:
                 swallowed()  # was: pass (silent except)
-        sid = app._app_state.selection.current_selection_id
-        sel = app._sel_by_id(sid) if sid else None
+        sid = ctx.state.selection.current_selection_id
+        sel = ctx.window._sel_by_id(sid) if sid else None
         if sel is None:
-            app._rep_refresh_map()      # no current selection — revert the click
+            from well_viewer.features.grouping.controller import rep_refresh_map
+            rep_refresh_map(ctx)        # no current selection — revert the click
             return
-        new = sorted((w for w in plate.selectedWellIds() if w in app._app_state.dataset.well_paths),
-                     key=app._parse_rc)
-        old = sorted((w for w in (sel.get("wells") or []) if w in app._app_state.dataset.well_paths),
-                     key=app._parse_rc)
+        well_paths = ctx.state.dataset.well_paths
+        new = sorted((w for w in plate.selectedWellIds() if w in well_paths),
+                     key=ctx.window._parse_rc)
+        old = sorted((w for w in (sel.get("wells") or []) if w in well_paths),
+                     key=ctx.window._parse_rc)
         if new == old:
             return
         # _sel_set_composition enforces well-exclusivity (the current group wins)
         # and runs _rebuild_all(), which re-pushes the plate via _rep_refresh_map.
-        app._sel_set_composition(sid, new)
+        ctx.window._sel_set_composition(sid, new)
     # selectionDragFinished fires once per click *and* once at the end of a drag.
     plate.selectionDragFinished.connect(_commit_plate_to_current)
 
 
-def build_replicate_groups_centre(app, parent: QWidget) -> None:
+def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     """Sample-Definitions CENTRE — Groups sub-tab.
 
     Hoists the legacy "below the plate" GROUPS chrome out of the sidebar.
     Contents (top → bottom):
       - GROUPS header with Clear-all / + Add buttons
       - Quick Replicates row (Pair + Order dropdowns + Apply button)
-      - SavedSelectionsList (composable) over ``app._app_state.selection.selections``
+      - SavedSelectionsList (composable) over ``ctx.state.selection.selections``
       - 1-line usage hint
     """
+    app = ctx.window
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -188,28 +192,28 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
         f"letter-spacing: 0.08em; font-weight: 600;"
     )
     active_l.addWidget(active_caption)
-    app._rep_active_group_lbl = app._ctx.widgets.register(
+    active_lbl = ctx.widgets.register(
         "_rep_active_group_lbl",
         QLabel("None selected — click a group below to start", active_row))
-    app._rep_active_group_lbl.setObjectName("ActiveGroupValue")
-    app._rep_active_group_lbl.setStyleSheet(
+    active_lbl.setObjectName("ActiveGroupValue")
+    active_lbl.setStyleSheet(
         f"QLabel#ActiveGroupValue {{ "
         f"color: {_theme.Colors.text_secondary}; "
         f"font-size: {_theme.Typography.small_size}px; "
         f"font-weight: 600; }}"
     )
-    active_l.addWidget(app._rep_active_group_lbl)
+    active_l.addWidget(active_lbl)
     active_l.addStretch(1)
     layout.addWidget(active_row)
 
     # The groups card-list — a widgets.SavedSelectionsList (composable)
-    # over app._app_state.selection.selections.
+    # over ctx.state.selection.selections.
     from widgets.saved_selections_list import SavedSelectionsList
     from well_viewer.features.grouping.tab_view import wire_selections_list as _wire
-    app._rep_list = app._ctx.widgets.register("_rep_list", SavedSelectionsList(parent))
-    app._rep_list.setComposable(True)
-    layout.addWidget(app._rep_list, 1)
-    _wire(app, app._rep_list)
+    rep_list = ctx.widgets.register("_rep_list", SavedSelectionsList(parent))
+    rep_list.setComposable(True)
+    layout.addWidget(rep_list, 1)
+    _wire(app, rep_list)
 
     hint = QLabel(
         "Click a group above to make it the ACTIVE group — its row "
@@ -224,7 +228,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     layout.addWidget(hint)
 
 
-def build_sample_definitions_centre(app, parent: QWidget) -> None:
+def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     """Centre panel for the Sample Definitions tab.
 
     Layout:
@@ -232,6 +236,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
       - sub-tabs: Groups / Well Labels / Ratios / Cell Gating (lazy-built
         on first open) / Notes
     """
+    app = ctx.window
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
         QFrame as _QFrame,
@@ -311,7 +316,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     # can stay full-aspect.
     groups_tab = _QWidget(sub_tabs)
     _QVBoxLayout(groups_tab).setContentsMargins(12, 12, 12, 12)
-    build_replicate_groups_centre(app, groups_tab)
+    build_replicate_groups_centre(ctx, groups_tab)
     sub_tabs.addTab(groups_tab, "Groups")
 
     # Sub-tab 1: Well Labels only
@@ -348,32 +353,32 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     # Register the Notes editor so the ctx-native sample-definitions loader
     # (persistence._apply_unified_state) writes migrated notes back through
     # ctx.widgets; register() also stamps app._notes_edit for the legacy readers.
-    notes_edit = app._ctx.widgets.register("_notes_edit", _NotesEdit(notes_tab, app._notes_schedule_save))
+    notes_edit = ctx.widgets.register("_notes_edit", _NotesEdit(notes_tab, app._notes_schedule_save))
     notes_edit.setPlaceholderText("Project notes…")
-    notes_edit.setPlainText(app._app_state.selection.notes_text or "")
+    notes_edit.setPlainText(ctx.state.selection.notes_text or "")
     nl.addWidget(notes_edit, 1)
     sub_tabs.addTab(notes_tab, "Notes")
 
     def _on_sample_def_subtab(idx: int) -> None:
         name = sub_tabs.tabText(idx)
         if name == "Cell Gating":
-            build_cell_gating_subtab(app._ctx)
-            cell_gating_sync_scatter_gates(app._ctx)
+            build_cell_gating_subtab(ctx)
+            cell_gating_sync_scatter_gates(ctx)
         if name == "Pipeline Info" and hasattr(app, "_pipeline_info_refresh"):
             app._pipeline_info_refresh()      # re-read in case the dataset changed
         # Entering the Groups sub-tab deselects any previously-active
         # group so a click on the sidebar plate has no consequence
         # until the user explicitly picks one. The active-group banner
         # built by ``build_replicate_groups_centre`` updates via
-        # ``_groups_centre_refresh``.
+        # ``groups_centre_refresh``.
         if name == "Groups":
-            if app._app_state.selection.current_selection_id is not None:
-                app._app_state.selection.current_selection_id = None
-                app._groups_centre_refresh()
-                app._refresh_sidebar_map()
-            if hasattr(app, "_rep_active_group_lbl"):
-                update_active_group_label(app._ctx)
+            if ctx.state.selection.current_selection_id is not None:
+                ctx.state.selection.current_selection_id = None
+                groups_centre_refresh(ctx)
+                ctx.refresh_sidebar_map()
+            if ctx.widgets.has("_rep_active_group_lbl"):
+                update_active_group_label(ctx)
     sub_tabs.currentChanged.connect(_on_sample_def_subtab)
     # Cell Gating leads and is the default tab, so build it now (currentChanged
     # won't fire for the already-current index 0).
-    build_cell_gating_subtab(app._ctx)
+    build_cell_gating_subtab(ctx)

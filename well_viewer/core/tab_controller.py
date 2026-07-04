@@ -149,19 +149,16 @@ def image_browser_subtab_app_bridge(
 
 
 def build_sample_definitions_app_bridge(ctx, frame) -> None:
-    """Build the Sample Definitions centre tab through one ctx→app seam.
+    """Build the Sample Definitions centre tab.
 
-    The centre builder + its whole sub-builder tree (Groups / Well Labels /
-    Ratios / Pipeline Info / Notes) are app-native — they stamp the
-    ``app._rep_*`` / ``app._sel_*`` widgets and wire the
-    ``_clear_sample_definitions_all`` / ``_groups_centre_refresh`` /
-    ``_refresh_sidebar_map`` god-methods. Rather than name that god-object from
-    the feature-layer registry, the registry calls this single core bridge, which
-    performs the lone god-object unwrap for the whole tab build. The feature
-    builder is reached via a ``lazy(...)`` proxy so this core module names no
-    feature at import time.
+    The centre builder is ctx-native: it threads ``ctx`` through its Groups /
+    Well Labels / Ratios / Pipeline Info / Notes sub-builders, registers its
+    widgets through ``ctx.widgets`` and reaches the remaining app-bound
+    ``_rep_*`` / ``_sel_*`` mutators through ``ctx.window``. The registry calls
+    this core bridge (reached via a ``lazy(...)`` proxy) so the feature builder
+    is not named at this core module's import time.
     """
-    _build_sample_definitions_centre(ctx.app, frame)
+    _build_sample_definitions_centre(ctx, frame)
 
 
 def on_notebook_current_changed(app, _idx) -> None:

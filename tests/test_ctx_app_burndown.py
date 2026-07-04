@@ -581,7 +581,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              same _features / _load_gating_from_pipeline_info / _seg_channel_token
 #              app machinery noted above, so threading ctx is net-0 (a reported
 #              floor bridge — see D1).
-CTX_APP_BUDGET = 21
+#   D-core ui_helpers band controls: -1   make_band_controls (the shared SEM/SD
+#              + FOV toggle widget) is fully ctx-native: reads the SEM flag off
+#              ctx.state.plot, wires the ctx-native core.plot_toggles handlers
+#              (toggle_sem/toggle_fov_replicates/refresh_fov_btn_state from E3),
+#              and registers the buttons on ctx.runtime.sem/fov banks (mirrors the
+#              batch-export controls row). Its lone core-boundary unwrap is gone.
+CTX_APP_BUDGET = 20
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -558,9 +558,15 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     (``_refresh_fov_btn_state``). Used both by :func:`attach_plot_toolbar` (legacy
     toolbar) and by the v2 ``PlotCard`` controls row.
 
-    A8: takes ``ctx``; the SEM/FOV buttons register onto app-level banks and wire
-    app toggles, so it unwraps the handle once at this core boundary."""
-    app = ctx.app
+    A8: fully ctx-native — reads the SEM flag off ``ctx.state.plot``, wires the
+    ctx-native ``core.plot_toggles`` handlers, and registers the buttons on the
+    ``ctx.runtime.sem`` / ``ctx.runtime.fov`` banks (mirrors the batch-export
+    controls row)."""
+    from well_viewer.core.plot_toggles import (
+        refresh_fov_btn_state,
+        toggle_fov_replicates,
+        toggle_sem,
+    )
     w = QWidget(parent)
     h = QHBoxLayout(w)
     h.setContentsMargins(0, 0, 0, 0)
@@ -569,16 +575,16 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     eb_lbl = QLabel("Error Band", w)
     eb_lbl.setObjectName("Muted")
     h.addWidget(eb_lbl)
-    initial = bool(app._app_state.plot.use_sem)
+    initial = bool(ctx.state.plot.use_sem)
     sem_btn = QPushButton("SEM" if initial else "SD", w)
     sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
-    sem_btn.clicked.connect(lambda _=False: app._toggle_sem())
+    sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
     h.addWidget(sem_btn)
-    if not getattr(app, "_sem_btns", None):
-        app._sem_btns = []
-    app._sem_btns.append(sem_btn)
-    if not getattr(app, "_sem_btn", None):
-        app._sem_btn = sem_btn
+    if ctx.runtime.sem.btns is None:
+        ctx.runtime.sem.btns = []
+    ctx.runtime.sem.btns.append(sem_btn)
+    if not ctx.runtime.sem.btn:
+        ctx.runtime.sem.btn = sem_btn
 
     if with_fov:
         sp_lbl = QLabel("Spread", w)
@@ -586,18 +592,14 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
         h.addWidget(sp_lbl)
         fov_btn = QPushButton("FOV", w)
         fov_btn.setProperty("variant", "toggle")
-        fov_btn.clicked.connect(lambda _=False: app._toggle_fov_replicates())
+        fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
         h.addWidget(fov_btn)
-        if not getattr(app, "_fov_btns", None):
-            app._fov_btns = []
-        app._fov_btns.append(fov_btn)
-        if not getattr(app, "_fov_btn", None):
-            app._fov_btn = fov_btn
-        if hasattr(app, "_refresh_fov_btn_state"):
-            try:
-                app._refresh_fov_btn_state()
-            except Exception:
-                swallowed()  # was: pass (silent except)
+        if ctx.runtime.fov.btns is None:
+            ctx.runtime.fov.btns = []
+        ctx.runtime.fov.btns.append(fov_btn)
+        if not ctx.runtime.fov.btn:
+            ctx.runtime.fov.btn = fov_btn
+        refresh_fov_btn_state(ctx)
 
     h.addStretch(1)
     return w

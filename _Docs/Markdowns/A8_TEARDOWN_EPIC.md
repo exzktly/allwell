@@ -348,13 +348,26 @@ clears it. None falls to a piecemeal conversion (all measured net-0/net-add).
 | 1 | `core/channel_state_controller.py:64` | `recalculate_threshold` seam — `app._get_rows` + the `_features` `on_channel_changed` hook (bundled, D-thresh). Clears with **feature-registry ctx-home**. |
 | 1 | `core/channel_state_controller.py:949` | `set_thresh_frac_on` seam — lazy-tab `_centre_build_pending` + loose `_cell_gating_thresh_frac_edits`. Clears with **cell-gating edits-dict → typed state**. |
 | 1 | `core/selection_controller.py:828` | `set_selected_wells` → `_refresh_sidebar_map`/`on_plate_sel_change` bottom into `_is_single_well_tab`(`app._features`). **feature-registry ctx-home.** |
-| 4 | `core/tab_controller.py:138,164,290,313` | The D5/D6 image-browser + sample-def bundled core seams + split-focus/visible providers (take `app` by installed-callable contract). Clear as their god-service trees convert. |
+| 2 | `core/tab_controller.py:138,164` | The D5/D6 image-browser + sample-def bundled core seams. Clear as their god-service trees convert. (The split-focus/visible providers at :290/313 were cleared → `ctx.window`/`ctx.runtime.split`, commit `d91543f`.) |
 | 1 | `domain/fold_change_controls.py:331` | `install_fold_change_controls` → `_ControlCombo`/`_repopulate_*` take `app`. Own conversion pass. |
 | 1 | `features/batch_export/tab_view.py:194` | `_show_batch_mode` → the 3 batch panels take `app` first-positional. **A14 batch-panel decomposition.** |
 | 1 | `features/saved_plots/controller.py:110` | `_rebuild_all` → `desc.on_selection_changed(app)` hook contract. **feature-registry ctx-home.** |
 | 2 | `persistence/cell_gating.py:20,64` | `save/load_from_pipeline_info` — loose `_cell_gating_*` widgets + `_scatter_gates` + `_centre_build_pending`. **cell-gating → typed state.** |
 | 2 | `persistence/view_state.py:95,421` | `snapshot`/`restore` — broad app-widget surface (`_current_leaf_tab`/`_snapshot_tabs`/`_set_selected_wells`). Sanctioned persistence unwrap; **T6**. |
-| **14** | | **3 epics + T6** |
+| **12** | | **3 epics + T6** (was 14; tab_controller providers −2 via `ctx.window`) |
+
+**Status 2026-07-04 (session end): 12 refs (98.7% overall).** The two
+Epic-registry attempts both confirmed (independently) that a `ctx.features`
+accessor clears **zero** — the registry is always a *co-inhabitant* of each seam
+(every site also needs `_get_rows`/`_refresh_sidebar_map`/`_rebuild_all`), so the
+registry epic only pays off *after* those get ctx homes (a typed data-service for
+`_get_rows`, ctx-native `refresh_sidebar_map`/`rebuild_all`). The honest −2 that
+attempt surfaced (tab-controller split providers → `ctx.window`) was taken. The
+remaining three epics (Epic-cellgating, A14, feature-registry-after-prereqs) each
+need a focused, interactive-smoke-gated pass; **none should be forced with a
+count-gaming accessor.** NOTE: background-worker infrastructure was failing at
+session end (repeated silent restart-kills), so these are best run as dedicated
+inline passes or in a fresh session.
 
 **Three epics unlock the rest, then T6 → 0:** (1) **feature-registry ctx-home** —
 give `app._features` a reviewed `ctx` accessor (clears channel:64, selection:828,
@@ -514,7 +527,7 @@ field. Everything must be green on the fast lane; the closeEvent/teardown tests
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[x]` | in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 14 (R1–R7 + F1/F2/F4 + E1–E6 + D-series done; 14 floor remains) |
+| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 12 (R1–R7 + F1/F2/F4 + E1–E6 + D-series + tab-controller done; 12 floor remains) |
 | T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into D1 (channel/axis → `channel_changed`) |
 | T5 | Saved-plots service | — | Med | `[~]` | capture/persistence ctx-native (`226d0af`); `_rebuild_all` → D7 |
 | T6 | Retire `ctx.app` | D1–D10 | High | `[ ]` | 26 floor → 0 (decompose god-methods, then delete field) |

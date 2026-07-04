@@ -146,7 +146,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     transpose_btn = QPushButton("⇄ Transpose", ctrl2)
     transpose_btn.setProperty("variant", "secondary")
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
-    transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx.app))
+    transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx))
     cl2.addWidget(transpose_btn)
 
     repset_avg_cb = reg.register("_heatmap_repset_avg_cb", QCheckBox("Rep-set avg", ctrl2))
@@ -240,18 +240,18 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # Unified press handler: label-drag first, then double-click rename, then
     # normal cell selection.  A single connection keeps ordering deterministic.
     canvas.mpl_connect("button_press_event",
-                       lambda evt: _on_canvas_press(ctx.app, evt))
+                       lambda evt: _on_canvas_press(ctx, evt))
     canvas.mpl_connect("motion_notify_event",
-                       lambda evt: _on_canvas_motion(ctx.app, evt))
+                       lambda evt: _on_canvas_motion(ctx, evt))
     canvas.mpl_connect("button_release_event",
-                       lambda evt: _on_canvas_release(ctx.app, evt))
+                       lambda evt: _on_canvas_release(ctx, evt))
 
     refresh_heatmap_timepoints(ctx)
 
     # Push any settings loaded from heatmap_layouts.json into the widgets.
     try:
         from well_viewer.persistence.heatmap_layouts import apply_persisted_settings
-        apply_persisted_settings(ctx.app)
+        apply_persisted_settings(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
 
@@ -388,14 +388,16 @@ def _on_vminmax_changed(ctx) -> None:
     _redraw(ctx)
 
 
-def _on_transpose(app) -> None:
+def _on_transpose(ctx) -> None:
     from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout, _persist_and_redraw, refresh_heatmap_layout_sidebar,
     )
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(ctx)
     layout.transpose()
-    _persist_and_redraw(app)
-    refresh_heatmap_layout_sidebar(app)
+    _persist_and_redraw(ctx)
+    # ``refresh_heatmap_layout_sidebar`` is still app-native (called from the
+    # banned registry.py / load_controller.py) — bridge via the app handle.
+    refresh_heatmap_layout_sidebar(ctx.app)
 
 
 def _on_repset_avg_changed(ctx) -> None:
@@ -436,15 +438,15 @@ def _persist_settings(ctx) -> None:
         swallowed()  # was: pass (silent except)
 
 
-def _on_label_double_click(app, evt) -> None:
+def _on_label_double_click(ctx, evt) -> None:
     """Edit a row/col tick label inline when double-clicked."""
     if not getattr(evt, "dblclick", False):
         return
-    ax = getattr(app, "_heatmap_ax", None)
+    ax = ctx.widgets.get_or_none("_heatmap_ax")
     if ax is None:
         return
     # Collect tick labels to hit-test against pixel positions.
-    canvas = getattr(app, "_heatmap_canvas", None)
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
     if canvas is None:
         return
     renderer = canvas.get_renderer()
@@ -473,7 +475,7 @@ def _on_label_double_click(app, evt) -> None:
     from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout, _persist_and_redraw,
     )
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(ctx)
     kind, idx = target
     current = ""
     if kind == "row":
@@ -487,7 +489,7 @@ def _on_label_double_click(app, evt) -> None:
             current = labels[idx]
         prompt = f"Column {idx + 1} label:"
     new_text, ok = QInputDialog.getText(
-        app if isinstance(app, QWidget) else None,
+        ctx.window,
         "Edit label", prompt, text=current,
     )
     if not ok:
@@ -506,30 +508,30 @@ def _on_label_double_click(app, evt) -> None:
         while len(layout.col_labels) < layout.cols:
             layout.col_labels.append(str(len(layout.col_labels) + 1))
         layout.col_labels[idx] = new_text or str(idx + 1)
-    _persist_and_redraw(app)
+    _persist_and_redraw(ctx)
 
 
-def _on_canvas_press(app, evt) -> None:
+def _on_canvas_press(ctx, evt) -> None:
     from well_viewer.features.heatmap.controller import on_heatmap_label_drag_press, on_heatmap_click
     # Label drag takes priority; double-click rename is next; cell select last.
-    if on_heatmap_label_drag_press(app, evt):
+    if on_heatmap_label_drag_press(ctx, evt):
         return
     if getattr(evt, "dblclick", False):
-        _on_label_double_click(app, evt)
+        _on_label_double_click(ctx, evt)
         return
-    on_heatmap_click(app, evt)
+    on_heatmap_click(ctx, evt)
 
 
-def _on_canvas_motion(app, evt) -> None:
+def _on_canvas_motion(ctx, evt) -> None:
     from well_viewer.features.heatmap.controller import on_heatmap_label_drag_motion, on_heatmap_motion
-    on_heatmap_label_drag_motion(app, evt)
-    if not getattr(app, "_heatmap_label_drag", None):
-        on_heatmap_motion(app, evt)
+    on_heatmap_label_drag_motion(ctx, evt)
+    if not ctx.runtime.heatmap.label_drag:
+        on_heatmap_motion(ctx, evt)
 
 
-def _on_canvas_release(app, evt) -> None:
+def _on_canvas_release(ctx, evt) -> None:
     from well_viewer.features.heatmap.controller import on_heatmap_label_drag_release
-    on_heatmap_label_drag_release(app, evt)
+    on_heatmap_label_drag_release(ctx, evt)
 
 
 def _redraw(ctx) -> None:

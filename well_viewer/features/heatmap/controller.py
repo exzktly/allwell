@@ -655,10 +655,10 @@ def _metric_axis_label(metric: str, ctx) -> str:
 
 # ── Click + hover handlers ───────────────────────────────────────────────────
 
-def _cell_at_event(app, event) -> Optional[Tuple[int, int]]:
+def _cell_at_event(ctx, event) -> Optional[Tuple[int, int]]:
     if event.inaxes is None or event.xdata is None or event.ydata is None:
         return None
-    layout = getattr(app, "_heatmap_layout_active", None)
+    layout = ctx.runtime.heatmap.layout_active
     if layout is None:
         return None
     c = int(round(event.xdata))
@@ -668,16 +668,16 @@ def _cell_at_event(app, event) -> Optional[Tuple[int, int]]:
     return r, c
 
 
-def on_heatmap_click(app, event) -> None:
-    rc = _cell_at_event(app, event)
+def on_heatmap_click(ctx, event) -> None:
+    rc = _cell_at_event(ctx, event)
     if rc is None:
         return
-    cell_index = getattr(app, "_heatmap_cell_well_index", {}) or {}
+    cell_index = ctx.runtime.heatmap.cell_well_index or {}
     wells_here = list(cell_index.get(rc, []))
     if not wells_here:
         return
 
-    selected = set(app._app_state.selection.selected_wells or set())
+    selected = set(ctx.state.selection.selected_wells or set())
     modifiers = 0
     try:
         # Matplotlib events expose the GUI event for modifier inspection.
@@ -702,23 +702,21 @@ def on_heatmap_click(app, event) -> None:
     else:
         selected = set(wells_here)
 
-    if hasattr(app, "_set_selected_wells"):
-        app._set_selected_wells(selected)
-    else:
-        app._app_state.selection.selected_wells = selected
-        if hasattr(app, "_redraw"):
-            app._redraw()
+    # ``set_selected_wells`` is the single mutation point (prev-sel tracking +
+    # redraw fan-out); it is still app-native, so bridge via the app handle.
+    from well_viewer.core.selection_controller import set_selected_wells
+    set_selected_wells(ctx.app, selected)
 
 
-def on_heatmap_motion(app, event) -> None:
-    rc = _cell_at_event(app, event)
-    status_lbl = getattr(app, "_heatmap_status_lbl", None)
+def on_heatmap_motion(ctx, event) -> None:
+    rc = _cell_at_event(ctx, event)
+    status_lbl = ctx.widgets.get_or_none("_heatmap_status_lbl")
     if rc is None:
         if status_lbl is not None:
             status_lbl.setText("")
         return
-    cell_index = getattr(app, "_heatmap_cell_well_index", {}) or {}
-    arr = getattr(app, "_heatmap_array", None)
+    cell_index = ctx.runtime.heatmap.cell_well_index or {}
+    arr = ctx.runtime.heatmap.array
     wells = cell_index.get(rc, [])
     if status_lbl is not None:
         if not wells:
@@ -726,20 +724,20 @@ def on_heatmap_motion(app, event) -> None:
         else:
             v = arr[rc[0], rc[1]] if arr is not None else float("nan")
             sample = ",".join(wells[:3]) + ("…" if len(wells) > 3 else "")
-            metric = _selected_metric(app)
+            metric = _selected_metric(ctx)
             status_lbl.setText(f"{sample}: {_format_cell_value(v, metric)}")
 
 
 # ── Row/col label drag-to-reorder ────────────────────────────────────────────
 
-def _label_at_event(app, event) -> Optional[Tuple[str, int]]:
+def _label_at_event(ctx, event) -> Optional[Tuple[str, int]]:
     """Return ("row", i) or ("col", i) if *event* is near a tick label, else None.
 
     Used only for the initial press that starts a drag, so the threshold is
     generous (12 px) but still requires the cursor to be close to a label.
     """
-    ax = getattr(app, "_heatmap_ax", None)
-    canvas = getattr(app, "_heatmap_canvas", None)
+    ax = ctx.widgets.get_or_none("_heatmap_ax")
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
     if ax is None or canvas is None or event.x is None or event.y is None:
         return None
     try:
@@ -768,7 +766,7 @@ def _label_at_event(app, event) -> Optional[Tuple[str, int]]:
     return None
 
 
-def _nearest_label_in_drag(app, event, kind: str) -> Optional[int]:
+def _nearest_label_in_drag(ctx, event, kind: str) -> Optional[int]:
     """Flexibly find the target row/col index during a drag.
 
     Prefers the data coordinate (when the cursor is inside the axes) so the
@@ -776,14 +774,14 @@ def _nearest_label_in_drag(app, event, kind: str) -> Optional[int]:
     to nearest-label-by-pixel when the cursor is outside the axes (e.g. over
     the label gutter itself).
     """
-    ax = getattr(app, "_heatmap_ax", None)
-    canvas = getattr(app, "_heatmap_canvas", None)
+    ax = ctx.widgets.get_or_none("_heatmap_ax")
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
     if ax is None or canvas is None or event.x is None or event.y is None:
         return None
 
-    layout = getattr(app, "_heatmap_layout_active", None)
+    layout = ctx.runtime.heatmap.layout_active
     if layout is None:
-        layout = active_layout(app._ctx)
+        layout = active_layout(ctx)
 
     # Inside the axes: data coords give us the exact row/col directly.
     if event.inaxes is ax:
@@ -819,13 +817,13 @@ def _nearest_label_in_drag(app, event, kind: str) -> Optional[int]:
     return best
 
 
-def _update_drag_label_colors(app) -> None:
+def _update_drag_label_colors(ctx) -> None:
     """Apply drag highlight colours to existing tick label artists and redraw."""
-    ax = getattr(app, "_heatmap_ax", None)
-    canvas = getattr(app, "_heatmap_canvas", None)
+    ax = ctx.widgets.get_or_none("_heatmap_ax")
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
     if ax is None or canvas is None:
         return
-    drag = getattr(app, "_heatmap_label_drag", None)
+    drag = ctx.runtime.heatmap.label_drag
     # Reset all labels to default.
     for lbl in ax.get_xticklabels():
         lbl.set_color("black")
@@ -848,8 +846,8 @@ def _update_drag_label_colors(app) -> None:
     canvas.draw_idle()
 
 
-def _set_canvas_cursor(app, cursor_shape) -> None:
-    canvas = getattr(app, "_heatmap_canvas", None)
+def _set_canvas_cursor(ctx, cursor_shape) -> None:
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
     if canvas is None:
         return
     try:
@@ -861,75 +859,77 @@ def _set_canvas_cursor(app, cursor_shape) -> None:
         swallowed()  # was: pass (silent except)
 
 
-def on_heatmap_label_drag_press(app, event) -> bool:
+def on_heatmap_label_drag_press(ctx, event) -> bool:
     """Start a label drag on left-press over a tick label. Returns True if consumed."""
     if getattr(event, "button", None) != 1:
         return False
     if getattr(event, "dblclick", False):
         return False
-    target = _label_at_event(app, event)
+    target = _label_at_event(ctx, event)
     if target is None:
         return False
     kind, idx = target
-    app._heatmap_label_drag = {"kind": kind, "src": idx, "over": idx}
-    _update_drag_label_colors(app)
+    ctx.runtime.heatmap.label_drag = {"kind": kind, "src": idx, "over": idx}
+    _update_drag_label_colors(ctx)
     try:
         from PySide6.QtCore import Qt as _Qt
-        _set_canvas_cursor(app, _Qt.ClosedHandCursor)
+        _set_canvas_cursor(ctx, _Qt.ClosedHandCursor)
     except Exception:
         swallowed()  # was: pass (silent except)
     return True
 
 
-def on_heatmap_label_drag_motion(app, event) -> None:
+def on_heatmap_label_drag_motion(ctx, event) -> None:
     """Update drag highlight while the mouse moves."""
-    drag = getattr(app, "_heatmap_label_drag", None)
+    drag = ctx.runtime.heatmap.label_drag
     if drag is None:
         # Show open-hand cursor when hovering over any label.
-        target = _label_at_event(app, event)
+        target = _label_at_event(ctx, event)
         try:
             from PySide6.QtCore import Qt as _Qt
             if target is not None:
-                _set_canvas_cursor(app, _Qt.OpenHandCursor)
+                _set_canvas_cursor(ctx, _Qt.OpenHandCursor)
             else:
-                _set_canvas_cursor(app, None)
+                _set_canvas_cursor(ctx, None)
         except Exception:
             swallowed()  # was: pass (silent except)
         return
     # Use the flexible finder so the highlight tracks the cursor everywhere.
-    drag["over"] = _nearest_label_in_drag(app, event, drag["kind"])
-    _update_drag_label_colors(app)
+    drag["over"] = _nearest_label_in_drag(ctx, event, drag["kind"])
+    _update_drag_label_colors(ctx)
 
 
-def on_heatmap_label_drag_release(app, event) -> None:
+def on_heatmap_label_drag_release(ctx, event) -> None:
     """Finish drag: apply reorder if source ≠ target, then clean up."""
-    drag = getattr(app, "_heatmap_label_drag", None)
+    drag = ctx.runtime.heatmap.label_drag
     if drag is None:
         return
     src = drag["src"]
     kind = drag["kind"]
     # Recompute target at the release position (motion may not have fired last).
-    over = _nearest_label_in_drag(app, event, kind)
+    over = _nearest_label_in_drag(ctx, event, kind)
     if over is None:
         over = drag.get("over")
-    app._heatmap_label_drag = None
-    _set_canvas_cursor(app, None)
+    ctx.runtime.heatmap.label_drag = None
+    _set_canvas_cursor(ctx, None)
     if over is not None and over != src:
-        _apply_label_reorder(app, kind, src, over)
+        _apply_label_reorder(ctx, kind, src, over)
     else:
-        _update_drag_label_colors(app)  # just clear highlights
+        _update_drag_label_colors(ctx)  # just clear highlights
 
 
-def _apply_label_reorder(app, kind: str, src: int, dst: int) -> None:
+def _apply_label_reorder(ctx, kind: str, src: int, dst: int) -> None:
     from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout,
         _persist_and_redraw,
         refresh_heatmap_layout_sidebar,
     )
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(ctx)
     if kind == "row":
         layout.reorder_rows(src, dst)
     else:
         layout.reorder_cols(src, dst)
-    _persist_and_redraw(app)
-    refresh_heatmap_layout_sidebar(app)
+    _persist_and_redraw(ctx)
+    # ``refresh_heatmap_layout_sidebar`` is still app-native (called from the
+    # banned registry.py / load_controller.py) — bridge via the app handle.
+    refresh_heatmap_layout_sidebar(ctx.app)

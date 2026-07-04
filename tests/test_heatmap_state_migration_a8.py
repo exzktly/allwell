@@ -58,7 +58,7 @@ def test_persistence_round_trip_through_slice(viewer_app, qtbot):
     app._app_state.heatmap.repset_avg = False
     app._app_state.heatmap.log_scale = False
     app._heatmap_persisted_settings = settings
-    hl.apply_persisted_settings(app)
+    hl.apply_persisted_settings(app._ctx)
     assert app._app_state.heatmap.scale_mode == "Fixed"
     assert app._app_state.heatmap.repset_avg is True
     assert app._app_state.heatmap.log_scale is True

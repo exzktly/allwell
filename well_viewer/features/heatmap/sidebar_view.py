@@ -260,16 +260,16 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
 
 # ── State helpers ────────────────────────────────────────────────────────────
 
-def _ensure_sidebar_layout(app) -> HeatmapLayout:
+def _ensure_sidebar_layout(ctx) -> HeatmapLayout:
     """Return (creating if needed) the single ``Sidebar`` layout."""
-    layouts: List[HeatmapLayout] = list(getattr(app, "_heatmap_layouts", []) or [])
+    layouts: List[HeatmapLayout] = list(ctx.runtime.heatmap.layouts or [])
     for lay in layouts:
         if lay.name == SIDEBAR_LAYOUT_NAME:
             return lay
     lay = HeatmapLayout(name=SIDEBAR_LAYOUT_NAME, rows=8, cols=12)
     layouts.append(lay)
-    app._heatmap_layouts = layouts
-    app._app_state.heatmap.active_layout_name = SIDEBAR_LAYOUT_NAME
+    ctx.runtime.heatmap.layouts = layouts
+    ctx.state.heatmap.active_layout_name = SIDEBAR_LAYOUT_NAME
     return lay
 
 
@@ -290,7 +290,7 @@ def refresh_heatmap_layout_sidebar(app) -> None:
     if table is None:
         return
 
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(app._ctx)
 
     if rows_spin is not None and rows_spin.value() != layout.rows:
         rows_spin.blockSignals(True)
@@ -361,7 +361,7 @@ def _on_size_changed(app) -> None:
     cols_spin: QSpinBox = getattr(app, "_heatmap_sidebar_cols_spin", None)
     if rows_spin is None or cols_spin is None:
         return
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(app._ctx)
     new_rows = int(rows_spin.value())
     new_cols = int(cols_spin.value())
     if new_rows == layout.rows and new_cols == layout.cols:
@@ -372,13 +372,13 @@ def _on_size_changed(app) -> None:
     if layout.col_labels and new_cols < len(layout.col_labels):
         layout.col_labels = layout.col_labels[:new_cols]
     layout.resize(new_rows, new_cols)
-    _persist_and_redraw(app)
+    _persist_and_redraw(app._ctx)
     refresh_heatmap_layout_sidebar(app)
 
 
 def _on_drop_event(app, kind: str, rc: Optional[Tuple[int, int]], token: str) -> None:
     """Handle a successful drop. Updates state and re-renders both widgets."""
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(app._ctx)
     src = _find_cell_for_token(layout, token)
     if kind == "palette":
         if src is not None:
@@ -391,15 +391,15 @@ def _on_drop_event(app, kind: str, rc: Optional[Tuple[int, int]], token: str) ->
         if src is not None and src != (target_r, target_c):
             layout.assign(src[0], src[1], existing)  # tenant goes back to source
         layout.assign(target_r, target_c, [token])
-    _persist_and_redraw(app)
+    _persist_and_redraw(app._ctx)
     refresh_heatmap_layout_sidebar(app)
 
 
 def _clear_cell(app, r: int, c: int) -> None:
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(app._ctx)
     if (r, c) in layout.cells:
         layout.assign(r, c, [])
-        _persist_and_redraw(app)
+        _persist_and_redraw(app._ctx)
         refresh_heatmap_layout_sidebar(app)
 
 
@@ -409,7 +409,7 @@ def _on_autopopulate(app) -> None:
     Grows the grid (capped at 32×32, the spinbox limit) when the selection
     has more wells than the current grid can hold.
     """
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(app._ctx)
     selected = list(app._app_state.selection.selected_wells or [])
     if not selected:
         return
@@ -442,18 +442,18 @@ def _on_autopopulate(app) -> None:
         c = i % cols
         layout.assign(r, c, [w])
 
-    _persist_and_redraw(app)
+    _persist_and_redraw(app._ctx)
     refresh_heatmap_layout_sidebar(app)
 
 
-def _persist_and_redraw(app) -> None:
+def _persist_and_redraw(ctx) -> None:
     try:
-        app._persistence.schedule_save("heatmap_layouts")
+        ctx.persistence.schedule_save("heatmap_layouts")
     except Exception:
         swallowed()  # was: pass (silent except)
-    if hasattr(app, "_heatmap_canvas"):
+    if ctx.widgets.get_or_none("_heatmap_canvas") is not None:
         try:
             from well_viewer.features.heatmap.controller import redraw_heatmap
-            redraw_heatmap(app._ctx)
+            redraw_heatmap(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)

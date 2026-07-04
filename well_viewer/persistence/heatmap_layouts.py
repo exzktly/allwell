@@ -67,14 +67,17 @@ def load_from_data_dir(app) -> None:
             refresh_heatmap_layout_sidebar(app)
         except Exception:
             swallowed()  # was: pass (silent except)
-    apply_persisted_settings(app)
+    apply_persisted_settings(app._ctx)
 
 
-def apply_persisted_settings(app) -> None:
+def apply_persisted_settings(ctx) -> None:
     """Push any settings loaded from disk into the heatmap UI widgets.
 
     Safe to call before the heatmap tab is built — does nothing in that case.
     """
+    # persistence/ may unwrap the god-object once; the body reads the many
+    # legacy ``app._heatmap_*`` widget/state stamps directly.
+    app = ctx.app
     settings = getattr(app, "_heatmap_persisted_settings", None)
     if not isinstance(settings, dict) or not settings:
         return

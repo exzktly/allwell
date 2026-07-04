@@ -529,18 +529,19 @@ def labels_apply_affix(app, *, where: str) -> None:
 
 
 
-def update_active_group_label(app) -> None:
+def update_active_group_label(ctx) -> None:
     """Mirror ``_current_selection_id`` into the Groups sub-tab banner.
 
     Shows the active group's name (bold, accent-coloured) when one is
     selected, or a "click a group below" prompt when none is — so a
     click on the sidebar plate always has a visible target.
     """
-    lbl = getattr(app, "_rep_active_group_lbl", None)
+    lbl = ctx.widgets.get_or_none("_rep_active_group_lbl")
     if lbl is None:
         return
-    sid = app._app_state.selection.current_selection_id
-    sel = app._sel_by_id(sid) if sid else None
+    sel_state = ctx.state.selection
+    sid = sel_state.current_selection_id
+    sel = next((s for s in sel_state.selections if s.get("id") == sid), None) if sid else None
     try:
         import theme as _theme
     except Exception:
@@ -556,7 +557,7 @@ def update_active_group_label(app) -> None:
             )
         return
     name = str(sel.get("name") or "(unnamed)")
-    n_wells = sum(1 for w in (sel.get("wells") or []) if w in app._app_state.dataset.well_paths)
+    n_wells = sum(1 for w in (sel.get("wells") or []) if w in ctx.state.dataset.well_paths)
     lbl.setText(f"{name}  ·  {n_wells} well(s)")
     if _theme is not None:
         lbl.setStyleSheet(
@@ -797,7 +798,7 @@ def groups_centre_refresh(app) -> None:
         rep_panel_refresh(app)
         label_grid_refresh(app)
     app._rep_refresh_map()
-    update_active_group_label(app)
+    update_active_group_label(app._ctx)
 
 
 

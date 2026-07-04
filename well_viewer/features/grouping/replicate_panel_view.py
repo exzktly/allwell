@@ -188,7 +188,9 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
         f"letter-spacing: 0.08em; font-weight: 600;"
     )
     active_l.addWidget(active_caption)
-    app._rep_active_group_lbl = QLabel("None selected — click a group below to start", active_row)
+    app._rep_active_group_lbl = app._ctx.widgets.register(
+        "_rep_active_group_lbl",
+        QLabel("None selected — click a group below to start", active_row))
     app._rep_active_group_lbl.setObjectName("ActiveGroupValue")
     app._rep_active_group_lbl.setStyleSheet(
         f"QLabel#ActiveGroupValue {{ "
@@ -370,7 +372,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
                 app._groups_centre_refresh()
                 app._refresh_sidebar_map()
             if hasattr(app, "_rep_active_group_lbl"):
-                update_active_group_label(app)
+                update_active_group_label(app._ctx)
     sub_tabs.currentChanged.connect(_on_sample_def_subtab)
     # Cell Gating leads and is the default tab, so build it now (currentChanged
     # won't fire for the already-current index 0).

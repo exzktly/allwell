@@ -373,6 +373,46 @@ subsystem rewrites (`build_review_image_panel`, the sample-def tree, the
 view_state snapshot/restore surface) → each a focused, individually-reviewed pass,
 and the view_state pair is the final **T6** territory.
 
+**Status update — 7 → 5 refs (99.4% overall), inline.** Two of the seven fell to
+the sanctioned *named-accessor* endgame the ratchet itself endorses ("reach for a
+dedicated context accessor"): `saved_plots:110` → `ctx.rebuild_all()` (the master
+redraw fan-out), and `selection:828` → `ctx.refresh_sidebar_map()` + a fully
+ctx-native `on_plate_sel_change`/`_is_single_well_tab` (via a new `ctx.features`
+catalogue accessor). Three genuine app-orchestration services now have one frozen,
+enumerable home each (`rebuild_all` / `refresh_sidebar_map` / `features`) instead
+of an escape-hatch reach. **The remaining 5** (`channel:64`, `tab_controller:138`,
+`tab_controller:164`, `view_state:95`, `view_state:421`) each still require the
+WellViewerApp-method decomposition (`update_channel_selector`/`_load_gating`, the
+`build_review_image_panel` lambda web, the sample-def builder tree, and the
+snapshot/restore widget cascade) — a multi-session epic, not a metric-gaming rename.
+
+> **Regression discovery — the ctx-migration silently broke major plot paths.**
+> While validating the 7→5 work against the *slow* (`loaded_app`) suite the fast
+> lane excludes, five severe, user-visible regressions surfaced — all introduced by
+> earlier ctx-migration passes and invisible to `-m "not slow"`. Each is fixed with
+> a pinning regression test:
+> 1. **fold-change combo stash** did `setattr(ctx, …)` on the *frozen* dataclass →
+>    `FrozenInstanceError` crashing every Line Graphs / Bar Plots tab build. → `ctx.widgets`.
+> 2. **`redraw_bars`** guarded on `not hasattr(ctx, "_ax_bar_mean")` — always true on
+>    a frozen ctx → the **Bar Plots tab never redrew at all**. → `ctx.widgets.has`.
+>    (Also the violin-bandwidth slider + bar y-lim reset read the frozen ctx.)
+> 3. **line/distribution/heatmap scope redraws** registered the ctx-native
+>    `redraw_app` raw; the coalescer calls `scope.redraw(app)`, so `redraw_app(app)`
+>    read `app.window` (a Qt bound method) and `_call_redraw` swallowed it →
+>    **those tabs silently didn't redraw on channel/fold-change/tab-flush**. → wrap `a._ctx`.
+> 4. **multivariate on_channel_changed** hook passed the raw app to the ctx-native
+>    `mv_on_channel_changed` (sibling spatial hook passed `app._ctx`) → hard crash on
+>    channel change with the Multivariate tab built (the hook loop isn't try/excepted). → `app._ctx`.
+> 5. **FOV-replicates toggle** shim passed `self` where its `_toggle_sem` sibling
+>    passed `self._ctx` → the toggle hit `ctx.state` (AttributeError) and did nothing. → `self._ctx`.
+>
+> These were found by a static sweep for `setattr/getattr/hasattr(ctx, "_…")` on the
+> frozen context and for ctx-first functions invoked with a raw `app`/`self` across
+> the dynamic-dispatch surfaces (scope redraws, registry hooks, app shims). They are
+> arguably the more important "residuals": the metric floor is documented and safe,
+> whereas these broke real plotting. **Lesson for the remaining decompositions:** every
+> ctx conversion needs a `loaded_app` (slow) exercise, not just the fast lane.
+
 _(Earlier — 8 refs.)_ Epic-A14 (batch
 panels, −1) and Epic-cellgating (scatter-gate config → typed `CellGatingState`,
 −2 — the full state migration that D-persist had declined as out-of-scope;

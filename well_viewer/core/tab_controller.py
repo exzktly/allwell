@@ -207,7 +207,7 @@ def on_notebook_current_changed(app, _idx) -> None:
 
 
 def run_tab_switch_smoke_checks(
-    app,
+    ctx,
     prev_tab: Optional[str],
     tab: str,
     prev_selected: set,
@@ -220,12 +220,12 @@ def run_tab_switch_smoke_checks(
     # Batch Export should share the same in-memory selection objects used by
     # the line/bar/scatter render paths.
     expected_ids = (
-        id(app._app_state.selection.selected_wells),
-        id(app._app_state.selection.selections),
+        id(ctx.state.selection.selected_wells),
+        id(ctx.state.selection.selections),
     )
-    if not hasattr(app, "_selection_model_identity"):
-        app._selection_model_identity = expected_ids
-    elif app._selection_model_identity != expected_ids:
+    if ctx.runtime.tab.selection_model_identity is None:
+        ctx.runtime.tab.selection_model_identity = expected_ids
+    elif ctx.runtime.tab.selection_model_identity != expected_ids:
         _logger.warning(
             "Selection model identity changed across tab switch: "
             "_selected_wells/_selections should be shared."
@@ -233,7 +233,7 @@ def run_tab_switch_smoke_checks(
 
     # UI smoke check: switching among Line/Bar/Batch must not mutate the
     # current per-well selection by itself.
-    if prev_tab in watched and prev_selected != app._app_state.selection.selected_wells:
+    if prev_tab in watched and prev_selected != ctx.state.selection.selected_wells:
         _logger.warning(
             "Tab switch altered selected wells unexpectedly: %s -> %s",
             prev_tab, tab,

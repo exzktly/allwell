@@ -49,7 +49,7 @@ class AppRuntime:
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
-                 "centre", "view_state")
+                 "centre", "view_state", "tab")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -149,3 +149,8 @@ class AppRuntime:
         # through AppRuntime — snapshot/restore read/write it via this alias so
         # the persistence layer names no god-object.
         object.__setattr__(self, "view_state", _FeatureRuntime(app, "_view_state_"))
+        # Tab-lifecycle transient scratch (prefix ``_tab_``): the on_tab_change
+        # smoke-check's cross-switch selection-model identity cache
+        # (``ctx.runtime.tab.selection_model_identity``). Debug-only, never
+        # persisted; read exclusively by the tab controller.
+        object.__setattr__(self, "tab", _FeatureRuntime(app, "_tab_"))

@@ -1051,7 +1051,7 @@ class WellViewerApp(QWidget):
     def _sync_preview_well_for_image_tabs(self) -> None: return sync_preview_well_for_image_tabs(self)
 
     def _run_tab_switch_smoke_checks(self, prev_tab: Optional[str], tab: str, prev_selected: set) -> None:
-        return run_tab_switch_smoke_checks(self, prev_tab, tab, prev_selected)
+        return run_tab_switch_smoke_checks(self._ctx, prev_tab, tab, prev_selected)
 
     def _show_line_sidebar(self) -> None:
         """No-op: the unified well picker is always visible for plot tabs."""

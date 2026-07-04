@@ -55,7 +55,7 @@ def test_selection_change_always_refreshes_sidebar(loaded_app):
 def test_on_plate_sel_change_triggers_refresh(loaded_app):
     _show_plotting_tab(loaded_app, "Line Graphs")
     counter = _CallCounter(loaded_app, ["_refresh_sidebar_map", "_redraw"])
-    on_plate_sel_change(loaded_app)
+    on_plate_sel_change(loaded_app._ctx)
     assert counter.counts["_refresh_sidebar_map"] == 1
     assert counter.counts["_redraw"] == 1
 

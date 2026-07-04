@@ -644,7 +644,7 @@ class WellViewerApp(QWidget):
 
     def _enforce_well_exclusivity(self) -> None: return enforce_well_exclusivity(self._ctx)
 
-    def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self)
+    def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self._ctx)
 
 
     def _rebuild_all(self) -> None: return rebuild_all(self)

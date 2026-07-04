@@ -777,15 +777,15 @@ def sel_set_color(app, sid, color) -> None:
 
 
 
-def groups_centre_refresh(app) -> None:
+def groups_centre_refresh(ctx) -> None:
     """Refresh all Sample Definitions panels.
 
     Card lists are only rebuilt when the tab is active (expensive).
     Plate maps are always updated (cheap).
     """
-    app._enforce_well_exclusivity()
+    enforce_well_exclusivity(ctx)
     tab_visible = False
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(ctx.window, "_notebook", None)
     if nb is not None:
         try:
             tab_visible = nb.currentName() == "Sample Definitions"
@@ -795,10 +795,11 @@ def groups_centre_refresh(app) -> None:
     if tab_visible:
         from well_viewer.features.grouping.label_grid_view import label_grid_refresh
         from well_viewer.features.grouping.tab_view import rep_panel_refresh
-        rep_panel_refresh(app._ctx)
-        label_grid_refresh(app._ctx)
-    app._rep_refresh_map()
-    update_active_group_label(app._ctx)
+        rep_panel_refresh(ctx)
+        label_grid_refresh(ctx)
+    from well_viewer.features.grouping.controller import rep_refresh_map
+    rep_refresh_map(ctx)
+    update_active_group_label(ctx)
 
 
 

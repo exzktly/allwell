@@ -47,7 +47,7 @@ class AppRuntime:
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
-                 "batch_export", "saved_plots", "split", "fov")
+                 "batch_export", "saved_plots", "split", "fov", "sem")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -81,3 +81,8 @@ class AppRuntime:
         # in-place-mutated ``app._fov_btns`` list, ``ctx.runtime.fov.observers``
         # <-> ``app._fov_observers``. Transient live widgets, never persisted.
         object.__setattr__(self, "fov", _FeatureRuntime(app, "_fov_"))
+        # App-global SEM/SD error-band toggle bank + observers (shared by every
+        # plot tab's Error Band control): ``ctx.runtime.sem.btns`` <->
+        # ``app._sem_btns`` and ``ctx.runtime.sem.observers`` <->
+        # ``app._sem_observers``. Live widgets, never persisted.
+        object.__setattr__(self, "sem", _FeatureRuntime(app, "_sem_"))

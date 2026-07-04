@@ -708,12 +708,12 @@ def toggle_sem(ctx) -> None:
     is_sem = ctx.state.plot.toggle_sem()
     text = "SEM" if is_sem else "SD"
     variant = "sem" if is_sem else "sem_warn"
-    for btn in list(getattr(ctx.app, "_sem_btns", []) or []):
+    for btn in list(ctx.runtime.sem.btns or []):
         btn.setText(text)
         btn.setProperty("variant", variant)
         btn.style().unpolish(btn)
         btn.style().polish(btn)
-    for obs in list(getattr(ctx.app, "_sem_observers", []) or []):
+    for obs in list(ctx.runtime.sem.observers or []):
         try:
             obs(is_sem)
         except Exception:

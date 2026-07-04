@@ -135,7 +135,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")          # the tab name is the title; keep the header lean
-    # Widget handles go through the WidgetRegistry; legacy ``ctx.app._line_*``
+    # Widget handles go through the WidgetRegistry; legacy ``app._line_*``
     # reads are forwarded to it by WellViewerApp.__getattr__.
     reg.register("_line_card", card)
     fig = reg.register("_line_fig", card.figure)

@@ -841,6 +841,8 @@ def _smfish_refresh_app_cache(ctx) -> None:
     # Refresh the Review CSV table so the smfish_count column on the
     # active well reflects the new counts. The plot redraw above does
     # not touch the Review CSV widget — it lives outside the plot fan-out.
+    # Bridged via the app method (not a direct import) to avoid a cross-feature
+    # deferred import into image_browser — the deletability guardrail bans those.
     refresh_review_csv = getattr(ctx.app, "_refresh_review_csv", None)
     if callable(refresh_review_csv):
         try:

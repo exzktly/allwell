@@ -47,29 +47,32 @@ from well_viewer.core.safe import swallowed
 _WELL_DISAMBIG_SUFFIX = " (well)"
 
 
-def _all_member_labels(app) -> list[str]:
+def _all_member_labels(ctx) -> list[str]:
     """Replicate-set names + selected well tokens currently plotted.
 
     When a well token collides with a rep-set name (e.g. someone named a
     rep-set "A01"), the well entry is suffixed with " (well)" so the
     user can pick either unambiguously.
+
+    A8 teardown: reads typed ``ctx.state.selection`` / ``ctx.state.dataset``
+    so it takes ``ctx`` and names no god-object.
     """
     names: list[str] = []
     repset_names: set[str] = set()
     seen: set[str] = set()
-    for s in (app._app_state.selection.selections or []):
+    for s in (ctx.state.selection.selections or []):
         if s.get("hidden"):
             continue
         name = s.get("name") or ""
         if not name or name in seen:
             continue
         wells = s.get("wells") or []
-        if any(w in (app._app_state.dataset.well_paths or {}) for w in wells):
+        if any(w in (ctx.state.dataset.well_paths or {}) for w in wells):
             names.append(name)
             seen.add(name)
             repset_names.add(name)
-    well_paths = app._app_state.dataset.well_paths or {}
-    for w in sorted(app._app_state.selection.selected_wells or [], key=lambda x: x):
+    well_paths = ctx.state.dataset.well_paths or {}
+    for w in sorted(ctx.state.selection.selected_wells or [], key=lambda x: x):
         if w in well_paths and w not in seen:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
             names.append(entry)
@@ -85,7 +88,7 @@ def _repopulate_control_combo(app, combo: QComboBox) -> None:
     candidate list is identical to what the combo already shows. The
     selected index is still re-synced from app state.
     """
-    members = _all_member_labels(app)
+    members = _all_member_labels(app._ctx)
     saved = app._app_state.plot.fc_control_label or ""
     # If the saved label matches a bare well token AND there's a
     # collision-suffixed entry in the candidate list, prefer the suffixed

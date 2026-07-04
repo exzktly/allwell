@@ -284,7 +284,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
              "gates below.",
     ))
     try:
-        cf_layout.addWidget(build_qc_gate_controls(ctx.app, control_frame))
+        cf_layout.addWidget(build_qc_gate_controls(ctx, control_frame))
     except Exception:
         swallowed()  # QC controls are best-effort; never block the tab build
 
@@ -1768,7 +1768,7 @@ def _cell_gating_refresh_opt_fc_controls(ctx) -> None:
     base = ctx.runtime.cell_gating.opt_fc_baseline_combo
     if ctrl is not None:
         prev = ctrl.currentText()
-        items = ["—", *_all_member_labels(ctx.app)]
+        items = ["—", *_all_member_labels(ctx)]
         if [ctrl.itemText(i) for i in range(ctrl.count())] != items:
             blocked = ctrl.blockSignals(True)
             try:

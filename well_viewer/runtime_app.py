@@ -484,10 +484,10 @@ class WellViewerApp(QWidget):
 
     # Stats tab group-editor methods (delegate to stats_controller)
 
-    def _stats_active_group(self) -> Optional[BarGroup]: return stats_active_group(self)
+    def _stats_active_group(self) -> Optional[BarGroup]: return stats_active_group(self._ctx)
 
 
-    def _stats_refresh_single_btn(self, tok: str) -> None: stats_refresh_map(self)
+    def _stats_refresh_single_btn(self, tok: str) -> None: stats_refresh_map(self._ctx)
 
 
 
@@ -861,7 +861,11 @@ class WellViewerApp(QWidget):
 
     def _on_metric_selected_global(self) -> None: return on_metric_selected_global(self)
 
-    def _on_stats_property_change(self) -> None: return on_stats_property_change(self)
+    # Named ``_stats_property_change`` (not ``_on_stats_property_change``) so the
+    # stats results-panel builder can wire the Property combo through the
+    # ``ctx.runtime.stats`` namespace (prefix ``_stats_``) without naming the
+    # god-object; the body stays fully app-side.
+    def _stats_property_change(self) -> None: return on_stats_property_change(self)
         # Stats display refreshes on its own when run; nothing to redraw here.
 
 
@@ -1109,7 +1113,7 @@ class WellViewerApp(QWidget):
 
     def _replicate_display_label(self, rset: 'ReplicateSet') -> str: return replicate_display_label(self._ctx, rset)
 
-    def _rep_sets_loaded(self) -> 'List[ReplicateSet]': return rep_sets_loaded(self)
+    def _rep_sets_loaded(self) -> 'List[ReplicateSet]': return rep_sets_loaded(self._ctx)
 
     def _groups_from_rep_sets(self) -> "List[BarGroup]":
         """One BarGroup per loaded selection (each wrapping its ReplicateSet)."""

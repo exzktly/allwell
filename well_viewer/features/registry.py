@@ -86,12 +86,11 @@ def _build_stats(ctx, frame) -> None:
         build_stats_group_editor, build_stats_tab,
     )
     build_stats_tab(ctx, frame)
-    # ``build_stats_group_editor`` still takes the legacy ``app`` (its body drives
-    # the stats controllers, which all take ``app``); the sidebar host frame is an
-    # app-window widget handle fetched through the blessed ``ctx.window`` accessor
-    # (a widget-parenting need, not behaviour coupling) so it no longer reaches
-    # through the god-object escape hatch.
-    build_stats_group_editor(ctx.app, ctx.window._sidebar_stats_frame)
+    # ``build_stats_group_editor`` takes ``ctx`` (its body drives the ctx-native
+    # stats group-editor controllers); the sidebar host frame is an app-window
+    # widget handle fetched through the blessed ``ctx.window`` accessor (a
+    # widget-parenting need, not behaviour coupling).
+    build_stats_group_editor(ctx, ctx.window._sidebar_stats_frame)
 
 
 _build_multivariate = _lazy_build("well_viewer.features.multivariate.tab_view", "build_multivariate_tab")
@@ -175,11 +174,11 @@ def _activate_statistics(app) -> None:
     app._sidebar_stats_frame.setVisible(True)
     # Auto-populate from rep-sets on first visit
     if not app._app_state.stats.groups and hasattr(app, "_stats_grp_inner"):
-        stats_sync_from_app(app)
+        stats_sync_from_app(app._ctx)
     if hasattr(app, "_stats_tp_cb"):
-        stats_update_tp_menu(app)
+        stats_update_tp_menu(app._ctx)
     # Reflect the current FOV-replicate mode (may have been toggled on a plot tab).
-    stats_refresh_fov_indicator(app)
+    stats_refresh_fov_indicator(app._ctx)
 
 
 def _activate_multivariate(app) -> None:
@@ -397,7 +396,7 @@ def _channel_bar(app) -> None:
 def _channel_stats(app) -> None:
     if hasattr(app, "_stats_tp_cb"):
         from well_viewer.features.stats.controller import stats_update_tp_menu
-        stats_update_tp_menu(app)
+        stats_update_tp_menu(app._ctx)
 
 
 def _channel_distribution(app) -> None:

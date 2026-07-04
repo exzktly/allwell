@@ -475,7 +475,19 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              app-only services (_features / _load_gating_from_pipeline_info); and
 #              the smfish _refresh_review_csv bridge can't take a cross-feature
 #              image_browser import (deletability guardrail).
-CTX_APP_BUDGET = 38
+#   E4-cellgating + E5-stats: -4   converted the QC debris-gate chain
+#              (qc_excluded_count / set_qc_params / recompute_qc_all -> ctx) so
+#              build_qc_gate_controls takes ctx; _all_member_labels + rep_sets_loaded
+#              re-signatured onto ctx; threaded the whole stats group-editor +
+#              results-panel controller chain (stats_refresh_map/group_list/apply_drag/
+#              grp_*/sync_from_app/on_test_change/update_tp_menu/refresh_fov_indicator +
+#              refresh_stats_property_combo) onto ctx, then flipped
+#              build_stats_group_editor / build_stats_results_panel to ctx. Run/Property
+#              actions resolve through the new ctx.runtime.stats namespace. Left as
+#              bridges (no clean ctx home): _refresh_thresh_frac_quick_edit (steppers
+#              unregistered), _build_review_csv_tab god-method, build_sample_definitions_
+#              centre (whole sample-def sub-builder tree still app-taking).
+CTX_APP_BUDGET = 34
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

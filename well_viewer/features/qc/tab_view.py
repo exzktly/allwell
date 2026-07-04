@@ -38,19 +38,23 @@ def _fmt(v: Optional[float]) -> str:
     return "" if v is None else f"{v:g}"
 
 
-def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
+def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     """A compact QC debris-gate row for the Cell Gating tab.
 
     Returns the row widget (already laid out). Edits apply live to the whole
     dataset and refresh the Segmentation overlay so excluded cells show there
     immediately.
+
+    A8 teardown: takes ``ctx`` — reads params off typed state, registers its
+    widget handles through ``ctx.widgets`` and drives the QC controllers /
+    Segmentation refresh through their ctx-native entry points.
     """
     row = QWidget(parent)
     hl = QHBoxLayout(row)
     hl.setContentsMargins(8, 2, 8, 2)
     hl.setSpacing(6)
 
-    params = get_qc_params(app._ctx)
+    params = get_qc_params(ctx)
 
     enable_cb = QCheckBox("QC debris gate", row)
     enable_cb.setChecked(bool(params.enabled))
@@ -101,14 +105,16 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
     hl.addWidget(status)
     hl.addStretch(1)
 
-    # stash refs so persistence / external recomputes can refresh the row
-    app._qc_gate_widgets = {
+    # stash refs so persistence / external recomputes can refresh the row.
+    # ``ctx.widgets.register`` also stamps ``app._qc_gate_widgets`` so the legacy
+    # ``qc_gate_refresh_widgets`` reader resolves it unchanged.
+    ctx.widgets.register("_qc_gate_widgets", {
         "enable": enable_cb, "min_area": min_area_edit,
         "max_area": max_area_edit, "min_solidity": min_sol_edit,
         "max_region_area": max_region_edit,
         "min_circularity": min_circ_edit, "max_circularity": max_circ_edit,
         "status": status,
-    }
+    })
 
     def _fields_params() -> QCParams:
         return QCParams(
@@ -127,19 +133,19 @@ def build_qc_gate_controls(app, parent: QWidget) -> QWidget:
             w.setEnabled(on)
 
     def _update_status() -> None:
-        if not app._app_state.dataset.cache:
+        if not ctx.state.dataset.cache:
             status.setText("")
             return
-        n_excl, n_tot = qc_excluded_count(app)
+        n_excl, n_tot = qc_excluded_count(ctx)
         if n_tot:
             status.setText(f"flagged {n_excl:,} / {n_tot:,}")
 
     def _apply() -> None:
         _sync_enabled()
-        set_qc_params(app, _fields_params())  # recompute + persist + redraw
+        set_qc_params(ctx, _fields_params())  # recompute + persist + redraw
         try:
-            from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
-            refresh_review_image(app)  # reflect QC in the segmentation overlay
+            from well_viewer.features.image_browser.review_image.renderer import refresh_review_image_ctx
+            refresh_review_image_ctx(ctx)  # reflect QC in the segmentation overlay
         except Exception:
             swallowed()  # was: pass (silent except)
         _update_status()

@@ -294,7 +294,7 @@ def load_directory(app, d: Path, label=None) -> None:
         # apply only wrote the column, leaving any cache built earlier in the
         # load sequence stale — the gate loaded into the fields but didn't take.
         from well_viewer.features.qc.controller import recompute_qc_all
-        recompute_qc_all(app)
+        recompute_qc_all(app._ctx)
         from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
         qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
     except Exception:

@@ -207,13 +207,16 @@ def rep_quick_pairs_from_dropdowns(app) -> None:
 
 
 
-def rep_sets_loaded(app) -> "List[ReplicateSet]":
+def rep_sets_loaded(ctx) -> "List[ReplicateSet]":
     """One ReplicateSet per selection that has ≥1 loaded well (ignores hidden),
-    in ``_selections`` order — derived straight from the unified model."""
+    in ``_selections`` order — derived straight from the unified model.
+
+    A8 teardown: reads typed ``ctx.state.selection`` / ``ctx.state.dataset`` so
+    it takes ``ctx`` and names no god-object."""
     out: "List[ReplicateSet]" = []
-    for s in app._app_state.selection.selections:
+    for s in ctx.state.selection.selections:
         wells = s.get("wells") or []
-        if any(w in app._app_state.dataset.well_paths for w in wells):
+        if any(w in ctx.state.dataset.well_paths for w in wells):
             out.append(ReplicateSet(s.get("name") or "", list(wells)))
     return out
 

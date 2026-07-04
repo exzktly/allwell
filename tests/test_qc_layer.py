@@ -142,7 +142,7 @@ def test_get_qc_params_lazy_seeds_from_pipeline_info():
 def test_qc_excluded_count_preview_params():
     cache = {"A01": _df([5, 50, 500])}
     app = _fake_app(cache, params=QCParams())  # committed: disabled
-    n_excl, n_tot = qc.qc_excluded_count(app, params=QCParams(enabled=True, min_area=10, max_area=200))
+    n_excl, n_tot = qc.qc_excluded_count(app._ctx, params=QCParams(enabled=True, min_area=10, max_area=200))
     assert (n_excl, n_tot) == (2, 3)
 
 
@@ -193,12 +193,15 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
         qc=QcState(params=QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)))
-    # qc_gate_refresh_widgets reads the params through get_qc_params(ctx).
-    app._ctx = SimpleNamespace(state=app._app_state, app=app)
+    # qc_gate_refresh_widgets reads the params through get_qc_params(ctx); the
+    # builder registers its widget handles through ctx.widgets (which also stamp
+    # ``app._qc_gate_widgets`` for the legacy reader below).
+    from well_viewer.core.widget_registry import WidgetRegistry
+    app._ctx = SimpleNamespace(state=app._app_state, app=app, widgets=WidgetRegistry(app))
 
     parent = QWidget()
     qtbot.addWidget(parent)
-    row = build_qc_gate_controls(app, parent)
+    row = build_qc_gate_controls(app._ctx, parent)
     qtbot.addWidget(row)
 
     w = app._qc_gate_widgets

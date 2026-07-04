@@ -279,7 +279,7 @@ def refresh_metric_combo_for_channel(ctx) -> None:
             smfish_channel=smfish_chan,
         )
     # Stats has its own channel combo, so its Property combo follows that one.
-    refresh_stats_property_combo(app)
+    refresh_stats_property_combo(app._ctx)
 
 
 # ── Channel-selector / dropdown sync ────────────────────────────────────────
@@ -689,16 +689,19 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
 
 
 
-def refresh_stats_property_combo(app) -> None:
-    """Reshape the stats Property combo to match the stats channel combo."""
-    ch_cb = app._ctx.widgets.get_or_none("_stats_channel_cb")
-    m_cb = getattr(app, "_stats_property_cb", None)
+def refresh_stats_property_combo(ctx) -> None:
+    """Reshape the stats Property combo to match the stats channel combo.
+
+    A8 teardown: takes ``ctx`` — both combos come from ``ctx.widgets`` and the
+    channel fallback from typed state, so it names no god-object."""
+    ch_cb = ctx.widgets.get_or_none("_stats_channel_cb")
+    m_cb = ctx.widgets.get_or_none("_stats_property_cb")
     if m_cb is None:
         return
     channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
     # Strip the " (spots)" suffix so smfish-enable matching works.
-    smf_base = channel.split(" ")[0] if channel else app._app_state.channel.active_channel
-    populate_metric_combo(app._ctx,
+    smf_base = channel.split(" ")[0] if channel else ctx.state.channel.active_channel
+    populate_metric_combo(ctx,
         m_cb, channel_entry=channel, smfish_channel=smf_base,
     )
 

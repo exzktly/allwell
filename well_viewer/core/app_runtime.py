@@ -48,7 +48,7 @@ class AppRuntime:
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
-                 "review_image", "review")
+                 "review_image", "review", "stats")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -113,3 +113,9 @@ class AppRuntime:
         # ``persistence.cell_overrides`` via the stamped app attr, not through
         # this namespace — persistence never imports AppRuntime.)
         object.__setattr__(self, "review", _FeatureRuntime(app, "_review_"))
+        # Stats-tab live callbacks the results-panel builder wires for other
+        # layers to invoke: ``ctx.runtime.stats.run`` <-> ``app._stats_run`` and
+        # ``ctx.runtime.stats.property_change`` <-> ``app._stats_property_change``.
+        # Bound-method handles (live objects), never serialized — resolved through
+        # the ``_stats_`` prefix so the ctx-native builder names no god-object.
+        object.__setattr__(self, "stats", _FeatureRuntime(app, "_stats_"))

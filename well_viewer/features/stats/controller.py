@@ -490,7 +490,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         app._ctx, groups=app._app_state.stats.groups, target_t=target_t,
         val_col=val_col, statistic=statistic, threshold=threshold, test=test,
         use_fov=use_fov)
-    stats_refresh_fov_indicator(app)
+    stats_refresh_fov_indicator(app._ctx)
 
     if is_ks:
         draw_ks_cdf_fn(group_vals, tp_str)
@@ -516,79 +516,113 @@ import copy as _copy
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from well_viewer.domain.plate_layout import WELL_COLORS
+from well_viewer.domain.batch_models import BarGroup
 from well_viewer.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
 from well_viewer.core.channel_state_controller import get_thresh_frac_on, refresh_stats_property_combo, set_active_metric
 from well_viewer.core.safe import swallowed
+# A8 teardown: the stats group-editor controllers now take ``ctx`` and derive
+# the loaded / visible rep-sets and their rank colours through the pure DOMAIN
+# enumerators (a lower layer, so no cross-feature module import and no
+# god-object reach-through — the same rule ``deserialize_stats_groups`` follows).
+from well_viewer.domain.selections_model import (
+    active_replicate_sets as _active_replicate_sets,
+    color_for_replicate_set as _color_for_replicate_set,
+    replicate_sets_loaded as _replicate_sets_loaded,
+)
 
 
-def stats_active_group(app):
-    return app._app_state.stats.active_group()
+def _rank_color_rset(ctx, rset) -> str:
+    """Rank colour for a ReplicateSet / BarGroup off ``ctx.state.selection``."""
+    return _color_for_replicate_set(rset, ctx.state.selection.selections)
 
 
-def stats_apply_drag(app, tok: str) -> None:
-    if tok in app._app_state.stats.drag_visited:
+def _rep_sets_loaded(ctx):
+    """All rep-sets with ≥1 loaded well (incl. hidden), from typed state."""
+    return _replicate_sets_loaded(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+
+
+def _stats_groups_from_rep_sets(ctx) -> "List[BarGroup]":
+    """One BarGroup per loaded selection (each wrapping its ReplicateSet)."""
+    return [BarGroup(r.name, members=[r]) for r in _rep_sets_loaded(ctx)]
+
+
+def _stats_groups_from_visible_rep_sets(ctx) -> "List[BarGroup]":
+    """One BarGroup per *visible* (non-hidden) rep-set — the traces actually
+    drawn on the plots."""
+    rsets = _active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    return [BarGroup(r.name, members=[r]) for r in rsets]
+
+
+def stats_active_group(ctx):
+    return ctx.state.stats.active_group()
+
+
+def stats_apply_drag(ctx, tok: str) -> None:
+    if tok in ctx.state.stats.drag_visited:
         return
-    app._app_state.stats.drag_visited.add(tok)
-    grp = stats_active_group(app)
-    if grp is None or tok not in app._app_state.dataset.well_paths:
+    ctx.state.stats.drag_visited.add(tok)
+    grp = stats_active_group(ctx)
+    if grp is None or tok not in ctx.state.dataset.well_paths:
         return
-    rset = next((r for r in app._rep_sets_loaded() if tok in r.wells), None)
+    rset = next((r for r in _rep_sets_loaded(ctx) if tok in r.wells), None)
     if rset is not None:
-        if app._app_state.stats.drag_adding:
+        if ctx.state.stats.drag_adding:
             if rset not in grp.members:
                 grp.members.append(rset)
         else:
             if rset in grp.members:
                 grp.members.remove(rset)
     else:
-        if app._app_state.stats.drag_adding:
+        if ctx.state.stats.drag_adding:
             if tok not in grp.solo_wells:
                 grp.solo_wells.append(tok)
         else:
             if tok in grp.solo_wells:
                 grp.solo_wells.remove(tok)
-    stats_refresh_map(app)
+    stats_refresh_map(ctx)
 
 
-def stats_refresh_map(app) -> None:
+def stats_refresh_map(ctx) -> None:
     """Push group state onto the Statistics plate (a WellPlateSelector): each
     group's wells take its rank colour; the active group's wells are the plate's
     selection (sunken), which is also what a drag on the plate edits."""
-    plate = getattr(app, "_stats_map_plate", None)
+    plate = ctx.widgets.get_or_none("_stats_map_plate")
     if plate is None:
         return
-    avail = list(app._app_state.dataset.well_paths.keys())
+    avail = list(ctx.state.dataset.well_paths.keys())
     plate.setEnabledWells(avail)
     tok_color: dict = {}
-    for grp in app._app_state.stats.groups:
-        c = app._rank_color_rset(grp)  # decision #1: colour by well-position rank
+    for grp in ctx.state.stats.groups:
+        c = _rank_color_rset(ctx, grp)  # decision #1: colour by well-position rank
         for w in grp.wells:
-            if w in app._app_state.dataset.well_paths:
+            if w in ctx.state.dataset.well_paths:
                 tok_color[w] = c   # last group wins — matches the other plates
     plate.clearWellColors()
     plate.setWellColors(tok_color)
-    grp = stats_active_group(app)
-    active = [w for w in grp.wells if w in app._app_state.dataset.well_paths] if grp else []
+    grp = stats_active_group(ctx)
+    active = [w for w in grp.wells if w in ctx.state.dataset.well_paths] if grp else []
     plate.setSelectedWellIds(active)
 
 
-def stats_refresh_group_list(app) -> None:
-    container = app._stats_grp_inner
+def stats_refresh_group_list(ctx) -> None:
+    container = ctx.widgets.get("_stats_grp_inner")
     layout = container.layout()
     if layout is None:
         layout = QVBoxLayout(container)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
     _clear_layout(layout)
-    if not app._app_state.stats.groups:
+    if not ctx.state.stats.groups:
         lbl = QLabel("No groups.  Click + Add to create one.")
         lbl.setObjectName("Muted")
         layout.addWidget(lbl)
-        stats_refresh_map(app)
+        stats_refresh_map(ctx)
         return
-    for gi, grp in enumerate(app._app_state.stats.groups):
-        is_sel = (gi == app._app_state.stats.active_grp)
-        color = app._rank_color_rset(grp)  # decision #1: colour by well-position rank
+    for gi, grp in enumerate(ctx.state.stats.groups):
+        is_sel = (gi == ctx.state.stats.active_grp)
+        color = _rank_color_rset(ctx, grp)  # decision #1: colour by well-position rank
         card = QFrame()
         card.setObjectName("StatsGroupCard")
         if is_sel:
@@ -612,67 +646,67 @@ def stats_refresh_group_list(app) -> None:
         idx = gi
         ren_btn = QPushButton("✎")
         ren_btn.setFlat(True)
-        ren_btn.clicked.connect(lambda _=False, i=idx: stats_grp_rename(app, i))
+        ren_btn.clicked.connect(lambda _=False, i=idx: stats_grp_rename(ctx, i))
         hl.addWidget(ren_btn)
         del_btn = QPushButton("✕")
         del_btn.setFlat(True)
-        del_btn.clicked.connect(lambda _=False, i=idx: stats_grp_delete(app, i))
+        del_btn.clicked.connect(lambda _=False, i=idx: stats_grp_delete(ctx, i))
         hl.addWidget(del_btn)
 
         def _click_select(ev, i=idx):
-            stats_select_grp(app, i)
+            stats_select_grp(ctx, i)
         card.mousePressEvent = _click_select
         layout.addWidget(card)
     layout.addStretch(1)
-    stats_refresh_map(app)
+    stats_refresh_map(ctx)
 
 
-def stats_select_grp(app, idx: int) -> None:
-    app._app_state.stats.select_group(idx)
-    stats_refresh_group_list(app)
+def stats_select_grp(ctx, idx: int) -> None:
+    ctx.state.stats.select_group(idx)
+    stats_refresh_group_list(ctx)
 
 
-def stats_grp_add(app) -> None:
-    app._app_state.stats.add_group()
-    stats_refresh_group_list(app)
+def stats_grp_add(ctx) -> None:
+    ctx.state.stats.add_group()
+    stats_refresh_group_list(ctx)
 
 
-def stats_grp_delete(app, idx: int) -> None:
-    if app._app_state.stats.delete_group(idx):
-        stats_refresh_group_list(app)
+def stats_grp_delete(ctx, idx: int) -> None:
+    if ctx.state.stats.delete_group(idx):
+        stats_refresh_group_list(ctx)
 
 
-def stats_grp_rename(app, idx: int) -> None:
-    stats = app._app_state.stats
+def stats_grp_rename(ctx, idx: int) -> None:
+    stats = ctx.state.stats
     if not (0 <= idx < len(stats.groups)):
         return
     old = stats.groups[idx].name
-    name = _ask_name_dialog(app, title="Rename group", prompt="Group name:", default=old)
+    name = _ask_name_dialog(ctx.window, title="Rename group", prompt="Group name:", default=old)
     if name and stats.rename_group(idx, name):
-        stats_refresh_group_list(app)
+        stats_refresh_group_list(ctx)
 
 
-def stats_grp_clear_all(app) -> None:
-    app._app_state.stats.clear_groups()
-    stats_refresh_group_list(app)
+def stats_grp_clear_all(ctx) -> None:
+    ctx.state.stats.clear_groups()
+    stats_refresh_group_list(ctx)
 
 
-def stats_sync_from_app(app, *, visible_only_in_split: bool = True) -> None:
+def stats_sync_from_app(ctx, *, visible_only_in_split: bool = True) -> None:
     # On *auto-populate* (first visit) in Split View, seed the comparison groups
     # from only the rep-sets currently *visible* on the plots (non-hidden) so the
     # comparison matches what the user is looking at. The explicit "Load from
     # Sample Definitions" action passes visible_only_in_split=False to load every
     # defined grouping regardless of visibility. Falls back to all groups outside
     # Split View, or when nothing is visible.
-    if visible_only_in_split and getattr(app, "_split_active", False):
-        groups = app._groups_from_visible_rep_sets() or app._groups_from_rep_sets()
+    if visible_only_in_split and ctx.runtime.split.active:
+        groups = _stats_groups_from_visible_rep_sets(ctx) or _stats_groups_from_rep_sets(ctx)
     else:
-        groups = app._groups_from_rep_sets()
-    app._app_state.stats.set_groups(_copy.deepcopy(groups))
-    stats_refresh_group_list(app)
+        groups = _stats_groups_from_rep_sets(ctx)
+    ctx.state.stats.set_groups(_copy.deepcopy(groups))
+    stats_refresh_group_list(ctx)
 
 
-def stats_resync_from_sample_defs(app) -> None:
+def stats_resync_from_sample_defs(ctx) -> None:
     """Re-pull the comparison groups from the shared Sample-Definition sets.
 
     Statistics auto-seeds its groups from the Sample-Definition replicate sets
@@ -682,14 +716,14 @@ def stats_resync_from_sample_defs(app) -> None:
     """
     from PySide6.QtWidgets import QMessageBox
 
-    rsets = app._groups_from_rep_sets()
+    rsets = _stats_groups_from_rep_sets(ctx)
     if not rsets:
-        app._set_status("No Sample-Definition groups to load — define them on the Sample Definitions tab.")
+        ctx.set_status("No Sample-Definition groups to load — define them on the Sample Definitions tab.")
         return
-    existing = [g for g in app._app_state.stats.groups if g.wells]
+    existing = [g for g in ctx.state.stats.groups if g.wells]
     if existing:
         resp = QMessageBox.question(
-            app if hasattr(app, "window") else None,
+            ctx.window,
             "Load from Sample Definitions",
             f"Replace the current {len(existing)} comparison group(s) with the "
             f"{len(rsets)} Sample-Definition group(s)?",
@@ -700,42 +734,56 @@ def stats_resync_from_sample_defs(app) -> None:
             return
     # Explicit "load all from Sample Definitions" — never filter to the
     # split-visible subset (the dialog above promised all rsets groups).
-    stats_sync_from_app(app, visible_only_in_split=False)
-    app._set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
+    stats_sync_from_app(ctx, visible_only_in_split=False)
+    ctx.set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
 
 
-def stats_on_test_change(app) -> None:
+def stats_on_test_change(ctx) -> None:
     """Clear results when test changes; update UI hints."""
-    app._stats_write_result("")
+    _stats_write_result(ctx, "")
     # Keep the stats Property combo in sync with the channel (ratio
     # channels collapse the metric set to "Calculated Val").
     try:
-        refresh_stats_property_combo(app)
+        refresh_stats_property_combo(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
 
 
-def stats_update_tp_menu(app) -> None:
+def _stats_write_result(ctx, text: str) -> None:
+    """Write *text* into the registered stats result panel (no-op if absent)."""
+    txt = ctx.widgets.get_or_none("_stats_result_text")
+    if txt is None:
+        return
+    txt.setReadOnly(False)
+    txt.setPlainText(text or "")
+    txt.setReadOnly(True)
+
+
+def stats_update_tp_menu(ctx) -> None:
     """Populate the timepoint, channel, and statistic dropdowns."""
     from well_viewer.core.ui_helpers import set_combo_values
+    from well_viewer.data.data_loading import get_rows
+    from well_viewer.core.channel_state_controller import ratio_label_for
 
+    tp_cb = ctx.widgets.get_or_none("_stats_tp_cb")
     all_tps: set = set()
-    for label in app._app_state.dataset.well_paths:
-        df = app._get_rows(label)
+    for label in ctx.state.dataset.well_paths:
+        df = get_rows(ctx, label)
         if df is None or "timepoint_hours" not in df.columns:
             continue
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").dropna().unique()
         all_tps.update(float(t) for t in tp)
     sorted_tps = sorted(all_tps)
     tp_strs = [f"{t:.4g}" for t in sorted_tps]
-    set_combo_values(app._stats_tp_cb, tp_strs or ["—"])
-    if hasattr(app._stats_tp_cb, "setCurrentText"):
-        app._stats_tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
+    if tp_cb is not None:
+        set_combo_values(tp_cb, tp_strs or ["—"])
+        if hasattr(tp_cb, "setCurrentText"):
+            tp_cb.setCurrentText(tp_strs[0] if tp_strs else "—")
 
     # Channel dropdown -- list every measurement column so the user can
     # pick any value to compare. Mirrors the scatter-tab dropdown so the
     # _col_for_scatter_entry mapping is reused.
-    channels = list(app._app_state.channel.fluor_channels) if app._app_state.channel.fluor_channels else []
+    channels = list(ctx.state.channel.fluor_channels) if ctx.state.channel.fluor_channels else []
     ch_options: List[str] = []
     for ch in channels:
         # Display fluor tokens upper-case (GFP) to match the rest of the app;
@@ -743,34 +791,35 @@ def stats_update_tp_menu(app) -> None:
         # chart titles already upper-case (_channel_label_for_val_col). ``ch``
         # stays lower-case for the smFISH-channel membership test.
         ch_options.append(ch.upper())
-        if ch in app._app_state.channel.smfish_channels:
+        if ch in ctx.state.channel.smfish_channels:
             ch_options.append(f"{ch.upper()} (spots)")
     # Ratio "channels" (computed per-cell values) and shape-class features are
     # selectable too — they resolve via _label_to_channel_key in
     # col_for_scatter_entry, and the Property combo collapses to a single
     # Calculated Val for them (see populate_metric_combo).
-    ch_options.extend(app._ratio_dropdown_labels())
+    ch_options.extend(ratio_label_for(ctx, r) for r in ctx.state.channel.ratio_metrics)
     from pipeline.shape_features import label_for as _shape_label_for
-    for _col in (app._app_state.channel.shape_features or []):
+    for _col in (ctx.state.channel.shape_features or []):
         ch_options.append(_shape_label_for(_col) or _col)
     if not ch_options:
         ch_options = ["—"]
-    if hasattr(app, "_stats_channel_cb") and app._stats_channel_cb is not None:
-        current_ch = app._stats_channel_cb.currentText()
-        set_combo_values(app._stats_channel_cb, ch_options)
+    channel_cb = ctx.widgets.get_or_none("_stats_channel_cb")
+    if channel_cb is not None:
+        current_ch = channel_cb.currentText()
+        set_combo_values(channel_cb, ch_options)
         if current_ch in ch_options:
-            app._stats_channel_cb.setCurrentText(current_ch)
+            channel_cb.setCurrentText(current_ch)
         else:
             # Default to the active channel when possible to match the
             # bar/line plots' current selection (compare upper-case since the
             # options now display upper-case while the token is lower-case).
-            active_disp = (app._app_state.channel.active_channel or "").upper()
+            active_disp = (ctx.state.channel.active_channel or "").upper()
             active = active_disp if active_disp in ch_options else ch_options[0]
-            app._stats_channel_cb.setCurrentText(active)
+            channel_cb.setCurrentText(active)
     # Channel may now resolve to a ratio key -- refresh the Property
     # combo's item set accordingly.
     try:
-        refresh_stats_property_combo(app)
+        refresh_stats_property_combo(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
 
@@ -872,14 +921,14 @@ def deserialize_stats_groups(ctx, data) -> list:
 
 
 
-def stats_refresh_fov_indicator(app) -> None:
+def stats_refresh_fov_indicator(ctx) -> None:
     """Update the Statistics tab's replicate-mode label from the FOV toggle, so
     the tab acknowledges which unit of replication the test will use."""
-    lbl = getattr(app, "_stats_fov_indicator", None)
+    lbl = ctx.widgets.get_or_none("_stats_fov_indicator")
     if lbl is None:
         return
     try:
-        on = bool(app._use_fov_spread_active())
+        on = bool(ctx.state.plot.use_fov_replicates)
     except Exception:
         return
     lbl.setText(

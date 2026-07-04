@@ -34,8 +34,8 @@ _build_sample_definitions_centre = _lazy(
 # Split-View extension points. ``split_view.install_split_view`` sets these; while
 # they are None the resolvers below behave exactly as the single-tab original, so
 # the feature is fully absent until (and unless) it is installed.
-split_focus_provider = None     # fn(app) -> focused leaf name | None
-split_visible_provider = None   # fn(app) -> set[str] of visible leaves | None
+split_focus_provider = None     # fn(ctx) -> focused leaf name | None
+split_visible_provider = None   # fn(ctx) -> set[str] of visible leaves | None
 split_nav_intercept = None      # fn(app, key) -> bool (True = consume nav)
 
 
@@ -241,7 +241,7 @@ def run_tab_switch_smoke_checks(
 
 
 
-def _resolve_leaf(app, top: str) -> str:
+def _resolve_leaf(ctx, top: str) -> str:
     """Resolve a top-level tab name to its current leaf.
 
     "Plotting" and "Image Browser" host nested sub-stacks whose current
@@ -249,18 +249,21 @@ def _resolve_leaf(app, top: str) -> str:
     one level for those. Every other top-level name is already a leaf. Works
     regardless of which page the outer notebook currently shows, so it is safe
     to call for a detached Split-View pane.
+
+    A8: takes ``ctx``; the plotting notebook is a window widget (``ctx.window``),
+    the Image Browser sub-tab bar is a runtime handle (``ctx.runtime.image_browser``).
     """
     if not top:
         return ""
     if top == "Plotting":
-        plotting_nb = getattr(app, "_plotting_notebook", None)
+        plotting_nb = getattr(ctx.window, "_plotting_notebook", None)
         if plotting_nb is not None and plotting_nb.count() > 0:
             try:
                 return plotting_nb.currentName()
             except Exception:
                 swallowed()  # was: pass (silent except)
     elif top == "Image Browser":
-        sub = getattr(app, "_image_browser_subtabs", None)
+        sub = ctx.runtime.image_browser.subtabs
         if sub is not None and sub.count() > 0:
             try:
                 return sub.tabText(sub.currentIndex())
@@ -284,22 +287,22 @@ def current_centre_tab(ctx) -> str:
     follow whichever pane the user last clicked — supplied by
     ``split_focus_provider`` (installed by ``split_view``; ``None`` otherwise).
 
-    A8: takes ``ctx`` so features name the tab state without the god-object; the
-    body drives the app's notebook widget, so it unwraps the handle once here.
+    A8: fully ctx-native — the split provider takes ``ctx``, and the centre
+    notebook is a window widget reached through the blessed ``ctx.window``
+    accessor (Qt widget-nav, not god-object behaviour).
     """
-    app = ctx.app
     if split_focus_provider is not None:
-        leaf = split_focus_provider(app)
+        leaf = split_focus_provider(ctx)
         if leaf:
             return leaf
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(ctx.window, "_notebook", None)
     if nb is None:
         return ""
     try:
         tab = nb.currentName()
     except Exception:
         return ""
-    return _resolve_leaf(app, tab)
+    return _resolve_leaf(ctx, tab)
 
 
 def visible_centre_tabs(ctx) -> "set[str]":
@@ -309,10 +312,11 @@ def visible_centre_tabs(ctx) -> "set[str]":
     installed (Split View) it returns both panes' leaves, so live-refresh fan-out
     (selection / channel / plot options) updates both panes even when only one is
     focused.
+
+    A8: the split provider takes ``ctx`` — no god-object handle needed.
     """
-    app = ctx.app
     if split_visible_provider is not None:
-        tabs = split_visible_provider(app)
+        tabs = split_visible_provider(ctx)
         if tabs:
             return set(tabs)
     cur = current_centre_tab(ctx)

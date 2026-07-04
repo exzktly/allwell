@@ -685,7 +685,19 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              Behaviourally identical (the app shim was just a self._ctx forward);
 #              the fake's ctx gained widgets + a channel slice the transitive
 #              get_thresh_frac_on now reads.
-CTX_APP_BUDGET = 14
+#   14 -> 12   tab-controller split providers → ctx.window/ctx.runtime.split: -2
+#              current_centre_tab + visible_centre_tabs dropped their app=ctx.app
+#              unwraps. The centre notebook is a genuine Qt widget-nav need, so it
+#              routes through the blessed ctx.window accessor (_notebook /
+#              _plotting_notebook — same pattern cell_browser/image_browser already
+#              use), the Image-Browser sub-tab bar via ctx.runtime.image_browser,
+#              and the split-view providers (split_view._focused_leaf /
+#              _visible_leaves) + _resolve_leaf now take ctx (split flags via
+#              ctx.runtime.split). This is the honest ctx.window/window-nav win the
+#              Epic-registry analysis flagged as separate from (and unblocked
+#              without) the feature-registry — booked under its own line, not the
+#              registry, per attribution discipline.
+CTX_APP_BUDGET = 12
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

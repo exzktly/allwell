@@ -108,10 +108,12 @@ def _split_app(*, install=True):
     top = QWidget()
     QHBoxLayout(top)
     app._top_bar = top
-    # tab_controller's current_centre_tab/visible_centre_tabs/is_tab_visible take
-    # ctx now (A8) and unwrap ctx.app; give the double a ctx pointing back to it.
+    # tab_controller's current_centre_tab/visible_centre_tabs + the split
+    # providers now take ctx (A8): the centre notebook via ctx.window, the split
+    # flags via ctx.runtime.split. Give the double a matching ctx.
     from types import SimpleNamespace
-    app._ctx = SimpleNamespace(app=app)
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = SimpleNamespace(app=app, window=app, runtime=AppRuntime(app))
     if install:
         sv.install_split_view(app)
     return app, st, widgets

@@ -302,21 +302,25 @@ def on_split_pane_combo_changed(app, _idx: int) -> None:
 
 # ── Provider hooks registered on tab_controller (None ⇒ feature absent) ───────
 
-def _focused_leaf(app):
-    """Provider for ``current_centre_tab``: the focused pane's leaf, or None."""
-    if not getattr(app, "_split_active", False):
+def _focused_leaf(ctx):
+    """Provider for ``current_centre_tab``: the focused pane's leaf, or None.
+
+    A8: takes ``ctx`` — split flags via ``ctx.runtime.split``, leaf resolution
+    via the now-ctx ``_resolve_leaf``."""
+    if not ctx.runtime.split.active:
         return None
-    return tab_controller._resolve_leaf(app, getattr(app, "_split_focused", None)) or None
+    return tab_controller._resolve_leaf(ctx, ctx.runtime.split.focused) or None
 
 
-def _visible_leaves(app):
-    """Provider for ``visible_centre_tabs``: both panes' leaves, or None."""
-    if not getattr(app, "_split_active", False):
+def _visible_leaves(ctx):
+    """Provider for ``visible_centre_tabs``: both panes' leaves, or None.
+
+    A8: takes ``ctx`` (split flags via ``ctx.runtime.split``)."""
+    if not ctx.runtime.split.active:
         return None
     out = {
-        leaf for top in (getattr(app, "_split_tab_a", None),
-                         getattr(app, "_split_tab_b", None))
-        if (leaf := tab_controller._resolve_leaf(app, top))
+        leaf for top in (ctx.runtime.split.tab_a, ctx.runtime.split.tab_b)
+        if (leaf := tab_controller._resolve_leaf(ctx, top))
     }
     return out or None
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
 from well_viewer.features.barplot.controller import (bar_reset_order, open_bar_timepoint_selector, toggle_bar_group_mode, toggle_bar_pool_replicates, toggle_bar_pool_rset_cells, toggle_swarm, toggle_violin, on_bar_drag_press, on_bar_drag_release)
 
 from well_viewer.core.plot_card_actions import (
@@ -71,7 +73,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     chan_cb = reg.register("_chan_cb_bar", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
 
@@ -267,7 +269,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _band_sep.setFrameShape(QFrame.HLine)
     _band_sep.setObjectName("HRule")
     _disp_lay.addWidget(_band_sep)
-    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
+    _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
 
     sl.addStretch(1)
     right_l.addWidget(shape_ctrl)

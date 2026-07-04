@@ -549,14 +549,18 @@ def _themed_nav_toolbar_class():
     return _ThemedNavToolbar
 
 
-def make_band_controls(app: Any, parent: QWidget, *, with_fov: bool = False) -> QWidget:
+def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidget:
     """Build the shared "Error Band: SEM/SD" (+ optional "Spread: FOV") toggle
     widget. The SEM button is wired through ``app._toggle_sem`` and registered in
     ``app._sem_btns`` so ``_toggle_sem`` can update every instance; the FOV button
     (``with_fov=True``) goes through ``app._toggle_fov_replicates`` /
     ``app._fov_btns`` and is auto-disabled whenever replicate groups are active
     (``_refresh_fov_btn_state``). Used both by :func:`attach_plot_toolbar` (legacy
-    toolbar) and by the v2 ``PlotCard`` controls row."""
+    toolbar) and by the v2 ``PlotCard`` controls row.
+
+    A8: takes ``ctx``; the SEM/FOV buttons register onto app-level banks and wire
+    app toggles, so it unwraps the handle once at this core boundary."""
+    app = ctx.app
     w = QWidget(parent)
     h = QHBoxLayout(w)
     h.setContentsMargins(0, 0, 0, 0)
@@ -653,7 +657,7 @@ def attach_plot_toolbar(
     toolbar.setObjectName("PlotToolbar")
     if with_sem and app is not None:
         toolbar.addSeparator()
-        toolbar.addWidget(make_band_controls(app, toolbar, with_fov=with_fov))
+        toolbar.addWidget(make_band_controls(app._ctx, toolbar, with_fov=with_fov))
     layout.addWidget(toolbar)
     return toolbar
 

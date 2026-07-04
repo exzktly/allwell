@@ -693,7 +693,7 @@ def refresh_stats_property_combo(app) -> None:
 
 
 
-def on_plot_channel_selected(app, source=None) -> None:
+def on_plot_channel_selected(ctx, source=None) -> None:
     """Channel-switch handler for line/bar/distribution/heatmap plot tabs.
 
     Each plot tab connects its channel combobox via a lambda that
@@ -704,7 +704,11 @@ def on_plot_channel_selected(app, source=None) -> None:
     leaks the line-tab value when other tabs change channels and
     ``_set_active_channel`` short-circuits because the "new" channel
     equals the current one. Prefer the explicit ``source`` widget.
+
+    A8: takes ``ctx``; the sender/combobox resolution + set_active_channel
+    still walk the app, so it unwraps the handle once at this core boundary.
     """
+    app = ctx.app
     label = ""
     if source is not None and hasattr(source, "currentText"):
         try:

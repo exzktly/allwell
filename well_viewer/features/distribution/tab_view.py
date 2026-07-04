@@ -6,6 +6,8 @@ chosen timepoint, grouped per replicate set or per well — in a v2 PlotCard.
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -55,7 +57,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     chan_cb = reg.register("_chan_cb_distribution", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
 
@@ -153,7 +155,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_ax", fig.add_subplot(1, 1, 1))
     fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
     reg.register("_distribution_canvas", card.canvas)
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
+    card.setControlsWidget(make_band_controls(ctx, card, with_fov=False))
     # NOTE: don't trigger a redraw on theme change — the distribution renderer
     # doesn't use plot_style.apply_ax_style, so ax.clear() would wipe the
     # widget-side theme styling that setPlotTheme already applied. Let

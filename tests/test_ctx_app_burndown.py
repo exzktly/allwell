@@ -344,7 +344,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              drop their ctx.app tab-visibility probes for is_tab_visible(ctx);
 #              also fixes cell_browser controller which already passed ctx to the
 #              app-typed is_tab_visible (always-False bug).
-CTX_APP_BUDGET = 90
+#   90 -> 84    Shared plot-tab builders -> ctx: on_plot_channel_selected
+#              (core channel_state_controller) and make_band_controls (core
+#              ui_helpers) take ctx, unwrapping once at the core boundary. The
+#              4 channel-combo tab_views (line/bar/heatmap/distribution) call
+#              on_plot_channel_selected(ctx, src) and the 4 band-control
+#              tab_views (line/bar/distribution/scatter-agg) call
+#              make_band_controls(ctx, ...); delegator + legacy toolbar bridge.
+CTX_APP_BUDGET = 84
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

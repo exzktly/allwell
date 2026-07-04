@@ -854,7 +854,7 @@ class WellViewerApp(QWidget):
 
 
 
-    def _on_plot_channel_selected(self, source = None) -> None: return on_plot_channel_selected(self, source)
+    def _on_plot_channel_selected(self, source = None) -> None: return on_plot_channel_selected(self._ctx, source)
 
     def _on_preview_channel_selected(self, _e = None) -> None: return on_preview_channel_selected(self, _e)
 

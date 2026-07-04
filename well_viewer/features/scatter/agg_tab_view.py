@@ -104,7 +104,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # a "Display ▾" popover (matches line/bar), instead of a card-controls row.
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
     _disp_btn.setToolTip("Error band (SEM/SD) for the aggregate points")
-    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=False))
+    _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=False))
     cl.addWidget(_disp_btn)
 
     cl.addStretch(1)

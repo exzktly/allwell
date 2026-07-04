@@ -6,6 +6,8 @@ slider to scrub through time and click-to-select wells.
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -69,7 +71,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     chan_cb.addItems(["GFP"])
     chan_cb.setMinimumWidth(220)
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
 

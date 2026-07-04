@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -54,7 +56,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     chan_cb = reg.register("_chan_cb_line", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
     if not ctx.widgets.has("_plot_chan_var"):
@@ -92,7 +94,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # rather than a separate card-controls row beneath the figure.
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", line_ctrl)
     _disp_btn.setToolTip("Error band (SEM/SD) and per-FOV spread")
-    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
+    _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
     cl.addWidget(_disp_btn)
 
     cl.addStretch(1)

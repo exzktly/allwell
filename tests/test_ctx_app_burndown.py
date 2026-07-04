@@ -712,7 +712,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              the custom-profile scratch to the new ctx.runtime.export namespace;
 #              two ctx-form helpers were added in export.style. tab_view was this
 #              feature's sole ctx.app, so it retires cleanly to zero.
-CTX_APP_BUDGET = 11
+#   11 -> 10   fold-change controls → ctx: -1   the whole domain/fold_change_controls
+#              cluster (install_fold_change_controls + _ControlCombo + the 4
+#              _repopulate_* combos + _sync_widgets_to_state + set_fold_change_state
+#              + _reset_bar_ylim_edits) only ever touched app._app_state / _event_bus
+#              / _ctx — zero god-methods — so it converts wholesale to ctx (ctx.state
+#              / ctx.bus). install dropped its app=ctx.app unwrap; the two persistence
+#              view_state callers of _sync_widgets_to_state pass app._ctx.
+CTX_APP_BUDGET = 10
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

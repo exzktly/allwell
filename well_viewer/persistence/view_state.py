@@ -519,7 +519,7 @@ def restore(ctx, state: dict) -> None:
         # exist at restore time (e.g. Line, built eagerly).
         try:
             from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
-            _sync_widgets_to_state(app)
+            _sync_widgets_to_state(app._ctx)
         except Exception:
             _logger.debug("view_state: fold-change combo sync failed", exc_info=True)
 
@@ -1163,7 +1163,7 @@ def reset(app) -> None:
     app._app_state.plot.fc_order = "ctrl_first"
     try:
         from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
-        _sync_widgets_to_state(app)
+        _sync_widgets_to_state(app._ctx)
     except Exception:
         _logger.debug("reset: fold-change sync failed", exc_info=True)
     # Per-tab combo defaults.

@@ -734,7 +734,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              a single core helper (channel_state_controller.ensure_cell_gating_
 #              tab_built, +1 app=ctx.app) that load + the quick-edit share — so the
 #              three cleared refs net -2 even though the lazy-build seam stays.
-CTX_APP_BUDGET = 8
+#   8 -> 7    ensure_cell_gating_tab_built → ctx: -1   the lazy Cell-Gating-tab
+#              force-build seam dropped its last app=ctx.app. The "tab is built"
+#              signal (the fluor-edits map) reads via ctx.runtime.cell_gating; the
+#              _centre_build_pending lazy-build closure got a runtime home
+#              (new ctx.runtime.centre namespace, prefix _centre_ — a live callback
+#              like the other stamped closures). So persistence-load + the plotting
+#              ThreshFracOn quick-edit reach the lazy build fully ctx-natively.
+CTX_APP_BUDGET = 7
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -48,7 +48,8 @@ class AppRuntime:
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
-                 "review_image", "review", "stats", "plot_groups", "export")
+                 "review_image", "review", "stats", "plot_groups", "export",
+                 "centre")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -131,3 +132,11 @@ class AppRuntime:
         # ``app._export_style_custom_profiles``). Session-only, never persisted —
         # lets the export + batch-export panels list/apply profiles ctx-natively.
         object.__setattr__(self, "export", _FeatureRuntime(app, "_export_style_"))
+        # Centre-notebook lazy build callback (prefix ``_centre_``): the
+        # ``ctx.runtime.centre.build_pending`` closure <-> ``app._centre_build_pending``,
+        # stamped once by ``centre_view`` to force-flip the centre stack to a
+        # named tab's page and build it on demand. A live callback (like the
+        # other stamped closures here), never persisted — lets the lazy-tab
+        # force-build (persistence load + the ThreshFracOn quick-edit both need
+        # it) resolve through ctx instead of the god-object handle.
+        object.__setattr__(self, "centre", _FeatureRuntime(app, "_centre_"))

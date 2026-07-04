@@ -934,19 +934,19 @@ def ensure_cell_gating_tab_built(ctx) -> bool:
     load and the plotting-tab ThreshFracOn quick-edit both need its QLineEdit
     maps to exist *now* (so the loaded/edited value has a widget to seed). This
     is the single ``app``-bound bundling seam for that lazy build: it force-flips
-    the centre stack to the tab's page (``_centre_build_pending``) and builds the
-    sub-tab. Kept in ``core`` (which may name the god-object) so persistence and
-    the quick-edit stay ``ctx``-native — they call this instead of unwrapping the
-    app themselves.
+    the centre stack to the tab's page (``ctx.runtime.centre.build_pending``) and
+    builds the sub-tab. Fully ``ctx``-native — the fluor-edits map (the "tab is
+    built" signal) reads through ``ctx.runtime.cell_gating`` and the lazy-build
+    closure through ``ctx.runtime.centre``, so persistence and the quick-edit
+    call this instead of unwrapping the app themselves.
     """
-    app = ctx.app
-    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
-        build = getattr(app, "_centre_build_pending", None)
+    if ctx.runtime.cell_gating.fluor_gate_edits is None:
+        build = ctx.runtime.centre.build_pending
         if callable(build):
             build("Sample Definitions")
         from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(ctx)
-    return hasattr(app, "_cell_gating_fluor_gate_edits")
+    return ctx.runtime.cell_gating.fluor_gate_edits is not None
 
 
 def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:

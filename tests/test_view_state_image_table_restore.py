@@ -75,18 +75,33 @@ def test_channel_and_source_round_trip_minimal_widgets(qapp):
         "binary": _combo(["None", "Mask"], data=["", "mask"]),
         "log": QCheckBox(), "chan": "GFP",
     }
+    cells = [[cell]]
+    lut = {0: lut0}
+    color_cbs = [LutSelector()]
+    crop = CropTool(on_change=lambda: None)
+    it_state = SimpleNamespace(image_table=ImageTableState(rows=1, cols=1))
+    # The fake doubles as its own ctx: ``_image_table_*`` / ``_app_state`` feed the
+    # app-based ``_apply_image_table``; ``state`` / ``runtime.image_table`` /
+    # ``widgets`` (+ a ``_ctx`` self-ref) feed the ctx-based
+    # ``_snapshot_image_table``. The same live objects back both faces.
     app = SimpleNamespace(
-        _image_table_cells=[[cell]],
-        _image_table_lut={0: lut0},
-        _image_table_row_lut_color_cbs=[LutSelector()],
-        _image_table_crop_tool=CropTool(on_change=lambda: None),
-        _app_state=SimpleNamespace(image_table=ImageTableState(rows=1, cols=1)),
+        _image_table_cells=cells,
+        _image_table_lut=lut,
+        _image_table_row_lut_color_cbs=color_cbs,
+        _image_table_crop_tool=crop,
+        _app_state=it_state,
+        state=it_state,
+        runtime=SimpleNamespace(image_table=SimpleNamespace(
+            cells=cells, lut=lut, row_lut_color_cbs=color_cbs, crop_tool=crop,
+            row_chan_cbs=None, row_well_cbs=None)),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
     )
+    app._ctx = app
 
     cell["chan_cb"].setCurrentText("mCherry")
     lut0["source"].setCurrentIndex(1)  # Corrected
 
-    snap = vs._snapshot_image_table(app)
+    snap = vs._snapshot_image_table(app._ctx)
     assert snap["cells"][0][0]["chan"] == "mCherry"
     assert snap["row_luts"]["0"]["source"] == "corrected"
 
@@ -126,7 +141,7 @@ def test_image_table_display_state_round_trips(loaded_app):
     row0["min"].setText("100")
     row0["max"].setText("2000")
 
-    snap = vs._snapshot_image_table(app)
+    snap = vs._snapshot_image_table(app._ctx)
     assert snap.get("crop") == [3, 5, 40, 60]
     s0 = snap["row_luts"]["0"]
     assert s0.get("source") == "corrected"
@@ -155,7 +170,7 @@ def test_snapshot_tolerates_unbuilt_image_table(loaded_app):
     """No grid built yet → snapshot is an empty dict, not an exception."""
     app = loaded_app
     app._image_table_cells = []
-    assert vs._snapshot_image_table(app) == {}
+    assert vs._snapshot_image_table(app._ctx) == {}
 
 
 def test_channel_and_source_restore_through_full_view_state_path(loaded_app):

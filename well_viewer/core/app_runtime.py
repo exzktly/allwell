@@ -49,7 +49,7 @@ class AppRuntime:
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
-                 "centre")
+                 "centre", "view_state")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -140,3 +140,12 @@ class AppRuntime:
         # force-build (persistence load + the ThreshFracOn quick-edit both need
         # it) resolve through ctx instead of the god-object handle.
         object.__setattr__(self, "centre", _FeatureRuntime(app, "_centre_"))
+        # View-state persistence scratch (prefix ``_view_state_``): the pending
+        # per-tab restore payload (``ctx.runtime.view_state.pending`` <->
+        # ``app._view_state_pending``) and the cross-dataset "absent" well/solo
+        # sets stashed on restore so a subset-load-then-save doesn't prune wells
+        # the current dataset simply doesn't contain (``.absent_wells`` /
+        # ``.absent_solo``, audit X14). Session scratch, never itself serialized
+        # through AppRuntime — snapshot/restore read/write it via this alias so
+        # the persistence layer names no god-object.
+        object.__setattr__(self, "view_state", _FeatureRuntime(app, "_view_state_"))

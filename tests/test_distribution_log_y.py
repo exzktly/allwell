@@ -10,17 +10,22 @@ from well_viewer.persistence import view_state as vs
 
 
 def _fake_app_with_distribution(**overrides):
-    """A SimpleNamespace app whose ``_app_state`` exposes a distribution slice
-    via ``feature_slice`` — matches the typed-state contract (A8 migration)."""
+    """A fake that doubles as its own ctx: ``_app_state`` feeds the app-based
+    ``_apply_distribution``, while ``state`` / ``widgets`` (+ a ``_ctx`` self-ref)
+    feed the ctx-based ``_snapshot_distribution``. The distribution combos aren't
+    built, so ``widgets.get_or_none`` returns ``None`` (snapshot skips them)."""
     slice_ = DistributionState(**overrides)
     state = SimpleNamespace(distribution=slice_,
                             feature_slice=lambda name: slice_ if name == "distribution" else None)
-    return SimpleNamespace(_app_state=state)
+    app = SimpleNamespace(_app_state=state, state=state,
+                          widgets=SimpleNamespace(get_or_none=lambda _n: None))
+    app._ctx = app
+    return app
 
 
 def test_distribution_log_y_snapshot_and_restore():
     app = _fake_app_with_distribution(bins=40, log_x=False, log_y=True)
-    snap = vs._snapshot_distribution(app)
+    snap = vs._snapshot_distribution(app._ctx)
     assert snap["log_y"] is True
 
     restored = _fake_app_with_distribution()

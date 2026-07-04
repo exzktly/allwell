@@ -14,7 +14,7 @@ from well_viewer.persistence.view_state import _nondefault_export_prefs
 def _app(prefs):
     from well_viewer.core.export_prefs_state import ExportPrefsState
     return types.SimpleNamespace(
-        _app_state=types.SimpleNamespace(export_prefs=ExportPrefsState(style_prefs=prefs)))
+        state=types.SimpleNamespace(export_prefs=ExportPrefsState(style_prefs=prefs)))
 
 
 def test_all_defaults_persist_nothing():

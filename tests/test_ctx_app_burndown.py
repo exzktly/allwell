@@ -759,7 +759,21 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              The three new accessors (rebuild_all / refresh_sidebar_map / features)
 #              are the teardown endgame: each names an irreducible god-object service
 #              in one frozen place instead of an escape-hatch reach-through.
-CTX_APP_BUDGET = 5
+#   5 -> 4    view_state.snapshot → ctx-native: -1   the snapshot half of the
+#              view-state persistence dropped its ``app = ctx.app`` unwrap. Its 8
+#              self-contained helpers (_nondefault_export_prefs / _current_leaf_tab /
+#              _snapshot_tabs / _combo_text / _snapshot_{bar,distribution,scatter,
+#              image_table}) now take ctx: typed reads via ctx.state, every combo via
+#              ctx.widgets.get_or_none (all 9 verified registry-backed), the runtime
+#              scratch via ctx.runtime.{scatter,image_table}, the active leaf via the
+#              ctx-native current_centre_tab(ctx), and the cross-dataset absent-well /
+#              pending-tab scratch via a new ctx.runtime.view_state namespace (prefix
+#              _view_state_). restore (the other unwrap, view_state:421) is untouched
+#              and still writes those app._view_state_* stamps, which the runtime alias
+#              bridges. Round-trip verified by the view_state suite (absent-wells X14,
+#              bar/scatter/image-table restore); the two image-table grid-build
+#              failures are a pre-existing grid_view None-layout bug, not this change.
+CTX_APP_BUDGET = 4
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

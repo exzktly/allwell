@@ -72,7 +72,7 @@ _IMAGE_BROWSER_SUBTABS = (
 
 # ── snapshot ───────────────────────────────────────────────────────────────
 
-def _nondefault_export_prefs(app) -> dict:
+def _nondefault_export_prefs(ctx) -> dict:
     """Only the export-style prefs the user actually changed.
 
     Persisting the *full* dict (defaults included) froze the old default into
@@ -83,7 +83,7 @@ def _nondefault_export_prefs(app) -> dict:
     app is constructed with.
     """
     from well_viewer.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS
-    cur = app._app_state.export_prefs.style_prefs or {}
+    cur = ctx.state.export_prefs.style_prefs or {}
     return {
         k: v for k, v in cur.items()
         if k not in DEFAULT_EXPORT_STYLE_PREFS or v != DEFAULT_EXPORT_STYLE_PREFS[k]
@@ -92,66 +92,63 @@ def _nondefault_export_prefs(app) -> dict:
 
 def snapshot(ctx) -> dict:
     """Build a JSON-serialisable view-state dict from current app state."""
-    app = ctx.app
     return {
         "schema_version": SCHEMA_VERSION,
         # X14: union back the wells that were saved for datasets/plates not
         # currently loaded (stashed on restore), so a subset-load-then-save does
         # not irreversibly prune wells the current dataset simply doesn't contain.
         "selected_wells": sorted(
-            set(app._app_state.selection.selected_wells or [])
-            | getattr(app, "_view_state_absent_wells", set())
+            set(ctx.state.selection.selected_wells or [])
+            | (ctx.runtime.view_state.absent_wells or set())
         ),
         # Rep-set visibility (which groups are shown on the plots) + solo wells —
         # in group/replicate mode this, not ``selected_wells``, is what drives the
         # plate and the plot, so a plot saved in that mode restores what was shown.
         "selection_visibility": {
             "hidden_ids": [
-                str(s.get("id")) for s in (app._app_state.selection.selections or [])
+                str(s.get("id")) for s in (ctx.state.selection.selections or [])
                 if s.get("id") is not None and s.get("hidden")
             ],
             "solo_wells": sorted(
-                set(app._app_state.selection.active_solo_wells or [])
-                | getattr(app, "_view_state_absent_solo", set())
+                set(ctx.state.selection.active_solo_wells or [])
+                | (ctx.runtime.view_state.absent_solo or set())
             ),
         },
-        "active_centre_tab": _current_leaf_tab(app),
-        "active_channel": str(app._app_state.channel.active_channel or ""),
-        "active_metric": str(app._app_state.channel.active_metric or ""),
-        "use_sem": bool(app._app_state.plot.use_sem),
-        "use_fov_replicates": bool(app._app_state.plot.use_fov_replicates),
-        "show_threshold_line": bool(app._app_state.plot.show_threshold_line),
-        "show_significance": bool(app._app_state.plot.show_significance),
+        "active_centre_tab": _current_leaf_tab(ctx),
+        "active_channel": str(ctx.state.channel.active_channel or ""),
+        "active_metric": str(ctx.state.channel.active_metric or ""),
+        "use_sem": bool(ctx.state.plot.use_sem),
+        "use_fov_replicates": bool(ctx.state.plot.use_fov_replicates),
+        "show_threshold_line": bool(ctx.state.plot.show_threshold_line),
+        "show_significance": bool(ctx.state.plot.show_significance),
         "fold_change": {
-            "vs_control_on": bool(app._app_state.plot.fc_vs_control_on),
-            "control_label": str(app._app_state.plot.fc_control_label or ""),
-            "vs_t0_on": bool(app._app_state.plot.fc_vs_t0_on),
-            "baseline_tp": str(getattr(app._app_state.plot, "fc_baseline_tp", "") or ""),
-            "op_ctrl": str(getattr(app._app_state.plot, "fc_op_ctrl", "ratio") or "ratio"),
-            "op_t0": str(getattr(app._app_state.plot, "fc_op_t0", "ratio") or "ratio"),
-            "order": str(getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first"),
+            "vs_control_on": bool(ctx.state.plot.fc_vs_control_on),
+            "control_label": str(ctx.state.plot.fc_control_label or ""),
+            "vs_t0_on": bool(ctx.state.plot.fc_vs_t0_on),
+            "baseline_tp": str(getattr(ctx.state.plot, "fc_baseline_tp", "") or ""),
+            "op_ctrl": str(getattr(ctx.state.plot, "fc_op_ctrl", "ratio") or "ratio"),
+            "op_t0": str(getattr(ctx.state.plot, "fc_op_t0", "ratio") or "ratio"),
+            "order": str(getattr(ctx.state.plot, "fc_order", "ctrl_first") or "ctrl_first"),
         },
-        "export_style_prefs": _nondefault_export_prefs(app),
+        "export_style_prefs": _nondefault_export_prefs(ctx),
         "export_axis_prefs": {
             str(k): dict(v)
-            for k, v in (app._app_state.export_prefs.axis_prefs or {}).items()
+            for k, v in (ctx.state.export_prefs.axis_prefs or {}).items()
             if isinstance(v, dict)
         },
-        "tabs": _snapshot_tabs(app),
+        "tabs": _snapshot_tabs(ctx),
     }
 
 
-def _current_leaf_tab(app) -> str:
-    fn = getattr(app, "_current_centre_tab", None)
-    if callable(fn):
-        try:
-            return str(fn() or "")
-        except Exception:
-            return ""
-    return ""
+def _current_leaf_tab(ctx) -> str:
+    from well_viewer.core.tab_controller import current_centre_tab
+    try:
+        return str(current_centre_tab(ctx) or "")
+    except Exception:
+        return ""
 
 
-def _snapshot_tabs(app) -> dict[str, dict]:
+def _snapshot_tabs(ctx) -> dict[str, dict]:
     """Capture per-tab combo state for tabs we know how to round-trip.
 
     Tab files aren't modified — we read from the widget references the
@@ -162,27 +159,27 @@ def _snapshot_tabs(app) -> dict[str, dict]:
     overwrote, so it's still authoritative.
     """
     tabs: dict[str, dict] = {}
-    pending = getattr(app, "_view_state_pending", None) or {}
+    pending = ctx.runtime.view_state.pending or {}
     for name, slc in pending.items():
         if isinstance(slc, dict) and slc:
             tabs[str(name)] = dict(slc)
-    bar = _snapshot_bar(app)
+    bar = _snapshot_bar(ctx)
     if bar:
         tabs["Bar Plots"] = bar
-    dist = _snapshot_distribution(app)
+    dist = _snapshot_distribution(ctx)
     if dist:
         tabs["Distribution"] = dist
-    scat = _snapshot_scatter(app)
+    scat = _snapshot_scatter(ctx)
     if scat:
         tabs["Scatter Plot"] = scat
-    img = _snapshot_image_table(app)
+    img = _snapshot_image_table(ctx)
     if img:
         tabs["Image Table"] = img
     return tabs
 
 
-def _combo_text(app, attr: str) -> str | None:
-    w = getattr(app, attr, None)
+def _combo_text(ctx, attr: str) -> str | None:
+    w = ctx.widgets.get_or_none(attr)
     if w is None:
         return None
     try:
@@ -191,25 +188,25 @@ def _combo_text(app, attr: str) -> str | None:
         return None
 
 
-def _snapshot_bar(app) -> dict:
+def _snapshot_bar(ctx) -> dict:
     out: dict[str, Any] = {}
-    tp = _combo_text(app, "_bar_tp_cb")
+    tp = _combo_text(ctx, "_bar_tp_cb")
     if tp is not None:
         out["timepoint"] = tp
-    sels = app._app_state.bar.tp_selections if hasattr(app, "_app_state") else None
+    sels = ctx.state.bar.tp_selections
     if isinstance(sels, dict) and sels:
         out["timepoint_selections"] = {k: bool(v) for k, v in sels.items()}
-    _bar = app._app_state.feature_slice("bar")
+    _bar = ctx.state.feature_slice("bar")
     if _bar is not None:
         out["swarm"] = bool(_bar.swarm)
         out["violin"] = bool(_bar.violin)
-    slider = getattr(app, "_violin_slider", None)
+    slider = ctx.widgets.get_or_none("_violin_slider")
     if slider is not None:
         try:
             out["violin_smooth"] = int(slider.value())
         except Exception:
             swallowed()  # was: pass (silent except)
-    plot = getattr(app._app_state, "plot", None) if hasattr(app, "_app_state") else None
+    plot = getattr(ctx.state, "plot", None)
     if plot is not None:
         if hasattr(plot, "bar_group_mode"):
             out["group_mode"] = str(plot.bar_group_mode)
@@ -229,18 +226,18 @@ def _snapshot_bar(app) -> dict:
     return out
 
 
-def _snapshot_distribution(app) -> dict:
+def _snapshot_distribution(ctx) -> dict:
     out: dict[str, Any] = {}
-    tp = _combo_text(app, "_distribution_tp_cb")
+    tp = _combo_text(ctx, "_distribution_tp_cb")
     if tp is not None:
         out["timepoint"] = tp
-    mode = _combo_text(app, "_distribution_mode_cb")
+    mode = _combo_text(ctx, "_distribution_mode_cb")
     if mode is not None:
         out["mode"] = mode
-    layout = _combo_text(app, "_distribution_layout_cb")
+    layout = _combo_text(ctx, "_distribution_layout_cb")
     if layout is not None:
         out["layout"] = layout
-    _dist = app._app_state.feature_slice("distribution")
+    _dist = ctx.state.feature_slice("distribution")
     if _dist is not None:
         out["bins"] = int(_dist.bins)
         out["log_x"] = bool(_dist.log_x)
@@ -248,7 +245,7 @@ def _snapshot_distribution(app) -> dict:
     return out
 
 
-def _snapshot_scatter(app) -> dict:
+def _snapshot_scatter(ctx) -> dict:
     out: dict[str, Any] = {}
     for key, attr in (
         # Per-cell ("Per-cell points") sub-tab axis selectors.
@@ -265,36 +262,35 @@ def _snapshot_scatter(app) -> dict:
         ("agg_ch_y", "_scatter_agg_ch_y_cb"),
         ("agg_metric_y", "_scatter_agg_metric_y_cb"),
     ):
-        v = _combo_text(app, attr)
+        v = _combo_text(ctx, attr)
         if v is not None:
             out[key] = v
     # Which sub-tab (per-cell vs aggregate) was active.
-    _sc = app._app_state.feature_slice("scatter")
+    _sc = ctx.state.feature_slice("scatter")
     if _sc is not None and _sc.mode:
         out["mode"] = str(_sc.mode)
     # Per-timepoint multi-select checkboxes for each sub-tab (the dataset-wide
     # timepoint filter the user can toggle). Mirrors the Bar tab's
     # ``timepoint_selections`` round-trip.
-    for key, attr in (
-        ("tp_selections", "_scatter_tp_selections"),
-        ("agg_tp_selections", "_scatter_agg_tp_selections"),
+    for key, sel in (
+        ("tp_selections", ctx.runtime.scatter.tp_selections),
+        ("agg_tp_selections", ctx.runtime.scatter.agg_tp_selections),
     ):
-        sel = getattr(app, attr, None)
         if isinstance(sel, dict) and sel:
             out[key] = {str(k): bool(v) for k, v in sel.items()}
     return out
 
 
-def _snapshot_image_table(app) -> dict:
+def _snapshot_image_table(ctx) -> dict:
     """Capture the Image Table grid: dimensions, per-cell well/chan/tp/fov,
     overlay toggles, and per-channel LUT min/max edits.
     """
-    cells = getattr(app, "_image_table_cells", None)
+    cells = ctx.runtime.image_table.cells
     if not cells:
         return {}
     out: dict[str, Any] = {
-        "rows": int(getattr(app._app_state.image_table, "rows", len(cells))),
-        "cols": int(getattr(app._app_state.image_table, "cols",
+        "rows": int(getattr(ctx.state.image_table, "rows", len(cells))),
+        "cols": int(getattr(ctx.state.image_table, "cols",
                              len(cells[0]) if cells else 0)),
     }
     grid: list[list[dict[str, str]]] = []
@@ -322,16 +318,15 @@ def _snapshot_image_table(app) -> dict:
     # replayed — otherwise the per-row channel/well combos + labels can land on
     # the wrong axis.
     for key, fld in (("row_axis", "row_axis"), ("col_axis", "col_axis")):
-        v = getattr(app._app_state.image_table, fld, None)
+        v = getattr(ctx.state.image_table, fld, None)
         if isinstance(v, str) and v:
             out[key] = v
     # Per-row channel / well convenience combos (one per grid row); their value
     # is mirrored into each cell, but capturing them keeps the per-row UI in sync.
-    for key, attr in (
-        ("row_chans", "_image_table_row_chan_cbs"),
-        ("row_wells", "_image_table_row_well_cbs"),
+    for key, cbs in (
+        ("row_chans", ctx.runtime.image_table.row_chan_cbs),
+        ("row_wells", ctx.runtime.image_table.row_well_cbs),
     ):
-        cbs = getattr(app, attr, None)
         if cbs:
             try:
                 out[key] = [str(cb.currentText()) for cb in cbs]
@@ -342,14 +337,14 @@ def _snapshot_image_table(app) -> dict:
         ("global_tp",   "_image_table_global_tp_cb"),
         ("global_fov",  "_image_table_global_fov_cb"),
     ):
-        v = _combo_text(app, attr)
+        v = _combo_text(ctx, attr)
         if v is not None:
             out[key] = v
     # Per-row LUT + display options (top-hat / boundaries / binary), keyed by
     # row index. Display is now per-row (grid_view.build_lut_row), not a set of
     # global toggles.
-    luts = getattr(app, "_image_table_lut", None) or {}
-    color_cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    luts = ctx.runtime.image_table.lut or {}
+    color_cbs = ctx.runtime.image_table.row_lut_color_cbs or []
     row_luts: dict[str, dict[str, Any]] = {}
     if isinstance(luts, dict):
         for r, edits in luts.items():
@@ -394,7 +389,7 @@ def _snapshot_image_table(app) -> dict:
     # display-only zoom, so a restored grid re-crops/re-scales. The ON-threshold
     # is intentionally NOT captured here — it's a global value shared with Cell
     # Gating and the plot tabs, so a saved-plot restore must not mutate it.
-    ct = getattr(app, "_image_table_crop_tool", None)
+    ct = ctx.runtime.image_table.crop_tool
     if ct is not None:
         try:
             out["crop"] = list(ct.crop) if ct.crop else None
@@ -402,7 +397,7 @@ def _snapshot_image_table(app) -> dict:
         except Exception:
             swallowed()
     try:
-        out["zoom"] = float(app._app_state.image_table.zoom)
+        out["zoom"] = float(ctx.state.image_table.zoom)
     except Exception:
         swallowed()
     return out

@@ -7,12 +7,17 @@ import logging
 _logger = logging.getLogger("well_viewer")
 
 
-def save_to_pipeline_info(app) -> None:
+def save_to_pipeline_info(ctx) -> None:
     """Persist non-default cell gating params to pipeline_info.json.
 
     Called from the Cell Gating tab whenever the user edits a value. Silently
     no-ops when no data directory is loaded or the sidecar is missing.
+
+    A8 teardown: takes ``ctx`` (the Cell Gating tab is a feature and cannot name
+    the god-object). Persistence MAY unwrap the app once here — the body still
+    reaches many loose ``app._cell_gating_*`` widget handles.
     """
+    app = ctx.app
     if not app._app_state.dataset.data_dir:
         return
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):
@@ -45,13 +50,18 @@ def save_to_pipeline_info(app) -> None:
     save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
 
 
-def load_from_pipeline_info(app) -> bool:
+def load_from_pipeline_info(ctx) -> bool:
     """Apply any saved cell_gating block in pipeline_info.json.
 
     Returns True when a block was found and applied. The Cell Gating tab is
     built lazily, so when the sidecar has persisted thresholds we force-build
     the tab here so its QLineEdits exist before we try to set them.
+
+    A8 teardown: takes ``ctx`` (feature callers hold ``ctx``, not the
+    god-object). Persistence MAY unwrap the app once here — the body still
+    reaches many loose ``app._cell_gating_*`` widget handles.
     """
+    app = ctx.app
     if not app._app_state.dataset.data_dir:
         return False
     from well_viewer.domain.gating_state import read_gating_params

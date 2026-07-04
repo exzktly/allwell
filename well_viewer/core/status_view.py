@@ -93,7 +93,11 @@ def build_bottom(app) -> None:
     app._status_band_chip.clicked.connect(lambda _=False: app._toggle_sem())
     sr_l.addWidget(app._status_band_chip)
 
-    app._progress_bar = QProgressBar(status_row)
+    # Register the shared status-bar progress bar through the WidgetRegistry so
+    # features reach it via ``ctx.widgets.get_or_none("_progress_bar")`` (A8);
+    # ``register`` also stamps ``app._progress_bar`` so the legacy readers
+    # (ui_helpers.show_progress / step_progress) keep resolving unchanged.
+    app._widget_registry.register("_progress_bar", QProgressBar(status_row))
     app._progress_bar.setOrientation(Qt.Horizontal)
     app._progress_bar.setFixedWidth(220)
     app._progress_bar.setRange(0, 100)

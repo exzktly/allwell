@@ -703,11 +703,11 @@ class WellViewerApp(QWidget):
 
     def _save_gating_to_pipeline_info(self) -> None:
         from well_viewer.persistence import cell_gating as _cg
-        _cg.save_to_pipeline_info(self)
+        _cg.save_to_pipeline_info(self._ctx)
 
     def _load_gating_from_pipeline_info(self) -> bool:
         from well_viewer.persistence import cell_gating as _cg
-        return _cg.load_from_pipeline_info(self)
+        return _cg.load_from_pipeline_info(self._ctx)
 
     # ── decision-#1 colour: "the plate is the legend" — every well / rep-set /
     # group is coloured by *well-position rank*, so the same well always gets the

@@ -31,6 +31,10 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
     app._app_state = SimpleNamespace(
         cell_gating=state if state is not None else CellGatingState(),
         plot=SimpleNamespace(),
+        # The thresh change-handler persists via cell_gating.save_to_pipeline_info
+        # (now ctx-native); with no data dir it returns early, so the pure-logic
+        # fan-out test never touches disk / the god-object save method.
+        dataset=SimpleNamespace(data_dir=None),
     )
     if with_edits:
         app._cell_gating_fluor_gate_edits = {k: QLineEdit(v) for k, v in fluor}

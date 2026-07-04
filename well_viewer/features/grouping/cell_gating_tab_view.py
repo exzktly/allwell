@@ -630,8 +630,11 @@ def build_cell_gating_subtab(ctx) -> None:
         build_cell_gating_tab(ctx, frame)
         if ctx.state.dataset.well_paths:
             try:
+                from well_viewer.persistence.cell_gating import (
+                    load_from_pipeline_info,
+                )
                 cell_gating_load_cell_areas(ctx)
-                ctx.app._load_gating_from_pipeline_info()
+                load_from_pipeline_info(ctx)
                 cell_gating_load_threshold_frac_on(ctx)
             except Exception:
                 logger.exception("Cell Gating post-build sync failed")
@@ -1132,7 +1135,7 @@ def cell_gating_start_gating_worker(ctx) -> None:
     worker.finished_ok.connect(lambda: _cell_gating_on_finished(ctx))
     worker.failed.connect(lambda msg: _cell_gating_on_failed(ctx, msg))
     ctx.runtime.cell_gating.worker = worker
-    bar = getattr(ctx.app, "_progress_bar", None)
+    bar = ctx.widgets.get_or_none("_progress_bar")
     if bar is not None:
         bar.setRange(0, max(1, len(ctx.state.dataset.well_paths)))
         bar.setValue(0)
@@ -2289,7 +2292,7 @@ def _cell_gating_plot_cdf(ctx) -> None:
 
 
 def _cell_gating_on_progress(ctx, current: int, total: int) -> None:
-    bar = getattr(ctx.app, "_progress_bar", None)
+    bar = ctx.widgets.get_or_none("_progress_bar")
     if bar is None:
         return
     if bar.maximum() != total:
@@ -2298,7 +2301,7 @@ def _cell_gating_on_progress(ctx, current: int, total: int) -> None:
 
 
 def _cell_gating_on_finished(ctx) -> None:
-    bar = getattr(ctx.app, "_progress_bar", None)
+    bar = ctx.widgets.get_or_none("_progress_bar")
     if bar is not None:
         bar.setValue(0)
         bar.hide()
@@ -2308,7 +2311,7 @@ def _cell_gating_on_finished(ctx) -> None:
 def _cell_gating_on_failed(ctx, msg: str) -> None:
     # Release the UI (hide the progress bar) and surface the error instead of
     # leaving the status bar stuck mid-pass (audit E7).
-    bar = getattr(ctx.app, "_progress_bar", None)
+    bar = ctx.widgets.get_or_none("_progress_bar")
     if bar is not None:
         bar.setValue(0)
         bar.hide()
@@ -2321,11 +2324,9 @@ def _cell_gating_on_failed(ctx, msg: str) -> None:
 
 def _cell_gating_persist_params(ctx) -> None:
     """Save current gating values into pipeline_info.json (no-op when at defaults)."""
-    save = getattr(ctx.app, "_save_gating_to_pipeline_info", None)
-    if save is None:
-        return
+    from well_viewer.persistence.cell_gating import save_to_pipeline_info
     try:
-        save()
+        save_to_pipeline_info(ctx)
     except Exception:
         logger.exception("Failed to save gating params to pipeline_info.json")
 

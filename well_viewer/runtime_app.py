@@ -889,7 +889,7 @@ class WellViewerApp(QWidget):
         """Effective state of the per-FOV-replicates toggle for plotting."""
         return bool(self._app_state.plot.use_fov_replicates)
 
-    def _toggle_fov_replicates(self) -> None: return toggle_fov_replicates(self)
+    def _toggle_fov_replicates(self) -> None: return toggle_fov_replicates(self._ctx)
 
     def _refresh_fov_btn_state(self) -> None: return refresh_fov_btn_state(self._ctx)
     def _refresh_bar_layout_btn_state(self) -> None: return refresh_bar_layout_btn_state(self._ctx)

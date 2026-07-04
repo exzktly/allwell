@@ -374,7 +374,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              a getattr(ctx.app,"show_status_message") probe — which was a dead
 #              no-op (WellViewerApp has no show_status_message), so gating-failure
 #              messages never surfaced. Now they do (latent silent-failure fix).
-CTX_APP_BUDGET = 73
+#   73 -> 72    heatmap refresh_metric_combo_for_channel /
+#              refresh_heatmap_aggregation_options take ctx (core unwrap). The
+#              heatmap build-time call was guarded by hasattr(ctx.app,
+#              "_refresh_*") on methods bound NOWHERE -> always False -> dead: the
+#              first-render Property-combo/aggregation sync never ran. Guards
+#              removed; called directly (self-guard + swallow-wrapped). 4 feature
+#              ctx.app removed, 2 core unwraps added (net -1 + latent dead-code fix).
+CTX_APP_BUDGET = 72
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

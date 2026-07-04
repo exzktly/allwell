@@ -260,11 +260,15 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # ``_active_metric`` (ratio channels disable the global combo and
     # collapse it to ``Calculated Val``; non-MFI properties grey out
     # threshold-based aggregations).
+    # A8: these took ctx.app-method hasattr guards that were always False
+    # (WellViewerApp has no _refresh_metric_combo_for_channel /
+    # _refresh_heatmap_aggregation_options methods — bound nowhere), so this
+    # first-render Property-combo + aggregation sync silently never ran. Both
+    # core fns now take ctx and self-guard on a missing combo, so call them
+    # directly (still swallow-wrapped) to realise the documented intent.
     try:
-        if hasattr(ctx.app, "_refresh_metric_combo_for_channel"):
-            refresh_metric_combo_for_channel(ctx.app)
-        if hasattr(ctx.app, "_refresh_heatmap_aggregation_options"):
-            refresh_heatmap_aggregation_options(ctx.app, )
+        refresh_metric_combo_for_channel(ctx)
+        refresh_heatmap_aggregation_options(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Bust any caches that might hold a stale "no values" result from

@@ -237,7 +237,7 @@ def set_active_channel(app, channel: str) -> None:
     # Reset threshold to the range of the new channel.
     recalculate_threshold(app)
     app._invalidate_stats_cache()
-    refresh_metric_combo_for_channel(app)
+    refresh_metric_combo_for_channel(app._ctx)
     # Keep the ctxbar ThreshFracOn quick-edit showing the new channel's value.
     refresh_thresh_frac_quick_edit(app)
     # Announce on the bus. The RedrawCoordinator subscriber coalesces the
@@ -253,7 +253,7 @@ def set_active_channel(app, channel: str) -> None:
 # ── Property/metric combo refresh ───────────────────────────────────────────
 
 
-def refresh_metric_combo_for_channel(app) -> None:
+def refresh_metric_combo_for_channel(ctx) -> None:
     """Reshape every Property combo to match the active channel.
 
     For ratio channels each combo collapses to a single ``Calculated
@@ -262,7 +262,11 @@ def refresh_metric_combo_for_channel(app) -> None:
     one. Per-tab combos (heatmap / stats) follow the global channel.
 
     Replaces ``partial(refresh_metric_combo_for_channel, WellViewerApp)``.
+
+    A8: takes ``ctx``; reshapes the app's per-tab combos, so it unwraps the
+    handle once at this core boundary.
     """
+    app = ctx.app
     try:
         channel_label = app._active_channel_label()
     except Exception:
@@ -400,7 +404,7 @@ def update_channel_selector(app) -> None:
                     global_cb.blockSignals(blocked)
     # Refresh the global Property combo's per-item enable state now that
     # the channel list has changed.
-    refresh_metric_combo_for_channel(app)
+    refresh_metric_combo_for_channel(app._ctx)
 
     # Same trick for the Segmentation tab's channel combo and the
     # back-compat Movie Montage combo — _pick_valid above preserves
@@ -553,8 +557,8 @@ def set_active_metric(app, metric: str) -> None:
             if hasattr(app, "_invalidate_dataset_cache"):
                 app._invalidate_dataset_cache()
     sync_metric_combos(app, metric)
-    refresh_metric_combo_for_channel(app)
-    refresh_heatmap_aggregation_options(app)
+    refresh_metric_combo_for_channel(app._ctx)
+    refresh_heatmap_aggregation_options(app._ctx)
     recalculate_threshold(app)
     app._invalidate_stats_cache()
     app._redraw()
@@ -637,7 +641,7 @@ def populate_metric_combo(
 
 
 
-def refresh_heatmap_aggregation_options(app) -> None:
+def refresh_heatmap_aggregation_options(ctx) -> None:
     """Grey out threshold-based heatmap aggregations for non-MFI properties.
 
     The ThreshFracOn cut is defined against mean fluorescence intensity
@@ -645,7 +649,10 @@ def refresh_heatmap_aggregation_options(app) -> None:
     threshold" only make sense when the active Property is MFI. When the
     user picks Total / Max / Min / Std / smFISH Count, those options
     disable so they're not silently misapplied.
+
+    A8: takes ``ctx``; reads the app's heatmap metric combo, unwrapped once here.
     """
+    app = ctx.app
     cb = getattr(app, "_heatmap_metric_cb", None)
     if cb is None:
         return

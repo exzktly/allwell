@@ -37,7 +37,7 @@ def _exercise(app):
         app._notebook.setCurrentByName(name)
     app._invalidate_stats_cache()
     from well_viewer.core.channel_state_controller import update_channel_selector
-    update_channel_selector(app)
+    update_channel_selector(app._ctx)
 
 
 # ── comment-out (descriptor pruned, package still importable) ────────────────

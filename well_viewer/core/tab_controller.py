@@ -143,7 +143,7 @@ def image_browser_subtab_app_bridge(
         # when the panel builds *after* a dataset is already loaded (it builds
         # lazily now), nothing has populated it yet, so fill it from the current
         # channel state. Harmless before any load.
-        update_channel_selector(app)
+        update_channel_selector(app._ctx)
     if refresh_active_tab:
         on_tab_change(app, None)
 

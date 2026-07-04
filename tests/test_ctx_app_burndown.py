@@ -783,7 +783,20 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              Signature unchanged (restore already took ctx), so no caller churn.
 #              Round-trip verified (47 view_state/threshold/saved-plot tests green;
 #              the 2 image-table reds are the pre-existing grid_view None-layout bug).
-CTX_APP_BUDGET = 3
+#   3 -> 2    channel:64 recalculate_threshold → fully ctx-native: -1   the
+#              "one sanctioned god-object seam" fell. Its two big collaborators
+#              went ctx-native — update_channel_selector(ctx) (combos via
+#              ctx.widgets, ratio/active/key helpers via their ctx forms, seg
+#              token via ctx.state) and set_active_image_channel(ctx) (review
+#              widgets registered + read via ctx.widgets; refresh_review_image_ctx
+#              / update_preview_ctx). Four review widgets got registered in
+#              panel_view. Rows load via get_rows(ctx); gating reload via
+#              load_from_pipeline_info(ctx) gated on ctx.runtime.cell_gating; and
+#              the _features on_channel_changed fan-out now dispatches ctx — all
+#              seven hooks (bar/stats/distribution/heatmap/multivariate/spatial/
+#              scatter) take ctx and guard via ctx.widgets.has (verified every
+#              guard widget is registered). recalc drops its last app=ctx.app.
+CTX_APP_BUDGET = 2
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -46,7 +46,7 @@ def test_restored_active_channel_beats_combo_default(loaded_app):
         var.blockSignals(blocked)
     assert var.currentText() == default_lbl
 
-    update_channel_selector(app)
+    update_channel_selector(app._ctx)
 
     # The restored active channel wins — not the stale default combo text.
     assert var.currentText() == active_lbl

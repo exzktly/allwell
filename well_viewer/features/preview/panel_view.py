@@ -74,13 +74,15 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     cl.addWidget(self._review_image_well_lbl)
 
     cl.addWidget(QLabel("Channel:", ctrl))
-    self._review_image_chan_cb = QComboBox(ctrl)
+    self._review_image_chan_cb = reg.register("_review_image_chan_cb", QComboBox(ctrl))
     self._review_image_chan_cb.addItems(["GFP"])
     self._review_image_chan_cb.currentIndexChanged.connect(
         lambda _i: on_review_image_channel_selected(self, None)
     )
     cl.addWidget(self._review_image_chan_cb)
-    self._review_image_chan_var = self._review_image_chan_cb
+    # ``_review_image_chan_var`` is a legacy alias of the same combo; register it
+    # under both names so ctx.widgets resolves either.
+    self._review_image_chan_var = reg.register("_review_image_chan_var", self._review_image_chan_cb)
 
     cl.addWidget(QLabel("FOV:", ctrl))
     self._review_image_fov_menu = reg.register(
@@ -192,18 +194,18 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     lut_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
     lr = QHBoxLayout(lut_row)
     lr.setContentsMargins(8, 2, 8, 2)
-    self._review_lut_chan_lbl = QLabel(
+    self._review_lut_chan_lbl = reg.register("_review_lut_chan_lbl", QLabel(
         f"{self._app_state.channel.active_image_channel.upper()} LUT min:", lut_row,
-    )
+    ))
     lr.addWidget(self._review_lut_chan_lbl)
 
-    self._review_lmin_entry = QLineEdit("auto", lut_row)
+    self._review_lmin_entry = reg.register("_review_lmin_entry", QLineEdit("auto", lut_row))
     self._review_lmin_entry.setFixedWidth(80)
     self._review_lmin_entry.editingFinished.connect(self._review_image_commit_lut)
     lr.addWidget(self._review_lmin_entry)
 
     lr.addWidget(QLabel("max:", lut_row))
-    self._review_lmax_entry = QLineEdit("auto", lut_row)
+    self._review_lmax_entry = reg.register("_review_lmax_entry", QLineEdit("auto", lut_row))
     self._review_lmax_entry.setFixedWidth(80)
     self._review_lmax_entry.editingFinished.connect(self._review_image_commit_lut)
     lr.addWidget(self._review_lmax_entry)

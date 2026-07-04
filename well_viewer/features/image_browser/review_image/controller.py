@@ -520,7 +520,7 @@ def on_review_image_channel_selected(app, _e=None) -> None:
             selected_ui_value,
             app._app_state.channel.active_image_channel,
         )
-    set_active_image_channel(app, selected_ui_value.lower(), preserve_review_view=True)
+    set_active_image_channel(app._ctx, selected_ui_value.lower(), preserve_review_view=True)
 
 
 

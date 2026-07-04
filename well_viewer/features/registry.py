@@ -394,62 +394,63 @@ def _sel_cell_browser(app) -> None:
 # widgets exist.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _channel_bar(app) -> None:
-    if hasattr(app, "_bar_tp_cb"):
-        app._update_bar_tp_menu()
+def _channel_bar(ctx) -> None:
+    from well_viewer.features.barplot.controller import update_bar_tp_menu
+    if ctx.widgets.has("_bar_tp_cb"):
+        update_bar_tp_menu(ctx)
 
 
-def _channel_stats(app) -> None:
-    if hasattr(app, "_stats_tp_cb"):
+def _channel_stats(ctx) -> None:
+    if ctx.widgets.has("_stats_tp_cb"):
         from well_viewer.features.stats.controller import stats_update_tp_menu
-        stats_update_tp_menu(app._ctx)
+        stats_update_tp_menu(ctx)
 
 
-def _channel_distribution(app) -> None:
-    if hasattr(app, "_distribution_tp_cb"):
+def _channel_distribution(ctx) -> None:
+    if ctx.widgets.has("_distribution_tp_cb"):
         try:
             from well_viewer.features.distribution.tab_view import (
                 refresh_distribution_timepoints,
             )
-            refresh_distribution_timepoints(app._ctx)
+            refresh_distribution_timepoints(ctx)
         except Exception:
             _logger.exception("Distribution timepoint refresh failed")
 
 
-def _channel_heatmap(app) -> None:
-    if hasattr(app, "_heatmap_tp_slider"):
+def _channel_heatmap(ctx) -> None:
+    if ctx.widgets.has("_heatmap_tp_slider"):
         try:
             from well_viewer.features.heatmap.tab_view import (
                 refresh_heatmap_timepoints,
             )
-            refresh_heatmap_timepoints(app._ctx)
+            refresh_heatmap_timepoints(ctx)
         except Exception:
             _logger.exception("Heatmap timepoint refresh failed")
 
 
-def _channel_multivariate(app) -> None:
+def _channel_multivariate(ctx) -> None:
     from well_viewer.features.multivariate.controller import mv_on_channel_changed
-    if hasattr(app, "_mv_canvas"):
-        mv_on_channel_changed(app._ctx)
+    if ctx.widgets.has("_mv_canvas"):
+        mv_on_channel_changed(ctx)
 
 
-def _channel_spatial(app) -> None:
+def _channel_spatial(ctx) -> None:
     from well_viewer.features.spatial.controller import sp_on_channel_changed
-    if hasattr(app, "_sp_canvas"):
-        sp_on_channel_changed(app._ctx)
+    if ctx.widgets.has("_sp_canvas"):
+        sp_on_channel_changed(ctx)
 
 
-def _channel_scatter(app) -> None:
-    if hasattr(app, "_scatter_ch_x_cb"):
+def _channel_scatter(ctx) -> None:
+    if ctx.widgets.has("_scatter_ch_x_cb"):
         try:
             from well_viewer.features.scatter.controller import (
                 redraw_scatter_agg_orchestrate,
                 redraw_scatter_orchestrate,
                 update_scatter_menus,
             )
-            update_scatter_menus(app._ctx)
-            redraw_scatter_orchestrate(app._ctx)
-            redraw_scatter_agg_orchestrate(app._ctx)
+            update_scatter_menus(ctx)
+            redraw_scatter_orchestrate(ctx)
+            redraw_scatter_agg_orchestrate(ctx)
         except Exception:
             _logger.exception("Scatter menu refresh failed")
 

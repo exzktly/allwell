@@ -336,6 +336,34 @@ god-method — that has no `ctx` form yet. Converting any one of them piecemeal
 **decompose the underlying god-methods** (roadmap below), or **T6** (delete the
 field, which forces the same decomposition).
 
+### The final floor register — the 14 that remain (measured `2026-07-04` @ `aff9c6f`)
+
+Every remaining ref is a **sanctioned single-unwrap core seam** bundling
+irreducible behaviour, a **persistence widget-bank unwrap**, or a **feature
+bridge into a hook-contract god-method**. Each is tagged with the epic that
+clears it. None falls to a piecemeal conversion (all measured net-0/net-add).
+
+| refs | Site(s) | Pinned by / epic |
+|-----:|---------|------------------|
+| 1 | `core/channel_state_controller.py:64` | `recalculate_threshold` seam — `app._get_rows` + the `_features` `on_channel_changed` hook (bundled, D-thresh). Clears with **feature-registry ctx-home**. |
+| 1 | `core/channel_state_controller.py:949` | `set_thresh_frac_on` seam — lazy-tab `_centre_build_pending` + loose `_cell_gating_thresh_frac_edits`. Clears with **cell-gating edits-dict → typed state**. |
+| 1 | `core/selection_controller.py:828` | `set_selected_wells` → `_refresh_sidebar_map`/`on_plate_sel_change` bottom into `_is_single_well_tab`(`app._features`). **feature-registry ctx-home.** |
+| 4 | `core/tab_controller.py:138,164,290,313` | The D5/D6 image-browser + sample-def bundled core seams + split-focus/visible providers (take `app` by installed-callable contract). Clear as their god-service trees convert. |
+| 1 | `domain/fold_change_controls.py:331` | `install_fold_change_controls` → `_ControlCombo`/`_repopulate_*` take `app`. Own conversion pass. |
+| 1 | `features/batch_export/tab_view.py:194` | `_show_batch_mode` → the 3 batch panels take `app` first-positional. **A14 batch-panel decomposition.** |
+| 1 | `features/saved_plots/controller.py:110` | `_rebuild_all` → `desc.on_selection_changed(app)` hook contract. **feature-registry ctx-home.** |
+| 2 | `persistence/cell_gating.py:20,64` | `save/load_from_pipeline_info` — loose `_cell_gating_*` widgets + `_scatter_gates` + `_centre_build_pending`. **cell-gating → typed state.** |
+| 2 | `persistence/view_state.py:95,421` | `snapshot`/`restore` — broad app-widget surface (`_current_leaf_tab`/`_snapshot_tabs`/`_set_selected_wells`). Sanctioned persistence unwrap; **T6**. |
+| **14** | | **3 epics + T6** |
+
+**Three epics unlock the rest, then T6 → 0:** (1) **feature-registry ctx-home** —
+give `app._features` a reviewed `ctx` accessor (clears channel:64, selection:828,
+saved_plots:110 + the tab_controller providers); (2) **A14 batch-panel
+decomposition** (clears batch_export:194); (3) **cell-gating edits-dict → typed
+`CellGatingState`** (clears channel:949 + persistence/cell_gating ×2). The
+view_state pair + `AppRuntime` stamp are the final **T6** deletions. Each epic is
+interactive-smoke-gated; none should be forced with a count-gaming accessor.
+
 ### The enabler passes — DONE (51 → 26)
 
 | Pass | What it did | Δ |
@@ -486,7 +514,7 @@ field. Everything must be green on the fast lane; the closeEvent/teardown tests
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[x]` | in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 20 (render tree + R1–R7 + F1/F2/F4 + E1–E6 + D1/D4/D5 done) |
+| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 14 (R1–R7 + F1/F2/F4 + E1–E6 + D-series done; 14 floor remains) |
 | T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into D1 (channel/axis → `channel_changed`) |
 | T5 | Saved-plots service | — | Med | `[~]` | capture/persistence ctx-native (`226d0af`); `_rebuild_all` → D7 |
 | T6 | Retire `ctx.app` | D1–D10 | High | `[ ]` | 26 floor → 0 (decompose god-methods, then delete field) |
@@ -533,18 +561,24 @@ floor register + the D-series roadmap in
 ---
 
 **Last updated:** 2026-07-04 (latest) — the god-method decomposition (D-series)
-is **underway and confirmed tractable**: **D1** (channel/metric), **D4**
-(review-image draw web), **D5** (image-browser sub-tabs), and the **ui_helpers
-SEM/FOV band controls** landed, driving **26 → 20 (97.75% overall)**, all pushed
-and green. Each proved a full-cluster god-method conversion is net-negative
-(vs. the piecemeal net-add), often via the D5 "bundle N god-services behind ONE
-core seam" tactic. Remaining queued D-passes — **D6** (sample-def/review-csv
-builders), **D-core** (selection/redraw/`refresh_status_chips` chain), **D7**
-(saved-plots `_rebuild_all`), **D9** (batch-export `_show_batch_mode`), **D8**
-(cell-gating quick-edit + fold-change), **D10** (tab providers + view-state) —
-were dispatched but hit the session rate limit (resets 08:00 UTC); resume then.
-The persistence widget-bank unwraps (6) + the `recalculate_threshold`-pinned
-channel/smfish refs stay for **T6**. Superseding earlier same-day notes below.
+**ran to the irreducible floor: 51 → 14 (98.4% overall)**, all pushed and green.
+Landed net-negative: **D1** channel/metric, **D4** review-image draw web, **D5**
+image-browser sub-tabs, **D6** sample-def/review-csv builders, **D-core** redraw
+orchestrator, **D-persist** heatmap persistence, **D-thresh** channel/metric/
+threshold/status-chip chain, plus the ui_helpers band controls and the
+cell-gating quick-edit — each via the "bundle N god-services behind ONE core
+seam" tactic or a full leaf-first conversion. **Two latent crashes fixed en
+route** (image-table threshold stepper `set_thresh_frac_on(ctx)` mismatch;
+all-black review-image threshold thumbnails). **Correctly declined as net-0**
+(would game the ratchet): **D-selection** + **D7** (`saved_plots._rebuild_all`)
+— both pinned to the `app._features` feature-registry hook contract (`on_selection_changed(app)`),
+which needs a deliberate architecture decision to give the registry a ctx home;
+**D9** (`_show_batch_mode`) — blocked on the A14 batch-panel decomposition
+(~2900 lines). **The 14 that remain are the genuine floor** — see the register
+below; each is a sanctioned single-unwrap core seam bundling irreducible
+behaviour, or a persistence widget-bank unwrap, cleared only by **T6** (delete
+the field) or the three named epics (feature-registry ctx-home, A14, cell-gating
+edits-dict → typed state). Superseding earlier same-day notes below.
 
 **Prior note (2026-07-04):** enabler passes **E1–E6** drove **51 → 26**
 (97% overall). Recorded the irreducible-floor register (each of the 26 tied to a

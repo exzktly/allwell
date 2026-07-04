@@ -32,7 +32,7 @@ def test_persistence_round_trip_through_slice(viewer_app):
     app._app_state.distribution.bins = 128
     app._app_state.distribution.log_x = True
     app._app_state.distribution.log_y = False
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     dist_snap = snap["tabs"]["Distribution"]
     assert dist_snap["bins"] == 128
     assert dist_snap["log_x"] is True

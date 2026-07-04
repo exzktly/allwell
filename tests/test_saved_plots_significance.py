@@ -38,8 +38,8 @@ def _two_groups():
 def _pairwise(app, groups):
     from well_viewer.features.stats.controller import threshold_for_val_col
     return compute_pairwise(
-        app, groups=groups, target_t=0.0, val_col=_VAL_COL, statistic="mean",
-        threshold=float(threshold_for_val_col(app, _VAL_COL)), test=_TEST)
+        app._ctx, groups=groups, target_t=0.0, val_col=_VAL_COL, statistic="mean",
+        threshold=float(threshold_for_val_col(app._ctx, _VAL_COL)), test=_TEST)
 
 
 def test_compute_pairwise_is_deterministic(loaded_app):
@@ -101,7 +101,7 @@ def test_save_then_restore_repopulates_pairwise_and_flag(loaded_app):
 
     # ``show_significance`` rides back via the view_state snapshot/restore path.
     from well_viewer.persistence import view_state
-    view_state.restore(app, dict(params))
+    view_state.restore(app._ctx, dict(params))
     assert app._app_state.plot.show_significance is True
 
 
@@ -147,7 +147,7 @@ def test_restore_accepts_legacy_name_only_member_format(loaded_app):
         "groups": [{"name": "CTRL", "members": ["CTRL"], "solo_wells": []},
                    {"name": "DRUG", "members": ["DRUG"], "solo_wells": []}],
         "test": _TEST, "target_t": 0.0, "val_col": _VAL_COL, "statistic": "mean",
-        "threshold": float(threshold_for_val_col(app, _VAL_COL)),
+        "threshold": float(threshold_for_val_col(app._ctx, _VAL_COL)),
     }
     app._app_state.stats.pairwise = []
     _restore_stats(app._ctx, legacy)

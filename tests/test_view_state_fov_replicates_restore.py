@@ -17,18 +17,18 @@ def test_use_fov_replicates_round_trips(loaded_app):
     app = loaded_app
 
     app._app_state.plot.use_fov_replicates = True
-    snap = view_state.snapshot(app)
+    snap = view_state.snapshot(app._ctx)
     assert snap["use_fov_replicates"] is True
 
     # Simulate a fresh open where the toggle starts off, then restore.
     app._app_state.plot.use_fov_replicates = False
-    view_state.restore(app, snap)
+    view_state.restore(app._ctx, snap)
     assert app._app_state.plot.use_fov_replicates is True
 
     # And the off state round-trips too.
-    snap_off = view_state.snapshot(app)
+    snap_off = view_state.snapshot(app._ctx)
     assert snap_off["use_fov_replicates"] is True
     app._app_state.plot.use_fov_replicates = False
-    snap2 = view_state.snapshot(app)
-    view_state.restore(app, snap2)
+    snap2 = view_state.snapshot(app._ctx)
+    view_state.restore(app._ctx, snap2)
     assert app._app_state.plot.use_fov_replicates is False

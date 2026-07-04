@@ -90,8 +90,9 @@ def _nondefault_export_prefs(app) -> dict:
     }
 
 
-def snapshot(app) -> dict:
+def snapshot(ctx) -> dict:
     """Build a JSON-serialisable view-state dict from current app state."""
+    app = ctx.app
     return {
         "schema_version": SCHEMA_VERSION,
         # X14: union back the wells that were saved for datasets/plates not
@@ -409,7 +410,7 @@ def _snapshot_image_table(app) -> dict:
 
 # ── restore ────────────────────────────────────────────────────────────────
 
-def restore(app, state: dict) -> None:
+def restore(ctx, state: dict) -> None:
     """Apply *state* in two phases — cross-cutting now, per-tab deferred.
 
     Per-tab combo values are stashed on ``app._view_state_pending`` and
@@ -417,6 +418,7 @@ def restore(app, state: dict) -> None:
     """
     if not isinstance(state, dict):
         return
+    app = ctx.app
 
     # Cross-cutting state — apply eagerly.
 
@@ -1104,17 +1106,17 @@ def save_to_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
     try:
-        state = snapshot(app)
+        state = snapshot(app._ctx)
     except Exception:
         _logger.exception("view_state: snapshot failed; not saving")
         return
-    _doc.set_section(app, "view_state", state)
+    _doc.set_section(app._ctx, "view_state", state)
 
 
 def load_from_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    state = _doc.get_section(app, "view_state")
+    state = _doc.get_section(app._ctx, "view_state")
     if not isinstance(state, dict):
         return
     sv = state.get("schema_version")
@@ -1132,7 +1134,7 @@ def load_from_data_dir(app) -> None:
             "view_state migrated from schema_version=%r to %d.", sv, SCHEMA_VERSION)
         state = migrated
     try:
-        restore(app, state)
+        restore(app._ctx, state)
     except Exception:
         _logger.exception("view_state: restore failed; continuing with defaults")
 
@@ -1173,7 +1175,7 @@ def reset(app) -> None:
     # Drop the view_state section so a fresh open doesn't repopulate.
     if app._app_state.dataset.data_dir:
         try:
-            _doc.set_section(app, "view_state", None)
+            _doc.set_section(app._ctx, "view_state", None)
         except Exception:
             _logger.debug("reset: persistence.json update failed", exc_info=True)
     # Force a redraw on whatever tab is active. The scope coalescer redraws

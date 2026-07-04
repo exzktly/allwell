@@ -10,6 +10,7 @@ import pandas as pd
 
 from well_viewer.data.data_loading import (
     df_included_mask,
+    get_rows,
     is_ratio_key,
     resolve_value_series,
 )
@@ -45,7 +46,7 @@ def _compute_statistic_arr(
 
 
 def collect_group_values(
-    app,
+    ctx,
     grp,
     target_t: float,
     *,
@@ -63,16 +64,16 @@ def collect_group_values(
     no loaded wells; a single-well group with FOV mode off yields a single value
     (``n=1``), which the caller declines as untestable.
     """
-    val_col = val_col or app._app_state.channel.active_val_col
+    val_col = val_col or ctx.state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
+            threshold = float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
         except Exception:
-            threshold = float(app._app_state.channel.threshold)
+            threshold = float(ctx.state.channel.threshold)
     threshold = float(threshold)
 
     reps = group_replicate_stats(
-        app._ctx, grp.wells, target_t, use_fov=use_fov,
+        ctx, grp.wells, target_t, use_fov=use_fov,
         val_col=val_col, threshold=threshold,
     )
     out: List[float] = []
@@ -84,23 +85,23 @@ def collect_group_values(
 
 
 def collect_group_per_cell_values(
-    app, grp, target_t: float, *, val_col: Optional[str] = None,
+    ctx, grp, target_t: float, *, val_col: Optional[str] = None,
     threshold: Optional[float] = None,
 ) -> List[float]:
     """Return per-cell values above threshold for KS-test (distribution comparison)."""
-    val_col = val_col or app._app_state.channel.active_val_col
+    val_col = val_col or ctx.state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
+            threshold = float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
         except Exception:
-            threshold = float(app._app_state.channel.threshold)
+            threshold = float(ctx.state.channel.threshold)
     threshold = float(threshold)
-    ratios = app._app_state.channel.ratio_index
+    ratios = ctx.state.channel.ratio_index
     chunks: List[np.ndarray] = []
     for lbl in grp.wells:
-        if lbl not in app._app_state.dataset.well_paths:
+        if lbl not in ctx.state.dataset.well_paths:
             continue
-        df = app._get_rows(lbl)
+        df = get_rows(ctx, lbl)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             continue
         mask = df_included_mask(df).to_numpy(copy=True)
@@ -224,7 +225,7 @@ def _run_pair_tests(group_vals, test, is_ks):
     return out
 
 
-def compute_pairwise(app, *, groups, target_t, val_col, statistic, threshold, test,
+def compute_pairwise(ctx, *, groups, target_t, val_col, statistic, threshold, test,
                      use_fov: bool = True) -> list:
     """Widget-free computation of the structured pairwise results that drive the
     Bar-plot significance brackets (``StatsState.pairwise``).
@@ -248,10 +249,10 @@ def compute_pairwise(app, *, groups, target_t, val_col, statistic, threshold, te
     group_vals: List[Tuple[str, List[float]]] = []
     for g in groups:
         if is_ks:
-            vals = collect_group_per_cell_values(app, g, target_t,
+            vals = collect_group_per_cell_values(ctx, g, target_t,
                                                  val_col=val_col, threshold=threshold)
         else:
-            vals = collect_group_values(app, g, target_t, val_col=val_col,
+            vals = collect_group_values(ctx, g, target_t, val_col=val_col,
                                         threshold=threshold, statistic=statistic,
                                         use_fov=use_fov)
         # A meaningful test needs >=2 replicate values; a single-well group with
@@ -418,7 +419,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     for g in groups:
         if is_ks:
             vals = collect_group_per_cell_values(
-                app, g, target_t, val_col=val_col, threshold=threshold,
+                app._ctx, g, target_t, val_col=val_col, threshold=threshold,
             )
             if not vals:
                 app._stats_write_result(
@@ -486,7 +487,7 @@ def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     # groups' WELLS (bar matching by membership), the tested measure (``stat`` →
     # which panel), and the run CONTEXT (``val_col`` / ``target_t``).
     app._app_state.stats.pairwise = compute_pairwise(
-        app, groups=app._app_state.stats.groups, target_t=target_t,
+        app._ctx, groups=app._app_state.stats.groups, target_t=target_t,
         val_col=val_col, statistic=statistic, threshold=threshold, test=test,
         use_fov=use_fov)
     stats_refresh_fov_indicator(app)
@@ -516,7 +517,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 
 from well_viewer.domain.plate_layout import WELL_COLORS
 from well_viewer.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
-from well_viewer.core.channel_state_controller import refresh_stats_property_combo, set_active_metric
+from well_viewer.core.channel_state_controller import get_thresh_frac_on, refresh_stats_property_combo, set_active_metric
 from well_viewer.core.safe import swallowed
 
 
@@ -788,24 +789,24 @@ def stats_refresh_colors(app) -> None:
         app._stats_canvas_widget.draw()
 
 
-def threshold_for_val_col(app, val_col: str) -> float:
+def threshold_for_val_col(ctx, val_col: str) -> float:
     """The ThreshFracOn cutoff for a value column (per-channel Cell-Gating cut).
 
     Ratio columns have no per-channel cut → the global threshold. Keyed off the
     passed ``val_col`` (not the live widget) so it's reusable at Saved-Plot
     re-run time."""
     if is_ratio_key(val_col):
-        return float(app._app_state.channel.threshold)
+        return float(ctx.state.channel.threshold)
     # val_col is "<channel>_mean_intensity" or "<channel>_smfish_count".
     if "_" in val_col:
         channel = val_col.split("_", 1)[0]
-        return float(app._get_thresh_frac_on(channel))
-    return float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
+        return float(get_thresh_frac_on(ctx, channel))
+    return float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
 
 
 def stats_active_threshold(app) -> float:
     """The per-channel ThreshFracOn for the currently-selected stats value column."""
-    return threshold_for_val_col(app, app._stats_active_val_col())
+    return threshold_for_val_col(app._ctx, app._stats_active_val_col())
 
 
 def serialize_stats_groups(groups) -> list:
@@ -828,7 +829,7 @@ def serialize_stats_groups(groups) -> list:
     return out
 
 
-def deserialize_stats_groups(app, data) -> list:
+def deserialize_stats_groups(ctx, data) -> list:
     """Rebuild stats ``BarGroup`` objects from :func:`serialize_stats_groups`
     output.
 
@@ -838,8 +839,16 @@ def deserialize_stats_groups(app, data) -> list:
     a member with no loaded wells is dropped. Accepts the legacy name-only member
     format (``members: [name, ...]``) for plots saved before wells were stored."""
     from well_viewer.domain.batch_models import BarGroup, ReplicateSet
-    rep_by_name = {r.name: r for r in app._rep_sets_loaded()}
-    paths = app._app_state.dataset.well_paths
+    paths = ctx.state.dataset.well_paths
+    # One ReplicateSet per selection with >=1 loaded well — the same rule as
+    # ``grouping.rep_sets_loaded``, inlined off ``ctx.state`` so this stays free
+    # of both a cross-feature import and the app god-object.
+    rep_by_name: dict = {}
+    for s in ctx.state.selection.selections:
+        s_wells = s.get("wells") or []
+        if any(w in paths for w in s_wells):
+            rs = ReplicateSet(s.get("name") or "", list(s_wells))
+            rep_by_name[rs.name] = rs
     out = []
     for item in data or []:
         if not isinstance(item, dict):
@@ -884,7 +893,7 @@ def stats_collect_group_values_shim(
     app, grp: BarGroup, target_t: float
 ) -> List[float]:
     return collect_group_values(
-        app, grp, target_t,
+        app._ctx, grp, target_t,
         val_col=app._stats_active_val_col(),
         threshold=app._stats_active_threshold(),
         statistic=app._stats_active_statistic(),

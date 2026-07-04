@@ -38,7 +38,7 @@ def test_persistence_round_trip_through_slice(viewer_app):
     app = viewer_app
     app._app_state.bar.swarm = True
     app._app_state.bar.violin = False
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     bar_snap = snap["tabs"]["Bar Plots"]      # per-tab sub-dict
     assert bar_snap["swarm"] is True and bar_snap["violin"] is False
 

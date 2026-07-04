@@ -116,12 +116,14 @@ def write(app, doc: dict) -> None:
     app._app_state.dataset.persistence_doc = doc
 
 
-def get_section(app, key: str) -> Any:
+def get_section(ctx, key: str) -> Any:
+    app = ctx.app
     return read(app).get(key)
 
 
-def set_section(app, key: str, value: Any) -> None:
+def set_section(ctx, key: str, value: Any) -> None:
     """Mutate one section and flush the whole doc to disk."""
+    app = ctx.app
     doc = read(app)
     if value is None:
         doc.pop(key, None)

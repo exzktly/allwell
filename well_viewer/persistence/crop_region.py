@@ -25,13 +25,13 @@ def save_to_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
     region = app._app_state.dataset.crop_region
-    _doc.set_section(app, _SECTION, list(region) if region else None)
+    _doc.set_section(app._ctx, _SECTION, list(region) if region else None)
 
 
 def load_from_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app, _SECTION)
+    data = _doc.get_section(app._ctx, _SECTION)
     if isinstance(data, (list, tuple)) and len(data) == 4:
         try:
             app._app_state.dataset.crop_region = tuple(int(v) for v in data)

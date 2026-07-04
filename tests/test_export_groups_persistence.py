@@ -53,7 +53,7 @@ def test_groups_round_trip_through_persistence_json(loaded_app):
 
     # Flush to persistence.json, then wipe the in-memory cache + doc.
     export_groups.save_to_data_dir(loaded_app)
-    assert _doc.get_section(loaded_app, "export_groups").get("bar")
+    assert _doc.get_section(loaded_app._ctx, "export_groups").get("bar")
     loaded_app._export_groups_doc = {}
     loaded_app._app_state.dataset.persistence_doc = None
 

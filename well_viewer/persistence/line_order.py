@@ -20,13 +20,13 @@ def save_to_data_dir(app) -> None:
         "rsets": list(app._app_state.plot.line_order_rsets),
         "wells": list(app._app_state.plot.line_order_wells),
     }
-    _doc.set_section(app, "line_order", payload)
+    _doc.set_section(app._ctx, "line_order", payload)
 
 
 def load_from_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app, "line_order")
+    data = _doc.get_section(app._ctx, "line_order")
     if not isinstance(data, dict):
         return
     rsets = data.get("rsets") or []

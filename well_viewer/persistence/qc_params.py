@@ -35,13 +35,13 @@ def save_to_data_dir(app) -> None:
     params = app._app_state.qc.params
     if params is None:
         return
-    _doc.set_section(app, _SECTION, params.to_dict())
+    _doc.set_section(app._ctx, _SECTION, params.to_dict())
 
 
 def load_from_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app, _SECTION)
+    data = _doc.get_section(app._ctx, _SECTION)
     if data is None:
         data = _absorb_legacy_sidecar(app)
     if data is None:
@@ -82,7 +82,7 @@ def _absorb_legacy_sidecar(app) -> Optional[dict]:
         return None
     if not isinstance(inner, dict):
         return None
-    _doc.set_section(app, _SECTION, inner)      # absorb into persistence.json
+    _doc.set_section(app._ctx, _SECTION, inner)      # absorb into persistence.json
     try:
         legacy.unlink()
     except OSError as exc:

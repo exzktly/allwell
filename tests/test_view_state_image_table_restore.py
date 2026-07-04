@@ -180,7 +180,7 @@ def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
     if not _set_combo_by_data(luts[0]["source"], "corrected"):
         pytest.skip("no Corrected source option")
 
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     it = (snap.get("tabs") or {}).get("Image Table") or {}
     assert it.get("cells", [[{}]])[0][0].get("chan") == want_chan
     assert it["row_luts"]["0"].get("source") == "corrected"
@@ -188,7 +188,7 @@ def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
     # New session: wipe both, then replay through the public restore path.
     chan_cb.setCurrentText(chans[0])
     _set_combo_by_data(luts[0]["source"], "raw")
-    vs.restore(app, snap)
+    vs.restore(app._ctx, snap)
     # restore stashes pending + tries to activate the tab; apply explicitly so
     # the assertion doesn't depend on notebook/subtab navigation in the harness.
     vs.apply_pending_tab_state(app, "Image Table")

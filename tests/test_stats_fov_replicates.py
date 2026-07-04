@@ -42,7 +42,7 @@ def test_multi_well_is_per_well_both_toggle_states(loaded_app_multifov):
     app = loaded_app_multifov
     grp = _grp("G", ["A01", "A02"])
     for use_fov in (True, False):
-        vals = collect_group_values(app, grp, 0.0, val_col=_VAL, threshold=0.0,
+        vals = collect_group_values(app._ctx, grp, 0.0, val_col=_VAL, threshold=0.0,
                                     statistic="mean", use_fov=use_fov)
         assert len(vals) == 2, use_fov  # two wells → two replicates
 
@@ -51,7 +51,7 @@ def test_single_well_fov_on_is_per_fov(loaded_app_multifov):
     """A single-well group with FOV mode on tests across the well's FOVs."""
     app = loaded_app_multifov
     grp = _grp("solo", ["A01"])
-    vals = collect_group_values(app, grp, 0.0, val_col=_VAL, threshold=0.0,
+    vals = collect_group_values(app._ctx, grp, 0.0, val_col=_VAL, threshold=0.0,
                                 statistic="mean", use_fov=True)
     assert len(vals) == 3  # 3 FOVs → 3 replicates
     assert len(set(round(v, 6) for v in vals)) == 3  # per-FOV means differ
@@ -62,16 +62,16 @@ def test_single_well_fov_off_yields_one_value_untestable(loaded_app_multifov):
     declined (compute_pairwise needs n>=2 per group)."""
     app = loaded_app_multifov
     grp = _grp("solo", ["A01"])
-    vals = collect_group_values(app, grp, 0.0, val_col=_VAL, threshold=0.0,
+    vals = collect_group_values(app._ctx, grp, 0.0, val_col=_VAL, threshold=0.0,
                                 statistic="mean", use_fov=False)
     assert len(vals) == 1
     # Two such single-well groups, FOV off → no test.
-    pw = compute_pairwise(app, groups=[_grp("a", ["A01"]), _grp("b", ["B01"])],
+    pw = compute_pairwise(app._ctx, groups=[_grp("a", ["A01"]), _grp("b", ["B01"])],
                           target_t=0.0, val_col=_VAL, statistic="mean",
                           threshold=0.0, test="t-test (Welch)", use_fov=False)
     assert pw == []
     # Same groups WITH FOV mode on → a test runs (per-FOV, n=3 each).
-    pw_on = compute_pairwise(app, groups=[_grp("a", ["A01"]), _grp("b", ["B01"])],
+    pw_on = compute_pairwise(app._ctx, groups=[_grp("a", ["A01"]), _grp("b", ["B01"])],
                              target_t=0.0, val_col=_VAL, statistic="mean",
                              threshold=0.0, test="t-test (Welch)", use_fov=True)
     assert pw_on and "p" in pw_on[0]
@@ -87,7 +87,7 @@ def test_saved_plot_captures_and_reruns_fov_mode(loaded_app_multifov):
     app._app_state.stats.groups = groups
     app._app_state.plot.use_fov_replicates = True       # FOV mode ON
     app._app_state.stats.pairwise = compute_pairwise(
-        app, groups=groups, target_t=0.0, val_col=_VAL, statistic="mean",
+        app._ctx, groups=groups, target_t=0.0, val_col=_VAL, statistic="mean",
         threshold=0.0, test="t-test (Welch)", use_fov=True)
     assert app._app_state.stats.pairwise  # per-FOV test ran
 

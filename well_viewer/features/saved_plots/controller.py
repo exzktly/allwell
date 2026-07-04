@@ -79,8 +79,7 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
                         rec.params.get("active_solo_wells"))
     _restore_stats(ctx, rec.params.get("stats"))
     try:
-        # view_state snapshot/restore is app-native (a later A8 cluster) → bridge.
-        view_state.restore(ctx.app, dict(rec.params))
+        view_state.restore(ctx, dict(rec.params))
     except Exception:
         _logger.debug("saved_plots: restore failed for %r", plot_id, exc_info=True)
 
@@ -121,11 +120,10 @@ def _restore_stats(ctx, cfg) -> None:
     if not isinstance(cfg, dict):
         return
     try:
-        # Stats compute plumbing is app-native (a later A8 cluster) → bridged via app.
-        groups = _deserialize_stats_groups(ctx.app, cfg.get("groups"))
+        groups = _deserialize_stats_groups(ctx, cfg.get("groups"))
         target_t = cfg.get("target_t")
         pairwise = _compute_pairwise(
-            ctx.app, groups=groups,
+            ctx, groups=groups,
             target_t=(float(target_t) if target_t is not None else None),
             val_col=cfg.get("val_col"), statistic=cfg.get("statistic", "mean"),
             threshold=cfg.get("threshold"), test=cfg.get("test", ""),

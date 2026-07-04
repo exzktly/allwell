@@ -39,7 +39,7 @@ def test_store_add_writes_png_and_persists(tmp_path):
     assert img.exists() and img.read_bytes() == b"\x89PNG-bytes"
     # Metadata landed in the persistence doc section.
     from well_viewer.persistence import _doc
-    section = _doc.get_section(app, "saved_plots")
+    section = _doc.get_section(app._ctx, "saved_plots")
     assert isinstance(section, list) and len(section) == 1
     assert section[0]["tab"] == "Bar Plots"
 
@@ -133,4 +133,4 @@ def test_store_rename_updates_title_and_persists(tmp_path):
     store.rename(app._ctx, "20260101-000000-000000", "My figure")
     assert store.get("20260101-000000-000000").title == "My figure"
     from well_viewer.persistence import _doc
-    assert _doc.get_section(app, "saved_plots")[0]["title"] == "My figure"
+    assert _doc.get_section(app._ctx, "saved_plots")[0]["title"] == "My figure"

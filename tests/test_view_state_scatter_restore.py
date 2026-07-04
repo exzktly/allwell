@@ -29,13 +29,13 @@ def test_scatter_axes_round_trip(loaded_app):
     app._scatter_ch_x_cb.setCurrentText(want_x)
     app._scatter_ch_y_cb.setCurrentText(want_y)
 
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     assert snap["tabs"].get("Scatter Plot", {}).get("ch_x") == want_x, snap.get("tabs")
 
     # New session: reset to defaults, then restore + activate.
     app._scatter_ch_x_cb.setCurrentText(items[0])
     app._scatter_ch_y_cb.setCurrentText(items[0])
-    vs.restore(app, snap)
+    vs.restore(app._ctx, snap)
     app._last_tab_name = "Line Graphs"
     app._notebook.setCurrentByName("Plotting")
     app._plotting_notebook.setCurrentByName("Scatter Plot")
@@ -61,12 +61,12 @@ def test_scatter_metric_round_trip(loaded_app):
     app._scatter_metric_x_cb.setCurrentText(want_mx)
     app._scatter_metric_y_cb.setCurrentText(want_my)
 
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     assert snap["tabs"].get("Scatter Plot", {}).get("metric_x") == want_mx, snap.get("tabs")
 
     app._scatter_metric_x_cb.setCurrentText(mx[0])
     app._scatter_metric_y_cb.setCurrentText(mx[0])
-    vs.restore(app, snap)
+    vs.restore(app._ctx, snap)
     app._last_tab_name = "Line Graphs"
     app._notebook.setCurrentByName("Plotting")
     app._plotting_notebook.setCurrentByName("Scatter Plot")
@@ -94,10 +94,10 @@ def test_scatter_agg_round_trip(loaded_app):
     want = items[1]
     cb.setCurrentText(want)
 
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
 
     cb.setCurrentText(items[0])
-    vs.restore(app, snap)
+    vs.restore(app._ctx, snap)
     app._last_tab_name = "Line Graphs"
     app._notebook.setCurrentByName("Plotting")
     app._plotting_notebook.setCurrentByName("Scatter Plot")

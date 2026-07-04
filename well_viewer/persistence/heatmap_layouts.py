@@ -45,13 +45,13 @@ def save_to_data_dir(app) -> None:
         "layouts": [lay.to_dict() for lay in layouts],
         "settings": _collect_settings(app),
     }
-    _doc.set_section(app, "heatmap_layouts", payload)
+    _doc.set_section(app._ctx, "heatmap_layouts", payload)
 
 
 def load_from_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app, "heatmap_layouts")
+    data = _doc.get_section(app._ctx, "heatmap_layouts")
     if not isinstance(data, dict):
         return
     from well_viewer.features.heatmap.models import layouts_from_dict

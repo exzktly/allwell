@@ -34,10 +34,9 @@ def capture_params(ctx, tab: str) -> tuple[dict, dict]:
     *thresholds* collects the gating cuts that aren't part of view-state but
     still shape fraction-on / inclusion plots.
     """
-    # ``view_state.snapshot`` walks the app's persisted UI state directly; that
-    # snapshot/restore layer is app-native (a later A8 cluster), so it is bridged
-    # through the app handle here — a reported residual.
-    params = view_state.snapshot(ctx.app)
+    # ``view_state.snapshot`` walks the persisted UI state directly (the
+    # snapshot/restore layer is ctx-native and unwraps the app internally).
+    params = view_state.snapshot(ctx)
     # Pin the originating tab so Restore navigates back here even if the user
     # had since moved to another tab before the snapshot ran.
     if tab:
@@ -105,8 +104,7 @@ def _capture_stats_config(ctx) -> dict | None:
     run_ctx = pairwise[0]  # test/val_col/target_t/stat are constant across the run
     val_col = str(run_ctx.get("val_col", "") or "")
     try:
-        # ``threshold_for_val_col`` is app-native stats plumbing; bridged via app.
-        threshold = float(_threshold_for_val_col(ctx.app, val_col))
+        threshold = float(_threshold_for_val_col(ctx, val_col))
         grp_data = _serialize_stats_groups(groups)
     except Exception:
         # Don't lose the saved plot's stats config silently (audit E10).

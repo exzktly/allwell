@@ -82,10 +82,9 @@ class SavedPlotsStore:
         """(Re)load records for the current dataset from persistence.json."""
         self.records = []
         self._loaded_dir = self._data_dir(ctx)
-        # ``persistence._doc`` reads/writes ``persistence.json`` off the app's
-        # dataset state; that doc I/O layer is app-native (a later A8 cluster),
-        # so it is bridged through the app handle — a reported residual.
-        section = _doc.get_section(ctx.app, _SECTION)
+        # ``persistence._doc`` reads/writes ``persistence.json`` off the dataset
+        # state (ctx-native; it unwraps the app internally).
+        section = _doc.get_section(ctx, _SECTION)
         if isinstance(section, list):
             for entry in section:
                 if isinstance(entry, dict):
@@ -97,8 +96,7 @@ class SavedPlotsStore:
             self.load(ctx)
 
     def _persist(self, ctx) -> None:
-        # Bridge to the app-native persistence doc layer (see ``load``).
-        _doc.set_section(ctx.app, _SECTION, [r.to_dict() for r in self.records])
+        _doc.set_section(ctx, _SECTION, [r.to_dict() for r in self.records])
 
     # ── mutations ─────────────────────────────────────────────────────────
     def add(self, ctx, rec: SavedPlot, png_bytes: bytes) -> bool:

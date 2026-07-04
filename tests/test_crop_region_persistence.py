@@ -14,7 +14,10 @@ from well_viewer.persistence import crop_region
 
 def _app(tmp_path):
     ds = SimpleNamespace(data_dir=tmp_path, persistence_doc=None, crop_region=None)
-    return SimpleNamespace(_app_state=SimpleNamespace(dataset=ds))
+    app = SimpleNamespace(_app_state=SimpleNamespace(dataset=ds))
+    # _doc.get_section/set_section take ``ctx`` (A8); a minimal ctx over the app.
+    app._ctx = SimpleNamespace(app=app)
+    return app
 
 
 def test_saves_into_persistence_json_section(tmp_path):

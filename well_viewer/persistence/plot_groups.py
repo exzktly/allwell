@@ -20,12 +20,12 @@ SECTION = "plot_groups"
 def save_to_data_dir(app) -> None:
     """Persist Plot Groups to the dataset's consolidated persistence document."""
     groups = validate_repair_plot_groups(app._app_state.selection.plot_groups or [])
-    _doc.set_section(app, SECTION, groups)
+    _doc.set_section(app._ctx, SECTION, groups)
 
 
 def load_from_data_dir(app) -> None:
     """Load persisted Plot Groups and refresh the sidebar list if it exists."""
-    raw = _doc.get_section(app, SECTION)
+    raw = _doc.get_section(app._ctx, SECTION)
     loaded = app._app_state.dataset.well_paths.keys()
     groups = filter_loaded_wells(validate_repair_plot_groups(raw), loaded)
     app._app_state.selection.plot_groups = groups

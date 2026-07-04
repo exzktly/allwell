@@ -38,5 +38,5 @@ def test_active_mode_reads_the_slice(viewer_app):
 def test_mode_persists_through_snapshot(viewer_app):
     app = viewer_app
     app._app_state.scatter.mode = "aggregate"
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     assert snap["tabs"]["Scatter Plot"]["mode"] == "aggregate"

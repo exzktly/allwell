@@ -1048,7 +1048,7 @@ class WellViewerApp(QWidget):
             # table tabs) or calls ``_refresh_sidebar_map`` which restores the
             # correct enabled state per well.
 
-    def _sync_preview_well_for_image_tabs(self) -> None: return sync_preview_well_for_image_tabs(self)
+    def _sync_preview_well_for_image_tabs(self) -> None: return sync_preview_well_for_image_tabs(self._ctx)
 
     def _run_tab_switch_smoke_checks(self, prev_tab: Optional[str], tab: str, prev_selected: set) -> None:
         return run_tab_switch_smoke_checks(self._ctx, prev_tab, tab, prev_selected)

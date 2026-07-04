@@ -485,7 +485,7 @@ def draw_review_image(
         app._app_state.review_image.zoom = 1.0
         app._app_state.review_image.pan_x = 0.0
         app._app_state.review_image.pan_y = 0.0
-    render_review_image_display(app)
+    render_review_image_display(app._ctx)
     app._review_image_label._mask_arr = center
     app._review_image_label._raw_arr = arr
     app._apply_review_image_cursor()
@@ -541,11 +541,18 @@ def _draw_crop_outline(app, rgb) -> None:
     _band(r0, r1 + 1, c1 - t + 1, c1 + 1)    # right
 
 
-def render_review_image_display(app, *, pan_only: bool = False) -> None:
-    if not hasattr(app, "_review_image_label"):
+def render_review_image_display(ctx, *, pan_only: bool = False) -> None:
+    # A8 E4-review: ctx-native pixmap-service leaf. The QLabel host, QScrollArea
+    # canvas, decoded RGB buffer and cached scale are live objects read via
+    # ``ctx.runtime.review_image``; view geometry (zoom/pan/base_pil) is typed
+    # state on ``ctx.state.review_image``.
+    rt = ctx.runtime.review_image
+    label = rt.label
+    if label is None:
         return
-    rgb = getattr(app, "_review_image_base_rgb", None)
-    if rgb is None and app._app_state.review_image.base_pil is None:
+    ri = ctx.state.review_image
+    rgb = rt.base_rgb
+    if rgb is None and ri.base_pil is None:
         return
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
@@ -555,16 +562,17 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
     if rgb is not None:
         ih, iw = rgb.shape[:2]
     else:
-        iw, ih = app._app_state.review_image.base_pil.size
-    vp = app._review_image_canvas.viewport()
+        iw, ih = ri.base_pil.size
+    canvas = rt.canvas
+    vp = canvas.viewport()
     cw = max(1, vp.width())
     ch = max(1, vp.height())
     fit = min(cw / max(iw, 1), ch / max(ih, 1))
-    scale = max(0.05, fit * max(0.1, float(app._app_state.review_image.zoom)))
+    scale = max(0.05, fit * max(0.1, float(ri.zoom)))
     nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
 
-    cached_scale = getattr(app, "_review_image_scale", None)
-    existing_pm = app._review_image_label.pixmap()
+    cached_scale = rt.scale
+    existing_pm = label.pixmap()
     rebuild = not pan_only or existing_pm is None or existing_pm.isNull() or cached_scale != scale
 
     if rebuild:
@@ -579,7 +587,7 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
                     nw, nh, Qt.IgnoreAspectRatio, Qt.FastTransformation,
                 )
         else:
-            img = app._app_state.review_image.base_pil
+            img = ri.base_pil
             shown = img.resize((nw, nh), _PILImage.NEAREST)
             if shown.mode != "RGBA":
                 shown = shown.convert("RGBA")
@@ -588,13 +596,13 @@ def render_review_image_display(app, *, pan_only: bool = False) -> None:
                 data, nw, nh, 4 * nw, QImage.Format_RGBA8888,
             ).copy()
             pm = QPixmap.fromImage(qimg)
-        app._review_image_label.setPixmap(pm)
-        app._review_image_label.resize(max(nw, cw), max(nh, ch))
-        app._review_image_scale = scale
-    pan_x = float(app._app_state.review_image.pan_x)
-    pan_y = float(app._app_state.review_image.pan_y)
-    hbar = app._review_image_canvas.horizontalScrollBar()
-    vbar = app._review_image_canvas.verticalScrollBar()
+        label.setPixmap(pm)
+        label.resize(max(nw, cw), max(nh, ch))
+        rt.scale = scale
+    pan_x = float(ri.pan_x)
+    pan_y = float(ri.pan_y)
+    hbar = canvas.horizontalScrollBar()
+    vbar = canvas.verticalScrollBar()
     cx = max(0, (max(nw, cw) - cw) // 2) - int(pan_x)
     cy = max(0, (max(nh, ch) - ch) // 2) - int(pan_y)
     hbar.setValue(max(hbar.minimum(), min(hbar.maximum(), cx)))

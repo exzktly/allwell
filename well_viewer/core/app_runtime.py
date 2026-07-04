@@ -47,7 +47,8 @@ class AppRuntime:
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
-                 "batch_export", "saved_plots", "split", "fov", "sem", "aggregate")
+                 "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
+                 "review_image", "review")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -93,3 +94,22 @@ class AppRuntime:
         # resolve those callables (or ``None``) so the stats leaf threads the
         # delegate through ``ctx`` instead of naming the god-object.
         object.__setattr__(self, "aggregate", _FeatureRuntime(app, "_aggregate_"))
+        # Review-image pixmap scratch: the decoded base RGB buffer, the QLabel
+        # host + QScrollArea canvas widgets, and the cached display scale — live
+        # objects the pixmap-service leaves (``render_review_image_display`` /
+        # ``zoom_review_image_to_selected_nucleus``) read/write. ``prefix``
+        # ``_review_image_`` maps ``ctx.runtime.review_image.base_rgb`` <->
+        # ``app._review_image_base_rgb`` (and ``.label`` / ``.canvas`` / ``.scale``)
+        # so the ctx-native leaves reach them without the god-object handle.
+        object.__setattr__(self, "review_image", _FeatureRuntime(app, "_review_image_"))
+        # Review-CSV live scratch (prefix ``_review_``): the table nav-index
+        # (``ctx.runtime.review.csv_row_index`` <-> ``app._review_csv_row_index``),
+        # the render signature, the last lookup context, and the manual
+        # cell-inclusion override map (``.included_overrides`` <->
+        # ``app._review_included_overrides``). These are read/written as raw app
+        # scratch by the CSV populate + cell-click navigation; the runtime alias
+        # lets the ctx-native table-build leaf reach them without the god-object
+        # handle. (The override map is still autosaved by
+        # ``persistence.cell_overrides`` via the stamped app attr, not through
+        # this namespace — persistence never imports AppRuntime.)
+        object.__setattr__(self, "review", _FeatureRuntime(app, "_review_"))

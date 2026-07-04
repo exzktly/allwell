@@ -976,7 +976,7 @@ class WellViewerApp(QWidget):
         return draw_review_image(self, fluor_arr, mask_arr, include_by_nid, fit_lut=fit_lut, preserve_view=preserve_view, boundary=boundary, above_by_nid=above_by_nid)
 
     def _render_review_image_display(self, *, pan_only: bool = False) -> None:
-        render_review_image_display(self, pan_only=pan_only)
+        render_review_image_display(self._ctx, pan_only=pan_only)
 
     def _review_image_resolve_lut(self, arr) -> Tuple[float, float]: return review_image_resolve_lut(self, arr)
 
@@ -1062,10 +1062,10 @@ class WellViewerApp(QWidget):
     def _refresh_review_csv_rows(self, rows=None) -> None: refresh_review_csv_rows(self._ctx, rows)
 
     def _review_effective_included(self, label: str, row: dict) -> str:
-        return review_effective_included(self, label, row)
+        return review_effective_included(self._ctx, label, row)
 
 
-    def _review_load_rows(self, label: str) -> List[dict]: return review_load_rows(self, label)
+    def _review_load_rows(self, label: str) -> List[dict]: return review_load_rows(self._ctx, label)
 
     def _update_bar_tp_menu(self) -> None: return update_bar_tp_menu(self._ctx)
 

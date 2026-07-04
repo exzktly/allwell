@@ -9,6 +9,7 @@ import logging
 from PySide6.QtWidgets import QTableWidgetItem
 
 from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
+from well_viewer.features.image_browser.review_image.renderer import render_review_image_display
 from well_viewer.features.image_browser.review_image.renderer import update_preview
 from well_viewer.features.image_browser.review_image.box_select import (
     box_select_begin, box_select_finish, box_select_update,
@@ -328,7 +329,7 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
         if tp_cb is not None:
             tp_cb.setCurrentText(tp)
 
-    zoom_review_image_to_selected_nucleus(app)
+    zoom_review_image_to_selected_nucleus(app._ctx)
 
 
 @_guard_event
@@ -696,18 +697,22 @@ def apply_box_delete(app, x0: int, y0: int, x1: int, y1: int) -> None:
 
 
 def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float = 3.0) -> None:
-    """ctx-native entry point. Bridges to the app-native body, which drives the
-    pixmap-service ``render_review_image_display`` (bound in ``runtime_app``) and
-    reads the decoded ``_review_image_base_rgb`` scratch buffer — the sanctioned
-    ctx→app boundary until those leaves migrate centrally."""
-    zoom_review_image_to_selected_nucleus(ctx.app, zoom)
+    """ctx-native entry point (kept for the cell-browser caller)."""
+    zoom_review_image_to_selected_nucleus(ctx, zoom)
 
 
-def zoom_review_image_to_selected_nucleus(app, zoom: float = 3.0) -> None:
-    if not hasattr(app, "_review_image_label") or not hasattr(app, "_review_image_canvas"):
+def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
+    # A8 E4-review: ctx-native pixmap-service leaf. The QLabel host + QScrollArea
+    # canvas + decoded RGB buffer are live objects on ``ctx.runtime.review_image``;
+    # zoom/pan/base_pil are typed state on ``ctx.state.review_image``.
+    rt = ctx.runtime.review_image
+    label = rt.label
+    canvas = rt.canvas
+    if label is None or canvas is None:
         return
-    nid = app._app_state.review_image.selected_nucleus
-    mask_arr = getattr(app._review_image_label, "_mask_arr", None)
+    ri = ctx.state.review_image
+    nid = ri.selected_nucleus
+    mask_arr = getattr(label, "_mask_arr", None)
     if nid is None or mask_arr is None:
         return
     ys, xs = _np.where(mask_arr == int(nid))
@@ -715,20 +720,20 @@ def zoom_review_image_to_selected_nucleus(app, zoom: float = 3.0) -> None:
         return
     cx = float(xs.mean())
     cy = float(ys.mean())
-    app._app_state.review_image.zoom = float(max(1.0, zoom))
-    rgb = getattr(app, "_review_image_base_rgb", None)
+    ri.zoom = float(max(1.0, zoom))
+    rgb = rt.base_rgb
     if rgb is not None:
         ih, iw = rgb.shape[:2]
     else:
-        img = app._app_state.review_image.base_pil
+        img = ri.base_pil
         if img is None:
             return
         iw, ih = img.size
-    vp = app._review_image_canvas.viewport()
+    vp = canvas.viewport()
     cw = max(1, vp.width())
     ch = max(1, vp.height())
     fit = min(cw / max(iw, 1), ch / max(ih, 1))
-    scale = max(0.05, fit * max(0.1, float(app._app_state.review_image.zoom)))
+    scale = max(0.05, fit * max(0.1, float(ri.zoom)))
     nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
     # The renderer derives the scrollbar value as
     #     scroll = max(0, (max(nw, cw) - cw) // 2) - int(pan)
@@ -738,9 +743,9 @@ def zoom_review_image_to_selected_nucleus(app, zoom: float = 3.0) -> None:
     # The old `cw/2 - base_x - cx*scale` form mis-offset the pan by
     # roughly (nw - cw)/2 px once you zoomed in, which is why the
     # yellow nucleus ended up off-screen.
-    app._app_state.review_image.pan_x = (nw / 2.0) - (cx * scale)
-    app._app_state.review_image.pan_y = (nh / 2.0) - (cy * scale)
-    app._render_review_image_display()
+    ri.pan_x = (nw / 2.0) - (cx * scale)
+    ri.pan_y = (nh / 2.0) - (cy * scale)
+    render_review_image_display(ctx)
 
 
 
@@ -852,26 +857,31 @@ def _refresh_review_csv_impl(ctx) -> None:
 def refresh_review_csv_rows(ctx, rows: Optional[List[dict]] = None) -> None:
     """Populate the Review CSV table from *rows* (or the current selection).
 
-    A8 teardown: called with ``ctx`` by the tab builder + the app delegator;
-    bridges to the app-native store/render body (see ``refresh_review_csv``)."""
-    _refresh_review_csv_rows_impl(ctx.app, rows)
+    A8 E4-review: fully ctx-native — the table + filter combos + message label
+    come from ``ctx.widgets``; the selection reads map to ``ctx.state``; the
+    nav-index + last-lookup scratch lives on ``ctx.runtime.review``; row
+    materialisation + effective-inclusion + row-key derivation go through the
+    ctx-native collect leaves."""
+    _refresh_review_csv_rows_impl(ctx, rows)
 
 
-def _refresh_review_csv_rows_impl(app, rows: Optional[List[dict]] = None) -> None:
-    if not hasattr(app, "_review_csv_table"):
+def _refresh_review_csv_rows_impl(ctx, rows: Optional[List[dict]] = None) -> None:
+    w = ctx.widgets
+    table = w.get_or_none("_review_csv_table")
+    if table is None:
         return
-    table = app._review_csv_table
     table.setRowCount(0)
     # Reset the navigation index + render signature; rebuilt below once the
     # table is populated (used by select_review_csv_row_for_cell for O(1) jumps).
-    app._review_csv_row_index = {}
-    app._review_csv_render_sig = None
+    ctx.runtime.review.csv_row_index = {}
+    ctx.runtime.review.csv_render_sig = None
+    msg_lbl = w.get_or_none("_review_csv_msg_lbl")
 
     if rows is None:
-        sels = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
+        sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
         rows = []
         for label in sels:
-            rows.extend(app._review_load_rows(label))
+            rows.extend(review_load_rows(ctx, label))
 
     def _norm(v: object) -> str:
         s = str(v or "").strip()
@@ -882,12 +892,14 @@ def _refresh_review_csv_rows_impl(app, rows: Optional[List[dict]] = None) -> Non
         except Exception:
             return s
 
-    fov_sel = _norm(app._review_fov_cb.currentText()) if hasattr(app, "_review_fov_cb") else ""
-    tp_sel = app._norm_timepoint(app._review_tp_cb.currentText()) if hasattr(app, "_review_tp_cb") else ""
+    fov_cb = w.get_or_none("_review_fov_cb")
+    tp_cb = w.get_or_none("_review_tp_cb")
+    fov_sel = _norm(fov_cb.currentText()) if fov_cb is not None else ""
+    tp_sel = norm_timepoint(ctx, tp_cb.currentText()) if tp_cb is not None else ""
     filtered = []
     for row in rows:
         row_fov = _norm(row.get("fov", row.get("FOV", "")))
-        row_tp = app._norm_timepoint(row.get("timepoint", row.get("tp", row.get("time", ""))))
+        row_tp = norm_timepoint(ctx, row.get("timepoint", row.get("tp", row.get("time", ""))))
         if fov_sel and row_fov != fov_sel:
             continue
         if tp_sel and row_tp != tp_sel:
@@ -897,25 +909,25 @@ def _refresh_review_csv_rows_impl(app, rows: Optional[List[dict]] = None) -> Non
     if not filtered:
         _logger.warning(
             "No Review CSV rows matched filters: selected_wells=%s fov=%s tp=%s total_rows=%d",
-            sorted(app._app_state.selection.selected_wells, key=app._parse_rc),
+            sorted(ctx.state.selection.selected_wells, key=parse_rc),
             fov_sel, tp_sel, len(rows),
         )
         if not rows:
             table.setColumnCount(0)
-            app._review_csv_msg_lbl.setText("No rows are available for the selected well(s).")
+            msg_lbl.setText("No rows are available for the selected well(s).")
             return
         # Fallback: if the filters are mismatched for any reason, still
         # show all loaded rows from selected well(s) instead of an empty table.
         filtered = list(rows)
-        app._review_csv_msg_lbl.setText(
+        msg_lbl.setText(
             "No exact Well/FOV/Timepoint match. Showing all selected rows instead."
         )
-        ctx = getattr(app, "_review_csv_lookup_context", {}) or {}
+        lookup = ctx.runtime.review.csv_lookup_context or {}
         ctx_txt = (
-            f" well={ctx.get('well','')} fov={ctx.get('fov','')} tp={ctx.get('tp','')} nucleus_id={ctx.get('nucleus_id','')}"
-            if ctx else ""
+            f" well={lookup.get('well','')} fov={lookup.get('fov','')} tp={lookup.get('tp','')} nucleus_id={lookup.get('nucleus_id','')}"
+            if lookup else ""
         )
-        app._set_status(
+        ctx.set_status(
             f"Review CSV fallback active: no exact match for FOV={fov_sel}, TP={tp_sel}; showing {len(filtered)} row(s).{ctx_txt}"
         )
 
@@ -962,11 +974,11 @@ def _refresh_review_csv_rows_impl(app, rows: Optional[List[dict]] = None) -> Non
             well_label = str(row.get("well", "") or "")
             for ci, c in enumerate(cols):
                 if ci == included_col and well_label:
-                    value = app._review_effective_included(well_label, row)
+                    value = review_effective_included(ctx, well_label, row)
                 else:
                     value = row.get(c, "")
                 table.setItem(r, ci, QTableWidgetItem(str(value)))
-            rf, rt, rn = app._review_row_keys(row)
+            rf, rt, rn = review_row_keys(ctx, row)
             # Key the navigation index by WELL too: the CSV table can span
             # several selected wells, and the same (fov, timepoint, nucleus_id)
             # exists in each — without the well a click resolved to whichever
@@ -976,18 +988,18 @@ def _refresh_review_csv_rows_impl(app, rows: Optional[List[dict]] = None) -> Non
             row_index.setdefault((rf, rt, rn), r)  # well-agnostic fallback
     finally:
         table.setUpdatesEnabled(True)
-    app._review_csv_row_index = row_index
-    app._review_csv_render_sig = (
-        tuple(sorted(app._app_state.selection.selected_wells, key=app._parse_rc)),
+    ctx.runtime.review.csv_row_index = row_index
+    ctx.runtime.review.csv_render_sig = (
+        tuple(sorted(ctx.state.selection.selected_wells, key=parse_rc)),
         fov_sel, tp_sel,
     )
     if truncated:
-        app._review_csv_msg_lbl.setText(
+        msg_lbl.setText(
             f"Showing first {len(filtered):,} of {n_total:,} row(s) "
             "— narrow the FOV / timepoint to see the rest."
         )
     else:
-        app._review_csv_msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
+        msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
 
 
 

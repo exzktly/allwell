@@ -462,7 +462,20 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              reads the metric combo via ctx.widgets. _stats_channel_cb registered for
 #              resolvability but its sole channel-controller reader takes app (no
 #              droppable unwrap), so it clears no ctx.app.
-CTX_APP_BUDGET = 40
+#   E4-review review-image/smfish services: -2   render_review_image_display +
+#              zoom_review_image_to_selected_nucleus went ctx-native via a new
+#              ctx.runtime.review_image live-object namespace (base_rgb / scale /
+#              label / canvas), clearing the zoom ctx entry point; and the Review
+#              CSV table-build leaf (_refresh_review_csv_rows_impl) + its two
+#              collect leaves (review_load_rows / review_effective_included) went
+#              ctx-native via ctx.widgets + a new ctx.runtime.review scratch
+#              namespace, clearing that entry point. The remaining four refs stay
+#              app-bridged: refresh_review_image + the review-csv double-click walk
+#              the deep draw/collect app-method web; recalculate_threshold needs
+#              app-only services (_features / _load_gating_from_pipeline_info); and
+#              the smfish _refresh_review_csv bridge can't take a cross-feature
+#              image_browser import (deletability guardrail).
+CTX_APP_BUDGET = 38
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

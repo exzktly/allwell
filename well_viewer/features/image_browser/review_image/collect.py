@@ -18,7 +18,7 @@ import numpy as np
 import numpy as _np
 import pandas as pd
 
-from well_viewer.data.data_loading import df_included_mask, resolve_value_series
+from well_viewer.data.data_loading import df_included_mask, get_rows, resolve_value_series
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 from well_viewer.core.ui_helpers import norm_timepoint
@@ -463,16 +463,19 @@ def review_collect_timepoints(app, fov: str) -> list:
     return tp_values
 
 
-def review_load_rows(app, label: str) -> List[dict]:
+def review_load_rows(ctx, label: str) -> List[dict]:
     """Materialize the cached DataFrame for ``label`` as a list of row dicts.
 
     Used by the Review CSV table widget and the Review Image overlay
     builders. Mutations to returned dicts are local — write back to the
     canonical store via ``_apply_review_overrides_to_cache`` (which
     updates the cached DataFrame's ``Included`` column directly).
+
+    A8 E4-review: ctx-native — row materialisation goes through the shared
+    ``data_loading.get_rows`` service.
     """
     try:
-        df = app._get_rows(label)
+        df = get_rows(ctx, label)
     except Exception:
         return []
     if df is None or df.empty:
@@ -480,18 +483,23 @@ def review_load_rows(app, label: str) -> List[dict]:
     return df.to_dict("records")
 
 
-def review_effective_included(app, label: str, row: dict) -> str:
+def review_effective_included(ctx, label: str, row: dict) -> str:
     """Effective Included value for a cached row.
 
     User overrides set via the Review Image tab take precedence over the
     gating-computed ``Included`` field stored on the cached row. Overrides
     are kept in a separate dict so they survive subsequent gating recomputes
     (which rewrite the canonical row['Included']).
+
+    A8 E4-review: ctx-native — the (fov,tp,nid) key comes from the ctx
+    ``review_row_keys`` leaf and the manual override map is the live
+    ``ctx.runtime.review.included_overrides`` scratch.
     """
-    fov, tp, nid = app._review_row_keys(row)
+    fov, tp, nid = review_row_keys(ctx, row)
     val = None
     if fov and tp and nid:
-        ovr = app._review_included_overrides.get((label, fov, tp, nid))
+        overrides = ctx.runtime.review.included_overrides or {}
+        ovr = overrides.get((label, fov, tp, nid))
         if ovr is not None:
             val = ovr
     if val is None:

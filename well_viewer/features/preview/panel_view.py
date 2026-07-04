@@ -321,7 +321,7 @@ def build_review_image_panel(self, parent: QWidget) -> None:
 
     def _on_review_image_canvas_resize(ev) -> None:
         _orig_canvas_resize(ev)
-        render_review_image_display(self)
+        render_review_image_display(self._ctx)
 
     self._review_image_canvas.resizeEvent = _on_review_image_canvas_resize
 

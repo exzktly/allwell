@@ -562,7 +562,7 @@ class WellViewerApp(QWidget):
 
     # ── Replicate-panel plate map ─────────────────────────────────────────────
 
-    def _rep_refresh_map(self) -> None: return rep_refresh_map(self)
+    def _rep_refresh_map(self) -> None: return rep_refresh_map(self._ctx)
 
 
     def _rep_select(self, idx: int) -> None: return rep_select(self, idx)

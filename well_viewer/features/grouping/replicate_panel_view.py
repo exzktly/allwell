@@ -82,7 +82,7 @@ def build_replicate_panel(app, parent: QWidget) -> None:
     plate.setSizePolicy(sp)
     layout.addWidget(plate, 0)
     layout.addStretch(1)
-    app._rep_map_plate = plate
+    app._rep_map_plate = app._ctx.widgets.register("_rep_map_plate", plate)
 
     def _commit_plate_to_current(*_a) -> None:
         # Well-membership edits should only land while the user is on the

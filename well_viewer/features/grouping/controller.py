@@ -158,25 +158,29 @@ from well_viewer.domain.selections_model import (  # noqa: E402,F401
 
 
 
-def rep_refresh_map(app) -> None:
+def rep_refresh_map(ctx) -> None:
     """Push selection state onto the GROUPS-panel plate (a WellPlateSelector):
     every selection's wells take that selection's rank colour; the *current*
     selection's wells are shown as the plate's selection (sunken/accent), which
     is also what a drag on the plate edits."""
-    plate = getattr(app, "_rep_map_plate", None)
+    from well_viewer.core.selection_controller import sel_color
+    plate = ctx.widgets.get_or_none("_rep_map_plate")
     if plate is None:
         return
-    plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
+    sel_state = ctx.state.selection
+    well_paths = ctx.state.dataset.well_paths
+    plate.setEnabledWells(list(well_paths.keys()))
     colors: Dict[str, str] = {}
-    for s in app._app_state.selection.selections:
-        c = app._sel_color(s)
+    for s in sel_state.selections:
+        c = sel_color(ctx, s)
         for tok in (s.get("wells") or []):
-            if tok in app._app_state.dataset.well_paths:
+            if tok in well_paths:
                 colors[tok] = c
     plate.clearWellColors()
     plate.setWellColors(colors)
-    cur = app._sel_by_id(app._app_state.selection.current_selection_id)
-    cur_wells = [w for w in (cur.get("wells") or []) if w in app._app_state.dataset.well_paths] if cur else []
+    cur_id = sel_state.current_selection_id
+    cur = next((s for s in sel_state.selections if s.get("id") == cur_id), None)
+    cur_wells = [w for w in (cur.get("wells") or []) if w in well_paths] if cur else []
     plate.setSelectedWellIds(cur_wells)
 
 

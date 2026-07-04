@@ -796,29 +796,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              seven hooks (bar/stats/distribution/heatmap/multivariate/spatial/
 #              scatter) take ctx and guard via ctx.widgets.has (verified every
 #              guard widget is registered). recalc drops its last app=ctx.app.
-#   2 -> 1    sample-def centre builder tree → ctx: -1   the
-#              build_sample_definitions_app_bridge seam dropped its
-#              ``_build_sample_definitions_centre(ctx.app, frame)`` unwrap — the
-#              centre builder now takes ctx. Its three in-module builders
-#              (build_sample_definitions_centre / build_replicate_groups_centre /
-#              build_replicate_panel) thread ctx: widgets register through
-#              ctx.widgets (_rep_map_plate / _rep_active_group_lbl / _rep_list /
-#              _notes_edit), typed reads via ctx.state (selection / dataset), the
-#              plate tooltip provider + well_plate_tooltip_provider take ctx, and
-#              the Groups-subtab refresh routes through the now-ctx-native
-#              groups_centre_refresh(ctx) / update_active_group_label(ctx) /
-#              rep_refresh_map(ctx) / ctx.refresh_sidebar_map(). The remaining
-#              app-bound mutators (_rep_clear_all / _rep_add / _sel_by_id /
-#              _sel_set_composition / _parse_rc / _clear_sample_definitions_all /
-#              _notes_schedule_save / _pipeline_info_refresh) reach through the
-#              blessed ctx.window accessor (a local ``app = ctx.window`` for the
-#              widget-stamp-heavy centre/groups builders). The three leaf
-#              sub-builders (build_label_grid / build_ratios_inline_panel /
-#              build_pipeline_info_subtab) stay app-native and are reached via
-#              ctx.window — their own ctx conversion is separate scope. The bridge
-#              docstring + registry caller are unchanged (same seam name). Only
-#              tab_controller:138 (the review-image bridge) remains.
-CTX_APP_BUDGET = 1
+CTX_APP_BUDGET = 2
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

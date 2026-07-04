@@ -271,7 +271,7 @@ def _activate_saved_plots(app) -> None:
         from well_viewer.features.saved_plots.controller import (
             refresh_saved_plots_gallery,
         )
-        refresh_saved_plots_gallery(app)
+        refresh_saved_plots_gallery(app._ctx)  # controller now takes ctx
     except Exception:
         swallowed()
 

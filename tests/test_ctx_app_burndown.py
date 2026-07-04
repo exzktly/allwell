@@ -401,7 +401,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              impls) thread ctx; cell_browser on_cell_clicked calls them with ctx.
 #              runtime_app delegators pass self._ctx. Deeper render/store paths that
 #              still take app remain reported bridges.
-CTX_APP_BUDGET = 62
+#   62 -> 63    saved_plots store/capture layer -> ctx: tab_view fully decoupled
+#              (5 ctx.app -> 0) + image_table save_plot_from_card(ctx). Like
+#              lineplot, whole-tree RISES by 1: the SavedPlotsStore / capture /
+#              controller layer previously took a raw app param (invisible to the
+#              ratchet); threading ctx surfaces its genuine bridges (persistence-
+#              doc I/O, view_state snapshot/restore, stats deserialize/compute) as
+#              counted, documented ctx.app residuals to convert with those layers.
+CTX_APP_BUDGET = 63
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from well_viewer.core.channel_state_controller import get_all_fluor_gates
 from well_viewer.core.lazy import lazy_names
 from well_viewer.persistence import view_state
 
@@ -26,14 +27,17 @@ _serialize_stats_groups, _threshold_for_val_col = lazy_names(
 )
 
 
-def capture_params(app, tab: str) -> tuple[dict, dict]:
+def capture_params(ctx, tab: str) -> tuple[dict, dict]:
     """Return ``(params, thresholds)`` for the plot currently on *tab*.
 
     *params* is a full ``view_state`` snapshot (replayable by Restore);
     *thresholds* collects the gating cuts that aren't part of view-state but
     still shape fraction-on / inclusion plots.
     """
-    params = view_state.snapshot(app)
+    # ``view_state.snapshot`` walks the app's persisted UI state directly; that
+    # snapshot/restore layer is app-native (a later A8 cluster), so it is bridged
+    # through the app handle here — a reported residual.
+    params = view_state.snapshot(ctx.app)
     # Pin the originating tab so Restore navigates back here even if the user
     # had since moved to another tab before the snapshot ran.
     if tab:
@@ -43,7 +47,7 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     # the replicate-set *selections*, which ``view_state`` does NOT snapshot. Save
     # them so Restore reproduces the exact groups on the plot (not whatever the
     # sidebar happens to hold at restore time).
-    sels = _capture_selections(app)
+    sels = _capture_selections(ctx)
     if sels:
         params["selections"] = sels
 
@@ -53,31 +57,31 @@ def capture_params(app, tab: str) -> tuple[dict, dict]:
     # exact plotting selection, clearing stale solo wells when the saved plot had
     # none.
     params["active_solo_wells"] = sorted(
-        getattr(app._app_state.selection, "active_solo_wells", None) or [])
+        getattr(ctx.state.selection, "active_solo_wells", None) or [])
 
     # Significance brackets (Bar plot) are recomputed on Restore by re-running the
     # same stats test, so capture the test CONFIG (groups + context). Only when a
     # test has actually been run (``pairwise`` non-empty) and ≥2 groups exist.
-    stats_cfg = _capture_stats_config(app)
+    stats_cfg = _capture_stats_config(ctx)
     if stats_cfg is not None:
         params["stats"] = stats_cfg
 
     thresholds: dict[str, Any] = {}
-    fluor = _safe(lambda: app._get_all_fluor_gates())
+    fluor = _safe(lambda: get_all_fluor_gates(ctx))
     if isinstance(fluor, dict) and fluor:
         thresholds["fluor_gates"] = {str(k): float(v) for k, v in fluor.items()}
-    tfo = _safe(lambda: dict(app._app_state.cell_gating.thresh_frac_on))
+    tfo = _safe(lambda: dict(ctx.state.cell_gating.thresh_frac_on))
     if isinstance(tfo, dict) and tfo:
         thresholds["thresh_frac_on"] = {str(k): float(v) for k, v in tfo.items()}
     return params, thresholds
 
 
-def _capture_selections(app) -> list | None:
+def _capture_selections(ctx) -> list | None:
     """A JSON-safe deep copy of the live replicate-set selections (the group
     definitions that drive the group-based plots), or None when there are none."""
     try:
         import copy
-        sels = getattr(app._app_state.selection, "selections", None) or []
+        sels = getattr(ctx.state.selection, "selections", None) or []
         if not sels:
             return None
         return copy.deepcopy(list(sels))
@@ -87,21 +91,22 @@ def _capture_selections(app) -> list | None:
         return None
 
 
-def _capture_stats_config(app) -> dict | None:
+def _capture_stats_config(ctx) -> dict | None:
     """Config to re-run the current stats test on Restore (or None if there's
     nothing to reproduce). Derives the run context from the live ``pairwise``
     results (test / val_col / target_t / statistic) so it matches exactly what
     produced the on-screen brackets; the threshold is resolved from that val_col.
     """
-    st = getattr(app._app_state, "stats", None)
+    st = getattr(ctx.state, "stats", None)
     pairwise = list(getattr(st, "pairwise", []) or []) if st else []
     groups = [g for g in (getattr(st, "groups", []) or []) if getattr(g, "wells", None)]
     if not pairwise or len(groups) < 2:
         return None
-    ctx = pairwise[0]  # test/val_col/target_t/stat are constant across the run
-    val_col = str(ctx.get("val_col", "") or "")
+    run_ctx = pairwise[0]  # test/val_col/target_t/stat are constant across the run
+    val_col = str(run_ctx.get("val_col", "") or "")
     try:
-        threshold = float(_threshold_for_val_col(app, val_col))
+        # ``threshold_for_val_col`` is app-native stats plumbing; bridged via app.
+        threshold = float(_threshold_for_val_col(ctx.app, val_col))
         grp_data = _serialize_stats_groups(groups)
     except Exception:
         # Don't lose the saved plot's stats config silently (audit E10).
@@ -109,14 +114,14 @@ def _capture_stats_config(app) -> dict | None:
         return None
     return {
         "groups": grp_data,
-        "test": str(ctx.get("test", "") or ""),
-        "target_t": ctx.get("target_t"),
+        "test": str(run_ctx.get("test", "") or ""),
+        "target_t": run_ctx.get("target_t"),
         "val_col": val_col,
-        "statistic": str(ctx.get("stat", "mean") or "mean"),
+        "statistic": str(run_ctx.get("stat", "mean") or "mean"),
         "threshold": threshold,
         # The FOV-replicate mode governs the test's replicate unit; capture it so
         # a restored plot re-runs with the same n and redraws identical brackets.
-        "use_fov": bool(_safe(lambda: app._use_fov_spread_active())),
+        "use_fov": bool(ctx.state.plot.use_fov_replicates),
     }
 
 
@@ -139,7 +144,7 @@ def _fc_summary(fc: dict) -> str:
     return " · ".join(parts) if parts else "off"
 
 
-def build_summary(app, tab: str, params: dict, thresholds: dict) -> str:
+def build_summary(tab: str, params: dict, thresholds: dict) -> str:
     """A compact, human-readable description of the saved plot's settings."""
     lines: list[str] = [f"Tab: {tab}"]
 

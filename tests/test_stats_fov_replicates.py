@@ -91,14 +91,14 @@ def test_saved_plot_captures_and_reruns_fov_mode(loaded_app_multifov):
         threshold=0.0, test="t-test (Welch)", use_fov=True)
     assert app._app_state.stats.pairwise  # per-FOV test ran
 
-    cfg = _capture_stats_config(app)
+    cfg = _capture_stats_config(app._ctx)
     assert cfg is not None and cfg["use_fov"] is True
 
     # Simulate a reload with the toggle now OFF; restore must still reproduce the
     # per-FOV result from the saved config (not the live toggle).
     app._app_state.plot.use_fov_replicates = False
     app._app_state.stats.pairwise = []
-    _restore_stats(app, cfg)
+    _restore_stats(app._ctx, cfg)
     assert app._app_state.stats.pairwise and "p" in app._app_state.stats.pairwise[0]
 
 

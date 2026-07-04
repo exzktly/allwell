@@ -37,7 +37,8 @@ def test_empty_state_until_a_plot_is_saved(qapp, tmp_path):
     # A real ViewerContext always carries a WidgetRegistry (``ctx.widgets``); the
     # builder registers its handles through it and register() stamps ``app._x``.
     # Reuse the same ctx for the repopulate so the registry sees the built handles.
-    ctx = SimpleNamespace(app=app, widgets=WidgetRegistry(app), runtime=AppRuntime(app))
+    ctx = SimpleNamespace(app=app, state=app._app_state,
+                          widgets=WidgetRegistry(app), runtime=AppRuntime(app))
     build_saved_plots_tab(ctx, parent)
 
     # No saved plots → empty-state page, regardless of dataset presence.
@@ -45,7 +46,7 @@ def test_empty_state_until_a_plot_is_saved(qapp, tmp_path):
 
     # Save one, repopulate (what opening the tab does) → gallery page shows
     # immediately, without needing an app restart.
-    get_store(app).add(app, _rec(), b"not-a-real-png")
+    get_store(ctx).add(ctx, _rec(), b"not-a-real-png")
     populate_saved_plots_grid(ctx)
 
     assert app._saved_plots_stack.currentIndex() == 1

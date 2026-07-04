@@ -5,14 +5,21 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
+from well_viewer.core.app_runtime import AppRuntime
 from well_viewer.features.saved_plots.state import SavedPlot, SavedPlotsStore, get_store
 
 
 def _app(tmp_path: Path):
-    """Minimal app stub exposing what the store + capture paths read."""
+    """Minimal app stub exposing what the store + capture paths read.
+
+    The store now takes ``ctx``: reads ``ctx.state.dataset`` and bridges to the
+    app-native persistence doc via ``ctx.app``. The fake wires a matching
+    ``_ctx`` (state=app._app_state, runtime=AppRuntime(app))."""
     dataset = SimpleNamespace(data_dir=tmp_path, persistence_doc=None)
     state = SimpleNamespace(dataset=dataset)
-    return SimpleNamespace(_app_state=state)
+    app = SimpleNamespace(_app_state=state)
+    app._ctx = SimpleNamespace(app=app, state=state, runtime=AppRuntime(app))
+    return app
 
 
 def _rec(pid="20260101-000000-000000", tab="Bar Plots"):
@@ -26,7 +33,7 @@ def _rec(pid="20260101-000000-000000", tab="Bar Plots"):
 def test_store_add_writes_png_and_persists(tmp_path):
     app = _app(tmp_path)
     store = SavedPlotsStore()
-    assert store.add(app, _rec(), b"\x89PNG-bytes") is True
+    assert store.add(app._ctx, _rec(), b"\x89PNG-bytes") is True
     # PNG written under <data_dir>/saved_plots/
     img = tmp_path / "saved_plots" / "20260101-000000-000000.png"
     assert img.exists() and img.read_bytes() == b"\x89PNG-bytes"
@@ -39,13 +46,13 @@ def test_store_add_writes_png_and_persists(tmp_path):
 
 def test_store_reload_from_disk(tmp_path):
     app = _app(tmp_path)
-    SavedPlotsStore().add(app, _rec(), b"x")
+    SavedPlotsStore().add(app._ctx, _rec(), b"x")
     # A fresh store loading the same dataset sees the persisted record.
     app2 = _app(tmp_path)
     # share the on-disk persistence.json by clearing the cached doc
     app2._app_state.dataset.persistence_doc = None
     store2 = SavedPlotsStore()
-    store2.load(app2)
+    store2.load(app2._ctx)
     assert [r.id for r in store2.records] == ["20260101-000000-000000"]
 
 
@@ -54,35 +61,35 @@ def test_store_move_reorders_in_display_order(tmp_path):
     store = SavedPlotsStore()
     # Added oldest→newest; display order is newest-first: [c, b, a].
     for pid in ("a", "b", "c"):
-        store.add(app, _rec(pid=pid), b"x")
+        store.add(app._ctx, _rec(pid=pid), b"x")
 
     def display_ids():
         return [r.id for r in reversed(store.records)]
 
     assert display_ids() == ["c", "b", "a"]
     # Move the top item ("c") down → [b, c, a].
-    assert store.move(app, "c", up=False) is True
+    assert store.move(app._ctx, "c", up=False) is True
     assert display_ids() == ["b", "c", "a"]
     # Move "a" up → [b, a, c].
-    assert store.move(app, "a", up=True) is True
+    assert store.move(app._ctx, "a", up=True) is True
     assert display_ids() == ["b", "a", "c"]
     # No-ops at the ends return False and don't change order.
-    assert store.move(app, "b", up=True) is False
-    assert store.move(app, "c", up=False) is False
+    assert store.move(app._ctx, "b", up=True) is False
+    assert store.move(app._ctx, "c", up=False) is False
     assert display_ids() == ["b", "a", "c"]
     # The new order persisted to disk.
     store2 = SavedPlotsStore()
-    store2.load(app)
+    store2.load(app._ctx)
     assert [r.id for r in reversed(store2.records)] == ["b", "a", "c"]
 
 
 def test_store_delete_removes_image_and_record(tmp_path):
     app = _app(tmp_path)
     store = SavedPlotsStore()
-    store.add(app, _rec(), b"x")
+    store.add(app._ctx, _rec(), b"x")
     img = tmp_path / "saved_plots" / "20260101-000000-000000.png"
     assert img.exists()
-    store.delete(app, "20260101-000000-000000")
+    store.delete(app._ctx, "20260101-000000-000000")
     assert not img.exists()
     assert store.records == []
 
@@ -90,7 +97,7 @@ def test_store_delete_removes_image_and_record(tmp_path):
 def test_add_without_dataset_dir_is_noop(tmp_path):
     app = _app(tmp_path)
     app._app_state.dataset.data_dir = None
-    assert SavedPlotsStore().add(app, _rec(), b"x") is False
+    assert SavedPlotsStore().add(app._ctx, _rec(), b"x") is False
 
 
 def test_build_summary_lists_key_params():
@@ -104,7 +111,7 @@ def test_build_summary_lists_key_params():
         "tabs": {"Bar Plots": {"timepoint": "24"}},
     }
     thresholds = {"thresh_frac_on": {"gfp": 12.5}}
-    text = build_summary(None, "Bar Plots", params, thresholds)
+    text = build_summary("Bar Plots", params, thresholds)
     assert "Tab: Bar Plots" in text
     assert "A01" in text and "gfp" in text
     assert "vs ctrl" in text
@@ -113,16 +120,17 @@ def test_build_summary_lists_key_params():
 
 def test_get_store_is_singleton_on_app():
     app = SimpleNamespace()
-    s1 = get_store(app)
-    s2 = get_store(app)
+    ctx = SimpleNamespace(runtime=AppRuntime(app))
+    s1 = get_store(ctx)
+    s2 = get_store(ctx)
     assert s1 is s2
 
 
 def test_store_rename_updates_title_and_persists(tmp_path):
     app = _app(tmp_path)
     store = SavedPlotsStore()
-    store.add(app, _rec(), b"x")
-    store.rename(app, "20260101-000000-000000", "My figure")
+    store.add(app._ctx, _rec(), b"x")
+    store.rename(app._ctx, "20260101-000000-000000", "My figure")
     assert store.get("20260101-000000-000000").title == "My figure"
     from well_viewer.persistence import _doc
     assert _doc.get_section(app, "saved_plots")[0]["title"] == "My figure"

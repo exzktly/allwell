@@ -349,14 +349,27 @@ clears it. None falls to a piecemeal conversion (all measured net-0/net-add).
 | 1 | `core/channel_state_controller.py:949` | `set_thresh_frac_on` seam — lazy-tab `_centre_build_pending` + loose `_cell_gating_thresh_frac_edits`. Clears with **cell-gating edits-dict → typed state**. |
 | 1 | `core/selection_controller.py:828` | `set_selected_wells` → `_refresh_sidebar_map`/`on_plate_sel_change` bottom into `_is_single_well_tab`(`app._features`). **feature-registry ctx-home.** |
 | 2 | `core/tab_controller.py:138,164` | The D5/D6 image-browser + sample-def bundled core seams. Clear as their god-service trees convert. (The split-focus/visible providers at :290/313 were cleared → `ctx.window`/`ctx.runtime.split`, commit `d91543f`.) |
-| 1 | `domain/fold_change_controls.py:331` | `install_fold_change_controls` → `_ControlCombo`/`_repopulate_*` take `app`. Own conversion pass. |
-| 1 | `features/batch_export/tab_view.py:194` | `_show_batch_mode` → the 3 batch panels take `app` first-positional. **A14 batch-panel decomposition.** |
+| ~~1~~ 0 | ~~`domain/fold_change_controls.py:331`~~ | **CLEARED** (commit `5154649`) — the whole cluster only touched typed state/bus, converted wholesale to ctx. |
+| ~~1~~ 0 | ~~`features/batch_export/tab_view.py:194`~~ | **CLEARED** (Epic-A14, commit `c492cc2`) — the 3 batch panels + `_show_batch_mode` now take `ctx`. |
 | 1 | `features/saved_plots/controller.py:110` | `_rebuild_all` → `desc.on_selection_changed(app)` hook contract. **feature-registry ctx-home.** |
 | 2 | `persistence/cell_gating.py:20,64` | `save/load_from_pipeline_info` — loose `_cell_gating_*` widgets + `_scatter_gates` + `_centre_build_pending`. **cell-gating → typed state.** |
 | 2 | `persistence/view_state.py:95,421` | `snapshot`/`restore` — broad app-widget surface (`_current_leaf_tab`/`_snapshot_tabs`/`_set_selected_wells`). Sanctioned persistence unwrap; **T6**. |
-| **12** | | **3 epics + T6** (was 14; tab_controller providers −2 via `ctx.window`) |
+| **10** | | god-service decompositions + T6 (was 14; −4 via tab providers, A14, fold-change) |
 
-**Status 2026-07-04 (session end): 12 refs (98.7% overall).** The two
+**Status 2026-07-04 (session end): 10 refs (98.9% overall).** Inline (worker
+infra was restart-killing) cleared four more: tab-controller split providers
+(−2, `ctx.window`/`ctx.runtime.split`), Epic-A14 batch panels (−1), and the
+fold-change controls cluster (−1). The remaining **10 each bottom into a genuine
+god-service** — `build_review_image_panel` (~30 app lambdas) + `update_channel_selector`
++ `on_tab_change` (tab_controller:138); the sample-def builder tree (tab_controller:164);
+`_refresh_sidebar_map` debounce (selection:828); `rebuild_all`'s `_features`
+`on_selection_changed` hook (saved_plots:110); `recalculate_threshold`'s
+`_features`/`_load_gating` seam (channel:64); `_centre_build_pending` lazy-build +
+the edits widget maps (channel:949, persistence/cell_gating ×2); the view_state
+snapshot/restore surface (view_state ×2 → **T6**). Each is a substantial,
+interactive-smoke-gated decomposition — worker-sized, best run one-per-pass.
+
+The two
 Epic-registry attempts both confirmed (independently) that a `ctx.features`
 accessor clears **zero** — the registry is always a *co-inhabitant* of each seam
 (every site also needs `_get_rows`/`_refresh_sidebar_map`/`_rebuild_all`), so the
@@ -527,7 +540,7 @@ field. Everything must be green on the fast lane; the closeEvent/teardown tests
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[x]` | in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 12 (R1–R7 + F1/F2/F4 + E1–E6 + D-series + tab-controller done; 12 floor remains) |
+| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 10 (R1–R7 + F1/F2/F4 + E1–E6 + D-series + A14 + tab/fold-change done; 10 remain) |
 | T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into D1 (channel/axis → `channel_changed`) |
 | T5 | Saved-plots service | — | Med | `[~]` | capture/persistence ctx-native (`226d0af`); `_rebuild_all` → D7 |
 | T6 | Retire `ctx.app` | D1–D10 | High | `[ ]` | 26 floor → 0 (decompose god-methods, then delete field) |

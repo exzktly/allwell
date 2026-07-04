@@ -263,23 +263,24 @@ def refresh_metric_combo_for_channel(ctx) -> None:
 
     Replaces ``partial(refresh_metric_combo_for_channel, WellViewerApp)``.
 
-    A8: takes ``ctx``; reshapes the app's per-tab combos, so it unwraps the
-    handle once at this core boundary.
+    A8/D1: ctx-native — the channel label composes off ``ctx.state.channel``
+    (the ctx ``active_channel_label`` leaf), the per-tab Property combos resolve
+    through ``ctx.widgets`` (registered in centre_view / lineplot / barplot), and
+    the stats fan-out already takes ``ctx``. No god-object unwrap.
     """
-    app = ctx.app
     try:
-        channel_label = app._active_channel_label()
+        channel_label = active_channel_label(ctx)
     except Exception:
         channel_label = ""
-    smfish_chan = app._app_state.channel.active_channel
+    smfish_chan = ctx.state.channel.active_channel
     for attr in ("_plotting_metric_cb", "_metric_cb", "_metric_cb_bar"):
-        populate_metric_combo(app._ctx,
-            getattr(app, attr, None),
+        populate_metric_combo(ctx,
+            ctx.widgets.get_or_none(attr),
             channel_entry=channel_label,
             smfish_channel=smfish_chan,
         )
     # Stats has its own channel combo, so its Property combo follows that one.
-    refresh_stats_property_combo(app._ctx)
+    refresh_stats_property_combo(ctx)
 
 
 # ── Channel-selector / dropdown sync ────────────────────────────────────────

@@ -537,7 +537,23 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              feature->god-method bridges (smfish/registry/image_browser/
 #              saved_plots/review_image/cell_gating quick-edit/batch_export) which
 #              net-ADD if converted piecemeal.
-CTX_APP_BUDGET = 26
+#   D1 channel/metric behaviour: -1   refresh_metric_combo_for_channel
+#              (core/channel_state_controller) dropped its ctx.app unwrap: the
+#              composed channel label comes off the ctx-native active_channel_label
+#              leaf (ctx.state.channel), the three per-tab Property combos
+#              (_plotting_metric_cb / _metric_cb / _metric_cb_bar) are all
+#              registered (centre_view / lineplot / barplot) so they resolve via
+#              ctx.widgets, smfish_chan reads ctx.state.channel, and the stats
+#              fan-out (refresh_stats_property_combo) already takes ctx. Pure
+#              widget-registry + typed-state conversion, no god-object behaviour.
+#              The sibling on_plot_channel_selected / on_metric_selected unwraps
+#              STAY: both bottom into set_active_channel / set_active_metric, which
+#              unconditionally call recalculate_threshold(app) — deep app machinery
+#              (_get_rows / _load_gating_from_pipeline_info / _features) — so
+#              threading ctx only relocates the single boundary unwrap into those
+#              god-methods (net-0) and would force the external set_active_* callers
+#              (view_state / stats) to change. Left as reported floor bridges.
+CTX_APP_BUDGET = 25
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

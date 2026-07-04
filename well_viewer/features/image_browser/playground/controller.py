@@ -164,14 +164,14 @@ def playground_on_change(app) -> None:
         return
 
     cache = st.image_cache
-    raw = _load_array(app, cache, st.well, st.channel, st.timepoint, st.fov,
+    raw = _load_array(app._ctx, cache, st.well, st.channel, st.timepoint, st.fov,
                       use_tophat=False)
     if raw is None:
         st.raw_arr = None
         _set_status(app, "No raw image for the selected frame.")
         return
     st.raw_arr = np.asarray(raw, dtype=np.float32)
-    st.mask_arr = _load_mask_array(app, cache, st.well, st.timepoint, st.fov)
+    st.mask_arr = _load_mask_array(app._ctx, cache, st.well, st.timepoint, st.fov)
     frame_lbl = f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}"
 
     # The binary threshold is per-frame: when the frame identity changes, drop
@@ -317,7 +317,7 @@ def _build_reference_then_render(app, chan_lower: str) -> None:
         _set_status(app, f"Model build failed: {msg}")
 
     app._playground_ref_bridge = request_reference_fields(
-        app, st.background_well, chan_lower,
+        app._ctx, st.background_well, chan_lower,
         flatfield_mode=st.flatfield_mode, background_method=st.background_method,
         on_done=_on_done, on_failed=_on_failed)
 

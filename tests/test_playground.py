@@ -399,5 +399,5 @@ def test_threshold_change_redraws_scope_plots(loaded_app, monkeypatch):
     monkeypatch.setattr(
         fcs, "redraw_scopes_or_defer",
         lambda a, *ar, **k: (calls.__setitem__("n", calls["n"] + 1), orig(a, *ar, **k))[1])
-    set_thresh_frac_on(loaded_app, 123.0)
+    set_thresh_frac_on(loaded_app._ctx, 123.0)
     assert calls["n"] >= 1

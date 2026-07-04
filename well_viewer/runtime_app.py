@@ -919,7 +919,7 @@ class WellViewerApp(QWidget):
 
     def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self, value)
 
-    def _review_row_keys(self, row: dict) -> Tuple[str, str, str]: return review_row_keys(self, row)
+    def _review_row_keys(self, row: dict) -> Tuple[str, str, str]: return review_row_keys(self._ctx, row)
 
 
     @staticmethod

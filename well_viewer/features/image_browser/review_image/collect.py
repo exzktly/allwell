@@ -21,6 +21,7 @@ import pandas as pd
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
+from well_viewer.core.ui_helpers import norm_timepoint
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ _logger = logging.getLogger(__name__)
 _FLATFIELD_PREVIEW_MAX_SAMPLES = 8
 
 
-def review_row_keys_series(app, df: pd.DataFrame) -> Optional[pd.Series]:
+def review_row_keys_series(ctx, df: pd.DataFrame) -> Optional[pd.Series]:
     """Vectorized counterpart of ``_review_row_keys`` for a DataFrame.
 
     Returns a ``Series`` of ``(fov, tp, nid)`` tuples aligned with
@@ -212,7 +213,7 @@ def review_build_include_map(
     }
     df = app._get_rows(well)
     if df is not None and not df.empty:
-        keys = review_row_keys_series(app,df)
+        keys = review_row_keys_series(app._ctx, df)
         if keys is not None:
             fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
             sub = df.loc[fov_eq.fillna(False).to_numpy()]
@@ -310,7 +311,7 @@ def review_build_threshold_map(
     df = app._get_rows(well)
     if df is None or df.empty:
         return above_by_nid
-    keys = review_row_keys_series(app,df)
+    keys = review_row_keys_series(app._ctx, df)
     if keys is None:
         return above_by_nid
     sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").fillna(False).to_numpy()
@@ -396,7 +397,7 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
             continue
         if df is None or df.empty:
             continue
-        keys = review_row_keys_series(app,df)
+        keys = review_row_keys_series(app._ctx, df)
         if keys is None:
             continue
         override_map = pd.Series(lookup)
@@ -412,7 +413,7 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
         df.loc[mask, "Included"] = override_for_row[mask].map(_coerce).astype(int)
 
 
-def review_row_keys(app, row: dict) -> Tuple[str, str, str]:
+def review_row_keys(ctx, row: dict) -> Tuple[str, str, str]:
     def _norm(v: object) -> str:
         s = str(v or "").strip()
         if not s:
@@ -433,7 +434,7 @@ def review_row_keys(app, row: dict) -> Tuple[str, str, str]:
         return ""
     return (
         _norm(_pick("fov", "FOV")),
-        app._norm_timepoint(_pick("timepoint", "tp", "time", "time_h", "timepoint_hours")),
+        norm_timepoint(ctx, _pick("timepoint", "tp", "time", "time_h", "timepoint_hours")),
         _norm(_pick("nucleus_id", "nucleus id", "nucleusId", "nucleusID")),
     )
 

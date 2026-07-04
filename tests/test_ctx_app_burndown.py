@@ -396,7 +396,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              helpers _well_labels_map/_ask_save_csv take ctx; _warn/_error param
 #              renamed app->parent (Qt parent only). batch_export panels bridge
 #              via self._app._ctx.
-CTX_APP_BUDGET = 64
+#   64 -> 62    review_image nav layer -> ctx: image_browser show_image_browser_subtab,
+#              review_image collect (review_row_keys) + controller (zoom + review_csv
+#              impls) thread ctx; cell_browser on_cell_clicked calls them with ctx.
+#              runtime_app delegators pass self._ctx. Deeper render/store paths that
+#              still take app remain reported bridges.
+CTX_APP_BUDGET = 62
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

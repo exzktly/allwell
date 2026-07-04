@@ -138,7 +138,7 @@ def goto(app, rev, page: str) -> bool:
     nb = rev._notebook
     if page in _IMAGE_BROWSER_SUBTABS:
         from well_viewer.features.image_browser.controller import show_image_browser_subtab
-        ok = show_image_browser_subtab(rev, page)
+        ok = show_image_browser_subtab(rev._ctx, page)
     else:
         ok = nb.setCurrentByName(page)
     rev._drain_pending_centre_builders()

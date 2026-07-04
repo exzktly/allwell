@@ -11,7 +11,7 @@ from __future__ import annotations
 def _goto_cell_browser(app):
     """Open the Cell Browser sub-tab of the unified Image Browser rail entry."""
     from well_viewer.features.image_browser.controller import show_image_browser_subtab
-    assert show_image_browser_subtab(app, "Cell Browser")
+    assert show_image_browser_subtab(app._ctx, "Cell Browser")
 
 
 def test_cell_browser_tab_builds_and_registers(loaded_app):

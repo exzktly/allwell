@@ -293,7 +293,7 @@ def on_cell_clicked(ctx, desc) -> None:
             from well_viewer.features.image_browser.controller import (
                 show_image_browser_subtab,
             )
-            show_image_browser_subtab(ctx.app, "Segmentation")
+            show_image_browser_subtab(ctx, "Segmentation")
         # Target nucleus before any refresh so intermediate renders already
         # draw the highlight (mirrors review_image.controller's jump-to-cell).
         if desc.nucleus_id:
@@ -312,7 +312,7 @@ def on_cell_clicked(ctx, desc) -> None:
         # tokens, so passing them straight to setCurrentText silently no-ops
         # (no matching item) and the view stays on the previous FOV/timepoint.
         # Normalize the same way the working Review-CSV jump does so they match.
-        fov_norm = review_row_keys(ctx.app,
+        fov_norm = review_row_keys(ctx,
             {"fov": desc.fov, "timepoint": desc.tp_token,
              "nucleus_id": desc.nucleus_id})[0]
         tp_norm = norm_timepoint(ctx, desc.tp_token)

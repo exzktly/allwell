@@ -294,7 +294,7 @@ def _on_review_csv_row_double_click_impl(app, item) -> None:
         # Segmentation is now a sub-tab of the unified Image Browser; route the
         # Review-CSV jump through the rail entry + sub-tab selection.
         from well_viewer.features.image_browser.controller import show_image_browser_subtab
-        show_image_browser_subtab(app, "Segmentation")
+        show_image_browser_subtab(app._ctx, "Segmentation")
 
     # Set the target nucleus before any refresh so intermediate renders can
     # already draw the yellow highlight.

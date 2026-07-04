@@ -27,7 +27,7 @@ def test_binary_threshold_map_reaches_diagnostic_without_nameerror(loaded_app):
     app = loaded_app
     well = "A01"
     df = app._get_rows(well)
-    keys = review_row_keys_series(app, df)
+    keys = review_row_keys_series(app._ctx, df)
     assert keys is not None and len(keys) > 0
 
     # Pick a real (fov, tp) present in the data and the nucleus ids there, so the

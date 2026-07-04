@@ -7,7 +7,7 @@ from well_viewer.features.image_browser.controller import show_image_browser_sub
 
 def test_segmentation_threshold_stepper_edits_thresh_frac(loaded_app):
     app = loaded_app
-    assert show_image_browser_subtab(app, "Segmentation")
+    assert show_image_browser_subtab(app._ctx, "Segmentation")
     st = getattr(app, "_review_thresh_frac_stepper", None)
     assert st is not None, "Segmentation tab should host an ON-threshold stepper"
     ch = app._app_state.channel.active_channel
@@ -17,7 +17,7 @@ def test_segmentation_threshold_stepper_edits_thresh_frac(loaded_app):
 
 def test_image_table_threshold_stepper_edits_thresh_frac(loaded_app):
     app = loaded_app
-    assert show_image_browser_subtab(app, "Image Table")
+    assert show_image_browser_subtab(app._ctx, "Image Table")
     st = getattr(app, "_image_table_thresh_frac_stepper", None)
     assert st is not None, "Image Table tab should host an ON-threshold stepper"
     ch = app._app_state.channel.active_channel
@@ -27,8 +27,8 @@ def test_image_table_threshold_stepper_edits_thresh_frac(loaded_app):
 
 def test_quick_edit_steppers_sync_on_refresh(loaded_app):
     app = loaded_app
-    show_image_browser_subtab(app, "Segmentation")
-    show_image_browser_subtab(app, "Image Table")
+    show_image_browser_subtab(app._ctx, "Segmentation")
+    show_image_browser_subtab(app._ctx, "Image Table")
     # Set via the canonical setter, then the shared refresh should sync both.
     app._set_thresh_frac_on(55.0)
     app._refresh_thresh_frac_quick_edit()

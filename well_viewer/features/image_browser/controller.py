@@ -99,18 +99,18 @@ def on_image_browser_subtab_changed(app, idx: int) -> None:
     on_tab_change(app, None)
 
 
-def show_image_browser_subtab(app, name: str) -> bool:
+def show_image_browser_subtab(ctx, name: str) -> bool:
     """Navigate to the Image Browser rail entry and select sub-tab *name*.
 
     The single entry point cross-feature jump-to-image navigation uses (Review
     CSV double-click, Cell Browser cell-click) now that the image-review
     surfaces are sub-tabs rather than top-level pages.
     """
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(ctx.window, "_notebook", None)
     if nb is None:
         return False
     nb.setCurrentByName("Image Browser")
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = ctx.runtime.image_browser.subtabs
     if sub is None:
         return False
     for i in range(sub.count()):

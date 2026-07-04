@@ -32,13 +32,13 @@ def test_image_browser_is_single_rail_entry(viewer_app):
 def test_subtabs_resolve_as_leaf_tabs(viewer_app):
     app = viewer_app
     for leaf in _SUBTABS:
-        assert show_image_browser_subtab(app, leaf), f"could not open {leaf}"
+        assert show_image_browser_subtab(app._ctx, leaf), f"could not open {leaf}"
         assert app._current_centre_tab() == leaf
 
 
 def test_playground_is_flat_sibling_not_nested_in_segmentation(viewer_app):
     app = viewer_app
-    show_image_browser_subtab(app, "Playground")
+    show_image_browser_subtab(app._ctx, "Playground")
     # The old Segmentation sub-stack (Review Image + Playground) is gone.
     assert not hasattr(app, "_segmentation_subtabs")
     assert not hasattr(app, "_playground_subtab_frame")

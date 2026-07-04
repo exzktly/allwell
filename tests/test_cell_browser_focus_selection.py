@@ -25,7 +25,7 @@ def _enter_scatter_cellbrowser_split(app):
     from well_viewer.core.split_view import enter_split
 
     # Build the Cell Browser sub-tab (lazy) and make it the active Image Browser leaf.
-    assert show_image_browser_subtab(app, "Cell Browser")
+    assert show_image_browser_subtab(app._ctx, "Cell Browser")
     # Make Scatter Plot the active Plotting leaf.
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
     app._notebook.setCurrentByName("Plotting")

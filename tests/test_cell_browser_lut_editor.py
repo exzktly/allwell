@@ -11,7 +11,7 @@ def test_lut_editor_rows_built_and_edit_shared_lut(loaded_app):
 
     app = loaded_app
     from well_viewer.features.image_browser.controller import show_image_browser_subtab
-    assert show_image_browser_subtab(app, "Cell Browser")
+    assert show_image_browser_subtab(app._ctx, "Cell Browser")
     cbt.cell_browser_refresh_lut_rows(app._ctx)   # takes ctx (A8)
     rows = app._cell_browser_lut_rows
     assert rows, "expected per-channel LUT rows"

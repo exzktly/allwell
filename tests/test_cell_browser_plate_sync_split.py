@@ -26,7 +26,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 def _enter_split(app):
     from well_viewer.features.image_browser.controller import show_image_browser_subtab
     from well_viewer.core.split_view import enter_split
-    assert show_image_browser_subtab(app, "Cell Browser")
+    assert show_image_browser_subtab(app._ctx, "Cell Browser")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
     app._notebook.setCurrentByName("Plotting")
     enter_split(app, "Plotting", "Image Browser")

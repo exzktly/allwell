@@ -356,7 +356,23 @@ clears it. None falls to a piecemeal conversion (all measured net-0/net-add).
 | 2 | `persistence/view_state.py:95,421` | `snapshot`/`restore` — broad app-widget surface (`_current_leaf_tab`/`_snapshot_tabs`/`_set_selected_wells`). Sanctioned persistence unwrap; **T6**. |
 | **10** | | god-service decompositions + T6 (was 14; −4 via tab providers, A14, fold-change) |
 
-**Status 2026-07-04 (session end): 10 refs (98.9% overall).** Inline (worker
+**Status 2026-07-04 (session end): 8 refs (99.1% overall).** Epic-A14 (batch
+panels, −1) and Epic-cellgating (scatter-gate config → typed `CellGatingState`,
+−2 — the full state migration that D-persist had declined as out-of-scope;
+persistence stops unwrapping, `_centre_build_pending` bundled into one
+`ensure_cell_gating_tab_built` core seam) both landed and were verified
+(round-trip characterization test; the `loaded_app` export-style `None.axes`
+error is confirmed **pre-existing**, not caused by the migration — a latent
+crash worth its own fix). **The final 8:** `channel:64` (`recalculate_threshold`
+`_features` hook + `_load_gating`), `channel:942` (`_centre_build_pending`
+lazy-build seam), `selection:828` (`_refresh_sidebar_map` debounce),
+`tab_controller:138` (`build_review_image_panel` ~30 lambdas), `tab_controller:164`
+(sample-def builder tree), `saved_plots:110` (`rebuild_all` `_features` hook),
+`view_state:95,421` (snapshot/restore surface → **T6**). Each is a large,
+interactive-smoke-gated decomposition of a *named* god-service, or the T6
+field-deletion; the `_features`-hook pair needs the registry-ctx-home decision.
+
+_(Earlier note — 10 refs.)_ Inline (worker
 infra was restart-killing) cleared four more: tab-controller split providers
 (−2, `ctx.window`/`ctx.runtime.split`), Epic-A14 batch panels (−1), and the
 fold-change controls cluster (−1). The remaining **10 each bottom into a genuine

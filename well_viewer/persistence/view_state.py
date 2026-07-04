@@ -408,28 +408,28 @@ def _snapshot_image_table(ctx) -> dict:
 def restore(ctx, state: dict) -> None:
     """Apply *state* in two phases — cross-cutting now, per-tab deferred.
 
-    Per-tab combo values are stashed on ``app._view_state_pending`` and
+    Per-tab combo values are stashed on ``ctx.runtime.view_state.pending`` and
     flushed by ``apply_pending_tab_state`` when each tab becomes active.
     """
     if not isinstance(state, dict):
         return
-    app = ctx.app
 
     # Cross-cutting state — apply eagerly.
 
     wells = state.get("selected_wells") or []
     if isinstance(wells, list):
         saved = {str(w) for w in wells if isinstance(w, str)}
-        current = set(app._app_state.dataset.well_paths or {})
+        current = set(ctx.state.dataset.well_paths or {})
         valid = saved & current
         # X14: remember wells saved for datasets/plates not currently loaded so
         # ``snapshot`` can re-persist them — a subset load must not prune them.
-        app._view_state_absent_wells = saved - current
-        if valid and hasattr(app, "_set_selected_wells"):
+        ctx.runtime.view_state.absent_wells = saved - current
+        if valid:
+            from well_viewer.core.selection_controller import set_selected_wells
             try:
-                app._set_selected_wells(valid, commit=False)
+                set_selected_wells(ctx, valid, commit=False)
             except Exception:
-                _logger.debug("view_state: _set_selected_wells failed", exc_info=True)
+                _logger.debug("view_state: set_selected_wells failed", exc_info=True)
 
     # Rep-set visibility (group mode) — re-apply each selection's hidden flag and
     # the solo-well set so a plot saved in replicate mode restores the groups it
@@ -437,37 +437,36 @@ def restore(ctx, state: dict) -> None:
     vis = state.get("selection_visibility")
     if isinstance(vis, dict):
         hidden_ids = {str(x) for x in (vis.get("hidden_ids") or [])}
-        for sel in (app._app_state.selection.selections or []):
+        for sel in (ctx.state.selection.selections or []):
             if sel.get("id") is not None:
                 sel["hidden"] = str(sel.get("id")) in hidden_ids
         solo = vis.get("solo_wells")
         if isinstance(solo, list):
-            wp = set(app._app_state.dataset.well_paths or {})
+            wp = set(ctx.state.dataset.well_paths or {})
             saved_solo = {str(w) for w in solo}
             # X14: preserve solo wells belonging to other datasets (see above).
-            app._view_state_absent_solo = saved_solo - wp
-            app._app_state.selection.active_solo_wells = saved_solo & wp
-        if hasattr(app, "_refresh_sidebar_map"):
-            try:
-                app._refresh_sidebar_map()
-            except Exception:
-                swallowed()
+            ctx.runtime.view_state.absent_solo = saved_solo - wp
+            ctx.state.selection.active_solo_wells = saved_solo & wp
+        try:
+            ctx.refresh_sidebar_map()
+        except Exception:
+            swallowed()
 
     if "use_sem" in state:
         try:
-            app._app_state.plot.use_sem = bool(state["use_sem"])
+            ctx.state.plot.use_sem = bool(state["use_sem"])
         except Exception:
             swallowed()  # was: pass (silent except)
 
     if "show_threshold_line" in state:
         try:
-            app._app_state.plot.show_threshold_line = bool(state["show_threshold_line"])
+            ctx.state.plot.show_threshold_line = bool(state["show_threshold_line"])
         except Exception:
             swallowed()
 
     if "show_significance" in state:
         try:
-            app._app_state.plot.show_significance = bool(state["show_significance"])
+            ctx.state.plot.show_significance = bool(state["show_significance"])
         except Exception:
             swallowed()
 
@@ -477,36 +476,36 @@ def restore(ctx, state: dict) -> None:
         # those widgets exist (lazy tabs), reading the field directly so a later
         # build still reflects the restored value.
         try:
-            app._app_state.plot.use_fov_replicates = bool(state["use_fov_replicates"])
-            if hasattr(app, "_refresh_fov_btn_state"):
-                app._refresh_fov_btn_state()
+            ctx.state.plot.use_fov_replicates = bool(state["use_fov_replicates"])
+            from well_viewer.core.plot_toggles import refresh_fov_btn_state
+            refresh_fov_btn_state(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
 
     fc = state.get("fold_change") or {}
     if isinstance(fc, dict):
         if "vs_control_on" in fc:
-            app._app_state.plot.fc_vs_control_on = bool(fc.get("vs_control_on"))
+            ctx.state.plot.fc_vs_control_on = bool(fc.get("vs_control_on"))
         if "control_label" in fc:
-            app._app_state.plot.fc_control_label = str(fc.get("control_label") or "")
+            ctx.state.plot.fc_control_label = str(fc.get("control_label") or "")
         if "vs_t0_on" in fc:
-            app._app_state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
+            ctx.state.plot.fc_vs_t0_on = bool(fc.get("vs_t0_on"))
         if "baseline_tp" in fc:
-            app._app_state.plot.fc_baseline_tp = str(fc.get("baseline_tp") or "")
+            ctx.state.plot.fc_baseline_tp = str(fc.get("baseline_tp") or "")
         # Legacy single-op snapshot: fan out to both axes via the
         # ``fc_op`` property setter so old saved state restores cleanly.
         if "op" in fc:
             op_in = str(fc.get("op") or "ratio")
-            app._app_state.plot.fc_op = op_in if op_in in ("ratio", "subtract") else "ratio"
+            ctx.state.plot.fc_op = op_in if op_in in ("ratio", "subtract") else "ratio"
         if "op_ctrl" in fc:
             op_in = str(fc.get("op_ctrl") or "ratio")
-            app._app_state.plot.fc_op_ctrl = op_in if op_in in ("ratio", "subtract") else "ratio"
+            ctx.state.plot.fc_op_ctrl = op_in if op_in in ("ratio", "subtract") else "ratio"
         if "op_t0" in fc:
             op_in = str(fc.get("op_t0") or "ratio")
-            app._app_state.plot.fc_op_t0 = op_in if op_in in ("ratio", "subtract") else "ratio"
+            ctx.state.plot.fc_op_t0 = op_in if op_in in ("ratio", "subtract") else "ratio"
         if "order" in fc:
             o_in = str(fc.get("order") or "ctrl_first")
-            app._app_state.plot.fc_order = o_in if o_in in ("ctrl_first", "t0_first") else "ctrl_first"
+            ctx.state.plot.fc_order = o_in if o_in in ("ctrl_first", "t0_first") else "ctrl_first"
         # Push the restored state into any fold-change combos that have
         # already been built. Lazily-built tabs (Bar) will pick the
         # values up on first install via _repopulate_*_combo, which both
@@ -514,7 +513,7 @@ def restore(ctx, state: dict) -> None:
         # exist at restore time (e.g. Line, built eagerly).
         try:
             from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
-            _sync_widgets_to_state(app._ctx)
+            _sync_widgets_to_state(ctx)
         except Exception:
             _logger.debug("view_state: fold-change combo sync failed", exc_info=True)
 
@@ -525,15 +524,15 @@ def restore(ctx, state: dict) -> None:
         # tab (or the batch-export path) on load.
         from well_viewer.core.plot_style import AXIS_SCOPED_PREF_KEYS
         clean_in = {k: v for k, v in prefs_in.items() if k not in AXIS_SCOPED_PREF_KEYS}
-        existing = app._app_state.export_prefs.style_prefs
+        existing = ctx.state.export_prefs.style_prefs
         if isinstance(existing, dict):
             existing.update(clean_in)
         else:
-            app._app_state.export_prefs.style_prefs = dict(clean_in)
+            ctx.state.export_prefs.style_prefs = dict(clean_in)
 
     axis_in = state.get("export_axis_prefs")
     if isinstance(axis_in, dict):
-        app._app_state.export_prefs.axis_prefs = {
+        ctx.state.export_prefs.axis_prefs = {
             str(k): dict(v) for k, v in axis_in.items() if isinstance(v, dict)
         }
 
@@ -551,7 +550,7 @@ def restore(ctx, state: dict) -> None:
     ch = state.get("active_channel")
     if isinstance(ch, str) and ch:
         try:
-            app._app_state.channel.active_channel = ch
+            ctx.state.channel.active_channel = ch
             set_active_channel(ctx, ch)
         except Exception:
             _logger.debug("view_state: active_channel restore failed", exc_info=True)
@@ -560,7 +559,7 @@ def restore(ctx, state: dict) -> None:
     if isinstance(metric, str) and metric:
         # Direct field assignment so tabs built lazily after this point
         # pick up the saved metric for their initial render.
-        app._app_state.channel.active_metric = metric
+        ctx.state.channel.active_metric = metric
         # Push the value into every metric combo widget that exists right
         # now (e.g. the global ctxbar's _plotting_metric_cb, built early
         # during centre-view construction). Without this the dropdown
@@ -583,36 +582,36 @@ def restore(ctx, state: dict) -> None:
     # active_val_col stale. Without this the post-load redraw plots the wrong
     # column until the user toggles the channel. sync_val_col skips ratio/shape.
     try:
-        app._app_state.channel.sync_val_col()
+        ctx.state.channel.sync_val_col()
     except Exception:
         _logger.debug("view_state: active_val_col re-derive failed", exc_info=True)
 
     # Stash per-tab state for deferred apply on first tab visit.
     tabs = state.get("tabs") or {}
     if isinstance(tabs, dict) and tabs:
-        app._view_state_pending = {str(k): dict(v) for k, v in tabs.items() if isinstance(v, dict)}
+        ctx.runtime.view_state.pending = {str(k): dict(v) for k, v in tabs.items() if isinstance(v, dict)}
 
     # Active tab is restored last so its on-change hook triggers any
     # lazy build with cross-cutting state already in place. Drives the
     # nested plotting stack when a plot sub-tab is requested.
     target = state.get("active_centre_tab")
     if isinstance(target, str) and target:
-        _activate_tab(app, target)
+        _activate_tab(ctx, target)
 
 
-def _activate_tab(app, name: str) -> None:
-    outer = getattr(app, "_notebook", None)
+def _activate_tab(ctx, name: str) -> None:
+    outer = getattr(ctx.window, "_notebook", None)
     if outer is None:
         return
     try:
         if name in _PLOT_SUBTABS:
             outer.setCurrentByName("Plotting")
-            sub = getattr(app, "_plotting_notebook", None)
+            sub = getattr(ctx.window, "_plotting_notebook", None)
             if sub is not None:
                 sub.setCurrentByName(name)
         elif name in _IMAGE_BROWSER_SUBTABS:
             outer.setCurrentByName("Image Browser")
-            sub = getattr(app, "_image_browser_subtabs", None)
+            sub = getattr(ctx.window, "_image_browser_subtabs", None)
             if sub is not None:
                 for i in range(sub.count()):
                     if sub.tabText(i) == name:

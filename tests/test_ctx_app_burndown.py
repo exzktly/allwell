@@ -773,7 +773,17 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              bridges. Round-trip verified by the view_state suite (absent-wells X14,
 #              bar/scatter/image-table restore); the two image-table grid-build
 #              failures are a pre-existing grid_view None-layout bug, not this change.
-CTX_APP_BUDGET = 4
+#   4 -> 3    view_state.restore → ctx-native: -1   the restore half dropped its
+#              ``app = ctx.app`` unwrap too. Bulk typed writes via ctx.state; the
+#              cross-dataset absent/pending scratch via ctx.runtime.view_state; the
+#              god-services via their ctx forms (set_selected_wells(ctx),
+#              ctx.refresh_sidebar_map(), refresh_fov_btn_state(ctx),
+#              _sync_widgets_to_state(ctx)); and _activate_tab went ctx-native over
+#              ctx.window (pure Qt centre/subtab nav — the blessed widget accessor).
+#              Signature unchanged (restore already took ctx), so no caller churn.
+#              Round-trip verified (47 view_state/threshold/saved-plot tests green;
+#              the 2 image-table reds are the pre-existing grid_view None-layout bug).
+CTX_APP_BUDGET = 3
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

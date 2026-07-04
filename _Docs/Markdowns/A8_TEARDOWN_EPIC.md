@@ -380,8 +380,15 @@ redraw fan-out), and `selection:828` → `ctx.refresh_sidebar_map()` + a fully
 ctx-native `on_plate_sel_change`/`_is_single_well_tab` (via a new `ctx.features`
 catalogue accessor). Three genuine app-orchestration services now have one frozen,
 enumerable home each (`rebuild_all` / `refresh_sidebar_map` / `features`) instead
-of an escape-hatch reach. **The remaining 5** (`channel:64`, `tab_controller:138`,
-`tab_controller:164`, `view_state:95`, `view_state:421`) each still require the
+of an escape-hatch reach. **Update — 5 → 4 refs (99.5%).** `view_state:95` (`snapshot`) went fully
+ctx-native: its 8 self-contained helpers now take ctx (typed `ctx.state`, combos
+via `ctx.widgets` — all 9 verified registry-backed, runtime scratch via
+`ctx.runtime.{scatter,image_table}`, active leaf via `current_centre_tab(ctx)`,
+and a new `ctx.runtime.view_state` namespace for the absent-well / pending-tab
+scratch). Round-trip verified. (Two image-table grid-build tests in that file
+fail on a **pre-existing** `grid_view` None-layout bug — fail on HEAD, unrelated;
+worth its own fix.) **The remaining 4** (`channel:64`, `tab_controller:138`,
+`tab_controller:164`, `view_state:421`) each still require the
 WellViewerApp-method decomposition (`update_channel_selector`/`_load_gating`, the
 `build_review_image_panel` lambda web, the sample-def builder tree, and the
 snapshot/restore widget cascade) — a multi-session epic, not a metric-gaming rename.

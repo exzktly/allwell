@@ -181,7 +181,7 @@ def _set_criteria_enabled(ctx, on: bool) -> None:
 def _gate_names(ctx) -> list:
     """Names of the gates currently drawn on the scatter (in draw order)."""
     out = []
-    for g in ctx.runtime.scatter.gates or []:
+    for g in ctx.state.cell_gating.scatter_gates or []:
         nm = str(g.get("name") or "").strip()
         if nm:
             out.append(nm)

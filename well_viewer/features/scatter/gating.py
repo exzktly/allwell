@@ -472,7 +472,7 @@ def draw_gates(ctx, ax, scatter_data, tps_list, ink_color: str,
     if ctx.state.scatter.gates_hidden:
         return
     from matplotlib.patches import Rectangle
-    gates = ctx.runtime.scatter.gates or []
+    gates = ctx.state.cell_gating.scatter_gates or []
     # Edit handles are only meaningful when not drawing a new gate (the
     # RectangleSelector owns the drag in draw mode) and on an interactive panel.
     editable = handles and not ctx.runtime.scatter.gate_draw_mode
@@ -606,7 +606,7 @@ def _next_gate_name(ctx) -> str:
     """Default ``Gate N`` name, N = first integer not already taken."""
     existing = {
         str(g.get("name") or "")
-        for g in (ctx.runtime.scatter.gates or [])
+        for g in (ctx.state.cell_gating.scatter_gates or [])
     }
     n = 1
     while f"Gate {n}" in existing:
@@ -621,7 +621,7 @@ def rename_gate(ctx, idx: int, name: str) -> bool:
     Cell Gating dropdown + inclusion recompute follow). A blank or duplicate
     name is rejected (returns ``False``) so the caller can revert its field.
     """
-    gates = ctx.runtime.scatter.gates or []
+    gates = ctx.state.cell_gating.scatter_gates or []
     if not (0 <= idx < len(gates)):
         return False
     new = str(name).strip()
@@ -633,8 +633,8 @@ def rename_gate(ctx, idx: int, name: str) -> bool:
     gates[idx]["name"] = new
     # Follow the rename in both Cell Gating selection sets (gating + thresh) so
     # the selection isn't lost (None means "all", nothing to update).
-    for choices in (ctx.runtime.cell_gating.gating_choices,
-                    ctx.runtime.cell_gating.thresh_choices):
+    for choices in (ctx.state.cell_gating.gating_choices,
+                    ctx.state.cell_gating.thresh_choices):
         if isinstance(choices, set) and old in choices:
             choices.discard(old)
             choices.add(new)
@@ -652,8 +652,8 @@ def _on_gate_drawn(ctx, eclick, erelease) -> None:
     y0, y1 = sorted((float(eclick.ydata), float(erelease.ydata)))
     if x1 - x0 <= 0 or y1 - y0 <= 0:  # ignore zero-area click-drags
         return
-    if not ctx.runtime.scatter.gates:
-        ctx.runtime.scatter.gates = []
+    if not ctx.state.cell_gating.scatter_gates:
+        ctx.state.cell_gating.scatter_gates = []
     # Stamp the gate with the metric columns of the axes it was drawn on so it
     # can be re-applied to a dataframe out of context (the Cell Gating tab uses
     # this to turn a gate into an inclusion mask). The active columns are already
@@ -667,7 +667,7 @@ def _on_gate_drawn(ctx, eclick, erelease) -> None:
     except Exception:
         drawn_wells = []
     # Auto-name silently (Gate 1, Gate 2, …); rename via the sidebar gate list.
-    ctx.runtime.scatter.gates.append({
+    ctx.state.cell_gating.scatter_gates.append({
         "x0": x0, "y0": y0, "x1": x1, "y1": y1,
         "x_col": cache.get("col_x"), "y_col": cache.get("col_y"),
         "name": _next_gate_name(ctx),
@@ -685,7 +685,7 @@ def _on_gate_drawn(ctx, eclick, erelease) -> None:
 
 def clear_gates(ctx) -> None:
     """Drop every gate and redraw."""
-    ctx.runtime.scatter.gates = []
+    ctx.state.cell_gating.scatter_gates = []
     _notify_gates_changed(ctx)
     _redraw(ctx)
 
@@ -726,7 +726,7 @@ def gate_edge_at(ctx, event, tol_px: float = 8.0):
     if event.x is None or event.y is None:
         return None
     px, py = float(event.x), float(event.y)
-    gates = ctx.runtime.scatter.gates or []
+    gates = ctx.state.cell_gating.scatter_gates or []
     # Iterate top-most (last drawn) first so the gate visually on top wins.
     for idx in range(len(gates) - 1, -1, -1):
         # Gates from other axes aren't drawn here, so they're not hittable.
@@ -787,7 +787,7 @@ def on_gate_edit_motion(ctx, event) -> None:
         return
     if event.xdata is None or event.ydata is None:
         return
-    gates = ctx.runtime.scatter.gates or []
+    gates = ctx.state.cell_gating.scatter_gates or []
     if not (0 <= ed["idx"] < len(gates)):
         ctx.runtime.scatter.gate_edit = None
         return
@@ -810,7 +810,7 @@ def on_gate_edit_release(ctx, event) -> None:
     if not ed:
         return
     ctx.runtime.scatter.gate_edit = None
-    gates = ctx.runtime.scatter.gates or []
+    gates = ctx.state.cell_gating.scatter_gates or []
     if not (0 <= ed["idx"] < len(gates)):
         return
     g = gates[ed["idx"]]

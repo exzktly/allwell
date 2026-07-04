@@ -301,7 +301,7 @@ def collect_cells(
     gate_mode = bool(getattr(st, "scatter_gate_mode", False))
     gates = []
     if gate_mode:
-        all_gates = list(ctx.runtime.scatter.gates or [])
+        all_gates = list(ctx.state.cell_gating.scatter_gates or [])
         # Only the gate(s) the user picked in the sidebar (None ⇒ all gates).
         chosen = getattr(ctx.runtime.cell_browser, "gate_choices", None)
         if chosen is None:

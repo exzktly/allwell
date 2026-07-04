@@ -106,8 +106,9 @@ def test_gate_stays_live_as_wells_are_added_and_removed(loaded_app):
     assert len(wells) >= 3
     _enter_split(app)
     app._cell_browser_state.scatter_gate_mode = True
-    app._scatter_gates = [{"x_col": "gfp_mean_intensity", "y_col": "gfp_mean_intensity",
-                           "x0": -1e12, "x1": 1e12, "y0": -1e12, "y1": 1e12, "name": "G1"}]
+    app._app_state.cell_gating.scatter_gates = [
+        {"x_col": "gfp_mean_intensity", "y_col": "gfp_mean_intensity",
+         "x0": -1e12, "x1": 1e12, "y0": -1e12, "y1": 1e12, "name": "G1"}]
     app._cell_browser_gate_choices = None
 
     def scope():

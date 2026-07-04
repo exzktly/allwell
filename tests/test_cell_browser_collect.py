@@ -47,11 +47,13 @@ class _AnyDf(dict):
 
 def _app(df):
     app = SimpleNamespace()
+    from well_viewer.core.cell_gating_state import CellGatingState
     app._app_state = SimpleNamespace(
         dataset=SimpleNamespace(well_paths={"A01": None}, cache=_AnyDf(df)),
         selection=SimpleNamespace(selected_wells=["A01"], selections=[],
                                   active_solo_wells=set()),
         channel=SimpleNamespace(ratio_index={}),
+        cell_gating=CellGatingState(),
     )
     from well_viewer.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state,
@@ -267,7 +269,7 @@ def _gate(x_col, y_col, x0, x1, y0, y1, name="G1"):
 
 def test_scatter_gate_mode_sources_from_gate_and_ignores_criteria():
     app = _app(_df())
-    app._scatter_gates = [_gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0)]
+    app._app_state.cell_gating.scatter_gates = [_gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0)]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     # A criterion that would exclude everything is ignored in gate mode.
@@ -278,7 +280,7 @@ def test_scatter_gate_mode_sources_from_gate_and_ignores_criteria():
 
 def test_scatter_gate_mode_empty_when_no_gates_drawn():
     app = _app(_df())
-    app._scatter_gates = []
+    app._app_state.cell_gating.scatter_gates = []
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     assert collect_cells(app._ctx, []) == []
@@ -288,7 +290,7 @@ def test_scatter_gate_mode_empty_timepoints_relax_to_all():
     # Outside gate mode an empty timepoint include-list yields nothing; in gate
     # mode it relaxes to "all" so the gated cells aren't hidden by the default.
     app = _app(_df())
-    app._scatter_gates = [_gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
+    app._app_state.cell_gating.scatter_gates = [_gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     cells = collect_cells(app._ctx, [], timepoints=[])
@@ -298,7 +300,7 @@ def test_scatter_gate_mode_empty_timepoints_relax_to_all():
 def test_scatter_gate_choices_filter_to_named_gates():
     # Two gates drawn; the sidebar picks only "G1" → only G1's cells appear.
     app = _app(_df())
-    app._scatter_gates = [
+    app._app_state.cell_gating.scatter_gates = [
         _gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0, name="G1"),
         _gate("gfp_mean_intensity", "area_px", 0.0, 60.0, 0.0, 1000.0, name="G2"),
     ]
@@ -321,7 +323,7 @@ def test_gate_mode_sources_from_live_selection():
     app._app_state.selection.selected_wells = ["A01", "B02"]
     g = _gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)
     g["wells"] = ["A01"]  # stale stamp must be ignored
-    app._scatter_gates = [g]
+    app._app_state.cell_gating.scatter_gates = [g]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     app._cell_browser_gate_choices = None

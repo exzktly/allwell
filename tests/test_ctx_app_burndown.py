@@ -719,7 +719,22 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              / _ctx — zero god-methods — so it converts wholesale to ctx (ctx.state
 #              / ctx.bus). install dropped its app=ctx.app unwrap; the two persistence
 #              view_state callers of _sync_widgets_to_state pass app._ctx.
-CTX_APP_BUDGET = 10
+#   Epic-cellgating scatter-gate config → typed state: -2
+#              The scatter-gate geometry (_scatter_gates), the two use-flags, and
+#              the per-layer gate selections joined the R6 gate values on the typed
+#              CellGatingState slice (ctx.state.cell_gating). Every reader/writer
+#              (cell_gating_tab_view / scatter.gating / stats_compute / cell_browser
+#              / export sidebar / load_controller) moved off the runtime-stamped
+#              app._scatter_gates / app._cell_gating_* attrs in lock-step, so
+#              persistence.cell_gating save + load read/write the config off
+#              ctx.state and dropped BOTH their app=ctx.app unwraps, and the
+#              plotting-tab set_thresh_frac_on quick-edit reaches the edits map via
+#              ctx.runtime. The lazy Cell-Gating-tab force-build (the one
+#              irreducible god-object seam: _centre_build_pending) was bundled into
+#              a single core helper (channel_state_controller.ensure_cell_gating_
+#              tab_built, +1 app=ctx.app) that load + the quick-edit share — so the
+#              three cleared refs net -2 even though the lazy-build seam stays.
+CTX_APP_BUDGET = 8
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

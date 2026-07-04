@@ -122,11 +122,11 @@ class GatingWorker(QThread):
         # filtering gate selected on the Cell Gating tab — a single named gate,
         # or the union of all gates — defines the Included population instead of
         # the intensity floors.
-        use_scatter = bool(self._ctx.runtime.cell_gating.use_scatter_gates)
+        use_scatter = bool(self._ctx.state.cell_gating.use_scatter_gates)
         # Thresholding has its OWN gate selection (independent of the gating
         # layer): cells inside its gate(s) define the "on" population for
         # fraction-on (Gate_On column).
-        use_thresh = bool(self._ctx.runtime.cell_gating.use_scatter_thresh)
+        use_thresh = bool(self._ctx.state.cell_gating.use_scatter_thresh)
         gating_gates = cell_gating_selected_scatter_gates(self._ctx, "gating")
         thresh_gates = cell_gating_selected_scatter_gates(self._ctx, "thresh")
         ratios = self._ctx.state.channel.ratio_index or {}
@@ -235,19 +235,9 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # define Included instead of the per-channel FluorGating. The gating and
     # thresholding layers each pick their OWN set of gates (a set of names, or
     # None ⇒ all gates, which auto-includes gates drawn later).
-    # A8 teardown: these live-session flags/choices are the ``_cell_gating_``
-    # runtime namespace. Seed defaults idempotently (preserve any value carried
-    # across a tab rebuild); ``ctx.runtime`` stamps back onto the same
-    # ``app._cell_gating_*`` attributes the readers below resolve.
-    _cg = ctx.runtime.cell_gating
-    if _cg.use_scatter_gates is None:
-        _cg.use_scatter_gates = False
-    if _cg.use_scatter_thresh is None:
-        _cg.use_scatter_thresh = False
-    # gating/thresholding gate selections default to None (⇒ all gates); touch
-    # so the attribute exists for any direct (non-getattr) reader.
-    _cg.gating_choices = _cg.gating_choices
-    _cg.thresh_choices = _cg.thresh_choices
+    # Epic-cellgating: the flags + per-layer gate selections are typed state on
+    # ``ctx.state.cell_gating`` (defaults: False / None), so no seeding is needed
+    # here — the checkboxes below read the slice.
 
     # The tab stacks a tall column of gating controls *above* the CDF plot and
     # the optimizer panel. On shorter windows that column squeezed the plot down
@@ -321,7 +311,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "Use scatter-plot gates for cell inclusion (replaces FluorGating)",
         sg_row,
     )
-    use_sg_cb.setChecked(bool(ctx.runtime.cell_gating.use_scatter_gates))
+    use_sg_cb.setChecked(bool(ctx.state.cell_gating.use_scatter_gates))
     use_sg_cb.setToolTip(
         "Define the Included population from the named rectangular gates drawn "
         "on the Scatter Plot tab instead of the per-channel intensity "
@@ -359,7 +349,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "Use scatter gate for fraction-on (thresholding, replaces ThreshFracOn)",
         th_row,
     )
-    use_th_cb.setChecked(bool(ctx.runtime.cell_gating.use_scatter_thresh))
+    use_th_cb.setChecked(bool(ctx.state.cell_gating.use_scatter_thresh))
     use_th_cb.setToolTip(
         "Define the 'on' population for fraction-on stats as the cells inside "
         "the selected gate(s), instead of cells above the per-channel "
@@ -749,6 +739,40 @@ def cell_gating_load_threshold_frac_on(ctx) -> None:
             edits[channel].setText(str(value))
 
 
+def cell_gating_apply_persisted_state(ctx) -> None:
+    """Mirror the typed ``CellGatingState`` slice onto the Cell Gating tab's live
+    widgets after a sidecar load.
+
+    Persistence writes the loaded gate values + scatter-gate config to
+    ``ctx.state.cell_gating`` (the source of truth) and then calls this so the
+    tab's input surface reflects it: the FluorGating / ThreshFracOn line-edits,
+    the two scatter-gate checkboxes, and the gate-filter buttons / FluorGating
+    greyout / summary label. No-op for any widget not built yet — persistence
+    never touches widgets itself, keeping it ``ctx``-native (this is the feature
+    seam it delegates the mirror to).
+    """
+    fluor_edits = ctx.runtime.cell_gating.fluor_gate_edits or {}
+    for channel, value in ctx.state.cell_gating.fluor_gates.items():
+        edit = fluor_edits.get(channel)
+        if edit is not None:
+            edit.setText(str(value))
+    cell_gating_load_threshold_frac_on(ctx)
+    for attr, flag in (
+        ("use_scatter_gates_cb", ctx.state.cell_gating.use_scatter_gates),
+        ("use_scatter_thresh_cb", ctx.state.cell_gating.use_scatter_thresh),
+    ):
+        cb = getattr(ctx.runtime.cell_gating, attr, None)
+        if cb is not None:
+            blocked = cb.blockSignals(True)
+            try:
+                cb.setChecked(flag)
+            finally:
+                cb.blockSignals(blocked)
+    _cell_gating_refresh_gate_filter(ctx)
+    _cell_gating_apply_scatter_gate_mode(ctx)
+    _cell_gating_refresh_gate_summary(ctx)
+
+
 def _cell_gating_sync_gate_state(ctx) -> None:
     """Parse every gate edit into the typed ``CellGatingState`` slice (R6).
 
@@ -833,7 +857,7 @@ def cell_gating_on_use_scatter_gates_change(ctx) -> None:
     new population through the ``Included`` chokepoint.
     """
     cb = ctx.runtime.cell_gating.use_scatter_gates_cb
-    ctx.runtime.cell_gating.use_scatter_gates = bool(cb.isChecked()) if cb is not None else False
+    ctx.state.cell_gating.use_scatter_gates = bool(cb.isChecked()) if cb is not None else False
     _cell_gating_apply_scatter_gate_mode(ctx)
     _cell_gating_refresh_gate_filter(ctx)  # enable/disable this layer's Gates button
     _cell_gating_refresh_gate_summary(ctx)
@@ -850,7 +874,7 @@ def cell_gating_on_use_scatter_thresh_change(ctx) -> None:
     re-run the gating pass so the Gate_On column + the stats cache refresh.
     """
     cb = ctx.runtime.cell_gating.use_scatter_thresh_cb
-    ctx.runtime.cell_gating.use_scatter_thresh = bool(cb.isChecked()) if cb is not None else False
+    ctx.state.cell_gating.use_scatter_thresh = bool(cb.isChecked()) if cb is not None else False
     _cell_gating_apply_scatter_gate_mode(ctx)
     _cell_gating_refresh_gate_filter(ctx)  # enable/disable this layer's Gates button
     _cell_gating_refresh_gate_summary(ctx)
@@ -882,8 +906,8 @@ def cell_gating_selected_scatter_gates(ctx, mode: str = "gating") -> list:
     Each layer's selection is a set of gate names; ``None`` means "all gates"
     (the default, which also auto-includes gates drawn later). An explicit
     (possibly empty) set selects exactly those names."""
-    gates = ctx.runtime.scatter.gates or []
-    choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
+    gates = ctx.state.cell_gating.scatter_gates or []
+    choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     if choices is None:
         return list(gates)
     chosen = set(choices)
@@ -892,7 +916,7 @@ def cell_gating_selected_scatter_gates(ctx, mode: str = "gating") -> list:
 
 def _cell_gating_gate_names(ctx) -> list:
     return [str(g.get("name") or "")
-            for g in (ctx.runtime.scatter.gates or [])
+            for g in (ctx.state.cell_gating.scatter_gates or [])
             if str(g.get("name") or "")]
 
 
@@ -903,7 +927,7 @@ def _cell_gating_set_gate_choices(ctx, mode: str, choices) -> None:
     being auto-included while the user is effectively at "all"."""
     if choices is not None and set(choices) == set(_cell_gating_gate_names(ctx)):
         choices = None
-    setattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode],
+    setattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode],
             None if choices is None else set(choices))
     _cell_gating_refresh_gate_filter(ctx)
     _cell_gating_refresh_gate_summary(ctx)
@@ -925,7 +949,7 @@ def _open_gate_filter_menu(ctx, mode: str) -> None:
     if btn is None:
         return
     names = _cell_gating_gate_names(ctx)
-    choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
+    choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     selected = set(names) if choices is None else set(choices)
 
     menu = QMenu(btn)
@@ -939,7 +963,7 @@ def _open_gate_filter_menu(ctx, mode: str) -> None:
 
         def _make(name=nm):
             def _on(checked: bool) -> None:
-                cur = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
+                cur = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
                 cur = set(names) if cur is None else set(cur)
                 cur.add(name) if checked else cur.discard(name)
                 _cell_gating_set_gate_choices(ctx, mode, cur)
@@ -966,7 +990,7 @@ def _cell_gating_gate_button_text(ctx, mode: str) -> str:
     names = _cell_gating_gate_names(ctx)
     if not names:
         return "No gates"
-    choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
+    choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     if choices is None:
         return "All gates"
     chosen = [n for n in names if n in set(choices)]
@@ -982,23 +1006,23 @@ def _cell_gating_refresh_gate_filter(ctx) -> None:
     explicitly-selected names that no longer exist (in each layer's set)."""
     names = set(_cell_gating_gate_names(ctx))
     for mode in _GATE_MODES:
-        choices = getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None)
+        choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
         if choices is not None:
             pruned = set(choices) & names
-            setattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode],
+            setattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode],
                     None if (pruned == names and names) else pruned)
         btn = getattr(ctx.runtime.cell_gating, _GATE_BUTTON_ATTR[mode], None)
         if btn is not None:
             btn.setText(_cell_gating_gate_button_text(ctx, mode))
             # Each Gates button is only relevant when its own layer is active.
-            btn.setEnabled(bool(getattr(ctx.runtime.cell_gating, _GATE_MODE_ACTIVE_ATTR[mode], False)))
+            btn.setEnabled(bool(getattr(ctx.state.cell_gating, _GATE_MODE_ACTIVE_ATTR[mode], False)))
 
 
 def _cell_gating_scatter_mode_on(ctx) -> bool:
     """True when either scatter-gate layer (gating or thresholding) is active —
     both consume the selected gate, so the dropdown is relevant for either."""
-    return bool(bool(ctx.runtime.cell_gating.use_scatter_gates)
-                or bool(ctx.runtime.cell_gating.use_scatter_thresh))
+    return bool(bool(ctx.state.cell_gating.use_scatter_gates)
+                or bool(ctx.state.cell_gating.use_scatter_thresh))
 
 
 def _gate_geom_sig(gates):
@@ -1018,8 +1042,8 @@ def _scatter_gate_signature(ctx):
     Used to skip a redundant gating pass when re-entering the tab with nothing
     changed — see :func:`cell_gating_sync_scatter_gates`."""
     return (
-        bool(bool(ctx.runtime.cell_gating.use_scatter_gates)),
-        bool(bool(ctx.runtime.cell_gating.use_scatter_thresh)),
+        bool(bool(ctx.state.cell_gating.use_scatter_gates)),
+        bool(bool(ctx.state.cell_gating.use_scatter_thresh)),
         _gate_geom_sig(cell_gating_selected_scatter_gates(ctx, "gating")),
         _gate_geom_sig(cell_gating_selected_scatter_gates(ctx, "thresh")),
     )
@@ -1061,10 +1085,10 @@ def _cell_gating_apply_scatter_gate_mode(ctx) -> None:
 
     (Each layer's Gates button is enabled per-layer in
     _cell_gating_refresh_gate_filter.)"""
-    gating_on = bool(bool(ctx.runtime.cell_gating.use_scatter_gates))
+    gating_on = bool(bool(ctx.state.cell_gating.use_scatter_gates))
     for edit in (ctx.runtime.cell_gating.fluor_gate_edits or {}).values():
         edit.setEnabled(not gating_on)
-    thresh_on = bool(bool(ctx.runtime.cell_gating.use_scatter_thresh))
+    thresh_on = bool(bool(ctx.state.cell_gating.use_scatter_thresh))
     for edit in (ctx.runtime.cell_gating.thresh_frac_edits or {}).values():
         edit.setEnabled(not thresh_on)
 
@@ -1074,7 +1098,7 @@ def _gate_target_phrase(ctx, mode: str) -> str:
     gates = cell_gating_selected_scatter_gates(ctx, mode)
     if not gates:
         return "no gates selected"
-    if getattr(ctx.runtime.cell_gating, _GATE_CHOICES_ATTR[mode], None) is None:
+    if getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None) is None:
         return f"all {len(gates)} gate(s)"
     if len(gates) == 1:
         return f"gate “{gates[0].get('name')}”"
@@ -1090,15 +1114,15 @@ def _cell_gating_refresh_gate_summary(ctx) -> None:
     if not _cell_gating_scatter_mode_on(ctx):
         lbl.setText("")
         return
-    if not (ctx.runtime.scatter.gates or []):
+    if not (ctx.state.cell_gating.scatter_gates or []):
         lbl.setText(
             "No scatter gates drawn yet — draw one on the Scatter Plot tab."
         )
         return
     parts = []
-    if bool(ctx.runtime.cell_gating.use_scatter_gates):
+    if bool(ctx.state.cell_gating.use_scatter_gates):
         parts.append(f"Inclusion: {_gate_target_phrase(ctx, 'gating')}")
-    if bool(ctx.runtime.cell_gating.use_scatter_thresh):
+    if bool(ctx.state.cell_gating.use_scatter_thresh):
         parts.append(f"Fraction-on: {_gate_target_phrase(ctx, 'thresh')}")
     lbl.setText("  •  ".join(parts))
 

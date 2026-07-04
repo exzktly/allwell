@@ -13,87 +13,71 @@ def save_to_pipeline_info(ctx) -> None:
     Called from the Cell Gating tab whenever the user edits a value. Silently
     no-ops when no data directory is loaded or the sidecar is missing.
 
-    A8 teardown: takes ``ctx`` (the Cell Gating tab is a feature and cannot name
-    the god-object). Persistence MAY unwrap the app once here — the body still
-    reaches many loose ``app._cell_gating_*`` widget handles.
+    Epic-cellgating: fully ``ctx``-native. Both the gate *values* (R6:
+    ``fluor_gates`` / ``thresh_frac_on``) and the scatter-gate *config*
+    (``scatter_gates`` + use-flags + per-layer gate selections) live on the
+    typed ``ctx.state.cell_gating`` slice, so nothing is read off the god-object.
+    ``fluor_gates`` is snapshotted via the core accessor (which iterates the
+    fluor channels and applies the 0.0 default), matching the historical block —
+    ratio entries stay out of ``fluor_gates`` exactly as before.
     """
-    app = ctx.app
-    if not app._app_state.dataset.data_dir:
+    state = ctx.state
+    if not state.dataset.data_dir:
         return
-    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
-        return
+    from well_viewer.core.channel_state_controller import get_all_fluor_gates
     from well_viewer.domain.gating_state import (
         build_gating_block,
         save_gating_to_pipeline_info,
     )
-    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
-    fluor_gates = app._get_all_fluor_gates()
-    # Persist every key that has a Cell Gating row, including ratio entries
-    # (keyed by ``ratio:<name>``). Iterating only ``app._app_state.channel.fluor_channels``
-    # silently dropped ratio thresholds and forced the default on next load.
-    thresh_frac_on = {
-        key: cell_gating_get_thresh_frac_on(app._ctx, key)
-        for key in (app._cell_gating_thresh_frac_edits or {}).keys()
-    }
+    cg = state.cell_gating
+
     def _sorted_or_none(s):
         return None if s is None else sorted(s)
+
     block = build_gating_block(
-        fluor_gates, thresh_frac_on,
-        scatter_gates=getattr(app, "_scatter_gates", None),
-        use_scatter_gates=getattr(app, "_cell_gating_use_scatter_gates", False),
-        scatter_gate_choices_gating=_sorted_or_none(
-            getattr(app, "_cell_gating_gating_choices", None)),
-        scatter_gate_choices_thresh=_sorted_or_none(
-            getattr(app, "_cell_gating_thresh_choices", None)),
-        use_scatter_thresh=getattr(app, "_cell_gating_use_scatter_thresh", False),
+        get_all_fluor_gates(ctx),
+        # ``thresh_frac_on`` carries every non-default Cell Gating row (fluor
+        # channels + ``ratio:<name>`` keys); ``build_gating_block`` drops any at
+        # the default, so passing the typed slice reproduces the historical block.
+        dict(cg.thresh_frac_on),
+        scatter_gates=cg.scatter_gates or None,
+        use_scatter_gates=cg.use_scatter_gates,
+        scatter_gate_choices_gating=_sorted_or_none(cg.gating_choices),
+        scatter_gate_choices_thresh=_sorted_or_none(cg.thresh_choices),
+        use_scatter_thresh=cg.use_scatter_thresh,
     )
-    save_gating_to_pipeline_info(app._app_state.dataset.data_dir, block)
+    save_gating_to_pipeline_info(state.dataset.data_dir, block)
 
 
 def load_from_pipeline_info(ctx) -> bool:
     """Apply any saved cell_gating block in pipeline_info.json.
 
-    Returns True when a block was found and applied. The Cell Gating tab is
-    built lazily, so when the sidecar has persisted thresholds we force-build
-    the tab here so its QLineEdits exist before we try to set them.
+    Returns True when a block was found and applied. The gate values + scatter
+    config are written to the typed ``ctx.state.cell_gating`` slice (the source
+    of truth); the (lazily-built) Cell Gating tab is then materialized and its
+    widgets are seeded from the slice.
 
-    A8 teardown: takes ``ctx`` (feature callers hold ``ctx``, not the
-    god-object). Persistence MAY unwrap the app once here — the body still
-    reaches many loose ``app._cell_gating_*`` widget handles.
+    Epic-cellgating: fully ``ctx``-native. The scatter-gate config joins the
+    R6 gate values on ``ctx.state.cell_gating``, so persistence writes typed
+    state directly. The lazy-tab force-build is delegated to the core seam
+    ``ensure_cell_gating_tab_built`` (persistence never names the god-object nor
+    imports ``AppRuntime``); the widget mirror is a ``ctx``-native feature call.
     """
-    app = ctx.app
-    if not app._app_state.dataset.data_dir:
+    state = ctx.state
+    if not state.dataset.data_dir:
         return False
     from well_viewer.domain.gating_state import read_gating_params
-    block = read_gating_params(app._app_state.dataset.data_dir)
+    block = read_gating_params(state.dataset.data_dir)
     if not block:
-        return False
-
-    # One deferred feature import for the whole function (the tab is built lazily
-    # so persistence can't import it at module scope without a cycle).
-    from well_viewer.features.grouping.cell_gating_tab_view import (
-        _cell_gating_apply_scatter_gate_mode,
-        _cell_gating_refresh_gate_filter,
-        _cell_gating_refresh_gate_summary,
-        build_cell_gating_subtab,
-    )
-
-    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
-        build = getattr(app, "_centre_build_pending", None)
-        if callable(build):
-            build("Sample Definitions")
-        build_cell_gating_subtab(app._ctx)
-    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return False
 
     applied = False
     # ``cell_area_threshold`` is retired from this block — the QC layer now owns
     # cell-area gating and migrates any legacy value (see QCParams.from_pipeline_info).
 
-    # R6: the typed CellGatingState slice is the source of truth for the gate
-    # values — write it directly, then mirror onto any already-built line-edit
-    # (the edits are the input surface; a row built later seeds from the slice).
-    gate_state = app._app_state.cell_gating
+    # R6 + Epic-cellgating: the typed CellGatingState slice is the source of
+    # truth — write the gate values and the scatter-gate config onto it directly.
+    cg = state.cell_gating
     fluor_gates = block.get("fluor_gates") or {}
     if isinstance(fluor_gates, dict):
         for ch, val in fluor_gates.items():
@@ -101,11 +85,8 @@ def load_from_pipeline_info(ctx) -> bool:
                 fval = float(val)
             except (ValueError, TypeError):
                 continue
-            gate_state.fluor_gates[str(ch)] = fval
-            edit = app._cell_gating_fluor_gate_edits.get(str(ch))
-            if edit is not None:
-                edit.setText(str(fval))
-                applied = True
+            cg.fluor_gates[str(ch)] = fval
+            applied = True
 
     thresh_frac_on = block.get("thresh_frac_on") or {}
     if isinstance(thresh_frac_on, dict):
@@ -114,21 +95,17 @@ def load_from_pipeline_info(ctx) -> bool:
                 fval = float(val)
             except (ValueError, TypeError):
                 continue
-            gate_state.thresh_frac_on[str(ch)] = fval
-            edit = app._cell_gating_thresh_frac_edits.get(str(ch))
-            if edit is not None:
-                edit.setText(str(fval))
-                applied = True
+            cg.thresh_frac_on[str(ch)] = fval
+            applied = True
 
-    # Restore the scatter-gate inclusion mode. The gates already carry their
-    # axis columns, so they are usable straight from the sidecar. Sync the
-    # checkbox + FluorGating-edit enablement + summary label to match.
+    # Restore the scatter-gate inclusion / thresholding config. The gates already
+    # carry their axis columns, so they are usable straight from the sidecar.
     scatter_gates = block.get("scatter_gates")
     if isinstance(scatter_gates, list) and scatter_gates:
-        app._scatter_gates = [dict(g) for g in scatter_gates if isinstance(g, dict)]
+        cg.scatter_gates = [dict(g) for g in scatter_gates if isinstance(g, dict)]
         applied = True
-    app._cell_gating_use_scatter_gates = bool(block.get("use_scatter_gates", False))
-    app._cell_gating_use_scatter_thresh = bool(block.get("use_scatter_thresh", False))
+    cg.use_scatter_gates = bool(block.get("use_scatter_gates", False))
+    cg.use_scatter_thresh = bool(block.get("use_scatter_thresh", False))
     # Per-layer gate selections: a list of names, or absent ⇒ None (all).
     # Migration of older single-selection schemas: ``scatter_gate_choices`` (one
     # combined list) and ``scatter_gate_choice`` (one name) both seed BOTH layers.
@@ -138,33 +115,30 @@ def load_from_pipeline_info(ctx) -> bool:
         legacy = block.get("scatter_gate_choice")
         return {str(legacy)} if legacy else None
     for key, attr in (
-        ("scatter_gate_choices_gating", "_cell_gating_gating_choices"),
-        ("scatter_gate_choices_thresh", "_cell_gating_thresh_choices"),
+        ("scatter_gate_choices_gating", "gating_choices"),
+        ("scatter_gate_choices_thresh", "thresh_choices"),
     ):
         if key in block:
             sel = block.get(key)
-            setattr(app, attr, set(str(n) for n in sel) if isinstance(sel, list) else None)
+            setattr(cg, attr, set(str(n) for n in sel) if isinstance(sel, list) else None)
         else:
-            setattr(app, attr, _legacy_selection())
-    for attr, flag in (
-        ("_cell_gating_use_scatter_gates_cb", app._cell_gating_use_scatter_gates),
-        ("_cell_gating_use_scatter_thresh_cb", app._cell_gating_use_scatter_thresh),
-    ):
-        cb = getattr(app, attr, None)
-        if cb is not None:
-            blocked = cb.blockSignals(True)
-            try:
-                cb.setChecked(flag)
-            finally:
-                cb.blockSignals(blocked)
-    _cell_gating_refresh_gate_filter(app._ctx)
-    _cell_gating_apply_scatter_gate_mode(app._ctx)
-    _cell_gating_refresh_gate_summary(app._ctx)
+            setattr(cg, attr, _legacy_selection())
+
+    # Materialize the lazily-built tab (core seam; the one app-bound step) so its
+    # QLineEdits + checkboxes exist, then mirror the typed slice onto them.
+    from well_viewer.core.channel_state_controller import (
+        ensure_cell_gating_tab_built,
+        refresh_thresh_frac_quick_edit,
+    )
+    if not ensure_cell_gating_tab_built(ctx):
+        return False
+    from well_viewer.features.grouping.cell_gating_tab_view import (
+        cell_gating_apply_persisted_state,
+    )
+    cell_gating_apply_persisted_state(ctx)
 
     # Mirror the just-loaded value into the plotting ctxbar quick-edit so it
     # shows the persisted threshold on load (guarded; no-op before it's built).
-    refresh = getattr(app, "_refresh_thresh_frac_quick_edit", None)
-    if callable(refresh):
-        refresh()
+    refresh_thresh_frac_quick_edit(ctx)
 
     return applied

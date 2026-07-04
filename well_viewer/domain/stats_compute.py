@@ -233,15 +233,15 @@ def _thresh_on_col(ctx) -> Optional[str]:
     A8 R-leaf: takes ``ctx`` — the scatter-gate / cell-gating flags read through
     ``ctx.runtime`` (the same stamped attributes, without naming the god-object).
     """
-    if not ctx.runtime.cell_gating.use_scatter_thresh:
+    if not ctx.state.cell_gating.use_scatter_thresh:
         return None
-    gates = ctx.runtime.scatter.gates or []
+    gates = ctx.state.cell_gating.scatter_gates or []
     if not gates:
         return None
     # Thresholding has its own gate selection (a set of names; None ⇒ all). Fall
     # back to the ThreshFracOn cutoff (return None) when the user has explicitly
     # selected no existing gate for the thresholding layer.
-    choices = ctx.runtime.cell_gating.thresh_choices
+    choices = ctx.state.cell_gating.thresh_choices
     if choices is not None:
         chosen = set(choices)
         if not any(str(g.get("name") or "") in chosen for g in gates):
@@ -261,8 +261,8 @@ def _gate_cache_sig(ctx):
     """
     if _thresh_on_col(ctx) is None:
         return None
-    gates = ctx.runtime.scatter.gates or []
-    choices = ctx.runtime.cell_gating.thresh_choices
+    gates = ctx.state.cell_gating.scatter_gates or []
+    choices = ctx.state.cell_gating.thresh_choices
     try:
         gates_key = json.dumps(gates, sort_keys=True, default=str)
     except (TypeError, ValueError):

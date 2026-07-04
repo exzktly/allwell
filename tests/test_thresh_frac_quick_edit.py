@@ -108,6 +108,13 @@ class _FakeApp:
             "gfp": _FakeEdit("50.0"),
             "mcherry": _FakeEdit("50.0"),
         }
+        # Epic-cellgating: ensure_cell_gating_tab_built() treats the fluor-gate
+        # edits map as the "tab is built" signal (in production both maps are
+        # created together); provide it so the quick-edit write path proceeds.
+        self._cell_gating_fluor_gate_edits = {
+            "gfp": _FakeEdit("0.0"),
+            "mcherry": _FakeEdit("0.0"),
+        }
         self.redraws = 0
         self._event_bus = _FakeBus()
         # The gate accessors read the slice via ctx (post-R6 pure state); the

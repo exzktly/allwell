@@ -17,11 +17,34 @@ import pandas as pd
 from well_viewer.core.app_runtime import AppRuntime
 
 
+def _seed_cg(app):
+    """Attach a typed ``CellGatingState`` to ``app._app_state``, seeding the
+    scatter-gate geometry + use-flags + per-layer gate selections from any loose
+    kwargs the fake set (Epic-cellgating: these are now typed state on
+    ``ctx.state.cell_gating``). The slice is the live object the gating functions
+    read/write; tests assert on ``app._app_state.cell_gating.*``."""
+    from well_viewer.core.cell_gating_state import CellGatingState
+    st = getattr(app, "_app_state", None)
+    if st is None:
+        st = SimpleNamespace()
+        app._app_state = st
+    if getattr(st, "cell_gating", None) is None:
+        st.cell_gating = CellGatingState(
+            scatter_gates=list(getattr(app, "_scatter_gates", []) or []),
+            use_scatter_gates=bool(getattr(app, "_cell_gating_use_scatter_gates", False)),
+            use_scatter_thresh=bool(getattr(app, "_cell_gating_use_scatter_thresh", False)),
+            gating_choices=getattr(app, "_cell_gating_gating_choices", None),
+            thresh_choices=getattr(app, "_cell_gating_thresh_choices", None),
+        )
+    return st.cell_gating
+
+
 def _cg_ctx(app):
     """Wrap a pure-logic fake app in the minimal ctx shape the cell-gating
-    functions consume (runtime stamps back onto the app's ``_cell_gating_*`` /
-    ``_scatter_*`` attributes, so the fake's attribute assertions still hold)."""
-    app._ctx = SimpleNamespace(app=app, runtime=AppRuntime(app))
+    functions consume (config on the typed ``ctx.state.cell_gating`` slice;
+    ``ctx.runtime`` stamps back onto the app's live ``_cell_gating_*`` widgets)."""
+    _seed_cg(app)
+    app._ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app))
     return app._ctx
 
 from well_viewer.features.scatter.gating import (
@@ -33,9 +56,10 @@ from well_viewer.features.scatter.gating import (
 def _mk_ctx(app):
     from types import SimpleNamespace
     from well_viewer.core.app_runtime import AppRuntime
+    _seed_cg(app)
     return SimpleNamespace(
         app=app,
-        state=getattr(app, "_app_state", None),
+        state=app._app_state,
         runtime=AppRuntime(app),
         widgets=SimpleNamespace(
             get_or_none=lambda n: getattr(app, n, None),
@@ -62,8 +86,8 @@ def test_on_gate_drawn_stamps_axis_columns_from_interaction_cache():
     _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=1.0, ydata=2.0),
                    SimpleNamespace(xdata=5.0, ydata=8.0))
 
-    assert len(app._scatter_gates) == 1
-    g = app._scatter_gates[0]
+    assert len(app._app_state.cell_gating.scatter_gates) == 1
+    g = app._app_state.cell_gating.scatter_gates[0]
     assert g["x_col"] == "gfp_mean_intensity"
     assert g["y_col"] == "mcherry_mean_intensity"
     assert (g["x0"], g["x1"], g["y0"], g["y1"]) == (1.0, 5.0, 2.0, 8.0)
@@ -93,7 +117,7 @@ def test_on_gate_drawn_assigns_default_name():
                    SimpleNamespace(xdata=1.0, ydata=1.0))
     _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=2.0, ydata=2.0),
                    SimpleNamespace(xdata=3.0, ydata=3.0))
-    assert [g["name"] for g in app._scatter_gates] == ["Gate 1", "Gate 2"]
+    assert [g["name"] for g in app._app_state.cell_gating.scatter_gates] == ["Gate 1", "Gate 2"]
 
 
 def test_gate_only_shown_on_its_own_axes():
@@ -130,9 +154,9 @@ def test_selected_scatter_gates_honours_choice():
     ctx = _cg_ctx(app)
     assert cell_gating_selected_scatter_gates(ctx, "gating") == [g1, g2, g3]
     assert cell_gating_selected_scatter_gates(ctx, "thresh") == [g2]
-    app._cell_gating_gating_choices = {"Gate 1", "Gate 3"}  # multi-select gating
+    app._app_state.cell_gating.gating_choices = {"Gate 1", "Gate 3"}  # multi-select gating
     assert cell_gating_selected_scatter_gates(ctx, "gating") == [g1, g3]
-    app._cell_gating_thresh_choices = set()                 # none for thresh
+    app._app_state.cell_gating.thresh_choices = set()                 # none for thresh
     assert cell_gating_selected_scatter_gates(ctx, "thresh") == []
 
 
@@ -153,8 +177,8 @@ def test_rename_gate_rejects_blank_and_duplicate_keeps_choice():
     assert rename_gate(_mk_ctx(app), 0, "Live") is True          # valid rename
     assert g1["name"] == "Live"
     # Both selection sets follow the rename so the gate stays selected.
-    assert app._cell_gating_gating_choices == {"Live"}
-    assert app._cell_gating_thresh_choices == {"Live"}
+    assert app._app_state.cell_gating.gating_choices == {"Live"}
+    assert app._app_state.cell_gating.thresh_choices == {"Live"}
 
 
 def test_on_gate_drawn_without_cache_leaves_columns_none():
@@ -163,7 +187,7 @@ def test_on_gate_drawn_without_cache_leaves_columns_none():
     app = SimpleNamespace(_scatter_gates=[], _scatter_gate_redraw_cb=lambda _a: None)
     _on_gate_drawn(_mk_ctx(app), SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=1.0, ydata=1.0))
-    g = app._scatter_gates[0]
+    g = app._app_state.cell_gating.scatter_gates[0]
     assert g["x_col"] is None and g["y_col"] is None
 
 

@@ -926,6 +926,29 @@ def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
     return tf[key] if key in tf else ctx.state.channel.threshold
 
 
+def ensure_cell_gating_tab_built(ctx) -> bool:
+    """Materialize the lazily-built Cell Gating sub-tab and return whether its
+    widget maps now exist.
+
+    The Cell Gating tab is only constructed on first activation, but persistence
+    load and the plotting-tab ThreshFracOn quick-edit both need its QLineEdit
+    maps to exist *now* (so the loaded/edited value has a widget to seed). This
+    is the single ``app``-bound bundling seam for that lazy build: it force-flips
+    the centre stack to the tab's page (``_centre_build_pending``) and builds the
+    sub-tab. Kept in ``core`` (which may name the god-object) so persistence and
+    the quick-edit stay ``ctx``-native — they call this instead of unwrapping the
+    app themselves.
+    """
+    app = ctx.app
+    if not hasattr(app, "_cell_gating_fluor_gate_edits"):
+        build = getattr(app, "_centre_build_pending", None)
+        if callable(build):
+            build("Sample Definitions")
+        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
+        build_cell_gating_subtab(ctx)
+    return hasattr(app, "_cell_gating_fluor_gate_edits")
+
+
 def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
     """Set ThreshFracOn for a channel (the active channel by default).
 
@@ -935,10 +958,10 @@ def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
     quick-edit; editing here stays consistent with the Cell Gating tab,
     Auto-threshold, stats, and exports. No-op until a dataset is loaded.
 
-    A8: takes ``ctx`` (the Image Table quick-edit already called it that way —
-    the prior ``app`` signature crashed that path). The body still force-builds
-    the lazily-created Cell Gating tab + reaches its loose ``_cell_gating_*``
-    edits dict, so it unwraps the handle once at this core boundary.
+    A8 / Epic-cellgating: fully ``ctx``-native — the lazy tab build routes
+    through :func:`ensure_cell_gating_tab_built` (the one app-bound seam) and the
+    edits map is reached via ``ctx.runtime.cell_gating`` (the same stamped
+    handle, without naming the god-object here).
     """
     if not ctx.state.dataset.data_dir:
         return
@@ -946,20 +969,14 @@ def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
         channel = ctx.state.channel.active_channel
     if not channel or channel == "—":
         return
-    app = ctx.app
-    # The Cell Gating tab is built lazily; materialize it (same pattern as
-    # persistence.cell_gating.load_from_pipeline_info) so its edits dict exists.
-    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
-        build = getattr(app, "_centre_build_pending", None)
-        if callable(build):
-            build("Sample Definitions")
-        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
-        build_cell_gating_subtab(ctx)
+    # The Cell Gating tab is built lazily; materialize it so its edits dict exists.
+    if not ensure_cell_gating_tab_built(ctx):
+        return
     from well_viewer.features.grouping.cell_gating_tab_view import (
         _cell_gating_resolve_key,
         cell_gating_on_threshold_frac_on_change,
     )
-    edits = getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}
+    edits = ctx.runtime.cell_gating.thresh_frac_edits or {}
     edit = edits.get(_cell_gating_resolve_key(ctx, channel))
     if edit is None:
         return

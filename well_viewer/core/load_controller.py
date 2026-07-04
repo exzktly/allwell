@@ -124,17 +124,22 @@ def _reset_gating_state(app) -> None:
 
     The persistence loaders (``cell_gating.load_from_pipeline_info``,
     ``cell_overrides.load_from_data_dir``) early-return when the new dataset has
-    no sidecar, leaving this ad-hoc ``app._*`` state in place — where it
-    silently filters the new dataset's cells / redefines fraction-on (audit
-    X1). Reset it to the "no gating" defaults before hydration; the new
-    dataset's own sidecar (if any) repopulates it afterwards.
+    no sidecar, leaving this state in place — where it silently filters the new
+    dataset's cells / redefines fraction-on (audit X1). Reset it to the "no
+    gating" defaults before hydration; the new dataset's own sidecar (if any)
+    repopulates it afterwards.
+
+    Epic-cellgating: the scatter-gate geometry + use-flags + per-layer gate
+    selections are typed state on ``ctx.state.cell_gating``, reset here in
+    lock-step with the R6 gate values.
     """
-    app._scatter_gates = []
+    cg = app._app_state.cell_gating
+    cg.scatter_gates = []
+    cg.use_scatter_gates = False
+    cg.use_scatter_thresh = False
+    cg.gating_choices = None
+    cg.thresh_choices = None
     app._review_included_overrides = {}
-    app._cell_gating_use_scatter_gates = False
-    app._cell_gating_use_scatter_thresh = False
-    app._cell_gating_gating_choices = None
-    app._cell_gating_thresh_choices = None
     app._app_state.heatmap.active_layout_name = None
 
 
@@ -429,8 +434,8 @@ def _kick_off_gating_after_load(app) -> None:
     # Scatter-gate inclusion / thresholding modes also need the pass so
     # Gate_Pass / Gate_On are computed from the persisted gates on load (neither
     # has a per-channel edit to inspect).
-    use_scatter = getattr(app, "_cell_gating_use_scatter_gates", False)
-    use_thresh = getattr(app, "_cell_gating_use_scatter_thresh", False)
+    use_scatter = app._app_state.cell_gating.use_scatter_gates
+    use_thresh = app._app_state.cell_gating.use_scatter_thresh
     if has_non_default_gate or use_scatter or use_thresh:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(app._ctx)

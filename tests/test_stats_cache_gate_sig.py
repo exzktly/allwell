@@ -16,17 +16,19 @@ _GATE = {
 
 
 def _app(use_thresh, gates, choices=None):
-    app = types.SimpleNamespace(
-        _cell_gating_use_scatter_thresh=use_thresh,
-        _scatter_gates=gates,
-        _cell_gating_thresh_choices=choices,
+    # Epic-cellgating: the scatter-gate on-population config (use-flag, gate
+    # geometry, thresh gate selection) is typed state on ``ctx.state.cell_gating``.
+    from well_viewer.core.cell_gating_state import CellGatingState
+    cg = CellGatingState(
+        use_scatter_thresh=use_thresh,
+        scatter_gates=gates,
+        thresh_choices=choices,
     )
-    # A8 R-leaf: ``_gate_cache_sig`` now resolves the gate-on flags through
-    # ``ctx.runtime`` (which stamps back onto these same app attributes).
-    # ``_gate_cache_sig`` is now ctx-native (A8 residuals): it reads the gate-on
-    # flags through ``ctx.runtime``, so the test passes the ctx, not the app.
+    app = types.SimpleNamespace()
+    app._app_state = types.SimpleNamespace(cell_gating=cg)
     from well_viewer.core.app_runtime import AppRuntime
-    app._ctx = types.SimpleNamespace(app=app, runtime=AppRuntime(app))
+    app._ctx = types.SimpleNamespace(
+        app=app, state=app._app_state, runtime=AppRuntime(app))
     return app._ctx
 
 

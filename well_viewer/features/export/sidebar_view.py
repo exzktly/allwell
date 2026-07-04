@@ -1046,7 +1046,7 @@ class ExportStyleSidebar(QWidget):
         return getattr(self._app, "_scatter_fig", None) is self._fig
 
     def _gate_count_text(self) -> str:
-        n = len(getattr(self._app, "_scatter_gates", None) or [])
+        n = len(self._app._app_state.cell_gating.scatter_gates or [])
         return f"{n} gate(s)"
 
     def _on_density_toggled(self) -> None:
@@ -1093,7 +1093,7 @@ class ExportStyleSidebar(QWidget):
         self._rebuild_gate_list()
 
     def _rebuild_gate_list(self) -> None:
-        """Rebuild the editable per-gate name rows from ``app._scatter_gates``."""
+        """Rebuild the editable per-gate name rows from the typed scatter gates."""
         layout = getattr(self, "_gate_list_layout", None)
         if layout is None:
             return
@@ -1106,7 +1106,7 @@ class ExportStyleSidebar(QWidget):
             w = item.widget()
             if w is not None:
                 w.deleteLater()
-        gates = getattr(self._app, "_scatter_gates", None) or []
+        gates = self._app._app_state.cell_gating.scatter_gates or []
         for idx, gate in enumerate(gates):
             edit = QLineEdit(str(gate.get("name") or ""))
             edit.setToolTip("Rename this gate (used by the Cell Gating filter).")
@@ -1119,7 +1119,7 @@ class ExportStyleSidebar(QWidget):
                 finally:
                     self._gate_rename_in_progress = False
                 if not ok:
-                    cur = (getattr(self._app, "_scatter_gates", None) or [])
+                    cur = (self._app._app_state.cell_gating.scatter_gates or [])
                     if 0 <= _i < len(cur):
                         _e.setText(str(cur[_i].get("name") or ""))
             edit.editingFinished.connect(_commit)

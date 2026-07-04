@@ -10,17 +10,29 @@ from well_viewer.features.scatter.gating import (
 )
 from well_viewer.features.scatter.state import ScatterState
 from well_viewer.core.export_prefs_state import ExportPrefsState
+from well_viewer.core.cell_gating_state import CellGatingState
 
 
 def _mk_ctx(app):
     """A ctx wrapper over a SimpleNamespace fake app: state/runtime/widgets all
     resolve through the app's ``_<name>`` attributes, matching how the tests set
-    (and assert on) them directly."""
+    (and assert on) them directly.
+
+    Epic-cellgating: the scatter-gate geometry is typed state on
+    ``ctx.state.cell_gating.scatter_gates``; ensure the slice exists (seeded from
+    a loose ``_scatter_gates`` kwarg for the minimal fakes that set one)."""
     from types import SimpleNamespace
     from well_viewer.core.app_runtime import AppRuntime
+    st = getattr(app, "_app_state", None)
+    if st is None:
+        st = SimpleNamespace()
+        app._app_state = st
+    if getattr(st, "cell_gating", None) is None:
+        st.cell_gating = CellGatingState(
+            scatter_gates=list(getattr(app, "_scatter_gates", []) or []))
     return SimpleNamespace(
         app=app,
-        state=getattr(app, "_app_state", None),
+        state=app._app_state,
         runtime=AppRuntime(app),
         widgets=SimpleNamespace(
             get_or_none=lambda n: getattr(app, n, None),
@@ -190,12 +202,13 @@ def _render_app(*, density: bool, gates):
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
     app._ax_scatter = ax
     app._scatter_fig = fig
     app._scatter_canvas = FigureCanvasAgg(fig)
     app._app_state.export_prefs.style_prefs = prefs
-    app._scatter_gates = list(gates)
+    app._app_state.cell_gating.scatter_gates = list(gates)
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     app._ctx = _mk_ctx(app)
@@ -260,7 +273,7 @@ def test_hidden_gates_are_not_drawn():
     redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
 
-    assert app._scatter_gates == [gate]   # gate kept in memory
+    assert app._app_state.cell_gating.scatter_gates == [gate]   # gate kept in memory
     assert not any(isinstance(p, Rectangle) and getattr(p, "_scatter_gate_artist", False)
                    for p in ax.patches)
     assert not any(getattr(t, "_scatter_gate_artist", False) for t in ax.texts)
@@ -283,7 +296,7 @@ def test_drawing_a_gate_notifies_count_callback():
     _on_gate_drawn(app._ctx, SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=10.0, ydata=10.0))
 
-    assert len(app._scatter_gates) == 1
+    assert len(app._app_state.cell_gating.scatter_gates) == 1
     assert calls == [1]
 
 
@@ -323,6 +336,7 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
     app._ctx = _mk_ctx(app)
     app._rep_sets_active = lambda: []
@@ -333,7 +347,7 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
     app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    app._scatter_gates = []
+    app._app_state.cell_gating.scatter_gates = []
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
@@ -392,6 +406,7 @@ def test_gates_appear_on_every_separate_axis():
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
     app._ctx = _mk_ctx(app)
     app._rep_sets_active = lambda: []
@@ -402,7 +417,7 @@ def test_gates_appear_on_every_separate_axis():
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
     app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    app._scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
+    app._app_state.cell_gating.scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
@@ -430,6 +445,7 @@ def _sidebar_stub_app(fig):
         selection=SimpleNamespace(selected_wells=["A01"]),
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
     app._ctx = _mk_ctx(app)
     app._scatter_fig = fig  # makes _is_scatter_cells_fig / _supports_well_order true
@@ -441,7 +457,7 @@ def _sidebar_stub_app(fig):
     app._toggle_sem = lambda: None
     app._toggle_fov_replicates = lambda: None
     # gate state the new section reads
-    app._scatter_gates = []
+    app._app_state.cell_gating.scatter_gates = []
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     return app
@@ -464,9 +480,9 @@ def test_sidebar_builds_scatter_density_and_gate_sections(qtbot):
     assert "scatter_density" in sb._getters
     assert sb._gate_count_text() == "0 gate(s)"
     # Clearing gates through the sidebar updates the count label without raising.
-    app._scatter_gates = [{"x0": 0, "y0": 0, "x1": 1, "y1": 1}]
+    app._app_state.cell_gating.scatter_gates = [{"x0": 0, "y0": 0, "x1": 1, "y1": 1}]
     sb._on_clear_gates()
-    assert app._scatter_gates == []
+    assert app._app_state.cell_gating.scatter_gates == []
 
 
 def test_draw_gate_is_one_shot_button(qtbot):
@@ -516,10 +532,10 @@ def _edit_app_with_gate(gate, xlim=(0.0, 10.0), ylim=(0.0, 10.0)):
     canvas.draw()  # populate transData
 
     app = SimpleNamespace()
-    app._app_state = SimpleNamespace(scatter=ScatterState())
+    app._app_state = SimpleNamespace(scatter=ScatterState(), cell_gating=CellGatingState())
     app._ax_scatter = ax
     app._scatter_canvas = canvas
-    app._scatter_gates = [dict(gate)]
+    app._app_state.cell_gating.scatter_gates = [dict(gate)]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_edit = None
     app._scatter_gate_ctx = ({}, [], "#888888")
@@ -571,7 +587,7 @@ def test_gate_edit_resize_right_edge():
     on_gate_edit_motion(app._ctx, _ev(ax, 9, 5))
     on_gate_edit_release(app._ctx, _ev(ax, 9, 5))
     assert app._scatter_gate_edit is None
-    g = app._scatter_gates[0]
+    g = app._app_state.cell_gating.scatter_gates[0]
     assert g["x1"] == 9 and g["x0"] == 2  # right edge moved, left unchanged
 
 
@@ -583,7 +599,7 @@ def test_gate_edit_corner_moves_both_axes():
     on_gate_edit_press(app._ctx, _ev(ax, 8, 8))  # top-right corner
     on_gate_edit_motion(app._ctx, _ev(ax, 6, 7))
     on_gate_edit_release(app._ctx, _ev(ax, 6, 7))
-    g = app._scatter_gates[0]
+    g = app._app_state.cell_gating.scatter_gates[0]
     assert g["x1"] == 6 and g["y1"] == 7 and g["x0"] == 2 and g["y0"] == 2
 
 
@@ -595,7 +611,7 @@ def test_gate_edit_collapse_removes_gate():
     on_gate_edit_press(app._ctx, _ev(ax, 8, 5))     # grab right edge
     on_gate_edit_motion(app._ctx, _ev(ax, 2, 5))    # drag onto the left edge → zero width
     on_gate_edit_release(app._ctx, _ev(ax, 2, 5))
-    assert app._scatter_gates == []  # collapsed gate dropped
+    assert app._app_state.cell_gating.scatter_gates == []  # collapsed gate dropped
 
 
 def test_gate_edit_press_ignored_in_draw_mode():
@@ -660,7 +676,7 @@ def test_drawing_a_gate_exits_create_mode():
     app._ctx = _mk_ctx(app)
     _on_gate_drawn(app._ctx, SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=5.0, ydata=5.0))
-    assert len(app._scatter_gates) == 1
+    assert len(app._app_state.cell_gating.scatter_gates) == 1
     assert app._scatter_gate_draw_mode is False   # auto-exited create mode
     assert synced == [False]                       # toggle synced off
 
@@ -700,6 +716,7 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
         export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
     app._ctx = _mk_ctx(app)
     app._rep_sets_active = lambda: []
@@ -710,7 +727,7 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
     app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    app._scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
+    app._app_state.cell_gating.scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
@@ -720,7 +737,7 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
     assert len(app._scatter_gate_render) == 2     # one render entry per panel
 
     # Simulate a resize: move the gate's left edge, then repaint gates only.
-    app._scatter_gates[0]["x0"] = 800.0
+    app._app_state.cell_gating.scatter_gates[0]["x0"] = 800.0
     redraw_gates_only(app._ctx)
     for ax in app._scatter_fig.axes:
         rects = [p for p in ax.patches

@@ -486,7 +486,7 @@ field. Everything must be green on the fast lane; the closeEvent/teardown tests
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[x]` | in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 26 (render tree + R1–R7 + F1/F2/F4 + E1–E6 done) |
+| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 20 (render tree + R1–R7 + F1/F2/F4 + E1–E6 + D1/D4/D5 done) |
 | T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into D1 (channel/axis → `channel_changed`) |
 | T5 | Saved-plots service | — | Med | `[~]` | capture/persistence ctx-native (`226d0af`); `_rebuild_all` → D7 |
 | T6 | Retire `ctx.app` | D1–D10 | High | `[ ]` | 26 floor → 0 (decompose god-methods, then delete field) |
@@ -532,10 +532,24 @@ floor register + the D-series roadmap in
 
 ---
 
-**Last updated:** 2026-07-04 (later) — enabler passes **E1–E6** drove **51 → 26**
+**Last updated:** 2026-07-04 (latest) — the god-method decomposition (D-series)
+is **underway and confirmed tractable**: **D1** (channel/metric), **D4**
+(review-image draw web), **D5** (image-browser sub-tabs), and the **ui_helpers
+SEM/FOV band controls** landed, driving **26 → 20 (97.75% overall)**, all pushed
+and green. Each proved a full-cluster god-method conversion is net-negative
+(vs. the piecemeal net-add), often via the D5 "bundle N god-services behind ONE
+core seam" tactic. Remaining queued D-passes — **D6** (sample-def/review-csv
+builders), **D-core** (selection/redraw/`refresh_status_chips` chain), **D7**
+(saved-plots `_rebuild_all`), **D9** (batch-export `_show_batch_mode`), **D8**
+(cell-gating quick-edit + fold-change), **D10** (tab providers + view-state) —
+were dispatched but hit the session rate limit (resets 08:00 UTC); resume then.
+The persistence widget-bank unwraps (6) + the `recalculate_threshold`-pinned
+channel/smfish refs stay for **T6**. Superseding earlier same-day notes below.
+
+**Prior note (2026-07-04):** enabler passes **E1–E6** drove **51 → 26**
 (97% overall). Recorded the irreducible-floor register (each of the 26 tied to a
 behaviour god-method) and the **D1–D10 god-method-decomposition roadmap → T6** as
-the only honest path to 0. Superseding earlier same-day note below.
+the only honest path to 0.
 
 **Last updated:** 2026-07-04 — parallel campaign drove **51 → 45** (F1/F2/F4
 integrated; F5 net-0, blocked). Replaced the F-batch plan with the definitive

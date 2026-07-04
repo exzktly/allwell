@@ -94,7 +94,8 @@ class _FakeApp:
     def __init__(self):
         from types import SimpleNamespace
         self._app_state = _AppState()
-        self._label_to_channel_key = {
+        # A8/X5: the label→key map is typed state on ChannelState now.
+        self._app_state.channel.label_to_channel_key = {
             "GFP": "gfp", "Eccentricity": "shape_eccentricity",
         }
         # active_channel_label reads ctx.state.channel (A8 teardown).
@@ -290,6 +291,10 @@ def test_label_key_value_roundtrip():
 
     app = _FakeApp()
     app._app_state.channel = ChannelState()
+    # X5: the label→key map is typed state (as update_channel_selector builds it).
+    app._app_state.channel.label_to_channel_key = {
+        "GFP": "gfp", "Eccentricity": "shape_eccentricity",
+    }
 
     # label → key (as update_channel_selector's map would resolve it)
     key = channel_key_for_label(app, "Eccentricity")

@@ -338,7 +338,7 @@ def collect_scatter_agg_data(
     fluor_gates = get_all_fluor_gates(ctx)  # Apply all channel gates
     # ``_label_to_channel_key`` (ratio/shape label→column map) is app-native
     # state not yet migrated — residual bridge.
-    label_to_key = getattr(ctx.app, "_label_to_channel_key", None) or {}
+    label_to_key = ctx.state.channel.label_to_channel_key
 
     # Get active replicates or selected wells
     active_rsets = active_replicate_sets(

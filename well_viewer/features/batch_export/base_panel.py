@@ -417,7 +417,7 @@ class BatchExportPanel(QWidget):
             return
         channel = str(ch_cb.currentText() or "")
         ratio_key = (
-            getattr(self._app, "_label_to_channel_key", None) or {}
+            self._app._app_state.channel.label_to_channel_key
         ).get(channel)
         from well_viewer.domain.ratio_models import is_ratio_key as _is_ratio_key
         is_ratio = bool(ratio_key and _is_ratio_key(ratio_key))
@@ -520,7 +520,7 @@ class BatchExportPanel(QWidget):
         the helper falls back to its default (50.0 for ThreshFracOn),
         and a ratio batch ends up filtering every cell out.
         """
-        mapping = getattr(self._app, "_label_to_channel_key", None) or {}
+        mapping = self._app._app_state.channel.label_to_channel_key
         resolved = mapping.get(channel_entry)
         if resolved:
             return resolved

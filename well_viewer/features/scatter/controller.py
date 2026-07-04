@@ -665,7 +665,7 @@ def col_for_scatter_entry(ctx, entry: str) -> str:
     "gfp (spots)" -> "gfp_smfish_count"
     "GFP/MCHERRY" (a ratio dropdown label) -> "ratio:GFP/MCHERRY"
     """
-    mapped_key = (getattr(ctx.app, "_label_to_channel_key", None) or {}).get(entry)
+    mapped_key = ctx.state.channel.label_to_channel_key.get(entry)
     if mapped_key and is_ratio_key(mapped_key):
         return mapped_key
     if mapped_key and is_shape_column(mapped_key):
@@ -692,7 +692,7 @@ def col_for_scatter_axis(ctx, channel_entry: str, metric_key: str) -> str:
     — that's a synthetic key that downstream aggregation code treats as a
     Fraction-On aggregation against the channel's mean-intensity column.
     """
-    mapped_key = (getattr(ctx.app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    mapped_key = ctx.state.channel.label_to_channel_key.get(channel_entry)
     if mapped_key and is_ratio_key(mapped_key):
         return mapped_key
     # Shape features are a single per-cell value (the ``shape_*`` column itself);
@@ -716,7 +716,7 @@ def compose_scatter_agg_stat(ctx, channel_entry: str, metric_label: str) -> str:
     prefix vocabulary so older callers and the savefile naming still
     recognise the result.
     """
-    ratio_key = (getattr(ctx.app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    ratio_key = ctx.state.channel.label_to_channel_key.get(channel_entry)
     if ratio_key and is_ratio_key(ratio_key):
         return f"Mean Ratio {channel_entry}"
     ch_upper = (channel_entry or "").upper()

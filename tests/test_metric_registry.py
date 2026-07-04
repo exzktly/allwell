@@ -103,12 +103,12 @@ def test_adding_a_metric_flows_everywhere(monkeypatch):
     class _Chan:
         active_metric = "mean_intensity"
         smfish_channels: list[str] = []
+        label_to_channel_key: dict[str, str] = {}   # X5: typed on ChannelState
 
     class _State:
         channel = _Chan()
 
     class _App:
-        _label_to_channel_key: dict[str, str] = {}
         _app_state = _State()
 
     cb = _FakeCombo()

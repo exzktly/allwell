@@ -381,7 +381,14 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              first-render Property-combo/aggregation sync never ran. Guards
 #              removed; called directly (self-guard + swallow-wrapped). 4 feature
 #              ctx.app removed, 2 core unwraps added (net -1 + latent dead-code fix).
-CTX_APP_BUDGET = 72
+#   72 -> 68    X5: _label_to_channel_key map migrated from an undeclared
+#              app._* attribute to typed state ChannelState.label_to_channel_key
+#              (rebuilt by update_channel_selector; resets on dataset swap). The
+#              4 scatter reads (controller x3 + collect) go through ctx.state.
+#              channel; channel_key_for_label / populate_metric_combo / batch_
+#              export read the typed field. Also removes the lossy getattr(...,None)
+#              fallback that let a stale/absent map silently drop ratio/shape keys.
+CTX_APP_BUDGET = 68
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -50,6 +50,11 @@ class ChannelState:
 
     ratio_metrics: list[RatioMetric] = field(default_factory=list)
     ratio_index: dict[str, RatioMetric] = field(default_factory=dict)
+    # Dropdown-label → channel-key map (real token / ``ratio:<name>`` / shape
+    # column). Rebuilt by update_channel_selector each channel recompute; typed
+    # here (A8/X5) so it resets on dataset swap instead of leaking as an
+    # undeclared ``app._label_to_channel_key`` attribute with a lossy fallback.
+    label_to_channel_key: dict[str, str] = field(default_factory=dict)
 
     threshold_min: float = 0.0
     threshold_max: float = 1.0

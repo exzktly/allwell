@@ -174,7 +174,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         include_fraction = bool(getattr(ch_cb, "_include_fraction", False))
         channel = str(ch_cb.currentText() or "")
         ratio_key = (
-            getattr(self._app, "_label_to_channel_key", None) or {}
+            self._app._app_state.channel.label_to_channel_key
         ).get(channel)
         is_ratio = bool(ratio_key and _is_ratio_key(ratio_key))
 

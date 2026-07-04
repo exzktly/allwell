@@ -299,11 +299,11 @@ def update_channel_selector(app) -> None:
     labels = (real_labels + ratio_labels + shape_labels) or ["—"]
     # Map the dropdown label back to the underlying channel key used by
     # set_active_channel (real token, ratio:<name> key, or shape_* column).
-    app._label_to_channel_key = {ch.upper(): ch for ch in app._app_state.channel.fluor_channels}
+    app._app_state.channel.label_to_channel_key = {ch.upper(): ch for ch in app._app_state.channel.fluor_channels}
     for r in app._app_state.channel.ratio_metrics:
-        app._label_to_channel_key[app._ratio_label_for(r)] = r.key()
+        app._app_state.channel.label_to_channel_key[app._ratio_label_for(r)] = r.key()
     for col, lbl in zip(shape_cols, shape_labels):
-        app._label_to_channel_key[lbl] = col
+        app._app_state.channel.label_to_channel_key[lbl] = col
     # Montage/preview includes the segmentation channel token.
     seg_tok = getattr(app, "_seg_channel_token", "")
     montage_chans = list(app._app_state.channel.fluor_channels)
@@ -596,7 +596,7 @@ def populate_metric_combo(
     from well_viewer.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
     )
-    mapped_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    mapped_key = app._app_state.channel.label_to_channel_key.get(channel_entry)
     is_ratio = bool(mapped_key and is_ratio_key(mapped_key))
     is_shape = bool(mapped_key and is_shape_column(mapped_key))
 
@@ -811,7 +811,7 @@ def channel_key_for_label(app, label: str) -> str:
     Real channels return their lowercase token; ratios return their
     ``ratio:<name>`` key.
     """
-    mapping = getattr(app, "_label_to_channel_key", None) or {}
+    mapping = app._app_state.channel.label_to_channel_key
     if label in mapping:
         return mapping[label]
     # Fallback when the dropdown was populated before ``_label_to_channel_key``

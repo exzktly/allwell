@@ -165,7 +165,7 @@ def draw_violin(
 
     n = len(wells)
     if bw is None:
-        slider = getattr(ctx, "_violin_slider", None)
+        slider = ctx.widgets.get_or_none("_violin_slider")
         bw_raw = float(slider.value()) / 100.0 if slider is not None else 1.0
         bw = max(0.05, bw_raw)
     else:
@@ -688,7 +688,7 @@ def draw_grouped_bar_mode(
 
 def redraw_bars(ctx) -> None:
     """Top-level bar plot redraw (drives the Bar Plots tab)."""
-    if not hasattr(ctx, "_ax_bar_mean"):
+    if not ctx.widgets.has("_ax_bar_mean"):
         return
     ax_mean = ctx.widgets.get_or_none("_ax_bar_mean")
     ax_frac = ctx.widgets.get_or_none("_ax_bar_frac")
@@ -712,8 +712,7 @@ def redraw_bars(ctx) -> None:
     # replicate sets exist) in sync on every redraw — covers the case where the
     # user just created a replicate set, which otherwise never refreshed the
     # button's visibility.
-    if hasattr(ctx, "_refresh_bar_layout_btn_state"):
-        refresh_bar_layout_btn_state(ctx)
+    refresh_bar_layout_btn_state(ctx)
     bar_selected = selected_bar_wells(ctx, active_rsets)
 
     _ch = ctx.state.channel.active_channel.upper()

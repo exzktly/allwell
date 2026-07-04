@@ -223,19 +223,20 @@ def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
     for scope in registered_scopes():
         if scope.name == skip_scope:
             continue
-        ctrl = getattr(ctx, scope.ctrl_combo_attr, None)
-        base = getattr(ctx, scope.baseline_combo_attr, None)
+        reg = ctx.widgets
+        ctrl = reg.get_or_none(scope.ctrl_combo_attr)
+        base = reg.get_or_none(scope.baseline_combo_attr)
         if ctrl is not None:
             _repopulate_control_combo(ctx, ctrl)
         if base is not None:
             _repopulate_baseline_combo(ctx, base)
-        op_ctrl_combo = getattr(ctx, f"_fc_op_ctrl_combo_{scope.name}", None)
+        op_ctrl_combo = reg.get_or_none(f"_fc_op_ctrl_combo_{scope.name}")
         if op_ctrl_combo is not None:
             _repopulate_op_combo(ctx, op_ctrl_combo, attr="fc_op_ctrl")
-        op_t0_combo = getattr(ctx, f"_fc_op_t0_combo_{scope.name}", None)
+        op_t0_combo = reg.get_or_none(f"_fc_op_t0_combo_{scope.name}")
         if op_t0_combo is not None:
             _repopulate_op_combo(ctx, op_t0_combo, attr="fc_op_t0")
-        order_combo = getattr(ctx, f"_fc_order_combo_{scope.name}", None)
+        order_combo = reg.get_or_none(f"_fc_order_combo_{scope.name}")
         if order_combo is not None:
             _repopulate_order_combo(ctx, order_combo)
 
@@ -243,11 +244,12 @@ def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
 def _reset_bar_ylim_edits(ctx) -> None:
     """Clear the bar plot's user-entered y-lim edits so the autofit reclaims
     the panels. Idempotent and no-op when the edits aren't built yet."""
+    bar_rt = ctx.runtime.barplot
     for attr in (
-        "_bar_ylim_mean_lo_edit", "_bar_ylim_mean_hi_edit",
-        "_bar_ylim_frac_lo_edit", "_bar_ylim_frac_hi_edit",
+        "ylim_mean_lo_edit", "ylim_mean_hi_edit",
+        "ylim_frac_lo_edit", "ylim_frac_hi_edit",
     ):
-        edit = getattr(ctx, attr, None)
+        edit = getattr(bar_rt, attr, None)
         if edit is None:
             continue
         setter = getattr(edit, "setText", None)
@@ -453,10 +455,14 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
                  else f"_fc_ctrl_combo_{scope}")
     baseline_attr = (descriptor.baseline_combo_attr if descriptor
                      else f"_fc_baseline_combo_{scope}")
-    setattr(ctx, ctrl_attr, ctrl_combo)
-    setattr(ctx, baseline_attr, baseline_combo)
+    # These combo handles live in the widget registry (``ctx`` is a frozen
+    # dataclass — it can't hold per-scope widget attrs), keyed by the same
+    # names the cross-tab sync helper looks them up under. register() also
+    # stamps ``app.<name>`` so any legacy attribute reader still resolves.
+    ctx.widgets.register(ctrl_attr, ctrl_combo)
+    ctx.widgets.register(baseline_attr, baseline_combo)
     # Per-axis op combos stash under the standard naming convention the
     # cross-tab sync helper looks up.
-    setattr(ctx, f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
-    setattr(ctx, f"_fc_op_t0_combo_{scope}", op_t0_combo)
-    setattr(ctx, f"_fc_order_combo_{scope}", order_combo)
+    ctx.widgets.register(f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
+    ctx.widgets.register(f"_fc_op_t0_combo_{scope}", op_t0_combo)
+    ctx.widgets.register(f"_fc_order_combo_{scope}", order_combo)

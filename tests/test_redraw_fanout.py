@@ -128,7 +128,7 @@ def test_fold_change_toggle_redraws_visible_scope_once(counted_app):
     _show_centre_tab(app, "Bar Plots")
     counter.reset()
 
-    set_fold_change_state(app, vs_t0_on=True)
+    set_fold_change_state(app._ctx, vs_t0_on=True)
 
     assert counter.counts["bar"] == 1, "fold-change toggle must redraw the bar scope once"
     assert counter.counts["line"] == 0, "hidden line scope must defer"

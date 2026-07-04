@@ -109,13 +109,13 @@ def test_populate_metric_combo_collapses_for_shape(qapp):
 
     # Shape feature → single, inert (disabled) entry.
     cb = QComboBox()
-    populate_metric_combo(app, cb, channel_entry="Eccentricity")
+    populate_metric_combo(app._ctx, cb, channel_entry="Eccentricity")
     assert [cb.itemText(i) for i in range(cb.count())] == [CALCULATED_VAL_LABEL]
     assert cb.isEnabled() is False
 
     # Real channel → full intensity metric set, enabled.
     cb2 = QComboBox()
-    populate_metric_combo(app, cb2, channel_entry="GFP")
+    populate_metric_combo(app._ctx, cb2, channel_entry="GFP")
     items = [cb2.itemText(i) for i in range(cb2.count())]
     assert items == list(METRIC_ORDER)
     assert cb2.isEnabled() is True

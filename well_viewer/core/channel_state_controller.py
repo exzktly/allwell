@@ -269,7 +269,7 @@ def refresh_metric_combo_for_channel(app) -> None:
         channel_label = ""
     smfish_chan = app._app_state.channel.active_channel
     for attr in ("_plotting_metric_cb", "_metric_cb", "_metric_cb_bar"):
-        populate_metric_combo(app,
+        populate_metric_combo(app._ctx,
             getattr(app, attr, None),
             channel_entry=channel_label,
             smfish_channel=smfish_chan,
@@ -565,7 +565,7 @@ def set_active_metric(app, metric: str) -> None:
 
 
 def populate_metric_combo(
-    app,
+    ctx,
     cb,
     *,
     channel_entry: str,
@@ -588,6 +588,7 @@ def populate_metric_combo(
     """
     if cb is None:
         return
+    app = ctx.app  # A8: builders pass ctx; combo repopulation still walks the app
     from well_viewer.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
     )
@@ -687,7 +688,7 @@ def refresh_stats_property_combo(app) -> None:
     channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
     # Strip the " (spots)" suffix so smfish-enable matching works.
     smf_base = channel.split(" ")[0] if channel else app._app_state.channel.active_channel
-    populate_metric_combo(app,
+    populate_metric_combo(app._ctx,
         m_cb, channel_entry=channel, smfish_channel=smf_base,
     )
 

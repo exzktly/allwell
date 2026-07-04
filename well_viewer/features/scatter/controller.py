@@ -742,7 +742,7 @@ def refresh_scatter_agg_metric_for_axis(ctx, axis: str) -> None:
     if ch_cb is None or m_cb is None:
         return
     channel = str(ch_cb.currentText() or "")
-    populate_metric_combo(ctx.app,
+    populate_metric_combo(ctx,
         m_cb, channel_entry=channel, smfish_channel=channel,
         include_fraction=True,
     )
@@ -789,7 +789,7 @@ def refresh_scatter_metric_for_axis(ctx, axis: str) -> None:
     if ch_cb is None or m_cb is None:
         return
     channel = str(ch_cb.currentText() or "")
-    populate_metric_combo(ctx.app,
+    populate_metric_combo(ctx,
         m_cb, channel_entry=channel, smfish_channel=channel,
     )
 

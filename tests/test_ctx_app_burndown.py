@@ -355,7 +355,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (domain) and on_metric_selected (core channel_state_controller)
 #              take ctx (unwrap once); line + bar tab_views wire the fold-change
 #              popover + hidden metric combo through ctx, delegator via self._ctx.
-CTX_APP_BUDGET = 82
+CTX_APP_BUDGET = 81
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

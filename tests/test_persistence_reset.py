@@ -26,7 +26,7 @@ def test_delete_removes_file_and_clears_cache(tmp_path):
     other.write_text("{}")
 
     app = _app(tmp_path)
-    removed = _doc.delete(app)
+    removed = _doc.delete(app._app_state)
 
     assert removed is True
     assert not pj.exists()                       # the doc is gone
@@ -38,7 +38,7 @@ def test_delete_no_file_is_noop(tmp_path):
     from well_viewer.persistence import _doc
 
     app = _app(tmp_path)                          # no persistence.json present
-    assert _doc.delete(app) is False
+    assert _doc.delete(app._app_state) is False
     assert app._app_state.dataset.persistence_doc is None
 
 
@@ -46,4 +46,4 @@ def test_delete_no_data_dir_is_safe():
     from well_viewer.persistence import _doc
 
     app = _app(None)
-    assert _doc.delete(app) is False
+    assert _doc.delete(app._app_state) is False

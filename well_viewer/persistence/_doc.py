@@ -36,13 +36,13 @@ LEGACY_SIDECARS: dict[str, str] = {
 }
 
 
-def path_for(app) -> Optional[Path]:
-    if app._app_state.dataset.data_dir:
-        return Path(app._app_state.dataset.data_dir) / PERSISTENCE_FILENAME
+def path_for(state) -> Optional[Path]:
+    if state.dataset.data_dir:
+        return Path(state.dataset.data_dir) / PERSISTENCE_FILENAME
     return None
 
 
-def delete(app) -> bool:
+def delete(state) -> bool:
     """Delete the dataset's ``persistence.json`` and drop the in-memory cache.
 
     This wipes every persistence.json-backed domain (view state, per-row LUTs,
@@ -51,8 +51,8 @@ def delete(app) -> bool:
     ``pipeline_info.json`` (sample-definition labels) — are left untouched.
     Returns ``True`` when a file was removed. Caller reloads the dataset.
     """
-    p = path_for(app)
-    app._app_state.dataset.persistence_doc = None
+    p = path_for(state)
+    state.dataset.persistence_doc = None
     if p is None or not p.exists():
         return False
     try:
@@ -63,17 +63,17 @@ def delete(app) -> bool:
         return False
 
 
-def read(app) -> dict:
+def read(state) -> dict:
     """Return the cached persistence doc, populating from disk on first call.
 
     When ``persistence.json`` is missing but legacy sidecars are present, the
     legacy files are migrated into a freshly written doc and then deleted.
     Returns an empty dict when there's no data directory at all.
     """
-    cached = app._app_state.dataset.persistence_doc
+    cached = state.dataset.persistence_doc
     if cached is not None:
         return cached
-    p = path_for(app)
+    p = path_for(state)
     if p is None:
         return {}
     if p.exists():
@@ -98,13 +98,13 @@ def read(app) -> dict:
     else:
         doc = _migrate_from_legacy(p)
     doc.setdefault("schema_version", SCHEMA_VERSION)
-    app._app_state.dataset.persistence_doc = doc
+    state.dataset.persistence_doc = doc
     return doc
 
 
-def write(app, doc: dict) -> None:
+def write(state, doc: dict) -> None:
     """Atomically replace the on-disk doc and refresh the cache."""
-    p = path_for(app)
+    p = path_for(state)
     if p is None:
         return
     doc.setdefault("schema_version", SCHEMA_VERSION)
@@ -113,23 +113,21 @@ def write(app, doc: dict) -> None:
     except OSError as exc:
         _logger.warning("Failed to write %s: %s", p, exc)
         return
-    app._app_state.dataset.persistence_doc = doc
+    state.dataset.persistence_doc = doc
 
 
 def get_section(ctx, key: str) -> Any:
-    app = ctx.app
-    return read(app).get(key)
+    return read(ctx.state).get(key)
 
 
 def set_section(ctx, key: str, value: Any) -> None:
     """Mutate one section and flush the whole doc to disk."""
-    app = ctx.app
-    doc = read(app)
+    doc = read(ctx.state)
     if value is None:
         doc.pop(key, None)
     else:
         doc[key] = value
-    write(app, doc)
+    write(ctx.state, doc)
 
 
 def _migrate_from_legacy(persistence_path: Path) -> dict:

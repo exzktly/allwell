@@ -513,7 +513,15 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              module docstring reworded to name "the god-object" instead — pure
 #              comment rewords (the ratchet counts comments), zero code change, per
 #              the established "no literal token in comments" convention.
-CTX_APP_BUDGET = 29
+#   29 -> 27   T6-persistence-doc: -2   the persistence-doc leaf (_doc.read/write/
+#              path_for/delete + get_section/set_section) now takes the typed
+#              AppState (ctx.state) instead of unwrapping ctx.app — it only ever
+#              touched app._app_state.dataset (data_dir / persistence_doc), which
+#              IS ctx.state.dataset. Honest typed-state conversion, not a god-object
+#              reach; the two get_section/set_section unwraps are gone. (read/write/
+#              path_for/delete have no external callers; delete's 3 test callers +
+#              the crop_region/plot_groups fake ctx now pass state.)
+CTX_APP_BUDGET = 27
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

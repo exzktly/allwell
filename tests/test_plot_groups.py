@@ -63,9 +63,9 @@ def test_plot_groups_persistence_round_trip(tmp_path):
         ),
     )
     app._app_state.dataset.well_paths = {"A01": tmp_path / "A01.csv", "A02": tmp_path / "A02.csv"}
-    # persistence unwraps ``ctx.app`` once (``_doc.set_section``/``get_section``
-    # take ctx); the fake app is its own ctx's app.
-    app._ctx = SimpleNamespace(app=app)
+    # ``_doc.set_section``/``get_section`` read ``ctx.state`` (the typed AppState);
+    # the fake app is its own ctx's app and exposes its state slice.
+    app._ctx = SimpleNamespace(app=app, state=app._app_state)
 
     persist.save_to_data_dir(app)
     app._app_state.selection.plot_groups = []

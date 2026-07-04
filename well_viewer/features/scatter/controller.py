@@ -14,7 +14,7 @@ from typing import List
 _logger = logging.getLogger(__name__)
 
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
-from well_viewer.core.channel_state_controller import populate_metric_combo, get_fluor_gate
+from well_viewer.core.channel_state_controller import populate_metric_combo, get_fluor_gate, ratio_label_for
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
@@ -526,7 +526,7 @@ def update_scatter_menus(ctx) -> None:
     # ``smFISH Count`` metric entry, so we no longer overload the
     # channel column with aggregation flavour.
     channels = list(ctx.state.channel.fluor_channels) if ctx.state.channel.fluor_channels else ["gfp"]
-    ratio_labels = ctx.app._ratio_dropdown_labels()
+    ratio_labels = [ratio_label_for(ctx, r) for r in ctx.state.channel.ratio_metrics]
     scatter_ch_options = [str(c).upper() for c in channels] + ratio_labels
 
     # The per-cell scatter additionally offers the shape-feature virtual

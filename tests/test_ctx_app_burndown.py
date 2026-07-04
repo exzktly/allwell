@@ -553,7 +553,21 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              threading ctx only relocates the single boundary unwrap into those
 #              god-methods (net-0) and would force the external set_active_* callers
 #              (view_state / stats) to change. Left as reported floor bridges.
-CTX_APP_BUDGET = 25
+#   D5 image-browser subtabs: -1   the Image Browser sub-tab controller
+#              (features/image_browser/controller: build_image_browser_subtab +
+#              on_image_browser_subtab_changed) went fully ctx-native — sub-tab bar
+#              + built-map read off ctx.runtime.image_browser, the two sidebar
+#              frames off ctx.widgets (registered at their app_shell_view build
+#              site), and the two tab_view call sites now pass ctx (was ctx.app,
+#              -2). The three residual god-services the lifecycle needs
+#              (build_review_image_panel + update_channel_selector for the
+#              Segmentation build, and on_tab_change for the leaf refresh) are
+#              bundled behind ONE new core seam
+#              (tab_controller.image_browser_subtab_app_bridge, +1) instead of
+#              piecemeal per-service unwraps — so converting the cluster is
+#              net-NEGATIVE, not the net-ADD the E6 note predicted for the
+#              piecemeal route.
+CTX_APP_BUDGET = 24
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

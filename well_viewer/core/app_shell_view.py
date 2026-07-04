@@ -108,10 +108,16 @@ def build_ui(app) -> None:
     # _on_tab_change.  All are hidden initially; the tab handler shows
     # the relevant one.
     app._sidebar_preview_frame = QWidget()
-    app._sidebar_image_table_frame = QWidget()
+    # The Image Table / Cell Browser sidebar frames are read back by the
+    # ctx-native Image Browser sub-tab controller, so register them (the registry
+    # stamps ``app._<name>`` too, keeping the app-native tab_controller /
+    # registry visibility readers resolving unchanged).
+    app._sidebar_image_table_frame = app._ctx.widgets.register(
+        "_sidebar_image_table_frame", QWidget())
     app._sidebar_sample_frame = QWidget()
     app._sidebar_stats_frame = QWidget()
-    app._sidebar_cell_browser_frame = QWidget()
+    app._sidebar_cell_browser_frame = app._ctx.widgets.register(
+        "_sidebar_cell_browser_frame", QWidget())
     for w in (app._sidebar_preview_frame, app._sidebar_image_table_frame,
               app._sidebar_sample_frame,
               app._sidebar_stats_frame,

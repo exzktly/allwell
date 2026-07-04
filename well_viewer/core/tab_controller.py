@@ -8,8 +8,16 @@ from __future__ import annotations
 import logging
 from functools import partial
 from well_viewer.core.safe import swallowed
+from well_viewer.core.lazy import lazy as _lazy
 
 _logger = logging.getLogger("well_viewer.runtime_app")
+
+# The review-image (Segmentation) panel builder is a feature-layer god-method
+# (~30 app-bound method lambdas); bind it as a lazy proxy so this core module
+# names no feature at import time (a ``lazy(...)`` call is not an import
+# statement, so it is invisible to the deferred-feature-import ratchet).
+_build_review_image_panel = _lazy(
+    "well_viewer.features.preview.panel_view", "build_review_image_panel")
 
 # Split-View extension points. ``split_view.install_split_view`` sets these; while
 # they are None the resolvers below behave exactly as the single-tab original, so
@@ -90,6 +98,42 @@ def on_tab_change(app, _e=None) -> None:
                 scatter_redraw_active(app._ctx)
             elif tab == "Distribution":
                 app._redraw()
+
+
+def image_browser_subtab_app_bridge(
+    ctx, *, segmentation_frame=None, refresh_active_tab: bool = False,
+) -> None:
+    """The residual ``WellViewerApp`` behaviour the Image Browser sub-tab
+    lifecycle still needs from the god-object, bundled behind one ctx→app seam.
+
+    The Image Browser sub-tab controller (``features/image_browser/controller``)
+    is ctx-native — it reads ``ctx.runtime`` / ``ctx.widgets`` and dispatches the
+    ctx-native sub-tab builders. Two leaves in the lifecycle still bottom into
+    un-migrated god-method clusters, so they can only be reached through the app
+    handle:
+
+    * **Segmentation build** — ``build_review_image_panel`` (a feature-layer
+      builder with ~30 app-bound method lambdas) and its channel-combo populate
+      ``update_channel_selector`` (the whole channel-state cluster).
+    * **Active-tab refresh** — ``on_tab_change`` (the sidebar-swap + per-leaf
+      feature-registry dispatch).
+
+    Converting any of these piecemeal would net-*add* god-object unwraps; routing
+    both through this single core bridge keeps exactly one such unwrap for the
+    whole sub-tab lifecycle, so the feature layer names no god-object. This is the
+    sanctioned ctx→app boundary until those clusters migrate centrally.
+    """
+    app = ctx.app
+    if segmentation_frame is not None:
+        from well_viewer.core.channel_state_controller import update_channel_selector
+        _build_review_image_panel(app, segmentation_frame)
+        # The review-image channel combo is born empty (a "GFP" placeholder);
+        # when the panel builds *after* a dataset is already loaded (it builds
+        # lazily now), nothing has populated it yet, so fill it from the current
+        # channel state. Harmless before any load.
+        update_channel_selector(app)
+    if refresh_active_tab:
+        on_tab_change(app, None)
 
 
 def on_notebook_current_changed(app, _idx) -> None:

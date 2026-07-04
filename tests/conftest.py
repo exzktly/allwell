@@ -345,7 +345,7 @@ def image_table_app(loaded_app):
     idx = next((i for i in range(sub.count())
                 if sub.tabText(i) == "Image Table"), None)
     assert idx is not None, "Image Table sub-tab not found"
-    build_image_browser_subtab(app, idx)
+    build_image_browser_subtab(app._ctx, idx)
     return app
 
 

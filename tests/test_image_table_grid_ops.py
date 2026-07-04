@@ -21,7 +21,7 @@ def _build_image_table(app):
         if sub.tabText(i) == "Image Table":
             sub.setCurrentIndex(i)
             from well_viewer.features.image_browser.controller import build_image_browser_subtab
-            build_image_browser_subtab(app, i)
+            build_image_browser_subtab(app._ctx, i)
             break
     assert hasattr(app, "_image_table_selector_grid")
 

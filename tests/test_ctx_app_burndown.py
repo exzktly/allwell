@@ -408,7 +408,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              ratchet); threading ctx surfaces its genuine bridges (persistence-
 #              doc I/O, view_state snapshot/restore, stats deserialize/compute) as
 #              counted, documented ctx.app residuals to convert with those layers.
-CTX_APP_BUDGET = 63
+CTX_APP_BUDGET = 62
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

@@ -15,7 +15,10 @@ from well_viewer.features.image_browser.review_image.box_select import (
 )
 from well_viewer.core.channel_state_controller import set_active_image_channel
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
-from well_viewer.data.data_loading import parse_timepoint_hours
+from well_viewer.core.ui_helpers import norm_timepoint
+from well_viewer.data.data_loading import get_rows, parse_timepoint_hours
+from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.viewer_state import parse_rc
 import numpy as _np
 
 from well_viewer.core.safe import swallowed
@@ -739,51 +742,66 @@ def zoom_review_image_to_selected_nucleus(app, zoom: float = 3.0) -> None:
 def refresh_review_csv(ctx) -> None:
     """Rebuild the Review CSV filter combos + table for the current selection.
 
-    A8 teardown: the tab builder + the app delegator call this with ``ctx``.
-    The body walks the app-native Review CSV store/render layer (row caches,
-    the ``app._review_*`` widget stamps, the row-index caches), so it bridges
-    through the app below until that layer converts."""
-    _refresh_review_csv_impl(ctx.app)
+    A8 teardown: takes ``ctx`` and walks it directly. The filter combos / well
+    label / table / message widgets are all registered in ``ctx.widgets`` by the
+    Review CSV tab builder; the selection + dataset reads map to ``ctx.state``
+    and the domain leaves (``parse_rc`` / ``active_replicate_sets``); row
+    materialisation goes through the ctx-native ``data_loading.get_rows``. The
+    per-row table build (``refresh_review_csv_rows``) still bridges to the
+    app-native nav-index store — see there."""
+    _refresh_review_csv_impl(ctx)
 
 
-def _refresh_review_csv_impl(app) -> None:
-    if not hasattr(app, "_review_csv_table"):
+def _refresh_review_csv_impl(ctx) -> None:
+    w = ctx.widgets
+    table = w.get_or_none("_review_csv_table")
+    if table is None:
         return
-    sels = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
+    sels = sorted(ctx.state.selection.selected_wells, key=parse_rc)
     # When the user has no explicit picks but rep-sets exist, fall back
     # to every well in the active groups so the table populates on first
     # visit. Previously this path took the "Select one or more wells"
     # branch and left Review CSV empty whenever groups were defined.
-    if not sels and app._app_state.selection.selections:
+    if not sels and ctx.state.selection.selections:
         seen: set = set()
-        for rset in app._rep_sets_active():
-            for w in rset.wells:
-                if w in app._app_state.dataset.well_paths and w not in seen:
-                    seen.add(w)
-        sels = sorted(seen, key=app._parse_rc)
+        for rset in active_replicate_sets(
+                ctx.state.selection.selections, ctx.state.dataset.well_paths):
+            for well in rset.wells:
+                if well in ctx.state.dataset.well_paths and well not in seen:
+                    seen.add(well)
+        sels = sorted(seen, key=parse_rc)
+    well_lbl = w.get_or_none("_review_well_lbl")
+    fov_cb = w.get_or_none("_review_fov_cb")
+    tp_cb = w.get_or_none("_review_tp_cb")
+    msg_lbl = w.get_or_none("_review_csv_msg_lbl")
     if not sels:
-        app._review_well_lbl.setText("(select well(s))")
-        _set_combo_values(app._review_fov_cb, [])
-        _set_combo_values(app._review_tp_cb, [])
-        app._review_fov_cb.setCurrentText("")
-        app._review_tp_cb.setCurrentText("")
-        app._refresh_review_csv_rows([])
-        app._review_csv_msg_lbl.setText("Select one or more wells in the picker.")
+        well_lbl.setText("(select well(s))")
+        _set_combo_values(fov_cb, [])
+        _set_combo_values(tp_cb, [])
+        fov_cb.setCurrentText("")
+        tp_cb.setCurrentText("")
+        refresh_review_csv_rows(ctx, [])
+        msg_lbl.setText("Select one or more wells in the picker.")
         return
 
-    app._review_well_lbl.setText(
+    well_lbl.setText(
         ", ".join(sels[:3]) + (f" (+{len(sels) - 3} more)" if len(sels) > 3 else "")
     )
     rows: List[dict] = []
     for label in sels:
-        rows.extend(app._review_load_rows(label))
+        try:
+            df = get_rows(ctx, label)
+        except Exception:
+            df = None
+        if df is not None and not df.empty:
+            rows.extend(df.to_dict("records"))
     if not rows:
-        _set_combo_values(app._review_fov_cb, [])
-        _set_combo_values(app._review_tp_cb, [])
-        app._review_fov_cb.setCurrentText("")
-        app._review_tp_cb.setCurrentText("")
-        app._refresh_review_csv_rows([])
-        app._review_csv_msg_lbl.setText("No CSV rows loaded for selected well(s).")
+        _set_combo_values(fov_cb, [])
+        _set_combo_values(tp_cb, [])
+        fov_cb.setCurrentText("")
+        tp_cb.setCurrentText("")
+        refresh_review_csv_rows(ctx, [])
+        msg_lbl.setText("No CSV rows loaded for selected well(s).")
         return
 
     # Normalize the FOV combo values the SAME way the cell-click navigation and
@@ -807,19 +825,19 @@ def _refresh_review_csv_impl(app) -> None:
     seen_tps: set[str] = set()
     for row in rows:
         raw_tp = str(row.get("timepoint", row.get("tp", row.get("time", "")))).strip()
-        norm_tp = app._norm_timepoint(raw_tp)
+        norm_tp = norm_timepoint(ctx, raw_tp)
         if not norm_tp or norm_tp in seen_tps:
             continue
         seen_tps.add(norm_tp)
         tps.append(norm_tp)
     tps.sort(key=lambda tp: (parse_timepoint_hours(tp) is None, parse_timepoint_hours(tp) or 0.0, tp))
-    _set_combo_values(app._review_fov_cb, fovs)
-    _set_combo_values(app._review_tp_cb, tps)
-    if fovs and app._review_fov_cb.currentText() not in fovs:
-        app._review_fov_cb.setCurrentText(fovs[0])
-    if tps and app._review_tp_cb.currentText() not in tps:
-        app._review_tp_cb.setCurrentText(tps[0])
-    app._refresh_review_csv_rows(rows)
+    _set_combo_values(fov_cb, fovs)
+    _set_combo_values(tp_cb, tps)
+    if fovs and fov_cb.currentText() not in fovs:
+        fov_cb.setCurrentText(fovs[0])
+    if tps and tp_cb.currentText() not in tps:
+        tp_cb.setCurrentText(tps[0])
+    refresh_review_csv_rows(ctx, rows)
 
 
 

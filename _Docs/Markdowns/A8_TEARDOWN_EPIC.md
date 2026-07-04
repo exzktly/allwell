@@ -317,75 +317,120 @@ and the one shared-helper touch each in `ui_helpers` / `plot_card_actions`.
 
 ---
 
-## Endgame — the 51, file by file (focused campaign)
+## Endgame — the residual register (45) + the plan to zero
 
-> Measured `2026-07-04` on `claude/code-review-audit-framework-se53zd`
-> (ratchet `CTX_APP_BUDGET = 51`). Command:
+> Measured `2026-07-04` on `claude/code-review-audit-framework-se53zd` @ `3c7543e`
+> (ratchet `CTX_APP_BUDGET = 45`). Command:
 > `python -c "import re,pathlib;C=re.compile(r'\bctx\.app\b');print(sum(len(C.findall(p.read_text())) for p in pathlib.Path('well_viewer').rglob('*.py')))"`
 
-Every remaining `ctx.app` reference, classified **FLOOR** (structural — only T6
-dissolves it) or **CONVERT** (this campaign burns it down), with the technique.
+**What the parallel campaign found.** A four-worker parallel sweep (batches
+F1/F2/F4/F5) drove **51 → 45** and then hit a hard structural wall. The workers
+converged on one conclusion: **the remaining refs cannot be cleared by
+cluster-local sweeps.** Every leftover `ctx.app` is one of —
+(1) a **FLOOR** ref (the runtime stamp / a sanctioned persistence unwrap / a
+documented shared-helper touch) that *only deleting the field* (T6) dissolves, or
+(2) a **bridge into an app-typed callee** — a god-method, an *unregistered*
+widget handle, a non-ctx viewer/dialog constructor, or a cross-feature shared
+toggle — where naively threading `ctx` would **add** `ctx.app` (F1 and F5 both
+measured net-positive conversions and correctly refused them). So the path to 0
+is no longer "sweep the tails"; it is a small set of **enabler passes** (E1–E5
+below) that make each callee ctx-reachable, followed by **T6**.
 
-| refs | File | Class | Note / technique |
-|-----:|------|-------|------------------|
-| 3 | `core/app_runtime.py` | **FLOOR** | The stamp back-end (`_FeatureRuntime(app, …)`). Gone when the `app` field is deleted at T6. |
-| 2 | `persistence/view_state.py` | **FLOOR** | Sanctioned single `app = ctx.app` unwrap ×2 fns (`snapshot`/`restore`). Persistence MAY unwrap. |
-| 2 | `persistence/cell_gating.py` | **FLOOR** | Sanctioned unwrap (`save`/`load_from_pipeline_info`). |
-| 2 | `persistence/_doc.py` | **FLOOR** | `get_section`/`set_section` unwrap (the doc-store leaf). |
-| 1 | `persistence/sample_definitions.py` | **FLOOR** | Sanctioned unwrap. |
-| 1 | `persistence/heatmap_layouts.py` | **FLOOR** | Sanctioned unwrap. |
-| 1 | `core/ui_helpers.py` | **FLOOR** | Documented shared-helper touch. |
-| 1 | `core/plot_card_actions.py` | **FLOOR** | Documented shared-helper touch. |
-| 5 | `features/registry.py` | **CONVERT** | 4 sub-builder handoffs (`build_stats_tab(ctx.app)`, `build_stats_group_editor`, `_build_review_csv_tab`, `build_sample_definitions_centre`) + 1. **Batch F1** — thread `ctx` into the four sub-builders (each currently takes `app`). |
-| 5 | `core/channel_state_controller.py` | **CONVERT** | 5 `app = ctx.app` unwraps in the channel/axis handlers. **Batch F4** — the controller cluster; overlaps T4 (`channel_changed` bus route). |
-| 3 | `features/image_browser/cell_browser/controller.py` | **CONVERT** | **Batch F2** (running worker `aea67a3`). |
-| 3 | `features/grouping/cell_gating_tab_view.py` | **CONVERT** | Post-R6 tail; **Batch F3**. |
-| 2 | `features/smfish/tab_view.py` | **CONVERT** | `recalculate_threshold(ctx.app)` + review-csv bridge; **Batch F5**. |
-| 2 | `features/image_browser/tab_view.py` | **CONVERT** | **Batch F2** (image_browser cluster). |
-| 2 | `features/image_browser/review_image/controller.py` | **CONVERT** | **Batch F2** (running worker `aea67a3`). |
-| 2 | `features/heatmap/controller.py` | **CONVERT** | Render-tree tail (post-R2); **Batch F5**. |
-| 2 | `features/batch_export/tab_view.py` | **CONVERT** | **Batch F5**. |
-| 2 | `domain/stats_compute.py` | **CONVERT** | `getattr(ctx.app, "_aggregate_well"/"_aggregate_group")` delegate hooks → thread the aggregators through `ctx`. **Batch F4** (enabler). |
-| 2 | `core/tab_controller.py` | **CONVERT** | 2 `app = ctx.app` unwraps; **Batch F4** (controller layer). |
-| 2 | `core/plot_orchestrator.py` | **CONVERT** | 1 comment + `app = ctx.app` in `redraw_app`; **Batch F4**. |
-| 1 | `features/scatter/callbacks.py` | **CONVERT** | **Batch F5**. |
-| 1 | `features/saved_plots/controller.py` | **CONVERT** | Post-T5 tail; **Batch F5**. |
-| 1 | `features/lineplot/tab_view.py` | **CONVERT** | **Batch F5**. |
-| 1 | `features/image_browser/image_table/picker_view.py` | **CONVERT** | **Batch F2**. |
-| 1 | `features/heatmap/tab_view.py` | **CONVERT** | **Batch F5**. |
-| 1 | `domain/fold_change_controls.py` | **CONVERT** | `app = ctx.app`; **Batch F4** enabler. |
-| **51** | | | **~13 FLOOR + ~38 CONVERT** |
+### Residual register — every one of the 45, with its blocker
 
-### Campaign batches (parallelizable; one PR-shaped commit each)
+| refs | File:line | Class | Blocker → enabler |
+|-----:|-----------|-------|-------------------|
+| 3 | `core/app_runtime.py` | **FLOOR** | The stamp back-end (`_FeatureRuntime(app, …)`). Dissolved by **T6** (delete field). |
+| 2 | `persistence/_doc.py:120,126` | **FLOOR** | `get_section`/`set_section` sanctioned unwrap. **T6** → read `ctx.state.dataset` + `ctx.persistence` directly. |
+| 2 | `persistence/view_state.py:95,421` | **FLOOR** | `snapshot`/`restore` sanctioned unwrap. **T6**. |
+| 2 | `persistence/cell_gating.py:20,64` | **FLOOR** | `save`/`load_from_pipeline_info` unwrap. **T6**. |
+| 1 | `persistence/sample_definitions.py:219` | **FLOOR** | `_apply_unified_state(ctx.app,…)` unwrap. **T6**. |
+| 1 | `persistence/heatmap_layouts.py:80` | **FLOOR** | Sanctioned unwrap. **T6**. |
+| 1 | `core/ui_helpers.py:563` | **FLOOR** | Documented shared-helper touch. **T6**. |
+| 1 | `core/plot_card_actions.py:5` | **FLOOR** | Doc-comment mention (regex counts comments). Free −1 via the "no literal token in comments" reword; else **T6**. |
+| 1 | `features/lineplot/tab_view.py:81` | **CONVERT** | `getattr(ctx.app,"_plotting_metric_cb")` — the global metric combo is stashed raw in `core.centre_view`, never `register()`-d → **E1** (register it; read via `ctx.widgets`). |
+| 1 | `features/heatmap/controller.py:935` | **CONVERT** | `refresh_heatmap_layout_sidebar` reads unregistered `_heatmap_sidebar_table/_rows_spin/_cols_spin` → **E1**. |
+| 1 | `features/heatmap/tab_view.py:404` | **CONVERT** | same callee as above → **E1**. |
+| 1 | `features/scatter/callbacks.py:74` | **CONVERT** | `ctx.app._open_scatter_cell_viewer(…)` — `ScatterCellViewer(dock, app, …)` is not ctx-native → **E2**. |
+| 2 | `features/batch_export/tab_view.py:174,188` | **CONVERT** | `_build_spread_row`/`_show_batch_mode` need `toggle_sem`/`toggle_fov_replicates`/`refresh_fov_btn_state`, which live in lineplot/barplot → calling them is a **banned cross-feature import** → **E3** (relocate those toggles to a shared non-feature home). |
+| 1 | `features/heatmap/controller.py:708` | **CONVERT** | `set_selected_wells(ctx.app,…)` body chains god-methods `on_plate_sel_change`/`_refresh_sidebar_map` → **E4**. |
+| 1 | `features/saved_plots/controller.py:110` | **CONVERT** | `ctx.app._rebuild_all()` — `rebuild_all(app)` body is all god-methods → **E4**. |
+| 1 | `features/smfish/tab_view.py:832` | **CONVERT** | `recalculate_threshold(ctx.app)` — body saturated with `update_channel_selector`/`_load_gating_from_pipeline_info`/`on_channel_changed` → **E4**. |
+| 1 | `features/smfish/tab_view.py:846` | **CONVERT** | `getattr(ctx.app,"_refresh_review_csv")` — must stay app-bridge (deferred-imports budget) → **E4/E7** (needs the review-csv service, below). |
+| 3 | `features/image_browser/review_image/controller.py:268,703,857` | **CONVERT** | review-csv row impls + `zoom_review_image_to_selected_nucleus` walk the app-pinned collect store + runtime_app-bound pixmap services → **E4** (migrate the collect store + pixmap services to ctx). |
+| 1 | `features/image_browser/review_image/renderer.py:191` | **CONVERT** | `refresh_review_image(ctx.app)` — same app-pinned services → **E4**. |
+| 2 | `features/image_browser/tab_view.py:51,56` | **CONVERT** | `on_image_browser_subtab_changed`/`build_image_browser_subtab` are app-typed → **E4**. |
+| 1 | `features/image_browser/image_table/picker_view.py:96` | **CONVERT** | app-typed sub-panel builder → **E4**. |
+| 4 | `features/grouping/cell_gating_tab_view.py:185,287,1118,1771` | **CONVERT** | `apply_review_overrides_to_cache`/`build_qc_gate_controls`/`_refresh_thresh_frac_quick_edit`/`_all_member_labels` — mixed god-methods + app-typed builders → **E4** (+A3 domain extract). |
+| 3 | `features/registry.py:94,104,111` | **CONVERT** | `build_stats_group_editor`/`_build_review_csv_tab`/`build_sample_definitions_centre` — their bodies drive ~11–13 app-taking stats controllers/god-methods (converting them ADDS `ctx.app`) → **E5** (migrate the stats-editor + sample-def controller chains to ctx first). |
+| 1 | `features/stats/tab_view.py:32` | **CONVERT** | `build_stats_results_panel(ctx.app,…)` — same stats-controller chain → **E5**. |
+| 4 | `core/channel_state_controller.py:269,658,722,1002` | **CONVERT** | single core unwraps in `refresh_metric_combo_for_channel`/`refresh_heatmap_aggregation_options`/`on_plot_channel_selected`/`on_metric_selected`; each drives a god-method (`_active_channel_label`/`set_active_channel`/`sender()`) or the unregistered `_stats_channel_cb` → **E6** (partly cleared by E1's registration; rest fold into the `channel_changed` bus route / T4). |
+| 2 | `core/tab_controller.py:218,241` | **CONVERT** | `current_centre_tab`/`visible_centre_tabs` pass `app` to installed `split_focus`/`visible_provider` callables + walk `_notebook` → **E6**. |
+| 1 | `domain/fold_change_controls.py:328` | **CONVERT** | `install_fold_change_controls` stashes per-tab combos on the app + funnels through `set_fold_change_state(app,…)` → **E6**. |
+| 1 | `core/plot_orchestrator.py:194` | **CONVERT** | `redraw_app` drives figure/notebook widgets + `redraw(app,…)` → **E6** (or stays as one boundary unwrap until T6). |
+| **45** | | | **13 FLOOR + 32 CONVERT** |
 
-The CONVERT residue clusters into five independent batches. Each is a
-characterization-test-first, one-cluster conversion; the shared-leaf work that
-gated them (R1/R2/R3/R4/R6/R7, colour + label + export-style leaves) is **done**,
-so these now convert **net-negative**.
+### The plan to zero — enabler passes E1–E5, then T6
 
-- **F1 · registry sub-builders (5).** Thread `ctx` into `build_stats_tab`,
-  `build_stats_group_editor`, `_build_review_csv_tab`, `build_sample_definitions_centre`
-  so `registry.py` stops passing `ctx.app`. Bounded signature pass; low risk.
-- **F2 · image_browser cluster (8):** `cell_browser/controller` (3),
-  `image_browser/tab_view` (2), `review_image/controller` (2),
-  `image_table/picker_view` (1). The running worker `aea67a3` targets the
-  cell_browser + review_image half — integrate its net-positive output, then
-  finish tab_view + picker_view.
-- **F3 · cell_gating tail (3).** `cell_gating_tab_view` post-R6 residue —
-  the last handler touches now that gate values are typed state.
-- **F4 · controller layer + aggregators (12):** `channel_state_controller` (5),
-  `tab_controller` (2), `plot_orchestrator` (2), `stats_compute` aggregator hooks
-  (2), `fold_change_controls` (1). **Overlaps T4** — thread `ctx` through the
-  channel/axis handlers and the `_aggregate_well/_aggregate_group` delegates;
-  the channel handlers fold into the `channel_changed` bus route. Highest-value
-  cluster (unpins category b's controller tail). Do the `stats_compute` +
-  `fold_change` aggregator enablers first, then the three core controllers.
-- **F5 · feature render/tab tails (9):** `smfish/tab_view` (2),
-  `heatmap/controller` (2), `batch_export/tab_view` (2), `scatter/callbacks` (1),
-  `saved_plots/controller` (1), `lineplot/tab_view` (1), `heatmap/tab_view` (1).
-  Independent one-liners riding on the now-`ctx` render tree; sweep in one pass.
+Ordered by leverage (each pass makes a callee ctx-reachable so the bridge sites
+above convert **net-negative**). These are **coordinated cross-file passes, not
+parallel cluster sweeps** — that is the lesson of the F1/F2/F4/F5 wave. Each is
+one PR, characterization-test-first, green on the fast lane.
 
-After F1–F5 land, the count is at the **~13 FLOOR**, and **T6** takes it to 0.
+1. **E1 — Register the orphan widgets (≈4 refs, lowest risk, do first).**
+   Three widget handles are stashed raw (`setattr(app, …)`) instead of through
+   `WidgetRegistry`, so `ctx.widgets` can't resolve them: the global
+   `_plotting_metric_cb` (`core.centre_view`), the heatmap-sidebar trio
+   (`_heatmap_sidebar_table`/`_rows_spin`/`_cols_spin`), and `_stats_channel_cb`.
+   `register()` each at its build site (it still app-stamps, so existing readers
+   are unchanged), then flip the four reader sites to `ctx.widgets.get`. Clears
+   lineplot:81, heatmap/controller:935, heatmap/tab_view:404, and one
+   channel_state_controller unwrap.
+2. **E2 — Make `ScatterCellViewer` / `open_scatter_cell_viewer` ctx-native (1).**
+   Change the constructor + opener to take `ctx` (dock + state via `ctx`), drop
+   the `_open_scatter_cell_viewer` god-method. Clears scatter/callbacks:74.
+3. **E3 — Relocate the shared plot toggles to a non-feature home (2).**
+   `toggle_sem` / `toggle_fov_replicates` / `refresh_fov_btn_state` live in
+   lineplot/barplot; move them to a shared module (e.g. `core/plot_toggles.py` or
+   the already-shared `features/preview` layer) so batch_export can call them
+   without a cross-feature import. Clears batch_export:174,188.
+4. **E4 — Migrate the app-pinned service chains to ctx (≈13, the bulk).**
+   The deep one. Four sub-chains, each its own PR:
+   - **Review-image services** — the collect store (`review_collect_timepoints`
+     …) + pixmap services (`draw_review_image`/`render_review_image_display`),
+     currently `runtime_app`-bound, take `ctx`. Clears review_image controller:268/703/857 + renderer:191 + smfish:846 (shared review-csv service, **E7**).
+   - **Heatmap plate-selection chain** — `set_selected_wells` →
+     `on_plate_sel_change`/`_refresh_sidebar_map` to ctx. Clears heatmap/controller:708.
+   - **Image-browser sub-tab chain** — `on_image_browser_subtab_changed` /
+     `build_image_browser_subtab` / the image-table picker builder to ctx. Clears
+     image_browser/tab_view:51,56 + image_table/picker_view:96.
+   - **cell_gating tail + saved_plots/smfish god-methods** — `apply_review_overrides_to_cache`,
+     `build_qc_gate_controls`, `_refresh_thresh_frac_quick_edit`, `_all_member_labels`,
+     `rebuild_all`, `recalculate_threshold`. Overlaps **A3** (extract cell_gating
+     domain compute out of the view). Clears cell_gating ×4, saved_plots:110, smfish:832.
+5. **E5 — Migrate the stats-editor + sample-def controller chains (4).**
+   Thread `ctx` through the stats group-editor controllers (`stats_refresh_map`/
+   `stats_grp_add`/`stats_apply_drag`/`stats_active_group`…) and the
+   sample-definitions sub-builders, then flip `build_stats_group_editor` /
+   `build_sample_definitions_centre` / `build_stats_results_panel` /
+   `_build_review_csv_tab` to `ctx`. Clears registry ×3 + stats/tab_view:32.
+6. **E6 — Fold the core controller residuals into the bus / accept as boundary.**
+   `channel_state_controller` (post-E1) / `tab_controller` / `fold_change_controls`
+   / `plot_orchestrator` — the channel/axis handlers fold into the
+   `channel_changed` route (**T4**); the rest are single core-boundary unwraps
+   that can remain until T6 flips the ratchet (they are `core/`, where the unwrap
+   is sanctioned). ≈8 refs.
+7. **T6 — Delete `ViewerContext.app`, dissolve the FLOOR (13), pin ratchet == 0.**
+   The forcing function: with the field gone, the persistence unwraps *must*
+   become `ctx.state`/`ctx.persistence`, the `AppRuntime` stamp is dropped (after
+   a mechanical `app._<prefix><name>` → `ctx.runtime.<f>.<name>` reader sweep,
+   which can run in parallel with E1–E6), and the two shared-helper touches route
+   through named accessors. Then flip `assert total <= N` to `== 0`.
+
+**Net effect:** E1→E5 clear ~28 CONVERT refs; E6 clears/parks ~8; T6 removes the
+13 FLOOR and the last handful → **0**. E1–E3 are quick wins (~7 refs, low risk);
+E4 is the multi-PR bulk; E5 is bounded; T6 is the capstone. Suggested order:
+**E1 ∥ E2 ∥ E3 (parallel, independent) → E4 (serial sub-chains) → E5 → E6 → T6.**
 
 ---
 
@@ -437,16 +482,17 @@ field. Everything must be green on the fast lane; the closeEvent/teardown tests
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[x]` | in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 51 (render tree + shared leaves R1–R7 done; F1–F5 tail remains) |
-| T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into Batch F4 (channel/axis handlers + aggregators) |
-| T5 | Saved-plots service | — | Med | `[x]` | capture/persistence ctx-native (`226d0af`); 1 controller tail (F5) |
-| T6 | Retire `ctx.app` | F1–F5 | Low | `[ ]` | ~13 floor → 0 (delete field) |
+| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 45 (render tree + shared leaves R1–R7 + F1/F2/F4 done) |
+| T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into enabler E6 (channel/axis handlers → `channel_changed`) |
+| T5 | Saved-plots service | — | Med | `[x]` | capture/persistence ctx-native (`226d0af`); 1 controller tail (E4) |
+| T6 | Retire `ctx.app` | E1–E6 | Low | `[ ]` | 13 floor → 0 (delete field) |
 
-**Focused campaign (51 → 0):** run **F1–F5 in parallel** (all shared leaves
-that gated them are done, so each converts net-negative), plus the independent
-**T6 step-2 runtime-reader sweep**; then the final **T6 atomic commit** deletes
-`ViewerContext.app` and flips the ratchet to `== 0`. See
-[§ Endgame](#endgame--the-51-file-by-file-focused-campaign).
+**Campaign status (51 → 45).** The parallel four-worker sweep (F1/F2/F4/F5) drove
+51 → 45 and revealed the wall: the remaining refs are **FLOOR** (T6-only) or
+**bridges into app-typed callees** where naive conversion adds `ctx.app`. The
+path to 0 is now the **enabler passes E1–E5 → E6 → T6** — coordinated cross-file
+passes, not cluster sweeps. Full residual register + the E1–T6 plan in
+[§ Endgame](#endgame--the-residual-register-45--the-plan-to-zero).
 
 ## Ratchet evolution
 
@@ -478,6 +524,7 @@ that gated them are done, so each converts net-negative), plus the independent
 
 ---
 
-**Last updated:** 2026-07-04 — refreshed to the **51** state; added the
-file-by-file Endgame map + the F1–F5 focused campaign and the concrete T6
-floor-dissolution plan.
+**Last updated:** 2026-07-04 — parallel campaign drove **51 → 45** (F1/F2/F4
+integrated; F5 net-0, blocked). Replaced the F-batch plan with the definitive
+**45-ref residual register** and the **enabler-pass plan (E1–E5 → E6 → T6)** the
+workers' findings proved is required to reach 0.

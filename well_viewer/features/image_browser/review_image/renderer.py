@@ -15,6 +15,16 @@ from PySide6.QtGui import QImage, QPixmap
 
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
+# collect.py is the (Qt-free) data half of this feature and never imports the
+# renderer, so these resolve at module scope — no deferred cycle-break needed.
+from well_viewer.features.image_browser.review_image.collect import (
+    flatfield_field_for,
+    review_build_include_map,
+    review_build_threshold_map,
+    review_collect_timepoints,
+    review_norm_fov,
+    review_resolve_image_refs,
+)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -183,19 +193,13 @@ def _update_preview_impl(ctx, well_label: Optional[str]) -> None:
 def refresh_review_image_ctx(ctx) -> None:
     """ctx-native entry point for the Review Image refresh.
 
-    The body still walks the app-native store (``collect``) + pixmap-service
-    (``draw_review_image`` / ``render_review_image_display``, bound in
-    ``runtime_app``) layers, so it bridges through the app handle — the
-    sanctioned ctx→app boundary until those leaves migrate centrally.
+    A8 D4: the whole draw web (``collect`` data helpers + the pixmap-service
+    leaves) is ctx-native, so this walks ``ctx`` directly — no app bridge. The
+    re-entry guard flag lives on the review-image runtime scratch.
     """
-    refresh_review_image(ctx.app)
-
-
-def refresh_review_image(app) -> None:
-    """Reload the Review Image canvas for the active well/FOV/timepoint."""
     from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 
-    if not hasattr(app, "_review_image_label"):
+    if ctx.runtime.review_image.label is None:
         return
     # Re-entry guard: refresh_review_image programmatically updates the
     # FOV / TP combos, whose currentIndexChanged signal re-invokes this
@@ -203,61 +207,102 @@ def refresh_review_image(app) -> None:
     # tab/sub-tab/FOV/TP all at once can stack signal callbacks deep
     # enough to trip RecursionError. Skip the nested call -- the outer
     # invocation will redraw with the final state.
-    if getattr(app, "_refresh_review_image_in_progress", False):
+    if ctx.runtime.review_image.refresh_in_progress:
         return
-    app._refresh_review_image_in_progress = True
+    ctx.runtime.review_image.refresh_in_progress = True
     try:
-        _refresh_review_image_impl(app, _set_combo_values, channel_switch_debug=_debug_flags.review_image_channel_switch_debug_enabled(), image_load_debug=_debug_flags.review_image_load_debug_enabled())
+        _refresh_review_image_impl(ctx, _set_combo_values, channel_switch_debug=_debug_flags.review_image_channel_switch_debug_enabled(), image_load_debug=_debug_flags.review_image_load_debug_enabled())
     finally:
-        app._refresh_review_image_in_progress = False
+        ctx.runtime.review_image.refresh_in_progress = False
 
 
-def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: bool, image_load_debug: bool) -> None:
-    from well_viewer.data.image_discovery import open_imgref_as_array
+def refresh_review_image(app) -> None:
+    """App-native compatibility entry — bridge to the ctx-native refresh.
 
-    well = app._app_state.preview.selected_well
-    if well is None:
-        if channel_switch_debug:
-            _logger.debug("[RI-CHSW step 6] refresh_review_image aborted: no selected well")
-        return
+    Kept so the many still-app callers (renderer toggles, controller cell
+    edits, crop / registry / preview-panel / channel-switch handlers) invoke it
+    unchanged; the body reaches the context via ``app._ctx`` (the app→ctx
+    direction), never the ``app``-escape-hatch field on the context."""
+    refresh_review_image_ctx(app._ctx)
+
+
+def _resolve_review_fov_tp(ctx, widgets, status, _set_combo_values, *, well, channel_switch_debug: bool):
+    """Resolve + validate the active (fov_raw, fov, tp_raw, tp) for the redraw.
+
+    Drives the FOV/TP combos, normalises both tokens, and writes the abort
+    status line + debug log on an invalid selection. Returns the 4-tuple, or
+    ``None`` when the FOV or timepoint is missing (caller then aborts the draw).
+    Split out of ``_refresh_review_image_impl`` to keep that orchestrator's
+    cyclomatic complexity in check (A8 D4)."""
+    from well_viewer.core.ui_helpers import norm_timepoint as _norm_timepoint
 
     fov_raw = ""
-    if hasattr(app, "_review_image_fov_menu"):
-        fov_raw = str(app._review_image_fov_menu.currentText() or "").strip()
-    if not fov_raw and hasattr(app, "_preview_fov_var"):
-        fov_raw = str(app._preview_fov_var.currentText() or "").strip()
-    fov = app._review_norm_fov(fov_raw)
+    fov_menu = widgets.get_or_none("_review_image_fov_menu")
+    if fov_menu is not None:
+        fov_raw = str(fov_menu.currentText() or "").strip()
+    if not fov_raw:
+        fov_var = getattr(ctx.window, "_preview_fov_var", None)
+        if fov_var is not None:
+            fov_raw = str(fov_var.currentText() or "").strip()
+    fov = review_norm_fov(fov_raw)
     if not fov_raw or fov_raw == "—" or not fov:
-        app._review_image_status.setText("No FOV selected.")
+        if status is not None:
+            status.setText("No FOV selected.")
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 6] refresh_review_image aborted: invalid fov raw=%r norm=%r",
                 fov_raw, fov,
             )
-        return
+        return None
 
-    tp_values = app._review_collect_timepoints(fov)
+    tp_values = review_collect_timepoints(ctx, fov)
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 6] refresh_review_image start well=%r selected_fov_raw=%r normalized_fov=%r active_channel=%r",
-            well, fov_raw, fov, app._app_state.channel.active_image_channel,
+            well, fov_raw, fov, ctx.state.channel.active_image_channel,
         )
-    _set_combo_values(app._review_image_tp_menu, tp_values or ["—"])
-    if tp_values and app._review_image_tp_var.currentText() not in tp_values:
-        app._review_image_tp_var.setCurrentText(tp_values[0])
-    tp_raw = str(app._review_image_tp_var.currentText() or "").strip()
-    tp = app._norm_timepoint(tp_raw)
+    tp_menu = widgets.get_or_none("_review_image_tp_menu")
+    _set_combo_values(tp_menu, tp_values or ["—"])
+    if tp_values and tp_menu.currentText() not in tp_values:
+        tp_menu.setCurrentText(tp_values[0])
+    tp_raw = str(tp_menu.currentText() or "").strip()
+    tp = _norm_timepoint(ctx, tp_raw)
     if not tp_raw or tp_raw == "—" or not tp:
-        app._review_image_status.setText("No timepoint selected.")
+        if status is not None:
+            status.setText("No timepoint selected.")
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 6] refresh_review_image aborted: invalid timepoint raw=%r norm=%r",
                 tp_raw, tp,
             )
+        return None
+    return fov_raw, fov, tp_raw, tp
+
+
+def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: bool, image_load_debug: bool) -> None:
+    from well_viewer.data.image_discovery import open_imgref_as_array
+    from well_viewer.core.channel_state_controller import (
+        get_all_fluor_gates, get_thresh_frac_on,
+    )
+
+    widgets = ctx.widgets
+    state = ctx.state
+    well = state.preview.selected_well
+    status = widgets.get_or_none("_review_image_status")
+    if well is None:
+        if channel_switch_debug:
+            _logger.debug("[RI-CHSW step 6] refresh_review_image aborted: no selected well")
         return
 
-    from well_viewer.features.image_browser.review_image.controller import review_resolve_image_refs
-    fluor_ref, mask_ref = review_resolve_image_refs(app, fov_raw=fov_raw, tp_raw=tp_raw)
+    resolved = _resolve_review_fov_tp(
+        ctx, widgets, status, _set_combo_values,
+        well=well, channel_switch_debug=channel_switch_debug,
+    )
+    if resolved is None:
+        return
+    fov_raw, fov, tp_raw, tp = resolved
+
+    fluor_ref, mask_ref = review_resolve_image_refs(ctx, fov_raw=fov_raw, tp_raw=tp_raw)
     if image_load_debug:
         fluor_path = getattr(fluor_ref, "full_path_str", str(fluor_ref)) if fluor_ref is not None else None
         mask_path = getattr(mask_ref, "full_path_str", str(mask_ref)) if mask_ref is not None else None
@@ -270,29 +315,31 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
             well, fov, tp, mask_path,
         )
     if fluor_ref is None or mask_ref is None:
-        app._review_image_status.setText(
-            "Missing fluorescence image or label map for selected FOV/timepoint."
-        )
+        if status is not None:
+            status.setText(
+                "Missing fluorescence image or label map for selected FOV/timepoint."
+            )
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 6] refresh_review_image missing refs fluor_ref=%r mask_ref=%r",
                 fluor_ref, mask_ref,
             )
         return
-    app._app_state.review_image.is_tif = str(getattr(fluor_ref, "name", "")).lower().endswith((".tif", ".tiff"))
+    state.review_image.is_tif = str(getattr(fluor_ref, "name", "")).lower().endswith((".tif", ".tiff"))
     if not _NP_AVAILABLE:
-        app._review_image_status.setText("Could not render review image (numpy unavailable).")
+        if status is not None:
+            status.setText("Could not render review image (numpy unavailable).")
         return
 
     # The "flatfield" stage and "raw" stage resolve the SAME raw file ref, so
     # the source mode must be part of the cache key or they would collide.
-    image_source = app._app_state.review_image.image_source
+    image_source = state.review_image.image_source
     cache_key = (
         getattr(fluor_ref, "full_path_str", id(fluor_ref)),
         getattr(mask_ref, "full_path_str", id(mask_ref)),
         image_source,
     )
-    cached = app._app_state.review_image.frame_cache
+    cached = state.review_image.frame_cache
     if cached is not None and cached.get("key") == cache_key:
         fluor_arr = cached["fluor_arr"]
         center = cached["center"]
@@ -301,7 +348,8 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
         fluor_raw = open_imgref_as_array(fluor_ref, greyscale=True)
         mask_raw = open_imgref_as_array(mask_ref, greyscale=True)
         if fluor_raw is None or mask_raw is None:
-            app._review_image_status.setText("Could not render review image (image decode failed).")
+            if status is not None:
+                status.setText("Could not render review image (image decode failed).")
             return
         fluor_arr = _np.asarray(fluor_raw, dtype=_np.float32)
         # Flat-field validation view: apply ONLY the selected flat-field to the
@@ -309,9 +357,8 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
         # no-op when the mode resolves to no field (e.g. flatfield="none").
         if image_source == "flatfield":
             import pipeline.flatfield as _ffc
-            from well_viewer.features.image_browser.review_image.controller import flatfield_field_for
             field = flatfield_field_for(
-                app, str(app._app_state.channel.active_image_channel or ""), fluor_arr,
+                ctx, str(state.channel.active_image_channel or ""), fluor_arr,
                 tp=tp)
             fluor_arr = _np.asarray(_ffc.apply_flatfield(fluor_arr, field), dtype=_np.float32)
         center_int = _np.rint(_np.asarray(mask_raw)).astype(_np.int32, copy=False)
@@ -323,45 +370,43 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
             (center != padded[1:-1, :-2]) |
             (center != padded[1:-1, 2:])
         )
-        app._app_state.review_image.frame_cache = {
+        state.review_image.frame_cache = {
             "key": cache_key,
             "fluor_arr": fluor_arr,
             "center": center,
             "boundary": boundary,
         }
 
-    ic_key = (well, fov, tp, app._app_state.review_image.override_version)
-    include_by_nid = app._app_state.review_image.include_cache.get(ic_key)
+    ic_key = (well, fov, tp, state.review_image.override_version)
+    include_by_nid = state.review_image.include_cache.get(ic_key)
     if include_by_nid is None:
-        from well_viewer.features.image_browser.review_image.controller import review_build_include_map
-        include_by_nid = review_build_include_map(app, center, well, fov, tp)
-        if len(app._app_state.review_image.include_cache) > 32:
-            app._app_state.review_image.include_cache.clear()
-        app._app_state.review_image.include_cache[ic_key] = include_by_nid
+        include_by_nid = review_build_include_map(ctx, center, well, fov, tp)
+        if len(state.review_image.include_cache) > 32:
+            state.review_image.include_cache.clear()
+        state.review_image.include_cache[ic_key] = include_by_nid
 
     above_by_nid: Optional[Dict[int, bool]] = None
-    if bool(app._app_state.review_image.binary_mask):
-        fluor_gates = app._get_all_fluor_gates()
-        threshold = app._get_thresh_frac_on()
+    if bool(state.review_image.binary_mask):
+        fluor_gates = get_all_fluor_gates(ctx)
+        threshold = get_thresh_frac_on(ctx)
         tm_key = (
-            well, fov, tp, app._app_state.review_image.override_version,
-            app._app_state.channel.active_val_col, threshold,
+            well, fov, tp, state.review_image.override_version,
+            state.channel.active_val_col, threshold,
             tuple(sorted(fluor_gates.items())),
         )
-        above_by_nid = app._app_state.review_image.threshold_map_cache.get(tm_key)
+        above_by_nid = state.review_image.threshold_map_cache.get(tm_key)
         if above_by_nid is None:
-            from well_viewer.features.image_browser.review_image.controller import review_build_threshold_map
-            above_by_nid = review_build_threshold_map(app, center, well, fov, tp)
-            if len(app._app_state.review_image.threshold_map_cache) > 32:
-                app._app_state.review_image.threshold_map_cache.clear()
-            app._app_state.review_image.threshold_map_cache[tm_key] = above_by_nid
+            above_by_nid = review_build_threshold_map(ctx, center, well, fov, tp)
+            if len(state.review_image.threshold_map_cache) > 32:
+                state.review_image.threshold_map_cache.clear()
+            state.review_image.threshold_map_cache[tm_key] = above_by_nid
 
-    preserve_view = bool(app._app_state.review_image.preserve_view_on_refresh)
-    app._app_state.review_image.preserve_view_on_refresh = False
+    preserve_view = bool(state.review_image.preserve_view_on_refresh)
+    state.review_image.preserve_view_on_refresh = False
     if channel_switch_debug:
         _logger.debug("[RI-CHSW step 6->7] draw_review_image preserve_view=%s", preserve_view)
     draw_review_image(
-        app,
+        ctx,
         fluor_arr, center, include_by_nid,
         fit_lut=False, preserve_view=preserve_view, boundary=boundary,
         above_by_nid=above_by_nid,
@@ -369,7 +414,7 @@ def _refresh_review_image_impl(app, _set_combo_values, *, channel_switch_debug: 
 
 
 def draw_review_image(
-    app,
+    ctx,
     fluor_arr,
     mask_arr,
     include_by_nid: Dict[int, bool],
@@ -379,31 +424,41 @@ def draw_review_image(
     boundary=None,
     above_by_nid: Optional[Dict[int, bool]] = None,
 ) -> None:
+    # A8 D4: ctx-native pixmap compositor. Typed view/colour state lives on
+    # ``ctx.state.review_image`` / ``ctx.state.image_view``; the QLabel host +
+    # decoded RGB buffer are the ``ctx.runtime.review_image`` scratch; the LUT
+    # boxes / status label are Qt widgets reached through ``ctx.widgets`` (the
+    # registered status label) or ``ctx.window`` (the unregistered LUT entries).
+    from well_viewer.core.channel_state_controller import active_channel_label
+    state = ctx.state
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image channel=%r fit_lut=%s preserve_view=%s",
-            app._app_state.channel.active_image_channel,
+            state.channel.active_image_channel,
             fit_lut, preserve_view,
         )
     arr = _np.asarray(fluor_arr, dtype=_np.float32)
-    app._app_state.review_image.last_fluor_arr = arr
+    state.review_image.last_fluor_arr = arr
     m = _np.asarray(mask_arr)
     if fit_lut:
         lo, hi = float(arr.min()), float(arr.max())
         if hi <= lo:
             hi = lo + 1.0
-        app._app_state.image_view.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
+        state.image_view.lut_by_channel[str(state.channel.active_image_channel or "").lower()] = (lo, hi)
     else:
-        lo, hi = app._review_image_resolve_lut(arr)
-    if hasattr(app, "_review_lut_chan_lbl"):
-        app._review_lut_chan_lbl.setText(f"{app._app_state.channel.active_image_channel.upper()} LUT min:")
+        lo, hi = review_image_resolve_lut(ctx, arr)
+    lut_chan_lbl = getattr(ctx.window, "_review_lut_chan_lbl", None)
+    if lut_chan_lbl is not None:
+        lut_chan_lbl.setText(f"{state.channel.active_image_channel.upper()} LUT min:")
     # Keep the min/max boxes in sync with the LUT actually applied, so the
     # user always sees the real numbers (not a stale "auto") and edits start
     # from the current range. (These are ``_review_lmin_entry`` /
     # ``_review_lmax_entry`` — the previous ``_review_lut_min_edit`` names
     # never matched a real widget, so the boxes never updated.)
-    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
-        for _entry, _val in ((app._review_lmin_entry, lo), (app._review_lmax_entry, hi)):
+    lmin_entry = getattr(ctx.window, "_review_lmin_entry", None)
+    lmax_entry = getattr(ctx.window, "_review_lmax_entry", None)
+    if lmin_entry is not None and lmax_entry is not None:
+        for _entry, _val in ((lmin_entry, lo), (lmax_entry, hi)):
             _blocked = _entry.blockSignals(True)
             try:
                 _entry.setText(f"{_val:.0f}")
@@ -426,8 +481,8 @@ def draw_review_image(
             (center_view != padded[1:-1, 2:])
         )
 
-    binary_mask_mode = bool(app._app_state.review_image.binary_mask)
-    sel_nid = app._app_state.review_image.selected_nucleus
+    binary_mask_mode = bool(state.review_image.binary_mask)
+    sel_nid = state.review_image.selected_nucleus
 
     if binary_mask_mode:
         if above_by_nid is None:
@@ -439,11 +494,11 @@ def draw_review_image(
             above_mask = _np.isin(center, above_arr)
             rgb[above_mask] = _np.array([255, 255, 255], dtype=_np.uint8)
         if sel_nid is not None:
-            sel_color = _np.asarray(app._app_state.review_image.selected_color, dtype=_np.uint8)
+            sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
             sel_boundary = boundary & (center == int(sel_nid))
             rgb[sel_boundary] = sel_color
     else:
-        tint = app._app_state.review_image.tint_color
+        tint = state.review_image.tint_color
         tr, tg, tb = (max(0, min(255, int(c))) for c in tint)
         rgb = _np.empty((h, w, 3), dtype=_np.uint8)
         if (tr, tg, tb) == (255, 255, 255):
@@ -462,53 +517,57 @@ def draw_review_image(
             include_mask = _np.isin(center, included_arr)
         else:
             include_mask = _np.zeros(center.shape, dtype=bool)
-        show_outline = bool(app._app_state.review_image.show_outline)
+        show_outline = bool(state.review_image.show_outline)
         if show_outline:
             draw_boundary = boundary & include_mask
-            boundary_color = _np.asarray(app._app_state.review_image.boundary_color, dtype=_np.uint8)
+            boundary_color = _np.asarray(state.review_image.boundary_color, dtype=_np.uint8)
             rgb[draw_boundary] = boundary_color
             if sel_nid is not None:
-                sel_color = _np.asarray(app._app_state.review_image.selected_color, dtype=_np.uint8)
+                sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
                 sel_boundary = boundary & (center == int(sel_nid))
                 rgb[sel_boundary] = sel_color
         elif sel_nid is not None:
-            sel_color = _np.asarray(app._app_state.review_image.selected_color, dtype=_np.uint8)
+            sel_color = _np.asarray(state.review_image.selected_color, dtype=_np.uint8)
             sel_boundary = boundary & (center == int(sel_nid))
             rgb[sel_boundary] = sel_color
 
-    _draw_crop_outline(app, rgb)
-    app._review_image_base_rgb = _np.ascontiguousarray(rgb)
-    app._app_state.review_image.base_pil = (
+    _draw_crop_outline(ctx, rgb)
+    ctx.runtime.review_image.base_rgb = _np.ascontiguousarray(rgb)
+    state.review_image.base_pil = (
         _PILImage.fromarray(rgb, mode="RGB") if _PIL_AVAILABLE else None
     )
     if not preserve_view:
-        app._app_state.review_image.zoom = 1.0
-        app._app_state.review_image.pan_x = 0.0
-        app._app_state.review_image.pan_y = 0.0
-    render_review_image_display(app._ctx)
-    app._review_image_label._mask_arr = center
-    app._review_image_label._raw_arr = arr
-    app._apply_review_image_cursor()
+        state.review_image.zoom = 1.0
+        state.review_image.pan_x = 0.0
+        state.review_image.pan_y = 0.0
+    render_review_image_display(ctx)
+    label = ctx.runtime.review_image.label
+    if label is not None:
+        label._mask_arr = center
+        label._raw_arr = arr
+    apply_review_image_cursor(ctx)
     suffix = f"  ·  highlighted nucleus {sel_nid}" if sel_nid is not None else ""
-    if binary_mask_mode:
-        app._review_image_status.setText(
-            f"Binary mask: cells above threshold for {app._active_channel_label()} shown white.{suffix}"
-        )
-    else:
-        app._review_image_status.setText(
-            f"Showing channel {app._app_state.channel.active_image_channel.upper()} with included cell boundaries.{suffix}"
-        )
+    status = ctx.widgets.get_or_none("_review_image_status")
+    if status is not None:
+        if binary_mask_mode:
+            status.setText(
+                f"Binary mask: cells above threshold for {active_channel_label(ctx)} shown white.{suffix}"
+            )
+        else:
+            status.setText(
+                f"Showing channel {state.channel.active_image_channel.upper()} with included cell boundaries.{suffix}"
+            )
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] draw_review_image complete status_channel=%r zoom=%.3f pan=(%.1f, %.1f)",
-            app._app_state.channel.active_image_channel,
-            float(app._app_state.review_image.zoom),
-            float(app._app_state.review_image.pan_x),
-            float(app._app_state.review_image.pan_y),
+            state.channel.active_image_channel,
+            float(state.review_image.zoom),
+            float(state.review_image.pan_x),
+            float(state.review_image.pan_y),
         )
 
 
-def _draw_crop_outline(app, rgb) -> None:
+def _draw_crop_outline(ctx, rgb) -> None:
     """Draw the active dataset-wide crop rectangle as an outline on ``rgb``.
 
     The region is in mask-pixel (row, col) space — the same coordinate system as
@@ -516,7 +575,7 @@ def _draw_crop_outline(app, rgb) -> None:
     set. A distinct cyan edge keeps it readable over both the red boundaries and
     the white binary mask.
     """
-    region = app._app_state.dataset.crop_region
+    region = ctx.state.dataset.crop_region
     if not region:
         return
     h, w = rgb.shape[:2]
@@ -614,9 +673,14 @@ def render_review_image_display(ctx, *, pan_only: bool = False) -> None:
         )
 
 
-def review_image_resolve_lut(app, arr) -> Tuple[float, float]:
-    chan = str(app._app_state.channel.active_image_channel or "").lower()
-    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
+def review_image_resolve_lut(ctx, arr) -> Tuple[float, float]:
+    # A8 D4: ctx-native — active channel + the per-channel LUT cache read off
+    # typed ``ctx.state``; the LUT min/max boxes are the (unregistered) Qt
+    # widgets reached through ``ctx.window``.
+    chan = str(ctx.state.channel.active_image_channel or "").lower()
+    lmin_entry = getattr(ctx.window, "_review_lmin_entry", None)
+    lmax_entry = getattr(ctx.window, "_review_lmax_entry", None)
+    if lmin_entry is not None and lmax_entry is not None:
         # Parse each box independently so editing just one (leaving the other
         # at "auto"/blank) still takes effect — the missing side falls back to
         # the data min/max rather than discarding the typed value entirely.
@@ -629,19 +693,19 @@ def review_image_resolve_lut(app, arr) -> Tuple[float, float]:
             except ValueError:
                 return fallback
 
-        lo = _num(app._review_lmin_entry.text(), float(arr.min()))
-        hi = _num(app._review_lmax_entry.text(), float(arr.max()))
+        lo = _num(lmin_entry.text(), float(arr.min()))
+        hi = _num(lmax_entry.text(), float(arr.max()))
         if hi > lo:
-            app._app_state.image_view.lut_by_channel[chan] = (lo, hi)
+            ctx.state.image_view.lut_by_channel[chan] = (lo, hi)
             return lo, hi
-    saved = app._app_state.image_view.lut_by_channel.get(chan)
+    saved = ctx.state.image_view.lut_by_channel.get(chan)
     if saved is not None and saved[1] > saved[0]:
         return saved
     lo = float(arr.min())
     hi = float(arr.max())
     if hi <= lo:
         hi = lo + 1.0
-    app._app_state.image_view.lut_by_channel[chan] = (lo, hi)
+    ctx.state.image_view.lut_by_channel[chan] = (lo, hi)
     return lo, hi
 
 
@@ -659,22 +723,26 @@ def refresh_review_image_source_btn(app) -> None:
 
 
 
-def apply_review_image_cursor(app) -> None:
+def apply_review_image_cursor(ctx) -> None:
     """Set the Review Image cursor based on include-edit mode.
 
     ForbiddenCursor (the ⊘ 'no entry' icon) indicates remove-cell mode;
     PointingHandCursor indicates normal select/highlight mode. Applied
     to both the label and the scroll viewport so it does not flicker
     back to the arrow over scrollbar gutters or padding.
+
+    A8 D4: ctx-native — edit-mode flags read off typed ``ctx.state``; the QLabel
+    host + QScrollArea canvas are the ``ctx.runtime.review_image`` scratch.
     """
     enabled = bool(
-        app._app_state.review_image.include_edit_mode
-        or app._app_state.review_image.crop_edit_mode
+        ctx.state.review_image.include_edit_mode
+        or ctx.state.review_image.crop_edit_mode
     )
     cursor = Qt.CrossCursor if enabled else Qt.PointingHandCursor
-    if hasattr(app, "_review_image_label"):
-        app._review_image_label.setCursor(cursor)
-    canvas = getattr(app, "_review_image_canvas", None)
+    label = ctx.runtime.review_image.label
+    if label is not None:
+        label.setCursor(cursor)
+    canvas = ctx.runtime.review_image.canvas
     if canvas is not None:
         canvas.setCursor(cursor)
         vp = canvas.viewport()

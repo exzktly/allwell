@@ -9,8 +9,9 @@ import logging
 from PySide6.QtWidgets import QTableWidgetItem
 
 from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
+from well_viewer.features.image_browser.review_image.renderer import refresh_review_image_ctx
 from well_viewer.features.image_browser.review_image.renderer import render_review_image_display
-from well_viewer.features.image_browser.review_image.renderer import update_preview
+from well_viewer.features.image_browser.review_image.renderer import update_preview_ctx
 from well_viewer.features.image_browser.review_image.box_select import (
     box_select_begin, box_select_finish, box_select_update,
 )
@@ -256,9 +257,8 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
 def on_review_csv_row_double_click(ctx, item) -> None:
     """Called with a QTableWidgetItem from itemDoubleClicked signal.
 
-    A8 teardown: the Review CSV tab wires this with ``ctx``. The navigation
-    body still walks the app-native review_image/segmentation subtree, so it
-    bridges through the app below (a later cluster converts that subtree).
+    A8 D4: the Review CSV tab wires this with ``ctx``, and the navigation body
+    now walks ``ctx`` directly (the review-image draw web is ctx-native).
 
     Wrapped end-to-end so a partially-built Segmentation tab (e.g. the
     user double-clicks before the preview panel has materialised) shows a
@@ -266,7 +266,7 @@ def on_review_csv_row_double_click(ctx, item) -> None:
     the Qt event loop.
     """
     try:
-        _on_review_csv_row_double_click_impl(ctx.app, item)
+        _on_review_csv_row_double_click_impl(ctx, item)
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("well_viewer").exception(
@@ -280,56 +280,60 @@ def on_review_csv_row_double_click(ctx, item) -> None:
             swallowed()  # was: pass (silent except)
 
 
-def _on_review_csv_row_double_click_impl(app, item) -> None:
-    if not hasattr(app, "_review_csv_table"):
+def _on_review_csv_row_double_click_impl(ctx, item) -> None:
+    # A8 D4: ctx-native — the CSV table comes from ``ctx.widgets``; selection /
+    # dataset / preview / review-image reads map to ``ctx.state``; the preview
+    # FOV + review-image TP combos are the (unregistered) Qt widgets reached via
+    # ``ctx.window``; the redraw + zoom go through the ctx-native leaves.
+    table = ctx.widgets.get_or_none("_review_csv_table")
+    if table is None:
         return
-    table = app._review_csv_table
     row_idx = item.row()
     row = _table_row_dict(table, row_idx)
-    fov, tp, nid = app._review_row_keys(row)
+    fov, tp, nid = review_row_keys(ctx, row)
     well_tok = str(row.get("well", "")).strip()
-    key = well_tok if well_tok in app._app_state.dataset.well_paths else None
-    if key is None and app._app_state.selection.selected_wells:
-        key = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)[0]
+    key = well_tok if well_tok in ctx.state.dataset.well_paths else None
+    if key is None and ctx.state.selection.selected_wells:
+        key = sorted(ctx.state.selection.selected_wells, key=parse_rc)[0]
     if key is None:
         return
 
-    if hasattr(app, "_notebook"):
+    if getattr(ctx.window, "_notebook", None) is not None:
         # Segmentation is now a sub-tab of the unified Image Browser; route the
         # Review-CSV jump through the rail entry + sub-tab selection.
         from well_viewer.features.image_browser.controller import show_image_browser_subtab
-        show_image_browser_subtab(app._ctx, "Segmentation")
+        show_image_browser_subtab(ctx, "Segmentation")
 
     # Set the target nucleus before any refresh so intermediate renders can
     # already draw the yellow highlight.
     if nid:
         try:
-            app._app_state.review_image.selected_nucleus = int(float(nid))
+            ctx.state.review_image.selected_nucleus = int(float(nid))
         except Exception:
-            app._app_state.review_image.selected_nucleus = None
+            ctx.state.review_image.selected_nucleus = None
 
-    app._app_state.preview.selected_well = key
-    update_preview(app, key)
+    ctx.state.preview.selected_well = key
+    update_preview_ctx(ctx, key)
 
-    # _preview_fov_var drives _refresh_review_image; force the target FOV
+    # _preview_fov_var drives refresh_review_image; force the target FOV
     # before repopulating the TP menu. The combo only exists once the
     # Segmentation tab's preview panel has been built — guard for the
     # double-click-before-build case so we don't crash.
     if fov:
-        fov_cb = getattr(app, "_preview_fov_cb", None)
+        fov_cb = getattr(ctx.window, "_preview_fov_cb", None)
         if fov_cb is not None:
             fov_cb.setCurrentText(fov)
-    refresh_review_image(app)
+    refresh_review_image_ctx(ctx)
 
     # TP menu now holds the target FOV's timepoints. Selecting the TP here
     # triggers refresh_review_image via currentIndexChanged, which renders
     # the correct frame with the highlight already in place.
     if tp:
-        tp_cb = getattr(app, "_review_image_tp_cb", None)
+        tp_cb = getattr(ctx.window, "_review_image_tp_cb", None)
         if tp_cb is not None:
             tp_cb.setCurrentText(tp)
 
-    zoom_review_image_to_selected_nucleus(app._ctx)
+    zoom_review_image_to_selected_nucleus(ctx)
 
 
 @_guard_event

@@ -78,7 +78,7 @@ BARPLOT_CONTROLLER_BUDGET = 731
 # three fns gained thin ctx-adapter wrappers here that delegate to their unchanged
 # app-native bodies (the Review-CSV store/nav layer isn't ctx yet). A deliberate,
 # one-time +17 for the ctx boundary — not god-logic growth.
-REVIEW_IMAGE_CONTROLLER_BUDGET = 1018  # A8 E4-review: ctx-native zoom + CSV-rows leaves (ctx-seam docstrings)
+REVIEW_IMAGE_CONTROLLER_BUDGET = 1022  # A8 D4: +4 for the ctx-native review-CSV double-click seam (refresh_review_image_ctx + update_preview_ctx imports + ctx-seam docstring/comments)
 # Ratcheted back to 1176: the loose-TIFs-in-``in/`` work centralized the
 # well-count + layout detection into input_resolution_service.count_expected_wells,
 # removing the duplicated counter from the tab.

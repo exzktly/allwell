@@ -935,7 +935,7 @@ class WellViewerApp(QWidget):
             return (0, parsed, str(tp))
         return (1, 0.0, str(tp))
 
-    def _review_collect_timepoints(self, fov: str) -> list: return review_collect_timepoints(self, fov)
+    def _review_collect_timepoints(self, fov: str) -> list: return review_collect_timepoints(self._ctx, fov)
 
 
     def _set_review_image_source(self, mode: str) -> None: return set_review_image_source(self, mode)
@@ -977,12 +977,12 @@ class WellViewerApp(QWidget):
 
 
     def _draw_review_image(self, fluor_arr, mask_arr, include_by_nid: Dict[int, bool], *, fit_lut = False, preserve_view = False, boundary = None, above_by_nid = None) -> None:
-        return draw_review_image(self, fluor_arr, mask_arr, include_by_nid, fit_lut=fit_lut, preserve_view=preserve_view, boundary=boundary, above_by_nid=above_by_nid)
+        return draw_review_image(self._ctx, fluor_arr, mask_arr, include_by_nid, fit_lut=fit_lut, preserve_view=preserve_view, boundary=boundary, above_by_nid=above_by_nid)
 
     def _render_review_image_display(self, *, pan_only: bool = False) -> None:
         render_review_image_display(self._ctx, pan_only=pan_only)
 
-    def _review_image_resolve_lut(self, arr) -> Tuple[float, float]: return review_image_resolve_lut(self, arr)
+    def _review_image_resolve_lut(self, arr) -> Tuple[float, float]: return review_image_resolve_lut(self._ctx, arr)
 
     def _review_image_auto_lut(self) -> None: return review_image_auto_lut(self)
 
@@ -1004,7 +1004,7 @@ class WellViewerApp(QWidget):
 
     def _on_review_image_click(self, event: Any) -> None: _on_review_image_click_controller(self, event, _logger)
 
-    def _apply_review_image_cursor(self) -> None: return apply_review_image_cursor(self)
+    def _apply_review_image_cursor(self) -> None: return apply_review_image_cursor(self._ctx)
 
     def _select_review_csv_row_for_cell(self, fov: str, tp: str, nucleus_id: str) -> None:
         _select_review_csv_row_for_cell_controller(self, fov, tp, nucleus_id, _logger)

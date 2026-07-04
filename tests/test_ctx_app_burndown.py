@@ -567,7 +567,21 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              piecemeal per-service unwraps — so converting the cluster is
 #              net-NEGATIVE, not the net-ADD the E6 note predicted for the
 #              piecemeal route.
-CTX_APP_BUDGET = 24
+#   D4 review-image draw web: -3   the whole Review Image redraw web went
+#              ctx-native — refresh_review_image (renderer, now an app→ctx shim over
+#              refresh_review_image_ctx), the review-CSV row double-click impl
+#              (controller), and the smFISH Apply-Global-Threshold review-CSV
+#              writeback (which now fires the refresh_review_csv callback the
+#              Review CSV builder stamps on ctx.runtime.review, not the app method).
+#              The supporting collect leaves (resolve-image-refs / include-map /
+#              threshold-map / flat-field-field / collect-timepoints /
+#              binary-gate-columns) + pixmap leaves (draw_review_image /
+#              review_image_resolve_lut / apply_review_image_cursor) all take ctx.
+#              recalculate_threshold(ctx.app) in smfish STAYS: it bottoms into the
+#              same _features / _load_gating_from_pipeline_info / _seg_channel_token
+#              app machinery noted above, so threading ctx is net-0 (a reported
+#              floor bridge — see D1).
+CTX_APP_BUDGET = 21
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

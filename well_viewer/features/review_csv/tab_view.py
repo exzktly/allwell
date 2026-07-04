@@ -86,3 +86,11 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     ))
     msg_lbl.setObjectName("Muted")
     layout.addWidget(msg_lbl)
+
+    # Stamp a live refresh callback on the review runtime scratch so cross-feature
+    # callers (e.g. smFISH's Apply-Global-Threshold writeback) can rebuild this
+    # table without importing into image_browser (the deletability guardrail bans
+    # a cross-feature deferred import). Same bridge mechanism E4-review used for
+    # the other review-csv leaves; ``None`` until this tab is built, so a caller
+    # that fires before a first visit simply no-ops (nothing on screen to refresh).
+    ctx.runtime.review.refresh_csv = lambda: refresh_review_csv(ctx)

@@ -31,11 +31,12 @@ def test_flatfield_field_for_gaussian_and_none(loaded_app):
     app = loaded_app
     arr = (np.random.default_rng(0).random((48, 48)).astype(np.float32) * 100)
     _set_flatfield_mode(app, "gaussian")
-    field = C.flatfield_field_for(app, "GFP", arr)
+    # A8 D4: flatfield_field_for is ctx-native — pass the app's context.
+    field = C.flatfield_field_for(app._ctx, "GFP", arr)
     assert field is not None and field.shape == arr.shape
     assert abs(float(field.mean()) - 1.0) < 1e-2          # mean-1 field
     _set_flatfield_mode(app, "none")
-    assert C.flatfield_field_for(app, "GFP", arr) is None  # identity → no-op
+    assert C.flatfield_field_for(app._ctx, "GFP", arr) is None  # identity → no-op
 
 
 def test_set_source_updates_state_syncs_control_and_clears_lut(loaded_app):

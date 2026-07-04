@@ -71,7 +71,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # ``from features.barplot...`` imports the toggles used to carry; and
 # invalidate_stats_cache's per-FOV refresh import now targets core.plot_toggles
 # instead of features.preview — three deferred feature imports removed.
-MAX_DEFERRED_FEATURE_IMPORTS = 128
+# Lowered to 124 in A8 D4 (review-image draw web → ctx): the renderer's four
+# function-local ``review_image.controller`` imports (resolve-refs / include-map
+# / threshold-map / flat-field field) were promoted to a single module-level
+# ``review_image.collect`` import — collect is the Qt-free data half and never
+# imports the renderer, so there is no cycle to defer.
+MAX_DEFERRED_FEATURE_IMPORTS = 124
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

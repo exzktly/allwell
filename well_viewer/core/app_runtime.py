@@ -48,7 +48,7 @@ class AppRuntime:
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
-                 "review_image", "review", "stats")
+                 "review_image", "review", "stats", "plot_groups")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -119,3 +119,10 @@ class AppRuntime:
         # Bound-method handles (live objects), never serialized — resolved through
         # the ``_stats_`` prefix so the ctx-native builder names no god-object.
         object.__setattr__(self, "stats", _FeatureRuntime(app, "_stats_"))
+        # Plot Groups quick-load drawers (a shared *core* sidebar widget, not a
+        # removable feature): ``ctx.runtime.plot_groups.drawers`` <->
+        # ``app._plot_groups_drawers`` — the list of registered drawer dicts that
+        # ``refresh_plot_groups_sidebar`` repaints in lock-step. Lets the ctx-native
+        # drawer builder + refresh reach the registry list without the god-object
+        # handle. The per-drawer Qt widgets go through ``ctx.widgets``.
+        object.__setattr__(self, "plot_groups", _FeatureRuntime(app, "_plot_groups_"))

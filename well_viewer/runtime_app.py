@@ -816,7 +816,7 @@ class WellViewerApp(QWidget):
     def _plate_commit_deferred(self) -> None: return plate_commit_deferred(self)
 
     def _set_selected_wells(self, new_set, *, commit = True) -> None:
-        return set_selected_wells(self, new_set, commit=commit)
+        return set_selected_wells(self._ctx, new_set, commit=commit)
 
 
     _PLOTTING_TABS = frozenset({

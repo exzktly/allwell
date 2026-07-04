@@ -90,10 +90,10 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     # Image Table grid immediately. ``include_add_controls=False`` because
     # authoring new groups belongs with the plotting workflow.
     from well_viewer.core.sidebar_view import build_plot_groups_drawer
-    # build_plot_groups_drawer is a shared core sidebar builder that still takes
-    # (and mutates) the app; bridge through the app handle until it migrates to ctx.
+    # build_plot_groups_drawer is a shared core sidebar builder; it takes ctx
+    # (drawer registry on ctx.runtime.plot_groups, widgets via ctx.widgets).
     plot_groups_section = build_plot_groups_drawer(
-        ctx.app, parent, include_add_controls=False,
+        ctx, parent, include_add_controls=False,
     )
     layout.addWidget(plot_groups_section)
 

@@ -800,7 +800,7 @@ def groups_centre_refresh(app) -> None:
 
 
 
-def set_selected_wells(app, new_set, *, commit: bool = True) -> None:
+def set_selected_wells(ctx, new_set, *, commit: bool = True) -> None:
     """Single mutation point for ``_selected_wells``.
 
     Callers that mutated the set directly (heatmap drag, smFISH tab
@@ -808,14 +808,24 @@ def set_selected_wells(app, new_set, *, commit: bool = True) -> None:
     and the redraw fan-out, so the next selection diff in
     ``selection_controller.on_plate_sel_change`` mis-attributed
     additions / removals across tabs. Funnel everything through here.
+
+    Takes ``ctx`` so feature callers (heatmap drag, the Plot Groups drawer)
+    thread the context instead of the god-object. The prev-sel snapshot + set
+    mutation are pure typed state; only the two downstream fan-outs
+    (``_refresh_sidebar_map`` debounce and ``on_plate_sel_change``) are still
+    app-native, so they are reached through a single ``app`` handle bridge.
     """
+    sel = ctx.state.selection
     new_set = set(new_set or [])
-    if new_set == app._app_state.selection.selected_wells:
+    if new_set == sel.selected_wells:
         return
     # Snapshot the previous selection so on_plate_sel_change can
     # compute an accurate diff if it runs after this.
-    app._app_state.selection.prev_sel = set(app._app_state.selection.selected_wells)
-    app._app_state.selection.selected_wells = new_set
+    sel.prev_sel = set(sel.selected_wells)
+    sel.selected_wells = new_set
+    # The sidebar-map debounce and the plate-change commit remain app-native
+    # god-services; bridge to them through one app handle (core may).
+    app = ctx.app
     if hasattr(app, "_refresh_sidebar_map"):
         app._refresh_sidebar_map()
     if commit:

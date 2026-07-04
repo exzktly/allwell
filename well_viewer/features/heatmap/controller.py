@@ -703,9 +703,9 @@ def on_heatmap_click(ctx, event) -> None:
         selected = set(wells_here)
 
     # ``set_selected_wells`` is the single mutation point (prev-sel tracking +
-    # redraw fan-out); it is still app-native, so bridge via the app handle.
+    # redraw fan-out); it takes ctx, so thread the context.
     from well_viewer.core.selection_controller import set_selected_wells
-    set_selected_wells(ctx.app, selected)
+    set_selected_wells(ctx, selected)
 
 
 def on_heatmap_motion(ctx, event) -> None:

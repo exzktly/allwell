@@ -487,7 +487,28 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              bridges (no clean ctx home): _refresh_thresh_frac_quick_edit (steppers
 #              unregistered), _build_review_csv_tab god-method, build_sample_definitions_
 #              centre (whole sample-def sub-builder tree still app-taking).
-CTX_APP_BUDGET = 34
+#   E4-ui heatmap/image-browser/saved_plots: -1   the shared core Plot Groups
+#              drawer (build_plot_groups_drawer + _plot_groups_add_current/load/
+#              delete/refresh_plot_groups_sidebar/schedule_save) went ctx-native:
+#              the drawer registry lives on a new ctx.runtime.plot_groups
+#              namespace, the per-drawer widgets register through ctx.widgets
+#              (still stamping the legacy singular app._plot_group_* readers),
+#              state via ctx.state, parse_rc/set_status/persistence via the
+#              ctx-native leaves, and the group-load selection through the
+#              now-ctx set_selected_wells. The Image Table picker drops its
+#              ctx.app drawer call (and its refresh_plot_groups_sidebar(ctx) — a
+#              previously silently-swallowed app/ctx mismatch — now actually
+#              repaints). set_selected_wells itself took ctx (heatmap drag +
+#              plot-groups load thread it; its two downstream fan-outs
+#              _refresh_sidebar_map + on_plate_sel_change stay app-native, reached
+#              through one core app-handle bridge → net 0 for that fn, so the -1
+#              is the picker drawer decouple). LEFT as reported bridges: image
+#              browser build_image_browser_subtab / on_image_browser_subtab_changed
+#              (their Segmentation build_review_image_panel + update_channel_selector
+#              + on_tab_change god-services net-ADD if converted) and saved_plots
+#              _rebuild_all (all god-methods: _groups_centre_refresh /
+#              _refresh_sidebar_map / _features / _show_line_sidebar).
+CTX_APP_BUDGET = 33
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

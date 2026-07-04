@@ -517,9 +517,11 @@ def aggregate_well(
     not define this method, so the DataFrame path is used at runtime.
 
     A8 R-leaf: takes ``ctx`` — rows via the ctx-native ``get_rows`` data
-    service, ratios/gate-on state via ``ctx.state`` / ``ctx.runtime``.
+    service, ratios/gate-on state via ``ctx.state`` / ``ctx.runtime``. The
+    optional aggregation delegate is resolved through ``ctx.runtime.aggregate``
+    (backed by ``app._aggregate_well``) instead of naming the god-object.
     """
-    delegate = getattr(ctx.app, "_aggregate_well", None)
+    delegate = ctx.runtime.aggregate.well
     if callable(delegate):
         return delegate(
             label,
@@ -555,9 +557,11 @@ def aggregate_group(
 ):
     """Aggregate a list of wells via the vectorized path (concatenated when len>1).
 
-    A8 R-leaf: takes ``ctx`` — see :func:`aggregate_well`.
+    A8 R-leaf: takes ``ctx`` — see :func:`aggregate_well`. The optional group
+    delegate resolves through ``ctx.runtime.aggregate`` (backed by
+    ``app._aggregate_group``) instead of naming the god-object.
     """
-    delegate = getattr(ctx.app, "_aggregate_group", None)
+    delegate = ctx.runtime.aggregate.group
     if callable(delegate):
         return delegate(
             wells,

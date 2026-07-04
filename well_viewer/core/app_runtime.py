@@ -47,7 +47,7 @@ class AppRuntime:
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
-                 "batch_export", "saved_plots", "split", "fov", "sem")
+                 "batch_export", "saved_plots", "split", "fov", "sem", "aggregate")
 
     def __init__(self, app) -> None:
         object.__setattr__(self, "_app", app)
@@ -86,3 +86,10 @@ class AppRuntime:
         # ``app._sem_btns`` and ``ctx.runtime.sem.observers`` <->
         # ``app._sem_observers``. Live widgets, never persisted.
         object.__setattr__(self, "sem", _FeatureRuntime(app, "_sem_"))
+        # Per-well / per-group aggregation delegates. Production ``WellViewerApp``
+        # exposes neither (the DataFrame path is used); the pure-logic test apps
+        # stamp ``app._aggregate_well`` / ``app._aggregate_group`` to serve
+        # precomputed AggPoints. ``ctx.runtime.aggregate.well`` / ``.group``
+        # resolve those callables (or ``None``) so the stats leaf threads the
+        # delegate through ``ctx`` instead of naming the god-object.
+        object.__setattr__(self, "aggregate", _FeatureRuntime(app, "_aggregate_"))

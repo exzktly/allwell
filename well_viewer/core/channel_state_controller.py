@@ -592,11 +592,14 @@ def populate_metric_combo(
     """
     if cb is None:
         return
-    app = ctx.app  # A8: builders pass ctx; combo repopulation still walks the app
+    # A8: pure typed-state read — the combo (``cb``) is passed in, and the only
+    # app touch is the channel slice, so read it off ``ctx.state`` directly with
+    # no god-object unwrap.
+    channel = ctx.state.channel
     from well_viewer.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
     )
-    mapped_key = app._app_state.channel.label_to_channel_key.get(channel_entry)
+    mapped_key = channel.label_to_channel_key.get(channel_entry)
     is_ratio = bool(mapped_key and is_ratio_key(mapped_key))
     is_shape = bool(mapped_key and is_shape_column(mapped_key))
 
@@ -621,7 +624,7 @@ def populate_metric_combo(
             cb.setCurrentText(prev)
         else:
             fallback = METRIC_KEY_TO_LABEL.get(
-                app._app_state.channel.active_metric, "Mean Intensity"
+                channel.active_metric, "Mean Intensity"
             )
             idx = cb.findText(fallback)
             if idx >= 0:
@@ -633,7 +636,7 @@ def populate_metric_combo(
             if item is not None:
                 smf_ok = (
                     smfish_channel is not None
-                    and smfish_channel in app._app_state.channel.smfish_channels
+                    and smfish_channel in channel.smfish_channels
                 )
                 item.setEnabled(smf_ok)
     finally:

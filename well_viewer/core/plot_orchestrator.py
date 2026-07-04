@@ -187,10 +187,10 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
 
 def redraw_app(ctx) -> None:
     # A8: takes ``ctx`` so features fan out a full redraw without naming the
-    # god-object (``redraw_app(ctx)`` replaces ``ctx.app._redraw()``). The
-    # orchestration body still drives the app's figure/notebook widgets, so it
-    # unwraps the handle once here — a single core-level bridge, not a per-call
-    # feature reach-through.
+    # god-object (``redraw_app(ctx)`` is the ctx-native replacement for the old
+    # ``_redraw()`` method call). The orchestration body still drives the app's
+    # figure/notebook widgets, so it unwraps the handle once here — a single
+    # core-level bridge, not a per-call feature reach-through.
     app = ctx.app
     # Keep the EmptyState/figure stacks in sync with the current data
     # state before any matplotlib work. When no data is loaded the plot

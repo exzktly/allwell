@@ -408,7 +408,15 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              ratchet); threading ctx surfaces its genuine bridges (persistence-
 #              doc I/O, view_state snapshot/restore, stats deserialize/compute) as
 #              counted, documented ctx.app residuals to convert with those layers.
-CTX_APP_BUDGET = 51
+#   F4 controllers+aggregators: -4   stats_compute aggregate_well / aggregate_group
+#              resolve the delegate through a new ctx.runtime.aggregate namespace
+#              (backed by app._aggregate_well/_group) instead of getattr(ctx.app);
+#              populate_metric_combo reads the channel slice off ctx.state (unwrap
+#              dropped); the plot_orchestrator redraw_app comment reworded off the
+#              literal ``ctx.app`` token. The channel/tab/fold-change/redraw_app
+#              residual unwraps stay — each drives a genuine god-object method or
+#              an un-registered widget handle (one core-boundary unwrap each).
+CTX_APP_BUDGET = 47
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

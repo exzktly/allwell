@@ -114,7 +114,8 @@ def test_adding_a_metric_flows_everywhere(monkeypatch):
     cb = _FakeCombo()
     from types import SimpleNamespace
     _a = _App()
-    _a._ctx = SimpleNamespace(app=_a)          # populate_metric_combo takes ctx (A8)
+    # populate_metric_combo reads the channel slice off ctx.state (A8).
+    _a._ctx = SimpleNamespace(app=_a, state=_a._app_state)
     populate_metric_combo(_a._ctx, cb, channel_entry="gfp")
     assert "Median Intensity" in cb.items
     assert "Foci Count" in cb.items

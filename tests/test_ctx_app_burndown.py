@@ -364,7 +364,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              app-native Review CSV store/nav bodies -> +3 counted bridges in
 #              review_image/controller); saved_plots grid/clear read ctx.widgets
 #              (net 0 there — the SavedPlotsStore layer still takes app).
-CTX_APP_BUDGET = 78
+#   78 -> 74    batch_export _mode_dispatch -> ctx: the 4 open_*_batch_export_shim
+#              (core.plot_orchestrator) take ctx and are fully threaded (shared
+#              _switch_to_batch_export_tab helper via ctx.state/ctx.window/
+#              ctx.runtime.batch_export — no core unwrap added); tab_view dispatch
+#              calls fn(ctx); delegators pass self._ctx. _build_spread_row /
+#              _show_batch_mode stay app bridges (converting adds ctx.app).
+CTX_APP_BUDGET = 74
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

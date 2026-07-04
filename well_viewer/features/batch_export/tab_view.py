@@ -146,18 +146,25 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     switch_row.addSegment("Scatter (cells)", data="scatter_cells")
     switch_row.addSegment("Scatter (aggregate)", data="scatter_agg")
 
+    from well_viewer.core.plot_orchestrator import (
+        open_batch_export_shim,
+        open_bar_batch_export_shim,
+        open_scatter_cells_batch_export_shim,
+        open_scatter_agg_batch_export_shim,
+    )
+
     _mode_dispatch = {
-        "line": ctx.app._open_batch_export,
-        "bar": ctx.app._open_bar_batch_export,
-        "scatter_cells": ctx.app._open_scatter_cells_batch_export,
-        "scatter_agg": ctx.app._open_scatter_agg_batch_export,
+        "line": open_batch_export_shim,
+        "bar": open_bar_batch_export_shim,
+        "scatter_cells": open_scatter_cells_batch_export_shim,
+        "scatter_agg": open_scatter_agg_batch_export_shim,
     }
 
     def _on_mode_changed(_idx: int) -> None:
         mode = switch_row.currentData() or "line"
         fn = _mode_dispatch.get(mode)
         if fn is not None:
-            fn()
+            fn(ctx)
     switch_row.currentChanged.connect(_on_mode_changed)
     layout.addWidget(switch_row)
 

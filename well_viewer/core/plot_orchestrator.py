@@ -225,48 +225,46 @@ def redraw_app(ctx) -> None:
 
 
 
-def open_bar_batch_export_shim(app) -> None:
+def _switch_to_batch_export_tab(ctx, mode: str) -> None:
+    """Focus the Batch Export notebook tab and select ``mode`` on its builder."""
+    nb = getattr(ctx.window, "_notebook", None)
+    if nb is not None:
+        nb.setCurrentByName("Batch Export")
+    set_mode = ctx.runtime.batch_export.set_mode
+    if set_mode is not None:
+        set_mode(mode)
+
+
+def open_bar_batch_export_shim(ctx) -> None:
     """Switch Batch Export tab to the inline bar-plot export builder."""
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Bar Batch Export.")
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Bar Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("bar")
+    _switch_to_batch_export_tab(ctx, "bar")
 
 
 
-def open_scatter_cells_batch_export_shim(app) -> None:
+def open_scatter_cells_batch_export_shim(ctx) -> None:
     """Switch Batch Export tab to the inline scatter-cells export builder."""
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Scatter Cells Batch Export.")
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Scatter Cells Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("scatter_cells")
+    _switch_to_batch_export_tab(ctx, "scatter_cells")
 
 
 
-def open_scatter_agg_batch_export_shim(app) -> None:
+def open_scatter_agg_batch_export_shim(ctx) -> None:
     """Switch Batch Export tab to the inline aggregate-scatter export builder."""
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Scatter Aggregate Batch Export.")
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Scatter Aggregate Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("scatter_agg")
+    _switch_to_batch_export_tab(ctx, "scatter_agg")
 
 
 
-def open_batch_export_shim(app) -> None:
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Batch Export.")
+def open_batch_export_shim(ctx) -> None:
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("line")
+    _switch_to_batch_export_tab(ctx, "line")
 

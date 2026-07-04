@@ -1022,7 +1022,7 @@ class WellViewerApp(QWidget):
 
     # ── Batch export ──────────────────────────────────────────────────────────
 
-    def _open_batch_export(self) -> None: return open_batch_export_shim(self)
+    def _open_batch_export(self) -> None: return open_batch_export_shim(self._ctx)
 
     # ── Montage ───────────────────────────────────────────────────────────────
 
@@ -1140,11 +1140,11 @@ class WellViewerApp(QWidget):
 
 
 
-    def _open_bar_batch_export(self) -> None: return open_bar_batch_export_shim(self)
+    def _open_bar_batch_export(self) -> None: return open_bar_batch_export_shim(self._ctx)
 
-    def _open_scatter_cells_batch_export(self) -> None: return open_scatter_cells_batch_export_shim(self)
+    def _open_scatter_cells_batch_export(self) -> None: return open_scatter_cells_batch_export_shim(self._ctx)
 
-    def _open_scatter_agg_batch_export(self) -> None: return open_scatter_agg_batch_export_shim(self)
+    def _open_scatter_agg_batch_export(self) -> None: return open_scatter_agg_batch_export_shim(self._ctx)
 
     # ── Save current figure ───────────────────────────────────────────────────
 

@@ -587,7 +587,20 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (toggle_sem/toggle_fov_replicates/refresh_fov_btn_state from E3),
 #              and registers the buttons on ctx.runtime.sem/fov banks (mirrors the
 #              batch-export controls row). Its lone core-boundary unwrap is gone.
-CTX_APP_BUDGET = 20
+#   D-core selection/redraw: -1   plot_orchestrator.redraw_app is now fully
+#              ctx-native — the ``app = ctx.app`` bridge is dropped. The render
+#              fan-out (``redraw``) takes ctx and guards distribution/heatmap on
+#              ctx.widgets.has(...); refresh_plot_empty_states runs off ctx.window
+#              (a widget-tree walk, same as the multivariate caller); the line
+#              figure/canvas + the export-style sidebar map are read off the
+#              widget registry (the sidebar map now self-registers on first open).
+#              selection_controller.set_selected_wells KEEPS its single unwrap: it
+#              drives ``_refresh_sidebar_map`` (a debounce bottoming into the
+#              deeply app-coupled refresh_sidebar_map_now) + on_plate_sel_change
+#              (which bottoms into _is_single_well_tab/_features/_notebook) — both
+#              irreducible without a large cross-cutting cascade, so threading ctx
+#              there is net-0 (a reported floor bridge).
+CTX_APP_BUDGET = 19
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

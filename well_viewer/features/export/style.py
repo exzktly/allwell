@@ -98,7 +98,16 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
         dock = _resolve_export_dock(app, fig)
         parent = dock if dock is not None else (canvas.parent() if canvas is not None else app)
         if not hasattr(app, "_export_style_sidebars"):
-            app._export_style_sidebars = {}
+            # Register the sidebar map in the widget registry (stamps
+            # ``app._export_style_sidebars`` too) so the ctx-native redraw
+            # orchestrator reaches it via ``ctx.widgets`` instead of the
+            # god-object. Fall back to a plain attribute if no ctx is wired
+            # (bare test doubles).
+            reg = getattr(getattr(app, "_ctx", None), "widgets", None)
+            if reg is not None:
+                reg.register("_export_style_sidebars", {})
+            else:
+                app._export_style_sidebars = {}
         key = id(fig)
         sb = app._export_style_sidebars.get(key)
         if sb is None:

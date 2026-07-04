@@ -25,7 +25,7 @@ def _qt_file_filter_from_filetypes(filetypes) -> str:
 
 
 def redraw(
-    app,
+    ctx,
     *,
     lineplot_redraw,
     apply_ax_style,
@@ -54,13 +54,13 @@ def redraw(
 
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
     metric_label = METRIC_KEY_TO_LABEL.get(
-        app._app_state.channel.active_metric, "Mean Intensity"
+        ctx.state.channel.active_metric, "Mean Intensity"
     )
 
     # 1. Line plot — always present (eager-built); the entry point that
     # established the orchestrator's name.
     lineplot_redraw(
-        app._ctx,
+        ctx,
         apply_ax_style=apply_ax_style,
         all_fluor_values=all_fluor_values,
         all_fluor_values_filtered=all_fluor_values_filtered,
@@ -68,19 +68,21 @@ def redraw(
         metric_label=metric_label,
     )
 
-    # 2. Distribution — lazy-built, so guard on the canvas attribute.
-    if hasattr(app, "_distribution_canvas"):
+    # 2. Distribution — lazy-built, so guard on the registered canvas handle
+    # (``register`` stamps ``app._distribution_canvas`` too, so this is the
+    # exact ctx-native equivalent of the old ``hasattr(app, …)`` guard).
+    if ctx.widgets.has("_distribution_canvas"):
         try:
             from well_viewer.features.distribution.controller import redraw_distribution
-            redraw_distribution(app._ctx)
+            redraw_distribution(ctx)
         except Exception:
             _logger.exception("Distribution redraw failed")
 
     # 3. Heat Map — lazy-built; same guard.
-    if hasattr(app, "_heatmap_canvas"):
+    if ctx.widgets.has("_heatmap_canvas"):
         try:
             from well_viewer.features.heatmap.controller import redraw_heatmap
-            redraw_heatmap(app._ctx)
+            redraw_heatmap(ctx)
         except Exception:
             _logger.exception("Heat map redraw failed")
 
@@ -186,12 +188,12 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
 
 
 def redraw_app(ctx) -> None:
-    # A8: takes ``ctx`` so features fan out a full redraw without naming the
-    # god-object (``redraw_app(ctx)`` is the ctx-native replacement for the old
-    # ``_redraw()`` method call). The orchestration body still drives the app's
-    # figure/notebook widgets, so it unwraps the handle once here — a single
-    # core-level bridge, not a per-call feature reach-through.
-    app = ctx.app
+    # A8 (D-core): fully ctx-native — the old god-object unwrap bridge is gone.
+    # The empty-state flip is a widget-tree walk (``ctx.window``), the render
+    # fan-out threads ``ctx`` (``redraw``/``refresh_plot_empty_states`` both take
+    # ctx now), and the line figure / export-style sidebars are read off the
+    # widget registry instead of the god-object.
+    #
     # Keep the EmptyState/figure stacks in sync with the current data
     # state before any matplotlib work. When no data is loaded the plot
     # is hidden behind the EmptyState page, so we can skip the actual
@@ -200,23 +202,27 @@ def redraw_app(ctx) -> None:
     from well_viewer.features.lineplot.controller import redraw_line_plots
     from well_viewer.data.data_loading import _all_fluor_values, _all_fluor_values_filtered
 
-    refresh_plot_empty_states(app)
+    refresh_plot_empty_states(ctx.window)
     # ``redraw`` fans out across the default-scope tabs (line /
     # distribution / heat map). Bar / scatter / scatter-aggregate are
     # scope-specific and re-render through their own per-tab shims.
     redraw(
-        app,
+        ctx,
         lineplot_redraw=redraw_line_plots,
         apply_ax_style=apply_ax_style,
         all_fluor_values=_all_fluor_values,
         all_fluor_values_filtered=_all_fluor_values_filtered,
         warn=WARN,
     )
-    apply_export_style_to_current(ctx, app._line_fig, getattr(app, "_line_canvas", None))
+    apply_export_style_to_current(
+        ctx,
+        ctx.widgets.get_or_none("_line_fig"),
+        ctx.widgets.get_or_none("_line_canvas"),
+    )
 
     # Keep the Export Configurator's line-order lists in sync with the
     # current selection / replicate sets when the sidebar is open.
-    for sb in (getattr(app, "_export_style_sidebars", {}) or {}).values():
+    for sb in (ctx.widgets.get_or_none("_export_style_sidebars") or {}).values():
         try:
             if getattr(sb, "_is_line_fig", lambda: False)():
                 sb._refresh_line_order_lists()

@@ -508,7 +508,12 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              + on_tab_change god-services net-ADD if converted) and saved_plots
 #              _rebuild_all (all god-methods: _groups_centre_refresh /
 #              _refresh_sidebar_map / _features / _show_line_sidebar).
-CTX_APP_BUDGET = 33
+#   33 -> 29   E6-docstrings: -4   the three ``AppRuntime`` docstring mentions of
+#              the literal god-object token and the one in ``plot_card_actions``'s
+#              module docstring reworded to name "the god-object" instead — pure
+#              comment rewords (the ratchet counts comments), zero code change, per
+#              the established "no literal token in comments" convention.
+CTX_APP_BUDGET = 29
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

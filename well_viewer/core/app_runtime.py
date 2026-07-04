@@ -3,14 +3,14 @@
 Features stash *live, non-persisted* objects on the app during a session —
 worker bridges, decoded image arrays, popup figures/canvases, extractors, cached
 geometry. These are not typed persistent state (they are never serialized), so
-they don't belong in ``AppState``; but leaving them as raw ``ctx.app._<x>``
-reach-throughs keeps the god-object coupling alive.
+they don't belong in ``AppState``; but leaving them as raw god-object
+reach-throughs keeps the coupling alive.
 
 ``AppRuntime`` gives each feature a small namespace (``ctx.runtime.<feature>``)
 for those objects. Assigning through it **stamps the value onto the app** as the
 legacy ``app._<feature>_<name>`` attribute, exactly like ``WidgetRegistry`` does
 for widgets — so the many existing ``app._<feature>_<name>`` readers keep
-resolving unchanged while the *builders* stop naming ``ctx.app``. As readers
+resolving unchanged while the *builders* stop naming the god-object. As readers
 migrate onto ``ctx.runtime`` in later steps, the stamp is eventually dropped.
 
 Deliberately NOT serialized: ``persistence/`` must never touch ``AppRuntime``
@@ -42,7 +42,7 @@ class AppRuntime:
     """Container of per-feature runtime namespaces, exposed as ``ctx.runtime``.
 
     Add a feature namespace here when its builder starts writing live objects
-    through ``ctx.runtime.<feature>`` instead of ``ctx.app._<feature>_*``.
+    through ``ctx.runtime.<feature>`` instead of the god-object ``_<feature>_*``.
     """
 
     __slots__ = ("_app", "smfish", "scatter", "cell_browser", "image_browser",

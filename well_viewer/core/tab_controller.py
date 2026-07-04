@@ -19,6 +19,18 @@ _logger = logging.getLogger("well_viewer.runtime_app")
 _build_review_image_panel = _lazy(
     "well_viewer.features.preview.panel_view", "build_review_image_panel")
 
+# The Sample Definitions centre builder (``build_sample_definitions_centre``) is a
+# deeply app-coupled feature-layer builder: it and its sub-builders (Groups /
+# Well Labels / Ratios / Pipeline Info / Notes) stamp dozens of ``app._rep_*`` /
+# ``app._sel_*`` widgets and wire the ``_clear_sample_definitions_all`` /
+# ``_groups_centre_refresh`` / ``_refresh_sidebar_map`` god-methods, so it still
+# takes the app handle. It is reached through the single core
+# ``build_sample_definitions_app_bridge`` seam below (one god-object unwrap for
+# the whole tab build) instead of being named from the feature-layer registry.
+_build_sample_definitions_centre = _lazy(
+    "well_viewer.features.grouping.replicate_panel_view",
+    "build_sample_definitions_centre")
+
 # Split-View extension points. ``split_view.install_split_view`` sets these; while
 # they are None the resolvers below behave exactly as the single-tab original, so
 # the feature is fully absent until (and unless) it is installed.
@@ -134,6 +146,22 @@ def image_browser_subtab_app_bridge(
         update_channel_selector(app)
     if refresh_active_tab:
         on_tab_change(app, None)
+
+
+def build_sample_definitions_app_bridge(ctx, frame) -> None:
+    """Build the Sample Definitions centre tab through one ctx→app seam.
+
+    The centre builder + its whole sub-builder tree (Groups / Well Labels /
+    Ratios / Pipeline Info / Notes) are app-native — they stamp the
+    ``app._rep_*`` / ``app._sel_*`` widgets and wire the
+    ``_clear_sample_definitions_all`` / ``_groups_centre_refresh`` /
+    ``_refresh_sidebar_map`` god-methods. Rather than name that god-object from
+    the feature-layer registry, the registry calls this single core bridge, which
+    performs the lone god-object unwrap for the whole tab build. The feature
+    builder is reached via a ``lazy(...)`` proxy so this core module names no
+    feature at import time.
+    """
+    _build_sample_definitions_centre(ctx.app, frame)
 
 
 def on_notebook_current_changed(app, _idx) -> None:

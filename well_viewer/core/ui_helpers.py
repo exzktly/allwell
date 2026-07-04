@@ -996,7 +996,7 @@ def notes_schedule_save(app) -> None:
     """
     edit = getattr(app, "_notes_edit", None)
     if edit is not None:
-        app._notes_text = edit.toPlainText()
+        app._app_state.selection.notes_text = edit.toPlainText()
     app._persistence.schedule_save("notes")
 
 

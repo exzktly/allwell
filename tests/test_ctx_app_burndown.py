@@ -600,7 +600,31 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (which bottoms into _is_single_well_tab/_features/_notebook) — both
 #              irreducible without a large cross-cutting cascade, so threading ctx
 #              there is net-0 (a reported floor bridge).
-CTX_APP_BUDGET = 19
+#   D6 sample-def/review-csv: -2   the two Data-group tab builders in the
+#              feature-layer registry stopped naming the god-object, and the
+#              sample-definitions loader went ctx-native:
+#              (1) Review CSV — its builder was already ctx-native
+#              (build_review_csv_tab(ctx, parent); the app's _build_review_csv_tab
+#              was only a self._ctx shim), so the registry now calls it directly
+#              via the uniform _lazy_build descriptor (-1, no core add).
+#              (2) Sample Definitions — the centre builder + its whole sub-builder
+#              tree (Groups / Well Labels / Ratios / Pipeline Info / Notes) are
+#              app-native (they stamp app._rep_*/_sel_* widgets and wire
+#              _clear_sample_definitions_all / _groups_centre_refresh /
+#              _refresh_sidebar_map). Rather than name the god-object from the
+#              feature registry, the lone unwrap for the whole tab build now lives
+#              behind ONE new core seam (tab_controller.build_sample_definitions_app_bridge,
+#              +1), reached via a lazy() proxy (no core->feature import). registry
+#              -1, core +1 → net-0 for that ref but the feature layer names no
+#              god-object.
+#              (3) persistence _apply_unified_state went ctx-native (-1): typed
+#              ctx.state slices, ctx.set_status for the status/migration notices
+#              (the one-time v1->v2 toast popup folded into the status line — it
+#              was already the code's own fallback), and the Notes writeback
+#              through the now-registered _notes_edit widget (ctx.widgets). The
+#              _notes_text memory cache moved off the god-object into the typed
+#              selection slice (SelectionState.notes_text).
+CTX_APP_BUDGET = 17
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

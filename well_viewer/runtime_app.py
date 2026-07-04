@@ -360,9 +360,9 @@ class WellViewerApp(QWidget):
         self._review_image_rubber_band: Optional[QRubberBand] = None
         self._review_included_overrides: Dict[Tuple[str, str, str, str], str] = {}
         self._review_csv_lookup_context: Dict[str, str] = {}
-        # Notes sub-tab text buffer. Data-dir autosave debouncing now lives in
-        # the PersistenceRegistry (self._persistence, built below).
-        self._notes_text: str = ""
+        # Notes sub-tab text buffer now lives in the typed selection slice
+        # (self._app_state.selection.notes_text). Data-dir autosave debouncing
+        # lives in the PersistenceRegistry (self._persistence, built below).
         self._review_image_source_seg = None
         self._review_image_color_swatches: Dict[str, object] = {}
         self._review_image_binary_btn = None

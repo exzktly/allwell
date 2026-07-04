@@ -99,15 +99,21 @@ _build_saved_plots = _lazy_build("well_viewer.features.saved_plots.tab_view", "b
 _build_batch_export = _lazy_build("well_viewer.features.batch_export.tab_view", "build_batch_export_tab")
 
 
-def _build_review_csv(ctx, frame) -> None:
-    ctx.app._build_review_csv_tab(frame)
+# Review CSV's builder is already ctx-native (``build_review_csv_tab(ctx, parent)``
+# — the app's ``_build_review_csv_tab`` was only a ``self._ctx`` shim), so it joins
+# the uniform declarative lazy descriptors instead of reaching through the app.
+_build_review_csv = _lazy_build("well_viewer.features.review_csv.tab_view", "build_review_csv_tab")
 
 
 def _build_sample_definitions(ctx, frame) -> None:
-    from well_viewer.features.grouping.replicate_panel_view import (
-        build_sample_definitions_centre,
-    )
-    build_sample_definitions_centre(ctx.app, frame)
+    # The Sample Definitions centre builder + its sub-builder tree are app-native
+    # (they stamp app._rep_*/_sel_* widgets and wire the _clear_sample_definitions_all
+    # / _groups_centre_refresh / _refresh_sidebar_map god-methods). The feature
+    # layer must not name the god-object, so the single god-object unwrap for the
+    # whole tab build lives behind the core ``build_sample_definitions_app_bridge``
+    # seam (which reaches the builder via a lazy proxy — no core→feature import).
+    from well_viewer.core.tab_controller import build_sample_definitions_app_bridge
+    build_sample_definitions_app_bridge(ctx, frame)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

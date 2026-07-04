@@ -19,8 +19,8 @@ def save_notes(app) -> None:
     """Debounced-autosave entry for the Notes sub-tab.
 
     Registered as the ``notes`` persistence domain. Tolerates a missing
-    ``pipeline_info.json`` — the Notes text stays in memory (``app._notes_text``)
-    until a dataset that has one is loaded.
+    ``pipeline_info.json`` — the Notes text stays in memory
+    (``app._app_state.selection.notes_text``) until a dataset that has one is loaded.
     """
     try:
         save_to_pipeline_info(app)
@@ -49,9 +49,9 @@ def autosave_to_pipeline_info(app) -> None:
     notes_edit = getattr(app, "_notes_edit", None)
     notes_text = (
         notes_edit.toPlainText() if notes_edit is not None
-        else getattr(app, "_notes_text", "") or ""
+        else app._app_state.selection.notes_text or ""
     )
-    app._notes_text = notes_text
+    app._app_state.selection.notes_text = notes_text
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
     plot_groups = list(app._app_state.selection.plot_groups or [])
@@ -91,9 +91,9 @@ def save_to_pipeline_info(app) -> None:
     notes_edit = getattr(app, "_notes_edit", None)
     notes_text = (
         notes_edit.toPlainText() if notes_edit is not None
-        else getattr(app, "_notes_text", "") or ""
+        else app._app_state.selection.notes_text or ""
     )
-    app._notes_text = notes_text
+    app._app_state.selection.notes_text = notes_text
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
     plot_groups = list(app._app_state.selection.plot_groups or [])
@@ -120,16 +120,21 @@ def save_to_pipeline_info(app) -> None:
     )
 
 
-def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, dict]:
-    """Parse a sample_definitions/bar_groups block → set ``app._app_state.selection.selections`` (the
-    in-memory source of truth). v1 blocks are migrated by ``from_block``.
+def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, dict]:
+    """Parse a sample_definitions/bar_groups block → set ``ctx.state.selection.selections``
+    (the in-memory source of truth). v1 blocks are migrated by ``from_block``.
+
+    ctx-native: reads the typed ``ctx.state`` slices, reports through the
+    ``ctx.set_status`` service accessor, and writes the Notes back through the
+    registered ``_notes_edit`` widget (``ctx.widgets``) — it names no god-object.
 
     Returns ``(applied, well_labels_dict)``. On a malformed block / migration
     failure: logs, leaves the existing state alone, disables v2 writes for the
     session, and returns ``(False, {})``.
     """
     from well_viewer.domain import selections_model as _sel
-    tok_to_label = app._app_state.dataset.tok_to_label
+    sel_state = ctx.state.selection
+    tok_to_label = ctx.state.dataset.tok_to_label
     # Mixed v1+v2 payload (both rep_sets/groups *and* a selections list
     # with content) — refuse to migrate. Either path would silently drop
     # data, so we keep the file untouched and disable v2 writes for the
@@ -140,16 +145,13 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
             "(selections) keys populated; refusing to migrate to avoid data "
             "loss. v2 writes disabled for this session."
         )
-        app._app_state.selection.v2_writes_disabled = True
-        try:
-            app._set_status(
-                "Saved sample definitions are in a mixed v1/v2 shape — using "
-                "compatibility mode. Edit and Save to clean up (see log)."
-            )
-        except Exception:
-            swallowed()  # was: pass (silent except)
+        sel_state.v2_writes_disabled = True
+        ctx.set_status(
+            "Saved sample definitions are in a mixed v1/v2 shape — using "
+            "compatibility mode. Edit and Save to clean up (see log)."
+        )
         return False, {}
-    # Detect a legacy v1 block so we can surface a one-time migration toast
+    # Detect a legacy v1 block so we can surface a one-time migration notice
     # after the upgrade succeeds. v2 blocks carry schema_version ≥ 2.
     was_v1 = False
     try:
@@ -165,35 +167,28 @@ def _apply_unified_state(app, block, *, set_notes: bool = True) -> tuple[bool, d
     except Exception:  # pragma: no cover - defensive: never crash on bad data
         _logger.exception("Couldn't upgrade saved sample definitions — using "
                           "compatibility mode; the file was left untouched.")
-        app._app_state.selection.v2_writes_disabled = True
-        try:
-            app._set_status("Couldn't upgrade saved sample definitions — using "
-                            "them in compatibility mode (see log).")
-        except Exception:
-            swallowed()  # was: pass (silent except)
+        sel_state.v2_writes_disabled = True
+        ctx.set_status("Couldn't upgrade saved sample definitions — using "
+                       "them in compatibility mode (see log).")
         return False, {}
 
-    app._app_state.selection.selections = selections
-    app._app_state.selection.current_selection_id = current_id
-    app._app_state.selection.plot_groups = plot_groups
+    sel_state.selections = selections
+    sel_state.current_selection_id = current_id
+    sel_state.plot_groups = plot_groups
     if was_v1:
         # Surface the migration so users know an upgrade happened; the new
-        # state will be persisted with a backup the next time they Save.
-        try:
-            toast = getattr(app, "_toast", None)
-            msg = (
-                f"Migrated legacy v1 sample-definitions to v2 "
-                f"({len(selections)} selection(s)). Save to persist."
-            )
-            if callable(toast):
-                toast(msg, kind="info", msec=6000)
-            else:
-                app._set_status(msg)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+        # state will be persisted with a backup the next time they Save. Routed
+        # through the status-bar service accessor (was a transient toast popup,
+        # which needed the god-object handle — the status line already served as
+        # the code's own fallback, so this one-time migration notice keeps
+        # surfacing without naming the app).
+        ctx.set_status(
+            f"Migrated legacy v1 sample-definitions to v2 "
+            f"({len(selections)} selection(s)). Save to persist."
+        )
     if set_notes:
-        app._notes_text = notes
-        notes_edit = getattr(app, "_notes_edit", None)
+        sel_state.notes_text = notes
+        notes_edit = ctx.widgets.get_or_none("_notes_edit")
         if notes_edit is not None and notes_edit.toPlainText() != notes:
             blocked = notes_edit.blockSignals(True)
             try:
@@ -216,7 +211,7 @@ def load_from_pipeline_info(ctx) -> bool:
     block = read_sample_definitions(ctx.state.dataset.data_dir)
     if not block:
         return False
-    applied, well_labels = _apply_unified_state(ctx.app, block)
+    applied, well_labels = _apply_unified_state(ctx, block)
     if not applied:
         return True  # a block existed; we just couldn't upgrade it
     valid = set(ctx.state.dataset.well_paths.keys())
@@ -253,7 +248,7 @@ def clear_all(app) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    app._notes_text = ""
+    app._app_state.selection.notes_text = ""
     notes_edit = getattr(app, "_notes_edit", None)
     if notes_edit is not None:
         blocked = notes_edit.blockSignals(True)

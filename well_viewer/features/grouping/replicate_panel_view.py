@@ -343,10 +343,13 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     nl.setContentsMargins(12, 12, 12, 12)
     # Commit on focus-out (not per keystroke): a freeform notes box shouldn't
     # rewrite pipeline_info.json on every letter typed.
-    app._notes_edit = _NotesEdit(notes_tab, app._notes_schedule_save)
-    app._notes_edit.setPlaceholderText("Project notes…")
-    app._notes_edit.setPlainText(getattr(app, "_notes_text", "") or "")
-    nl.addWidget(app._notes_edit, 1)
+    # Register the Notes editor so the ctx-native sample-definitions loader
+    # (persistence._apply_unified_state) writes migrated notes back through
+    # ctx.widgets; register() also stamps app._notes_edit for the legacy readers.
+    notes_edit = app._ctx.widgets.register("_notes_edit", _NotesEdit(notes_tab, app._notes_schedule_save))
+    notes_edit.setPlaceholderText("Project notes…")
+    notes_edit.setPlainText(app._app_state.selection.notes_text or "")
+    nl.addWidget(notes_edit, 1)
     sub_tabs.addTab(notes_tab, "Notes")
 
     def _on_sample_def_subtab(idx: int) -> None:

@@ -416,7 +416,17 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              literal ``ctx.app`` token. The channel/tab/fold-change/redraw_app
 #              residual unwraps stay — each drives a genuine god-object method or
 #              an un-registered widget handle (one core-boundary unwrap each).
-CTX_APP_BUDGET = 47
+#   F2 review_image/cell_browser: -1   update_preview converted ctx-native
+#              (update_preview_ctx reads the panel widgets via ctx.widgets —
+#              registered in preview/panel_view — and ctx.state; _preview_tophat_fluor
+#              + the re-entry guard moved into PreviewState). cell_browser
+#              on_cell_clicked now calls update_preview_ctx / refresh_review_image_ctx
+#              / zoom_..._nucleus_ctx (cell_browser 3->0). refresh_review_image + zoom
+#              keep app-native bodies (they walk the app-pinned collect store + the
+#              runtime_app-bound pixmap services draw_review_image /
+#              render_review_image_display), so their ctx entry points bridge through
+#              the app handle — 2 residuals relocated into review_image/.
+CTX_APP_BUDGET = 46
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

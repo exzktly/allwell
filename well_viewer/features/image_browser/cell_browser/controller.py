@@ -25,9 +25,12 @@ from well_viewer.features.image_browser.cell_browser.collect import (
 )
 from well_viewer.features.image_browser.cell_browser.state import MAX_TOTAL, THUMB_PX
 from well_viewer.features.image_browser.review_image.controller import (
-    zoom_review_image_to_selected_nucleus,
+    zoom_review_image_to_selected_nucleus_ctx,
 )
-from well_viewer.features.image_browser.review_image.renderer import refresh_review_image, update_preview
+from well_viewer.features.image_browser.review_image.renderer import (
+    refresh_review_image_ctx,
+    update_preview_ctx,
+)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -305,7 +308,7 @@ def on_cell_clicked(ctx, desc) -> None:
         # are decoded and the FOV menu is repopulated — otherwise jumping to a
         # cell in a different well leaves the FOV combo (and image) stale.
         ctx.state.preview.selected_well = desc.well
-        update_preview(ctx.app, desc.well)
+        update_preview_ctx(ctx, desc.well)
         # The FOV / timepoint combos hold *normalized* tokens — FOV as
         # ``float:g`` (renderer ``_norm_fov``) and timepoint as parsed hours
         # ``:g`` (``_norm_timepoint``). The descriptor carries the raw CSV
@@ -319,14 +322,14 @@ def on_cell_clicked(ctx, desc) -> None:
         fov_cb = getattr(ctx.window, "_preview_fov_cb", None)
         if fov_cb is not None and fov_norm:
             fov_cb.setCurrentText(fov_norm)
-        refresh_review_image(ctx.app)
+        refresh_review_image_ctx(ctx)
         # The TP menu now holds the target FOV's timepoints; setting it fires
         # currentIndexChanged → refresh, rendering the correct frame.
         tp_cb = getattr(ctx.window, "_review_image_tp_cb", None)
         if tp_cb is not None and tp_norm:
             tp_cb.setCurrentText(tp_norm)
         # Centre + zoom on the highlighted cell so it's actually visible.
-        zoom_review_image_to_selected_nucleus(ctx.app)
+        zoom_review_image_to_selected_nucleus_ctx(ctx)
     except Exception as exc:  # noqa: BLE001
         _logger.exception("cell_browser: navigate-to-segmentation failed")
         _set_status(ctx, f"Could not open cell in Segmentation: {exc}")

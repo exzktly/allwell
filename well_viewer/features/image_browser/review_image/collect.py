@@ -64,7 +64,7 @@ def review_resolve_image_refs(app, *, fov_raw: str, tp_raw: str):
     for a given FOV/timepoint.
     """
     raw_first = app._app_state.review_image.image_source in ("raw", "flatfield")
-    tophat_map = getattr(app, "_preview_tophat_fluor", {})
+    tophat_map = app._app_state.preview.tophat_fluor
     raw_map = app._app_state.preview.fluor
     if raw_first:
         primary, fallback = raw_map, tophat_map

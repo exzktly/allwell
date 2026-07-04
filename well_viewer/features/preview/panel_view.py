@@ -49,6 +49,11 @@ render_review_image_display = _lazy(_RI_RENDER, "render_review_image_display")
 
 
 def build_review_image_panel(self, parent: QWidget) -> None:
+    # Register the widgets the ctx-native render pipeline reads back
+    # (``update_preview_ctx`` resolves them via ``ctx.widgets``). ``register``
+    # still stamps ``self._<name>`` so the app-native readers (refresh / draw)
+    # are unaffected.
+    reg = self._ctx.widgets
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -64,7 +69,8 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     ctrl.setObjectName("TabCtrl")  # data-gated: greyed out until a dataset loads
     cl = QHBoxLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
-    self._review_image_well_lbl = QLabel("No well selected", ctrl)
+    self._review_image_well_lbl = reg.register(
+        "_review_image_well_lbl", QLabel("No well selected", ctrl))
     cl.addWidget(self._review_image_well_lbl)
 
     cl.addWidget(QLabel("Channel:", ctrl))
@@ -77,7 +83,8 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     self._review_image_chan_var = self._review_image_chan_cb
 
     cl.addWidget(QLabel("FOV:", ctrl))
-    self._review_image_fov_menu = QComboBox(ctrl)
+    self._review_image_fov_menu = reg.register(
+        "_review_image_fov_menu", QComboBox(ctrl))
     self._review_image_fov_menu.addItems(["—"])
     self._review_image_fov_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image(self)
@@ -85,7 +92,8 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     cl.addWidget(self._review_image_fov_menu)
 
     cl.addWidget(QLabel("Timepoint:", ctrl))
-    self._review_image_tp_menu = QComboBox(ctrl)
+    self._review_image_tp_menu = reg.register(
+        "_review_image_tp_menu", QComboBox(ctrl))
     self._review_image_tp_menu.addItems(["—"])
     self._review_image_tp_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image(self)
@@ -175,7 +183,8 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # gates). This overlay still *renders* the QC verdict — excluded cells show
     # here. The per-channel ON/OFF intensity threshold (ThreshFracOn) IS editable
     # here again, via the quick-edit Stepper added to the LUT row below.
-    self._review_image_status = QLabel("", inner)
+    self._review_image_status = reg.register(
+        "_review_image_status", QLabel("", inner))
     self._review_image_status.setObjectName("Muted")
     il.addWidget(self._review_image_status)
 

@@ -33,78 +33,97 @@ except ImportError:
 
 
 def update_preview(app, well_label: Optional[str]) -> None:
-    """Load images for *well_label* and render the inline montage."""
-    # Same re-entry guard as refresh_review_image: update_preview drives
-    # the FOV combo, whose signal handler calls back into the review-image
-    # refresh path, which can re-enter update_preview through the channel
-    # / well plate callbacks.
-    if getattr(app, "_update_preview_in_progress", False):
+    """Legacy app-typed entry: bridge to the ctx-native preview pipeline.
+
+    Kept so the still-app callers (registry ``_activate_segmentation``,
+    ``preview_view``, ``channel_state_controller``) call it unchanged.
+    """
+    update_preview_ctx(app._ctx, well_label)
+
+
+def update_preview_ctx(ctx, well_label: Optional[str]) -> None:
+    """Load images for *well_label* and render the inline montage.
+
+    Same re-entry guard as refresh_review_image: update_preview drives the FOV
+    combo, whose signal handler calls back into the review-image refresh path,
+    which can re-enter update_preview through the channel / well plate callbacks.
+    """
+    if ctx.state.preview.update_in_progress:
         return
-    app._update_preview_in_progress = True
+    ctx.state.preview.update_in_progress = True
     try:
-        _update_preview_impl(app, well_label)
+        _update_preview_impl(ctx, well_label)
     finally:
-        app._update_preview_in_progress = False
+        ctx.state.preview.update_in_progress = False
 
 
-def _update_preview_impl(app, well_label: Optional[str]) -> None:
+def _update_preview_impl(ctx, well_label: Optional[str]) -> None:
     # Local imports keep this module standalone-importable without paying
     # the cost of dragging in runtime_app at module load time.
     from well_viewer.data.image_discovery import find_well_images_and_masks
     from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 
+    widgets = ctx.widgets
+    state = ctx.state
     # Switching wells keeps the current zoom/pan — browsing well-to-well
     # shouldn't snap the view back to fit each time. (FOV / timepoint / channel
     # changes go through refresh_review_image directly and still reset.)
-    app._app_state.review_image.preserve_view_on_refresh = True
+    state.review_image.preserve_view_on_refresh = True
 
     channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
     if well_label is None:
-        if hasattr(app, "_preview_well_lbl"):
-            app._preview_well_lbl.setText("No well selected")
-        if hasattr(app, "_review_image_well_lbl"):
-            app._review_image_well_lbl.setText("No well selected")
-        if hasattr(app, "_review_image_fov_menu"):
-            _set_combo_values(app._review_image_fov_menu, ["—"])
-        if hasattr(app, "_review_image_tp_menu"):
-            _set_combo_values(app._review_image_tp_menu, ["—"])
-            app._review_image_tp_var.setCurrentText("—")
-        app._app_state.preview.fluor = app._app_state.preview.overlay = app._app_state.preview.mask = {}
-        if hasattr(app, "_review_image_status"):
-            app._review_image_status.setText("Select a well in the left panel.")
+        well_lbl = widgets.get_or_none("_preview_well_lbl")
+        if well_lbl is not None:
+            well_lbl.setText("No well selected")
+        ri_well_lbl = widgets.get_or_none("_review_image_well_lbl")
+        if ri_well_lbl is not None:
+            ri_well_lbl.setText("No well selected")
+        fov_menu = widgets.get_or_none("_review_image_fov_menu")
+        if fov_menu is not None:
+            _set_combo_values(fov_menu, ["—"])
+        tp_menu = widgets.get_or_none("_review_image_tp_menu")
+        if tp_menu is not None:
+            _set_combo_values(tp_menu, ["—"])
+            tp_menu.setCurrentText("—")
+        state.preview.fluor = state.preview.overlay = state.preview.mask = {}
+        status = widgets.get_or_none("_review_image_status")
+        if status is not None:
+            status.setText("Select a well in the left panel.")
         if channel_switch_debug:
             _logger.debug("[RI-CHSW step 4] update_preview early return: no well selected")
         return
 
-    if hasattr(app, "_preview_well_lbl"):
-        tok = _extract_well_token(well_label) or well_label
-        app._preview_well_lbl.setText(tok)
-    if hasattr(app, "_review_image_well_lbl"):
-        tok = _extract_well_token(well_label) or well_label
-        app._review_image_well_lbl.setText(tok)
+    tok = _extract_well_token(well_label) or well_label
+    well_lbl = widgets.get_or_none("_preview_well_lbl")
+    if well_lbl is not None:
+        well_lbl.setText(tok)
+    ri_well_lbl = widgets.get_or_none("_review_image_well_lbl")
+    if ri_well_lbl is not None:
+        ri_well_lbl.setText(tok)
 
+    active_image_channel = ""
     try:
-        active_image_channel = str(app._app_state.channel.active_image_channel or "").strip().lower()
+        active_image_channel = str(state.channel.active_image_channel or "").strip().lower()
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 4] update_preview start well=%r active_channel=%r",
                 well_label, active_image_channel,
             )
         fluor, overlay, mask, tophat_fluor = find_well_images_and_masks(
-            app._app_state.dataset.data_dir,
+            state.dataset.data_dir,
             well_label,
             fluor_token=active_image_channel,
-            in_dir=app._app_state.dataset.in_dir,
-            _fov_tp_extractor=app._app_state.dataset.fov_tp_extractor,
-            _pipeline_info=app._app_state.dataset.pipeline_info,
+            in_dir=state.dataset.in_dir,
+            _fov_tp_extractor=state.dataset.fov_tp_extractor,
+            _pipeline_info=state.dataset.pipeline_info,
         )
     except Exception as _exc:
         _logger.exception("Unexpected error searching images for %r: %s", well_label, _exc)
         fluor, overlay, mask, tophat_fluor = {}, {}, {}, {}
-    app._app_state.preview.fluor = fluor
-    app._app_state.preview.overlay = overlay
-    app._app_state.preview.mask = mask
-    app._preview_tophat_fluor = tophat_fluor
+    state.preview.fluor = fluor
+    state.preview.overlay = overlay
+    state.preview.mask = mask
+    state.preview.tophat_fluor = tophat_fluor
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 4] update_preview refs loaded well=%r active_channel=%r fluor=%d tophat=%d overlay=%d mask=%d",
@@ -138,25 +157,38 @@ def _update_preview_impl(app, well_label: Optional[str]) -> None:
         key=_fov_sort_key,
     )
     if channel_switch_debug:
+        fov_var = widgets.get_or_none("_preview_fov_var")
         _logger.debug(
             "[RI-CHSW step 4] update_preview candidate_fovs=%s selected_fov_before=%r",
             all_fovs,
-            app._preview_fov_var.currentText() if hasattr(app, "_preview_fov_var") else "—",
+            fov_var.currentText() if fov_var is not None else "—",
         )
 
     if not (fluor or overlay or mask or tophat_fluor):
         tok = _extract_well_token(well_label) or well_label
-        dirs = f"in={app._app_state.dataset.in_dir}  out={app._app_state.dataset.data_dir}"
+        dirs = f"in={state.dataset.in_dir}  out={state.dataset.data_dir}"
         msg = f"No images found for {tok}. Searched: {dirs}"
         _logger.warning(msg)
         return
 
-    if hasattr(app, "_review_image_fov_menu"):
-        _set_combo_values(app._review_image_fov_menu, all_fovs or ["—"])
+    fov_menu = widgets.get_or_none("_review_image_fov_menu")
+    if fov_menu is not None:
+        _set_combo_values(fov_menu, all_fovs or ["—"])
 
     if channel_switch_debug:
         _logger.debug("[RI-CHSW step 4->6] triggering refresh_review_image after preview reload")
-    refresh_review_image(app)
+    refresh_review_image_ctx(ctx)
+
+
+def refresh_review_image_ctx(ctx) -> None:
+    """ctx-native entry point for the Review Image refresh.
+
+    The body still walks the app-native store (``collect``) + pixmap-service
+    (``draw_review_image`` / ``render_review_image_display``, bound in
+    ``runtime_app``) layers, so it bridges through the app handle — the
+    sanctioned ctx→app boundary until those leaves migrate centrally.
+    """
+    refresh_review_image(ctx.app)
 
 
 def refresh_review_image(app) -> None:

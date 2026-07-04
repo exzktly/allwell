@@ -695,6 +695,14 @@ def apply_box_delete(app, x0: int, y0: int, x1: int, y1: int) -> None:
 
 
 
+def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float = 3.0) -> None:
+    """ctx-native entry point. Bridges to the app-native body, which drives the
+    pixmap-service ``render_review_image_display`` (bound in ``runtime_app``) and
+    reads the decoded ``_review_image_base_rgb`` scratch buffer — the sanctioned
+    ctx→app boundary until those leaves migrate centrally."""
+    zoom_review_image_to_selected_nucleus(ctx.app, zoom)
+
+
 def zoom_review_image_to_selected_nucleus(app, zoom: float = 3.0) -> None:
     if not hasattr(app, "_review_image_label") or not hasattr(app, "_review_image_canvas"):
         return

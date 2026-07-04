@@ -73,7 +73,12 @@ PROCESS_MICROSCOPY_BUDGET = 4707
 IMAGE_TABLE_CONTROLLER_BUDGET = 1494
 SCATTER_CONTROLLER_BUDGET = 875
 BARPLOT_CONTROLLER_BUDGET = 731
-REVIEW_IMAGE_CONTROLLER_BUDGET = 963
+# 963 -> 980: A8 ctx-seam. review_csv/tab_view stopped naming ctx.app (4 -> 0) by
+# calling refresh_review_csv[_rows] / on_review_csv_row_double_click with ctx; those
+# three fns gained thin ctx-adapter wrappers here that delegate to their unchanged
+# app-native bodies (the Review-CSV store/nav layer isn't ctx yet). A deliberate,
+# one-time +17 for the ctx boundary — not god-logic growth.
+REVIEW_IMAGE_CONTROLLER_BUDGET = 980
 # Ratcheted back to 1176: the loose-TIFs-in-``in/`` work centralized the
 # well-count + layout detection into input_resolution_service.count_expected_wells,
 # removing the duplicated counter from the tab.

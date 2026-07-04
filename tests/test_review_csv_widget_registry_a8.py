@@ -47,5 +47,5 @@ def test_refresh_reader_resolves_after_registry_build(viewer_app, qtbot):
     from well_viewer.features.image_browser.review_image.controller import (
         refresh_review_csv,
     )
-    refresh_review_csv(app)  # no dataset loaded → the "select wells" branch; must not raise
+    refresh_review_csv(app._ctx)  # no dataset loaded → the "select wells" branch; must not raise
     assert app._review_csv_msg_lbl.text()  # message label was updated by the reader

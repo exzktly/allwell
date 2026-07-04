@@ -1058,9 +1058,9 @@ class WellViewerApp(QWidget):
         from well_viewer.features.review_csv.tab_view import build_review_csv_tab as _v
         _v(self._ctx, parent)
 
-    def _refresh_review_csv(self) -> None: refresh_review_csv(self)
+    def _refresh_review_csv(self) -> None: refresh_review_csv(self._ctx)
 
-    def _refresh_review_csv_rows(self, rows=None) -> None: refresh_review_csv_rows(self, rows)
+    def _refresh_review_csv_rows(self, rows=None) -> None: refresh_review_csv_rows(self._ctx, rows)
 
     def _review_effective_included(self, label: str, row: dict) -> str:
         return review_effective_included(self, label, row)

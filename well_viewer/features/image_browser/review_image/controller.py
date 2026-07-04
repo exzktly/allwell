@@ -249,8 +249,12 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
             swallowed()  # was: pass (silent except)
 
 
-def on_review_csv_row_double_click(app, item) -> None:
+def on_review_csv_row_double_click(ctx, item) -> None:
     """Called with a QTableWidgetItem from itemDoubleClicked signal.
+
+    A8 teardown: the Review CSV tab wires this with ``ctx``. The navigation
+    body still walks the app-native review_image/segmentation subtree, so it
+    bridges through the app below (a later cluster converts that subtree).
 
     Wrapped end-to-end so a partially-built Segmentation tab (e.g. the
     user double-clicks before the preview panel has materialised) shows a
@@ -258,14 +262,14 @@ def on_review_csv_row_double_click(app, item) -> None:
     the Qt event loop.
     """
     try:
-        _on_review_csv_row_double_click_impl(app, item)
+        _on_review_csv_row_double_click_impl(ctx.app, item)
     except Exception as exc:  # noqa: BLE001
         import logging
         logging.getLogger("well_viewer").exception(
             "Review-CSV row double-click failed",
         )
         try:
-            app._set_status(
+            ctx.set_status(
                 f"Could not navigate to Segmentation: {exc} (see log for details).",
             )
         except Exception:
@@ -732,7 +736,17 @@ def zoom_review_image_to_selected_nucleus(app, zoom: float = 3.0) -> None:
 
 
 
-def refresh_review_csv(app) -> None:
+def refresh_review_csv(ctx) -> None:
+    """Rebuild the Review CSV filter combos + table for the current selection.
+
+    A8 teardown: the tab builder + the app delegator call this with ``ctx``.
+    The body walks the app-native Review CSV store/render layer (row caches,
+    the ``app._review_*`` widget stamps, the row-index caches), so it bridges
+    through the app below until that layer converts."""
+    _refresh_review_csv_impl(ctx.app)
+
+
+def _refresh_review_csv_impl(app) -> None:
     if not hasattr(app, "_review_csv_table"):
         return
     sels = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
@@ -809,7 +823,15 @@ def refresh_review_csv(app) -> None:
 
 
 
-def refresh_review_csv_rows(app, rows: Optional[List[dict]] = None) -> None:
+def refresh_review_csv_rows(ctx, rows: Optional[List[dict]] = None) -> None:
+    """Populate the Review CSV table from *rows* (or the current selection).
+
+    A8 teardown: called with ``ctx`` by the tab builder + the app delegator;
+    bridges to the app-native store/render body (see ``refresh_review_csv``)."""
+    _refresh_review_csv_rows_impl(ctx.app, rows)
+
+
+def _refresh_review_csv_rows_impl(app, rows: Optional[List[dict]] = None) -> None:
     if not hasattr(app, "_review_csv_table"):
         return
     table = app._review_csv_table

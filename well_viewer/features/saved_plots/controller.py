@@ -33,7 +33,7 @@ def wire_save_to_gallery(ctx, card, tab_name: str) -> None:
 
     A8 teardown: takes ``ctx`` so plot builders wire the gallery hook without
     naming the god-object. The capture itself still walks ``WellViewerApp`` (a
-    later cluster), so the handler bridges through ``ctx.app``."""
+    later cluster), so the handler bridges through the app below."""
     if card is None or not hasattr(card, "set_save_handler"):
         return
     card.set_save_handler(

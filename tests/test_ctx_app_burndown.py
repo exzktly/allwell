@@ -355,7 +355,16 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (domain) and on_metric_selected (core channel_state_controller)
 #              take ctx (unwrap once); line + bar tab_views wire the fold-change
 #              popover + hidden metric combo through ctx, delegator via self._ctx.
-CTX_APP_BUDGET = 79
+#   82 -> 81    populate_metric_combo (core channel_state_controller) takes ctx.
+#   81 -> 80    Heatmap interaction subsystem -> ctx (controller mouse/label-drag
+#              handlers + sidebar_view + persistence/heatmap_layouts).
+#   80 -> 79    scatter update_scatter_menus ratio labels via ratio_label_for(ctx).
+#   79 -> 78    review_csv tab -> ctx (4->0; refresh_review_csv[_rows] /
+#              on_review_csv_row_double_click take ctx as thin wrappers over the
+#              app-native Review CSV store/nav bodies -> +3 counted bridges in
+#              review_image/controller); saved_plots grid/clear read ctx.widgets
+#              (net 0 there — the SavedPlotsStore layer still takes app).
+CTX_APP_BUDGET = 78
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

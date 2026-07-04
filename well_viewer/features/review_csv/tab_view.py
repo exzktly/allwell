@@ -9,7 +9,10 @@ from PySide6.QtWidgets import (
 )
 from well_viewer.core.lazy import lazy as _lazy
 # Lazy so Review CSV imports without Image Browser present (keeps it deletable).
-on_review_csv_row_double_click = _lazy("well_viewer.features.image_browser.review_image.controller", "on_review_csv_row_double_click")
+_RCSV = "well_viewer.features.image_browser.review_image.controller"
+on_review_csv_row_double_click = _lazy(_RCSV, "on_review_csv_row_double_click")
+refresh_review_csv = _lazy(_RCSV, "refresh_review_csv")
+refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
@@ -42,7 +45,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     fov_cb = reg.register("_review_fov_cb", QComboBox(ctrl))
     fov_cb.setFixedWidth(120)
     fov_cb.currentIndexChanged.connect(
-        lambda _i: ctx.app._refresh_review_csv_rows()
+        lambda _i: refresh_review_csv_rows(ctx)
     )
     cl.addWidget(fov_cb)
 
@@ -51,13 +54,13 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     tp_cb = reg.register("_review_tp_cb", QComboBox(ctrl))
     tp_cb.setFixedWidth(140)
     tp_cb.currentIndexChanged.connect(
-        lambda _i: ctx.app._refresh_review_csv_rows()
+        lambda _i: refresh_review_csv_rows(ctx)
     )
     cl.addWidget(tp_cb)
 
     refresh_btn = QPushButton("Refresh", ctrl)
     refresh_btn.setProperty("variant", "secondary")
-    refresh_btn.clicked.connect(lambda _=False: ctx.app._refresh_review_csv())
+    refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))
     cl.addWidget(refresh_btn)
     cl.addStretch(1)
     layout.addWidget(ctrl)
@@ -74,7 +77,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     table.setSelectionBehavior(QTableWidget.SelectRows)
     table.setEditTriggers(QTableWidget.NoEditTriggers)
     table.itemDoubleClicked.connect(
-        lambda item: on_review_csv_row_double_click(ctx.app, item)
+        lambda item: on_review_csv_row_double_click(ctx, item)
     )
     layout.addWidget(table, 1)
 

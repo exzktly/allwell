@@ -391,7 +391,7 @@ class WellViewerApp(QWidget):
 
     def _get_thresh_frac_on(self, channel: Optional[str] = None) -> float: return get_thresh_frac_on(self._ctx, channel)
 
-    def _set_thresh_frac_on(self, value, channel: Optional[str] = None) -> None: return set_thresh_frac_on(self, value, channel)
+    def _set_thresh_frac_on(self, value, channel: Optional[str] = None) -> None: return set_thresh_frac_on(self._ctx, value, channel)
 
     def _refresh_thresh_frac_quick_edit(self) -> None: return refresh_thresh_frac_quick_edit(self._ctx)
 

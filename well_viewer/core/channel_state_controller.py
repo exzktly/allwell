@@ -926,7 +926,7 @@ def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
     return tf[key] if key in tf else ctx.state.channel.threshold
 
 
-def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
+def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
     """Set ThreshFracOn for a channel (the active channel by default).
 
     Writes *through* the Cell Gating tab's edit — the single source of truth that
@@ -934,13 +934,19 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
     save → persist → redraw). This is the write half of the plotting-tab
     quick-edit; editing here stays consistent with the Cell Gating tab,
     Auto-threshold, stats, and exports. No-op until a dataset is loaded.
+
+    A8: takes ``ctx`` (the Image Table quick-edit already called it that way —
+    the prior ``app`` signature crashed that path). The body still force-builds
+    the lazily-created Cell Gating tab + reaches its loose ``_cell_gating_*``
+    edits dict, so it unwraps the handle once at this core boundary.
     """
-    if not app._app_state.dataset.data_dir:
+    if not ctx.state.dataset.data_dir:
         return
     if channel is None:
-        channel = app._app_state.channel.active_channel
+        channel = ctx.state.channel.active_channel
     if not channel or channel == "—":
         return
+    app = ctx.app
     # The Cell Gating tab is built lazily; materialize it (same pattern as
     # persistence.cell_gating.load_from_pipeline_info) so its edits dict exists.
     if not hasattr(app, "_cell_gating_thresh_frac_edits"):
@@ -948,13 +954,13 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
         if callable(build):
             build("Sample Definitions")
         from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
-        build_cell_gating_subtab(app._ctx)
+        build_cell_gating_subtab(ctx)
     from well_viewer.features.grouping.cell_gating_tab_view import (
         _cell_gating_resolve_key,
         cell_gating_on_threshold_frac_on_change,
     )
     edits = getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}
-    edit = edits.get(_cell_gating_resolve_key(app._ctx, channel))
+    edit = edits.get(_cell_gating_resolve_key(ctx, channel))
     if edit is None:
         return
     blocked = edit.blockSignals(True)
@@ -962,7 +968,7 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
         edit.setText(str(float(value)))
     finally:
         edit.blockSignals(blocked)
-    cell_gating_on_threshold_frac_on_change(app._ctx)
+    cell_gating_on_threshold_frac_on_change(ctx)
 
 
 def refresh_thresh_frac_quick_edit(ctx) -> None:

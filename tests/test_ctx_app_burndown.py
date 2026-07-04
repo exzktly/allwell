@@ -664,7 +664,20 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              _load_gating are irreducibly app-bound, so the whole body is bundled
 #              behind a single app-handle unwrap. Net three sites cleared vs one
 #              seam added → -2.
-CTX_APP_BUDGET = 14
+#   14 -> 15   set_thresh_frac_on bugfix: +1 (JUSTIFIED SURFACING, not regression).
+#              The Image Table threshold quick-edit called set_thresh_frac_on(ctx,
+#              value) but the fn still took ``app`` → a live AttributeError crash
+#              (ViewerContext has no _app_state) whenever a user edited the
+#              image-table ON-threshold stepper. Fixed by giving the fn its correct
+#              modern ctx signature (typed ctx.state reads; build_cell_gating_subtab
+#              / _cell_gating_resolve_key / cell_gating_on_threshold_frac_on_change
+#              already take ctx); its lazy-tab force-build (_centre_build_pending)
+#              and loose _cell_gating_thresh_frac_edits dict have no ctx home yet,
+#              so ONE sanctioned core-boundary unwrap is surfaced. A correctness fix
+#              that trades a crash for one documented unwrap — cleared when the
+#              cell-gating edits dict migrates to typed state. Locked by
+#              test_thresh_quickedit (was failing on the pristine tree).
+CTX_APP_BUDGET = 15
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

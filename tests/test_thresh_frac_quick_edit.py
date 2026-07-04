@@ -137,7 +137,7 @@ def test_set_writes_through_active_channel_edit(monkeypatch):
     # orchestrator (was ctx.app._redraw()); route it back to the fake's counter.
     import well_viewer.features.grouping.cell_gating_tab_view as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
-    set_thresh_frac_on(app, 123.0)            # active channel == gfp
+    set_thresh_frac_on(app._ctx, 123.0)       # active channel == gfp
     assert app._cell_gating_thresh_frac_edits["gfp"].text() == "123.0"
     assert get_thresh_frac_on(app._ctx) == 123.0
     assert get_thresh_frac_on(app._ctx, "mcherry") == 50.0   # untouched
@@ -150,7 +150,7 @@ def test_set_targets_explicit_channel(monkeypatch):
     app = _FakeApp()
     import well_viewer.features.grouping.cell_gating_tab_view as cg
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
-    set_thresh_frac_on(app, 77.0, channel="mcherry")
+    set_thresh_frac_on(app._ctx, 77.0, channel="mcherry")
     assert get_thresh_frac_on(app._ctx, "mcherry") == 77.0
     assert get_thresh_frac_on(app._ctx, "gfp") == 50.0
 
@@ -158,7 +158,7 @@ def test_set_targets_explicit_channel(monkeypatch):
 def test_set_noop_without_dataset():
     app = _FakeApp()
     app._app_state.dataset.data_dir = ""
-    set_thresh_frac_on(app, 999.0)
+    set_thresh_frac_on(app._ctx, 999.0)
     assert get_thresh_frac_on(app._ctx, "gfp") == 50.0
     assert app.redraws == 0
 

@@ -260,7 +260,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 _val_col = self._export_val_col_for("_bar_channel_cb")
                 _ch = _ch_selected
                 _metric = self._selected_export_metric_key("_bar_channel_cb")
-                _well_labels = _well_labels_map(self._app)
+                _well_labels = _well_labels_map(self._app._ctx)
                 _fluor_gates = self._app._get_all_fluor_gates()
                 _per_fov_spread = self._app._use_fov_spread_active()
 

@@ -89,7 +89,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl1, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_heatmap_data(ctx.app))
+    _export_btn.clicked.connect(lambda _=False: export_heatmap_data(ctx))
     cl1.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", ctrl1, tooltip="Copy SVG")
     _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))

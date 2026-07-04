@@ -1354,7 +1354,7 @@ class BatchExportPanel(QWidget):
                 _ch = _ch_selected
                 _metric = self._selected_export_metric_key("_line_channel_cb")
                 _fluor_gates = self._app._get_all_fluor_gates()
-                _well_labels = _well_labels_map(self._app)
+                _well_labels = _well_labels_map(self._app._ctx)
                 panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
                 # Two passes through the same shared collector: raw values
                 # for the standard mean / spread columns, fold-change

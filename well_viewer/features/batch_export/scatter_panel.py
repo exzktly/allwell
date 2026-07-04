@@ -443,7 +443,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             return f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h"
         try:
             from well_viewer.features.export.service import _well_labels_map, well_name_for
-            _well_labels = _well_labels_map(self._app)
+            _well_labels = _well_labels_map(self._app._ctx)
             rows: List[dict] = []
             for label, data in scatter_data.items():
                 for x, y, meta in zip(data["x"], data["y"], data["metadata"]):
@@ -495,8 +495,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
             )
-            _well_labels = _well_labels_map(self._app)
-            _well_paths = _well_paths_keys(self._app)
+            _well_labels = _well_labels_map(self._app._ctx)
+            _well_paths = _well_paths_keys(self._app._ctx)
             rows: List[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")
@@ -560,7 +560,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
                 )
             from well_viewer.features.export.service import _well_labels_map, well_name_for
-            _well_labels = _well_labels_map(self._app)
+            _well_labels = _well_labels_map(self._app._ctx)
             for label, data in scatter_data.items():
                 combined_series.append((tp_h, label, data))
                 for x, y, meta in zip(data["x"], data["y"], data["metadata"]):
@@ -619,8 +619,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
             )
-            _well_labels = _well_labels_map(self._app)
-            _well_paths = _well_paths_keys(self._app)
+            _well_labels = _well_labels_map(self._app._ctx)
+            _well_paths = _well_paths_keys(self._app._ctx)
             rows: List[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")

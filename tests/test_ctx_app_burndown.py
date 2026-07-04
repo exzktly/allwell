@@ -388,7 +388,15 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              channel; channel_key_for_label / populate_metric_combo / batch_
 #              export read the typed field. Also removes the lossy getattr(...,None)
 #              fallback that let a stale/absent map silently drop ratio/shape keys.
-CTX_APP_BUDGET = 68
+#   68 -> 64    export/service CSV writers take ctx: export_plot_data /
+#              export_bar_plot_data / export_heatmap_data / export_distribution_data
+#              fully threaded to ctx (state/set_status/domain leaves/ctx.runtime.
+#              heatmap/ctx.widgets/ctx.window) matching the scatter exporters; the
+#              4 plot-tab Export-CSV buttons call export_*_data(ctx). Shared
+#              helpers _well_labels_map/_ask_save_csv take ctx; _warn/_error param
+#              renamed app->parent (Qt parent only). batch_export panels bridge
+#              via self._app._ctx.
+CTX_APP_BUDGET = 64
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

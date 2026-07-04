@@ -106,7 +106,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # than the pill-style btn_primary / btn_secondary used pre-v2.
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", line_ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_plot_data(ctx.app))
+    _export_btn.clicked.connect(lambda _=False: export_plot_data(ctx))
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", line_ctrl, tooltip="Copy SVG")
     _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))

@@ -8,6 +8,12 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.domain.stats_compute import aggregate_well
+from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.core.channel_state_controller import (
+    get_all_fluor_gates,
+    get_thresh_frac_on,
+)
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
 # Bound lazily so export imports without scatter / barplot present — keeps those
@@ -18,19 +24,20 @@ _scatter_axis_metric_key = _lazy("well_viewer.features.scatter.controller", "sca
 _scatter_col_for_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 _scatter_sync_agg_stat_combos = _lazy("well_viewer.features.scatter.controller", "sync_scatter_agg_stat_combos")
 resolve_bar_timepoints = _lazy("well_viewer.features.barplot.renderer", "resolve_bar_timepoints")
+_collect_bar_items_for_app = _lazy("well_viewer.features.barplot.collect", "collect_bar_items_for_app")
 
 
 _CSV_FILTER = "CSV files (*.csv);;All files (*.*)"
 
 
-def _well_labels_map(app) -> dict:
+def _well_labels_map(ctx) -> dict:
     """Snapshot of the Sample Definitions well-label map (token → name)."""
-    return dict(app._app_state.dataset.well_labels or {})
+    return dict(ctx.state.dataset.well_labels or {})
 
 
-def _well_paths_keys(app) -> set:
+def _well_paths_keys(ctx) -> set:
     """Set of valid well tokens for the loaded project."""
-    paths = app._app_state.dataset.well_paths or {}
+    paths = ctx.state.dataset.well_paths or {}
     return set(paths)
 
 
@@ -71,10 +78,10 @@ def well_names_joined(tokens, well_labels: dict, *,
     return sep.join(names)
 
 
-def _ask_save_csv(app, title: str, default_name: str) -> str:
-    initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
+def _ask_save_csv(ctx, title: str, default_name: str) -> str:
+    initial_dir = str(ctx.state.dataset.data_dir) if ctx.state.dataset.data_dir else ""
     initial_path = str(Path(initial_dir) / default_name) if initial_dir else default_name
-    out, _ = QFileDialog.getSaveFileName(app, title, initial_path, _CSV_FILTER)
+    out, _ = QFileDialog.getSaveFileName(ctx.window, title, initial_path, _CSV_FILTER)
     return out or ""
 
 
@@ -224,18 +231,18 @@ def attach_bar_fold_change_columns(
     row["fold_change_control"] = control_label if vs_control else ""
 
 
-def _warn(app, title: str, msg: str) -> None:
-    QMessageBox.warning(app, title, msg)
+def _warn(parent, title: str, msg: str) -> None:
+    QMessageBox.warning(parent, title, msg)
 
 
-def _error(app, title: str, msg: str) -> None:
-    QMessageBox.critical(app, title, msg)
+def _error(parent, title: str, msg: str) -> None:
+    QMessageBox.critical(parent, title, msg)
 
 
-def export_plot_data(app) -> None:
+def export_plot_data(ctx) -> None:
     from well_viewer.domain import fold_change as _fc
 
-    selected = list(app._selected_labels())
+    selected = sorted(ctx.state.selection.selected_wells, key=lambda lbl: parse_rc(lbl))
     well_to_repset: dict = {}
     if not selected:
         # The line plot falls back to active replicate sets when nothing is
@@ -245,31 +252,34 @@ def export_plot_data(app) -> None:
         # rep-set members (deduped, order preserved) plus a replicate_set
         # column so the grouping isn't lost.
         seen: set = set()
-        for rset in (app._rep_sets_active() or []):
+        rep_sets = active_replicate_sets(
+            ctx.state.selection.selections, ctx.state.dataset.well_paths
+        )
+        for rset in (rep_sets or []):
             for w in rset.wells:
-                if w in app._app_state.dataset.well_paths and w not in seen:
+                if w in ctx.state.dataset.well_paths and w not in seen:
                     seen.add(w)
                     selected.append(w)
                     well_to_repset[w] = getattr(rset, "name", "")
     if not selected:
-        _warn(app, "Export", "No wells selected. Select wells in the picker, or define a replicate set.")
+        _warn(ctx.window, "Export", "No wells selected. Select wells in the picker, or define a replicate set.")
         return
-    ch = app._app_state.channel.active_channel
-    metric = app._app_state.channel.active_metric
-    threshold = app._get_thresh_frac_on(ch)
-    use_sem = bool(app._app_state.plot.use_sem)
+    ch = ctx.state.channel.active_channel
+    metric = ctx.state.channel.active_metric
+    threshold = get_thresh_frac_on(ctx, ch)
+    use_sem = bool(ctx.state.plot.use_sem)
     band_lbl = "SEM" if use_sem else "SD"
-    fluor_gates = app._get_all_fluor_gates()
-    well_labels = _well_labels_map(app)
+    fluor_gates = get_all_fluor_gates(ctx)
+    well_labels = _well_labels_map(ctx)
     include_repset_col = bool(well_to_repset)
 
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app._ctx)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(ctx)
     fc_control_means: dict = {}
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_means = _fc.pts_to_mean_by_t(
             _fc.control_pts_for_line(
-                app._ctx, fc_ctrl_lbl, threshold=threshold,
-                val_col=app._app_state.channel.active_val_col,
+                ctx, fc_ctrl_lbl, threshold=threshold,
+                val_col=ctx.state.channel.active_val_col,
                 fluor_gates=fluor_gates,
             )
         )
@@ -277,9 +287,9 @@ def export_plot_data(app) -> None:
 
     rows_out = []
     for label in selected:
-        pts = aggregate_well(app._ctx,
+        pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
-            val_col=app._app_state.channel.active_val_col,
+            val_col=ctx.state.channel.active_val_col,
             fluor_gates=fluor_gates,
         )
         norm_pts = (
@@ -310,9 +320,9 @@ def export_plot_data(app) -> None:
                 row["fold_change_control"] = fc_ctrl_lbl if fc_vs_ctrl else ""
             rows_out.append(row)
     if not rows_out:
-        _warn(app, "Export", "No data to export for the current selection.")
+        _warn(ctx.window, "Export", "No data to export for the current selection.")
         return
-    out_path = _ask_save_csv(app, "Export plot data", f"{ch}_{metric}_plot_export.csv")
+    out_path = _ask_save_csv(ctx, "Export plot data", f"{ch}_{metric}_plot_export.csv")
     if not out_path:
         return
     base_cols = ["well", "well_name"] + (["replicate_set"] if include_repset_col else [])
@@ -329,12 +339,12 @@ def export_plot_data(app) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        app._set_status(f"Exported {len(rows_out)} row(s) to {Path(out_path).name}")
+        ctx.set_status(f"Exported {len(rows_out)} row(s) to {Path(out_path).name}")
     except OSError as exc:
-        _error(app, "Export failed", str(exc))
+        _error(ctx.window, "Export failed", str(exc))
 
 
-def export_bar_plot_data(app) -> None:
+def export_bar_plot_data(ctx) -> None:
     from well_viewer.domain import fold_change as _fc
     from well_viewer.features.barplot.controller import FC_STATE_OFF
 
@@ -344,33 +354,33 @@ def export_bar_plot_data(app) -> None:
     # read ``_bar_tp_cb.currentText()`` directly — that carries just the
     # first checked timepoint, so a multi-tp selection silently dropped
     # every additional one from the CSV.
-    tp_list = resolve_bar_timepoints(app._ctx)
+    tp_list = resolve_bar_timepoints(ctx)
     if not tp_list:
-        _warn(app, "Export", "Select a timepoint first.")
+        _warn(ctx.window, "Export", "Select a timepoint first.")
         return
     target_ts = [t for t, _ in tp_list]
     target_t_arg = target_ts[0] if len(target_ts) == 1 else target_ts
-    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(app._ctx)
+    fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = _fc.fold_change_state(ctx)
     fc_active = fc_vs_ctrl or fc_vs_t0
     # Additive CSV: raw values in the standard ``mean_*`` / ``err_*``
     # columns, fold-change values in their own columns. The aggregation
     # helpers are cached so the second call to collect_bar_items is cheap.
-    use_groups, items_raw, band_lbl = app._collect_bar_items(
-        target_t_arg, fc_state=FC_STATE_OFF,
+    use_groups, items_raw, band_lbl = _collect_bar_items_for_app(
+        ctx, target_t_arg, fc_state=FC_STATE_OFF,
     )
     if fc_active:
-        _, items_fc, _ = app._collect_bar_items(target_t_arg)
+        _, items_fc, _ = _collect_bar_items_for_app(ctx, target_t_arg)
         # Match raw items by (key, tp) — same key can appear at multiple tps
         # in a multi-tp export, so a single ``key → fc_item`` map would
         # collapse them all onto the last timepoint's FC values.
         fc_by_key_tp = {(it.key, float(it.tp)): it for it in items_fc}
     else:
         fc_by_key_tp = {}
-    ch = app._app_state.channel.active_channel
-    metric = app._app_state.channel.active_metric
-    threshold = app._get_thresh_frac_on(ch)
-    well_labels = _well_labels_map(app)
-    well_paths = _well_paths_keys(app)
+    ch = ctx.state.channel.active_channel
+    metric = ctx.state.channel.active_metric
+    threshold = get_thresh_frac_on(ctx, ch)
+    well_labels = _well_labels_map(ctx)
+    well_paths = _well_paths_keys(ctx)
     rows_out = []
     id_cols = (["name", "well_name"] if use_groups else ["well", "well_name"])
     for item in items_raw:
@@ -409,14 +419,14 @@ def export_bar_plot_data(app) -> None:
                 )
         rows_out.append(row)
     if not rows_out:
-        _warn(app, "Export", "No data to export.")
+        _warn(ctx.window, "Export", "No data to export.")
         return
     tp_label_for_filename = (
         tp_list[0][1] if len(tp_list) == 1
         else f"{tp_list[0][1]}-{tp_list[-1][1]}"
     )
     out_path = _ask_save_csv(
-        app, "Export bar plot data",
+        ctx, "Export bar plot data",
         f"bar_t{tp_label_for_filename}.csv",
     )
     if not out_path:
@@ -429,9 +439,9 @@ def export_bar_plot_data(app) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        app._set_status(f"Exported {len(rows_out)} row(s) → {Path(out_path).name}")
+        ctx.set_status(f"Exported {len(rows_out)} row(s) → {Path(out_path).name}")
     except OSError as exc:
-        _error(app, "Export failed", str(exc))
+        _error(ctx.window, "Export failed", str(exc))
 
 
 def export_scatter_data(ctx) -> None:
@@ -512,7 +522,7 @@ def export_scatter_data(ctx) -> None:
     tp_tag = (f"t{timepoints_h[0]:g}" if len(timepoints_h) == 1
               else f"t{min(timepoints_h):g}-{max(timepoints_h):g}")
     out_path = _ask_save_csv(
-        ctx.window, "Export scatter plot data",
+        ctx, "Export scatter plot data",
         f"scatter_{ch_x_base}_vs_{ch_y_base}_{tp_tag}.csv",
     )
     if not out_path:
@@ -596,7 +606,7 @@ def export_scatter_agg_data(ctx) -> None:
     stat_y_safe = stat_y.replace(" ", "_").lower()
 
     out_path = _ask_save_csv(
-        ctx.window, "Export aggregate scatter plot data",
+        ctx, "Export aggregate scatter plot data",
         f"scatter_agg_{stat_x_safe}_vs_{stat_y_safe}_{tp_range}.csv",
     )
     if not out_path:
@@ -613,26 +623,26 @@ def export_scatter_agg_data(ctx) -> None:
         _error(ctx.window, "Export failed", str(exc))
 
 
-def export_heatmap_data(app) -> None:
+def export_heatmap_data(ctx) -> None:
     """Export the currently displayed heatmap grid values to CSV."""
     import math as _math
-    arr = getattr(app, "_heatmap_array", None)
-    layout = getattr(app, "_heatmap_layout_active", None)
-    cell_index = getattr(app, "_heatmap_cell_well_index", None)
+    arr = ctx.runtime.heatmap.array
+    layout = ctx.runtime.heatmap.layout_active
+    cell_index = ctx.runtime.heatmap.cell_well_index
     if arr is None or layout is None:
-        _warn(app, "Export", "No heatmap data — draw the heatmap first.")
+        _warn(ctx.window, "Export", "No heatmap data — draw the heatmap first.")
         return
-    tp_values = list(getattr(app, "_heatmap_tp_values", []) or [])
-    slider = getattr(app, "_heatmap_tp_slider", None)
+    tp_values = list(ctx.runtime.heatmap.tp_values or [])
+    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
     tp = None
     if slider is not None and tp_values:
         idx = max(0, min(slider.value(), len(tp_values) - 1))
         tp = tp_values[idx]
-    ch = app._app_state.channel.active_channel
-    metric_cb = getattr(app, "_heatmap_metric_cb", None)
+    ch = ctx.state.channel.active_channel
+    metric_cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     metric = str(metric_cb.currentText()) if metric_cb else "metric"
     col_name = f"{ch}_{metric.lower().replace(' ', '_')}"
-    well_labels = _well_labels_map(app)
+    well_labels = _well_labels_map(ctx)
     rows_out = []
     for r in range(layout.rows):
         for c in range(layout.cols):
@@ -648,11 +658,11 @@ def export_heatmap_data(app) -> None:
                 col_name: f"{val:.6f}" if val != "" else "",
             })
     if not rows_out:
-        _warn(app, "Export", "No heatmap cells to export.")
+        _warn(ctx.window, "Export", "No heatmap cells to export.")
         return
     tp_tag = f"_t{tp:g}h" if tp is not None else ""
     out_path = _ask_save_csv(
-        app, "Export heatmap data",
+        ctx, "Export heatmap data",
         f"heatmap_{ch}_{metric.replace(' ', '_')}{tp_tag}.csv",
     )
     if not out_path:
@@ -663,21 +673,21 @@ def export_heatmap_data(app) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        app._set_status(f"Exported {len(rows_out)} heatmap cell(s) → {Path(out_path).name}")
+        ctx.set_status(f"Exported {len(rows_out)} heatmap cell(s) → {Path(out_path).name}")
     except OSError as exc:
-        _error(app, "Export failed", str(exc))
+        _error(ctx.window, "Export failed", str(exc))
 
 
-def export_distribution_data(app) -> None:
+def export_distribution_data(ctx) -> None:
     """Export the per-cell values currently shown in the Distribution tab to CSV."""
     from well_viewer.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
     import math as _math
 
-    val_col = app._app_state.channel.active_val_col
-    fluor_gates = app._get_all_fluor_gates()
-    ratios = app._app_state.channel.ratio_index
+    val_col = ctx.state.channel.active_val_col
+    fluor_gates = get_all_fluor_gates(ctx)
+    ratios = ctx.state.channel.ratio_index
 
-    tp_var = getattr(app, "_distribution_tp_var", None)
+    tp_var = ctx.widgets.get_or_none("_distribution_tp_var")
     tp_str = tp_var.currentText() if tp_var is not None else ""
     try:
         tp_h = float(tp_str) if tp_str not in ("", "—", None) else float("nan")
@@ -685,13 +695,13 @@ def export_distribution_data(app) -> None:
         tp_h = float("nan")
     tp_filter = tp_h if _math.isfinite(tp_h) else None
 
-    ch = app._app_state.channel.active_channel
-    well_labels = _well_labels_map(app)
-    well_paths = _well_paths_keys(app)
+    ch = ctx.state.channel.active_channel
+    well_labels = _well_labels_map(ctx)
+    well_paths = _well_paths_keys(ctx)
     import pandas as pd
     chunks = []
     tp_tag_str = f"{tp_h:g}" if _math.isfinite(tp_h) else ""
-    for name, _color, df in iter_plot_groups(app._ctx):
+    for name, _color, df in iter_plot_groups(ctx):
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,
             fluor_gates=fluor_gates,
@@ -710,21 +720,21 @@ def export_distribution_data(app) -> None:
         }))
 
     if not chunks:
-        _warn(app, "Export", "No distribution data — select wells and a timepoint first.")
+        _warn(ctx.window, "Export", "No distribution data — select wells and a timepoint first.")
         return
 
     combined = pd.concat(chunks, ignore_index=True)
     tp_tag = f"_t{tp_h:g}h" if _math.isfinite(tp_h) else ""
     out_path = _ask_save_csv(
-        app, "Export distribution data",
+        ctx, "Export distribution data",
         f"distribution_{ch}_{val_col}{tp_tag}.csv",
     )
     if not out_path:
         return
     try:
         combined.to_csv(out_path, index=False)
-        app._set_status(f"Exported {len(combined)} cell(s) → {Path(out_path).name}")
+        ctx.set_status(f"Exported {len(combined)} cell(s) → {Path(out_path).name}")
     except OSError as exc:
-        _error(app, "Export failed", str(exc))
+        _error(ctx.window, "Export failed", str(exc))
 
 

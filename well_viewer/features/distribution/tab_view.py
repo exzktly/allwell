@@ -125,7 +125,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_distribution_data(ctx.app))
+    _export_btn.clicked.connect(lambda _=False: export_distribution_data(ctx))
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", ctrl, tooltip="Copy SVG")
     _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))

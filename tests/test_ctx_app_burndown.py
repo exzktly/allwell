@@ -426,7 +426,13 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              runtime_app-bound pixmap services draw_review_image /
 #              render_review_image_display), so their ctx entry points bridge through
 #              the app handle — 2 residuals relocated into review_image/.
-CTX_APP_BUDGET = 46
+#   F1 registry sub-builders: -1   build_stats_tab threaded onto ctx (state writes
+#              -> ctx.state); the stats sidebar host frame fetched via the blessed
+#              ctx.window widget accessor instead of ctx.app. The stats group-editor /
+#              sample-definitions / review-csv builders stay on the app bridge (their
+#              bodies drive app-taking controllers + god methods, so converting them
+#              would ADD ctx.app, not remove it).
+CTX_APP_BUDGET = 45
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

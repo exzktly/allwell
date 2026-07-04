@@ -26,10 +26,10 @@ from well_viewer.core.channel_state_controller import refresh_stats_property_com
 from well_viewer.core.safe import swallowed
 
 
-def build_stats_tab(app, parent: QWidget) -> None:
-    app._app_state.stats.groups = []
-    app._app_state.stats.active_grp = -1
-    build_stats_results_panel(app, parent)
+def build_stats_tab(ctx, parent: QWidget) -> None:
+    ctx.state.stats.groups = []
+    ctx.state.stats.active_grp = -1
+    build_stats_results_panel(ctx.app, parent)
 
 
 def build_stats_group_editor(app, parent: QWidget) -> None:

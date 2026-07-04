@@ -85,8 +85,13 @@ def _build_stats(ctx, frame) -> None:
     from well_viewer.features.stats.tab_view import (
         build_stats_group_editor, build_stats_tab,
     )
-    build_stats_tab(ctx.app, frame)
-    build_stats_group_editor(ctx.app, ctx.app._sidebar_stats_frame)
+    build_stats_tab(ctx, frame)
+    # ``build_stats_group_editor`` still takes the legacy ``app`` (its body drives
+    # the stats controllers, which all take ``app``); the sidebar host frame is an
+    # app-window widget handle fetched through the blessed ``ctx.window`` accessor
+    # (a widget-parenting need, not behaviour coupling) so it no longer reaches
+    # through the god-object escape hatch.
+    build_stats_group_editor(ctx.app, ctx.window._sidebar_stats_frame)
 
 
 _build_multivariate = _lazy_build("well_viewer.features.multivariate.tab_view", "build_multivariate_tab")

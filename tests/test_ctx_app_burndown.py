@@ -646,7 +646,25 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              ``_thresh_choices``) whose ctx home would be a broad cross-feature
 #              (scatter/stats) state migration — out of scope for this pass, so
 #              converting either is net-0.
-CTX_APP_BUDGET = 16
+#   D-thresh recalculate_threshold chain: -2   channel_state_controller
+#              set_active_channel / set_active_metric + the two plot handlers
+#              (on_plot_channel_selected / on_metric_selected) and the smFISH
+#              apply-global-threshold caller all went ctx-native — three
+#              reach-through sites cleared. The channel/metric switch fan-out now
+#              reads typed state off ctx.state, resolves every combo / frame /
+#              stepper / status chip through ctx.widgets (registering the five
+#              previously-loose handles: _plotting_channel_cb,
+#              _plotting_thresh_frac_stepper, _review_thresh_frac_stepper,
+#              _status_threshold_chip, _status_band_chip), announces on ctx.bus,
+#              and routes threshold / stats-cache / redraw through the ctx-native
+#              recalculate_threshold, invalidate_stats_cache, redraw_app helpers.
+#              recalculate_threshold itself keeps ONE new god-object seam: its
+#              ``_features`` on_channel_changed hook fan-out has no sanctioned ctx
+#              home, and update_channel_selector / _get_rows / _seg_channel_token /
+#              _load_gating are irreducibly app-bound, so the whole body is bundled
+#              behind a single app-handle unwrap. Net three sites cleared vs one
+#              seam added → -2.
+CTX_APP_BUDGET = 14
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

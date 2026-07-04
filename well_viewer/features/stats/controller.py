@@ -1007,5 +1007,5 @@ def on_stats_property_change(app) -> None:
     metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
     if metric == "smfish_count" and app._app_state.channel.active_channel not in app._app_state.channel.smfish_channels:
         metric = "mean_intensity"
-    set_active_metric(app, metric)
+    set_active_metric(app._ctx, metric)
 

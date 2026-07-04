@@ -78,7 +78,10 @@ def build_bottom(app) -> None:
     # mode, fed live from state. Clicking jumps to / toggles their editor, so
     # the always-visible readout doubles as a control. They replace the
     # duplicate "threshold=… | band=…" text the line plot used to append.
-    app._status_threshold_chip = QPushButton("", status_row)
+    # Register both chips through the WidgetRegistry so the ctx-native
+    # ``refresh_status_chips(ctx)`` resolves them via ``ctx.widgets`` (register
+    # also stamps ``app._status_threshold_chip`` for legacy readers).
+    app._widget_registry.register("_status_threshold_chip", QPushButton("", status_row))
     app._status_threshold_chip.setProperty("variant", "secondary")
     app._status_threshold_chip.setCursor(Qt.PointingHandCursor)
     app._status_threshold_chip.setToolTip(
@@ -86,7 +89,7 @@ def build_bottom(app) -> None:
     app._status_threshold_chip.clicked.connect(lambda _=False: _go_to_threshold_editor(app))
     sr_l.addWidget(app._status_threshold_chip)
 
-    app._status_band_chip = QPushButton("", status_row)
+    app._widget_registry.register("_status_band_chip", QPushButton("", status_row))
     app._status_band_chip.setProperty("variant", "secondary")
     app._status_band_chip.setCursor(Qt.PointingHandCursor)
     app._status_band_chip.setToolTip("Error band: SEM or SD — click to toggle")
@@ -150,30 +153,35 @@ def build_bottom(app) -> None:
     # toolbar), and seed both chips for the current state.
     if not getattr(app, "_sem_observers", None):
         app._sem_observers = []
-    app._sem_observers.append(lambda _is_sem: refresh_status_chips(app))
-    refresh_status_chips(app)
+    app._sem_observers.append(lambda _is_sem: refresh_status_chips(app._ctx))
+    refresh_status_chips(app._ctx)
 
 
-def refresh_status_chips(app) -> None:
+def refresh_status_chips(ctx) -> None:
     """Update the status-bar threshold / error-band chips from current state.
 
     Hidden until a dataset is loaded (the values are meaningless otherwise).
-    Safe to call before the chips are built (no-op)."""
-    thr_chip = getattr(app, "_status_threshold_chip", None)
-    band_chip = getattr(app, "_status_band_chip", None)
+    Safe to call before the chips are built (no-op).
+
+    A8/D-thresh: ctx-native — both chips resolve through ``ctx.widgets``, the
+    dataset / SEM state comes off ``ctx.state``, and the ThreshFracOn read uses
+    the ctx-native ``get_thresh_frac_on`` leaf."""
+    thr_chip = ctx.widgets.get_or_none("_status_threshold_chip")
+    band_chip = ctx.widgets.get_or_none("_status_band_chip")
     if thr_chip is None or band_chip is None:
         return
-    has_data = bool(getattr(app._app_state.dataset, "well_paths", None))
+    has_data = bool(getattr(ctx.state.dataset, "well_paths", None))
     thr_chip.setVisible(has_data)
     band_chip.setVisible(has_data)
     if not has_data:
         return
     try:
-        thr = float(app._get_thresh_frac_on(app._app_state.channel.active_channel))
+        from well_viewer.core.channel_state_controller import get_thresh_frac_on
+        thr = float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
         thr_chip.setText(f"Threshold {thr:g}")
     except Exception:
         thr_chip.setText("Threshold —")
-    use_sem = bool(app._app_state.plot.use_sem)
+    use_sem = bool(ctx.state.plot.use_sem)
     band_chip.setText(f"Band {'SEM' if use_sem else 'SD'}")
 
 

@@ -216,8 +216,9 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # so the Binary (≥ ON threshold) overlay updates live without leaving the tab.
     lr.addSpacing(12)
     lr.addWidget(QLabel("ON threshold:", lut_row))
-    self._review_thresh_frac_stepper = Stepper(
-        lut_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
+    self._review_thresh_frac_stepper = reg.register(
+        "_review_thresh_frac_stepper",
+        Stepper(lut_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
     self._review_thresh_frac_stepper.setFixedWidth(96)
     self._review_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
     _rt_edit = getattr(self._review_thresh_frac_stepper, "_edit", None)

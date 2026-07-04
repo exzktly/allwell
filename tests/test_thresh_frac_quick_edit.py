@@ -114,9 +114,12 @@ class _FakeApp:
         # cell_gating change handler also reaches ctx.bus (plot_options_changed)
         # and ctx.runtime.cell_gating (the edit banks stamped on app._cell_gating_*).
         from well_viewer.core.app_runtime import AppRuntime
+        from well_viewer.core.widget_registry import WidgetRegistry
+        # A8/D-thresh: refresh_thresh_frac_quick_edit resolves the steppers +
+        # status chips via ctx.widgets, so the double needs a real registry.
         self._ctx = SimpleNamespace(
             state=self._app_state, app=self, bus=self._event_bus,
-            runtime=AppRuntime(self),
+            runtime=AppRuntime(self), widgets=WidgetRegistry(self),
         )
 
     def _redraw(self) -> None:
@@ -165,9 +168,8 @@ def test_refresh_syncs_stepper_with_signals_blocked():
     # R6: a committed value lives on the typed slice (setText alone is an
     # uncommitted keystroke — the change handler is what syncs it).
     app._app_state.cell_gating.thresh_frac_on["gfp"] = 88.0
-    stepper = _FakeStepper(0.0)
-    app._plotting_thresh_frac_stepper = stepper
-    refresh_thresh_frac_quick_edit(app)
+    stepper = app._ctx.widgets.register("_plotting_thresh_frac_stepper", _FakeStepper(0.0))
+    refresh_thresh_frac_quick_edit(app._ctx)
     assert stepper.value() == 88.0
     # Signals are restored to unblocked after the display sync.
     assert stepper.blocked is False
@@ -177,18 +179,18 @@ def test_refresh_follows_active_channel():
     app = _FakeApp()
     app._app_state.cell_gating.thresh_frac_on["gfp"] = 10.0
     app._app_state.cell_gating.thresh_frac_on["mcherry"] = 20.0
-    app._plotting_thresh_frac_stepper = _FakeStepper(0.0)
+    app._ctx.widgets.register("_plotting_thresh_frac_stepper", _FakeStepper(0.0))
 
-    refresh_thresh_frac_quick_edit(app)
+    refresh_thresh_frac_quick_edit(app._ctx)
     assert app._plotting_thresh_frac_stepper.value() == 10.0
     app._app_state.channel.active_channel = "mcherry"
-    refresh_thresh_frac_quick_edit(app)
+    refresh_thresh_frac_quick_edit(app._ctx)
     assert app._plotting_thresh_frac_stepper.value() == 20.0
 
 
 def test_refresh_noop_without_stepper():
     app = _FakeApp()                            # no _plotting_thresh_frac_stepper
-    refresh_thresh_frac_quick_edit(app)         # must not raise
+    refresh_thresh_frac_quick_edit(app._ctx)         # must not raise
 
 
 # ── real wiring on an offscreen WellViewerApp ────────────────────────────────
@@ -214,9 +216,9 @@ def test_stepper_follows_channel_switch(loaded_app):
 
     loaded_app._set_thresh_frac_on(123.0, "gfp")
     loaded_app._set_thresh_frac_on(77.0, "mcherry")
-    set_active_channel(loaded_app, "mcherry")
+    set_active_channel(loaded_app._ctx, "mcherry")
     assert loaded_app._plotting_thresh_frac_stepper.value() == 77.0
-    set_active_channel(loaded_app, "gfp")
+    set_active_channel(loaded_app._ctx, "gfp")
     assert loaded_app._plotting_thresh_frac_stepper.value() == 123.0
 
 

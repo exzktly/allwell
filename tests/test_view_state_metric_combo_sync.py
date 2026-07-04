@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from well_viewer.core.widget_registry import WidgetRegistry
+
 
 
 class _FakeCombo:
@@ -62,6 +64,10 @@ def _make_app(metric: str = "mean_intensity") -> SimpleNamespace:
     app._app_state = SimpleNamespace(
         channel=SimpleNamespace(active_metric=metric),
     )
+    # A8/D-thresh: sync_metric_combos resolves combos via ctx.widgets. Register
+    # (which also stamps app._<name> for legacy readers) and expose the ctx.
+    reg = WidgetRegistry(app)
+    app._ctx = SimpleNamespace(app=app, state=app._app_state, widgets=reg)
     return app
 
 
@@ -72,11 +78,11 @@ def test_sync_metric_combos_pushes_value_into_global_combo():
     from well_viewer.core.channel_state_controller import sync_metric_combos
 
     app = _make_app(metric="smfish_count")
-    app._plotting_metric_cb = _FakeCombo(
+    app._ctx.widgets.register("_plotting_metric_cb", _FakeCombo(
         items=["Mean Intensity", "smFISH Count"], current_index=0,
-    )
+    ))
 
-    sync_metric_combos(app, "smfish_count")
+    sync_metric_combos(app._ctx, "smfish_count")
 
     assert app._plotting_metric_cb.currentText() == "smFISH Count"
     # blockSignals was used — no change handler should have re-fired.
@@ -89,10 +95,10 @@ def test_sync_metric_combos_is_noop_when_already_correct():
     from well_viewer.core.channel_state_controller import sync_metric_combos
 
     app = _make_app()
-    app._plotting_metric_cb = _FakeCombo(
+    app._ctx.widgets.register("_plotting_metric_cb", _FakeCombo(
         items=["Mean Intensity", "smFISH Count"], current_index=0,
-    )
-    sync_metric_combos(app, "mean_intensity")
+    ))
+    sync_metric_combos(app._ctx, "mean_intensity")
     # Still at index 0 (Mean Intensity); no emission either.
     assert app._plotting_metric_cb.currentText() == "Mean Intensity"
     assert app._plotting_metric_cb.signal_emissions == []
@@ -104,12 +110,12 @@ def test_sync_metric_combos_skips_combo_that_lacks_the_label():
     from well_viewer.core.channel_state_controller import sync_metric_combos
 
     app = _make_app()
-    app._metric_cb = _FakeCombo(items=["Mean Intensity"], current_index=0)
+    app._ctx.widgets.register("_metric_cb", _FakeCombo(items=["Mean Intensity"], current_index=0))
     # Set the active_metric field to mimic the apply_state path so this
     # test reflects the production code path (which calls sync after a
     # direct field assignment).
     app._app_state.channel.active_metric = "smfish_count"
-    sync_metric_combos(app, "smfish_count")
+    sync_metric_combos(app._ctx, "smfish_count")
     # The combo doesn't carry "smFISH Count" — stays at its current value.
     assert app._metric_cb.currentText() == "Mean Intensity"
 
@@ -121,10 +127,10 @@ def test_sync_metric_combos_handles_missing_combos():
 
     app = _make_app()
     # Only one combo present — _metric_cb, _metric_cb_bar, _stats_property_cb absent.
-    app._plotting_metric_cb = _FakeCombo(
+    app._ctx.widgets.register("_plotting_metric_cb", _FakeCombo(
         items=["Mean Intensity", "smFISH Count"], current_index=0,
-    )
-    sync_metric_combos(app, "smfish_count")  # must not raise
+    ))
+    sync_metric_combos(app._ctx, "smfish_count")  # must not raise
     assert app._plotting_metric_cb.currentText() == "smFISH Count"
 
 

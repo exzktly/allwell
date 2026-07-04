@@ -44,12 +44,24 @@ _logger = logging.getLogger("well_viewer")
 # ── Threshold / channel-list recompute ──────────────────────────────────────
 
 
-def recalculate_threshold(app) -> None:
+def recalculate_threshold(ctx) -> None:
     """Re-detect channels from the loaded CSVs, sync combos, and rebuild
     the (lo, hi) intensity range used by the threshold sliders.
 
     Replaces ``partial(recalculate_threshold, WellViewerApp)``.
+
+    A8/D-thresh: this is the **one sanctioned god-object seam** in the
+    channel/metric switch chain. The bulk of the body — the ``_features``
+    registry ``on_channel_changed`` hook fan-out (no sanctioned ctx home),
+    ``update_channel_selector``, ``_get_rows``, ``_seg_channel_token`` and the
+    ``_load_gating_from_pipeline_info`` reload — is irreducibly god-object bound,
+    so it is bundled behind a single app-handle unwrap here. The two plot
+    handlers (``on_plot_channel_selected`` / ``on_metric_selected``), the smFISH
+    apply-global-threshold caller, and ``set_active_channel`` / ``set_active_metric``
+    all call this ctx-natively — net three reach-through sites cleared for this
+    one seam.
     """
+    app = ctx.app
     sample_df = next(
         (app._get_rows(lbl) for lbl in app._app_state.dataset.well_paths),
         pd.DataFrame(),
@@ -160,7 +172,7 @@ def recalculate_threshold(app) -> None:
 # ── Active channel switching ────────────────────────────────────────────────
 
 
-def set_active_channel(app, channel: str) -> None:
+def set_active_channel(ctx, channel: str) -> None:
     """Switch the active fluorescent channel and trigger a scope-aware redraw.
 
     ``channel`` may be a real channel token (e.g. ``"gfp"``) or a ratio
@@ -168,13 +180,20 @@ def set_active_channel(app, channel: str) -> None:
     selector and route reads through ``resolve_value``.
 
     Replaces ``partial(set_active_channel, WellViewerApp)``.
+
+    A8/D-thresh: ctx-native — typed state reads off ``ctx.state.channel``, every
+    combo/frame resolves through ``ctx.widgets``, the channel_changed announce
+    goes on ``ctx.bus``, and the threshold recompute / stats-cache / quick-edit
+    fan-out all take ``ctx``. No god-object unwrap here (the one seam lives in
+    ``recalculate_threshold``).
     """
+    from well_viewer.core.selection_controller import invalidate_stats_cache
     if not channel or channel == "—":
         return
     # ChannelState owns the channel/metric/val_col invariant — the mutators
     # below perform the pure state transition (and report whether anything
     # changed); this controller keeps the widget-sync that must stay in Qt.
-    channel_state = app._app_state.channel
+    channel_state = ctx.state.channel
     if is_ratio_key(channel):
         ratio = channel_state.resolve_ratio(channel)
         if ratio is None:
@@ -183,7 +202,7 @@ def set_active_channel(app, channel: str) -> None:
             return
         # Hide the per-cell metric selector — ratios encode their own metrics.
         for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
-            frame = getattr(app, frame_attr, None)
+            frame = ctx.widgets.get_or_none(frame_attr)
             if frame is not None:
                 frame.setVisible(False)
     elif is_shape_column(channel):
@@ -192,7 +211,7 @@ def set_active_channel(app, channel: str) -> None:
         if not channel_state.set_active_shape_feature(channel):
             return
         for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
-            frame = getattr(app, frame_attr, None)
+            frame = ctx.widgets.get_or_none(frame_attr)
             if frame is not None:
                 frame.setVisible(False)
     else:
@@ -206,7 +225,7 @@ def set_active_channel(app, channel: str) -> None:
         label = METRIC_KEY_TO_LABEL.get(channel_state.active_metric, "Mean Intensity")
         for cb_attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
                         "_plotting_metric_cb"):
-            cb = getattr(app, cb_attr, None)
+            cb = ctx.widgets.get_or_none(cb_attr)
             if cb is None:
                 continue
             idx = cb.findText(label)
@@ -219,10 +238,10 @@ def set_active_channel(app, channel: str) -> None:
                 cb.blockSignals(blocked)
     # Keep all plot-tab channel selectors in sync so switching channel on
     # one tab is reflected on the others.
-    target_label = app._active_channel_label()
+    target_label = active_channel_label(ctx)
     for attr in ("_chan_cb_line", "_chan_cb_bar", "_chan_cb_distribution",
                  "_chan_cb_heatmap", "_plotting_channel_cb"):
-        cb = getattr(app, attr, None)
+        cb = ctx.widgets.get_or_none(attr)
         if cb is None:
             continue
         if str(cb.currentText() or "") == target_label:
@@ -235,19 +254,21 @@ def set_active_channel(app, channel: str) -> None:
             finally:
                 cb.blockSignals(blocked)
     # Reset threshold to the range of the new channel.
-    recalculate_threshold(app)
-    app._invalidate_stats_cache()
-    refresh_metric_combo_for_channel(app._ctx)
+    recalculate_threshold(ctx)
+    invalidate_stats_cache(ctx)
+    refresh_metric_combo_for_channel(ctx)
     # Keep the ctxbar ThreshFracOn quick-edit showing the new channel's value.
-    refresh_thresh_frac_quick_edit(app)
+    refresh_thresh_frac_quick_edit(ctx)
     # Announce on the bus. The RedrawCoordinator subscriber coalesces the
     # redraw — visible scope now, the other marked dirty for redraw on tab
     # switch (see redraw_coordinator.py / fold_change_scopes.py).
-    app._event_bus.channel_changed.emit(channel_state)
-    if hasattr(app, "_cdf_chan_lbl"):
-        app._cdf_chan_lbl.setText(f"({target_label} x range)")
-    if hasattr(app, "_bar_ylim_chan_lbl"):
-        app._bar_ylim_chan_lbl.setText(f"{target_label} y:")
+    ctx.bus.channel_changed.emit(channel_state)
+    cdf_lbl = ctx.widgets.get_or_none("_cdf_chan_lbl")
+    if cdf_lbl is not None:
+        cdf_lbl.setText(f"({target_label} x range)")
+    bar_ylim_lbl = ctx.widgets.get_or_none("_bar_ylim_chan_lbl")
+    if bar_ylim_lbl is not None:
+        bar_ylim_lbl.setText(f"{target_label} y:")
 
 
 # ── Property/metric combo refresh ───────────────────────────────────────────
@@ -376,7 +397,7 @@ def update_channel_selector(app) -> None:
     # Keep active channel anchored to a valid plot channel.
     if active_label not in labels:
         if plot_label != "—":
-            set_active_channel(app, app._channel_key_for_label(plot_label))
+            set_active_channel(app._ctx, app._channel_key_for_label(plot_label))
         else:
             # No valid plot channel — clear active state explicitly.
             app._app_state.channel.active_channel = ""
@@ -492,7 +513,7 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
 
 
 
-def sync_metric_combos(app, metric: str) -> None:
+def sync_metric_combos(ctx, metric: str) -> None:
     """Push *metric* (an ``active_metric`` key like ``"smfish_count"``) into
     every metric-combo widget the app knows about, without retriggering the
     change handler.
@@ -503,12 +524,15 @@ def sync_metric_combos(app, metric: str) -> None:
     when the field is already at the target value, so without this helper
     the dropdown reverts to the combo's default ("Mean Intensity") on app
     reopen and the user has to "wiggle" the dropdown to force a sync.
+
+    A8/D-thresh: ctx-native — every metric combo resolves through
+    ``ctx.widgets`` (all five are registered by their tab builders).
     """
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
     label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
     for attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
                  "_plotting_metric_cb", "_stats_property_cb"):
-        cb = getattr(app, attr, None)
+        cb = ctx.widgets.get_or_none(attr)
         if cb is None:
             continue
         try:
@@ -528,16 +552,25 @@ def sync_metric_combos(app, metric: str) -> None:
             cb.blockSignals(blocked)
 
 
-def set_active_metric(app, metric: str) -> None:
-    """Switch the active intensity property and redraw."""
-    if metric == app._app_state.channel.active_metric:
+def set_active_metric(ctx, metric: str) -> None:
+    """Switch the active intensity property and redraw.
+
+    A8/D-thresh: ctx-native — the metric/val_col mutation lands on
+    ``ctx.state.channel``, the stale-cache recovery clears
+    ``ctx.state.dataset.cache`` directly, and the combo-sync / threshold /
+    stats / redraw fan-out all take ``ctx``. No god-object unwrap.
+    """
+    from well_viewer.core.plot_orchestrator import redraw_app
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    channel = ctx.state.channel
+    if metric == channel.active_metric:
         return
-    app._app_state.channel.active_metric = metric
-    if not is_ratio_key(app._app_state.channel.active_val_col) and not is_shape_column(app._app_state.channel.active_val_col):
-        app._app_state.channel.active_val_col = f"{app._app_state.channel.active_channel}_{app._app_state.channel.active_metric}"
-    active_val_col = app._app_state.channel.active_val_col
+    channel.active_metric = metric
+    if not is_ratio_key(channel.active_val_col) and not is_shape_column(channel.active_val_col):
+        channel.active_val_col = f"{channel.active_channel}_{channel.active_metric}"
+    active_val_col = channel.active_val_col
     if not is_ratio_key(active_val_col) and not is_shape_column(active_val_col):
-        cache = getattr(app._app_state.dataset, "cache", {}) or {}
+        cache = getattr(ctx.state.dataset, "cache", {}) or {}
         first_df = next(iter(cache.values()), None)
         if (
             first_df is not None
@@ -551,21 +584,22 @@ def set_active_metric(app, metric: str) -> None:
                 "recover from a stale cache (e.g. pre-normalisation "
                 "mixed-case headers). Cached columns were: %s",
                 active_val_col,
-                app._app_state.channel.active_channel,
+                channel.active_channel,
                 metric,
                 sorted(first_df.columns.tolist()),
             )
-            if hasattr(app, "_invalidate_dataset_cache"):
-                app._invalidate_dataset_cache()
-    sync_metric_combos(app, metric)
-    refresh_metric_combo_for_channel(app._ctx)
-    refresh_heatmap_aggregation_options(app._ctx)
-    recalculate_threshold(app)
-    app._invalidate_stats_cache()
-    app._redraw()
-    if hasattr(app, "_bar_tp_cb"):
+            # Drop the per-well DataFrame cache (the ctx-native equivalent of
+            # ``app._invalidate_dataset_cache()`` — a bare ``cache.clear()``).
+            ctx.state.dataset.cache.clear()
+    sync_metric_combos(ctx, metric)
+    refresh_metric_combo_for_channel(ctx)
+    refresh_heatmap_aggregation_options(ctx)
+    recalculate_threshold(ctx)
+    invalidate_stats_cache(ctx)
+    redraw_app(ctx)
+    if ctx.widgets.get_or_none("_bar_tp_cb") is not None:
         from well_viewer.features.barplot.renderer import redraw_bars
-        redraw_bars(app._ctx)
+        redraw_bars(ctx)
 
 
 
@@ -720,10 +754,11 @@ def on_plot_channel_selected(ctx, source=None) -> None:
     ``_set_active_channel`` short-circuits because the "new" channel
     equals the current one. Prefer the explicit ``source`` widget.
 
-    A8: takes ``ctx``; the sender/combobox resolution + set_active_channel
-    still walk the app, so it unwraps the handle once at this core boundary.
+    A8/D-thresh: fully ctx-native — the source combo's text, the ``sender()``
+    fallback (via ``ctx.window`` — the QMainWindow qua Qt object), the
+    ``_plot_chan_var`` last-resort read (``ctx.widgets``), and the
+    label→key + set_active_channel handoff all route through ``ctx``.
     """
-    app = ctx.app
     label = ""
     if source is not None and hasattr(source, "currentText"):
         try:
@@ -732,7 +767,7 @@ def on_plot_channel_selected(ctx, source=None) -> None:
             label = ""
     if not label:
         try:
-            sender = app.sender()
+            sender = ctx.window.sender()
         except Exception:
             sender = None
         if sender is not None and hasattr(sender, "currentText"):
@@ -741,10 +776,11 @@ def on_plot_channel_selected(ctx, source=None) -> None:
             except Exception:
                 label = ""
     if not label:
-        label = app._plot_chan_var.currentText()
+        plot_chan_var = ctx.widgets.get_or_none("_plot_chan_var")
+        label = plot_chan_var.currentText() if plot_chan_var is not None else ""
     # Route real channels and ratios via the label→key map so ratio
     # selections (e.g. "GFP/MCHERRY") resolve to a ``ratio:<name>`` key.
-    set_active_channel(app, app._channel_key_for_label(label))
+    set_active_channel(ctx, channel_key_for_label(ctx, label))
 
 
 
@@ -808,17 +844,20 @@ def on_metric_selected_global(app) -> None:
     # empty plot.
     if metric == "smfish_count" and app._app_state.channel.active_channel not in app._app_state.channel.smfish_channels:
         metric = "mean_intensity"
-    set_active_metric(app, metric)
+    set_active_metric(app._ctx, metric)
 
 
 
-def channel_key_for_label(app, label: str) -> str:
+def channel_key_for_label(ctx, label: str) -> str:
     """Map a dropdown label back to the ``_set_active_channel`` argument.
 
     Real channels return their lowercase token; ratios return their
     ``ratio:<name>`` key.
-    """
-    mapping = app._app_state.channel.label_to_channel_key
+
+    A8/D-thresh: ctx-native — pure ``ctx.state.channel`` + the ctx
+    ``ratio_label_for`` leaf."""
+    channel = ctx.state.channel
+    mapping = channel.label_to_channel_key
     if label in mapping:
         return mapping[label]
     # Fallback when the dropdown was populated before ``_label_to_channel_key``
@@ -827,8 +866,8 @@ def channel_key_for_label(app, label: str) -> str:
     # included) BEFORE assuming a real channel — otherwise a ratio read in this
     # window is lossily lowercased into a bogus real-channel token like
     # ``"gfp/mcherry"`` (audit X5).
-    for r in getattr(app._app_state.channel, "ratio_metrics", None) or []:
-        if label == ratio_label_for(app._ctx, r):
+    for r in getattr(channel, "ratio_metrics", None) or []:
+        if label == ratio_label_for(ctx, r):
             return r.key()
     # Otherwise assume a real channel and lowercase the label.
     return str(label or "").lower()
@@ -926,7 +965,7 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
     cell_gating_on_threshold_frac_on_change(app._ctx)
 
 
-def refresh_thresh_frac_quick_edit(app) -> None:
+def refresh_thresh_frac_quick_edit(ctx) -> None:
     """Sync the ON-threshold quick-edit Steppers to the active channel's
     ThreshFracOn.
 
@@ -936,19 +975,22 @@ def refresh_thresh_frac_quick_edit(app) -> None:
     intensity threshold). Signals are blocked so this display sync doesn't loop
     back through ``set_thresh_frac_on`` (``Stepper.setValue`` emits
     ``valueChanged``). No-op for any stepper that hasn't been built yet.
+
+    A8/D-thresh: ctx-native — the status-chip refresh and the ThreshFracOn read
+    both take ``ctx``, and each quick-edit stepper resolves through
+    ``ctx.widgets``.
     """
     # Keep the status-bar threshold chip (F1) in sync — runs on channel switch
     # and every threshold edit, the same triggers as the ctxbar stepper.
-    refresh_chips = getattr(app, "_refresh_status_chips", None)
-    if callable(refresh_chips):
-        refresh_chips()
-    value = float(get_thresh_frac_on(app._ctx))
+    from well_viewer.core.status_view import refresh_status_chips
+    refresh_status_chips(ctx)
+    value = float(get_thresh_frac_on(ctx))
     for attr in (
         "_plotting_thresh_frac_stepper",
         "_review_thresh_frac_stepper",
         "_image_table_thresh_frac_stepper",
     ):
-        stepper = getattr(app, attr, None)
+        stepper = ctx.widgets.get_or_none(attr)
         if stepper is None:
             continue
         blocked = stepper.blockSignals(True)
@@ -1002,12 +1044,15 @@ def ratio_label_for(ctx, ratio: RatioMetric) -> str:
 
 
 def on_metric_selected(ctx) -> None:
-    """Handle the per-tab (legacy hidden) metric selector change."""
-    app = ctx.app
+    """Handle the per-tab (legacy hidden) metric selector change.
+
+    A8/D-thresh: ctx-native — the metric combo resolves through ``ctx.widgets``
+    and the set_active_metric handoff takes ``ctx``."""
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
-    metric_label = app._metric_var.currentText()
+    metric_var = ctx.widgets.get_or_none("_metric_var")
+    metric_label = metric_var.currentText() if metric_var is not None else ""
     metric = METRIC_LABEL_TO_KEY.get(metric_label, "mean_intensity")
-    set_active_metric(app, metric)
+    set_active_metric(ctx, metric)
 
 
 

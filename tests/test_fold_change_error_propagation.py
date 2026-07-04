@@ -37,7 +37,7 @@ def _by_key(items):
 
 def test_vs_control_propagates_the_control_spread_into_every_bar(loaded_app):
     app = loaded_app
-    set_active_channel(app, "gfp")
+    set_active_channel(app._ctx, "gfp")
     app._set_selected_wells(set(WELLS))
 
     # Raw (unscaled) per-well mean ± spread — the fold-change inputs.

@@ -829,7 +829,7 @@ def _smfish_refresh_app_cache(ctx) -> None:
     for label, path in ctx.state.dataset.well_paths.items():
         if label in ctx.state.dataset.cache:
             ctx.state.dataset.cache[label] = load_well_csv(path)
-    recalculate_threshold(ctx.app)
+    recalculate_threshold(ctx)
     # The per-well DataFrames now carry new smfish_count values; the
     # stats cache keys do not include CSV content, so without an
     # explicit invalidation every line / bar / scatter aggregate keeps

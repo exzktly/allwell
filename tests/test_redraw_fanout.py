@@ -102,7 +102,7 @@ def test_channel_change_redraws_visible_bar_scope_once(counted_app):
     _show_centre_tab(app, "Bar Plots")
     counter.reset()
 
-    set_active_channel(app, "mcherry")
+    set_active_channel(app._ctx, "mcherry")
 
     assert counter.counts["bar"] == 1, "visible bar scope must redraw exactly once"
     assert counter.counts["line"] == 0, "hidden line scope must defer (no redraw)"
@@ -114,7 +114,7 @@ def test_channel_change_redraws_visible_line_scope_once(counted_app):
     _show_centre_tab(app, "Line Graphs")
     counter.reset()
 
-    set_active_channel(app, "mcherry")
+    set_active_channel(app._ctx, "mcherry")
 
     assert counter.counts["line"] == 1, "visible line scope must redraw exactly once"
     assert counter.counts["bar"] == 0, "hidden bar scope must defer (no redraw)"
@@ -172,7 +172,7 @@ def test_deferred_scope_flushes_exactly_once_on_tab_switch(counted_app):
     # Act on the bar scope while line is hidden -> line is marked dirty.
     _show_centre_tab(app, "Bar Plots")
     counter.reset()
-    set_active_channel(app, "mcherry")
+    set_active_channel(app._ctx, "mcherry")
     assert counter.counts["line"] == 0, "hidden line scope must not redraw eagerly"
 
     # Switching to the line tab flushes the one deferred redraw — and only one.

@@ -304,7 +304,8 @@ def build_centre(app, parent: QWidget) -> None:
         arl.addWidget(chan_lbl)
         # Expose the label so tab-switch logic can hide it on scatter tabs.
         app._plotting_channel_lbl = chan_lbl
-        app._plotting_channel_cb = _QComboBox()
+        app._plotting_channel_cb = app._ctx.widgets.register(
+            "_plotting_channel_cb", _QComboBox())
         app._plotting_channel_cb.setMinimumContentsLength(8)
         app._plotting_channel_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "
@@ -383,8 +384,9 @@ def build_centre(app, parent: QWidget) -> None:
         )
         arl.addWidget(thresh_lbl)
         app._plotting_thresh_frac_lbl = thresh_lbl
-        app._plotting_thresh_frac_stepper = _Stepper(
-            value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
+        app._plotting_thresh_frac_stepper = app._ctx.widgets.register(
+            "_plotting_thresh_frac_stepper",
+            _Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
         app._plotting_thresh_frac_stepper.setFixedWidth(96)
         # Don't let the threshold box grab keyboard focus when the window first
         # shows (it auto-focused on load) — only take focus on click.

@@ -353,13 +353,13 @@ def test_ctxbar_threshold_box_reflects_set_value(loaded_app):
         cell_gating_on_threshold_frac_on_change,
     )
     from well_viewer.core.channel_state_controller import set_active_channel
-    set_active_channel(app, "gfp")
+    set_active_channel(app._ctx, "gfp")
     app._cell_gating_thresh_frac_edits["gfp"].setText("123")
     cell_gating_on_threshold_frac_on_change(app._ctx)
     assert app._plotting_thresh_frac_stepper.value() == 123.0
     app._cell_gating_thresh_frac_edits["mcherry"].setText("77")
     cell_gating_on_threshold_frac_on_change(app._ctx)
-    set_active_channel(app, "mcherry")
+    set_active_channel(app._ctx, "mcherry")
     assert app._plotting_thresh_frac_stepper.value() == 77.0
 
 

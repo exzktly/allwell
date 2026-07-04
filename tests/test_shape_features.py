@@ -297,7 +297,7 @@ def test_label_key_value_roundtrip():
     }
 
     # label → key (as update_channel_selector's map would resolve it)
-    key = channel_key_for_label(app, "Eccentricity")
+    key = channel_key_for_label(app._ctx, "Eccentricity")
     assert key == "shape_eccentricity"
 
     # activating it via the state mutator, then label round-trips back

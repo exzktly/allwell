@@ -29,7 +29,7 @@ def test_restored_active_channel_beats_combo_default(loaded_app):
         pytest.skip("plot channel combo not built")
 
     # Make a non-default channel active (what restore would have set).
-    set_active_channel(app, fluors[1])
+    set_active_channel(app._ctx, fluors[1])
     active_lbl = app._active_channel_label()
     labels = [var.itemText(i) for i in range(var.count())]
     default_lbl = next((s for s in labels if s not in (active_lbl, "—")), None)

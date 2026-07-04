@@ -40,7 +40,7 @@ def _app(ratios, *, with_map):
 def test_ratio_label_resolves_via_map_when_built():
     r = _ratio()
     app = _app([r], with_map=True)
-    assert channel_key_for_label(app, "GFP/MCHERRY") == r.key()
+    assert channel_key_for_label(app._ctx, "GFP/MCHERRY") == r.key()
 
 
 def test_ratio_label_resolves_before_map_built():
@@ -49,18 +49,18 @@ def test_ratio_label_resolves_before_map_built():
     r = _ratio()
     app = _app([r], with_map=False)
     assert not hasattr(app, "_label_to_channel_key")
-    assert channel_key_for_label(app, "GFP/MCHERRY") == r.key()
-    assert channel_key_for_label(app, "GFP/MCHERRY") != "gfp/mcherry"
+    assert channel_key_for_label(app._ctx, "GFP/MCHERRY") == r.key()
+    assert channel_key_for_label(app._ctx, "GFP/MCHERRY") != "gfp/mcherry"
 
 
 def test_disambiguated_ratio_label_resolves_before_map():
     # Two ratios share the GFP/MCHERRY base label → labels carry "[name]".
     r1, r2 = _ratio("a"), _ratio("b")
     app = _app([r1, r2], with_map=False)
-    assert channel_key_for_label(app, "GFP/MCHERRY [a]") == r1.key()
-    assert channel_key_for_label(app, "GFP/MCHERRY [b]") == r2.key()
+    assert channel_key_for_label(app._ctx, "GFP/MCHERRY [a]") == r1.key()
+    assert channel_key_for_label(app._ctx, "GFP/MCHERRY [b]") == r2.key()
 
 
 def test_real_channel_still_lowercases():
     app = _app([_ratio()], with_map=False)
-    assert channel_key_for_label(app, "GFP") == "gfp"
+    assert channel_key_for_label(app._ctx, "GFP") == "gfp"

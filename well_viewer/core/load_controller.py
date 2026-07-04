@@ -388,7 +388,7 @@ def load_directory(app, d: Path, label=None) -> None:
     display = label or str(d)
     app._dir_label.setText(display)
     app._set_status(f"Loaded {n} well(s) — {display}")
-    recalculate_threshold(app)
+    recalculate_threshold(app._ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from
     # _recalculate_threshold, which fires on every channel/metric switch)

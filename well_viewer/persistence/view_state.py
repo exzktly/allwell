@@ -557,7 +557,7 @@ def restore(ctx, state: dict) -> None:
     if isinstance(ch, str) and ch:
         try:
             app._app_state.channel.active_channel = ch
-            set_active_channel(app, ch)
+            set_active_channel(ctx, ch)
         except Exception:
             _logger.debug("view_state: active_channel restore failed", exc_info=True)
 
@@ -577,7 +577,7 @@ def restore(ctx, state: dict) -> None:
         # count was the last-selected metric.
         try:
             from well_viewer.core.channel_state_controller import sync_metric_combos
-            sync_metric_combos(app, metric)
+            sync_metric_combos(ctx, metric)
         except Exception:
             _logger.debug("view_state: metric combo sync failed", exc_info=True)
 

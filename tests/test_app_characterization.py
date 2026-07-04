@@ -73,7 +73,7 @@ def test_collect_line_series_per_well_points(all_wells_selected):
 
 
 def test_collect_bar_items_follows_active_channel(all_wells_selected):
-    set_active_channel(all_wells_selected, "mcherry")
+    set_active_channel(all_wells_selected._ctx, "mcherry")
     _, items, _ = collect_bar_items(all_wells_selected._ctx, 0.0)
     by_key = {it.key: it.mean for it in items}
     for well in WELLS:

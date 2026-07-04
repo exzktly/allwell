@@ -393,11 +393,11 @@ class WellViewerApp(QWidget):
 
     def _set_thresh_frac_on(self, value, channel: Optional[str] = None) -> None: return set_thresh_frac_on(self, value, channel)
 
-    def _refresh_thresh_frac_quick_edit(self) -> None: return refresh_thresh_frac_quick_edit(self)
+    def _refresh_thresh_frac_quick_edit(self) -> None: return refresh_thresh_frac_quick_edit(self._ctx)
 
     def _refresh_status_chips(self) -> None:
         from well_viewer.core.status_view import refresh_status_chips
-        return refresh_status_chips(self)
+        return refresh_status_chips(self._ctx)
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -840,7 +840,7 @@ class WellViewerApp(QWidget):
     def _ratio_dropdown_labels(self) -> List[str]:
         return [self._ratio_label_for(r) for r in self._app_state.channel.ratio_metrics]
 
-    def _channel_key_for_label(self, label: str) -> str: return channel_key_for_label(self, label)
+    def _channel_key_for_label(self, label: str) -> str: return channel_key_for_label(self._ctx, label)
 
     def _active_channel_label(self) -> str: return active_channel_label(self._ctx)
 

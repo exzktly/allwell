@@ -530,7 +530,7 @@ class WellViewerApp(QWidget):
 
     # ── Preview sidebar picker ────────────────────────────────────────────────
 
-    def _refresh_preview_picker(self) -> None: return refresh_preview_picker_shim(self)
+    def _refresh_preview_picker(self) -> None: return refresh_preview_picker_shim(self._ctx)
 
     # ── Image Table tab ───────────────────────────────────────────────────────
 

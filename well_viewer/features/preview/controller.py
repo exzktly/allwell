@@ -57,16 +57,7 @@ def sync_preview_well_for_image_tabs(ctx) -> None:
         preview.selected_well = sorted(well_paths.keys(), key=parse_rc)[0]
 
 
-def refresh_preview_picker_shim(app) -> None:
-    from well_viewer.data.data_loading import extract_well_token as _extract_well_token
-    from ui.theme import get_color
-    _refresh_preview_picker_view(
-        app,
-        button_bg=get_color("button_bg"),
-        button_text=get_color("button_text"),
-        button_text_disabled=get_color("button_text_disabled"),
-        accent=get_color("ACCENT"),
-        clr_white=get_color("CLR_WHITE"),
-        clr_accent_dark=get_color("ACCENT_DARK"),
-        extract_well_token_fn=_extract_well_token,
-    )
+def refresh_preview_picker_shim(ctx) -> None:
+    # The preview picker refresh reads its state/widgets off ctx; the former
+    # styling kwargs are unused by the view, so this is now a thin ctx delegate.
+    _refresh_preview_picker_view(ctx)

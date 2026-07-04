@@ -39,7 +39,7 @@ def build_preview_picker(app, parent: QWidget) -> None:
     _sp.setHeightForWidth(True)
     plate.setSizePolicy(_sp)
     layout.addWidget(plate)
-    app._sidebar_preview_plate = plate
+    app._sidebar_preview_plate = app._ctx.widgets.register("_sidebar_preview_plate", plate)
 
     def _on_plate_changed(ids) -> None:
         _preview = app._app_state.feature_slice("preview")
@@ -53,7 +53,8 @@ def build_preview_picker(app, parent: QWidget) -> None:
         update_preview(app, tok)
     plate.selectionChanged.connect(_on_plate_changed)
 
-    app._preview_sel_lbl = QLabel("No well selected", parent)
+    app._preview_sel_lbl = app._ctx.widgets.register(
+        "_preview_sel_lbl", QLabel("No well selected", parent))
     app._preview_sel_lbl.setObjectName("Muted")
     app._preview_sel_lbl.setAlignment(Qt.AlignLeft)
     layout.addWidget(app._preview_sel_lbl)
@@ -68,14 +69,16 @@ def build_preview_picker(app, parent: QWidget) -> None:
     app._refresh_preview_picker()
 
 
-def refresh_preview_picker(app, **_kw) -> None:
-    _preview = app._app_state.feature_slice("preview")
+def refresh_preview_picker(ctx, **_kw) -> None:
+    _preview = ctx.state.feature_slice("preview")
     if _preview is None:  # Image Browser disabled — no preview state
         return
-    plate = getattr(app, "_sidebar_preview_plate", None)
+    plate = ctx.widgets.get_or_none("_sidebar_preview_plate")
     sel = _preview.selected_well
     if plate is not None:
-        plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
-        plate.setSelectedWellIds([sel] if sel and sel in app._app_state.dataset.well_paths else [])
-    if hasattr(app, "_preview_sel_lbl"):
-        app._preview_sel_lbl.setText(f"Selected: {sel}" if sel else "No well selected")
+        well_paths = ctx.state.dataset.well_paths
+        plate.setEnabledWells(list(well_paths.keys()))
+        plate.setSelectedWellIds([sel] if sel and sel in well_paths else [])
+    lbl = ctx.widgets.get_or_none("_preview_sel_lbl")
+    if lbl is not None:
+        lbl.setText(f"Selected: {sel}" if sel else "No well selected")

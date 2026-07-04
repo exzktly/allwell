@@ -430,7 +430,7 @@ def _channel_heatmap(app) -> None:
 def _channel_multivariate(app) -> None:
     from well_viewer.features.multivariate.controller import mv_on_channel_changed
     if hasattr(app, "_mv_canvas"):
-        mv_on_channel_changed(app)
+        mv_on_channel_changed(app._ctx)
 
 
 def _channel_spatial(app) -> None:

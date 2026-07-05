@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import time
 import zipfile
 from pathlib import Path
 
@@ -69,13 +71,52 @@ def _fsync_path(path: Path) -> None:
             pass
 
 
+# Retry budget for the image write. ``tifffile`` writes the pixel buffer with
+# ``ndarray.tofile``, which raises the cryptic ``OSError: <N> requested and 0
+# written`` whenever the underlying ``fwrite`` comes back short. The error is at
+# the *write* stage (the file already opened), so with free disk space available
+# it is not "disk full" — the usual culprits on a local volume are a transient
+# filesystem/I-O hiccup, a backup / anti-virus / indexing process momentarily
+# holding the freshly-created file, or (macOS APFS) space that ``df`` reports
+# free but that isn't yet writable. All of those clear on their own, so the right
+# response is to back off and retry; only when the volume is genuinely out of
+# room (free space below the image size) is retrying futile and we say so
+# outright. If the retries are exhausted the caller still sees a failure — with
+# an honest, actionable diagnostic rather than the raw numpy message — so the FOV
+# is marked failed instead of emitting a truncated image. ``_RETRY_BASE_DELAY_S``
+# is patched to 0 in tests. Mirrors the GUI-side shield in
+# ``well_viewer/persistence/_io.py``.
+_WRITE_MAX_ATTEMPTS = 5
+_RETRY_BASE_DELAY_S = 0.5
+
+
+def _free_bytes(path: Path) -> "int | None":
+    """Free bytes on *path*'s volume, or ``None`` if it can't be determined."""
+    try:
+        return shutil.disk_usage(path.parent).free
+    except OSError:
+        return None
+
+
 def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
-    """Atomic image write: tmp file → fsync → rename.
+    """Atomic image write: tmp file → fsync → rename, with retry on OSError.
 
     Routes ``.tif/.tiff`` through tifffile and ``.png`` through imageio v3.
     Other extensions fall back to tifffile. Cleans up the temp file on
     failure so the well's output directory never carries partial bytes
     that a later zip-up step would pack into a corrupt archive.
+
+    An ``OSError`` from the codec (notably numpy's cryptic ``<N> requested and 0
+    written`` short-write) is retried up to ``_WRITE_MAX_ATTEMPTS`` times with
+    exponential backoff — such failures are usually transient (filesystem/I-O
+    blip, backup/AV holding the file, macOS APFS purgeable space) and clear on
+    a retry; the partial tmp is unlinked between attempts. Two exits skip the
+    remaining retries: a genuinely full volume (free space below the image
+    size), which cannot be fixed by retrying, is reported immediately; and once
+    the budget is exhausted the final failure propagates as an enriched
+    ``OSError`` (original message + free space + likely causes + how to resume)
+    so the caller marks the FOV failed rather than emitting a truncated image.
+    Non-``OSError`` exceptions (e.g. ``KeyboardInterrupt``) are never retried.
 
     The tmp file is named ``__aw_tmp_<stem>.pid<N><ext>`` — a unique
     prefix the zip-up step's listers explicitly exclude. The trailing
@@ -91,20 +132,57 @@ def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
         f"__aw_tmp_{out_path.stem}.pid{os.getpid()}{out_path.suffix}"
     )
     suffix = out_path.suffix.lower()
-    try:
-        if suffix == ".png":
-            iio.imwrite(str(tmp), data)
-        else:
-            imwrite(str(tmp), data)
-        _fsync_path(tmp)
-        os.replace(str(tmp), str(out_path))
-    except BaseException:
+    need = int(getattr(data, "nbytes", 0) or 0)
+
+    def _cleanup_tmp() -> None:
         try:
             if tmp.exists():
                 tmp.unlink()
         except OSError:
             pass
-        raise
+
+    for attempt in range(_WRITE_MAX_ATTEMPTS):
+        try:
+            if suffix == ".png":
+                iio.imwrite(str(tmp), data)
+            else:
+                imwrite(str(tmp), data)
+            _fsync_path(tmp)
+            os.replace(str(tmp), str(out_path))
+            return
+        except OSError as exc:
+            _cleanup_tmp()
+            free = _free_bytes(out_path)
+            # Genuinely out of room → retrying cannot help; say so plainly.
+            if free is not None and free < need:
+                raise OSError(
+                    f"No space left on device while writing {out_path.name}: "
+                    f"{free:,} byte(s) free on {out_path.parent}, need "
+                    f"{need:,} for this image. Free up space (or point "
+                    f"ALLWELL_SCRATCH_DIR at a roomier volume) and re-run with "
+                    f"--incremental to resume."
+                ) from exc
+            if attempt + 1 >= _WRITE_MAX_ATTEMPTS:
+                free_str = (f"{free:,} byte(s) free" if free is not None
+                            else "free space unknown")
+                raise OSError(
+                    f"Failed to write {out_path.name} after "
+                    f"{_WRITE_MAX_ATTEMPTS} attempts ({exc}); {free_str} on "
+                    f"{out_path.parent}. A zero-byte write with space available "
+                    f"usually means a transient filesystem/I-O error, a backup / "
+                    f"anti-virus / indexing process holding the file, or (macOS "
+                    f"APFS) space df reports free but that is not yet writable. "
+                    f"Re-run with --incremental to resume the unfinished "
+                    f"FOV-groups."
+                ) from exc
+            log.warning(
+                "imwrite %s failed (%s); retry %d/%d after backoff",
+                out_path.name, exc, attempt + 1, _WRITE_MAX_ATTEMPTS - 1,
+            )
+            time.sleep(_RETRY_BASE_DELAY_S * (2 ** attempt))
+        except BaseException:
+            _cleanup_tmp()
+            raise
 
 
 def _safe_atomic_text_write(out_path: "Path | str") -> "_AtomicTextHandle":

@@ -97,6 +97,40 @@ def test_returns_failed_wells_for_exit_code(tmp_path, monkeypatch):
     assert set(failed) == {"A2", "A3"}
 
 
+def test_partial_fov_failures_count_wells_not_fov_names(tmp_path, monkeypatch):
+    """Regression: a well that finishes with per-FOV-group failures writes a
+    partial CSV/zip (so it looks complete on the plate map) and returns the
+    failed FOV-group *names* in its ``failed`` list. Those names must NOT be
+    counted as separate failed wells — the driver returns the affected WELL
+    label once, not one entry per failed FOV-group. Previously 12 failed
+    FOV-groups across 2 wells were reported as "12 wells failed"."""
+    _patch(monkeypatch)
+    monkeypatch.setattr(pm, "_report_worker_failure", lambda well, out, exc: None)
+
+    def submit_task(executor, well, path):
+        if well == "A1":
+            # 3 FOV-groups failed inside an otherwise-complete well.
+            return _FakeFuture(([{"nuc": 1}], ["A1_f01.tif", "A1_f02.tif", "A1_f03.tif"]))
+        if well == "A2":
+            return _FakeFuture(exc=RuntimeError("boom"))   # failed entirely
+        return _FakeFuture(([{"nuc": 2}], []))             # A3 clean
+
+    failed = pm._run_well_worker_pool(
+        items=[("A1", Path("a1")), ("A2", Path("a2")), ("A3", Path("a3"))],
+        output_dir=tmp_path, workers=3, force=False, incremental=False,
+        force_cpu=False, threads_per_worker=0, shared_kwargs_template={},
+        mode_label="Test",
+        stale_sweep=lambda out: None,
+        output_exists=lambda well: False,
+        submit_task=submit_task,
+    )
+
+    # A1 (partial) contributes ONE well label despite 3 failed FOV-groups; A2
+    # (entire failure) contributes one; A3 (clean) contributes none.
+    assert sorted(failed) == ["A1", "A2"]
+    assert failed.count("A1") == 1
+
+
 def test_all_complete_returns_empty_failed_list(tmp_path, monkeypatch):
     # The early "all complete" path returns [] (no failures) so main() exits 0.
     _patch(monkeypatch)

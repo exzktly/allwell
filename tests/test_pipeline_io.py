@@ -1,11 +1,22 @@
 """Unit tests for pipeline.io.py (output writers extracted from the pipeline in P4)."""
 
 import csv
+from collections import namedtuple
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from pipeline import io as mio
+
+_Usage = namedtuple("_Usage", "total used free")
+
+
+def _ample_disk(monkeypatch):
+    """Force ``shutil.disk_usage`` to report plenty of free space so a write
+    failure is triaged as transient (retry path), not disk-full."""
+    monkeypatch.setattr(mio.shutil, "disk_usage",
+                        lambda p: _Usage(1 << 40, 0, 1 << 40))
 
 
 def test_safe_imwrite_tif_roundtrip(tmp_path):
@@ -16,6 +27,106 @@ def test_safe_imwrite_tif_roundtrip(tmp_path):
     assert out.exists()
     np.testing.assert_array_equal(imread(str(out)), img)
     # No scratch temp file left behind.
+    assert not list(tmp_path.glob("__aw_tmp_*"))
+
+
+def test_safe_imwrite_retries_transient_oserror_then_succeeds(tmp_path, monkeypatch):
+    """A transient ``OSError: <N> requested and 0 written`` (short write on a NAS
+    output volume) must be absorbed by the retry loop, not fail the FOV."""
+    from tifffile import imread
+    img = np.arange(64, dtype=np.float32).reshape(8, 8)
+    out = tmp_path / "img.tif"
+
+    monkeypatch.setattr(mio, "_RETRY_BASE_DELAY_S", 0.0)
+    _ample_disk(monkeypatch)
+    real_imwrite = mio.imwrite
+    attempts = {"n": 0}
+
+    def flaky_imwrite(path, data, *a, **k):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise OSError("15334400 requested and 0 written")
+        return real_imwrite(path, data, *a, **k)
+
+    with patch.object(mio, "imwrite", side_effect=flaky_imwrite):
+        mio._safe_imwrite(out, img)
+
+    assert attempts["n"] == 2                       # one failure, then success
+    np.testing.assert_array_equal(imread(str(out)), img)
+    assert not list(tmp_path.glob("__aw_tmp_*"))    # partial tmp cleaned up
+
+
+def test_safe_imwrite_exhausts_retries_with_honest_diagnostic(tmp_path, monkeypatch):
+    """The real-world bug: a ``<N> requested and 0 written`` short write on a
+    LOCAL disk that HAS free space. Every attempt is retried (it's usually
+    transient); when they're all exhausted the FOV still fails, but with an
+    enriched diagnostic — the original message, the free space, and the resume
+    hint — not a false "disk full" claim."""
+    img = np.zeros((4, 4), dtype=np.float32)
+    out = tmp_path / "img.tif"
+
+    monkeypatch.setattr(mio, "_RETRY_BASE_DELAY_S", 0.0)
+    _ample_disk(monkeypatch)                          # 1 TiB free — not disk-full
+    calls = {"n": 0}
+
+    def always_fails(path, data, *a, **k):
+        calls["n"] += 1
+        raise OSError("15334400 requested and 0 written")
+
+    with patch.object(mio, "imwrite", side_effect=always_fails):
+        with pytest.raises(OSError) as ei:
+            mio._safe_imwrite(out, img)
+
+    msg = str(ei.value)
+    assert "0 written" in msg                         # original error preserved
+    assert "No space left on device" not in msg       # NOT misreported as full
+    assert "--incremental" in msg                     # actionable resume hint
+    assert calls["n"] == mio._WRITE_MAX_ATTEMPTS       # every attempt tried
+    assert not out.exists()
+    assert not list(tmp_path.glob("__aw_tmp_*"))
+
+
+def test_safe_imwrite_reports_disk_full_without_retrying(tmp_path, monkeypatch):
+    """When the volume really is out of room (free < image size), retrying is
+    futile: the write is attempted once and re-raised as a clear "No space left
+    on device" message."""
+    img = np.zeros((64, 64), dtype=np.float32)        # 16 KiB
+    out = tmp_path / "img.tif"
+
+    monkeypatch.setattr(mio, "_RETRY_BASE_DELAY_S", 0.0)
+    # Only 1 KiB free — below the 16 KiB image → genuine disk-full.
+    monkeypatch.setattr(mio.shutil, "disk_usage", lambda p: _Usage(1 << 30, 1 << 30, 1024))
+    calls = {"n": 0}
+
+    def always_short(path, data, *a, **k):
+        calls["n"] += 1
+        raise OSError("15334400 requested and 0 written")
+
+    with patch.object(mio, "imwrite", side_effect=always_short):
+        with pytest.raises(OSError, match="No space left on device"):
+            mio._safe_imwrite(out, img)
+
+    assert calls["n"] == 1                            # no futile retries
+    assert not out.exists()
+    assert not list(tmp_path.glob("__aw_tmp_*"))
+
+
+def test_safe_imwrite_does_not_retry_keyboardinterrupt(tmp_path, monkeypatch):
+    """Non-OSError exceptions (e.g. Ctrl-C) are never retried — they propagate
+    immediately after tmp cleanup."""
+    img = np.zeros((4, 4), dtype=np.float32)
+    out = tmp_path / "img.tif"
+    calls = {"n": 0}
+
+    def interrupt(path, data, *a, **k):
+        calls["n"] += 1
+        raise KeyboardInterrupt
+
+    with patch.object(mio, "imwrite", side_effect=interrupt):
+        with pytest.raises(KeyboardInterrupt):
+            mio._safe_imwrite(out, img)
+
+    assert calls["n"] == 1                            # no retry
     assert not list(tmp_path.glob("__aw_tmp_*"))
 
 

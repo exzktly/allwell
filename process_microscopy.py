@@ -1976,19 +1976,31 @@ def _quantify_image_group(
     _t = time.perf_counter()
     records: list[dict] = []
     idx = np.asarray(nuc_ids, dtype=np.int32)
+    # ``scipy.ndimage``'s centered statistics (``standard_deviation`` /
+    # ``variance``) internally compute ``sums / counts`` over the *full* label
+    # histogram — every integer from 0 to ``labels.max()`` — before selecting our
+    # ``index`` entries (scipy _measurements.py:646). The seeded-watershed method
+    # routinely emits *non-contiguous* label ids (a marker whose basin lands
+    # entirely outside the cytoplasm mask leaves a gap), so those gap ids have a
+    # zero count and scipy hits 0/0 -> a stream of "invalid value encountered in
+    # divide" RuntimeWarnings. The per-cell results for the ids we actually pass
+    # in ``idx`` are unaffected (they always have count >= 1), so this is pure log
+    # noise; silence just the numpy FP flags around the measurement calls rather
+    # than relabelling (which would renumber every cell's nucleus_id).
     area = ndi.sum(np.ones_like(labels, dtype=np.float32), labels=labels, index=idx)
     fluor_stats: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, str]] = []
     # Quantification is always computed from top-hat corrected fluorescence
     # images. smFISH LoG outputs are only produced as optional intermediates.
-    for fc, tok in zip(fluor_tophat, fluor_tokens):
-        fluor_stats.append((
-            ndi.sum(fc, labels=labels, index=idx),
-            ndi.mean(fc, labels=labels, index=idx),
-            ndi.maximum(fc, labels=labels, index=idx),
-            ndi.minimum(fc, labels=labels, index=idx),
-            ndi.standard_deviation(fc, labels=labels, index=idx),
-            tok.lower(),
-        ))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        for fc, tok in zip(fluor_tophat, fluor_tokens):
+            fluor_stats.append((
+                ndi.sum(fc, labels=labels, index=idx),
+                ndi.mean(fc, labels=labels, index=idx),
+                ndi.maximum(fc, labels=labels, index=idx),
+                ndi.minimum(fc, labels=labels, index=idx),
+                ndi.standard_deviation(fc, labels=labels, index=idx),
+                tok.lower(),
+            ))
 
     # Per-cell morphology (selected shape features + always-on centroids), one
     # regionprops pass over the label image. Channel-independent → emitted with
@@ -2956,6 +2968,22 @@ def _process_groups_in_worker(
                 _fov_done += 1
                 log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
 
+    if failed:
+        # The well still writes a CSV + out.zip from the FOV-groups that DID
+        # succeed, so it will look complete on the plate map. Shout that the
+        # output is partial and name the casualties, otherwise a per-FOV failure
+        # (e.g. a transient write error) silently drops FOV-groups from the well.
+        # A plain re-run SKIPS this well (its CSV/zip exist); use --incremental to
+        # reprocess only the missing FOV-groups (they are absent from the CSV
+        # done-set) or --force to redo the whole well.
+        log.warning(
+            "Well %s — PARTIAL: %d of %d FOV-group(s) FAILED (%s). The per-well "
+            "CSV / out.zip cover only the %d successful FOV-group(s). Re-run with "
+            "--incremental to recover the missing ones.",
+            well_label, len(failed), _fov_total, ", ".join(failed),
+            _fov_total - len(failed),
+        )
+
     return all_records, failed
 
 
@@ -3320,8 +3348,12 @@ def output_exists_for_well(output_dir: Path, well_label: str, csv_prefix: str) -
       • <output_dir>/<well>_out.zip       – compressed QC images
       • <output_dir>/<csv_prefix>_<well>.csv – per-well measurements
 
-    This prevents re-processing wells that completed successfully in a prior
-    run while still allowing partially-completed wells to be retried.
+    This prevents re-processing wells that completed in a prior run. Note that a
+    well whose CSV + out.zip exist counts as complete here even if some of its
+    FOV-groups failed (the outputs cover only the successful FOV-groups), so a
+    plain re-run SKIPS such partial wells. To reprocess the missing FOV-groups,
+    re-run with --incremental (they are absent from the CSV done-set and so are
+    re-processed) or --force (redo the whole well).
     """
     safe_well = _safe_well(well_label)
     out_zip  = output_dir / f"{well_label}_out.zip"
@@ -3451,7 +3483,20 @@ def _run_well_worker_pool(
     log.info("%s mode: %d well(s) to process, %d worker(s).", mode_label, len(to_process), workers)
 
     all_records: list[dict] = []
-    all_failed:  list[str]  = []
+    # Two DISTINCT failure classes, kept apart so the summary isn't misleading:
+    #   * wells_failed_entirely — the worker raised, so the well produced NO
+    #     output at all (no CSV, no out.zip); it is absent from the plate map.
+    #   * partial_wells{well -> failed FOV-group names} — the well finished and
+    #     wrote a CSV + out.zip from its successful FOV-groups (so it shows as
+    #     complete / green on the plate map), but some FOV-groups failed and are
+    #     missing from that output.
+    # Previously both were flattened into one list and per-FOV failure *names*
+    # were counted as "wells failed", so a run with e.g. 12 failed FOV-groups
+    # across a couple of otherwise-complete wells reported "12 well(s)/pair(s)
+    # failed" while those wells looked done — exactly the confusing mismatch this
+    # separation fixes.
+    wells_failed_entirely: list[str] = []
+    partial_wells: dict[str, list[str]] = {}
 
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(
@@ -3470,27 +3515,45 @@ def _run_well_worker_pool(
             try:
                 records, failed = future.result()
                 all_records.extend(records)
-                all_failed.extend(failed)
+                if failed:
+                    partial_wells[well_label] = list(failed)
             except Exception as exc:           # noqa: BLE001
                 _report_worker_failure(well_label, output_dir, exc)
-                all_failed.append(well_label)
+                wells_failed_entirely.append(well_label)
+
+    n_partial_fovs = sum(len(v) for v in partial_wells.values())
+    # Wells the exit code must flag: those with no output PLUS those with partial
+    # output (deduped, order-stable). A partially-complete well is still a
+    # failure for exit purposes — data is missing — so the remote layer must not
+    # treat the run as clean success (audit E5).
+    affected_wells: list[str] = list(wells_failed_entirely)
+    affected_wells += [w for w in partial_wells if w not in wells_failed_entirely]
 
     log.info("=" * 60)
     log.info("%s mode complete.", mode_label)
     log.info(
-        "Total wells : %d  |  processed : %d  |  skipped : %d  |  "
-        "nuclei : %d  |  failed wells : %d",
-        len(items), len(to_process), n_skipped,
-        len(all_records), len(all_failed),
+        "Total wells : %d  |  processed : %d  |  skipped : %d  |  nuclei : %d  |  "
+        "wells failed (no output) : %d  |  wells partial : %d  |  "
+        "FOV-groups failed : %d",
+        len(items), len(to_process), n_skipped, len(all_records),
+        len(wells_failed_entirely), len(partial_wells), n_partial_fovs,
     )
-    if all_failed:
-        log.warning("Failed wells/pairs:")
-        for name in all_failed:
+    if wells_failed_entirely:
+        log.warning("Wells that failed entirely (no output written):")
+        for name in wells_failed_entirely:
             log.warning("  %s", name)
+    if partial_wells:
+        log.warning(
+            "Wells with PARTIAL output (complete on the plate map, but missing "
+            "the FOV-group(s) below — re-run with --incremental to recover):"
+        )
+        for name, fovs in partial_wells.items():
+            log.warning("  %s — %d failed FOV-group(s): %s",
+                        name, len(fovs), ", ".join(fovs))
     # Surfaced to main() so a run with per-well failures sets a non-zero exit
     # code — otherwise an all-failed run exits 0 and the remote layer treats it
     # as success and cleans up the inputs (audit E5).
-    return all_failed
+    return affected_wells
 
 
 def process_well_zips(
@@ -4479,7 +4542,11 @@ def main() -> None:
     if failed_wells:
         import sys as _sys
         log.error(
-            "%d well(s)/pair(s) failed — exiting non-zero.", len(failed_wells)
+            "%d well(s) failed or produced partial output — exiting non-zero. "
+            "See the per-well breakdown above; partial wells look complete on "
+            "the plate map but are missing FOV-group(s) (recover with "
+            "--incremental).",
+            len(failed_wells),
         )
         _sys.exit(1)
 

@@ -364,9 +364,11 @@ class LabelGrid(QWidget):
         """
 
 
-def build_label_grid(app, parent: QWidget) -> None:
+def build_label_grid(ctx, parent: QWidget) -> None:
     """Mount the LabelGrid in the Well Labels sub-tab and wire it up."""
     from well_viewer.core.ui_helpers import btn_secondary
+    from well_viewer.core.selection_controller import labels_apply_affix
+    app = ctx.window
 
     layout = parent.layout()
     if layout is None:
@@ -389,7 +391,8 @@ def build_label_grid(app, parent: QWidget) -> None:
     help_lbl.setWordWrap(True)
     hl.addWidget(help_lbl, 1)
 
-    prefix_btn = btn_secondary(head, "Add Prefix", app._labels_add_prefix)
+    prefix_btn = btn_secondary(head, "Add Prefix",
+                               lambda: labels_apply_affix(ctx, where="prefix"))
     prefix_btn.setToolTip(
         "Prepend text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "
@@ -397,7 +400,8 @@ def build_label_grid(app, parent: QWidget) -> None:
     )
     hl.addWidget(prefix_btn)
 
-    suffix_btn = btn_secondary(head, "Add Suffix", app._labels_add_suffix)
+    suffix_btn = btn_secondary(head, "Add Suffix",
+                               lambda: labels_apply_affix(ctx, where="suffix"))
     suffix_btn.setToolTip(
         "Append text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "
@@ -416,7 +420,7 @@ def build_label_grid(app, parent: QWidget) -> None:
     grid = LabelGrid(app, parent)
     grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     layout.addWidget(grid, 1)
-    app._lbl_grid = app._ctx.widgets.register("_lbl_grid", grid)
+    ctx.widgets.register("_lbl_grid", grid)
 
 
 def label_grid_refresh(ctx) -> None:

@@ -473,7 +473,7 @@ def import_selections_from_json(ctx) -> None:
 
 
 
-def labels_apply_affix(app, *, where: str) -> None:
+def labels_apply_affix(ctx, *, where: str) -> None:
     """Prompt for text and prepend/append it to the labels of every
     well currently selected.
 
@@ -482,9 +482,10 @@ def labels_apply_affix(app, *, where: str) -> None:
     sidebar's plate selection is used as a fallback.
     """
     from well_viewer.core.ui_helpers import ask_name_dialog
+    from well_viewer.domain.viewer_state import parse_rc
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 
-    grid = getattr(app, "_lbl_grid", None)
+    grid = ctx.widgets.get_or_none("_lbl_grid")
     grid_sel: list[str] = []
     if grid is not None:
         try:
@@ -492,11 +493,11 @@ def labels_apply_affix(app, *, where: str) -> None:
         except Exception:
             grid_sel = []
     if grid_sel:
-        selected = sorted(grid_sel, key=app._parse_rc)
+        selected = sorted(grid_sel, key=parse_rc)
     else:
-        selected = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
+        selected = sorted(ctx.state.selection.selected_wells, key=parse_rc)
     if not selected:
-        app._set_status(
+        ctx.set_status(
             f"Add {where.title()}: no wells selected — click a row/column "
             "header on the Well Labels grid or select wells on the sidebar plate."
         )
@@ -507,22 +508,23 @@ def labels_apply_affix(app, *, where: str) -> None:
     plural = "s" if len(selected) != 1 else ""
     prompt = (f"Text to {verb} the custom label of {len(selected)} "
               f"selected well{plural}:")
-    text = ask_name_dialog(app, title=title, prompt=prompt, default="", strip=False)
+    text = ask_name_dialog(ctx.window, title=title, prompt=prompt, default="", strip=False)
     if not text:
         return
 
+    labels = ctx.state.dataset.well_labels
     for tok in selected:
-        current = app._app_state.dataset.well_labels.get(tok, "")
+        current = labels.get(tok, "")
         new = (text + current) if where == "prefix" else (current + text)
         if new:
-            app._app_state.dataset.well_labels[tok] = new
+            labels[tok] = new
         else:
-            app._app_state.dataset.well_labels.pop(tok, None)
+            labels.pop(tok, None)
 
-    app._invalidate_stats_cache()
-    label_grid_refresh(app._ctx)
-    _schedule_sample_def_autosave(app._ctx)
-    app._set_status(
+    invalidate_stats_cache(ctx)
+    label_grid_refresh(ctx)
+    _schedule_sample_def_autosave(ctx)
+    ctx.set_status(
         f"Added {where} '{text}' to {len(selected)} well label{plural}."
     )
 
@@ -1108,13 +1110,13 @@ def plate_commit_deferred(app) -> None:
 
 
 
-def labels_clear_all(app) -> None:
-    if app._app_state.dataset.well_labels:
+def labels_clear_all(ctx) -> None:
+    if ctx.state.dataset.well_labels:
         from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-        app._app_state.dataset.well_labels.clear()
-        label_grid_refresh(app._ctx)
-        app._invalidate_stats_cache()
-        _schedule_sample_def_autosave(app._ctx)
+        ctx.state.dataset.well_labels.clear()
+        label_grid_refresh(ctx)
+        invalidate_stats_cache(ctx)
+        _schedule_sample_def_autosave(ctx)
 
 
 

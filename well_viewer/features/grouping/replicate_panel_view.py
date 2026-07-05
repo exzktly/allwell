@@ -319,7 +319,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     # Sub-tab 1: Well Labels only
     labels_tab = _QWidget(sub_tabs)
     _QVBoxLayout(labels_tab).setContentsMargins(12, 12, 12, 12)
-    build_label_grid(app, labels_tab)
+    build_label_grid(app._ctx, labels_tab)
     sub_tabs.addTab(labels_tab, "Well Labels")
 
     # Sub-tab 2: Ratio Metrics only

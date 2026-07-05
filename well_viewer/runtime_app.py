@@ -582,12 +582,12 @@ class WellViewerApp(QWidget):
 
 
 
-    def _labels_clear_all(self) -> None: return labels_clear_all(self)
+    def _labels_clear_all(self) -> None: return labels_clear_all(self._ctx)
 
 
-    def _labels_add_prefix(self) -> None: labels_apply_affix(self, where="prefix")
+    def _labels_add_prefix(self) -> None: labels_apply_affix(self._ctx, where="prefix")
 
-    def _labels_add_suffix(self) -> None: labels_apply_affix(self, where="suffix")
+    def _labels_add_suffix(self) -> None: labels_apply_affix(self._ctx, where="suffix")
 
     # ── unified-model (app._app_state.selection.selections) — the in-memory source of truth ──────
 

@@ -134,33 +134,24 @@ def _set_combo_by_data(cb, data) -> bool:
     return False
 
 
-def _skip_if_image_table_grid_unbuilt(app) -> None:
-    """Interim guard for a pre-existing gap: the Image Table is a lazy sub-tab
-    that ``loaded_app`` does not build, so its ``selector_grid`` layout is absent
-    and ``image_table_apply_preset`` would crash inside ``build_image_table_grid``
-    (``NoneType.addWidget``). Skip cleanly rather than error until the harness is
-    reworked to build the sub-tab and these round-trips exercise real assertions
-    again (tracked as follow-up)."""
-    if getattr(app._ctx.runtime.image_table, "selector_grid", None) is None:
-        pytest.skip("Image Table sub-tab not built by loaded_app (lazy sub-tab)")
-
-
-def test_image_table_display_state_round_trips(loaded_app):
-    app = loaded_app
-    _skip_if_image_table_grid_unbuilt(app)
+def test_image_table_display_state_round_trips(image_table_app):
+    # image_table_app builds the lazy Image Table sub-tab, so the live grid
+    # objects (cells / per-row LUT rows / colour selectors / crop tool) exist on
+    # ctx.runtime.image_table — the A8-teardown home the ctx-native snapshot /
+    # apply read from (the old ``app._image_table_*`` stamps no longer track it).
+    app = image_table_app
+    it = app._ctx.runtime.image_table
     C.image_table_repopulate_dropdowns(app._ctx)
     # Build the selector grid + per-row LUT/colormap rows (no render).
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    luts = getattr(app, "_image_table_lut", None) or {}
-    color_cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
-    if not luts or not color_cbs or 0 not in luts:
-        pytest.skip("dataset built no Image Table LUT rows")
+    luts = it.lut or {}
+    color_cbs = it.row_lut_color_cbs or []
+    assert luts and color_cbs and 0 in luts, "apply_preset built no Image Table LUT rows"
 
     # ── set a distinctive display state ──────────────────────────────────────
-    app._image_table_crop_tool.set_crop((3, 5, 40, 60))
+    it.crop_tool.set_crop((3, 5, 40, 60))
     row0 = luts[0]
-    if not _set_combo_by_data(row0["source"], "corrected"):
-        pytest.skip("no Corrected source option")
+    assert _set_combo_by_data(row0["source"], "corrected"), "no Corrected source option"
     color_cbs[0].setLut("magma")
     row0["min"].setText("100")
     row0["max"].setText("2000")
@@ -173,7 +164,7 @@ def test_image_table_display_state_round_trips(loaded_app):
     assert s0.get("min") == "100" and s0.get("max") == "2000"
 
     # ── new session: wipe the state, then restore it ─────────────────────────
-    app._image_table_crop_tool.clear()
+    it.crop_tool.clear()
     _set_combo_by_data(row0["source"], "raw")
     color_cbs[0].setLut("viridis")
     row0["min"].setText("")
@@ -182,10 +173,10 @@ def test_image_table_display_state_round_trips(loaded_app):
     vs._apply_image_table(app._ctx, snap)
 
     # Dimensions are unchanged, so the live widgets are not rebuilt.
-    live0 = app._image_table_lut[0]
-    assert tuple(app._image_table_crop_tool.crop) == (3, 5, 40, 60)
+    live0 = it.lut[0]
+    assert tuple(it.crop_tool.crop) == (3, 5, 40, 60)
     assert live0["source"].currentData() == "corrected"
-    assert app._image_table_row_lut_color_cbs[0].lut() == "magma"
+    assert it.row_lut_color_cbs[0].lut() == "magma"
     assert live0["min"].text() == "100"
     assert live0["max"].text() == "2000"
 
@@ -193,45 +184,44 @@ def test_image_table_display_state_round_trips(loaded_app):
 def test_snapshot_tolerates_unbuilt_image_table(loaded_app):
     """No grid built yet → snapshot is an empty dict, not an exception."""
     app = loaded_app
-    app._image_table_cells = []
+    app._ctx.runtime.image_table.cells = []
     assert vs._snapshot_image_table(app._ctx) == {}
 
 
-def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
+def test_channel_and_source_restore_through_full_view_state_path(image_table_app):
     """Channel (per-cell) and Source (per-row) come back through the SAME path
     Saved Plots uses: full ``view_state.snapshot`` → ``view_state.restore`` →
     ``apply_pending_tab_state`` (rather than calling ``_apply_image_table``
     directly). This guards the build-order/axis gap the user hit."""
-    app = loaded_app
-    _skip_if_image_table_grid_unbuilt(app)
+    app = image_table_app
+    it = app._ctx.runtime.image_table
     C.image_table_repopulate_dropdowns(app._ctx)
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    cells = getattr(app, "_image_table_cells", None) or []
-    luts = getattr(app, "_image_table_lut", None) or {}
-    if not cells or not cells[0] or 0 not in luts:
-        pytest.skip("Image Table grid not built for this dataset")
+    assert it.cells and it.cells[0] and 0 in (it.lut or {}), \
+        "apply_preset built no Image Table grid"
 
-    chan_cb = cells[0][0].get("chan_cb")
+    chan_cb = it.cells[0][0].get("chan_cb")
     chans = [chan_cb.itemText(i) for i in range(chan_cb.count()) if chan_cb.itemText(i)]
-    if len(chans) < 2:
-        pytest.skip("dataset has <2 channels")
+    assert len(chans) >= 2, "dataset has <2 channels"
     want_chan = chans[1]
+    # Setting a cell channel fires image_table_rebuild_lut_row, which REPLACES
+    # ``it.lut`` with a fresh dict — so always read ``it.lut[0]`` afresh after a
+    # channel change rather than caching the row's LUT slot.
     chan_cb.setCurrentText(want_chan)
-    if not _set_combo_by_data(luts[0]["source"], "corrected"):
-        pytest.skip("no Corrected source option")
+    assert _set_combo_by_data(it.lut[0]["source"], "corrected"), "no Corrected source option"
 
     snap = vs.snapshot(app._ctx)
-    it = (snap.get("tabs") or {}).get("Image Table") or {}
-    assert it.get("cells", [[{}]])[0][0].get("chan") == want_chan
-    assert it["row_luts"]["0"].get("source") == "corrected"
+    it_snap = (snap.get("tabs") or {}).get("Image Table") or {}
+    assert it_snap.get("cells", [[{}]])[0][0].get("chan") == want_chan
+    assert it_snap["row_luts"]["0"].get("source") == "corrected"
 
     # New session: wipe both, then replay through the public restore path.
     chan_cb.setCurrentText(chans[0])
-    _set_combo_by_data(luts[0]["source"], "raw")
+    _set_combo_by_data(it.lut[0]["source"], "raw")
     vs.restore(app._ctx, snap)
     # restore stashes pending + tries to activate the tab; apply explicitly so
     # the assertion doesn't depend on notebook/subtab navigation in the harness.
     vs.apply_pending_tab_state(app._ctx, "Image Table")
 
-    assert app._image_table_cells[0][0]["chan_cb"].currentText() == want_chan
-    assert app._image_table_lut[0]["source"].currentData() == "corrected"
+    assert it.cells[0][0]["chan_cb"].currentText() == want_chan
+    assert it.lut[0]["source"].currentData() == "corrected"

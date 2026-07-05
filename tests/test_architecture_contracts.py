@@ -281,6 +281,10 @@ FEATURE_NAME_EXCEPTIONS = {
     # image_table row/column add+remove helpers (and the Add-column dialog),
     # paired with image_table/controller.py.
     "grid_ops.py",
+    # image_table per-row LUT min/max pooling (Fit + post-render auto-refresh),
+    # split out of image_table/controller.py to hold its line budget; paired with
+    # it and the image_compose LUT layer.
+    "lut_ops.py",
     # the feature registry: the single assembly point for FeatureDescriptors and
     # the sole sanctioned importer of well_viewer.features.* (the import-inversion
     # seam) — not a per-feature module, so it sits outside the naming scheme.

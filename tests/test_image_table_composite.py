@@ -94,3 +94,19 @@ def test_export_figure_includes_composite_row(image_table_app):
     ctx.state.image_table.composite = True
     fig, _ = _build_export_figure(ctx)
     assert len(fig.axes) == (n_rows + 1) * n_cols
+
+
+@pytest.mark.qt
+def test_composite_control_is_a_checkable_toggle_button(image_table_app):
+    from PySide6.QtWidgets import QAbstractButton
+
+    app = image_table_app
+    btn = app._image_table_composite_chk
+    # A toolbar toggle button (not a stray QCheckBox), styled to match the row.
+    assert isinstance(btn, QAbstractButton) and btn.isCheckable()
+    assert btn.property("variant") == "toggle"
+    # Toggling drives the state flag through the same handler.
+    btn.setChecked(True)
+    assert app._ctx.state.image_table.composite is True
+    btn.setChecked(False)
+    assert app._ctx.state.image_table.composite is False

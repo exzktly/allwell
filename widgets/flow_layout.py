@@ -108,29 +108,45 @@ class FlowLayout(QLayout):
         margins = self.contentsMargins()
         effective = rect.adjusted(margins.left(), margins.top(),
                                   -margins.right(), -margins.bottom())
+        space_x = max(0, self.horizontalSpacing())
+        space_y = max(0, self.verticalSpacing())
+
         x = effective.x()
         y = effective.y()
         line_height = 0
+        # Buffer the current line's placements as (item, QRect) so the whole line
+        # can be flushed *vertically centred* once its final height is known —
+        # otherwise short controls (labels/checkboxes) top-align against tall
+        # buttons and the row reads ragged.
+        line: list = []
+
+        def _flush() -> None:
+            if test_only:
+                return
+            for it, r in line:
+                # Centre each item within the line's height.
+                cy = r.y() + (line_height - r.height()) // 2
+                it.setGeometry(QRect(QPoint(r.x(), cy), r.size()))
+
         for item in self._items:
             widget = item.widget()
             if widget is not None and not widget.isVisible():
                 continue
-            space_x = self.horizontalSpacing()
-            if space_x < 0:
-                space_x = 0
-            space_y = self.verticalSpacing()
-            if space_y < 0:
-                space_y = 0
-            hint = item.sizeHint()
-            next_x = x + hint.width() + space_x
+            # Never pack a widget into less than it needs (defends against a
+            # widget whose sizeHint under-reports its painted width — the cause
+            # of the Composite/Crop overlap).
+            size = item.sizeHint().expandedTo(item.minimumSize())
+            next_x = x + size.width() + space_x
             if next_x - space_x > effective.right() and line_height > 0:
-                # Wrap to the next line.
+                # Wrap: flush the finished line centred, then start a new one.
+                _flush()
+                line = []
                 x = effective.x()
                 y = y + line_height + space_y
-                next_x = x + hint.width() + space_x
+                next_x = x + size.width() + space_x
                 line_height = 0
-            if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), hint))
+            line.append((item, QRect(QPoint(x, y), size)))
             x = next_x
-            line_height = max(line_height, hint.height())
+            line_height = max(line_height, size.height())
+        _flush()
         return y + line_height - rect.y() + margins.bottom()

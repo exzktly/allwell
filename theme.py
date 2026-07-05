@@ -313,7 +313,11 @@ QPushButton, QToolButton {{
     font-weight: {t.medium};
 }}
 QToolButton {{
-    padding: 4px;
+    /* Match QPushButton's 6px vertical padding so tool buttons (Crop / Export /
+       Build / More / Channels) are the same height as push buttons on toolbars;
+       keep horizontal padding compact. The hasMenu padding-right caret rule
+       below still overrides the right side. */
+    padding: 6px 4px;
 }}
 QPushButton:hover, QToolButton:hover {{
     background-color: {c.hover};

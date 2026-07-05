@@ -24,6 +24,12 @@ _logger = logging.getLogger("well_viewer")
 
 _MIN_CELLS_FOR_STATS = 3
 
+# Per-frame levels facet one panel per selected well. Past this many wells the
+# grid squishes to unreadable slivers, so we render the first N (plate-order)
+# and note the remainder. Summary level is unbounded — it collapses each well
+# to a single matrix row, so it has no per-panel budget.
+_MAX_FRAME_PANELS = 12
+
 
 def _state(ctx):
     return ctx.state.feature_slice("spatial")
@@ -195,19 +201,26 @@ def sp_set_summary_display(ctx, mode: str) -> None:
 
 # ── recompute pipeline ───────────────────────────────────────────────────────
 
-def _active_well(ctx, st) -> str:
+def _frame_wells(ctx, st) -> list:
+    """Wells to facet at a per-frame level — the current plate selection in
+    plate order, falling back to the first loaded well when nothing is
+    selected. Unlike the Summary walk this stays bounded by the caller's cap
+    (one figure panel per well)."""
     selected = list(ctx.state.selection.selected_wells or [])
-    if st.active_well and st.active_well in selected:
-        return st.active_well
     if selected:
-        return sorted(selected)[0]
+        return sorted(selected)
     for lbl in ctx.state.dataset.well_paths:
-        return lbl
-    return ""
+        return [lbl]
+    return []
 
 
 def sp_recompute(ctx) -> None:
-    """Collect + compute for the current state, then render."""
+    """Collect + compute for the current state, then render.
+
+    Per-frame levels (Cell / Colony / Intra-colony) compute one payload per
+    selected well and stash them on ``st.frames`` so the renderer can facet a
+    panel per well. Summary level stays a single collapsed matrix.
+    """
     st = _state(ctx)
     if st is None or ctx.widgets.get_or_none("_sp_canvas") is None:
         return
@@ -215,13 +228,31 @@ def sp_recompute(ctx) -> None:
     if st.level == sp_state.LEVEL_SUMMARY:
         _recompute_summary(ctx, st)
         return
-    well = _active_well(ctx, st)
-    st.active_well = well
-    if not well:
+    wells = _frame_wells(ctx, st)
+    if not wells:
         st.last_error = "Load a dataset and pick a well to analyse."
         render_spatial(ctx)
         return
 
+    shown = wells[:_MAX_FRAME_PANELS]
+    st.frames_truncated = len(wells) - len(shown)
+    st.active_well = shown[0]
+    frames = []
+    total_cells = 0
+    for well in shown:
+        payload = _compute_frame_payload(ctx, st, well)
+        total_cells += int(payload.get("n_cells", 0) or 0)
+        frames.append(payload)
+    st.frames = frames
+    st.n_cells = total_cells
+    render_spatial(ctx)
+
+
+def _compute_frame_payload(ctx, st, well: str) -> dict:
+    """Collect + compute a single well's per-frame payload for the current
+    level / viz. A ``"error"`` key marks a panel that can't be drawn (no cells,
+    or a compute failure) so the renderer can message just that facet without
+    blanking the whole grid."""
     frame = collect_spatial_frame(
         ctx, well,
         timepoint=st.timepoint,
@@ -229,25 +260,24 @@ def sp_recompute(ctx) -> None:
         include_gate=True,
     )
     pts = frame["points"]
-    st.n_cells = int(pts.shape[0])
-    if st.n_cells == 0:
-        st.last_error = f"No cells in {well} at the selected timepoint."
-        render_spatial(ctx)
-        return
-
+    n_cells = int(pts.shape[0])
     payload = {
         "well": well,
         "timepoint": frame.get("timepoint"),
         "points": pts,
         "metric": frame.get("metric"),
         "metric_col": st.metric_col,
+        "n_cells": n_cells,
     }
+    if n_cells == 0:
+        payload["error"] = "No cells at the selected timepoint."
+        return payload
 
     metrics = st.enabled_metrics
     try:
         if metrics.get("nnd", True):
             payload["nnd"] = spc.nearest_neighbour_distance(pts)
-        if st.viz == sp_state.VIZ_RIPLEY and st.n_cells >= _MIN_CELLS_FOR_STATS:
+        if st.viz == sp_state.VIZ_RIPLEY and n_cells >= _MIN_CELLS_FOR_STATS:
             payload["ripley"] = spc.ripley_l(pts)
 
         need_colonies = (st.level in (sp_state.LEVEL_COLONY, sp_state.LEVEL_INTRA)
@@ -281,11 +311,10 @@ def sp_recompute(ctx) -> None:
                     payload["intra_colour_label"] = "r / R"
 
     except Exception as exc:  # pragma: no cover - defensive
-        _logger.exception("Spatial compute failed")
-        st.last_error = f"Analysis failed: {exc}"
+        _logger.exception("Spatial compute failed for %s", well)
+        payload["error"] = f"Analysis failed: {exc}"
 
-    st.last_result = payload
-    render_spatial(ctx)
+    return payload
 
 
 # ── LEVEL_SUMMARY (per-(well,timepoint) matrix) ──────────────────────────────

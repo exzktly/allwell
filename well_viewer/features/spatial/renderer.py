@@ -1,17 +1,23 @@
 """Spatial-analysis renderer — pure matplotlib.
 
-Reads the controller's cached snapshot (``last_result``) and draws whichever
-viz is selected. Six MVP vizs: spatial map, NND histogram, Ripley L,
-colony size histogram, radial profile, boundary-vs-interior split.
+Reads the controller's cached snapshot and draws whichever viz is selected.
+Six MVP vizs: spatial map, NND histogram, Ripley L, colony size histogram,
+radial profile, boundary-vs-interior split.
+
+Per-frame levels (Cell / Colony / Intra-colony) facet one panel per selected
+well: ``st.frames`` holds a per-well payload and each per-viz drawer paints a
+single axes, so the same viz repeats across a grid. Summary level draws a
+single collapsed matrix from ``st.last_result``.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 
 import numpy as np
 
-from well_viewer.core.plot_style import tokens_for
+from well_viewer.core.plot_style import style_legend, tokens_for
 from well_viewer.features.spatial import state as sp_state
 
 _logger = logging.getLogger("well_viewer")
@@ -28,34 +34,94 @@ def render_spatial(ctx) -> None:
     try:
         if st.last_error:
             _draw_message(fig, st.last_error)
-        elif not st.last_result:
+        elif st.viz == sp_state.VIZ_SUMMARY_PANEL:
+            if not st.last_result:
+                _draw_message(fig, "Select one or more wells to summarise.")
+            else:
+                _render_summary_panel(fig, st)
+        elif not st.frames:
             _draw_message(fig, "Select a well to explore its spatial structure.")
         else:
-            viz = st.viz
-            if viz == sp_state.VIZ_SPATIAL_MAP:
-                _render_spatial_map(fig, st)
-            elif viz == sp_state.VIZ_NND_HISTOGRAM:
-                _render_nnd_histogram(fig, st)
-            elif viz == sp_state.VIZ_RIPLEY:
-                _render_ripley(fig, st)
-            elif viz == sp_state.VIZ_COLONY_SIZE:
-                _render_colony_size(fig, st)
-            elif viz == sp_state.VIZ_COLONY_METRIC_DIST:
-                _render_colony_metric_dist(fig, st)
-            elif viz == sp_state.VIZ_RADIAL_PROFILE:
-                _render_radial_profile(fig, st)
-            elif viz == sp_state.VIZ_BOUNDARY_INTERIOR:
-                _render_boundary_interior(fig, st)
-            elif viz == sp_state.VIZ_SUMMARY_PANEL:
-                _render_summary_panel(fig, st)
-            else:  # pragma: no cover
-                _draw_message(fig, f"Unknown visualization: {viz!r}")
+            _render_frames_grid(fig, st)
     except Exception as exc:  # pragma: no cover - defensive
         _logger.exception("Spatial render failed")
         _draw_message(fig, f"Render failed: {exc}")
     canvas = ctx.widgets.get_or_none("_sp_canvas")
     if canvas is not None:
         canvas.draw_idle()
+
+
+# ── faceted grid (one panel per selected well) ───────────────────────────────
+
+def _grid_shape(n: int) -> tuple[int, int]:
+    """Rows × cols for *n* panels, kept roughly square so maps and
+    distributions both stay legible."""
+    if n <= 1:
+        return 1, 1
+    cols = int(math.ceil(math.sqrt(n)))
+    rows = int(math.ceil(n / cols))
+    return rows, cols
+
+
+def _render_frames_grid(fig, st) -> None:
+    frames = st.frames
+    n = len(frames)
+    rows, cols = _grid_shape(n)
+    for i, payload in enumerate(frames):
+        ax = fig.add_subplot(rows, cols, i + 1)
+        _render_one_panel(ax, st, payload)
+    if getattr(st, "frames_truncated", 0):
+        _bg, title_fg, _muted, _grid, _spine = _tokens(fig.axes[0])
+        fig.suptitle(
+            f"Showing {n} of {n + st.frames_truncated} selected wells "
+            f"(narrow the selection to see the rest)",
+            color=title_fg, fontsize=9,
+        )
+    try:
+        fig.tight_layout()
+    except Exception:  # pragma: no cover - defensive
+        from well_viewer.core.safe import swallowed
+        swallowed()
+
+
+def _render_one_panel(ax, st, payload) -> None:
+    """Draw a single well's payload for the active viz into *ax*, prefixing the
+    well label onto the panel title so faceted grids stay identifiable."""
+    err = payload.get("error")
+    if err:
+        _msg_ax(ax, f"{payload.get('well', '')}\n{err}")
+        return
+    viz = st.viz
+    if viz == sp_state.VIZ_SPATIAL_MAP:
+        _render_spatial_map(ax, payload, st)
+    elif viz == sp_state.VIZ_NND_HISTOGRAM:
+        _render_nnd_histogram(ax, payload)
+    elif viz == sp_state.VIZ_RIPLEY:
+        _render_ripley(ax, payload)
+    elif viz == sp_state.VIZ_COLONY_SIZE:
+        _render_colony_size(ax, payload)
+    elif viz == sp_state.VIZ_COLONY_METRIC_DIST:
+        _render_colony_metric_dist(ax, payload)
+    elif viz == sp_state.VIZ_RADIAL_PROFILE:
+        _render_radial_profile(ax, payload)
+    elif viz == sp_state.VIZ_BOUNDARY_INTERIOR:
+        _render_boundary_interior(ax, payload)
+    else:  # pragma: no cover
+        _msg_ax(ax, f"Unknown visualization: {viz!r}")
+        return
+    _prefix_well_title(ax, payload.get("well", ""))
+
+
+def _prefix_well_title(ax, well: str) -> None:
+    """Prepend ``<well> · `` to whatever title the viz drawer set, preserving
+    its colour/size. No-op on message panels (axis off → no title)."""
+    if not well or not ax.axison:
+        return
+    art = ax.title
+    existing = ax.get_title()
+    text = f"{well} · {existing}" if existing else well
+    ax.set_title(text, color=art.get_color(), fontsize=art.get_fontsize(),
+                 pad=6)
 
 
 # ── shared helpers ────────────────────────────────────────────────────────────
@@ -72,6 +138,17 @@ def _draw_message(fig, text: str) -> None:
     ax.axis("off")
     ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True,
             transform=ax.transAxes, color=muted, fontsize=10)
+
+
+def _msg_ax(ax, text: str) -> None:
+    """Per-panel message (empty / failed facet) — draws into a single axes so
+    the rest of the grid still renders."""
+    bg, _title, muted, _grid, _spine = _tokens(ax)
+    ax.figure.set_facecolor(bg)
+    ax.set_facecolor(bg)
+    ax.axis("off")
+    ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True,
+            transform=ax.transAxes, color=muted, fontsize=9)
 
 
 def _style_axes(ax, title: str = "", xlabel: str = "", ylabel: str = "") -> None:
@@ -94,14 +171,12 @@ def _style_axes(ax, title: str = "", xlabel: str = "", ylabel: str = "") -> None
 
 # ── viz #1: spatial map ──────────────────────────────────────────────────────
 
-def _render_spatial_map(fig, st) -> None:
-    payload = st.last_result
+def _render_spatial_map(ax, payload, st) -> None:
     pts = payload.get("points")
     if pts is None or pts.shape[0] == 0:
-        _draw_message(fig, "No cells at the selected timepoint.")
+        _msg_ax(ax, "No cells at the selected timepoint.")
         return
-    ax = fig.add_subplot(111)
-    _style_axes(ax, title=f"{payload.get('well', '')} · t={payload.get('timepoint', 0):.2g} h",
+    _style_axes(ax, title=f"t={payload.get('timepoint', 0):.2g} h",
                 xlabel="x (px)", ylabel="y (px)")
 
     level = st.level
@@ -192,32 +267,30 @@ def _overlay_hulls(ax, pts, labels) -> None:
 
 # ── viz #2: NND histogram ────────────────────────────────────────────────────
 
-def _render_nnd_histogram(fig, st) -> None:
-    nnd = st.last_result.get("nnd")
+def _render_nnd_histogram(ax, payload) -> None:
+    nnd = payload.get("nnd")
     if nnd is None or nnd.size == 0:
-        _draw_message(fig, "Not enough cells for a nearest-neighbour distribution.")
+        _msg_ax(ax, "Not enough cells for a nearest-neighbour distribution.")
         return
     finite = nnd[np.isfinite(nnd)]
     if finite.size == 0:
-        _draw_message(fig, "No finite nearest-neighbour distances.")
+        _msg_ax(ax, "No finite nearest-neighbour distances.")
         return
-    ax = fig.add_subplot(111)
     _style_axes(ax, title="Nearest-neighbour distance",
                 xlabel="Distance (px)", ylabel="Cells")
     ax.hist(finite, bins=30, color="#4aa3ff", alpha=0.8)
     ax.axvline(float(np.median(finite)), color="#ff9c4a", lw=1.2,
                label=f"median = {np.median(finite):.1f} px")
-    ax.legend(fontsize=8, frameon=False)
+    style_legend(ax.legend(fontsize=8, frameon=False), ax)
 
 
 # ── viz #3: Ripley L ─────────────────────────────────────────────────────────
 
-def _render_ripley(fig, st) -> None:
-    ripley = st.last_result.get("ripley")
+def _render_ripley(ax, payload) -> None:
+    ripley = payload.get("ripley")
     if ripley is None:
-        _draw_message(fig, "Not enough cells for Ripley's L.")
+        _msg_ax(ax, "Not enough cells for Ripley's L.")
         return
-    ax = fig.add_subplot(111)
     _style_axes(ax,
                 title=f"Ripley L(r) − r · n={ripley.n_points}",
                 xlabel="r (px)", ylabel="L(r) − r")
@@ -225,17 +298,16 @@ def _render_ripley(fig, st) -> None:
                     color="#888888", alpha=0.25, label="CSR envelope")
     ax.plot(ripley.r, ripley.L_minus_r, color="#4aa3ff", lw=1.4, label="sample")
     ax.axhline(0.0, color="#666666", lw=0.6)
-    ax.legend(fontsize=8, frameon=False)
+    style_legend(ax.legend(fontsize=8, frameon=False), ax)
 
 
 # ── viz #6: colony size histogram ────────────────────────────────────────────
 
-def _render_colony_size(fig, st) -> None:
-    stats = st.last_result.get("colony_stats")
+def _render_colony_size(ax, payload) -> None:
+    stats = payload.get("colony_stats")
     if stats is None or stats.size.size == 0:
-        _draw_message(fig, "No colonies detected — try increasing ε multiplier.")
+        _msg_ax(ax, "No colonies detected — try increasing ε multiplier.")
         return
-    ax = fig.add_subplot(111)
     _style_axes(ax,
                 title=f"Colony size · {stats.ids.size} colonies",
                 xlabel="Cells per colony", ylabel="Colonies")
@@ -244,21 +316,20 @@ def _render_colony_size(fig, st) -> None:
     ax.hist(stats.size, bins=bins, color="#4aa3ff", alpha=0.85)
     ax.axvline(float(np.median(stats.size)), color="#ff9c4a", lw=1.2,
                label=f"median = {float(np.median(stats.size)):.1f}")
-    ax.legend(fontsize=8, frameon=False)
+    style_legend(ax.legend(fontsize=8, frameon=False), ax)
 
 
 # ── viz #8: per-colony metric distribution (inter- vs intra-variability) ─────
 
-def _render_colony_metric_dist(fig, st) -> None:
-    payload = st.last_result
+def _render_colony_metric_dist(ax, payload) -> None:
     metric = payload.get("metric")
     labels = payload.get("colony_labels")
     metric_col = payload.get("metric_col") or "metric"
     if metric is None:
-        _draw_message(fig, "Pick a per-cell metric to compare colonies.")
+        _msg_ax(ax, "Pick a per-cell metric to compare colonies.")
         return
     if labels is None or labels.shape[0] != metric.shape[0]:
-        _draw_message(fig, "No colonies detected — try increasing ε multiplier.")
+        _msg_ax(ax, "No colonies detected — try increasing ε multiplier.")
         return
 
     # Group values by colony, dropping noise + non-finite.
@@ -269,7 +340,7 @@ def _render_colony_metric_dist(fig, st) -> None:
         if block.size > 0:
             per_colony.append((cid, block))
     if not per_colony:
-        _draw_message(fig, "No finite metric values inside any colony.")
+        _msg_ax(ax, "No finite metric values inside any colony.")
         return
 
     # Sort colonies by median so the plot reads left→right in signal order.
@@ -278,7 +349,6 @@ def _render_colony_metric_dist(fig, st) -> None:
     data = [block for _, block in per_colony]
     positions = list(range(1, len(data) + 1))
 
-    ax = fig.add_subplot(111)
     _style_axes(ax, title=f"{metric_col} · per-colony distribution",
                 xlabel="Colony (ordered by median)", ylabel=metric_col)
 
@@ -320,18 +390,17 @@ def _render_colony_metric_dist(fig, st) -> None:
                 fontsize=8, color=title_fg,
                 bbox=dict(boxstyle="round,pad=0.3", facecolor=bg,
                           edgecolor=muted, alpha=0.85))
-    ax.legend(fontsize=7, frameon=False, loc="upper right")
+    style_legend(ax.legend(fontsize=7, frameon=False, loc="upper right"), ax)
 
 
 # ── viz #9: radial profile ───────────────────────────────────────────────────
 
-def _render_radial_profile(fig, st) -> None:
-    prof = st.last_result.get("radial_profile")
-    metric_col = st.last_result.get("metric_col") or "metric"
+def _render_radial_profile(ax, payload) -> None:
+    prof = payload.get("radial_profile")
+    metric_col = payload.get("metric_col") or "metric"
     if prof is None or not np.any(np.isfinite(prof.mean)):
-        _draw_message(fig, "Pick a metric and ensure colonies were detected.")
+        _msg_ax(ax, "Pick a metric and ensure colonies were detected.")
         return
-    ax = fig.add_subplot(111)
     _style_axes(ax,
                 title=f"Radial profile of {metric_col}",
                 xlabel="r / R (colony centre → edge)", ylabel=metric_col)
@@ -342,20 +411,18 @@ def _render_radial_profile(fig, st) -> None:
 
 # ── viz #10: boundary vs interior split ──────────────────────────────────────
 
-def _render_boundary_interior(fig, st) -> None:
-    payload = st.last_result
+def _render_boundary_interior(ax, payload) -> None:
     metric = payload.get("metric")
     geom = payload.get("intra_geom")
     metric_col = payload.get("metric_col") or "metric"
     if metric is None or geom is None or metric.shape[0] != geom.is_boundary.shape[0]:
-        _draw_message(fig, "Pick a per-cell metric to compare boundary vs interior.")
+        _msg_ax(ax, "Pick a per-cell metric to compare boundary vs interior.")
         return
     interior = metric[~geom.is_boundary & np.isfinite(metric)]
     boundary = metric[geom.is_boundary & np.isfinite(metric)]
     if interior.size == 0 and boundary.size == 0:
-        _draw_message(fig, "No finite metric values in either partition.")
+        _msg_ax(ax, "No finite metric values in either partition.")
         return
-    ax = fig.add_subplot(111)
     _style_axes(ax, title=f"{metric_col} · boundary vs interior",
                 xlabel="", ylabel=metric_col)
     positions = [1, 2]
@@ -466,5 +533,5 @@ def _render_summary_lines(fig, matrix, wells, tps, ylabel: str) -> None:
                 marker="o", markersize=3, lw=1.1,
                 color=cmap(i % cmap.N), label=w)
     if len(wells) <= 12:
-        ax.legend(fontsize=7, frameon=False,
-                  loc="upper right", ncol=min(2, len(wells)))
+        style_legend(ax.legend(fontsize=7, frameon=False,
+                               loc="upper right", ncol=min(2, len(wells))), ax)

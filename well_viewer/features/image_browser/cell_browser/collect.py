@@ -39,6 +39,29 @@ compute_gate_inclusion = _lazy(
     "well_viewer.features.scatter.gating", "compute_gate_inclusion")
 
 
+def _scatter_selected_timepoints(ctx) -> Optional[List[float]]:
+    """The timepoints the per-cell scatter is currently drawn over, read from
+    ``ctx.runtime.scatter.tp_selections`` (a ``{tp_str: bool}`` map).
+
+    Returns the list of checked timepoints (floats), or ``None`` when the scatter
+    runtime / selection map is unavailable (scatter is a removable feature, so
+    guard defensively). Used in gate mode so the gated gallery mirrors the scatter
+    cloud's timepoint subset instead of pulling every timepoint.
+    """
+    scatter_rt = getattr(ctx.runtime, "scatter", None)
+    sel = getattr(scatter_rt, "tp_selections", None) if scatter_rt is not None else None
+    if not sel:
+        return None
+    out: List[float] = []
+    for tp_str, on in sel.items():
+        if on:
+            try:
+                out.append(float(tp_str))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 @dataclass(frozen=True)
 class Criterion:
     """One filter row: keep cells with ``min <= value(column) <= max``.
@@ -309,12 +332,28 @@ def collect_cells(
         else:
             gates = [g for g in all_gates if str(g.get("name") or "") in chosen]
 
-    # Relax an empty timepoint/FOV include-list to "all" on the live auto-sync
-    # path (and in gate mode), so a Split View selection change shows the cells
-    # immediately instead of a silently-blank gallery — the tp/FOV pickers start
-    # fully deselected. The explicit Generate button keeps the strict tri-state
-    # (empty → "pick timepoints" hint) so its deliberate affordance is unchanged.
-    if gate_mode or live_sync:
+    # Relax an empty timepoint/FOV include-list on the live auto-sync path (and
+    # in gate mode), so a Split View selection change shows the cells immediately
+    # instead of a silently-blank gallery — the tp/FOV pickers start fully
+    # deselected. The explicit Generate button keeps the strict tri-state (empty →
+    # "pick timepoints" hint) so its deliberate affordance is unchanged.
+    if gate_mode:
+        # Gate mode mirrors the scatter cloud, which is drawn over the scatter's
+        # own selected timepoint subset. When the Cell Browser's own picker is at
+        # its (deselected) default, honour that subset rather than relaxing to
+        # "all timepoints" — otherwise the gallery loads cells from timepoints the
+        # gate was never drawn over. An explicit browser-picker selection still
+        # wins (it stays in ``target``).
+        if target is None or target.size == 0:
+            scatter_tps = _scatter_selected_timepoints(ctx)
+            if scatter_tps is None:
+                # No scatter subset available → relax to "all" (old fallback).
+                target = None
+            else:
+                target = np.asarray([float(t) for t in scatter_tps], dtype=float)
+        if fov_set is not None and not fov_set:
+            fov_set = None
+    elif live_sync:
         if target is not None and target.size == 0:
             target = None
         if fov_set is not None and not fov_set:

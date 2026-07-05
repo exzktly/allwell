@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.data.crop_tool import CropTool
 from well_viewer.core.ui_helpers import btn_primary
+from widgets.flow_layout import FlowLayout
 from well_viewer.features.image_browser.image_table.controller import image_table_open_export_settings
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_dimensions
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_global
@@ -323,10 +324,11 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.addWidget(sep2)
 
     # ── Action strip — Generate · Crop▾ · crop status … Export▾ · Zoom ──
+    # FlowLayout so the strip wraps instead of clipping the Export/Zoom cluster
+    # when Split View narrows the pane.
     action_row = QWidget(inner)
-    tr = QHBoxLayout(action_row)
+    tr = FlowLayout(action_row, h_spacing=6, v_spacing=4)
     tr.setContentsMargins(0, 0, 0, 0)
-    tr.setSpacing(6)
 
     tr.addWidget(btn_primary(action_row, "Generate", partial(image_table_generate, ctx)))
 
@@ -360,7 +362,6 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # ON/OFF intensity threshold quick-edit for the active channel — drives the
     # per-row "≥ Thr" binary overlay. Edits the same ThreshFracOn value as the
     # Cell Gating tab / the plot tabs, and re-composites the generated table.
-    tr.addSpacing(12)
     tr.addWidget(QLabel("ON threshold:", action_row))
     thresh_stepper = reg.register("_image_table_thresh_frac_stepper", Stepper(
         action_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
@@ -378,8 +379,6 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         lambda v: image_table_set_thresh_frac(ctx, v)
     )
     tr.addWidget(thresh_stepper)
-
-    tr.addStretch(1)
 
     # Export ▾ split button: click = Export; menu = Copy / settings.
     export_act = QAction("Export", action_row)

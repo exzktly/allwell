@@ -41,6 +41,7 @@ from well_viewer.core.lazy import lazy as _lazy
 redraw_bars = _lazy("well_viewer.features.barplot.renderer", "redraw_bars")
 redraw_scatter_agg_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_agg_orchestrate")
 redraw_scatter_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_orchestrate")
+redraw_distribution = _lazy("well_viewer.features.distribution.controller", "redraw_distribution")
 clear_gates = _lazy("well_viewer.features.scatter.gating", "clear_gates")
 rename_gate = _lazy("well_viewer.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw_mode")
@@ -661,7 +662,12 @@ class ExportStyleSidebar(QWidget):
         ylog_cb.setChecked(bool(self._prefs.get(_ykey, _xdef)))
         self._bind_getter_setter(_xkey, xlog_cb)
         self._bind_getter_setter(_ykey, ylog_cb)
-        if _is_scatter:
+        # Scatter re-tags its axis on redraw; the distribution must fully redraw
+        # so its histogram bars are re-drawn with the correct ``log=`` baseline
+        # (and so its on-plot "log x"/"log y" checkboxes re-sync). Other figures
+        # keep the lightweight restyle path.
+        _is_distribution = getattr(self._app, "_distribution_fig", None) is self._fig
+        if _is_scatter or _is_distribution:
             xlog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
             ylog_cb.toggled.connect(lambda _=False: self._redraw_bound_figure())
         add_stacked(s_lim, "Log scale", hrow(xlog_cb, ylog_cb))
@@ -1200,6 +1206,9 @@ class ExportStyleSidebar(QWidget):
                 return
             if getattr(app, "_scatter_agg_fig", None) is self._fig:
                 redraw_scatter_agg_orchestrate(app._ctx)
+                return
+            if getattr(app, "_distribution_fig", None) is self._fig:
+                redraw_distribution(app._ctx)
                 return
             app._redraw()
         except Exception:

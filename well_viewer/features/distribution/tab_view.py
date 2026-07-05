@@ -108,7 +108,12 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     log_x_cb = reg.register("_distribution_log_x_cb", QCheckBox("log x", ctrl))
 
     def _on_log_changed(state: int) -> None:
-        ctx.state.distribution.log_x = bool(state)
+        # Single source of truth: the per-figure axis pref (``x_log``) — the same
+        # store the Properties-sidebar "X log" toggle and the authoritative
+        # export-style pass use. Mirror into the feature-state field so the
+        # existing view-state persistence keeps working.
+        from well_viewer.features.distribution.controller import set_distribution_axis_log
+        set_distribution_axis_log(ctx, "x", bool(state))
         _on_changed(ctx)
     log_x_cb.stateChanged.connect(_on_log_changed)
     cl.addWidget(log_x_cb)
@@ -116,7 +121,8 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     log_y_cb = reg.register("_distribution_log_y_cb", QCheckBox("log y", ctrl))
 
     def _on_log_y_changed(state: int) -> None:
-        ctx.state.distribution.log_y = bool(state)
+        from well_viewer.features.distribution.controller import set_distribution_axis_log
+        set_distribution_axis_log(ctx, "y", bool(state))
         _on_changed(ctx)
     log_y_cb.stateChanged.connect(_on_log_y_changed)
     cl.addWidget(log_y_cb)

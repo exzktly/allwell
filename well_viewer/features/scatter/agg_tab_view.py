@@ -8,13 +8,14 @@ from well_viewer.core.plot_card_actions import (
 
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout,
+    QCheckBox, QComboBox, QLabel, QMenu, QPushButton, QVBoxLayout,
     QWidget, QWidgetAction,
 )
 
 from well_viewer.core.ui_helpers import (
-    make_band_controls, make_plot_with_right_dock, make_popover_button,
-    make_plot_view_switcher)
+    add_menu_action, make_action_menu_button, make_band_controls,
+    make_plot_with_right_dock, make_popover_button, make_plot_view_switcher)
+from widgets.flow_layout import FlowLayout
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.controller import on_scatter_agg_axis_change
 from well_viewer.features.scatter.controller import update_tp_selection_display
@@ -42,7 +43,9 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
-    cl = QHBoxLayout(ctrl)
+    # FlowLayout so the control row wraps rather than clipping when Split View
+    # narrows the pane (see cells_tab_view for the same treatment).
+    cl = FlowLayout(ctrl, h_spacing=6, v_spacing=4)
     cl.setContentsMargins(10, 6, 10, 6)
 
     # Per-axis channel + property selectors mirror the cells scatter tab.
@@ -110,24 +113,17 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=False))
     cl.addWidget(_disp_btn)
 
-    cl.addStretch(1)
-
-    from widgets.icon_button import IconButton as _IconButton
-    _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_scatter_agg_data(ctx))
+    # Export / copy / save / figure-properties collapse into one "Export ▾" menu
+    # (mirrors the per-cell scatter tab).
+    _export_btn, _export_menu = make_action_menu_button(
+        "Export ▾", ctrl, tooltip="Export, copy, save, and figure properties")
+    add_menu_action(_export_menu, "Export CSV…", lambda: export_scatter_agg_data(ctx))
+    add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
+    add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx))
+    _export_menu.addSeparator()
+    add_menu_action(_export_menu, "Figure properties…",
+                    lambda: ctx.open_export_style_panel("scatter_agg"))
     cl.addWidget(_export_btn)
-    _copy_btn = _IconButton("copy", ctrl, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
-    cl.addWidget(_copy_btn)
-    _save_btn = _IconButton("save", ctrl, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
-    cl.addWidget(_save_btn)
-    style_btn = _IconButton(
-        "sliders-horizontal", ctrl,
-        tooltip="Show / hide the figure properties panel",
-    )
-    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("scatter_agg"))
-    cl.addWidget(style_btn)
     layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)

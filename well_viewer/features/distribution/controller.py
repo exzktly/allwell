@@ -14,7 +14,9 @@ import numpy as np
 
 from well_viewer.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
 from well_viewer.core.safe import swallowed
-from well_viewer.core.plot_style import apply_export_style_to_current, style_legend
+from well_viewer.core.plot_style import (
+    apply_export_style_to_current, figure_prefs, style_legend,
+)
 from well_viewer.core.channel_state_controller import (
     active_channel_label, get_all_fluor_gates, get_thresh_frac_on,
 )
@@ -24,6 +26,56 @@ NO_DATA_MSG = (
     "No values to plot.\n"
     "Pick a channel, metric, and timepoint, and select wells or groups."
 )
+
+
+# ── Log-scale single source of truth ────────────────────────────────────────
+# The Distribution tab has two controls for each axis' log scale: the on-plot
+# "log x"/"log y" checkboxes and the Properties-sidebar "X log"/"Y log" toggles.
+# The sidebar writes the per-figure axis pref (``x_log``/``y_log``) and the
+# export-style pass applies it *last*, so it used to silently override whatever
+# the on-plot checkbox / renderer set — the button looked dead / inverted. These
+# helpers make that per-figure pref the single source of truth: both controls
+# read and write it, and it drives both the calculation (bin edges / KDE grid)
+# and the axis scale. ``ctx.state.distribution.log_*`` is kept mirrored so the
+# existing view-state persistence is unchanged.
+
+def get_distribution_axis_log(ctx, axis: str) -> bool:
+    """Read the unified log flag for ``axis`` ("x"/"y") from the figure pref,
+    falling back to the mirrored feature-state field (first load / migration)."""
+    key = "x_log" if axis == "x" else "y_log"
+    state_attr = "log_x" if axis == "x" else "log_y"
+    fig = ctx.widgets.get_or_none("_distribution_fig")
+    if fig is not None:
+        prefs = figure_prefs(ctx, fig)
+        # An explicitly-set pref wins; when unset, seed it from the mirrored
+        # state so a persisted button choice survives the first redraw.
+        if key in prefs._axis:  # type: ignore[attr-defined]
+            return bool(prefs[key])
+    return bool(getattr(ctx.state.distribution, state_attr, False))
+
+
+def set_distribution_axis_log(ctx, axis: str, on: bool) -> None:
+    """Write the unified log flag for ``axis`` to the figure pref and mirror it
+    into the feature-state field (for view-state persistence)."""
+    key = "x_log" if axis == "x" else "y_log"
+    state_attr = "log_x" if axis == "x" else "log_y"
+    setattr(ctx.state.distribution, state_attr, bool(on))
+    fig = ctx.widgets.get_or_none("_distribution_fig")
+    if fig is not None:
+        figure_prefs(ctx, fig)[key] = bool(on)
+
+
+def _sync_log_checkbox(ctx, widget_name: str, on: bool) -> None:
+    """Reflect the unified log flag onto an on-plot checkbox without re-emitting
+    its ``stateChanged`` (which would recurse into a redraw)."""
+    cb = ctx.widgets.get_or_none(widget_name)
+    if cb is None or bool(cb.isChecked()) == bool(on):
+        return
+    blocked = cb.blockSignals(True)
+    try:
+        cb.setChecked(bool(on))
+    finally:
+        cb.blockSignals(blocked)
 
 
 def _gaussian_kde(values: Sequence[float], grid: np.ndarray) -> np.ndarray:
@@ -232,8 +284,22 @@ def redraw_distribution(ctx) -> None:
     mode_cb = ctx.widgets.get_or_none("_distribution_mode_var")
     mode = mode_cb.currentText() if mode_cb is not None else "Histogram + KDE"
     bins = int(ctx.state.distribution.bins or 40)
-    log_x = bool(ctx.state.distribution.log_x)
-    log_y = bool(ctx.state.distribution.log_y)
+    # Read the unified log flags from the per-figure axis pref (single source of
+    # truth shared with the Properties sidebar), then reflect them back onto the
+    # on-plot checkboxes so a sidebar toggle keeps the checkbox in lockstep. The
+    # same values drive the calculation (bin edges / KDE grid) and the axis, so
+    # bins are never computed in a different scale than the axis is drawn in.
+    log_x = get_distribution_axis_log(ctx, "x")
+    log_y = get_distribution_axis_log(ctx, "y")
+    # Seed the figure pref + mirror the feature-state field from the resolved
+    # value, so the authoritative export-style pass reads exactly what the
+    # renderer draws (covers the migration case where an old session persisted
+    # only ``state.log_*`` and the pref was still unset — otherwise the export
+    # pass would force the axis linear against the button).
+    set_distribution_axis_log(ctx, "x", log_x)
+    set_distribution_axis_log(ctx, "y", log_y)
+    _sync_log_checkbox(ctx, "_distribution_log_x_cb", log_x)
+    _sync_log_checkbox(ctx, "_distribution_log_y_cb", log_y)
     layout_cb = ctx.widgets.get_or_none("_distribution_layout_var")
     layout_choice = layout_cb.currentText() if layout_cb is not None else "Overlay"
 
@@ -403,8 +469,12 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
         grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
         for name, color, vals in groups:
             if mode in ("Histogram", "Histogram + KDE"):
+                # Pass ``log=log_y`` into hist so matplotlib computes proper
+                # log-scaled bars/limits. Calling ``set_yscale("log")`` after
+                # drawing density bars from a 0 baseline (log(0) undefined) made
+                # the bar heights render wrong — this is the correct entry point.
                 ax.hist(
-                    vals, bins=edges, density=True, alpha=0.45,
+                    vals, bins=edges, density=True, alpha=0.45, log=log_y,
                     color=color, label=f"{name} (n={int(vals.size)})",
                 )
             if mode in ("KDE only", "Histogram + KDE"):
@@ -418,6 +488,8 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
             except Exception:
                 swallowed()  # was: pass (silent except)
         if log_y:
+            # Redundant for the histogram modes (``hist(log=True)`` already set
+            # it) but needed for KDE-only, and idempotent otherwise.
             try:
                 ax.set_yscale("log")
             except Exception:
@@ -476,8 +548,10 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
     for i, ((name, color, vals), ax) in enumerate(zip(groups, axes)):
         ax.set_axis_on()
         if mode in ("Histogram", "Histogram + KDE"):
+            # ``log=log_y`` — see the overlay renderer note: drawing density bars
+            # from a 0 baseline then setting log-Y afterward renders wrong heights.
             ax.hist(
-                vals, bins=edges, density=True, alpha=0.55,
+                vals, bins=edges, density=True, alpha=0.55, log=log_y,
                 color=color,
             )
         if mode == "Histogram + KDE":

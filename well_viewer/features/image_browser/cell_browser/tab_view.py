@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from widgets.flow_layout import FlowLayout
+
 from well_viewer.features.image_browser.cell_browser import controller as ctl
 from well_viewer.features.image_browser.cell_browser.criteria_view import (  # re-export
     build_cell_browser_sidebar,
@@ -52,9 +54,10 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # ── controls row ────────────────────────────────────────────────────────
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
-    cl = QHBoxLayout(ctrl)
+    # FlowLayout so this control row wraps rather than clipping when Split View
+    # narrows the pane. Secondary display toggles are grouped behind "Display ▾".
+    cl = FlowLayout(ctrl, h_spacing=6, v_spacing=4)
     cl.setContentsMargins(10, 6, 10, 6)
-    cl.setSpacing(6)
 
     cl.addWidget(QLabel("Channels:", ctrl))
     chan_host = QWidget(ctrl)
@@ -78,26 +81,37 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_browser_lut_layout", lut_lay)
     ctx.runtime.cell_browser.lut_rows = {}
 
-    boundary_cb = QCheckBox("Boundaries", ctrl)
+    # Secondary display toggles (Boundaries / Spot counts / Source stage) collapse
+    # into a "Display ▾" popover so the row stays readable at narrow (Split View)
+    # widths — Channels / LUT / Generate are the controls that matter inline.
+    disp_btn, disp_panel, disp_lay = make_popover_button("Display ▾", ctrl)
+    disp_btn.setToolTip("Cell display options: boundaries, spot counts, image source")
+    cl.addWidget(disp_btn)
+
+    boundary_cb = QCheckBox("Boundaries", disp_panel)
     boundary_cb.setChecked(True)
-    cl.addWidget(boundary_cb)
+    disp_lay.addWidget(boundary_cb)
     reg.register("_cell_browser_boundary_cb", boundary_cb)
 
     # N9: caption each crop with the active channel's smFISH spot count. Staged
     # like the other display controls — applied on Generate.
-    label_spot_cb = QCheckBox("Spot counts", ctrl)
+    label_spot_cb = QCheckBox("Spot counts", disp_panel)
     label_spot_cb.setChecked(False)
     label_spot_cb.setToolTip(
         "Label each cell with the active channel's smFISH spot count "
         "(its <channel>_smfish_count). Sort by that metric to rank cells by count.")
-    cl.addWidget(label_spot_cb)
+    disp_lay.addWidget(label_spot_cb)
     reg.register("_cell_browser_label_spot_cb", label_spot_cb)
 
     # Source: which stage of the fluorescence image to crop from. Raw (default)
     # or Corrected (top-hat). Staged like the rest — applied on Generate.
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
-    cl.addWidget(QLabel("Source:", ctrl))
-    source_seg = _SegmentedControl(ctrl)
+    _src_row = QWidget(disp_panel)
+    _src_lay = QHBoxLayout(_src_row)
+    _src_lay.setContentsMargins(0, 0, 0, 0)
+    _src_lay.setSpacing(6)
+    _src_lay.addWidget(QLabel("Source:", _src_row))
+    source_seg = _SegmentedControl(_src_row)
     for _lbl, _data in (("Raw", "raw"), ("Corrected", "corrected")):
         source_seg.addSegment(_lbl, data=_data)
     source_seg.setCurrentByData("raw")
@@ -105,7 +119,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         "Image stage cropped for each cell:\n"
         "• Raw — unprocessed fluorescence.\n"
         "• Corrected — top-hat / background-subtracted image.")
-    cl.addWidget(source_seg)
+    _src_lay.addWidget(source_seg)
+    disp_lay.addWidget(_src_row)
     reg.register("_cell_browser_source_seg", source_seg)
 
     cl.addWidget(QLabel("Per page:", ctrl))
@@ -137,7 +152,6 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     count_lbl.setObjectName("Muted")
     cl.addWidget(count_lbl)
     reg.register("_cell_browser_count_label", count_lbl)
-    cl.addStretch(1)
     layout.addWidget(ctrl)
 
     # ── scrollable grid ──────────────────────────────────────────────────────

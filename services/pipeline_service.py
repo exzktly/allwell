@@ -43,6 +43,30 @@ def _emit_num_flag(args: list[str], opts: dict, key: str, flag: str, cast) -> No
     args += [flag, str(value)]
 
 
+def _emit_execution_flags(args: list[str], opts: dict) -> None:
+    """Append the optional compute/execution flags (tf_threads, workers,
+    stardist_tile_px).
+
+    Extracted from :func:`build_pipeline_args` to keep that function's
+    cyclomatic complexity under the ratchet ceiling. Each flag is emitted only
+    when present and non-zero (``0`` = use the pipeline default → no flag);
+    ``tf_threads`` allows any non-zero value, the others only positive. A
+    malformed value is skipped rather than raising, matching the long-standing
+    behaviour for these performance knobs.
+    """
+    for key, flag, positive_only in (
+        ("tf_threads", "--tf_threads", False),
+        ("workers", "--workers", True),
+        ("stardist_tile_px", "--stardist_tile_px", True),
+    ):
+        try:
+            v = int(opts.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if (v > 0) if positive_only else (v != 0):
+            args += [flag, str(v)]
+
+
 def build_pipeline_args(
     pipeline: Path,
     input_dir: Path,
@@ -169,24 +193,7 @@ def build_pipeline_args(
             if v > 0:
                 args += [flag, str(v)]
 
-    try:
-        tf = int(opts["tf_threads"])
-        if tf != 0:
-            args += ["--tf_threads", str(tf)]
-    except ValueError:
-        pass
-    try:
-        workers = int(opts.get("workers", 0))
-        if workers > 0:
-            args += ["--workers", str(workers)]
-    except (TypeError, ValueError):
-        pass
-    try:
-        tile_px = int(opts.get("stardist_tile_px", 0) or 0)
-        if tile_px > 0:                      # 0 = off (default) → no flag
-            args += ["--stardist_tile_px", str(tile_px)]
-    except (TypeError, ValueError):
-        pass
+    _emit_execution_flags(args, opts)
 
     return args
 

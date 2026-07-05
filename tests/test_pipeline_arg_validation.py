@@ -92,6 +92,19 @@ def test_phase_token_absent_when_unset():
     args = build_pipeline_args(_P, _IN, _OUT, _opts())
     assert "--phase_token" not in args
 
+
+def test_stardist_tile_px_emitted_when_set():
+    args = build_pipeline_args(_P, _IN, _OUT, _opts(stardist_tile_px="2048"))
+    assert _flag_value(args, "--stardist_tile_px") == "2048"
+
+
+def test_stardist_tile_px_off_by_default_or_zero():
+    # Unset → no flag (pipeline default = off).
+    assert "--stardist_tile_px" not in build_pipeline_args(_P, _IN, _OUT, _opts())
+    # Explicit 0 also means off → no flag.
+    assert "--stardist_tile_px" not in build_pipeline_args(
+        _P, _IN, _OUT, _opts(stardist_tile_px="0"))
+
     args = []
     _emit_num_flag(args, {"r": ""}, "r", "--r", int)   # blank → skip
     assert args == []

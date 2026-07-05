@@ -653,6 +653,17 @@ class AnalyzeTabFormMixin:
         w_row.layout().addWidget(w_hint)
         w_row.layout().addStretch(1)
 
+        # StarDist prediction tiling — caps per-worker peak RAM on large frames
+        # (an untiled ~4K predict can use several GB/worker, so parallel workers
+        # exhaust memory). 0 = off (default); e.g. 2048 → 2x2 tiles on a 4K frame.
+        tile_row = self._row(sec, "StarDist tile px (0=off)")
+        self._stardist_tile_px_edit = self._entry(tile_row, "0", width=56)
+        tile_hint = QLabel("(0 → no tiling; 2048/1024 = less RAM, slightly slower)",
+                           tile_row)
+        tile_hint.setObjectName("Muted")
+        tile_row.layout().addWidget(tile_hint)
+        tile_row.layout().addStretch(1)
+
         self._cpu_only_cb = QCheckBox("CPU only (disable GPU)", sec)
         sec.layout().addWidget(self._cpu_only_cb)
         self._force_cb = QCheckBox("Force reprocess all wells", sec)
@@ -864,6 +875,7 @@ class AnalyzeTabFormMixin:
         s("_csv_prefix_edit", d.get("csv_prefix"))
         s("_tf_threads_edit", d.get("tf_threads"))
         s("_workers_edit", d.get("workers"))
+        s("_stardist_tile_px_edit", d.get("stardist_tile_px"))
         chk("_cpu_only_cb", d.get("cpu_only"))
         chk("_force_cb", d.get("force"))
 

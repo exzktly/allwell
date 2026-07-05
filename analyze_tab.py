@@ -828,6 +828,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             cpu_only=self._cpu_only_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),
             workers=self._workers_edit.text(),
+            stardist_tile_px=self._stardist_tile_px_edit.text(),
             filename_schema=self._build_schema_arg(),
             filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
             smfish_tokens=self._smfish_tokens_list(),

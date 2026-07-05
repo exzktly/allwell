@@ -2663,7 +2663,8 @@ def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
 
 
 def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
-                 segmentation_method: str = DEFAULT_SEGMENTATION_METHOD) -> None:
+                 segmentation_method: str = DEFAULT_SEGMENTATION_METHOD,
+                 stardist_tile_px: int = 0) -> None:
     """
     Called once in each worker process before any image pairs are processed.
 
@@ -2761,6 +2762,9 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
         device_note = "CPU-only (non-macOS default)"
     thr_note = (f"{threads_per_worker} TF thread(s)" if threads_per_worker > 0
                 else "TF default threads")
+
+    # Install the per-run StarDist tiling threshold (0 = off) before any predict.
+    _stardist.set_tile_px(stardist_tile_px)
 
     # Label-free methods (cellpose / classical_threshold) don't use the StarDist
     # TF model — skip the (heavy, network-touching) load entirely. Cellpose
@@ -3577,7 +3581,15 @@ def _run_well_worker_pool(
                  len(to_process))
     log.info("%s mode: %d well(s) to process, %d worker(s).", mode_label, len(to_process), workers)
 
-    all_records: list[dict] = []
+    # Running count of per-cell records across all wells — NOT the records
+    # themselves. Each well already writes its own per-well CSV inside its worker,
+    # so the parent never needs the records; it only reports a total in the
+    # summary line below. Accumulating the full list here (the old behaviour) held
+    # every cell dict of the entire plate in the long-lived parent process just to
+    # call len() on it — tens of millions of ~KB dicts on a large plate, i.e. the
+    # tens-of-GB "the run eats all my RAM" leak. A single integer fixes it, and
+    # each well's returned records are freed as soon as the loop reassigns them.
+    total_nuclei = 0
     # Two DISTINCT failure classes, kept apart so the summary isn't misleading:
     #   * wells_failed_entirely — the worker raised, so the well produced NO
     #     output at all (no CSV, no out.zip); it is absent from the plate map.
@@ -3599,7 +3611,8 @@ def _run_well_worker_pool(
         mp_context=ctx,
         initializer=_worker_init,
         initargs=(force_cpu, threads_per_worker,
-                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD)),
+                  shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD),
+                  int(shared_kwargs_template.get("_stardist_tile_px", 0) or 0)),
     ) as executor:
         future_to_well = {
             submit_task(executor, well_label, path): well_label
@@ -3609,7 +3622,7 @@ def _run_well_worker_pool(
             well_label = future_to_well[future]
             try:
                 records, failed = future.result()
-                all_records.extend(records)
+                total_nuclei += len(records)
                 if failed:
                     partial_wells[well_label] = list(failed)
             except Exception as exc:           # noqa: BLE001
@@ -3630,7 +3643,7 @@ def _run_well_worker_pool(
         "Total wells : %d  |  processed : %d  |  skipped : %d  |  nuclei : %d  |  "
         "wells failed (no output) : %d  |  wells partial : %d  |  "
         "FOV-groups failed : %d",
-        len(items), len(to_process), n_skipped, len(all_records),
+        len(items), len(to_process), n_skipped, total_nuclei,
         len(wells_failed_entirely), len(partial_wells), n_partial_fovs,
     )
     if wells_failed_entirely:
@@ -4220,6 +4233,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p.add_argument(
+        "--stardist_tile_px",
+        type=int,
+        default=0,
+        help=(
+            "Tile StarDist prediction so no block exceeds this many pixels per "
+            "side, capping per-worker peak memory on large frames. "
+            "0 (default) = OFF (predict the whole frame at once). On ~4K frames "
+            "an untiled predict can use several GB per worker, so a few parallel "
+            "workers exhaust RAM; set e.g. 2048 (2x2 tiles on 4K) or 1024 (less "
+            "RAM, a bit slower). Slightly slower per frame; results are stitched."
+        ),
+    )
+
     p.add_argument("--csv_prefix", default="measurements",
                    help="Filename prefix for per-well CSVs (<prefix>_<well>.csv)")
 
@@ -4489,6 +4516,10 @@ def main() -> None:
         cellpose_flow_threshold=args.cellpose_flow_threshold,
         cellpose_cellprob_threshold=args.cellpose_cellprob_threshold,
         cellpose_nuclei_channel=args.cellpose_nuclei_channel,
+        # Private (leading _) so it's filtered out of the process_image_group
+        # kwargs but still read by _run_well_worker_pool to seed each worker's
+        # StarDist tiling via _worker_init/set_tile_px. Mirrors _fov_threads.
+        _stardist_tile_px=int(args.stardist_tile_px or 0),
     )
 
     # If the selected input is an "in" directory, normalise any loose TIF/TIFF

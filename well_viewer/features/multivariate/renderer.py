@@ -88,12 +88,15 @@ def _point_colors(data, color_by: str, clusters=None):
         colors = [pos[float(t)] for t in tps.tolist()]
         legend = [(f"{t:g} h", pos[t]) for t in uniq]
         return colors, legend
-    # group or well: use the collected per-group colours.
+    # group or well: use the collected per-group / per-well colours.
     key = "well" if color_by == "well" else "group"
     labels = data[key]
-    gcolors = data["group_colors"] if key == "group" else {}
     if key == "well":
-        # well colours weren't precomputed; fall back to group_colors keyed by well
+        # Per-well colours are keyed by well label in BOTH selection modes; use
+        # them so "colour by: well" also works when replicate-set groups are
+        # active (where group_colors is keyed by group name, not well token).
+        gcolors = data.get("well_colors") or data["group_colors"]
+    else:
         gcolors = data["group_colors"]
     order = []
     seen = set()

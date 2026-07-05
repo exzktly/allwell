@@ -74,8 +74,8 @@ def _cmap_stops(name: str, n: int = 24) -> list[QColor]:
     """Colour stops for *name*, sampled from matplotlib if available."""
     try:
         import matplotlib  # noqa: F401
-        from matplotlib import colormaps as _mpl_cmaps
-        cmap = _mpl_cmaps[name]
+        from widgets.lut_cmaps import lut_cmap
+        cmap = lut_cmap(name)  # black→colour for the mono LUTs (Reds/Greens/…)
         out = []
         for i in range(n):
             r, g, b, _a = cmap(i / (n - 1))

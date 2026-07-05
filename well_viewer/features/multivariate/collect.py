@@ -88,6 +88,10 @@ def collect_feature_matrix(
     well_labels: List[str] = []
     tp_values: List[float] = []
     group_colors: Dict[str, Any] = {}
+    # Per-well colours keyed by well label (absolute plate-position rank), built
+    # in BOTH modes so the renderer's "colour by: well" option works even when
+    # replicate-set groups are active (group_colors is keyed by group name there).
+    well_colors: Dict[str, Any] = {}
     dropped = 0
 
     def _collect_well(well_label: str, group_name: str):
@@ -138,6 +142,7 @@ def collect_feature_matrix(
                 rset, ctx.state.selection.selections)
             for well_label in rset.wells:
                 if well_label in ctx.state.dataset.well_paths:
+                    well_colors[well_label] = color_for_well(well_label)
                     _collect_well(well_label, group_name)
     else:
         selected = sorted(
@@ -147,6 +152,7 @@ def collect_feature_matrix(
         )
         for well_label in selected:
             group_colors[well_label] = color_for_well(well_label)
+            well_colors[well_label] = color_for_well(well_label)
             _collect_well(well_label, well_label)
 
     if rows_X:
@@ -162,6 +168,7 @@ def collect_feature_matrix(
         "well": np.asarray(well_labels, dtype=object),
         "timepoint": np.asarray(tp_values, dtype=float),
         "group_colors": group_colors,
+        "well_colors": well_colors,
         "n_cells": int(X.shape[0]),
         "n_dropped_nan": int(dropped),
     }

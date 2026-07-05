@@ -103,15 +103,19 @@ def test_adding_a_metric_flows_everywhere(monkeypatch):
     class _Chan:
         active_metric = "mean_intensity"
         smfish_channels: list[str] = []
+        label_to_channel_key: dict[str, str] = {}   # X5: typed on ChannelState
 
     class _State:
         channel = _Chan()
 
     class _App:
-        _label_to_channel_key: dict[str, str] = {}
         _app_state = _State()
 
     cb = _FakeCombo()
-    populate_metric_combo(_App(), cb, channel_entry="gfp")
+    from types import SimpleNamespace
+    _a = _App()
+    # populate_metric_combo reads the channel slice off ctx.state (A8).
+    _a._ctx = SimpleNamespace(app=_a, state=_a._app_state)
+    populate_metric_combo(_a._ctx, cb, channel_entry="gfp")
     assert "Median Intensity" in cb.items
     assert "Foci Count" in cb.items

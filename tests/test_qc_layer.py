@@ -113,34 +113,36 @@ def test_df_included_mask_qc_only_when_included_absent():
 
 # ── controller projection ─────────────────────────────────────────────────────
 def _fake_app(cache, pipeline_info=None, params=None):
+    from well_viewer.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(cache=cache, pipeline_info=pipeline_info))
-    if params is not None:
-        app._qc_params = params
+        dataset=SimpleNamespace(cache=cache, pipeline_info=pipeline_info),
+        qc=QcState(params=params))
+    # The QC projectors take ``ctx`` (R1); a minimal ctx over the same state.
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
     return app
 
 
 def test_apply_qc_to_cache_writes_qc_pass_column():
     cache = {"A01": _df([5, 100], solidity=[0.99, 0.99])}
     app = _fake_app(cache, params=QCParams(enabled=True, min_area=10))
-    qc.apply_qc_to_cache(app, "A01")
+    qc.apply_qc_to_cache(app._ctx, "A01")
     assert "QC_Pass" in cache["A01"].columns
     assert list(cache["A01"]["QC_Pass"]) == [0, 1]
 
 
 def test_get_qc_params_lazy_seeds_from_pipeline_info():
     app = _fake_app({}, pipeline_info={"qc_options": {"remove_debris": True, "min_area": 15}})
-    p = qc.get_qc_params(app)
+    p = qc.get_qc_params(app._ctx)
     assert p.enabled and p.min_area == 15
-    # cached on the app afterwards
-    assert app._qc_params is p
+    # cached on the typed QC state afterwards
+    assert app._app_state.qc.params is p
 
 
 def test_qc_excluded_count_preview_params():
     cache = {"A01": _df([5, 50, 500])}
     app = _fake_app(cache, params=QCParams())  # committed: disabled
-    n_excl, n_tot = qc.qc_excluded_count(app, params=QCParams(enabled=True, min_area=10, max_area=200))
+    n_excl, n_tot = qc.qc_excluded_count(app._ctx, params=QCParams(enabled=True, min_area=10, max_area=200))
     assert (n_excl, n_tot) == (2, 3)
 
 
@@ -186,14 +188,20 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
         build_qc_gate_controls, qc_gate_refresh_widgets,
     )
 
+    from well_viewer.core.qc_state import QcState
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}))
-    app._qc_params = QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)
+        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
+        qc=QcState(params=QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)))
+    # qc_gate_refresh_widgets reads the params through get_qc_params(ctx); the
+    # builder registers its widget handles through ctx.widgets (which also stamp
+    # ``app._qc_gate_widgets`` for the legacy reader below).
+    from well_viewer.core.widget_registry import WidgetRegistry
+    app._ctx = SimpleNamespace(state=app._app_state, app=app, widgets=WidgetRegistry(app))
 
     parent = QWidget()
     qtbot.addWidget(parent)
-    row = build_qc_gate_controls(app, parent)
+    row = build_qc_gate_controls(app._ctx, parent)
     qtbot.addWidget(row)
 
     w = app._qc_gate_widgets
@@ -201,7 +209,7 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     assert w["min_circularity"].text() == "0.5"
     assert w["max_circularity"].text() == "0.95"
 
-    app._qc_params = QCParams(enabled=True, min_circularity=0.7)
+    app._app_state.qc.params = QCParams(enabled=True, min_circularity=0.7)
     qc_gate_refresh_widgets(app)
     assert w["min_circularity"].text() == "0.7"
     assert w["max_circularity"].text() == ""   # unset → blank

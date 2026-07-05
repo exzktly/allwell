@@ -16,17 +16,16 @@ def test_capture_selections_logs_on_failure(caplog):
         def selections(self):
             raise RuntimeError("boom")
 
-    app = types.SimpleNamespace(
-        _app_state=types.SimpleNamespace(selection=_Boom()))
+    ctx = types.SimpleNamespace(state=types.SimpleNamespace(selection=_Boom()))
     with caplog.at_level(logging.ERROR,
                          logger="well_viewer.features.saved_plots.collect"):
-        assert collect._capture_selections(app) is None
+        assert collect._capture_selections(ctx) is None
     assert any("selections" in r.getMessage() for r in caplog.records), \
         "a failed selection capture must be logged, not swallowed"
 
 
 def test_capture_selections_returns_none_when_empty():
-    app = types.SimpleNamespace(
-        _app_state=types.SimpleNamespace(
+    ctx = types.SimpleNamespace(
+        state=types.SimpleNamespace(
             selection=types.SimpleNamespace(selections=[])))
-    assert collect._capture_selections(app) is None
+    assert collect._capture_selections(ctx) is None

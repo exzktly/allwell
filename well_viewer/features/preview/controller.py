@@ -24,45 +24,40 @@ from well_viewer.features.preview.preview_view import (
 )
 
 
-def sync_preview_well_for_image_tabs(app) -> None:
+def sync_preview_well_for_image_tabs(ctx) -> None:
     """Keep current preview well unless the active selection supplies one."""
-    preview = app._app_state.feature_slice("preview")
+    sel_state = ctx.state.selection
+    preview = ctx.state.feature_slice("preview")
     if preview is None:  # Image Browser disabled — no preview state
         return
-    cur_sel = app._sel_by_id(app._app_state.selection.current_selection_id)
+    cur_id = sel_state.current_selection_id
+    cur_sel = next((s for s in sel_state.selections if s.get("id") == cur_id), None)
     sel_wells = (cur_sel.get("wells") or []) if cur_sel else []
+    well_paths = ctx.state.dataset.well_paths
 
     # Preserve explicit user choice when still valid.
     current = preview.selected_well
-    if current in app._app_state.dataset.well_paths:
+    if current in well_paths:
         # If the active selection has wells, prefer its first loaded well.
         for tok in sel_wells:
-            if tok in app._app_state.dataset.well_paths:
+            if tok in well_paths:
                 preview.selected_well = tok
                 return
         return
 
     # If no valid current well, use the active selection's first loaded well.
     for tok in sel_wells:
-        if tok in app._app_state.dataset.well_paths:
+        if tok in well_paths:
             preview.selected_well = tok
             return
 
     # Final fallback: keep previous behavior of choosing first available well.
-    if app._app_state.dataset.well_paths:
-        preview.selected_well = sorted(app._app_state.dataset.well_paths.keys(), key=app._parse_rc)[0]
+    if well_paths:
+        from well_viewer.domain.viewer_state import parse_rc
+        preview.selected_well = sorted(well_paths.keys(), key=parse_rc)[0]
 
 
-def refresh_preview_picker_shim(app) -> None:
-    from well_viewer.data.data_loading import extract_well_token as _extract_well_token
-    from ui.theme import get_color
-    _refresh_preview_picker_view(
-        app,
-        button_bg=get_color("button_bg"),
-        button_text=get_color("button_text"),
-        button_text_disabled=get_color("button_text_disabled"),
-        accent=get_color("ACCENT"),
-        clr_white=get_color("CLR_WHITE"),
-        clr_accent_dark=get_color("ACCENT_DARK"),
-        extract_well_token_fn=_extract_well_token,
-    )
+def refresh_preview_picker_shim(ctx) -> None:
+    # The preview picker refresh reads its state/widgets off ctx; the former
+    # styling kwargs are unused by the view, so this is now a thin ctx delegate.
+    _refresh_preview_picker_view(ctx)

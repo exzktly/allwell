@@ -22,9 +22,14 @@ from dataclasses import dataclass
 from well_viewer.data.data_loading import (
     aggregate_with_threshold_df,
     df_included_mask,
+    get_rows,
     resolve_value_series,
 )
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
+from well_viewer.core.channel_state_controller import (
+    get_all_fluor_gates,
+    get_thresh_frac_on,
+)
 
 
 # ── Unified replicate model (single source of truth for BOTH stats and plots) ──
@@ -79,11 +84,13 @@ def _norm_fov(df: "pd.DataFrame") -> np.ndarray:
     return s.to_numpy()
 
 
-def _safe_rows(app, lbl):
-    """The well's raw DataFrame, or None when the backend exposes only
-    pre-aggregated points (the pure-logic MockApp has no ``_get_rows``)."""
-    getter = getattr(app, "_get_rows", None)
-    return getter(lbl) if callable(getter) else None
+def _safe_rows(ctx, lbl):
+    """The well's raw DataFrame from the loaded-row cache, or None when the
+    backend exposes only pre-aggregated points (the pure-logic MockApp seeds no
+    cache). Ctx-native: reads the same ``dataset.cache`` the row service fills —
+    the well-branch aggregator populated it just above, and ``loaded_app`` fills
+    it at load, so a real app always has the frame here; a mock has None."""
+    return ctx.state.dataset.cache.get(lbl)
 
 
 def _point_at(pts, target_t):
@@ -130,7 +137,7 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
             (float(all_vals.mean()) if all_vals.size else float("nan")))
 
 
-def _rep_from(app, df, pts, target_t, threshold, val_col, fluor_gates, ratios,
+def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,
               on_col) -> "Optional[ReplicateStat]":
     """Build a ReplicateStat: mean/frac/n from the aggregator point *pts* (plot-
     identical, delegate-aware), median/mean_all from raw *df* when available."""
@@ -145,7 +152,7 @@ def _rep_from(app, df, pts, target_t, threshold, val_col, fluor_gates, ratios,
     )
 
 
-def group_replicate_stats(app, wells, target_t, *, use_fov, val_col, threshold,
+def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
                           fluor_gates=None) -> "List[ReplicateStat]":
     """THE canonical producer of per-replicate summaries for a group at a
     timepoint. One record per replicate (per well, or per FOV of the single well
@@ -154,31 +161,31 @@ def group_replicate_stats(app, wells, target_t, *, use_fov, val_col, threshold,
     never describe different units of replication. Mean / fraction / n come from
     :func:`aggregate_well` (the same aggregator the plots use, honoring the
     MockApp delegate)."""
-    loaded = [w for w in wells if w in app._app_state.dataset.well_paths]
+    loaded = [w for w in wells if w in ctx.state.dataset.well_paths]
     unit = replicate_unit(len(loaded), use_fov)
     if unit == "none":
         return []
     if fluor_gates is None:
-        fluor_gates = app._get_all_fluor_gates()
-    ratios = app._app_state.channel.ratio_index
-    on_col = _thresh_on_col(app)
+        fluor_gates = get_all_fluor_gates(ctx)
+    ratios = ctx.state.channel.ratio_index
+    on_col = _thresh_on_col(ctx)
     reps: "List[ReplicateStat]" = []
     if unit == "well":
         for lbl in loaded:
-            pts = aggregate_well(app, lbl, threshold=threshold, use_sem=False,
+            pts = aggregate_well(ctx, lbl, threshold=threshold, use_sem=False,
                                  val_col=val_col, fluor_gates=fluor_gates)
-            rs = _rep_from(app, _safe_rows(app, lbl), pts, target_t, threshold,
+            rs = _rep_from(_safe_rows(ctx, lbl), pts, target_t, threshold,
                            val_col, fluor_gates, ratios, on_col)
             if rs is not None:
                 reps.append(rs)
     else:  # "fov": exactly one loaded well; each of its FOVs is a replicate
         lbl = loaded[0]
-        df = _safe_rows(app, lbl)
+        df = _safe_rows(ctx, lbl)
         if df is None or len(df) == 0:
             # Pre-aggregated backends (MockApp) have no raw rows to split — the
             # well is its own single replicate.
-            rs = _rep_from(app, None,
-                           aggregate_well(app, lbl, threshold=threshold,
+            rs = _rep_from(None,
+                           aggregate_well(ctx, lbl, threshold=threshold,
                                           use_sem=False, val_col=val_col,
                                           fluor_gates=fluor_gates),
                            target_t, threshold, val_col, fluor_gates, ratios, on_col)
@@ -192,7 +199,7 @@ def group_replicate_stats(app, wells, target_t, *, use_fov, val_col, threshold,
                     sub, threshold=threshold, use_sem=False, val_col=val_col,
                     fluor_gates=fluor_gates, per_fov_spread=False,
                     ratios=ratios, on_col=on_col)
-                rs = _rep_from(app, sub, pts, target_t, threshold, val_col,
+                rs = _rep_from(sub, pts, target_t, threshold, val_col,
                                fluor_gates, ratios, on_col)
                 if rs is not None:
                     reps.append(rs)
@@ -213,7 +220,7 @@ def _reduce_reps(reps, field: str, use_sem: bool) -> tuple[float, float]:
     return m, (sd / math.sqrt(n) if (use_sem and n > 1) else sd)
 
 
-def _thresh_on_col(app) -> Optional[str]:
+def _thresh_on_col(ctx) -> Optional[str]:
     """Return ``"Gate_On"`` when scatter-gate *thresholding* is active (mode on
     and a gate selected), else ``None``.
 
@@ -222,16 +229,19 @@ def _thresh_on_col(app) -> Optional[str]:
     gate) instead of ``value > ThreshFracOn``. Inlined here (no
     ``well_viewer.features`` import) to keep the domain layer acyclic — see
     ``tests/test_layering.py``.
+
+    A8 R-leaf: takes ``ctx`` — the scatter-gate / cell-gating flags read through
+    ``ctx.runtime`` (the same stamped attributes, without naming the god-object).
     """
-    if not getattr(app, "_cell_gating_use_scatter_thresh", False):
+    if not ctx.state.cell_gating.use_scatter_thresh:
         return None
-    gates = getattr(app, "_scatter_gates", None) or []
+    gates = ctx.state.cell_gating.scatter_gates or []
     if not gates:
         return None
     # Thresholding has its own gate selection (a set of names; None ⇒ all). Fall
     # back to the ThreshFracOn cutoff (return None) when the user has explicitly
     # selected no existing gate for the thresholding layer.
-    choices = getattr(app, "_cell_gating_thresh_choices", None)
+    choices = ctx.state.cell_gating.thresh_choices
     if choices is not None:
         chosen = set(choices)
         if not any(str(g.get("name") or "") in chosen for g in gates):
@@ -239,7 +249,7 @@ def _thresh_on_col(app) -> Optional[str]:
     return "Gate_On"
 
 
-def _gate_cache_sig(app):
+def _gate_cache_sig(ctx):
     """Signature of the scatter-gate on-population state for the stats cache.
 
     ``threshold`` alone does not capture gate-based fraction-on: when scatter-gate
@@ -249,10 +259,10 @@ def _gate_cache_sig(app):
     edit from returning a stale cached statistic (audit S4). Returns ``None`` in
     plain threshold mode, leaving the existing keys byte-identical there.
     """
-    if _thresh_on_col(app) is None:
+    if _thresh_on_col(ctx) is None:
         return None
-    gates = getattr(app, "_scatter_gates", None) or []
-    choices = getattr(app, "_cell_gating_thresh_choices", None)
+    gates = ctx.state.cell_gating.scatter_gates or []
+    choices = ctx.state.cell_gating.thresh_choices
     try:
         gates_key = json.dumps(gates, sort_keys=True, default=str)
     except (TypeError, ValueError):
@@ -262,7 +272,7 @@ def _gate_cache_sig(app):
 
 
 def well_aggregate_stats(
-    app,
+    ctx,
     wells,
     target_t: float,
     *,
@@ -295,10 +305,10 @@ def well_aggregate_stats(
     fov_mean_spreads: List[float] = []
     fov_frac_spreads: List[float] = []
     for lbl in wells:
-        if lbl not in app._app_state.dataset.well_paths:
+        if lbl not in ctx.state.dataset.well_paths:
             continue
         pts = aggregate_well(
-            app,
+            ctx,
             lbl, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -347,7 +357,7 @@ def well_aggregate_stats(
 
 
 def compute_rep_stats(
-    app,
+    ctx,
     rset: "ReplicateSet",
     target_t: float,
     threshold: float,
@@ -366,27 +376,27 @@ def compute_rep_stats(
     plot paths (line / bar / scatter-agg) compute the "mean across
     wells under active gating" identically.
     """
-    fluor_gates = app._get_all_fluor_gates()
+    fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,
-                  app._app_state.channel.active_val_col, tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
-    if cache_key in app._app_state.stats_cache.cache:
-        return app._app_state.stats_cache.cache[cache_key]
+                  ctx.state.channel.active_val_col, tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+    if cache_key in ctx.state.stats_cache.cache:
+        return ctx.state.stats_cache.cache[cache_key]
 
     reps = group_replicate_stats(
-        app, rset.wells, target_t, use_fov=False,
-        val_col=app._app_state.channel.active_val_col,
+        ctx, rset.wells, target_t, use_fov=False,
+        val_col=ctx.state.channel.active_val_col,
         threshold=threshold, fluor_gates=fluor_gates,
     )
     gm, gerr = _reduce_reps(reps, "mean", use_sem)
     gf, ferr = _reduce_reps(reps, "frac", use_sem)
 
     result = (gm, gerr, gf, ferr)
-    app._app_state.stats_cache.cache[cache_key] = result
+    ctx.state.stats_cache.cache[cache_key] = result
     return result
 
 
 def compute_rep_per_fov_stats(
-    app,
+    ctx,
     rset: "ReplicateSet",
     target_t: float,
     threshold: float,
@@ -400,20 +410,20 @@ def compute_rep_per_fov_stats(
     disambiguated by prefixing with the source well label so identical FOV
     numbers in different wells stay distinct.
     """
-    fluor_gates = app._get_all_fluor_gates()
+    fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
-                 use_sem, app._app_state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
-    if cache_key in app._app_state.stats_cache.cache:
-        return app._app_state.stats_cache.cache[cache_key]
+                 use_sem, ctx.state.channel.active_val_col,
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+    if cache_key in ctx.state.stats_cache.cache:
+        return ctx.state.stats_cache.cache[cache_key]
 
     # Per-FOV replicates come from the shared producer (``use_fov=True``), so the
     # spread here is taken across the exact same FOV replicate values the Stats
     # tab tests. For a single-well set that's the well's FOVs; the call site only
     # routes here when ``replicate_unit`` is "fov".
     reps = group_replicate_stats(
-        app, rset.wells, target_t, use_fov=True,
-        val_col=app._app_state.channel.active_val_col,
+        ctx, rset.wells, target_t, use_fov=True,
+        val_col=ctx.state.channel.active_val_col,
         threshold=threshold, fluor_gates=fluor_gates,
     )
     gm, gerr = _reduce_reps(reps, "mean", use_sem)
@@ -421,11 +431,11 @@ def compute_rep_per_fov_stats(
     nm, ns = _reduce_reps(reps, "n_above", use_sem)
     result = (gm, gerr, gf, ferr,
               (nm if math.isfinite(nm) else 0.0), ns)
-    app._app_state.stats_cache.cache[cache_key] = result
+    ctx.state.stats_cache.cache[cache_key] = result
     return result
 
 
-def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
+def compute_rep_n_above(ctx, rset: "ReplicateSet", target_t: float) -> int:
     """Total events-above-threshold contributing to *rset* at *target_t*.
 
     Sums ``n_above`` (AggPoint index 4) across loaded wells of the set
@@ -433,33 +443,33 @@ def compute_rep_n_above(app, rset: "ReplicateSet", target_t: float) -> int:
     cells that actually exceeded the active threshold — the same
     numerator that drives the fraction-above-threshold value.
     """
-    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-    fluor_gates = app._get_all_fluor_gates()
+    threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
-                 app._app_state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
-    if cache_key in app._app_state.stats_cache.cache:
-        return app._app_state.stats_cache.cache[cache_key]
+                 ctx.state.channel.active_val_col,
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+    if cache_key in ctx.state.stats_cache.cache:
+        return ctx.state.stats_cache.cache[cache_key]
 
     total = 0
     for lbl in rset.wells:
-        if lbl not in app._app_state.dataset.well_paths:
+        if lbl not in ctx.state.dataset.well_paths:
             continue
         pts = aggregate_well(
-            app,
+            ctx,
             lbl, threshold=threshold, use_sem=False,
-            val_col=app._app_state.channel.active_val_col,
+            val_col=ctx.state.channel.active_val_col,
             fluor_gates=fluor_gates,
         )
         matched = [pt for pt in pts if tp_close(pt[0], target_t)]
         if matched:
             # AggPoint index 4 = n_above; index 5 = n_total.
             total += int(matched[0][4])
-    app._app_state.stats_cache.cache[cache_key] = total
+    ctx.state.stats_cache.cache[cache_key] = total
     return total
 
 
-def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
+def compute_rep_n_above_stats(ctx, rset: "ReplicateSet", target_t: float,
                               use_sem: bool) -> tuple:
     """Mean and SD/SEM of events-above-threshold *across the set's wells*.
 
@@ -470,27 +480,27 @@ def compute_rep_n_above_stats(app, rset: "ReplicateSet", target_t: float,
     and Fraction panels (a per-well mean with a cross-well spread), so the
     Events panel gets replicate error bars instead of a spread-less total.
     """
-    threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-    fluor_gates = app._get_all_fluor_gates()
+    threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
-                 threshold, use_sem, app._app_state.channel.active_val_col,
-                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(app))
-    if cache_key in app._app_state.stats_cache.cache:
-        return app._app_state.stats_cache.cache[cache_key]
+                 threshold, use_sem, ctx.state.channel.active_val_col,
+                 tuple(sorted(fluor_gates.items())), _gate_cache_sig(ctx))
+    if cache_key in ctx.state.stats_cache.cache:
+        return ctx.state.stats_cache.cache[cache_key]
 
     reps = group_replicate_stats(
-        app, rset.wells, target_t, use_fov=False,
-        val_col=app._app_state.channel.active_val_col,
+        ctx, rset.wells, target_t, use_fov=False,
+        val_col=ctx.state.channel.active_val_col,
         threshold=threshold, fluor_gates=fluor_gates,
     )
     mean, spread = _reduce_reps(reps, "n_above", use_sem)
     result = ((mean if math.isfinite(mean) else 0.0), spread)
-    app._app_state.stats_cache.cache[cache_key] = result
+    ctx.state.stats_cache.cache[cache_key] = result
     return result
 
 
 def aggregate_well(
-    app,
+    ctx,
     label: str,
     threshold: float,
     use_sem: bool,
@@ -501,12 +511,17 @@ def aggregate_well(
 ):
     """Aggregate a single well via the vectorized DataFrame path.
 
-    If ``app`` exposes a callable ``_aggregate_well`` (the pure-logic
+    If the app exposes a callable ``_aggregate_well`` (the pure-logic
     test MockApp does, returning precomputed AggPoints from its
     in-memory map), delegate to it. Production ``WellViewerApp`` does
     not define this method, so the DataFrame path is used at runtime.
+
+    A8 R-leaf: takes ``ctx`` — rows via the ctx-native ``get_rows`` data
+    service, ratios/gate-on state via ``ctx.state`` / ``ctx.runtime``. The
+    optional aggregation delegate is resolved through ``ctx.runtime.aggregate``
+    (backed by ``app._aggregate_well``) instead of naming the god-object.
     """
-    delegate = getattr(app, "_aggregate_well", None)
+    delegate = ctx.runtime.aggregate.well
     if callable(delegate):
         return delegate(
             label,
@@ -518,20 +533,20 @@ def aggregate_well(
             tp_col=tp_col,
         )
     return aggregate_with_threshold_df(
-        app._get_rows(label),
+        get_rows(ctx, label),
         threshold=threshold,
         use_sem=use_sem,
         tp_col=tp_col,
         val_col=val_col,
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
-        ratios=app._app_state.channel.ratio_index,
-        on_col=_thresh_on_col(app),
+        ratios=ctx.state.channel.ratio_index,
+        on_col=_thresh_on_col(ctx),
     )
 
 
 def aggregate_group(
-    app,
+    ctx,
     wells: List[str],
     threshold: float,
     use_sem: bool,
@@ -540,8 +555,13 @@ def aggregate_group(
     per_fov_spread: bool = False,
     tp_col: str = "timepoint_hours",
 ):
-    """Aggregate a list of wells via the vectorized path (concatenated when len>1)."""
-    delegate = getattr(app, "_aggregate_group", None)
+    """Aggregate a list of wells via the vectorized path (concatenated when len>1).
+
+    A8 R-leaf: takes ``ctx`` — see :func:`aggregate_well`. The optional group
+    delegate resolves through ``ctx.runtime.aggregate`` (backed by
+    ``app._aggregate_group``) instead of naming the god-object.
+    """
+    delegate = ctx.runtime.aggregate.group
     if callable(delegate):
         return delegate(
             wells,
@@ -552,12 +572,12 @@ def aggregate_group(
             per_fov_spread=per_fov_spread,
             tp_col=tp_col,
         )
-    valid = [w for w in wells if w in app._app_state.dataset.well_paths]
+    valid = [w for w in wells if w in ctx.state.dataset.well_paths]
     if not valid:
         return []
     if len(valid) == 1:
         return aggregate_well(
-            app,
+            ctx,
             valid[0], threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates, per_fov_spread=per_fov_spread,
@@ -565,7 +585,7 @@ def aggregate_group(
         )
     frames = []
     for w in valid:
-        sub = app._get_rows(w)
+        sub = get_rows(ctx, w)
         if per_fov_spread and len(sub) > 0:
             # Prefix FOV ids with the well label so identical FOV numbers
             # across replicate wells stay distinct when pooled.
@@ -585,8 +605,8 @@ def aggregate_group(
         val_col=val_col,
         fluor_gates=fluor_gates or {},
         per_fov_spread=per_fov_spread,
-        ratios=app._app_state.channel.ratio_index,
-        on_col=_thresh_on_col(app),
+        ratios=ctx.state.channel.ratio_index,
+        on_col=_thresh_on_col(ctx),
     )
 
 

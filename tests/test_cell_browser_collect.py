@@ -30,19 +30,34 @@ def _df():
     })
 
 
+class _AnyDf(dict):
+    """Row cache that returns the one test frame for any queried well —
+    mirrors the old ``_get_rows = lambda label: df`` fake now that the
+    controller fetches rows via the ctx-native ``get_rows(ctx, label)``."""
+    def __init__(self, df):
+        super().__init__()
+        self._df = df
+
+    def __contains__(self, k):
+        return True
+
+    def __getitem__(self, k):
+        return self._df
+
+
 def _app(df):
     app = SimpleNamespace()
+    from well_viewer.core.cell_gating_state import CellGatingState
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(well_paths={"A01": None}),
+        dataset=SimpleNamespace(well_paths={"A01": None}, cache=_AnyDf(df)),
         selection=SimpleNamespace(selected_wells=["A01"], selections=[],
                                   active_solo_wells=set()),
         channel=SimpleNamespace(ratio_index={}),
+        cell_gating=CellGatingState(),
     )
-    app._get_rows = lambda label: df
-    app._parse_rc = lambda s: (s, 0, 0)
-    # No replicate-set groups by default → Cell Browser falls back to the
-    # individual well selection (then to all loaded wells).
-    app._rep_sets_active = lambda: []
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = SimpleNamespace(app=app, state=app._app_state,
+                               runtime=AppRuntime(app))
     return app
 
 
@@ -50,7 +65,7 @@ def _app(df):
 
 def test_enumerate_lists_all_property_families():
     app = _app(_df())
-    cols = dict(enumerate_properties(app))
+    cols = dict(enumerate_properties(app._ctx))
     assert "gfp_mean_intensity" in cols
     assert "cy5_smfish_count" in cols
     assert "shape_circularity" in cols
@@ -62,19 +77,19 @@ def test_enumerate_lists_all_property_families():
 
 def test_single_criterion_min():
     app = _app(_df())
-    cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=500.0)])
+    cells = collect_cells(app._ctx, [Criterion("gfp_mean_intensity", lo=500.0)])
     assert sorted(c.nucleus_id for c in cells) == ["11", "12"]  # 600, 700
 
 
 def test_min_and_max_band():
     app = _app(_df())
-    cells = collect_cells(app, [Criterion("shape_circularity", lo=0.5, hi=0.92)])
+    cells = collect_cells(app._ctx, [Criterion("shape_circularity", lo=0.5, hi=0.92)])
     assert [c.nucleus_id for c in cells] == ["11"]  # 0.9 only; 0.95 too high, NaN fails
 
 
 def test_multiple_criteria_anded():
     app = _app(_df())
-    cells = collect_cells(app, [
+    cells = collect_cells(app._ctx, [
         Criterion("gfp_mean_intensity", lo=500.0),
         Criterion("cy5_smfish_count", lo=8.0),
     ])
@@ -83,19 +98,19 @@ def test_multiple_criteria_anded():
 
 def test_timepoint_filter():
     app = _app(_df())
-    cells = collect_cells(app, [], timepoints=[24.0])
+    cells = collect_cells(app._ctx, [], timepoints=[24.0])
     assert sorted(c.nucleus_id for c in cells) == ["12", "13"]
 
 
 def test_fov_filter():
     app = _app(_df())
-    cells = collect_cells(app, [], fovs=["1"])
+    cells = collect_cells(app._ctx, [], fovs=["1"])
     assert sorted(c.nucleus_id for c in cells) == ["10", "12"]
 
 
 def test_descriptor_carries_image_locators():
     app = _app(_df())
-    cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=650.0)])
+    cells = collect_cells(app._ctx, [Criterion("gfp_mean_intensity", lo=650.0)])
     c = cells[0]
     assert c.well == "A01" and c.fov == "1" and c.tp_token == "24"
     assert c.timepoint_h == 24.0 and c.filename == "img_2.tif"
@@ -105,13 +120,13 @@ def test_descriptor_carries_image_locators():
 def test_nan_fails_active_bound():
     app = _app(_df())
     # row 3 (nid 13) has NaN circularity → excluded by any circularity bound.
-    cells = collect_cells(app, [Criterion("shape_circularity", lo=0.0)])
+    cells = collect_cells(app._ctx, [Criterion("shape_circularity", lo=0.0)])
     assert "13" not in [c.nucleus_id for c in cells]
 
 
 def test_empty_criteria_returns_all():
     app = _app(_df())
-    cells = collect_cells(app, [])
+    cells = collect_cells(app._ctx, [])
     assert len(cells) == 4
 
 
@@ -120,7 +135,7 @@ def test_no_selection_falls_back_to_all_loaded_wells():
     # well (mirrors Cell Gating) so the gallery populates on first open.
     app = _app(_df())
     app._app_state.selection.selected_wells = []
-    cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=0.0)])
+    cells = collect_cells(app._ctx, [Criterion("gfp_mean_intensity", lo=0.0)])
     assert len(cells) == 4  # all rows of the one loaded well (A01)
 
 
@@ -136,7 +151,7 @@ def test_source_wells_mirror_groups_when_groups_exist():
     app._app_state.selection.selected_wells = ["A01"]      # stale individual sel
     app._app_state.selection.selections = [{"name": "grp", "wells": ["B02"]}]
     app._rep_sets_active = lambda: [SimpleNamespace(name="grp", wells=["B02"])]
-    assert cell_browser_source_wells(app) == ["B02"]       # group mirror wins
+    assert cell_browser_source_wells(app._ctx) == ["B02"]       # group mirror wins
 
 
 def test_source_wells_include_active_solo_wells():
@@ -150,7 +165,7 @@ def test_source_wells_include_active_solo_wells():
     app._app_state.selection.selections = [{"name": "grp", "wells": ["B02"]}]
     app._app_state.selection.active_solo_wells = {"A01"}
     app._rep_sets_active = lambda: [SimpleNamespace(name="grp", wells=["B02"])]
-    assert cell_browser_source_wells(app) == ["A01", "B02"]
+    assert cell_browser_source_wells(app._ctx) == ["A01", "B02"]
 
 
 def test_source_wells_use_selection_when_no_groups():
@@ -161,24 +176,24 @@ def test_source_wells_use_selection_when_no_groups():
     app._app_state.dataset.well_paths = {"A01": None, "B02": None}
     app._app_state.selection.selected_wells = ["A01"]
     app._rep_sets_active = lambda: []
-    assert cell_browser_source_wells(app) == ["A01"]
+    assert cell_browser_source_wells(app._ctx) == ["A01"]
 
 
 def test_timepoint_filter_is_strict_include_list():
     # None → not filtered (all 4 rows); [] → options exist but none chosen → 0;
     # a value → only that timepoint's cells (tps are [0,0,24,24]).
     app = _app(_df())
-    assert len(collect_cells(app, [], timepoints=None)) == 4
-    assert collect_cells(app, [], timepoints=[]) == []
-    assert len(collect_cells(app, [], timepoints=[0.0])) == 2
+    assert len(collect_cells(app._ctx, [], timepoints=None)) == 4
+    assert collect_cells(app._ctx, [], timepoints=[]) == []
+    assert len(collect_cells(app._ctx, [], timepoints=[0.0])) == 2
 
 
 def test_fov_filter_is_strict_include_list():
     # None → not filtered; [] → 0; a value → only that FOV (fovs are [1,2,1,2]).
     app = _app(_df())
-    assert len(collect_cells(app, [], fovs=None)) == 4
-    assert collect_cells(app, [], fovs=[]) == []
-    assert len(collect_cells(app, [], fovs=["1"])) == 2
+    assert len(collect_cells(app._ctx, [], fovs=None)) == 4
+    assert collect_cells(app._ctx, [], fovs=[]) == []
+    assert len(collect_cells(app._ctx, [], fovs=["1"])) == 2
 
 
 def test_live_sync_relaxes_empty_timepoints_and_fovs():
@@ -186,16 +201,16 @@ def test_live_sync_relaxes_empty_timepoints_and_fovs():
     # Split View selection change shows cells instead of a blank gallery; the
     # default (Generate) path keeps the strict tri-state.
     app = _app(_df())
-    assert collect_cells(app, [], timepoints=[]) == []                  # Generate: strict
-    assert len(collect_cells(app, [], timepoints=[], live_sync=True)) == 4
-    assert len(collect_cells(app, [], fovs=[], live_sync=True)) == 4
+    assert collect_cells(app._ctx, [], timepoints=[]) == []                  # Generate: strict
+    assert len(collect_cells(app._ctx, [], timepoints=[], live_sync=True)) == 4
+    assert len(collect_cells(app._ctx, [], fovs=[], live_sync=True)) == 4
 
 
 def test_channels_prefer_app_list():
     app = _app(_df())
     app._app_state.channel.fluor_channels = ["gfp", "mcherry"]
     from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
-    assert cell_browser_channels(app) == ["gfp", "mcherry"]
+    assert cell_browser_channels(app._ctx) == ["gfp", "mcherry"]
 
 
 def test_channels_fall_back_to_detection_when_app_list_empty():
@@ -204,7 +219,7 @@ def test_channels_fall_back_to_detection_when_app_list_empty():
     app = _app(_df())
     app._app_state.channel.fluor_channels = []
     from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
-    assert "gfp" in cell_browser_channels(app)  # from gfp_mean_intensity column
+    assert "gfp" in cell_browser_channels(app._ctx)  # from gfp_mean_intensity column
 
 
 def test_channels_coerced_to_str():
@@ -212,7 +227,7 @@ def test_channels_coerced_to_str():
     app = _app(_df())
     app._app_state.channel.fluor_channels = [1, "gfp"]
     from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
-    assert cell_browser_channels(app) == ["1", "gfp"]
+    assert cell_browser_channels(app._ctx) == ["1", "gfp"]
 
 
 # ── N9: spot-count label population ──────────────────────────────────────────
@@ -222,7 +237,7 @@ def test_label_spot_count_populates_active_channel_count():
     app._app_state.channel.active_channel = "cy5"
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=True, scatter_gate_mode=False)
-    cells = collect_cells(app, [])
+    cells = collect_cells(app._ctx, [])
     assert {c.nucleus_id: c.spot_count for c in cells} == {
         "10": 0, "11": 5, "12": 9, "13": 1}
 
@@ -232,7 +247,7 @@ def test_label_spot_count_off_leaves_none():
     app._app_state.channel.active_channel = "cy5"
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=False)
-    cells = collect_cells(app, [])
+    cells = collect_cells(app._ctx, [])
     assert all(c.spot_count is None for c in cells)
 
 
@@ -241,7 +256,7 @@ def test_label_spot_count_none_when_channel_has_no_smfish_column():
     app._app_state.channel.active_channel = "gfp"  # no gfp_smfish_count column
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=True, scatter_gate_mode=False)
-    cells = collect_cells(app, [])
+    cells = collect_cells(app._ctx, [])
     assert all(c.spot_count is None for c in cells)
 
 
@@ -254,49 +269,49 @@ def _gate(x_col, y_col, x0, x1, y0, y1, name="G1"):
 
 def test_scatter_gate_mode_sources_from_gate_and_ignores_criteria():
     app = _app(_df())
-    app._scatter_gates = [_gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0)]
+    app._app_state.cell_gating.scatter_gates = [_gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0)]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     # A criterion that would exclude everything is ignored in gate mode.
-    cells = collect_cells(app, [Criterion("gfp_mean_intensity", lo=0.0, hi=1.0)])
+    cells = collect_cells(app._ctx, [Criterion("gfp_mean_intensity", lo=0.0, hi=1.0)])
     # gate keeps gfp in [500,800] → nids 11 (600) and 12 (700).
     assert sorted(c.nucleus_id for c in cells) == ["11", "12"]
 
 
 def test_scatter_gate_mode_empty_when_no_gates_drawn():
     app = _app(_df())
-    app._scatter_gates = []
+    app._app_state.cell_gating.scatter_gates = []
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
-    assert collect_cells(app, []) == []
+    assert collect_cells(app._ctx, []) == []
 
 
 def test_scatter_gate_mode_empty_timepoints_relax_to_all():
     # Outside gate mode an empty timepoint include-list yields nothing; in gate
     # mode it relaxes to "all" so the gated cells aren't hidden by the default.
     app = _app(_df())
-    app._scatter_gates = [_gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
+    app._app_state.cell_gating.scatter_gates = [_gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
-    cells = collect_cells(app, [], timepoints=[])
+    cells = collect_cells(app._ctx, [], timepoints=[])
     assert len(cells) == 4
 
 
 def test_scatter_gate_choices_filter_to_named_gates():
     # Two gates drawn; the sidebar picks only "G1" → only G1's cells appear.
     app = _app(_df())
-    app._scatter_gates = [
+    app._app_state.cell_gating.scatter_gates = [
         _gate("gfp_mean_intensity", "area_px", 500.0, 800.0, 0.0, 1000.0, name="G1"),
         _gate("gfp_mean_intensity", "area_px", 0.0, 60.0, 0.0, 1000.0, name="G2"),
     ]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     app._cell_browser_gate_choices = {"G1"}  # exclude G2 (which would add nid 13, gfp 50)
-    cells = collect_cells(app, [])
+    cells = collect_cells(app._ctx, [])
     assert sorted(c.nucleus_id for c in cells) == ["11", "12"]  # G1 only, not 13
     # None ⇒ all gates → G1 ∪ G2 brings in nid 13 (gfp 50) and 10 (gfp 100? no, 100>60)
     app._cell_browser_gate_choices = None
-    cells = collect_cells(app, [])
+    cells = collect_cells(app._ctx, [])
     assert "13" in {c.nucleus_id for c in cells}  # G2 contributes the low-gfp cell
 
 
@@ -308,9 +323,9 @@ def test_gate_mode_sources_from_live_selection():
     app._app_state.selection.selected_wells = ["A01", "B02"]
     g = _gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)
     g["wells"] = ["A01"]  # stale stamp must be ignored
-    app._scatter_gates = [g]
+    app._app_state.cell_gating.scatter_gates = [g]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     app._cell_browser_gate_choices = None
-    cells = collect_cells(app, [])
+    cells = collect_cells(app._ctx, [])
     assert {c.well for c in cells} == {"A01", "B02"}  # follows the live selection

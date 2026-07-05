@@ -16,8 +16,8 @@ from well_viewer.features.image_browser.cell_browser.worker import CellImageLoad
 
 
 def _fake_app():
-    # load_page reads app._app_state.image_view for the LUT/tint snapshot.
-    return types.SimpleNamespace(_app_state=types.SimpleNamespace(image_view=None))
+    # load_page reads ctx.state.image_view for the LUT/tint snapshot.
+    return types.SimpleNamespace(state=types.SimpleNamespace(image_view=None))
 
 
 class _Desc:
@@ -53,7 +53,7 @@ def test_superseded_loader_stops_before_all_composed(monkeypatch):
 
     monkeypatch.setattr(cb_worker, "compose_cell_rgb", _fake_compose)
 
-    loader = CellImageLoader(app=_fake_app())
+    loader = CellImageLoader(_fake_app())
     loader.load_page([_Desc(i) for i in range(60)], 0, ["cy5"], False, gen=1)
 
     while len(composed) < 3:  # let a few through
@@ -69,7 +69,7 @@ def test_uninterrupted_loader_composes_the_whole_page(monkeypatch):
     monkeypatch.setattr(cb_worker, "compose_cell_rgb",
                         lambda app, desc, *a, **k: composed.append(desc.nucleus_id))
 
-    loader = CellImageLoader(app=_fake_app())
+    loader = CellImageLoader(_fake_app())
     loader.load_page([_Desc(i) for i in range(8)], 0, ["cy5"], False, gen=1)
     _wait_stable(composed)
 
@@ -77,7 +77,7 @@ def test_uninterrupted_loader_composes_the_whole_page(monkeypatch):
 
 
 def test_cancel_bumps_latest_gen():
-    loader = CellImageLoader(app=_fake_app())
+    loader = CellImageLoader(_fake_app())
     loader._latest_gen = 5
     loader.cancel()
     assert loader._latest_gen == 6

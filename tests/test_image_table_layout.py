@@ -23,7 +23,7 @@ def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
         dataset=SimpleNamespace(well_paths={w: w for w in wells}, pipeline_info=info,
                                 cache={}),
         channel=SimpleNamespace(fluor_channels=list(channels), smfish_channels=set(),
-                                ratio_metrics=[]),
+                                ratio_metrics=[], seg_channel_token=""),
         image_table=ImageTableState(
             active_wells=set(active_wells or []),
             active_channels=set(active_channels or []),
@@ -31,6 +31,9 @@ def _fake_app(*, wells, channels, active_wells=None, active_channels=None,
     )
     # parse_rc: sort key "A01" -> (row, col)
     app._parse_rc = lambda w: (w[0], int(w[1:]))
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = SimpleNamespace(app=app, state=app._app_state,
+                               runtime=AppRuntime(app))
     return app
 
 
@@ -38,31 +41,31 @@ def test_axis_values_wells_uses_selection_then_falls_back_to_all():
     app = _fake_app(wells=["A01", "A02", "B01"], channels=["gfp"],
                     active_wells=["B01", "A01"])
     # selection, sorted by parse_rc
-    assert C._axis_values(app, "well") == ["A01", "B01"]
+    assert C._axis_values(app._ctx, "well") == ["A01", "B01"]
     # no selection → all wells
     app._app_state.image_table.active_wells = set()
-    assert C._axis_values(app, "well") == ["A01", "A02", "B01"]
+    assert C._axis_values(app._ctx, "well") == ["A01", "A02", "B01"]
 
 
 def test_axis_values_channels_filters_to_ticked():
-    chans = C._channel_options(_fake_app(wells=["A01"], channels=["gfp", "rfp"]))
+    chans = C._channel_options(_fake_app(wells=["A01"], channels=["gfp", "rfp"])._ctx)
     assert chans, "channel options should be non-empty"
     # tick exactly one channel → only it appears, in option order
     app = _fake_app(wells=["A01"], channels=["gfp", "rfp"],
                     active_channels={chans[0]})
-    assert C._axis_values(app, "channel") == [chans[0]]
+    assert C._axis_values(app._ctx, "channel") == [chans[0]]
     # none ticked → all channels
     app._app_state.image_table.active_channels = set()
-    assert C._axis_values(app, "channel") == chans
+    assert C._axis_values(app._ctx, "channel") == chans
 
 
 def test_axis_values_timepoints_and_fovs_delegate_to_options():
     app = _fake_app(wells=["A01"], channels=["gfp"],
                     timepoints=[6, 24], fovs=[1, 2, 3])
     # the axis just surfaces the canonical option lists
-    assert C._axis_values(app, "timepoint") == C._timepoint_options(app)
-    assert C._axis_values(app, "fov") == C._fov_options(app)
-    assert C._axis_values(app, "fov") == ["1", "2", "3"]
+    assert C._axis_values(app._ctx, "timepoint") == C._timepoint_options(app._ctx)
+    assert C._axis_values(app._ctx, "fov") == C._fov_options(app._ctx)
+    assert C._axis_values(app._ctx, "fov") == ["1", "2", "3"]
 
 
 def test_layout_cell_values_maps_axes_and_holds_fixed():
@@ -81,32 +84,32 @@ def test_set_zoom_absolute_and_relative_clamp():
     app = _fake_app(wells=["A01"], channels=["gfp"])
     app._app_state.image_table.zoom = 1.0
     # absolute
-    C.image_table_set_zoom(app, 2.0)
+    C.image_table_set_zoom(app._ctx, 2.0)
     assert app._app_state.image_table.zoom == 2.0
     # relative multiply
-    C.image_table_set_zoom(app, 1.25, relative=True)
+    C.image_table_set_zoom(app._ctx, 1.25, relative=True)
     assert abs(app._app_state.image_table.zoom - 2.5) < 1e-9
     # clamps to the max (4.0)
-    C.image_table_set_zoom(app, 100.0)
+    C.image_table_set_zoom(app._ctx, 100.0)
     assert app._app_state.image_table.zoom == C._ZOOM_MAX
     # clamps to the min
-    C.image_table_set_zoom(app, 0.0001)
+    C.image_table_set_zoom(app._ctx, 0.0001)
     assert app._app_state.image_table.zoom == C._ZOOM_MIN
 
 
 def test_channel_selection_helpers():
     app = _fake_app(wells=["A01"], channels=["gfp", "rfp"])
-    opts = C._channel_options(app)
+    opts = C._channel_options(app._ctx)
     app._app_state.image_table.active_channels = set()
     # toggling a channel on/off mutates the active set
-    C.image_table_toggle_channel(app, opts[0], True)
+    C.image_table_toggle_channel(app._ctx, opts[0], True)
     assert app._app_state.image_table.active_channels == {opts[0]}
-    C.image_table_toggle_channel(app, opts[0], False)
+    C.image_table_toggle_channel(app._ctx, opts[0], False)
     assert app._app_state.image_table.active_channels == set()
     # select-all / clear
-    C.image_table_set_all_channels(app, True)
+    C.image_table_set_all_channels(app._ctx, True)
     assert app._app_state.image_table.active_channels == set(opts)
-    C.image_table_set_all_channels(app, False)
+    C.image_table_set_all_channels(app._ctx, False)
     assert app._app_state.image_table.active_channels == set()
 
 

@@ -23,26 +23,35 @@ from typing import Optional, Sequence
 from well_viewer.core.safe import swallowed
 
 
-def current_focus_tp(app) -> Optional[float]:
-    """The shared focus timepoint, or ``None`` when not yet chosen."""
-    return app._app_state.plot.focus_timepoint
+def current_focus_tp(ctx) -> Optional[float]:
+    """The shared focus timepoint, or ``None`` when not yet chosen.
+
+    A8-teardown T3: this leaf reads only typed state, so it takes ``ctx`` (not
+    the god-object) — ``ctx.state.plot.focus_timepoint`` is the same PlotState.
+    """
+    return ctx.state.plot.focus_timepoint
 
 
-def set_focus_tp(app, tp, *, emit: bool = True) -> None:
+def set_focus_tp(ctx, tp, *, emit: bool = True) -> None:
     """Set the shared focus timepoint and (by default) notify the other tabs.
 
     ``tp`` is coerced to ``float`` (``None`` clears it). When *emit* is True the
-    ``plot_options_changed`` signal fires so visible plot scopes redraw."""
+    ``plot_options_changed`` signal fires so visible plot scopes redraw.
+
+    A8-teardown T3: pure state + bus, so this leaf takes ``ctx`` —
+    ``ctx.state.plot`` and ``ctx.bus`` replace the god-object reach-through with
+    zero residual.
+    """
     try:
         val: Optional[float] = None if tp is None else float(tp)
     except (TypeError, ValueError):
         val = None
-    if val == app._app_state.plot.focus_timepoint:
+    if val == ctx.state.plot.focus_timepoint:
         return
-    app._app_state.plot.focus_timepoint = val
+    ctx.state.plot.focus_timepoint = val
     if emit:
         try:
-            app._event_bus.plot_options_changed.emit(app._app_state.plot)
+            ctx.bus.plot_options_changed.emit(ctx.state.plot)
         except Exception:
             swallowed()
 

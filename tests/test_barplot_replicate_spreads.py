@@ -43,9 +43,9 @@ def test_replicates_mode_spread_on_all_three_panels():
     )
     rset = ReplicateSet("R", ["A01", "A02"])
 
-    gm, gerr, gf, ferr = compute_rep_stats(app, rset, 1.0, threshold=50.0,
+    gm, gerr, gf, ferr = compute_rep_stats(app._ctx, rset, 1.0, threshold=50.0,
                                            use_sem=False)
-    n_mean, n_spread = compute_rep_n_above_stats(app, rset, 1.0, use_sem=False)
+    n_mean, n_spread = compute_rep_n_above_stats(app._ctx, rset, 1.0, use_sem=False)
 
     assert gm == 150.0 and gerr > 0      # Mean panel
     assert gf == pytest.approx(0.30) and ferr > 0  # Fraction panel
@@ -64,9 +64,9 @@ def test_replicates_mode_identical_wells_zero_spread():
         selections=[{"name": "R", "wells": ["A01", "A02"], "hidden": False}],
     )
     rset = ReplicateSet("R", ["A01", "A02"])
-    _gm, gerr, _gf, ferr = compute_rep_stats(app, rset, 1.0, threshold=50.0,
+    _gm, gerr, _gf, ferr = compute_rep_stats(app._ctx, rset, 1.0, threshold=50.0,
                                              use_sem=False)
-    _n, n_spread = compute_rep_n_above_stats(app, rset, 1.0, use_sem=False)
+    _n, n_spread = compute_rep_n_above_stats(app._ctx, rset, 1.0, use_sem=False)
     assert gerr > 0          # mean differs ⇒ spread
     assert ferr == 0.0       # fraction identical ⇒ no spread (legitimately)
     assert n_spread == 0.0   # n_above identical ⇒ no spread (legitimately)
@@ -90,12 +90,22 @@ class _FovApp:
         st = AppState()
         attach_feature_state(st)
         st.dataset.well_paths = {w: w for w in rows_by_well}
+        # Seed the row cache so the ctx-native ``get_rows`` (A8 R-leaf) finds
+        # these in-memory frames without a CSV load.
+        st.dataset.cache = dict(rows_by_well)
         st.channel.active_val_col = "gfp_mean_intensity"
         self.__app_state = st
 
     @property
     def _app_state(self):
         return self.__app_state
+
+    @property
+    def _ctx(self):
+        from types import SimpleNamespace
+        from well_viewer.core.app_runtime import AppRuntime
+        return SimpleNamespace(app=self, state=self.__app_state,
+                               runtime=AppRuntime(self))
 
     def _get_rows(self, label):
         return self._rows.get(label)
@@ -132,7 +142,7 @@ def test_fov_mode_spread_on_all_three_panels():
     rset = ReplicateSet("R", ["W1", "W2"])
 
     mean, mean_err, frac, frac_err, n_pf_mean, n_pf_spread = (
-        compute_rep_per_fov_stats(app, rset, 1.0, threshold=50.0, use_sem=False)
+        compute_rep_per_fov_stats(app._ctx, rset, 1.0, threshold=50.0, use_sem=False)
     )
 
     assert mean_err > 0     # Mean panel — per-FOV mean intensities differ
@@ -147,6 +157,6 @@ def test_fov_mode_single_fov_zero_spread():
     app = _FovApp({"W1": well1})
     rset = ReplicateSet("R", ["W1"])
     _m, mean_err, _f, frac_err, _nm, n_pf_spread = compute_rep_per_fov_stats(
-        app, rset, 1.0, threshold=50.0, use_sem=False
+        app._ctx, rset, 1.0, threshold=50.0, use_sem=False
     )
     assert mean_err == 0.0 and frac_err == 0.0 and n_pf_spread == 0.0

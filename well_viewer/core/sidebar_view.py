@@ -15,10 +15,12 @@ from well_viewer.core.selection_controller import on_sidebar_plate_row_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_selection_changed
 from well_viewer.core.selection_controller import on_sidebar_plate_well_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_well_dropped
+from well_viewer.core.selection_controller import set_selected_wells
 import logging
 
 from well_viewer.core.safe import swallowed
 from well_viewer.domain.plot_groups import make_plot_group
+from well_viewer.domain.viewer_state import parse_rc
 
 _logger = logging.getLogger("well_viewer")
 
@@ -63,7 +65,7 @@ def build_sidebar(app, parent: QWidget) -> None:
     _sp.setHeightForWidth(True)
     plate.setSizePolicy(_sp)
     layout.addWidget(plate)
-    app._sidebar_plate = plate
+    app._sidebar_plate = app._ctx.widgets.register("_sidebar_plate", plate)
     app._sidebar_map_outer = plate
 
     # Select all / Select none are now driven by the small toggle circle
@@ -88,7 +90,7 @@ def build_sidebar(app, parent: QWidget) -> None:
     # alongside the well id, so the rail plate doubles as a quick label
     # readout — useful on tabs where the sidebar doesn't show the labels.
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    plate.setWellTooltipProvider(well_plate_tooltip_provider(app))
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(app._ctx))
 
     # User request: All 96 / Invert / Clear quick-select buttons removed
     # from the sidebar — row and column header clicks on the plate cover
@@ -141,21 +143,25 @@ def build_sidebar(app, parent: QWidget) -> None:
     # user opens it — so the name field + saved-group list never push up into
     # (and overlap) the selected-well count bar above the plate.
     plot_groups_section = build_plot_groups_drawer(
-        app, parent, include_add_controls=True,
+        app._ctx, parent, include_add_controls=True,
     )
     layout.addWidget(plot_groups_section)
     app._plot_groups_sidebar_section = plot_groups_section
-    app._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(app)
+    app._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(app._ctx)
 
 
-def build_plot_groups_drawer(app, parent, *, include_add_controls: bool = True):
+def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True):
     """Build a Plot Groups quick-load drawer and register it for refresh.
 
     Returns a ``CollapsibleSection`` widget the caller adds to its layout.
     Multiple drawers can co-exist (one on the main plotting sidebar, one on
     the Image Table sidebar) — each is registered in
-    ``app._plot_groups_drawers`` and ``refresh_plot_groups_sidebar`` updates
-    them all in lock-step.
+    ``ctx.runtime.plot_groups.drawers`` and ``refresh_plot_groups_sidebar``
+    updates them all in lock-step.
+
+    Takes ``ctx``: the drawer registry lives on ``ctx.runtime.plot_groups`` and
+    the per-drawer Qt widgets register through ``ctx.widgets`` (which still
+    stamps ``app._<name>`` for the legacy singular back-compat readers).
 
     ``include_add_controls=False`` omits the "name + Add" row, useful for
     secondary drawers (e.g. Image Table's) where the user only wants to
@@ -180,12 +186,13 @@ def build_plot_groups_drawer(app, parent, *, include_add_controls: bool = True):
             "Save the currently selected wells as a Plot Group. Plot Groups only "
             "reload well selections; they are not stats or replicate groups."
         )
-        add_btn.clicked.connect(lambda _=False: _plot_groups_add_current(app))
+        add_btn.clicked.connect(lambda _=False: _plot_groups_add_current(ctx))
         nr.addWidget(add_btn)
         section.addWidget(name_row)
-        # Back-compat: the original main-sidebar API exposed these directly.
-        app._plot_group_name_edit = name_edit
-        app._plot_groups_add_btn = add_btn
+        # Back-compat: the original main-sidebar API exposed these directly
+        # (register() stamps app._plot_group_name_edit / _plot_groups_add_btn).
+        ctx.widgets.register("_plot_group_name_edit", name_edit)
+        ctx.widgets.register("_plot_groups_add_btn", add_btn)
 
     empty_label = QLabel("No Plot Groups yet.", section)
     empty_label.setObjectName("Muted")
@@ -211,28 +218,28 @@ def build_plot_groups_drawer(app, parent, *, include_add_controls: bool = True):
         "list_layout": list_layout,
         "empty_label": empty_label,
     }
-    drawers = getattr(app, "_plot_groups_drawers", None)
+    drawers = ctx.runtime.plot_groups.drawers
     if drawers is None:
-        app._plot_groups_drawers = [drawer]
+        ctx.runtime.plot_groups.drawers = [drawer]
     else:
         drawers.append(drawer)
     # Back-compat: keep the original singular references pointing at the
     # primary (main-sidebar) drawer so older callers still resolve.
-    if not hasattr(app, "_plot_groups_list_widget"):
-        app._plot_groups_list_widget = list_widget
-        app._plot_groups_list_layout = list_layout
-        app._plot_groups_empty_label = empty_label
+    if not ctx.widgets.has("_plot_groups_list_widget"):
+        ctx.widgets.register("_plot_groups_list_widget", list_widget)
+        ctx.widgets.register("_plot_groups_list_layout", list_layout)
+        ctx.widgets.register("_plot_groups_empty_label", empty_label)
 
     return section
 
 
-def _plot_groups_schedule_save(app) -> None:
-    p = getattr(app, "_persistence", None)
+def _plot_groups_schedule_save(ctx) -> None:
+    p = ctx.persistence
     if p is not None:
         p.schedule_save("plot_groups")
 
 
-def _wells_for_new_plot_group(app) -> "list[str]":
+def _wells_for_new_plot_group(ctx) -> "list[str]":
     """The well set a new Plot Group should capture, sorted by plate position.
 
     Prefers the raw plate selection (``selected_wells``). But once replicate
@@ -245,30 +252,27 @@ def _wells_for_new_plot_group(app) -> "list[str]":
     Group" save whatever is currently on screen — the feature was previously
     unusable whenever any replicate set was defined.
     """
-    sel = app._app_state.selection
+    sel = ctx.state.selection
     raw = set(sel.selected_wells or set())
     if not raw and sel.selections:
-        loaded = app._app_state.dataset.well_paths
+        loaded = ctx.state.dataset.well_paths
         raw = {
             w
             for s in sel.selections if not s.get("hidden")
             for w in (s.get("wells") or []) if w in loaded
         }
         raw |= {w for w in (sel.active_solo_wells or set()) if w in loaded}
-    return sorted(raw, key=app._parse_rc)
+    return sorted(raw, key=parse_rc)
 
 
-def _plot_groups_add_current(app) -> None:
-    wells = _wells_for_new_plot_group(app)
+def _plot_groups_add_current(ctx) -> None:
+    wells = _wells_for_new_plot_group(ctx)
     if not wells:
-        try:
-            app._set_status("Select wells (or show a group) before adding a Plot Group.")
-        except Exception:
-            swallowed("plot_groups: set status (no wells selected)")
+        ctx.set_status("Select wells (or show a group) before adding a Plot Group.")
         return
-    edit = getattr(app, "_plot_group_name_edit", None)
+    edit = ctx.widgets.get_or_none("_plot_group_name_edit")
     name = edit.text().strip() if edit is not None else ""
-    existing = app._app_state.selection.plot_groups or []
+    existing = ctx.state.selection.plot_groups or []
     used_names = {g.get("name") for g in existing}
     used_ids = {g.get("id") for g in existing}
     group = make_plot_group(
@@ -277,32 +281,28 @@ def _plot_groups_add_current(app) -> None:
         used_names=used_names,
         used_ids=used_ids,
     )
-    app._app_state.selection.plot_groups = list(existing) + [group]
+    ctx.state.selection.plot_groups = list(existing) + [group]
     if edit is not None:
         edit.clear()
-    refresh_plot_groups_sidebar(app)
-    _plot_groups_schedule_save(app)
-    try:
-        app._set_status(
-            f"Added Plot Group “{group['name']}” ({len(group['wells'])} wells)."
-        )
-    except Exception:
-        swallowed("plot_groups: set status (added group)")
+    refresh_plot_groups_sidebar(ctx)
+    _plot_groups_schedule_save(ctx)
+    ctx.set_status(
+        f"Added Plot Group “{group['name']}” ({len(group['wells'])} wells)."
+    )
 
 
-def _plot_groups_load(app, group_id: str) -> None:
+def _plot_groups_load(ctx, group_id: str) -> None:
     group = next(
-        (g for g in app._app_state.selection.plot_groups if g.get("id") == group_id),
+        (g for g in ctx.state.selection.plot_groups if g.get("id") == group_id),
         None,
     )
     if group is None:
         return
-    valid = set(app._app_state.dataset.well_paths or {})
+    valid = set(ctx.state.dataset.well_paths or {})
     wells = {w for w in (group.get("wells") or []) if w in valid}
-    if hasattr(app, "_set_selected_wells"):
-        app._set_selected_wells(wells)
-    else:
-        app._app_state.selection.selected_wells = wells
+    # ``set_selected_wells`` is the single mutation point (prev-sel tracking +
+    # redraw fan-out); thread ctx.
+    set_selected_wells(ctx, wells)
     # Mirror the selection into the Image Table's tab-local well set so a
     # group picked from any sidebar (plotting or Image Table) immediately
     # drives the Image Table grid — without this, the Image Table's plate
@@ -319,58 +319,55 @@ def _plot_groups_load(app, group_id: str) -> None:
     # writing ``active_wells`` directly so the state is correct when the
     # tab does build.
     try:
-        plate = getattr(app, "_sidebar_image_table_plate", None)
+        plate = ctx.runtime.image_table.sidebar_plate
         if plate is not None:
             try:
                 plate.setSelectedWellIds(sorted(wells))
             except Exception:
                 swallowed("plot_groups: image table plate sync")
         else:
-            image_table_state = getattr(app._app_state, "image_table", None)
+            image_table_state = getattr(ctx.state, "image_table", None)
             if image_table_state is not None:
                 image_table_state.active_wells = set(wells)
     except Exception:
         _logger.debug("plot_groups: image table active_wells sync failed", exc_info=True)
-    try:
-        app._set_status(
-            f"Loaded Plot Group “{group.get('name', 'Plot Group')}” "
-            f"({len(wells)} wells)."
-        )
-    except Exception:
-        swallowed("plot_groups: set status (loaded group)")
+    ctx.set_status(
+        f"Loaded Plot Group “{group.get('name', 'Plot Group')}” "
+        f"({len(wells)} wells)."
+    )
 
 
-def _plot_groups_delete(app, group_id: str) -> None:
-    before = list(app._app_state.selection.plot_groups or [])
+def _plot_groups_delete(ctx, group_id: str) -> None:
+    before = list(ctx.state.selection.plot_groups or [])
     after = [g for g in before if g.get("id") != group_id]
     if len(after) == len(before):
         return
-    app._app_state.selection.plot_groups = after
-    refresh_plot_groups_sidebar(app)
-    _plot_groups_schedule_save(app)
+    ctx.state.selection.plot_groups = after
+    refresh_plot_groups_sidebar(ctx)
+    _plot_groups_schedule_save(ctx)
 
 
-def refresh_plot_groups_sidebar(app) -> None:
+def refresh_plot_groups_sidebar(ctx) -> None:
     """Rebuild the Plot Groups quick-load buttons across every registered drawer.
 
     Each sidebar that hosts a Plot Groups drawer registers it via
     ``build_plot_groups_drawer``; this function repaints every one so the
     main plotting sidebar and the Image Table sidebar stay in lock-step.
     """
-    drawers = getattr(app, "_plot_groups_drawers", None)
+    drawers = ctx.runtime.plot_groups.drawers
     if not drawers:
         # Fallback for any builder that still uses the original singular refs.
-        lay = getattr(app, "_plot_groups_list_layout", None)
-        empty = getattr(app, "_plot_groups_empty_label", None)
+        lay = ctx.widgets.get_or_none("_plot_groups_list_layout")
+        empty = ctx.widgets.get_or_none("_plot_groups_empty_label")
         if lay is None:
             return
         drawers = [{
             "list_layout": lay,
-            "list_widget": getattr(app, "_plot_groups_list_widget", None),
+            "list_widget": ctx.widgets.get_or_none("_plot_groups_list_widget"),
             "empty_label": empty,
         }]
-    groups = list(app._app_state.selection.plot_groups or [])
-    valid = set(app._app_state.dataset.well_paths or {})
+    groups = list(ctx.state.selection.plot_groups or [])
+    valid = set(ctx.state.dataset.well_paths or {})
     for drawer in drawers:
         lay = drawer.get("list_layout")
         if lay is None:
@@ -396,14 +393,14 @@ def refresh_plot_groups_sidebar(app) -> None:
             )
             load_btn.setToolTip(", ".join(wells) or "No loaded wells in this group")
             load_btn.clicked.connect(
-                lambda _=False, gid=group.get("id", ""): _plot_groups_load(app, gid)
+                lambda _=False, gid=group.get("id", ""): _plot_groups_load(ctx, gid)
             )
             rl.addWidget(load_btn, 1)
             del_btn = QPushButton("×", row)
             del_btn.setFixedWidth(28)
             del_btn.setToolTip("Delete this Plot Group")
             del_btn.clicked.connect(
-                lambda _=False, gid=group.get("id", ""): _plot_groups_delete(app, gid)
+                lambda _=False, gid=group.get("id", ""): _plot_groups_delete(ctx, gid)
             )
             rl.addWidget(del_btn)
             lay.addWidget(row)

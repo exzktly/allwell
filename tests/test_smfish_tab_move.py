@@ -27,7 +27,7 @@ def test_segmentation_and_smfish_resolve_as_leaf_tabs(viewer_app):
     app = viewer_app
     # Segmentation resolves as a leaf via the Image Browser sub-tab descent.
     from well_viewer.features.image_browser.controller import show_image_browser_subtab
-    assert show_image_browser_subtab(app, "Segmentation")
+    assert show_image_browser_subtab(app._ctx, "Segmentation")
     assert app._current_centre_tab() == "Segmentation"
     app._notebook.setCurrentByName("smFISH")
     assert app._current_centre_tab() == "smFISH"

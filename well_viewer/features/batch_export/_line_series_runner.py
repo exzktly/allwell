@@ -31,10 +31,17 @@ LineSeries = _lazy("well_viewer.features.lineplot.controller", "LineSeries")
 _aggpoint_to_linepoint = _lazy("well_viewer.features.lineplot.controller", "_aggpoint_to_linepoint")
 from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.domain.stats_compute import aggregate_group
+from well_viewer.domain.selections_model import (
+    color_for_well as _color_for_well,
+    replicate_display_label as _replicate_display_label,
+)
+from well_viewer.data.data_loading import get_rows as _get_rows
+
+_rank_color_rset = _lazy("well_viewer.features.grouping.controller", "rank_color_rset")
 
 
 def collect_line_series_for_group(
-    app,
+    ctx,
     group: BarGroup,
     *,
     threshold: float,
@@ -63,7 +70,7 @@ def collect_line_series_for_group(
     if fc_vs_ctrl and fc_ctrl_lbl:
         fc_control_means = _fc.pts_to_mean_by_t(
             _fc.control_pts_for_line(
-                app, fc_ctrl_lbl, threshold=threshold,
+                ctx, fc_ctrl_lbl, threshold=threshold,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
             )
@@ -75,7 +82,7 @@ def collect_line_series_for_group(
         from well_viewer.data.data_loading import all_fluor_values as _all_fluor_values
         vals: List[float] = []
         for lbl in wells:
-            df = app._get_rows(lbl)
+            df = _get_rows(ctx, lbl)
             if df is None or df.empty:
                 continue
             vals.extend(_all_fluor_values(df, val_col=val_col).tolist())
@@ -83,10 +90,10 @@ def collect_line_series_for_group(
 
     series_out: List[LineSeries] = []
     for rset in group.members:
-        valid_wells = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+        valid_wells = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
         if not valid_wells:
             continue
-        pts = aggregate_group(app,
+        pts = aggregate_group(ctx,
             valid_wells, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -97,17 +104,17 @@ def collect_line_series_for_group(
                 use_t0=fc_vs_t0,
             )
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]
-        display = app._replicate_display_label(rset)
-        color = app._rank_color_rset(rset)
+        display = _replicate_display_label(ctx, rset)
+        color = _rank_color_rset(ctx, rset)
         series_out.append(LineSeries(
             key=rset.name, display=display, color=color,
             kind="repset", wells=valid_wells,
             points=points, cdf_vals=_cdf_for(valid_wells),
         ))
     for w in group.solo_wells:
-        if w not in app._app_state.dataset.well_paths:
+        if w not in ctx.state.dataset.well_paths:
             continue
-        pts = aggregate_well(app,
+        pts = aggregate_well(ctx,
             w, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -118,7 +125,7 @@ def collect_line_series_for_group(
                 use_t0=fc_vs_t0,
             )
         points = [_aggpoint_to_linepoint(pt) for pt in (pts or [])]
-        color = app._rank_color_well(w)
+        color = _color_for_well(w)
         series_out.append(LineSeries(
             key=w, display=w, color=color,
             kind="well", wells=[w],

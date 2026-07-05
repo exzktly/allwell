@@ -42,6 +42,10 @@ class SelectionState:
     plot_groups: list[dict] = field(default_factory=list)
     v2_writes_disabled: bool = False
 
+    # Freeform project notes (persisted in the sample_definitions block). Cached
+    # here so headless save/load has the text even before the Notes widget builds.
+    notes_text: str = ""
+
     plate_commit_pending: bool = False
 
     # ── saved selections ("rep mode") ────────────────────────────────────────

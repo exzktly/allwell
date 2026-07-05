@@ -17,11 +17,11 @@ def test_threshfracon_fields_grey_out_with_fraction_on_gate(loaded_app):
     assert edits, "expected ThreshFracOn edits"
 
     # Default: threshold mode → editable.
-    app._cell_gating_use_scatter_thresh = False
-    cg._cell_gating_apply_scatter_gate_mode(app)
+    app._app_state.cell_gating.use_scatter_thresh = False
+    cg._cell_gating_apply_scatter_gate_mode(app._ctx)
     assert all(e.isEnabled() for e in edits.values())
 
     # Fraction-on gate on → the gate replaces the threshold → fields disabled.
-    app._cell_gating_use_scatter_thresh = True
-    cg._cell_gating_apply_scatter_gate_mode(app)
+    app._app_state.cell_gating.use_scatter_thresh = True
+    cg._cell_gating_apply_scatter_gate_mode(app._ctx)
     assert all(not e.isEnabled() for e in edits.values())

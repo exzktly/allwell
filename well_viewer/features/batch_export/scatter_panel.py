@@ -28,6 +28,15 @@ from well_viewer.features.batch_export._common import (
 )
 from well_viewer.features.batch_export.base_panel import BatchExportPanel
 from well_viewer.core.safe import swallowed
+# ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
+from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.channel_state_controller import (
+    get_fluor_gate as _get_fluor_gate,
+    ratio_label_for as _ratio_label_for,
+)
+from well_viewer.data.data_loading import get_rows as _get_rows
+_col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
+_compose_scatter_agg_stat = _lazy("well_viewer.features.scatter.controller", "compose_scatter_agg_stat")
 
 
 class ScatterBatchExportPanel(BatchExportPanel):
@@ -35,14 +44,14 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def __init__(
         self,
-        app,
+        ctx,
         parent: Optional[QWidget] = None,
         *,
         scatter_mode: str = "cells",
         use_sidebar_groups: bool = False,
     ) -> None:
         self._scatter_mode = "aggregate" if scatter_mode == "aggregate" else "cells"
-        super().__init__(app, parent, use_sidebar_groups=use_sidebar_groups)
+        super().__init__(ctx, parent, use_sidebar_groups=use_sidebar_groups)
 
     def _compute_persist_key(self) -> str:
         return "scatter_agg" if self._scatter_mode == "aggregate" else "scatter_cells"
@@ -103,12 +112,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self._build_run_row(layout, button_text="\u25b6  Run Scatter Batch Export")
 
     def _init_timepoint_dropdown(self) -> None:
-        timepoints = sorted(set(self._app._app_state.dataset.all_timepoints_cache or []))
+        timepoints = sorted(set(self._ctx.state.dataset.all_timepoints_cache or []))
         if not timepoints:
             import pandas as _pd
             tps: set = set()
-            for lbl in self._app._app_state.dataset.well_paths:
-                df = self._app._get_rows(lbl)
+            for lbl in self._ctx.state.dataset.well_paths:
+                df = _get_rows(self._ctx, lbl)
                 if df is None or "timepoint_hours" not in df.columns:
                     continue
                 tp = _pd.to_numeric(df["timepoint_hours"], errors="coerce").dropna().unique()
@@ -174,7 +183,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         include_fraction = bool(getattr(ch_cb, "_include_fraction", False))
         channel = str(ch_cb.currentText() or "")
         ratio_key = (
-            getattr(self._app, "_label_to_channel_key", None) or {}
+            self._ctx.state.channel.label_to_channel_key
         ).get(channel)
         is_ratio = bool(ratio_key and _is_ratio_key(ratio_key))
 
@@ -196,7 +205,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 prop_cb.setCurrentText(prev)
             else:
                 fallback = METRIC_KEY_TO_LABEL.get(
-                    self._app._app_state.channel.active_metric,
+                    self._ctx.state.channel.active_metric,
                     "Mean Intensity",
                 )
                 idx = prop_cb.findText(fallback)
@@ -209,7 +218,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 item = model.item(sm_idx) if model is not None else None
                 if item is not None:
                     smf_ok = channel in (
-                        self._app._app_state.channel.smfish_channels or []
+                        self._ctx.state.channel.smfish_channels or []
                     )
                     item.setEnabled(smf_ok)
         finally:
@@ -218,14 +227,16 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _scatter_channel_options(self) -> List[str]:
         """Real fluor channels + ratio labels — same source the per-tab
         scatter plot uses so the batch UI tracks the plot tabs exactly."""
-        channels = list(self._app._app_state.channel.fluor_channels) if self._app._app_state.channel.fluor_channels else ["gfp"]
+        channels = list(self._ctx.state.channel.fluor_channels) if self._ctx.state.channel.fluor_channels else ["gfp"]
         options: List[str] = list(channels)
         ratio_labels: List[str] = []
-        if hasattr(self._app, "_ratio_dropdown_labels"):
-            try:
-                ratio_labels = list(self._app._ratio_dropdown_labels() or [])
-            except Exception:
-                ratio_labels = []
+        try:
+            ratio_labels = [
+                _ratio_label_for(self._ctx, r)
+                for r in (self._ctx.state.channel.ratio_metrics or [])
+            ]
+        except Exception:
+            ratio_labels = []
         for r in ratio_labels:
             if r and r not in options:
                 options.append(r)
@@ -311,9 +322,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         / ratio key, via ``app._col_for_scatter_axis``."""
         channel = str(ch_cb.currentText() or "")
         metric_key = self._scatter_metric_key(prop_cb)
-        if hasattr(self._app, "_col_for_scatter_axis"):
-            return self._app._col_for_scatter_axis(channel, metric_key)
-        return f"{channel}_{metric_key}"
+        return _col_for_scatter_axis(self._ctx, channel, metric_key)
 
     def _scatter_axis_stat(self, ch_cb: QComboBox, prop_cb: QComboBox) -> str:
         """Build the legacy ``Mean Fluorescence GFP (Total Intensity)``-style
@@ -322,13 +331,11 @@ class ScatterBatchExportPanel(BatchExportPanel):
         ``scatter_controller.parse_statistic``."""
         channel = str(ch_cb.currentText() or "")
         metric_label = str(prop_cb.currentText() or "Mean Intensity")
-        if hasattr(self._app, "_compose_scatter_agg_stat"):
-            return self._app._compose_scatter_agg_stat(channel, metric_label)
-        return f"Mean Fluorescence {channel.upper()}"
+        return _compose_scatter_agg_stat(self._ctx, channel, metric_label)
 
     def _run_batch(self) -> None:
         groups_with_data = _groups_with_loaded_wells(
-            self._groups_for_export(), self._app._app_state.dataset.well_paths,
+            self._groups_for_export(), self._ctx.state.dataset.well_paths,
         )
         if not groups_with_data:
             QMessageBox.warning(self, "No groups", "Define at least one non-empty group.")
@@ -407,22 +414,22 @@ class ScatterBatchExportPanel(BatchExportPanel):
         ``app._rep_sets_active()`` / ``app._app_state.selection.selected_wells`` (both derived from
         ``app._app_state.selection.selections``), so we swap ``_selections`` for the duration."""
         from well_viewer.domain.selections_model import make_selection
-        app = self._app
-        saved = (app._app_state.selection.selections, app._app_state.selection.current_selection_id, app._app_state.selection.selected_wells)
+        sel = self._ctx.state.selection
+        saved = (sel.selections, sel.current_selection_id, sel.selected_wells)
         try:
             used_names: set = set()
             used_ids: set = set()
-            app._app_state.selection.selections = [
+            sel.selections = [
                 make_selection(name=m.name, wells=list(m.wells), source="rep_set",
                                used_names=used_names, used_ids=used_ids,
                                fallback_color_idx=i)
                 for i, m in enumerate(grp.members)
             ]
-            app._app_state.selection.current_selection_id = None
-            app._app_state.selection.selected_wells = set(grp.solo_wells)
+            sel.current_selection_id = None
+            sel.selected_wells = set(grp.solo_wells)
             yield
         finally:
-            (app._app_state.selection.selections, app._app_state.selection.current_selection_id, app._app_state.selection.selected_wells) = saved
+            (sel.selections, sel.current_selection_id, sel.selected_wells) = saved
 
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
@@ -434,16 +441,16 @@ class ScatterBatchExportPanel(BatchExportPanel):
             ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
             ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
             scatter_data = _collect_scatter_data(
-                self._app, col_x, col_y, tp_h,
+                self._ctx, col_x, col_y, tp_h,
                 well_colors=WELL_COLORS,
-                fluor_gate_x=self._app._get_fluor_gate(ch_x_base),
-                fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
+                fluor_gate_x=_get_fluor_gate(self._ctx, ch_x_base),
+                fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
             )
         if not scatter_data:
             return f"{grp.name}: no scatter-cells data at t={tp_h:.1f}h"
         try:
             from well_viewer.features.export.service import _well_labels_map, well_name_for
-            _well_labels = _well_labels_map(self._app)
+            _well_labels = _well_labels_map(self._ctx)
             rows: List[dict] = []
             for label, data in scatter_data.items():
                 for x, y, meta in zip(data["x"], data["y"], data["metadata"]):
@@ -486,7 +493,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
         with self._app_group_scope(grp):
             scatter_data = _collect_scatter_agg_data(
-                self._app, stat_x, stat_y, [tp_h],
+                self._ctx, stat_x, stat_y, [tp_h],
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:
@@ -495,8 +502,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
             )
-            _well_labels = _well_labels_map(self._app)
-            _well_paths = _well_paths_keys(self._app)
+            _well_labels = _well_labels_map(self._ctx)
+            _well_paths = _well_paths_keys(self._ctx)
             rows: List[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")
@@ -554,13 +561,13 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
                 ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
                 scatter_data = _collect_scatter_data(
-                    self._app, col_x, col_y, tp_h,
+                    self._ctx, col_x, col_y, tp_h,
                     well_colors=WELL_COLORS,
-                    fluor_gate_x=self._app._get_fluor_gate(ch_x_base),
-                    fluor_gate_y=self._app._get_fluor_gate(ch_y_base),
+                    fluor_gate_x=_get_fluor_gate(self._ctx, ch_x_base),
+                    fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
                 )
             from well_viewer.features.export.service import _well_labels_map, well_name_for
-            _well_labels = _well_labels_map(self._app)
+            _well_labels = _well_labels_map(self._ctx)
             for label, data in scatter_data.items():
                 combined_series.append((tp_h, label, data))
                 for x, y, meta in zip(data["x"], data["y"], data["metadata"]):
@@ -610,7 +617,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
         with self._app_group_scope(grp):
             scatter_data = _collect_scatter_agg_data(
-                self._app, stat_x, stat_y, sorted(timepoints),
+                self._ctx, stat_x, stat_y, sorted(timepoints),
                 well_colors=WELL_COLORS,
             )
         if not scatter_data:
@@ -619,8 +626,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             from well_viewer.features.export.service import (
                 _well_labels_map, _well_paths_keys, well_name_for,
             )
-            _well_labels = _well_labels_map(self._app)
-            _well_paths = _well_paths_keys(self._app)
+            _well_labels = _well_labels_map(self._ctx)
+            _well_paths = _well_paths_keys(self._ctx)
             rows: List[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")

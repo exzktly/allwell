@@ -38,8 +38,8 @@ def _two_groups():
 def _pairwise(app, groups):
     from well_viewer.features.stats.controller import threshold_for_val_col
     return compute_pairwise(
-        app, groups=groups, target_t=0.0, val_col=_VAL_COL, statistic="mean",
-        threshold=float(threshold_for_val_col(app, _VAL_COL)), test=_TEST)
+        app._ctx, groups=groups, target_t=0.0, val_col=_VAL_COL, statistic="mean",
+        threshold=float(threshold_for_val_col(app._ctx, _VAL_COL)), test=_TEST)
 
 
 def test_compute_pairwise_is_deterministic(loaded_app):
@@ -59,7 +59,7 @@ def test_capture_stats_config_records_run_context(loaded_app):
     app._app_state.stats.groups = groups
     app._app_state.stats.pairwise = _pairwise(app, groups)
 
-    cfg = _capture_stats_config(app)
+    cfg = _capture_stats_config(app._ctx)
     assert cfg is not None
     assert cfg["test"] == _TEST
     assert cfg["val_col"] == _VAL_COL
@@ -72,7 +72,7 @@ def test_capture_stats_config_records_run_context(loaded_app):
 def test_no_stats_config_without_a_run(loaded_app):
     """No test run (empty ``pairwise``) → nothing to reproduce → no config."""
     loaded_app._app_state.stats.pairwise = []
-    assert _capture_stats_config(loaded_app) is None
+    assert _capture_stats_config(loaded_app._ctx) is None
 
 
 def test_save_then_restore_repopulates_pairwise_and_flag(loaded_app):
@@ -83,7 +83,7 @@ def test_save_then_restore_repopulates_pairwise_and_flag(loaded_app):
     app._app_state.stats.pairwise = live
     app._app_state.plot.show_significance = True
 
-    params, _thresholds = capture_params(app, "Bar Plots")
+    params, _thresholds = capture_params(app._ctx, "Bar Plots")
     assert params.get("show_significance") is True
     assert isinstance(params.get("stats"), dict)
 
@@ -92,7 +92,7 @@ def test_save_then_restore_repopulates_pairwise_and_flag(loaded_app):
     app._app_state.stats.groups = []
     app._app_state.plot.show_significance = False
 
-    _restore_stats(app, params["stats"])
+    _restore_stats(app._ctx, params["stats"])
     restored = app._app_state.stats.pairwise
     assert restored and len(restored) == len(live) == 1
     assert restored[0]["a"] == live[0]["a"] and restored[0]["b"] == live[0]["b"]
@@ -101,7 +101,7 @@ def test_save_then_restore_repopulates_pairwise_and_flag(loaded_app):
 
     # ``show_significance`` rides back via the view_state snapshot/restore path.
     from well_viewer.persistence import view_state
-    view_state.restore(app, dict(params))
+    view_state.restore(app._ctx, dict(params))
     assert app._app_state.plot.show_significance is True
 
 
@@ -122,14 +122,14 @@ def test_restore_reproduces_groups_when_replicate_set_renamed(loaded_app):
               BarGroup("DRUG", members=[rep_by["DRUG"]])]
     app._app_state.stats.groups = groups
     app._app_state.stats.pairwise = _pairwise(app, groups)
-    cfg = _capture_stats_config(app)
+    cfg = _capture_stats_config(app._ctx)
     assert cfg["groups"][1]["members"] == [{"name": "DRUG", "wells": ["B01", "B02"]}]
 
     # User renames DRUG → TREATED (same wells) after saving.
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("TREATED", ["B01", "B02"])])
     app._app_state.stats.pairwise = []
     app._app_state.stats.groups = []
-    _restore_stats(app, cfg)
+    _restore_stats(app._ctx, cfg)
 
     pw = app._app_state.stats.pairwise
     assert pw and pw[0]["a_wells"] == ["A01", "A02"] and pw[0]["b_wells"] == ["B01", "B02"]
@@ -147,10 +147,10 @@ def test_restore_accepts_legacy_name_only_member_format(loaded_app):
         "groups": [{"name": "CTRL", "members": ["CTRL"], "solo_wells": []},
                    {"name": "DRUG", "members": ["DRUG"], "solo_wells": []}],
         "test": _TEST, "target_t": 0.0, "val_col": _VAL_COL, "statistic": "mean",
-        "threshold": float(threshold_for_val_col(app, _VAL_COL)),
+        "threshold": float(threshold_for_val_col(app._ctx, _VAL_COL)),
     }
     app._app_state.stats.pairwise = []
-    _restore_stats(app, legacy)
+    _restore_stats(app._ctx, legacy)
     pw = app._app_state.stats.pairwise
     assert pw and pw[0]["a_wells"] == ["A01", "A02"] and pw[0]["b_wells"] == ["B01", "B02"]
 
@@ -160,7 +160,7 @@ def test_capture_params_includes_live_selections(loaded_app):
     reproduce the exact bars (view_state doesn't snapshot ``selections``)."""
     app = loaded_app
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
-    params, _thresholds = capture_params(app, "Bar Plots")
+    params, _thresholds = capture_params(app._ctx, "Bar Plots")
     assert "selections" in params
     assert [s["name"] for s in params["selections"]] == ["CTRL", "DRUG"]
 
@@ -179,7 +179,7 @@ def test_restore_selections_replaces_live_groups(loaded_app):
                           ("EXTRA", ["A01", "B02"])])
     assert len(app._rep_sets_active()) == 3
 
-    _restore_selections(app, saved)
+    _restore_selections(app._ctx, saved)
     assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG"]
 
 
@@ -192,12 +192,12 @@ def test_capture_and_restore_active_solo_wells(loaded_app):
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
     app._app_state.selection.active_solo_wells = {"A01", "B01"}
 
-    params, _thresholds = capture_params(app, "Bar Plots")
+    params, _thresholds = capture_params(app._ctx, "Bar Plots")
     assert params.get("active_solo_wells") == ["A01", "B01"]
 
     # Simulate a diverged live state, then restore.
     app._app_state.selection.active_solo_wells = {"B02"}
-    _restore_selections(app, params.get("selections"), params.get("active_solo_wells"))
+    _restore_selections(app._ctx, params.get("selections"), params.get("active_solo_wells"))
     assert app._app_state.selection.active_solo_wells == {"A01", "B01"}
 
 
@@ -208,7 +208,7 @@ def test_restore_clears_solo_wells_when_saved_empty(loaded_app):
     app = loaded_app
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
     app._app_state.selection.active_solo_wells = {"A01"}  # diverged live state
-    _restore_selections(app, [dict(s) for s in app._app_state.selection.selections], [])
+    _restore_selections(app._ctx, [dict(s) for s in app._app_state.selection.selections], [])
     assert app._app_state.selection.active_solo_wells == set()
 
 
@@ -218,8 +218,8 @@ def test_restore_selections_noop_without_block(loaded_app):
     from well_viewer.features.saved_plots.controller import _restore_selections
     app = loaded_app
     _set_selections(app, [("CTRL", ["A01", "A02"]), ("DRUG", ["B01", "B02"])])
-    _restore_selections(app, None)
-    _restore_selections(app, [])
+    _restore_selections(app._ctx, None)
+    _restore_selections(app._ctx, [])
     assert [r.name for r in app._rep_sets_active()] == ["CTRL", "DRUG"]
 
 
@@ -228,6 +228,6 @@ def test_restore_without_stats_block_is_noop(loaded_app):
     must not raise and must leave ``pairwise`` empty (no brackets)."""
     app = loaded_app
     app._app_state.stats.pairwise = []
-    _restore_stats(app, None)          # missing block
-    _restore_stats(app, {})            # empty block
+    _restore_stats(app._ctx, None)          # missing block
+    _restore_stats(app._ctx, {})            # empty block
     assert app._app_state.stats.pairwise == []

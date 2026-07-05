@@ -27,7 +27,7 @@ def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
     before = int(df_included_mask(app._get_rows(well)).sum())
 
     # Enable the gate with a min-area bound that excludes the smaller cells.
-    set_qc_params(app, QCParams(enabled=True, min_area=250.0))
+    set_qc_params(app._ctx, QCParams(enabled=True, min_area=250.0))
     gated = int(df_included_mask(app._get_rows(well)).sum())
     assert gated < before, "QC gate should exclude small cells"
 
@@ -36,6 +36,6 @@ def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
 
     # The bounds must survive the reopen AND actually filter, without the user
     # re-entering anything.
-    p = get_qc_params(app)
+    p = get_qc_params(app._ctx)
     assert p.enabled and p.min_area == 250.0
     assert int(df_included_mask(app._get_rows(well)).sum()) == gated

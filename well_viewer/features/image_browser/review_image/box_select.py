@@ -22,33 +22,33 @@ from typing import Optional, Tuple
 _CLICK_PX_THRESH = 3
 
 
-def box_select_begin(app, event) -> None:
+def box_select_begin(ctx, event) -> None:
     """Arm a rubber-band drag anchored at the event's label-local position."""
     from PySide6.QtCore import QRect
     from PySide6.QtWidgets import QRubberBand
 
-    ri = app._app_state.review_image
+    ri = ctx.state.review_image
     pos = event.position()
     ax, ay = float(pos.x()), float(pos.y())
     ri.box_anchor = (ax, ay)
     ri.box_active = True
-    label = getattr(app, "_review_image_label", None)
+    label = ctx.runtime.review_image.label
     if label is not None:
-        rb = app._review_image_rubber_band
+        rb = ctx.runtime.review_image.rubber_band
         if rb is None:
             rb = QRubberBand(QRubberBand.Rectangle, label)
-            app._review_image_rubber_band = rb
+            ctx.runtime.review_image.rubber_band = rb
         rb.setGeometry(QRect(int(ax), int(ay), 1, 1))
         rb.show()
 
 
-def box_select_update(app, event) -> None:
+def box_select_update(ctx, event) -> None:
     """Resize the active rubber band to the current cursor position."""
     from PySide6.QtCore import QRect
 
-    ri = app._app_state.review_image
+    ri = ctx.state.review_image
     anchor = ri.box_anchor
-    rb = app._review_image_rubber_band
+    rb = ctx.runtime.review_image.rubber_band
     if anchor is None or rb is None:
         return
     ax, ay = anchor
@@ -61,7 +61,7 @@ def box_select_update(app, event) -> None:
     rb.setGeometry(QRect(x0, y0, w, h))
 
 
-def box_select_finish(app, event) -> Optional[Tuple[int, int, int, int]]:
+def box_select_finish(ctx, event) -> Optional[Tuple[int, int, int, int]]:
     """Finalize the drag and return ``(mx0, my0, mx1, my1)`` in mask-array pixel
     space, or ``None`` for a tap / too-small drag.
 
@@ -69,9 +69,9 @@ def box_select_finish(app, event) -> Optional[Tuple[int, int, int, int]]:
     label-local pixels accounts for the current ``_review_image_scale`` and the
     pixmap-centering offset, so window position, scroll, and zoom are handled.
     """
-    ri = app._app_state.review_image
+    ri = ctx.state.review_image
     anchor = ri.box_anchor
-    rb = app._review_image_rubber_band
+    rb = ctx.runtime.review_image.rubber_band
     ri.box_active = False
     ri.box_anchor = None
     if rb is not None:
@@ -83,8 +83,8 @@ def box_select_finish(app, event) -> Optional[Tuple[int, int, int, int]]:
     rx, ry = float(pos.x()), float(pos.y())
     if abs(rx - ax) < _CLICK_PX_THRESH and abs(ry - ay) < _CLICK_PX_THRESH:
         return None
-    scale = float(getattr(app, "_review_image_scale", 1.0) or 1.0)
-    label = getattr(app, "_review_image_label", None)
+    scale = float(ctx.runtime.review_image.scale or 1.0)
+    label = ctx.runtime.review_image.label
     off_x, off_y = 0, 0
     if label is not None:
         pm = label.pixmap()

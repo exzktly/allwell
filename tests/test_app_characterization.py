@@ -35,7 +35,7 @@ def all_wells_selected(loaded_app):
 
 def test_collect_bar_items_per_well_means(all_wells_selected):
     for _label, tp_hours in TIMEPOINTS:
-        _, items, _ = collect_bar_items(all_wells_selected, tp_hours)
+        _, items, _ = collect_bar_items(all_wells_selected._ctx, tp_hours)
         by_key = {it.key: it.mean for it in items}
         assert set(by_key) == set(WELLS)
         for well in WELLS:
@@ -45,20 +45,20 @@ def test_collect_bar_items_per_well_means(all_wells_selected):
 
 
 def test_collect_bar_items_order_is_sorted(all_wells_selected):
-    _, items, _ = collect_bar_items(all_wells_selected, 0.0)
+    _, items, _ = collect_bar_items(all_wells_selected._ctx, 0.0)
     assert [it.key for it in items] == sorted(WELLS)
 
 
 def test_collect_bar_items_stable_across_calls(all_wells_selected):
-    _, first, _ = collect_bar_items(all_wells_selected, 24.0)
-    _, second, _ = collect_bar_items(all_wells_selected, 24.0)
+    _, first, _ = collect_bar_items(all_wells_selected._ctx, 24.0)
+    _, second, _ = collect_bar_items(all_wells_selected._ctx, 24.0)
     assert ([(it.key, it.mean) for it in first]
             == [(it.key, it.mean) for it in second])
 
 
 def test_collect_line_series_per_well_points(all_wells_selected):
     series, _ = collect_line_series(
-        all_wells_selected,
+        all_wells_selected._ctx,
         threshold=all_wells_selected._app_state.channel.threshold,
         use_sem=all_wells_selected._app_state.plot.use_sem,
     )
@@ -73,8 +73,8 @@ def test_collect_line_series_per_well_points(all_wells_selected):
 
 
 def test_collect_bar_items_follows_active_channel(all_wells_selected):
-    set_active_channel(all_wells_selected, "mcherry")
-    _, items, _ = collect_bar_items(all_wells_selected, 0.0)
+    set_active_channel(all_wells_selected._ctx, "mcherry")
+    _, items, _ = collect_bar_items(all_wells_selected._ctx, 0.0)
     by_key = {it.key: it.mean for it in items}
     for well in WELLS:
         assert math.isclose(

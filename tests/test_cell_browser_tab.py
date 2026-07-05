@@ -11,7 +11,7 @@ from __future__ import annotations
 def _goto_cell_browser(app):
     """Open the Cell Browser sub-tab of the unified Image Browser rail entry."""
     from well_viewer.features.image_browser.controller import show_image_browser_subtab
-    assert show_image_browser_subtab(app, "Cell Browser")
+    assert show_image_browser_subtab(app._ctx, "Cell Browser")
 
 
 def test_cell_browser_tab_builds_and_registers(loaded_app):
@@ -22,15 +22,15 @@ def test_cell_browser_tab_builds_and_registers(loaded_app):
 
     # Centre widgets wired.
     assert getattr(app, "_cell_browser_grid", None) is not None
-    assert getattr(app, "_cell_browser_loader", None) is not None
-    assert getattr(app, "_cell_browser_state", None) is not None
+    assert app._ctx.runtime.cell_browser.loader is not None
+    assert app._ctx.runtime.cell_browser.state is not None
 
     # Sidebar frame is shown on this tab and its builder ran.
     assert app._sidebar_cell_browser_frame.isVisibleTo(app._sidebar_cell_browser_frame.parent())
-    assert hasattr(app, "_cell_browser_criteria_rows")
+    assert app._ctx.runtime.cell_browser.criteria_rows is not None
 
     # Channel chips populated from the dataset's fluor channels.
-    chips = getattr(app, "_cell_browser_channel_chips", {})
+    chips = (app._ctx.runtime.cell_browser.channel_chips or {})
     assert set(chips) == set(app._app_state.channel.fluor_channels or [])
 
 
@@ -43,7 +43,7 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
 
     from well_viewer.features.image_browser.cell_browser.tab_view import cell_browser_refresh
 
-    built = set(getattr(app, "_cell_browser_channel_chips", {}))
+    built = set((app._ctx.runtime.cell_browser.channel_chips or {}))
     assert built, "expected the bar to build from the dataset's channels"
 
     # Force the next resolve to come back empty (fluor list AND data both empty).
@@ -51,12 +51,12 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
     real_get_rows = app._get_rows
     app._get_rows = lambda _label: None
     try:
-        cell_browser_refresh(app)
+        cell_browser_refresh(app._ctx)
     finally:
         app._get_rows = real_get_rows
 
     # The bar must still be intact — not blanked.
-    assert set(getattr(app, "_cell_browser_channel_chips", {})) == built
+    assert set((app._ctx.runtime.cell_browser.channel_chips or {})) == built
 
 
 def test_cell_browser_section_icon_registered(viewer_app):
@@ -76,12 +76,12 @@ def test_cell_browser_click_navigates_to_segmentation(loaded_app):
 
     # None timepoints/FOVs → no tp/fov restriction (strict-list semantics: [] would
     # mean "0 selected → 0 cells"). We just need a cell to click.
-    cells = collect_cells(app, [], None, None)
+    cells = collect_cells(app._ctx, [], None, None)
     assert cells, "expected the mini dataset to yield cells"
 
     # Clicking a cell must switch to Segmentation and select that nucleus —
     # the navigation path must not raise even when image arrays are absent.
-    ctl.on_cell_clicked(app, cells[0])
+    ctl.on_cell_clicked(app._ctx, cells[0])
     assert app._current_centre_tab() == "Segmentation"
     assert app._app_state.review_image.selected_nucleus == int(float(cells[0].nucleus_id))
     assert app._app_state.preview.selected_well == cells[0].well
@@ -99,7 +99,7 @@ def test_cell_browser_click_sets_normalized_timepoint(loaded_app):
     from well_viewer.features.image_browser.cell_browser import controller as ctl
     from well_viewer.features.image_browser.cell_browser.collect import collect_cells
 
-    cells = collect_cells(app, [], None, None)
+    cells = collect_cells(app._ctx, [], None, None)
     cell = next(c for c in cells if c.tp_token == "24h")
     assert app._norm_timepoint("24h") == "24"  # normalization actually differs
 
@@ -115,9 +115,9 @@ def test_cell_browser_click_sets_normalized_timepoint(loaded_app):
 
     fov_rec, tp_rec = _Rec(), _Rec()
     app._preview_fov_cb = fov_rec
-    app._review_image_tp_cb = tp_rec
+    app._ctx.runtime.review_image.tp_cb = tp_rec
 
-    ctl.on_cell_clicked(app, cell)
+    ctl.on_cell_clicked(app._ctx, cell)
 
     # The raw token must never be the value handed to the combo; the normalized
     # hours value must be.
@@ -134,8 +134,8 @@ def test_cell_browser_apply_filters_no_criteria(loaded_app):
 
     # No criteria + all timepoints/FOVs selected → every cell in the selected
     # wells qualifies. apply_filters must populate the state without raising.
-    ctl.apply_filters(app)
-    st = app._cell_browser_state
+    ctl.apply_filters(app._ctx)
+    st = app._ctx.runtime.cell_browser.state
     assert isinstance(st.cells, list)
     # loaded advances by at most one page; never exceeds the total.
     assert 0 <= st.loaded <= len(st.cells)

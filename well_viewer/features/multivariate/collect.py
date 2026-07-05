@@ -19,13 +19,15 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from well_viewer.data.data_loading import df_included_mask, resolve_value_series
+from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.metric_registry import METRIC_BY_KEY
+from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.selections_model import color_for_replicate_set, color_for_well, active_replicate_sets
 
 _logger = logging.getLogger(__name__)
 
 
-def column_display_label(app, col: str) -> str:
+def column_display_label(ctx, col: str) -> str:
     """Human-readable label for a feature column (drives picker + axis text).
 
     Handles the three column families: shape/morphology (via the shape-feature
@@ -36,7 +38,7 @@ def column_display_label(app, col: str) -> str:
     from pipeline.shape_features import is_shape_column, label_for as shape_label
     if is_shape_column(col):
         return shape_label(col) or col
-    ratio_index = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratio_index = getattr(ctx.state.channel, "ratio_index", None) or {}
     if col in ratio_index:
         rm = ratio_index[col]
         return getattr(rm, "label", None) or getattr(rm, "name", None) or col
@@ -50,7 +52,7 @@ def column_display_label(app, col: str) -> str:
 
 
 def collect_feature_matrix(
-    app,
+    ctx,
     *,
     feature_cols: List[str],
     timepoints=None,
@@ -75,7 +77,7 @@ def collect_feature_matrix(
     """
     feature_cols = list(feature_cols or [])
     n_feat = len(feature_cols)
-    ratios = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
 
     target_arr = None
     if timepoints:
@@ -90,7 +92,7 @@ def collect_feature_matrix(
 
     def _collect_well(well_label: str, group_name: str):
         nonlocal dropped
-        df = app._get_rows(well_label)
+        df = get_rows(ctx, well_label)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             return
         mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
@@ -127,22 +129,24 @@ def collect_feature_matrix(
         well_labels.extend([well_label] * sel.size)
         tp_values.extend(tp[sel].tolist())
 
-    active_rsets = app._rep_sets_active()
+    active_rsets = active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
     if active_rsets:
         for rset in active_rsets:
             group_name = rset.name
-            group_colors[group_name] = app._rank_color_rset(rset)
+            group_colors[group_name] = color_for_replicate_set(
+                rset, ctx.state.selection.selections)
             for well_label in rset.wells:
-                if well_label in app._app_state.dataset.well_paths:
+                if well_label in ctx.state.dataset.well_paths:
                     _collect_well(well_label, group_name)
     else:
         selected = sorted(
-            (lbl for lbl in app._app_state.selection.selected_wells
-             if lbl in app._app_state.dataset.well_paths),
-            key=lambda lbl: app._parse_rc(lbl),
+            (lbl for lbl in ctx.state.selection.selected_wells
+             if lbl in ctx.state.dataset.well_paths),
+            key=lambda lbl: parse_rc(lbl),
         )
         for well_label in selected:
-            group_colors[well_label] = app._rank_color_well(well_label)
+            group_colors[well_label] = color_for_well(well_label)
             _collect_well(well_label, well_label)
 
     if rows_X:
@@ -153,7 +157,7 @@ def collect_feature_matrix(
     return {
         "X": X,
         "feature_cols": feature_cols,
-        "feature_labels": [column_display_label(app, c) for c in feature_cols],
+        "feature_labels": [column_display_label(ctx, c) for c in feature_cols],
         "group": np.asarray(grp_labels, dtype=object),
         "well": np.asarray(well_labels, dtype=object),
         "timepoint": np.asarray(tp_values, dtype=float),
@@ -163,7 +167,7 @@ def collect_feature_matrix(
     }
 
 
-def available_feature_columns(app, well_label: Optional[str] = None) -> Dict[str, List[str]]:
+def available_feature_columns(ctx, well_label: Optional[str] = None) -> Dict[str, List[str]]:
     """Discover the feature columns present in the loaded dataset, by family.
 
     Dynamically derived per-dataset (never hardcoded): intensity/count columns
@@ -182,18 +186,18 @@ def available_feature_columns(app, well_label: Optional[str] = None) -> Dict[str
     df = None
     label = well_label
     if label is None:
-        for lbl in app._app_state.dataset.well_paths:
-            candidate = app._get_rows(lbl)
+        for lbl in ctx.state.dataset.well_paths:
+            candidate = get_rows(ctx, lbl)
             if candidate is not None and not candidate.empty:
                 df = candidate
                 break
     else:
-        df = app._get_rows(label)
+        df = get_rows(ctx, label)
     if df is None or df.empty:
         return {}
 
     present = set(df.columns)
-    channels = list(getattr(app._app_state.channel, "fluor_channels", None) or [])
+    channels = list(getattr(ctx.state.channel, "fluor_channels", None) or [])
     if not channels:
         # Fall back to inferring channel tokens from the intensity columns present.
         inferred = set()
@@ -211,7 +215,7 @@ def available_feature_columns(app, well_label: Optional[str] = None) -> Dict[str
 
     families["Shape"] = list(detect_shape_features(df))
 
-    ratio_index = getattr(app._app_state.channel, "ratio_index", None) or {}
+    ratio_index = getattr(ctx.state.channel, "ratio_index", None) or {}
     families["Ratios"] = list(ratio_index.keys())
 
     return {k: v for k, v in families.items() if v}

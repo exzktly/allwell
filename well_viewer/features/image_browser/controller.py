@@ -22,7 +22,9 @@ from well_viewer.core.safe import swallowed
 # cycle break — they only resolve when the Image Browser page is first built
 # (centre_view imports this package lazily), so app-startup laziness is
 # preserved while each sub-tab's *widget construction* still happens on demand.
-from well_viewer.features.preview.panel_view import build_review_image_panel
+# (Segmentation's ``build_review_image_panel`` is a god-method that still needs
+# the app handle, so it is reached through the core ``image_browser_subtab_app_bridge``
+# rather than named here — this controller stays fully ctx-native.)
 from well_viewer.features.image_browser.image_table.tab_view import build_image_table_tab
 from well_viewer.features.image_browser.image_table.picker_view import build_image_table_picker
 from well_viewer.features.image_browser.cell_browser.tab_view import (
@@ -36,7 +38,7 @@ _logger = logging.getLogger("well_viewer")
 
 def image_browser_current_subtab(app) -> str:
     """Leaf name of the active Image Browser sub-tab ("" when none/unbuilt)."""
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = app._ctx.runtime.image_browser.subtabs
     if sub is None or sub.count() == 0:
         return ""
     try:
@@ -46,36 +48,35 @@ def image_browser_current_subtab(app) -> str:
         return ""
 
 
-def build_image_browser_subtab(app, idx: int) -> None:
+def build_image_browser_subtab(ctx, idx: int) -> None:
     """Build the sub-tab body (+ its sidebar) at *idx* on first show.
 
-    Idempotent: the per-name ``app._image_browser_built`` flag guards against
-    rebuilding when the user flips back to an already-constructed sub-tab.
+    Idempotent: the per-name ``ctx.runtime.image_browser.built`` flag guards
+    against rebuilding when the user flips back to an already-constructed sub-tab.
+
+    Fully ctx-native: the sub-tab bar / built-flag map come from
+    ``ctx.runtime.image_browser`` and the two sidebar frames from ``ctx.widgets``;
+    the Segmentation branch's app-native review-image build is reached through the
+    single core ``image_browser_subtab_app_bridge`` seam.
     """
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = ctx.runtime.image_browser.subtabs
     if sub is None or idx < 0 or idx >= sub.count():
         return
     name = sub.tabText(idx)
-    built = app._image_browser_built
+    built = ctx.runtime.image_browser.built
     if built.get(name):
         return
     frame = sub.widget(idx)
-    ctx = app._ctx
     try:
         if name == "Segmentation":
-            build_review_image_panel(app, frame)
-            # The review-image channel combo is born empty (just a "GFP"
-            # placeholder); when the panel builds *after* a dataset is already
-            # loaded (it builds lazily now), nothing has populated it yet, so
-            # fill it from the current channel state. Harmless before any load.
-            from well_viewer.core.channel_state_controller import update_channel_selector
-            update_channel_selector(app)
+            from well_viewer.core.tab_controller import image_browser_subtab_app_bridge
+            image_browser_subtab_app_bridge(ctx, segmentation_frame=frame)
         elif name == "Image Table":
             build_image_table_tab(ctx, frame)
-            build_image_table_picker(app, app._sidebar_image_table_frame)
+            build_image_table_picker(ctx, ctx.widgets.get("_sidebar_image_table_frame"))
         elif name == "Cell Browser":
             build_cell_browser_tab(ctx, frame)
-            build_cell_browser_sidebar(app, app._sidebar_cell_browser_frame)
+            build_cell_browser_sidebar(ctx, ctx.widgets.get("_sidebar_cell_browser_frame"))
         elif name == "Playground":
             if frame.layout() is None:
                 QHBoxLayout(frame).setContentsMargins(12, 12, 12, 12)
@@ -87,30 +88,31 @@ def build_image_browser_subtab(app, idx: int) -> None:
         _logger.exception("Image Browser: build sub-tab %r failed", name)
 
 
-def on_image_browser_subtab_changed(app, idx: int) -> None:
+def on_image_browser_subtab_changed(ctx, idx: int) -> None:
     """Lazy-build the now-current sub-tab, then refresh the sidebar to match.
 
     Mirrors the Plotting sub-tab handler — the sub-tab leaf is now the effective
     centre tab, so the standard ``on_tab_change`` dispatch (sidebar swap + the
-    leaf's own refresh) must re-run.
+    leaf's own refresh) must re-run. Both the build and the refresh route through
+    the single core ctx→app bridge, so this handler names no god-object.
     """
-    build_image_browser_subtab(app, idx)
-    from well_viewer.core.tab_controller import on_tab_change
-    on_tab_change(app, None)
+    build_image_browser_subtab(ctx, idx)
+    from well_viewer.core.tab_controller import image_browser_subtab_app_bridge
+    image_browser_subtab_app_bridge(ctx, refresh_active_tab=True)
 
 
-def show_image_browser_subtab(app, name: str) -> bool:
+def show_image_browser_subtab(ctx, name: str) -> bool:
     """Navigate to the Image Browser rail entry and select sub-tab *name*.
 
     The single entry point cross-feature jump-to-image navigation uses (Review
     CSV double-click, Cell Browser cell-click) now that the image-review
     surfaces are sub-tabs rather than top-level pages.
     """
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(ctx.window, "_notebook", None)
     if nb is None:
         return False
     nb.setCurrentByName("Image Browser")
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = ctx.runtime.image_browser.subtabs
     if sub is None:
         return False
     for i in range(sub.count()):

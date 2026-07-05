@@ -25,7 +25,7 @@ def _enter_scatter_cellbrowser_split(app):
     from well_viewer.core.split_view import enter_split
 
     # Build the Cell Browser sub-tab (lazy) and make it the active Image Browser leaf.
-    assert show_image_browser_subtab(app, "Cell Browser")
+    assert show_image_browser_subtab(app._ctx, "Cell Browser")
     # Make Scatter Plot the active Plotting leaf.
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
     app._notebook.setCurrentByName("Plotting")
@@ -78,7 +78,7 @@ def test_focus_after_gate_preserves_selection(loaded_app):
     app._app_state.selection.selected_wells = set(user_sel)
 
     # Register a scatter gate (mirrors the user's "after drawing a gate" repro).
-    app._scatter_gates = [{
+    app._app_state.cell_gating.scatter_gates = [{
         "x_col": "gfp_mean_intensity", "y_col": "gfp_mean_intensity",
         "x0": 0.0, "x1": 1e12, "y0": 0.0, "y1": 1e12,
         "name": "G1", "wells": wells[:1],

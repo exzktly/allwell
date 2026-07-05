@@ -62,7 +62,7 @@ def save_to_data_dir(app) -> None:
         return
     fingerprints = _well_zip_fingerprints(app)
     overrides = []
-    for (well, fov, tp, nid), val in app._review_included_overrides.items():
+    for (well, fov, tp, nid), val in app._ctx.runtime.review.included_overrides.items():
         overrides.append({
             "well": str(well),
             "fov": str(fov),
@@ -158,8 +158,8 @@ def load_from_data_dir(app) -> None:
     if not new_map:
         # Refuse to wipe a populated in-memory state with a no-op load.
         return
-    app._review_included_overrides.clear()
-    app._review_included_overrides.update(new_map)
+    app._ctx.runtime.review.included_overrides.clear()
+    app._ctx.runtime.review.included_overrides.update(new_map)
     # Bump the include-map version so Review Image recomputes; skipped when
     # Image Browser is disabled (no review_image slice).
     _review_image = app._app_state.feature_slice("review_image")

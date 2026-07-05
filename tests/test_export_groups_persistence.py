@@ -14,7 +14,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 def _panel(app):
     from well_viewer.features.batch_export import BarBatchExportPanel
-    return BarBatchExportPanel(app, None, use_sidebar_groups=False)
+    return BarBatchExportPanel(app._ctx, None, use_sidebar_groups=False)
 
 
 def _add_solo_group(panel, app, name="G1"):
@@ -25,7 +25,7 @@ def _add_solo_group(panel, app, name="G1"):
     grp.solo_wells.append(well)
     panel._groups.append(grp)
     panel._active_grp = len(panel._groups) - 1
-    panel._refresh_group_list()  # persists to app._export_groups_doc + schedules save
+    panel._refresh_group_list()  # persists to app._ctx.runtime.batch_export.export_groups_doc + schedules save
     return well
 
 
@@ -39,7 +39,7 @@ def test_no_manual_save_load_route():
 def test_editing_groups_mirrors_to_app_doc(loaded_app):
     panel = _panel(loaded_app)
     _add_solo_group(panel, loaded_app)
-    doc = getattr(loaded_app, "_export_groups_doc", None)
+    doc = loaded_app._ctx.runtime.batch_export.export_groups_doc
     assert isinstance(doc, dict) and doc.get("bar")
     assert len(doc["bar"]) == 1
     assert doc["bar"][0]["name"] == "G1"
@@ -53,13 +53,13 @@ def test_groups_round_trip_through_persistence_json(loaded_app):
 
     # Flush to persistence.json, then wipe the in-memory cache + doc.
     export_groups.save_to_data_dir(loaded_app)
-    assert _doc.get_section(loaded_app, "export_groups").get("bar")
-    loaded_app._export_groups_doc = {}
+    assert _doc.get_section(loaded_app._ctx, "export_groups").get("bar")
+    loaded_app._ctx.runtime.batch_export.export_groups_doc = {}
     loaded_app._app_state.dataset.persistence_doc = None
 
     # Reload from disk → app doc repopulated with the same group + solo well.
     export_groups.load_from_data_dir(loaded_app)
-    bar = loaded_app._export_groups_doc["bar"]
+    bar = loaded_app._ctx.runtime.batch_export.export_groups_doc["bar"]
     assert bar[0]["name"] == "G1"
     assert bar[0]["solo_wells"] == [well]
 
@@ -79,7 +79,7 @@ def test_distinct_panels_keep_separate_slots(loaded_app):
     from well_viewer.features.batch_export import BatchExportPanel
     bar = _panel(loaded_app)
     _add_solo_group(bar, loaded_app, name="BarGrp")
-    line = BatchExportPanel(loaded_app, None, use_sidebar_groups=False)
+    line = BatchExportPanel(loaded_app._ctx, None, use_sidebar_groups=False)
     assert line._groups == []  # the "line" slot is still empty
-    doc = loaded_app._export_groups_doc
+    doc = loaded_app._ctx.runtime.batch_export.export_groups_doc
     assert set(doc) == {"bar"} and doc["bar"][0]["name"] == "BarGrp"

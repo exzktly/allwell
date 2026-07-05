@@ -43,12 +43,16 @@ def test_pipeline_setup_crash_emits_error_and_finished():
 
 
 # ── E7 ────────────────────────────────────────────────────────────────────
-def test_gating_worker_emits_failed_on_crash(qapp):
-    class _BadApp:
-        def _get_all_fluor_gates(self):
-            raise RuntimeError("gate boom")
+def test_gating_worker_emits_failed_on_crash(qapp, monkeypatch):
+    # The worker's first step is get_all_fluor_gates(ctx); force it to raise so
+    # _run_inner crashes and must route the error through the ``failed`` signal.
+    import well_viewer.features.grouping.cell_gating_tab_view as cg
 
-    worker = GatingWorker(_BadApp())
+    def _boom(ctx):
+        raise RuntimeError("gate boom")
+
+    monkeypatch.setattr(cg, "get_all_fluor_gates", _boom)
+    worker = GatingWorker(object())
     seen = []
     worker.failed.connect(lambda msg: seen.append(msg))
     worker.finished_ok.connect(lambda: seen.append("OK"))

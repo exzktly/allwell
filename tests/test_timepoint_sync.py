@@ -11,16 +11,18 @@ from well_viewer.core.timepoint_sync import (
 )
 
 
-def _app():
+def _ctx():
+    # A8-teardown T3: the leaves take ``ctx`` and read ``ctx.state.plot`` /
+    # ``ctx.bus`` — mirror that minimal surface here.
     emitted = []
     bus = SimpleNamespace(
         plot_options_changed=SimpleNamespace(emit=lambda s: emitted.append(s)))
-    app = SimpleNamespace(
-        _app_state=SimpleNamespace(plot=SimpleNamespace(focus_timepoint=None)),
-        _event_bus=bus,
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(plot=SimpleNamespace(focus_timepoint=None)),
+        bus=bus,
     )
-    app._emitted = emitted
-    return app
+    ctx._emitted = emitted
+    return ctx
 
 
 def test_nearest_index_picks_closest():
@@ -36,21 +38,21 @@ def test_nearest_index_handles_unset_and_empty():
 
 
 def test_set_and_get_focus_tp_emits_once():
-    app = _app()
-    set_focus_tp(app, 24.0)
-    assert current_focus_tp(app) == 24.0
-    assert len(app._emitted) == 1
+    ctx = _ctx()
+    set_focus_tp(ctx, 24.0)
+    assert current_focus_tp(ctx) == 24.0
+    assert len(ctx._emitted) == 1
 
 
 def test_set_focus_tp_unchanged_does_not_re_emit():
-    app = _app()
-    set_focus_tp(app, 24.0)
-    set_focus_tp(app, 24.0)
-    assert len(app._emitted) == 1
+    ctx = _ctx()
+    set_focus_tp(ctx, 24.0)
+    set_focus_tp(ctx, 24.0)
+    assert len(ctx._emitted) == 1
 
 
 def test_set_focus_tp_emit_false_is_silent():
-    app = _app()
-    set_focus_tp(app, 12.0, emit=False)
-    assert current_focus_tp(app) == 12.0
-    assert app._emitted == []
+    ctx = _ctx()
+    set_focus_tp(ctx, 12.0, emit=False)
+    assert current_focus_tp(ctx) == 12.0
+    assert ctx._emitted == []

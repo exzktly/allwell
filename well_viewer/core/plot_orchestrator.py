@@ -25,7 +25,7 @@ def _qt_file_filter_from_filetypes(filetypes) -> str:
 
 
 def redraw(
-    app,
+    ctx,
     *,
     lineplot_redraw,
     apply_ax_style,
@@ -54,13 +54,13 @@ def redraw(
 
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
     metric_label = METRIC_KEY_TO_LABEL.get(
-        app._app_state.channel.active_metric, "Mean Intensity"
+        ctx.state.channel.active_metric, "Mean Intensity"
     )
 
     # 1. Line plot — always present (eager-built); the entry point that
     # established the orchestrator's name.
     lineplot_redraw(
-        app,
+        ctx,
         apply_ax_style=apply_ax_style,
         all_fluor_values=all_fluor_values,
         all_fluor_values_filtered=all_fluor_values_filtered,
@@ -68,19 +68,21 @@ def redraw(
         metric_label=metric_label,
     )
 
-    # 2. Distribution — lazy-built, so guard on the canvas attribute.
-    if hasattr(app, "_distribution_canvas"):
+    # 2. Distribution — lazy-built, so guard on the registered canvas handle
+    # (``register`` stamps ``app._distribution_canvas`` too, so this is the
+    # exact ctx-native equivalent of the old ``hasattr(app, …)`` guard).
+    if ctx.widgets.has("_distribution_canvas"):
         try:
             from well_viewer.features.distribution.controller import redraw_distribution
-            redraw_distribution(app)
+            redraw_distribution(ctx)
         except Exception:
             _logger.exception("Distribution redraw failed")
 
     # 3. Heat Map — lazy-built; same guard.
-    if hasattr(app, "_heatmap_canvas"):
+    if ctx.widgets.has("_heatmap_canvas"):
         try:
             from well_viewer.features.heatmap.controller import redraw_heatmap
-            redraw_heatmap(app)
+            redraw_heatmap(ctx)
         except Exception:
             _logger.exception("Heat map redraw failed")
 
@@ -158,7 +160,7 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
     stat_y = app._scatter_agg_stat_y_cb.currentText()
 
     selected_timepoints: list[float] = []
-    tp_checks = getattr(app, "_scatter_agg_tp_checks", None)
+    tp_checks = app._ctx.runtime.scatter.agg_tp_checks
     if tp_checks:
         for tp_str, widget in tp_checks.items():
             try:
@@ -185,7 +187,13 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
     )
 
 
-def redraw_app(app) -> None:
+def redraw_app(ctx) -> None:
+    # A8 (D-core): fully ctx-native — the old god-object unwrap bridge is gone.
+    # The empty-state flip is a widget-tree walk (``ctx.window``), the render
+    # fan-out threads ``ctx`` (``redraw``/``refresh_plot_empty_states`` both take
+    # ctx now), and the line figure / export-style sidebars are read off the
+    # widget registry instead of the god-object.
+    #
     # Keep the EmptyState/figure stacks in sync with the current data
     # state before any matplotlib work. When no data is loaded the plot
     # is hidden behind the EmptyState page, so we can skip the actual
@@ -194,23 +202,27 @@ def redraw_app(app) -> None:
     from well_viewer.features.lineplot.controller import redraw_line_plots
     from well_viewer.data.data_loading import _all_fluor_values, _all_fluor_values_filtered
 
-    refresh_plot_empty_states(app)
+    refresh_plot_empty_states(ctx.window)
     # ``redraw`` fans out across the default-scope tabs (line /
     # distribution / heat map). Bar / scatter / scatter-aggregate are
     # scope-specific and re-render through their own per-tab shims.
     redraw(
-        app,
+        ctx,
         lineplot_redraw=redraw_line_plots,
         apply_ax_style=apply_ax_style,
         all_fluor_values=_all_fluor_values,
         all_fluor_values_filtered=_all_fluor_values_filtered,
         warn=WARN,
     )
-    apply_export_style_to_current(app, app._line_fig, getattr(app, "_line_canvas", None))
+    apply_export_style_to_current(
+        ctx,
+        ctx.widgets.get_or_none("_line_fig"),
+        ctx.widgets.get_or_none("_line_canvas"),
+    )
 
     # Keep the Export Configurator's line-order lists in sync with the
     # current selection / replicate sets when the sidebar is open.
-    for sb in (getattr(app, "_export_style_sidebars", {}) or {}).values():
+    for sb in (ctx.widgets.get_or_none("_export_style_sidebars") or {}).values():
         try:
             if getattr(sb, "_is_line_fig", lambda: False)():
                 sb._refresh_line_order_lists()
@@ -219,48 +231,46 @@ def redraw_app(app) -> None:
 
 
 
-def open_bar_batch_export_shim(app) -> None:
+def _switch_to_batch_export_tab(ctx, mode: str) -> None:
+    """Focus the Batch Export notebook tab and select ``mode`` on its builder."""
+    nb = getattr(ctx.window, "_notebook", None)
+    if nb is not None:
+        nb.setCurrentByName("Batch Export")
+    set_mode = ctx.runtime.batch_export.set_mode
+    if set_mode is not None:
+        set_mode(mode)
+
+
+def open_bar_batch_export_shim(ctx) -> None:
     """Switch Batch Export tab to the inline bar-plot export builder."""
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Bar Batch Export.")
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Bar Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("bar")
+    _switch_to_batch_export_tab(ctx, "bar")
 
 
 
-def open_scatter_cells_batch_export_shim(app) -> None:
+def open_scatter_cells_batch_export_shim(ctx) -> None:
     """Switch Batch Export tab to the inline scatter-cells export builder."""
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Scatter Cells Batch Export.")
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Scatter Cells Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("scatter_cells")
+    _switch_to_batch_export_tab(ctx, "scatter_cells")
 
 
 
-def open_scatter_agg_batch_export_shim(app) -> None:
+def open_scatter_agg_batch_export_shim(ctx) -> None:
     """Switch Batch Export tab to the inline aggregate-scatter export builder."""
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Scatter Aggregate Batch Export.")
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Scatter Aggregate Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("scatter_agg")
+    _switch_to_batch_export_tab(ctx, "scatter_agg")
 
 
 
-def open_batch_export_shim(app) -> None:
-    if not app._app_state.dataset.well_paths:
-        QMessageBox.warning(app, "No data", "Load data before opening Batch Export.")
+def open_batch_export_shim(ctx) -> None:
+    if not ctx.state.dataset.well_paths:
+        QMessageBox.warning(ctx.window, "No data", "Load data before opening Batch Export.")
         return
-    if hasattr(app, "_notebook"):
-        app._notebook.setCurrentByName("Batch Export")
-    if hasattr(app, "_batch_export_set_mode"):
-        app._batch_export_set_mode("line")
+    _switch_to_batch_export_tab(ctx, "line")
 

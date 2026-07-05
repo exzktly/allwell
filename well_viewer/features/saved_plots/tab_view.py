@@ -76,11 +76,11 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     cl.addStretch(1)
     report_btn = QPushButton("Export report…", ctrl)
     report_btn.setToolTip("Export all saved plots as a multi-page PDF report.")
-    report_btn.clicked.connect(lambda: C.export_report_pdf(ctx.app))
+    report_btn.clicked.connect(lambda: C.export_report_pdf(ctx))
     cl.addWidget(report_btn)
     clear_btn = QPushButton("Clear all", ctrl)
     clear_btn.setProperty("variant", "secondary")
-    clear_btn.clicked.connect(lambda: _confirm_clear(ctx.app))
+    clear_btn.clicked.connect(lambda: _confirm_clear(ctx))
     cl.addWidget(clear_btn)
     layout.addWidget(ctrl)
 
@@ -109,13 +109,13 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     reg.register("_saved_plots_list_host", list_host)
     # Controller repaints the gallery through this callback (avoids a
     # controller → tab_view import cycle).
-    ctx.runtime.saved_plots.repopulate = lambda: populate_saved_plots_grid(ctx.app)
+    ctx.runtime.saved_plots.repopulate = lambda: populate_saved_plots_grid(ctx)
 
     layout.addWidget(stack, 1)
-    populate_saved_plots_grid(ctx.app)
+    populate_saved_plots_grid(ctx)
 
 
-def _confirm_clear(app) -> None:
+def _confirm_clear(ctx) -> None:
     try:
         from PySide6.QtWidgets import QMessageBox
         if QMessageBox.question(
@@ -125,36 +125,39 @@ def _confirm_clear(app) -> None:
             return
     except Exception:
         swallowed()  # no dialog (e.g. headless) — fall through to clearing
-    C.clear_saved_plots(app)
+    C.clear_saved_plots(ctx)
 
 
-def populate_saved_plots_grid(app) -> None:
+def populate_saved_plots_grid(ctx) -> None:
     """Rebuild the gallery from the current store contents and flip the
-    empty-state based on how many saved plots exist."""
-    col = getattr(app, "_saved_plots_list", None)
+    empty-state based on how many saved plots exist.
+
+    A8 teardown: takes ``ctx`` — the gallery widget handles read through
+    ``ctx.widgets`` and the store/capture layer is ctx-native."""
+    col = ctx.widgets.get_or_none("_saved_plots_list")
     if col is None:
         return
     clear_layout(col)
-    store = get_store(app)
-    store.ensure_loaded(app)
+    store = get_store(ctx)
+    store.ensure_loaded(ctx)
     records = list(reversed(store.records))  # newest first
 
-    lbl = getattr(app, "_saved_plots_count_lbl", None)
+    lbl = ctx.widgets.get_or_none("_saved_plots_count_lbl")
     if lbl is not None:
         n = len(records)
         lbl.setText(f"{n} saved plot{'' if n == 1 else 's'}")
 
-    stack = getattr(app, "_saved_plots_stack", None)
+    stack = ctx.widgets.get_or_none("_saved_plots_stack")
     if stack is not None:
         stack.setCurrentIndex(1 if records else 0)
 
     total = len(records)
     for i, rec in enumerate(records):
         col.addWidget(_build_saved_card(
-            app, store, rec, is_first=(i == 0), is_last=(i == total - 1)))
+            ctx, store, rec, is_first=(i == 0), is_last=(i == total - 1)))
 
 
-def _build_saved_card(app, store, rec, *, is_first: bool = True,
+def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
                       is_last: bool = True) -> QWidget:
     card = QFrame()
     card.setObjectName("Panel")
@@ -176,7 +179,7 @@ def _build_saved_card(app, store, rec, *, is_first: bool = True,
     v.addLayout(header)
 
     # Full-width figure (scales with the tab).
-    img_path = store.image_path(app, rec)
+    img_path = store.image_path(ctx, rec)
     pm = QPixmap(str(img_path)) if (img_path is not None and img_path.exists()) else QPixmap()
     if not pm.isNull():
         v.addWidget(_AspectImage(pm, card))
@@ -208,42 +211,42 @@ def _build_saved_card(app, store, rec, *, is_first: bool = True,
     up_btn.setToolTip("Move up")
     up_btn.setFixedWidth(32)
     up_btn.setEnabled(not is_first)
-    up_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(app, _id, True))
+    up_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(ctx, _id, True))
     actions.addWidget(up_btn)
     down_btn = QPushButton("▼", card)
     down_btn.setProperty("variant", "secondary")
     down_btn.setToolTip("Move down")
     down_btn.setFixedWidth(32)
     down_btn.setEnabled(not is_last)
-    down_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(app, _id, False))
+    down_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(ctx, _id, False))
     actions.addWidget(down_btn)
     restore_btn = QPushButton("Restore settings", card)
     restore_btn.setToolTip("Re-apply these parameters and open the source tab.")
-    restore_btn.clicked.connect(lambda _=False, _id=rec.id: C.restore_saved_plot(app, _id))
+    restore_btn.clicked.connect(lambda _=False, _id=rec.id: C.restore_saved_plot(ctx, _id))
     actions.addWidget(restore_btn)
     rename_btn = QPushButton("Rename", card)
     rename_btn.setProperty("variant", "secondary")
-    rename_btn.clicked.connect(lambda _=False, _id=rec.id, _t=rec.title: _rename(app, _id, _t))
+    rename_btn.clicked.connect(lambda _=False, _id=rec.id, _t=rec.title: _rename(ctx, _id, _t))
     actions.addWidget(rename_btn)
     export_btn = QPushButton("Export…", card)
     export_btn.setProperty("variant", "secondary")
-    export_btn.clicked.connect(lambda _=False, _id=rec.id: C.export_saved_plot(app, _id))
+    export_btn.clicked.connect(lambda _=False, _id=rec.id: C.export_saved_plot(ctx, _id))
     actions.addWidget(export_btn)
     actions.addStretch(1)
     del_btn = QPushButton("Delete", card)
     del_btn.setProperty("variant", "secondary")
-    del_btn.clicked.connect(lambda _=False, _id=rec.id: C.delete_saved_plot(app, _id))
+    del_btn.clicked.connect(lambda _=False, _id=rec.id: C.delete_saved_plot(ctx, _id))
     actions.addWidget(del_btn)
     v.addLayout(actions)
 
     return card
 
 
-def _rename(app, plot_id: str, current: str) -> None:
+def _rename(ctx, plot_id: str, current: str) -> None:
     try:
         new_name, ok = QInputDialog.getText(
             None, "Rename saved plot", "Name:", text=current or "")
     except Exception:
         return
     if ok and new_name.strip():
-        C.rename_saved_plot(app, plot_id, new_name.strip())
+        C.rename_saved_plot(ctx, plot_id, new_name.strip())

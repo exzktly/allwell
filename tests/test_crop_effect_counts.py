@@ -56,9 +56,12 @@ def test_effect_no_centroids_fails_open():
 
 # ── aggregation over the cache ────────────────────────────────────────────────
 def _app(cache, region):
-    return SimpleNamespace(
+    app = SimpleNamespace(
         _app_state=SimpleNamespace(
             dataset=SimpleNamespace(cache=cache, crop_region=region)))
+    # _crop_effect_counts reads the region through get_crop_region(ctx) (R1).
+    app._ctx = SimpleNamespace(state=app._app_state, app=app)
+    return app
 
 
 def test_counts_aggregate_over_loaded_wells():
@@ -67,12 +70,12 @@ def test_counts_aggregate_over_loaded_wells():
         "A02": _df([4, 12], [6, 18]),   # 1 inside, 1 outside
     }
     app = _app(cache, (0, 0, 8, 12))
-    removed, total_incl, has_centroids, n_wells = crop._crop_effect_counts(app)
+    removed, total_incl, has_centroids, n_wells = crop._crop_effect_counts(app._ctx)
     assert (removed, total_incl, has_centroids, n_wells) == (2, 4, True, 2)
 
 
 def test_counts_flag_missing_centroids_dataset_wide():
     cache = {"A01": pd.DataFrame({"area_px": [1, 2], "Included": [1, 1]})}
     app = _app(cache, (0, 0, 5, 5))
-    removed, total_incl, has_centroids, n_wells = crop._crop_effect_counts(app)
+    removed, total_incl, has_centroids, n_wells = crop._crop_effect_counts(app._ctx)
     assert has_centroids is False and removed == 0 and n_wells == 1

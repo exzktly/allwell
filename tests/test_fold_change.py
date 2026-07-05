@@ -213,7 +213,7 @@ def test_first_tp_value_empty():
 def test_fold_change_state_reads_app(mock_app):
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
-    assert fold_change_state(mock_app) == (True, "CTRL", False)
+    assert fold_change_state(mock_app._ctx) == (True, "CTRL", False)
 
 
 def test_fold_change_suffix_off():
@@ -253,7 +253,7 @@ def test_fold_change_suffix_for_uses_resolved_baseline():
             fc_vs_control_on=False, fc_vs_t0_on=True, fc_control_label="",
             fc_op_ctrl="ratio", fc_op_t0="subtract", fc_baseline_tp=baseline_tp,
         )
-        return SimpleNamespace(_app_state=SimpleNamespace(plot=plot))
+        return SimpleNamespace(state=SimpleNamespace(plot=plot))
 
     assert "vs t=24h (subtraction)" in fold_change_suffix_for(_app("24"))
     # Empty baseline → each member's earliest point.
@@ -263,29 +263,29 @@ def test_fold_change_suffix_for_uses_resolved_baseline():
 # ── resolve_control_wells ───────────────────────────────────────────────────
 
 def test_resolve_control_wells_rep_set(mock_app):
-    assert resolve_control_wells(mock_app, "CTRL") == ["A01", "A02"]
+    assert resolve_control_wells(mock_app._ctx, "CTRL") == ["A01", "A02"]
 
 
 def test_resolve_control_wells_solo(mock_app):
-    assert resolve_control_wells(mock_app, "C01") == ["C01"]
+    assert resolve_control_wells(mock_app._ctx, "C01") == ["C01"]
 
 
 def test_resolve_control_wells_unknown(mock_app):
-    assert resolve_control_wells(mock_app, "ZZ99") == []
+    assert resolve_control_wells(mock_app._ctx, "ZZ99") == []
 
 
 def test_resolve_control_wells_empty(mock_app):
-    assert resolve_control_wells(mock_app, "") == []
-    assert resolve_control_wells(mock_app, None) == []
+    assert resolve_control_wells(mock_app._ctx, "") == []
+    assert resolve_control_wells(mock_app._ctx, None) == []
 
 
 def test_resolve_control_wells_well_suffix_bypasses_repset(mock_app):
     # Pretend a rep-set is named "A01" — same as a well token.
     mock_app.selections.append({"name": "A01", "wells": ["B01"]})
     # Bare "A01" → rep-set (which points at B01)
-    assert resolve_control_wells(mock_app, "A01") == ["B01"]
+    assert resolve_control_wells(mock_app._ctx, "A01") == ["B01"]
     # Suffixed "A01 (well)" → the actual A01 well
-    assert resolve_control_wells(mock_app, "A01 (well)") == ["A01"]
+    assert resolve_control_wells(mock_app._ctx, "A01 (well)") == ["A01"]
 
 
 # ── member_mean_series / control_mean_at_for_bar ────────────────────────────
@@ -298,7 +298,7 @@ def _kw(threshold=50.0, val_col="gfp", use_sem=True, per_fov_spread=False,
 
 
 def test_member_mean_series_repset_uses_mean_of_means(mock_app):
-    series = member_mean_series(mock_app, "TREAT", **_kw())
+    series = member_mean_series(mock_app._ctx, "TREAT", **_kw())
     # Both B01 and B02 have means 100, 200, 400 — mean-of-means is identical.
     assert math.isclose(series[0.0], 100.0)
     assert math.isclose(series[1.0], 200.0)
@@ -306,38 +306,38 @@ def test_member_mean_series_repset_uses_mean_of_means(mock_app):
 
 
 def test_member_mean_series_solo_well(mock_app):
-    series = member_mean_series(mock_app, "C01", **_kw())
+    series = member_mean_series(mock_app._ctx, "C01", **_kw())
     assert math.isclose(series[0.0], 50.0)
     assert math.isclose(series[2.0], 200.0)
 
 
 def test_member_mean_series_unknown_label(mock_app):
-    assert member_mean_series(mock_app, "ZZ99", **_kw()) == {}
+    assert member_mean_series(mock_app._ctx, "ZZ99", **_kw()) == {}
 
 
 def test_control_mean_at_for_bar_repset(mock_app):
-    v = control_mean_at_for_bar(mock_app, "CTRL", 1.0, **_kw())
+    v = control_mean_at_for_bar(mock_app._ctx, "CTRL", 1.0, **_kw())
     assert math.isclose(v, 100.0)
 
 
 def test_control_mean_at_for_bar_missing_tp(mock_app):
     # Target tp not in any well of the control rep-set.
-    v = control_mean_at_for_bar(mock_app, "CTRL", 99.0, **_kw())
+    v = control_mean_at_for_bar(mock_app._ctx, "CTRL", 99.0, **_kw())
     assert v is None
 
 
 def test_member_first_tp_value_repset(mock_app):
-    v = member_first_tp_value(mock_app, "TREAT", **_kw())
+    v = member_first_tp_value(mock_app._ctx, "TREAT", **_kw())
     assert math.isclose(v, 100.0)  # mean of B01, B02 at t=0
 
 
 def test_member_first_tp_value_well(mock_app):
-    v = member_first_tp_value(mock_app, "C01", **_kw())
+    v = member_first_tp_value(mock_app._ctx, "C01", **_kw())
     assert math.isclose(v, 50.0)
 
 
 def test_member_first_tp_value_unknown(mock_app):
-    assert member_first_tp_value(mock_app, "ZZ99", **_kw()) is None
+    assert member_first_tp_value(mock_app._ctx, "ZZ99", **_kw()) is None
 
 
 # ── build_cell_scaling ──────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ def test_build_cell_scaling_off():
 def test_build_cell_scaling_control_only_divides(mock_app):
     # vs CTRL, ratio: cell value 200 / control mean 100 = 2.0.
     resolver = build_cell_scaling(
-        mock_app, ["B01", "B02"], fc_state=(True, "CTRL", False), **_kw(),
+        mock_app._ctx, ["B01", "B02"], fc_state=(True, "CTRL", False), **_kw(),
     )
     assert math.isclose(_apply_one(resolver, "B01", 1.0, 200.0), 2.0)
     assert math.isclose(_apply_one(resolver, "B02", 1.0, 200.0), 2.0)
@@ -376,7 +376,7 @@ def test_build_cell_scaling_control_subtract(mock_app):
     # S1: with op_ctrl="subtract" the overlay SUBTRACTS the control mean
     # (200 - 100 = 100) instead of always dividing (which gave 2.0).
     resolver = build_cell_scaling(
-        mock_app, ["B01"], fc_state=(True, "CTRL", False),
+        mock_app._ctx, ["B01"], fc_state=(True, "CTRL", False),
         op_ctrl="subtract", **_kw(),
     )
     assert math.isclose(_apply_one(resolver, "B01", 1.0, 200.0), 100.0)
@@ -385,7 +385,7 @@ def test_build_cell_scaling_control_subtract(mock_app):
 def test_build_cell_scaling_t0_only(mock_app):
     # vs t0, ratio: B01/C01 baselines are 100 / 50.
     resolver = build_cell_scaling(
-        mock_app, ["B01", "C01"], fc_state=(False, "", True), **_kw(),
+        mock_app._ctx, ["B01", "C01"], fc_state=(False, "", True), **_kw(),
     )
     assert math.isclose(_apply_one(resolver, "B01", 2.0, 300.0), 3.0)
     assert math.isclose(_apply_one(resolver, "C01", 2.0, 300.0), 6.0)
@@ -394,7 +394,7 @@ def test_build_cell_scaling_t0_only(mock_app):
 def test_build_cell_scaling_both(mock_app):
     # control_mean (100) then t0_mean (100), both ratio: 10000 / 100 / 100 = 1.0.
     resolver = build_cell_scaling(
-        mock_app, ["B01"], fc_state=(True, "CTRL", True), **_kw(),
+        mock_app._ctx, ["B01"], fc_state=(True, "CTRL", True), **_kw(),
     )
     assert math.isclose(_apply_one(resolver, "B01", 1.0, 10000.0), 1.0)
 
@@ -402,7 +402,7 @@ def test_build_cell_scaling_both(mock_app):
 def test_build_cell_scaling_control_missing_is_blank(mock_app):
     # tp 99 doesn't exist in CTRL data → spec.missing → caller blanks the slot.
     resolver = build_cell_scaling(
-        mock_app, ["B01"], fc_state=(True, "CTRL", False), **_kw(),
+        mock_app._ctx, ["B01"], fc_state=(True, "CTRL", False), **_kw(),
     )
     assert resolver("B01", 99.0).missing
 
@@ -412,7 +412,7 @@ def test_build_cell_scaling_per_tp_control(mock_app):
     # between t=0 (50) and t=1 (100), so the same cell value scales differently
     # instead of collapsing to the first tp.
     resolver = build_cell_scaling(
-        mock_app, ["B01"], fc_state=(True, "C01", False), **_kw(),
+        mock_app._ctx, ["B01"], fc_state=(True, "C01", False), **_kw(),
     )
     assert math.isclose(_apply_one(resolver, "B01", 0.0, 100.0), 2.0)   # /50
     assert math.isclose(_apply_one(resolver, "B01", 1.0, 100.0), 1.0)   # /100
@@ -521,7 +521,7 @@ def test_normalize_pts_control_means_still_works():
 
 
 def test_member_stats_series_returns_means_and_spreads(mock_app):
-    series = member_stats_series(mock_app, "TREAT", **_kw())
+    series = member_stats_series(mock_app._ctx, "TREAT", **_kw())
     # MockApp._compute_rep_stats returns (mean, 0.0, frac, 0.0) — spread
     # is 0 here, but the shape we care about is (mean, spread).
     for t, (m, s) in series.items():
@@ -531,7 +531,7 @@ def test_member_stats_series_returns_means_and_spreads(mock_app):
 
 
 def test_control_stats_at_for_bar_returns_tuple(mock_app):
-    stats = control_stats_at_for_bar(mock_app, "CTRL", 1.0, **_kw())
+    stats = control_stats_at_for_bar(mock_app._ctx, "CTRL", 1.0, **_kw())
     assert stats is not None
     mean, spread = stats
     assert math.isclose(mean, 100.0)
@@ -539,7 +539,7 @@ def test_control_stats_at_for_bar_returns_tuple(mock_app):
 
 
 def test_member_first_tp_stats_returns_tuple(mock_app):
-    stats = member_first_tp_stats(mock_app, "C01", **_kw())
+    stats = member_first_tp_stats(mock_app._ctx, "C01", **_kw())
     assert stats is not None
     mean, spread = stats
     assert math.isclose(mean, 50.0)

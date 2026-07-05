@@ -26,7 +26,7 @@ def test_qc_gate_excludes_small_cells_via_chokepoint(loaded_app):
     incl_before = int(df_included_mask(df).sum())
     thresh = float(areas.median()) + 1.0
 
-    set_qc_params(app, QCParams(enabled=True, min_area=thresh))
+    set_qc_params(app._ctx, QCParams(enabled=True, min_area=thresh))
 
     df2 = app._get_rows(well)
     # Non-destructive: no rows removed.
@@ -35,12 +35,12 @@ def test_qc_gate_excludes_small_cells_via_chokepoint(loaded_app):
     # The chokepoint now excludes the sub-threshold cells.
     incl_after = int(df_included_mask(df2).sum())
     assert incl_after < incl_before
-    assert get_qc_params(app).min_area == thresh
+    assert get_qc_params(app._ctx).min_area == thresh
 
 
 def test_qc_disabled_includes_everything(loaded_app):
     app = loaded_app
-    set_qc_params(app, QCParams(enabled=False))
+    set_qc_params(app._ctx, QCParams(enabled=False))
     well = sorted(app._app_state.dataset.well_paths)[0]
     df = app._get_rows(well)
     # QC_Pass all-pass when disabled → chokepoint == manual Included only.

@@ -35,12 +35,17 @@ class _RedrawCounter:
     """Tally every invocation of the line / bar scope redraw callables.
 
     The bar scope only enters through the scope coalescer, so wrapping
-    the scope's callable is enough. The line scope enters through TWO
-    paths: the coalescer (channel / fold-change) and the
-    ``dataset_loaded`` subscriber (which calls ``app._redraw`` directly
-    for a full post-load redraw). Wrap both so every effective redraw
-    is observed exactly once. Wrappers call through to the originals so
-    the app behaves normally; ``restore()`` undoes both wrappings.
+    the scope's callable is enough. The line scope enters through THREE
+    paths, each resolving a *different* binding of
+    ``plot_orchestrator.redraw_app``: the coalescer (via the line scope's
+    closure ``_redraw_app_scope``), the ``dataset_loaded`` subscriber (via
+    ``app._redraw``, runtime_app's module-top binding), and the tab-switch
+    activation (``on_tab_change`` / ``_activate_default_plot``, which import
+    ``redraw_app`` function-locally and so resolve the *module* attribute).
+    Wrap all three — the two scope/app callables plus the module attribute —
+    so every effective redraw is observed exactly once. The three bindings are
+    disjoint, so no path is double-counted. Wrappers call through to the
+    originals; ``restore()`` undoes every wrapping.
     """
 
     def __init__(self, app) -> None:
@@ -59,6 +64,14 @@ class _RedrawCounter:
         self._original_app_redraw = app._redraw
         app._redraw = self._wrap("line", app._redraw)
 
+        # The tab-switch activation path (``on_tab_change`` /
+        # ``_activate_default_plot``) imports ``redraw_app`` function-locally, so
+        # it resolves the module attribute — patch that too.
+        import well_viewer.core.plot_orchestrator as _po
+        self._po = _po
+        self._original_redraw_app = _po.redraw_app
+        _po.redraw_app = self._wrap("line", _po.redraw_app)
+
     def _wrap(self, name, original):
         def _counted(*args, **kwargs):
             self.counts[name] += 1
@@ -72,6 +85,7 @@ class _RedrawCounter:
         for scope in self._original_scopes.values():
             register_fold_change_scope(scope)
         self.app._redraw = self._original_app_redraw
+        self._po.redraw_app = self._original_redraw_app
 
     @property
     def total(self) -> int:
@@ -102,7 +116,7 @@ def test_channel_change_redraws_visible_bar_scope_once(counted_app):
     _show_centre_tab(app, "Bar Plots")
     counter.reset()
 
-    set_active_channel(app, "mcherry")
+    set_active_channel(app._ctx, "mcherry")
 
     assert counter.counts["bar"] == 1, "visible bar scope must redraw exactly once"
     assert counter.counts["line"] == 0, "hidden line scope must defer (no redraw)"
@@ -114,7 +128,7 @@ def test_channel_change_redraws_visible_line_scope_once(counted_app):
     _show_centre_tab(app, "Line Graphs")
     counter.reset()
 
-    set_active_channel(app, "mcherry")
+    set_active_channel(app._ctx, "mcherry")
 
     assert counter.counts["line"] == 1, "visible line scope must redraw exactly once"
     assert counter.counts["bar"] == 0, "hidden bar scope must defer (no redraw)"
@@ -128,7 +142,7 @@ def test_fold_change_toggle_redraws_visible_scope_once(counted_app):
     _show_centre_tab(app, "Bar Plots")
     counter.reset()
 
-    set_fold_change_state(app, vs_t0_on=True)
+    set_fold_change_state(app._ctx, vs_t0_on=True)
 
     assert counter.counts["bar"] == 1, "fold-change toggle must redraw the bar scope once"
     assert counter.counts["line"] == 0, "hidden line scope must defer"
@@ -172,7 +186,7 @@ def test_deferred_scope_flushes_exactly_once_on_tab_switch(counted_app):
     # Act on the bar scope while line is hidden -> line is marked dirty.
     _show_centre_tab(app, "Bar Plots")
     counter.reset()
-    set_active_channel(app, "mcherry")
+    set_active_channel(app._ctx, "mcherry")
     assert counter.counts["line"] == 0, "hidden line scope must not redraw eagerly"
 
     # Switching to the line tab flushes the one deferred redraw — and only one.

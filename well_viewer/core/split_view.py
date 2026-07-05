@@ -9,14 +9,14 @@ call:
     install_split_view(app)          # ← comment this out to remove the feature
 
 With that call commented out, no toggle button is ever created, so the user can
-never enter split, ``app._split_active`` is never set, and the provider hooks on
+never enter split, ``app._ctx.runtime.split.active`` is never set, and the provider hooks on
 ``tab_controller`` stay ``None`` — ``current_centre_tab`` / ``visible_centre_tabs``
 / ``is_tab_visible`` then resolve to the single current tab exactly as before, the
 live-refresh chokepoints fan out to one tab, and none of the reparenting / focus
 / entry-UI code below is ever reached.
 
 Mechanics: the centre notebook is hidden and its two chosen top-level pages are
-reparented into ``app._split_pane`` (a horizontal ``QSplitter``). The focused
+reparented into ``app._ctx.runtime.split.pane`` (a horizontal ``QSplitter``). The focused
 pane drives the sidebar (via the ``split_focus_provider`` hook); both panes are
 reported visible (via ``split_visible_provider``) so the chokepoints refresh each.
 Two instances of the *same* tab are out of scope — feature figures/state are
@@ -49,19 +49,19 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
     """Show *tab_a* and *tab_b* side-by-side, both live; *tab_a* is focused.
 
     Both bodies are force-built if still deferred, detached from the hidden
-    notebook into ``app._split_pane``, and the focused pane drives the sidebar.
+    notebook into ``app._ctx.runtime.split.pane``, and the focused pane drives the sidebar.
     No-op if the names match or the centre isn't built.
     """
     if not tab_a or not tab_b or tab_a == tab_b:
         return
     nb = getattr(app, "_notebook", None)
-    split = getattr(app, "_split_pane", None)
+    split = app._ctx.runtime.split.pane
     if nb is None or split is None:
         return
-    if getattr(app, "_split_active", False):
+    if app._ctx.runtime.split.active:
         exit_split(app)
     # Force-build deferred bodies before detaching so panes are never blank.
-    build = getattr(app, "_centre_build_pending", None)
+    build = app._ctx.runtime.centre.build_pending
     if callable(build):
         for t in (tab_a, tab_b):
             try:
@@ -70,10 +70,10 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
                 _logger.exception("Split: deferred build for %r failed", t)
     # Set state first so any notebook signal fired mid-detach resolves to the
     # focused pane rather than a stale leaf.
-    app._split_active = True
-    app._split_tab_a = tab_a
-    app._split_tab_b = tab_b
-    app._split_focused = tab_a
+    app._ctx.runtime.split.active = True
+    app._ctx.runtime.split.tab_a = tab_a
+    app._ctx.runtime.split.tab_b = tab_b
+    app._ctx.runtime.split.focused = tab_a
     blocked = nb.blockSignals(True)
     try:
         wa = nb.detachPage(tab_a)
@@ -90,10 +90,10 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
                 nb.reattachPage(tab_b, wb)
         finally:
             nb.blockSignals(blocked)
-        app._split_active = False
-        app._split_tab_a = app._split_tab_b = app._split_focused = None
+        app._ctx.runtime.split.active = False
+        app._ctx.runtime.split.tab_a = app._ctx.runtime.split.tab_b = app._ctx.runtime.split.focused = None
         return
-    app._split_pane_widgets = {tab_a: wa, tab_b: wb}
+    app._ctx.runtime.split.pane_widgets = {tab_a: wa, tab_b: wb}
     split.addWidget(wa)
     split.addWidget(wb)
     wa.show()
@@ -102,27 +102,27 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
     split.setVisible(True)
     nb.setVisible(False)
     _install_split_focus_filter(app)
-    on_tab_change(app, None)
+    on_tab_change(app._ctx, None)
 
 
 def exit_split(app) -> None:
     """Tear down Split View: reattach both panes (original order) and show the
     notebook again, focused on the former pane A."""
-    if not getattr(app, "_split_active", False):
+    if not app._ctx.runtime.split.active:
         return
     nb = getattr(app, "_notebook", None)
-    split = getattr(app, "_split_pane", None)
-    a = app._split_tab_a
-    b = app._split_tab_b
-    widgets = getattr(app, "_split_pane_widgets", {}) or {}
+    split = app._ctx.runtime.split.pane
+    a = app._ctx.runtime.split.tab_a
+    b = app._ctx.runtime.split.tab_b
+    widgets = app._ctx.runtime.split.pane_widgets or {}
     wa = widgets.get(a)
     wb = widgets.get(b)
     for w in (wa, wb):
         if w is not None:
             w.setParent(None)
-    app._split_active = False
-    app._split_tab_a = app._split_tab_b = app._split_focused = None
-    app._split_pane_widgets = {}
+    app._ctx.runtime.split.active = False
+    app._ctx.runtime.split.tab_a = app._ctx.runtime.split.tab_b = app._ctx.runtime.split.focused = None
+    app._ctx.runtime.split.pane_widgets = {}
     _remove_split_focus_filter(app)
     if split is not None:
         split.setVisible(False)
@@ -138,24 +138,24 @@ def exit_split(app) -> None:
                 nb.setCurrentByName(a)
         finally:
             nb.blockSignals(blocked)
-    on_tab_change(app, None)
+    on_tab_change(app._ctx, None)
 
 
 def focus_split(app, top: str) -> None:
     """Make pane *top* the focused one (drives the sidebar). No-op off split."""
-    if not getattr(app, "_split_active", False) or not top:
+    if not app._ctx.runtime.split.active or not top:
         return
-    if getattr(app, "_split_focused", None) == top:
+    if app._ctx.runtime.split.focused == top:
         return
-    app._split_focused = top
-    on_tab_change(app, None)
+    app._ctx.runtime.split.focused = top
+    on_tab_change(app._ctx, None)
 
 
 # ── Focused-pane click watcher ───────────────────────────────────────────────
 
 def _resolve_focused_pane(app, obj):
     """Map a clicked widget to the top-level name of the pane that contains it."""
-    widgets = getattr(app, "_split_pane_widgets", {}) or {}
+    widgets = app._ctx.runtime.split.pane_widgets or {}
     if not widgets:
         return None
     node = obj
@@ -196,7 +196,7 @@ class _SplitFocusWatcher(QObject):
 
     def on_focus_changed(self, _old, new) -> None:  # noqa: N802 (Qt slot)
         try:
-            active = bool(getattr(self._app, "_split_active", False))
+            active = bool(self._app._ctx.runtime.split.active)
         except RuntimeError:
             return  # underlying C++ app already deleted — nothing to do
         if not active or new is None:
@@ -220,10 +220,10 @@ class _SplitFocusWatcher(QObject):
 
 
 def _install_split_focus_filter(app) -> None:
-    watcher = getattr(app, "_split_focus_filter", None)
+    watcher = app._ctx.runtime.split.focus_filter
     if watcher is None:
         watcher = _SplitFocusWatcher(app)
-        app._split_focus_filter = watcher
+        app._ctx.runtime.split.focus_filter = watcher
     qapp = QApplication.instance()
     if qapp is not None and not watcher._connected:
         # Idempotent via the tracked flag: connect once. We deliberately do NOT
@@ -234,7 +234,7 @@ def _install_split_focus_filter(app) -> None:
 
 
 def _remove_split_focus_filter(app) -> None:
-    watcher = getattr(app, "_split_focus_filter", None)
+    watcher = app._ctx.runtime.split.focus_filter
     if watcher is None:
         return
     qapp = QApplication.instance()
@@ -250,7 +250,7 @@ def _remove_split_focus_filter(app) -> None:
 
 def sync_split_toggle_button(app, checked: bool) -> None:
     """Reflect *checked* on the top-bar split toggle without re-firing it."""
-    btn = getattr(app, "_split_toggle_btn", None)
+    btn = app._ctx.runtime.split.toggle_btn
     if btn is None:
         return
     blocked = btn.blockSignals(True)
@@ -258,15 +258,15 @@ def sync_split_toggle_button(app, checked: bool) -> None:
         btn.setChecked(checked)
     finally:
         btn.blockSignals(blocked)
-    combo = getattr(app, "_split_pane_combo", None)
+    combo = app._ctx.runtime.split.pane_combo
     if combo is not None:
         combo.setVisible(checked)
 
 
 def on_split_toggle_clicked(app) -> None:
     """Top-bar split toggle: pane A = current tab, pane B = dropdown pick."""
-    btn = app._split_toggle_btn
-    combo = app._split_pane_combo
+    btn = app._ctx.runtime.split.toggle_btn
+    combo = app._ctx.runtime.split.pane_combo
     if btn.isChecked():
         cur = app._notebook.currentName()
         others = [n for n in app._notebook.pageNames() if n and n != cur]
@@ -290,10 +290,10 @@ def on_split_toggle_clicked(app) -> None:
 
 def on_split_pane_combo_changed(app, _idx: int) -> None:
     """Re-pair pane A with a newly chosen pane B from the dropdown."""
-    if not getattr(app, "_split_active", False):
+    if not app._ctx.runtime.split.active:
         return
-    new_b = app._split_pane_combo.currentText()
-    a = getattr(app, "_split_tab_a", None)
+    new_b = app._ctx.runtime.split.pane_combo.currentText()
+    a = app._ctx.runtime.split.tab_a
     if not new_b or new_b == a:
         return
     exit_split(app)
@@ -302,21 +302,25 @@ def on_split_pane_combo_changed(app, _idx: int) -> None:
 
 # ── Provider hooks registered on tab_controller (None ⇒ feature absent) ───────
 
-def _focused_leaf(app):
-    """Provider for ``current_centre_tab``: the focused pane's leaf, or None."""
-    if not getattr(app, "_split_active", False):
+def _focused_leaf(ctx):
+    """Provider for ``current_centre_tab``: the focused pane's leaf, or None.
+
+    A8: takes ``ctx`` — split flags via ``ctx.runtime.split``, leaf resolution
+    via the now-ctx ``_resolve_leaf``."""
+    if not ctx.runtime.split.active:
         return None
-    return tab_controller._resolve_leaf(app, getattr(app, "_split_focused", None)) or None
+    return tab_controller._resolve_leaf(ctx, ctx.runtime.split.focused) or None
 
 
-def _visible_leaves(app):
-    """Provider for ``visible_centre_tabs``: both panes' leaves, or None."""
-    if not getattr(app, "_split_active", False):
+def _visible_leaves(ctx):
+    """Provider for ``visible_centre_tabs``: both panes' leaves, or None.
+
+    A8: takes ``ctx`` (split flags via ``ctx.runtime.split``)."""
+    if not ctx.runtime.split.active:
         return None
     out = {
-        leaf for top in (getattr(app, "_split_tab_a", None),
-                         getattr(app, "_split_tab_b", None))
-        if (leaf := tab_controller._resolve_leaf(app, top))
+        leaf for top in (ctx.runtime.split.tab_a, ctx.runtime.split.tab_b)
+        if (leaf := tab_controller._resolve_leaf(ctx, top))
     }
     return out or None
 
@@ -324,7 +328,7 @@ def _visible_leaves(app):
 def _nav_intercept(app, _key) -> bool:
     """Rail navigation while split: exit split first, then let the normal
     ``setCurrentByName`` proceed (returns False = not consumed)."""
-    if getattr(app, "_split_active", False):
+    if app._ctx.runtime.split.active:
         exit_split(app)
         sync_split_toggle_button(app, False)
     return False
@@ -332,7 +336,7 @@ def _nav_intercept(app, _key) -> bool:
 
 def _exit_on_mode(app) -> None:
     """Leave Split View when the Review/Analyze mode switches."""
-    if getattr(app, "_split_active", False):
+    if app._ctx.runtime.split.active:
         exit_split(app)
         sync_split_toggle_button(app, False)
 
@@ -342,7 +346,7 @@ def _exit_on_mode(app) -> None:
 def install_split_view(app) -> None:
     """Wire up Split View. This is the *only* line to comment out to remove it.
 
-    Builds ``app._split_pane``, the top-bar toggle + right-pane dropdown, and
+    Builds ``app._ctx.runtime.split.pane``, the top-bar toggle + right-pane dropdown, and
     registers the provider hooks on ``tab_controller`` so the resolvers become
     split-aware. Tolerant of a missing top bar / centre layout / ``modeChanged``
     signal so it can also be driven in tests against a minimal stub app.
@@ -364,10 +368,10 @@ def install_split_view(app) -> None:
         split.setParent(parent)
     if layout is not None:
         layout.addWidget(split, 1)
-    app._split_pane = split
-    app._split_active = False
-    app._split_tab_a = app._split_tab_b = app._split_focused = None
-    app._split_pane_widgets = {}
+    app._ctx.runtime.split.pane = split
+    app._ctx.runtime.split.active = False
+    app._ctx.runtime.split.tab_a = app._ctx.runtime.split.tab_b = app._ctx.runtime.split.focused = None
+    app._ctx.runtime.split.pane_widgets = {}
 
     # 2. Entry UI — toggle button + right-pane dropdown in the top bar.
     top = getattr(app, "_top_bar", None)
@@ -380,8 +384,8 @@ def install_split_view(app) -> None:
         combo.setToolTip("Right pane")
         combo.setVisible(False)
         combo.currentIndexChanged.connect(lambda i: on_split_pane_combo_changed(app, i))
-        app._split_toggle_btn = btn
-        app._split_pane_combo = combo
+        app._ctx.runtime.split.toggle_btn = btn
+        app._ctx.runtime.split.pane_combo = combo
         # Sit at the right end of the top bar (after the stretch + Open).
         top_layout.addWidget(btn)
         top_layout.addWidget(combo)

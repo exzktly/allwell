@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from well_viewer.data.data_loading import get_rows
 from well_viewer.data.image_resolver import (
     normalize_row_filename,
     resolve_filename_candidates,
@@ -43,7 +44,7 @@ class ScatterCellViewer(QWidget):
     def __init__(
         self,
         parent,
-        app: "WellViewerApp",
+        ctx,
         well_label: str,
         filename: str,
         nuclear_id: str,
@@ -51,7 +52,7 @@ class ScatterCellViewer(QWidget):
     ):
         super().__init__(parent)
 
-        self.app = app
+        self.ctx = ctx
         self.well_label = well_label
         self.filename = normalize_row_filename(filename)
         self.nuclear_id = nuclear_id
@@ -177,9 +178,9 @@ class ScatterCellViewer(QWidget):
 
     @staticmethod
     def _row_dict_at(df, idx: int) -> dict:
-        """Return row ``idx`` of ``_get_rows`` as a ``{column: value}`` dict.
+        """Return row ``idx`` of ``get_rows`` as a ``{column: value}`` dict.
 
-        ``app._get_rows`` returns a ``pandas.DataFrame`` (positional ``df[idx]``
+        ``get_rows`` returns a ``pandas.DataFrame`` (positional ``df[idx]``
         is a *column* lookup → ``KeyError``), so use ``iloc``.
         """
         return dict(df.iloc[idx])
@@ -355,12 +356,12 @@ class ScatterCellViewer(QWidget):
             return
         self._debug(f"parsed_nuclear_id={nuclear_id}")
 
-        if self.well_label not in self.app._app_state.dataset.well_paths:
+        if self.well_label not in self.ctx.state.dataset.well_paths:
             self._img_label.setText(f"Well {self.well_label} is no longer loaded")
             self._debug(f"well_label not in app._app_state.dataset.well_paths: {self.well_label!r}")
             return
 
-        rows = self.app._get_rows(self.well_label)
+        rows = get_rows(self.ctx, self.well_label)
         if not (0 <= self.row_idx < len(rows)):
             self._img_label.setText("Invalid row index")
             self._debug(f"row_idx out of bounds: row_idx={self.row_idx}, rows={len(rows)}")
@@ -375,7 +376,7 @@ class ScatterCellViewer(QWidget):
         self._row_timepoint = str(row.get("timepoint") or "").strip()
         self._debug(f"csv.channel={self._nuclear_token!r}")
         self._debug(f"csv.fov={self._row_fov!r}  csv.timepoint={self._row_timepoint!r}")
-        self._debug(f"fluor channels to probe={sorted(self.app._app_state.channel.fluor_channels)!r}")
+        self._debug(f"fluor channels to probe={sorted(self.ctx.state.channel.fluor_channels)!r}")
 
         mask_arr, mask_path = self._load_output_image_by_filename("mask")
         # Mask-content sanity: log shape, label cardinality, and whether
@@ -416,7 +417,7 @@ class ScatterCellViewer(QWidget):
             self._cell_outline_mask = None
             self._debug(f"failed to compute cell outline mask: {e!r}")
 
-        for ch in sorted(self.app._app_state.channel.fluor_channels):
+        for ch in sorted(self.ctx.state.channel.fluor_channels):
             self._debug(f"loading fluor channel {ch!r}...")
             arr = self._load_and_crop_channel(ch)
             if arr is not None:
@@ -442,7 +443,7 @@ class ScatterCellViewer(QWidget):
         else:
             self._debug("  -> mask unavailable")
 
-        available_channels = [ch for ch in sorted(self.app._app_state.channel.fluor_channels) if self._cell_images.get(ch) is not None]
+        available_channels = [ch for ch in sorted(self.ctx.state.channel.fluor_channels) if self._cell_images.get(ch) is not None]
         if nuc_key in self._cell_images and nuc_key not in available_channels:
             available_channels.append(nuc_key)
         if "nuclear" in self._cell_images:
@@ -484,7 +485,7 @@ class ScatterCellViewer(QWidget):
                 open_imgref_as_array,
             )
 
-            pipeline_info = self.app._app_state.dataset.pipeline_info
+            pipeline_info = self.ctx.state.dataset.pipeline_info
             candidates = resolve_filename_candidates(
                 self.filename,
                 pipeline_info=pipeline_info,
@@ -502,8 +503,8 @@ class ScatterCellViewer(QWidget):
             if well_token is None:
                 return None, f"could not extract well_token from {self.well_label!r}"
 
-            data_dir = self.app._app_state.dataset.data_dir
-            in_dir = self.app._app_state.dataset.in_dir
+            data_dir = self.ctx.state.dataset.data_dir
+            in_dir = self.ctx.state.dataset.in_dir
             zips: list = []
             if data_dir and data_dir.is_dir():
                 zips = find_out_well_zips_in_dir(data_dir, well_token)
@@ -713,8 +714,8 @@ class ScatterCellViewer(QWidget):
                 self._debug(f"could not parse well token from {self.well_label!r} for nuclear image load")
                 return None
 
-            in_dir = self.app._app_state.dataset.in_dir
-            data_dir = self.app._app_state.dataset.data_dir
+            in_dir = self.ctx.state.dataset.in_dir
+            data_dir = self.ctx.state.dataset.data_dir
 
             zips: list = []
             if in_dir and in_dir.is_dir():
@@ -723,7 +724,7 @@ class ScatterCellViewer(QWidget):
                 zips = find_well_zips_in_dir(data_dir, well_token)
             self._debug(f"nuclear image zip search target={self.filename!r}, zips={[str(z) for z in zips]!r}")
 
-            pipeline_info = self.app._app_state.dataset.pipeline_info
+            pipeline_info = self.ctx.state.dataset.pipeline_info
             target_names = resolve_filename_candidates(
                 self.filename,
                 pipeline_info=pipeline_info,
@@ -790,7 +791,7 @@ class ScatterCellViewer(QWidget):
                 open_imgref_as_array,
             )
 
-            pipeline_info = self.app._app_state.dataset.pipeline_info
+            pipeline_info = self.ctx.state.dataset.pipeline_info
             target_names = resolve_filename_candidates(
                 self.filename,
                 pipeline_info=pipeline_info,
@@ -806,8 +807,8 @@ class ScatterCellViewer(QWidget):
                 self._debug(f"channel={channel_token}: could not parse well token from {self.well_label!r}")
                 return None
 
-            in_dir = self.app._app_state.dataset.in_dir
-            data_dir = self.app._app_state.dataset.data_dir
+            in_dir = self.ctx.state.dataset.in_dir
+            data_dir = self.ctx.state.dataset.data_dir
 
             zips: list = []
             if in_dir and in_dir.is_dir():
@@ -1058,7 +1059,7 @@ _CELL_VIEWER_WIDTH = 380
 
 
 def open_scatter_cell_viewer(
-    app,
+    ctx,
     well_label: str,
     filename: str,
     nuclear_id: str,
@@ -1069,11 +1070,13 @@ def open_scatter_cell_viewer(
     of them is visible at a time (no disruptive modal pop-up window)."""
     from well_viewer.core.ui_helpers import mount_widget_in_plot_dock
 
-    dock = getattr(app, "_scatter_export_dock", None)
-    viewer = getattr(app, "_scatter_cell_viewer", None)
+    # The dock is a registered widget; the viewer itself is a live session
+    # object in the scatter runtime namespace (never persisted).
+    dock = ctx.widgets.get_or_none("_scatter_export_dock")
+    viewer = ctx.runtime.scatter.cell_viewer
     if viewer is None:
-        viewer = ScatterCellViewer(dock, app, well_label, filename, nuclear_id, row_idx)
-        app._scatter_cell_viewer = viewer
+        viewer = ScatterCellViewer(dock, ctx, well_label, filename, nuclear_id, row_idx)
+        ctx.runtime.scatter.cell_viewer = viewer
     else:
         viewer.update_cell(well_label, filename, nuclear_id, row_idx)
 

@@ -1,6 +1,6 @@
 """Image Table tab — non-UI controller logic.
 
-These functions are bound onto the runtime app (via ``runtime_app.py``)
+These functions are bound onto the runtime ctx (via ``runtime_app.py``)
 and drive the Image Table tab:
 
 - multi-select sidebar picker (ignores groupings / replicate sets)
@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 )
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import set_combo_values
+from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.core.channel_state_controller import set_thresh_frac_on
 
 
 # ── LUT colour palette ──────────────────────────────────────────────────────
@@ -76,30 +78,30 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
 # ── Sidebar picker ───────────────────────────────────────────────────────────
 
 
-def image_table_refresh_picker(app) -> None:
+def image_table_refresh_picker(ctx) -> None:
     """Push the active-well set onto the sidebar plate and update the count label."""
-    plate = getattr(app, "_sidebar_image_table_plate", None)
+    plate = ctx.runtime.image_table.sidebar_plate
     if plate is not None:
-        plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
+        plate.setEnabledWells(list(ctx.state.dataset.well_paths.keys()))
         active = sorted(
-            (w for w in app._app_state.image_table.active_wells if w in app._app_state.dataset.well_paths),
-            key=app._parse_rc,
+            (w for w in ctx.state.image_table.active_wells if w in ctx.state.dataset.well_paths),
+            key=parse_rc,
         )
         plate.setSelectedWellIds(active)
-    lbl = getattr(app, "_image_table_count_lbl", None)
+    lbl = getattr(ctx.runtime.image_table, "count_lbl", None)
     if lbl is not None:
-        n = len(app._app_state.image_table.active_wells)
+        n = len(ctx.state.image_table.active_wells)
         lbl.setText(f"{n} well{'s' if n != 1 else ''} active")
 
 
-def image_table_select_all(app) -> None:
-    app._app_state.image_table.active_wells = set(app._app_state.dataset.well_paths.keys())
-    image_table_refresh_picker(app)
+def image_table_select_all(ctx) -> None:
+    ctx.state.image_table.active_wells = set(ctx.state.dataset.well_paths.keys())
+    image_table_refresh_picker(ctx)
 
 
-def image_table_clear_active(app) -> None:
-    app._app_state.image_table.active_wells = set()
-    image_table_refresh_picker(app)
+def image_table_clear_active(ctx) -> None:
+    ctx.state.image_table.active_wells = set()
+    image_table_refresh_picker(ctx)
 
 
 # ── Pipeline-info-driven dropdown options ────────────────────────────────────
@@ -145,29 +147,29 @@ from well_viewer.features.image_browser.image_table.grid_layout import (  # noqa
 
 
 
-def image_table_repopulate_dropdowns(app) -> None:
+def image_table_repopulate_dropdowns(ctx) -> None:
     """Refresh option lists for the global row, the per-row channel combos, and every cell.
 
     Called when pipeline info / wells become available after the tab is
     already built. Existing selections are preserved when still valid.
     """
-    chan_opts = _channel_options(app)
-    tp_opts = _timepoint_options(app)
-    fov_opts = _fov_options(app)
-    well_opts = _well_options(app)
+    chan_opts = _channel_options(ctx)
+    tp_opts = _timepoint_options(ctx)
+    fov_opts = _fov_options(ctx)
+    well_opts = _well_options(ctx)
 
-    if hasattr(app, "_image_table_global_chan_cb"):
-        set_combo_values(app._image_table_global_chan_cb, chan_opts)
-    if hasattr(app, "_image_table_global_tp_cb"):
-        set_combo_values(app._image_table_global_tp_cb, tp_opts)
-        set_combo_values(app._image_table_global_fov_cb, fov_opts)
+    if ctx.runtime.image_table.global_chan_cb is not None:
+        set_combo_values(ctx.runtime.image_table.global_chan_cb, chan_opts)
+    if ctx.runtime.image_table.global_tp_cb is not None:
+        set_combo_values(ctx.runtime.image_table.global_tp_cb, tp_opts)
+        set_combo_values(ctx.runtime.image_table.global_fov_cb, fov_opts)
 
-    for cb in getattr(app, "_image_table_row_chan_cbs", None) or []:
+    for cb in getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []:
         set_combo_values(cb, chan_opts)
-    for cb in getattr(app, "_image_table_row_well_cbs", None) or []:
+    for cb in getattr(ctx.runtime.image_table, "row_well_cbs", None) or []:
         set_combo_values(cb, well_opts)
 
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for row in cells:
         for cell in row:
             set_combo_values(cell["well_cb"], well_opts)
@@ -178,28 +180,28 @@ def image_table_repopulate_dropdowns(app) -> None:
     # The LUT/Display row is built once at tab-construction time, when the grid
     # may not exist yet. Rebuild it now so a per-row box appears for each grid
     # row. ``build_lut_row`` preserves prior per-row values across rebuilds.
-    cells = getattr(app, "_image_table_cells", None) or []
-    existing = set((getattr(app, "_image_table_lut", None) or {}).keys())
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
+    existing = set((getattr(ctx.runtime.image_table, "lut", None) or {}).keys())
     if set(range(len(cells))) != existing:
-        image_table_rebuild_lut_row(app)
+        image_table_rebuild_lut_row(ctx)
 
     # Keep the sidebar channel multi-select in sync with the dataset's channels.
-    image_table_refresh_channel_picker(app)
+    image_table_refresh_channel_picker(ctx)
 
 
 # ── Selector-grid build / rebuild ────────────────────────────────────────────
 
 
-def image_table_apply_dimensions(app) -> None:
+def image_table_apply_dimensions(ctx) -> None:
     """Read rows / cols spinners and rebuild the selector grid."""
-    rows = int(app._image_table_rows_spin.value())
-    cols = int(app._image_table_cols_spin.value())
-    app._app_state.image_table.rows = rows
-    app._app_state.image_table.cols = cols
-    image_table_rebuild_grid(app)
+    rows = int(ctx.runtime.image_table.rows_spin.value())
+    cols = int(ctx.runtime.image_table.cols_spin.value())
+    ctx.state.image_table.rows = rows
+    ctx.state.image_table.cols = cols
+    image_table_rebuild_grid(ctx)
 
 
-def image_table_rebuild_grid(app) -> None:
+def image_table_rebuild_grid(ctx) -> None:
     """Rebuild the selector grid (rows × cols of cell groupboxes) plus the
     per-row channel + LUT-colour column at column 0."""
     from well_viewer.features.image_browser.image_table.grid_view import build_image_table_grid
@@ -210,16 +212,16 @@ def image_table_rebuild_grid(app) -> None:
         image_table_remove_row,
     )
 
-    rows = int(getattr(app._app_state.image_table, "rows", 2) or 2)
-    cols = int(getattr(app._app_state.image_table, "cols", 3) or 3)
+    rows = int(getattr(ctx.state.image_table, "rows", 2) or 2)
+    cols = int(getattr(ctx.state.image_table, "cols", 3) or 3)
 
-    chan_opts = _channel_options(app)
-    tp_opts = _timepoint_options(app)
-    fov_opts = _fov_options(app)
-    well_opts = _well_options(app)
+    chan_opts = _channel_options(ctx)
+    tp_opts = _timepoint_options(ctx)
+    fov_opts = _fov_options(ctx)
+    well_opts = _well_options(ctx)
 
     cells, row_chan_cbs, row_well_cbs = build_image_table_grid(
-        app,
+        ctx,
         rows=rows,
         cols=cols,
         chan_opts=chan_opts,
@@ -232,11 +234,11 @@ def image_table_rebuild_grid(app) -> None:
         on_remove_col=image_table_remove_col,
     )
 
-    app._image_table_cells = cells
-    app._image_table_row_chan_cbs = row_chan_cbs
-    app._image_table_row_well_cbs = row_well_cbs
+    ctx.runtime.image_table.cells = cells
+    ctx.runtime.image_table.row_chan_cbs = row_chan_cbs
+    ctx.runtime.image_table.row_well_cbs = row_well_cbs
     # The per-row colormap selectors live in the per-row table now and are
-    # (re)created + stored on app by image_table_rebuild_lut_row -> build_lut_row.
+    # (re)created + stored on ctx by image_table_rebuild_lut_row -> build_lut_row.
 
     # Refresh the per-row levels/display table whenever any cell's channel
     # changes so the row labels + Fit pooling track the new assignment. This
@@ -247,10 +249,10 @@ def image_table_rebuild_grid(app) -> None:
             if cb is None:
                 continue
             cb.currentIndexChanged.connect(
-                lambda _i, a=app: image_table_rebuild_lut_row(a)
+                lambda _i, a=ctx: image_table_rebuild_lut_row(a)
             )
 
-    image_table_rebuild_lut_row(app)
+    image_table_rebuild_lut_row(ctx)
 
 
 
@@ -263,7 +265,7 @@ def image_table_rebuild_grid(app) -> None:
 
 
 
-def image_table_apply_global(app, field: str) -> None:
+def image_table_apply_global(ctx, field: str) -> None:
     """Copy a global dropdown's current value into every cell's matching combo.
 
     ``field`` is one of "chan", "tp", "fov". For "chan" the per-row channel
@@ -271,13 +273,13 @@ def image_table_apply_global(app, field: str) -> None:
     channel min/max boxes track the new global channel.
     """
     if field == "chan":
-        src = getattr(app, "_image_table_global_chan_cb", None)
+        src = getattr(ctx.runtime.image_table, "global_chan_cb", None)
         key = "chan_cb"
     elif field == "tp":
-        src = getattr(app, "_image_table_global_tp_cb", None)
+        src = getattr(ctx.runtime.image_table, "global_tp_cb", None)
         key = "tp_cb"
     elif field == "fov":
-        src = getattr(app, "_image_table_global_fov_cb", None)
+        src = getattr(ctx.runtime.image_table, "global_fov_cb", None)
         key = "fov_cb"
     else:
         return
@@ -286,7 +288,7 @@ def image_table_apply_global(app, field: str) -> None:
     value = src.currentText()
     if not value:
         return
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for row in cells:
         for cell in row:
             cb = cell.get(key)
@@ -297,22 +299,22 @@ def image_table_apply_global(app, field: str) -> None:
                 cb.setCurrentText(value)
             cb.blockSignals(False)
     if field == "chan":
-        for cb in getattr(app, "_image_table_row_chan_cbs", None) or []:
+        for cb in getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []:
             cb.blockSignals(True)
             if cb.findText(value) >= 0:
                 cb.setCurrentText(value)
             cb.blockSignals(False)
-        image_table_rebuild_lut_row(app)
+        image_table_rebuild_lut_row(ctx)
 
 
-def image_table_apply_row_well(app, row_idx: int) -> None:
+def image_table_apply_row_well(ctx, row_idx: int) -> None:
     """Copy the per-row well selector's value into every cell in that row.
 
     Mirrors ``image_table_apply_row_channel`` for the well axis: lets the
     user pick a single well for an entire row without clicking each cell.
     """
-    row_cbs = getattr(app, "_image_table_row_well_cbs", None) or []
-    cells = getattr(app, "_image_table_cells", None) or []
+    row_cbs = getattr(ctx.runtime.image_table, "row_well_cbs", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not (0 <= row_idx < len(row_cbs)) or not (0 <= row_idx < len(cells)):
         return
     value = row_cbs[row_idx].currentText()
@@ -328,14 +330,14 @@ def image_table_apply_row_well(app, row_idx: int) -> None:
         cb.blockSignals(False)
 
 
-def image_table_apply_row_channel(app, row_idx: int) -> None:
+def image_table_apply_row_channel(ctx, row_idx: int) -> None:
     """Copy the per-row channel selector's value into every cell in that row.
 
     Cell-level channel dropdowns remain usable for one-off overrides; this
     only fires when the per-row combo changes.
     """
-    row_cbs = getattr(app, "_image_table_row_chan_cbs", None) or []
-    cells = getattr(app, "_image_table_cells", None) or []
+    row_cbs = getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not (0 <= row_idx < len(row_cbs)) or not (0 <= row_idx < len(cells)):
         return
     value = row_cbs[row_idx].currentText()
@@ -349,10 +351,10 @@ def image_table_apply_row_channel(app, row_idx: int) -> None:
         if cb.findText(value) >= 0:
             cb.setCurrentText(value)
         cb.blockSignals(False)
-    image_table_rebuild_lut_row(app)
+    image_table_rebuild_lut_row(ctx)
 
 
-def image_table_distribute_timepoints(app) -> None:
+def image_table_distribute_timepoints(ctx) -> None:
     """Walk the available timepoints and assign one to each column, per row.
 
     Each row gets the same timepoint sequence across its cells, so multi-row
@@ -361,14 +363,14 @@ def image_table_distribute_timepoints(app) -> None:
     per-row well/channel selections made via ``Distribute Wells`` or the
     per-row dropdowns) so distinct rows keep their own well assignments.
     """
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
-        app._set_status("Image Table: build a grid first (set rows/cols).")
+        ctx.set_status("Image Table: build a grid first (set rows/cols).")
         return
 
-    tps = _timepoint_options(app)
+    tps = _timepoint_options(ctx)
     if not tps:
-        app._set_status("Image Table: no timepoints in pipeline_info.json.")
+        ctx.set_status("Image Table: no timepoints in pipeline_info.json.")
         return
 
     def _set(cb, text):
@@ -398,8 +400,8 @@ def image_table_distribute_timepoints(app) -> None:
             _set(cell["tp_cb"], tps[c])
             assignments += 1
 
-    image_table_rebuild_lut_row(app)
-    app._set_status(
+    image_table_rebuild_lut_row(ctx)
+    ctx.set_status(
         f"Image Table: distributed {min(len(tps), len(cells[0]) if cells else 0)} "
         f"timepoint(s) across {len(cells)} row(s) ({assignments} cells filled)."
     )
@@ -424,14 +426,14 @@ _AXIS_MAX = 12  # grid is capped at 12×12; longer axes are truncated
 
 
 
-def _apply_row_channel_styling(app, channels: List[str]) -> None:
+def _apply_row_channel_styling(ctx, channels: List[str]) -> None:
     """When rows are channels, mirror each channel onto its row-0 channel combo
     and default every row to grayscale (Greys). The user can recolor any row
     via its LutSelector — defaulting to grayscale makes channels comparable at a
     glance and avoids implying meaning (e.g. green = GFP) that the data may not
     carry."""
-    row_chan = getattr(app, "_image_table_row_chan_cbs", None) or []
-    row_lut = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    row_chan = getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []
+    row_lut = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
     for r, chan in enumerate(channels):
         if r < len(row_chan) and row_chan[r] is not None:
             cb = row_chan[r]
@@ -451,22 +453,22 @@ def _apply_row_channel_styling(app, channels: List[str]) -> None:
 
 
 
-def image_table_build_layout(app) -> None:
+def image_table_build_layout(ctx) -> None:
     """Auto-size the grid to the chosen row/col axes and fill every cell."""
-    row_axis = _current_axis(app, "row")
-    col_axis = _current_axis(app, "col")
+    row_axis = _current_axis(ctx, "row")
+    col_axis = _current_axis(ctx, "col")
     if row_axis == col_axis:
-        app._set_status("Image Table: choose two different axes for rows and columns.")
+        ctx.set_status("Image Table: choose two different axes for rows and columns.")
         return
 
-    row_vals = _axis_values(app, row_axis)
-    col_vals = _axis_values(app, col_axis)
+    row_vals = _axis_values(ctx, row_axis)
+    col_vals = _axis_values(ctx, col_axis)
     if not row_vals:
-        app._set_status(f"Image Table: nothing on the {_AXIS_LABEL[row_axis]} axis "
+        ctx.set_status(f"Image Table: nothing on the {_AXIS_LABEL[row_axis]} axis "
                         f"(select some in the sidebar).")
         return
     if not col_vals:
-        app._set_status(f"Image Table: nothing on the {_AXIS_LABEL[col_axis]} axis "
+        ctx.set_status(f"Image Table: nothing on the {_AXIS_LABEL[col_axis]} axis "
                         f"(select some in the sidebar).")
         return
 
@@ -475,17 +477,17 @@ def image_table_build_layout(app) -> None:
     rows, cols = len(row_vals), len(col_vals)
 
     # Size the grid (sync the spinners) and rebuild the empty selector cells.
-    app._app_state.image_table.rows = rows
-    app._app_state.image_table.cols = cols
-    for attr, val in (("_image_table_rows_spin", rows), ("_image_table_cols_spin", cols)):
-        spin = getattr(app, attr, None)
+    ctx.state.image_table.rows = rows
+    ctx.state.image_table.cols = cols
+    for attr, val in (("rows_spin", rows), ("cols_spin", cols)):
+        spin = getattr(ctx.runtime.image_table, attr, None)
         if spin is not None:
             spin.blockSignals(True)
             spin.setValue(val)
             spin.blockSignals(False)
-    image_table_rebuild_grid(app)
+    image_table_rebuild_grid(ctx)
 
-    fixed = _fixed_off_axis(app, {row_axis, col_axis})
+    fixed = _fixed_off_axis(ctx, {row_axis, col_axis})
     key_of = {"well": "well_cb", "channel": "chan_cb",
               "timepoint": "tp_cb", "fov": "fov_cb"}
 
@@ -499,7 +501,7 @@ def image_table_build_layout(app) -> None:
         finally:
             cb.blockSignals(False)
 
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             vals = _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c)
@@ -507,38 +509,38 @@ def image_table_build_layout(app) -> None:
                 _set(cell.get(ckey), vals[dim])
 
     if row_axis == "channel":
-        _apply_row_channel_styling(app, row_vals)
+        _apply_row_channel_styling(ctx, row_vals)
 
-    image_table_rebuild_lut_row(app)
-    app._set_status(
+    image_table_rebuild_lut_row(ctx)
+    ctx.set_status(
         f"Image Table: built {rows}×{cols} selector grid — rows = {_AXIS_LABEL[row_axis]}, "
         f"cols = {_AXIS_LABEL[col_axis]}. Press Generate to render."
     )
 
 
-def image_table_apply_preset(app, row_axis: str, col_axis: str) -> None:
+def image_table_apply_preset(ctx, row_axis: str, col_axis: str) -> None:
     """Set the row/col axis dropdowns to a common pairing, then Build."""
     for which, axis in (("row", row_axis), ("col", col_axis)):
-        cb = getattr(app, f"_image_table_{which}_axis_cb", None)
+        cb = getattr(ctx.runtime.image_table, f"{which}_axis_cb", None)
         if cb is not None:
             idx = cb.findData(axis)
             cb.blockSignals(True)
             cb.setCurrentIndex(idx if idx >= 0 else 0)
             cb.blockSignals(False)
-        setattr(app, f"_image_table_{which}_axis", axis)
-    image_table_build_layout(app)
+        setattr(ctx.runtime.image_table, f"{which}_axis", axis)
+    image_table_build_layout(ctx)
 
 
 # ── Channel multi-select (sidebar) ────────────────────────────────────────────
 
 
-def _update_channel_btn_text(app) -> None:
+def _update_channel_btn_text(ctx) -> None:
     """Reflect the active-channel set on the layout-row dropdown button."""
-    btn = getattr(app, "_image_table_channel_btn", None)
+    btn = getattr(ctx.runtime.image_table, "channel_btn", None)
     if btn is None:
         return
-    opts = _channel_options(app)
-    sel = getattr(app._app_state.image_table, "active_channels", None) or set()
+    opts = _channel_options(ctx)
+    sel = getattr(ctx.state.image_table, "active_channels", None) or set()
     ordered = [c for c in opts if c in sel]
     if not ordered or len(ordered) == len(opts):
         btn.setText("Channels: all")
@@ -548,49 +550,49 @@ def _update_channel_btn_text(app) -> None:
         btn.setText(f"Channels: {len(ordered)} selected")
 
 
-def image_table_refresh_channel_picker(app) -> None:
+def image_table_refresh_channel_picker(ctx) -> None:
     """Rebuild the layout-row channel dropdown menu from the dataset's
     channels, preserving valid prior selections."""
     from PySide6.QtGui import QAction
 
-    menu = getattr(app, "_image_table_channel_menu", None)
+    menu = getattr(ctx.runtime.image_table, "channel_menu", None)
     if menu is None:
         return
-    opts = _channel_options(app)
-    active = getattr(app._app_state.image_table, "active_channels", None) or set()
-    app._app_state.image_table.active_channels = {c for c in active if c in opts}
+    opts = _channel_options(ctx)
+    active = getattr(ctx.state.image_table, "active_channels", None) or set()
+    ctx.state.image_table.active_channels = {c for c in active if c in opts}
 
     menu.clear()
     act_all = menu.addAction("Select all")
-    act_all.triggered.connect(lambda _=False: image_table_set_all_channels(app, True))
+    act_all.triggered.connect(lambda _=False: image_table_set_all_channels(ctx, True))
     act_none = menu.addAction("Clear")
-    act_none.triggered.connect(lambda _=False: image_table_set_all_channels(app, False))
+    act_none.triggered.connect(lambda _=False: image_table_set_all_channels(ctx, False))
     menu.addSeparator()
     for ch in opts:
         act = QAction(ch, menu)
         act.setCheckable(True)
         # Set state BEFORE wiring so building the menu doesn't fire toggled.
-        act.setChecked(ch in app._app_state.image_table.active_channels)
-        act.toggled.connect(lambda checked, c=ch: image_table_toggle_channel(app, c, checked))
+        act.setChecked(ch in ctx.state.image_table.active_channels)
+        act.toggled.connect(lambda checked, c=ch: image_table_toggle_channel(ctx, c, checked))
         menu.addAction(act)
-    _update_channel_btn_text(app)
+    _update_channel_btn_text(ctx)
 
 
-def image_table_toggle_channel(app, channel: str, checked: bool) -> None:
+def image_table_toggle_channel(ctx, channel: str, checked: bool) -> None:
     """Add/remove a single channel from the active set (menu item toggled)."""
-    sel = set(getattr(app._app_state.image_table, "active_channels", None) or set())
+    sel = set(getattr(ctx.state.image_table, "active_channels", None) or set())
     if checked:
         sel.add(channel)
     else:
         sel.discard(channel)
-    app._app_state.image_table.active_channels = sel
-    _update_channel_btn_text(app)
+    ctx.state.image_table.active_channels = sel
+    _update_channel_btn_text(ctx)
 
 
-def image_table_set_all_channels(app, on: bool) -> None:
+def image_table_set_all_channels(ctx, on: bool) -> None:
     """Select-all / clear from the dropdown header actions."""
-    app._app_state.image_table.active_channels = set(_channel_options(app)) if on else set()
-    image_table_refresh_channel_picker(app)  # rebuild to refresh checkmarks
+    ctx.state.image_table.active_channels = set(_channel_options(ctx)) if on else set()
+    image_table_refresh_channel_picker(ctx)  # rebuild to refresh checkmarks
 
 
 # ── Add row (clone an existing row, vary one dimension) ───────────────────────
@@ -604,7 +606,7 @@ def image_table_set_all_channels(app, on: bool) -> None:
 
 
 
-def image_table_add_varied_row(app, *, src_idx: int, dim: str, mode: str, value: str) -> None:
+def image_table_add_varied_row(ctx, *, src_idx: int, dim: str, mode: str, value: str) -> None:
     """Append a new row cloned from row *src_idx*, varying one dimension.
 
     Uniform mode sets *dim* to *value* across the whole new row; Step mode
@@ -612,19 +614,19 @@ def image_table_add_varied_row(app, *, src_idx: int, dim: str, mode: str, value:
     value). Other dimensions are copied as-is. Builds the selector row only —
     press Generate to render. Driven by :func:`image_table_open_add_row_dialog`.
     """
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
-        app._set_status("Image Table: build a table first, then add a row.")
+        ctx.set_status("Image Table: build a table first, then add a row.")
         return
     dim = dim or "channel"
     mode = mode or "uniform"
     value = (value or "").strip()
 
-    snap = _snapshot_cells(app)
+    snap = _snapshot_cells(ctx)
     if not (0 <= src_idx < len(snap)):
         src_idx = len(snap) - 1
     src_row = snap[src_idx]
-    opts = _all_dim_options(app, dim)
+    opts = _all_dim_options(ctx, dim)
 
     new_row: List[Dict[str, str]] = []
     for cell_vals in src_row:
@@ -645,16 +647,16 @@ def image_table_add_varied_row(app, *, src_idx: int, dim: str, mode: str, value:
     # Grow the grid by one row, rebuild the empty cells, then restore the old
     # rows plus the freshly-built one.
     new_rows = len(snap) + 1
-    app._app_state.image_table.rows = new_rows
-    spin = getattr(app, "_image_table_rows_spin", None)
+    ctx.state.image_table.rows = new_rows
+    spin = getattr(ctx.runtime.image_table, "rows_spin", None)
     if spin is not None:
         spin.blockSignals(True)
         spin.setValue(new_rows)
         spin.blockSignals(False)
-    image_table_rebuild_grid(app)
+    image_table_rebuild_grid(ctx)
 
     full = snap + [new_row]
-    for r, row in enumerate(getattr(app, "_image_table_cells", None) or []):
+    for r, row in enumerate(getattr(ctx.runtime.image_table, "cells", None) or []):
         if r >= len(full):
             break
         for c, cell in enumerate(row):
@@ -664,17 +666,17 @@ def image_table_add_varied_row(app, *, src_idx: int, dim: str, mode: str, value:
     # When the varied dimension is the channel and the whole new row shares one
     # channel (uniform), mirror it onto the row's channel combo + colormap.
     if dim == "channel" and mode == "uniform" and value:
-        _apply_row_channel_styling_for_row(app, new_rows - 1, value)
+        _apply_row_channel_styling_for_row(ctx, new_rows - 1, value)
 
-    image_table_rebuild_lut_row(app)
+    image_table_rebuild_lut_row(ctx)
     verb = f"set {dim} = {value}" if mode == "uniform" else f"stepped {dim}"
-    app._set_status(
+    ctx.set_status(
         f"Image Table: added row {new_rows} cloned from row {src_idx + 1} "
         f"({verb}). Press Generate to render."
     )
 
 
-def image_table_open_add_row_dialog(app) -> None:
+def image_table_open_add_row_dialog(ctx) -> None:
     """Modal dialog to clone an existing row, varying one dimension.
 
     Replaces the inline Add-row combo strip — collects source row / dimension /
@@ -683,12 +685,12 @@ def image_table_open_add_row_dialog(app) -> None:
     """
     from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout
 
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
-        app._set_status("Image Table: build a table first, then add a row.")
+        ctx.set_status("Image Table: build a table first, then add a row.")
         return
 
-    dlg = QDialog(app)
+    dlg = QDialog(ctx)
     dlg.setWindowTitle("Image Table — Add row")
     form = QFormLayout(dlg)
 
@@ -723,7 +725,7 @@ def image_table_open_add_row_dialog(app) -> None:
         prev = val_cb.currentText().strip()
         val_cb.blockSignals(True)
         val_cb.clear()
-        opts = _all_dim_options(app, dim)
+        opts = _all_dim_options(ctx, dim)
         val_cb.addItems(opts)
         if prev in opts:
             val_cb.setCurrentText(prev)
@@ -742,7 +744,7 @@ def image_table_open_add_row_dialog(app) -> None:
     if dlg.exec() != QDialog.Accepted:
         return
     image_table_add_varied_row(
-        app,
+        ctx,
         src_idx=int(src_cb.currentData() or 0),
         dim=str(dim_cb.currentData() or "channel"),
         mode=str(mode_cb.currentData() or "uniform"),
@@ -750,12 +752,12 @@ def image_table_open_add_row_dialog(app) -> None:
     )
 
 
-def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
+def _apply_row_channel_styling_for_row(ctx, row_idx: int, channel: str) -> None:
     """Set one row's channel combo + default the LUT to grayscale (used by
     Add-row). Matches ``_apply_row_channel_styling``: rows default to Greys
     regardless of channel; user can recolor a row via its LutSelector."""
-    row_chan = getattr(app, "_image_table_row_chan_cbs", None) or []
-    row_lut = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    row_chan = getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []
+    row_lut = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
     if 0 <= row_idx < len(row_chan) and row_chan[row_idx] is not None:
         cb = row_chan[row_idx]
         cb.blockSignals(True)
@@ -775,7 +777,7 @@ def _apply_row_channel_styling_for_row(app, row_idx: int, channel: str) -> None:
 
 
 
-def image_table_load_heatmap_layout(app) -> None:
+def image_table_load_heatmap_layout(ctx) -> None:
     """Adopt the Heat Map tab's well configuration (rows, cols, per-cell well).
 
     Pulls the single sidebar layout maintained by the heat-map tab
@@ -790,14 +792,14 @@ def image_table_load_heatmap_layout(app) -> None:
         SIDEBAR_LAYOUT_NAME,
     )
 
-    layouts = list(getattr(app, "_heatmap_layouts", []) or [])
+    layouts = list(ctx.runtime.heatmap.layouts or [])
     layout = next((l for l in layouts if l.name == SIDEBAR_LAYOUT_NAME), None)
     if layout is None:
-        app._set_status("Image Table: no Heat Map layout to load.")
+        ctx.set_status("Image Table: no Heat Map layout to load.")
         return
 
-    rows_spin = getattr(app, "_image_table_rows_spin", None)
-    cols_spin = getattr(app, "_image_table_cols_spin", None)
+    rows_spin = getattr(ctx.runtime.image_table, "rows_spin", None)
+    cols_spin = getattr(ctx.runtime.image_table, "cols_spin", None)
     if rows_spin is None or cols_spin is None:
         return
 
@@ -814,11 +816,11 @@ def image_table_load_heatmap_layout(app) -> None:
             spin.setValue(val)
         finally:
             spin.blockSignals(blocked)
-    app._app_state.image_table.rows = target_rows
-    app._app_state.image_table.cols = target_cols
-    image_table_rebuild_grid(app)
+    ctx.state.image_table.rows = target_rows
+    ctx.state.image_table.cols = target_cols
+    image_table_rebuild_grid(ctx)
 
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
 
     # Clear every freshly-rebuilt cell's well first so heat-map blanks
     # come through as blanks instead of the A1 default.
@@ -860,10 +862,10 @@ def image_table_load_heatmap_layout(app) -> None:
             f" Clamped from {int(layout.rows)}×{int(layout.cols)} to fit "
             f"the Image Table grid limits."
         )
-    app._set_status(msg)
+    ctx.set_status(msg)
 
 
-def image_table_distribute_wells(app) -> None:
+def image_table_distribute_wells(ctx) -> None:
     """Walk active wells row-wise and assign one to each selector cell.
 
     Special case: when the table has exactly twice as many cells as there
@@ -872,13 +874,13 @@ def image_table_distribute_wells(app) -> None:
     table is wider than tall). This is convenient for laying out two
     rows of complementary channels for the same set of wells.
     """
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
-        app._set_status("Image Table: build a grid first (set rows/cols and click Apply).")
+        ctx.set_status("Image Table: build a grid first (set rows/cols and click Apply).")
         return
-    active = sorted(app._app_state.image_table.active_wells, key=app._parse_rc)
+    active = sorted(ctx.state.image_table.active_wells, key=parse_rc)
     if not active:
-        app._set_status("Image Table: no active wells in the sidebar picker.")
+        ctx.set_status("Image Table: no active wells in the sidebar picker.")
         return
 
     flat_cells = [(r, c, cell) for r, row in enumerate(cells) for c, cell in enumerate(row)]
@@ -902,12 +904,12 @@ def image_table_distribute_wells(app) -> None:
         assignments += 1
 
     if duplicated:
-        app._set_status(
+        ctx.set_status(
             f"Image Table: distributed {n_active} well(s) twice "
             f"({assignments} cells filled) for complementary-channel layout."
         )
     else:
-        app._set_status(
+        ctx.set_status(
             f"Image Table: distributed {assignments} well(s) into the selector grid."
         )
 
@@ -915,12 +917,12 @@ def image_table_distribute_wells(app) -> None:
 # ── LUT row ──────────────────────────────────────────────────────────────────
 
 
-def image_table_rebuild_lut_row(app) -> None:
+def image_table_rebuild_lut_row(ctx) -> None:
     """Rebuild the per-row LUT + display editors (one box per grid row)."""
     from well_viewer.features.image_browser.image_table.grid_view import build_lut_row
 
     build_lut_row(
-        app,
+        ctx,
         on_auto_lut=image_table_auto_lut,
         lut_color_names=LUT_COLOR_NAMES,
     )
@@ -945,26 +947,26 @@ _ZOOM_MIN = 0.33
 _ZOOM_MAX = 4.0
 
 
-def image_table_set_zoom(app, factor: float, *, relative: bool = False) -> None:
+def image_table_set_zoom(ctx, factor: float, *, relative: bool = False) -> None:
     """Set (or step) the rendered-table zoom factor and re-render.
 
     ``relative=True`` multiplies the current zoom by *factor* (zoom in/out
     buttons); otherwise *factor* is the absolute level (1.0 = 240 px cells).
     """
-    cur = float(getattr(app._app_state.image_table, "zoom", 1.0) or 1.0)
+    cur = float(getattr(ctx.state.image_table, "zoom", 1.0) or 1.0)
     new = cur * factor if relative else factor
     new = max(_ZOOM_MIN, min(_ZOOM_MAX, new))
-    app._app_state.image_table.zoom = new
-    lbl = getattr(app, "_image_table_zoom_lbl", None)
+    ctx.state.image_table.zoom = new
+    lbl = getattr(ctx.runtime.image_table, "zoom_lbl", None)
     if lbl is not None:
         lbl.setText(f"{new * 100:.0f}%")
     # Only re-render if a table has already been generated; otherwise just
     # store the level for the next Generate.
-    if getattr(app._app_state.image_table, "last_render", None):
-        image_table_generate(app)
+    if getattr(ctx.state.image_table, "last_render", None):
+        image_table_generate(ctx)
 
 
-def image_table_set_thresh_frac(app, value) -> None:
+def image_table_set_thresh_frac(ctx, value) -> None:
     """Edit the active channel's ON/OFF intensity threshold (ThreshFracOn) from
     the Image Table controls row, then re-composite so the per-row "≥ Thr"
     binary overlay reflects it.
@@ -975,9 +977,9 @@ def image_table_set_thresh_frac(app, value) -> None:
     cheap re-composite the zoom control does; before the first Generate it just
     stores the value.
     """
-    app._set_thresh_frac_on(value)
-    if getattr(app._app_state.image_table, "last_render", None):
-        image_table_generate(app)
+    set_thresh_frac_on(ctx, value)
+    if getattr(ctx.state.image_table, "last_render", None):
+        image_table_generate(ctx)
 
 
 # ── Per-cell mouse handling: hover pixel readout + crop drag ────────────────
@@ -986,7 +988,7 @@ def image_table_set_thresh_frac(app, value) -> None:
 
 
 def _install_cell_events(
-    app, label, crop_tool, well: str, chan: str, tp: str, fov: str,
+    ctx, label, crop_tool, well: str, chan: str, tp: str, fov: str,
 ) -> None:
     """Wire press/move/release on a cell's image label.
 
@@ -1108,15 +1110,15 @@ def _install_cell_events(
 
 
 
-def _refresh_lut_fields_from_render(app, rendered) -> None:
+def _refresh_lut_fields_from_render(ctx, rendered) -> None:
     """Pool the actual min/max per ROW from the just-rendered arrays and write
     the numbers into that row's LUT box, except rows the user has overridden.
 
     Each row's entry carries an ``auto`` flag (True until the user edits its
     min/max); only auto rows get refreshed, so manual overrides stick.
     """
-    luts = getattr(app, "_image_table_lut", None) or {}
-    cells = getattr(app, "_image_table_cells", None) or []
+    luts = getattr(ctx.runtime.image_table, "lut", None) or {}
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not luts or not cells:
         return
     try:
@@ -1156,7 +1158,7 @@ def _refresh_lut_fields_from_render(app, rendered) -> None:
 # ── Generate (render image table below the selector) ─────────────────────────
 
 
-def _prefetch_cell_arrays(app, cells, cache) -> None:
+def _prefetch_cell_arrays(ctx, cells, cache) -> None:
     """Decode the grid's unique (well, channel, variant) images in parallel.
 
     The first Generate after a dataset load (or after the cache is invalidated)
@@ -1172,7 +1174,7 @@ def _prefetch_cell_arrays(app, cells, cache) -> None:
     """
     todo: dict = {}
     for r, row in enumerate(cells):
-        use_tophat, _b, _bm = _row_display_opts(app, r)
+        use_tophat, _b, _bm = _row_display_opts(ctx, r)
         for cell in row:
             well = cell["well_cb"].currentText().strip()
             chan = cell["chan_cb"].currentText().strip()
@@ -1180,7 +1182,7 @@ def _prefetch_cell_arrays(app, cells, cache) -> None:
             fov = cell["fov_cb"].currentText().strip()
             if not (well and chan and tp):
                 continue
-            if _find_ratio_for_channel(app, chan) is not None:
+            if _find_ratio_for_channel(ctx, chan) is not None:
                 continue
             th = bool(use_tophat) and not _is_nuc_seg(chan)
             variant = "tophat" if th else "raw"
@@ -1196,7 +1198,7 @@ def _prefetch_cell_arrays(app, cells, cache) -> None:
     def _warm(spec) -> None:
         well, chan, tp, fov, th = spec
         try:
-            _load_array(app, cache, well, chan, tp, fov, use_tophat=th)
+            _load_array(ctx, cache, well, chan, tp, fov, use_tophat=th)
         except Exception:
             swallowed()  # in-loop load (with its own handling) is the fallback
 
@@ -1209,20 +1211,20 @@ def _prefetch_cell_arrays(app, cells, cache) -> None:
             "image_table: parallel prefetch failed", exc_info=True)
 
 
-def image_table_generate(app) -> None:
+def image_table_generate(ctx) -> None:
     """Load images for every cell and lay out the rendered image table."""
     from well_viewer.core.ui_helpers import make_fluor_thumb, make_overlay_thumb
     from well_viewer.core.ui_helpers import clear_layout
 
-    cells = getattr(app, "_image_table_cells", None) or []
-    grid = app._image_table_render_grid
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
+    grid = ctx.runtime.image_table.render_grid
     clear_layout(grid)
     if not cells:
-        app._set_status("Image Table: build a grid first (set rows/cols and click Apply).")
+        ctx.set_status("Image Table: build a grid first (set rows/cols and click Apply).")
         return
 
     # Once the user has triggered a Generate, hide the EmptyState placeholder.
-    empty = getattr(app, "_image_table_empty_state", None)
+    empty = getattr(ctx.runtime.image_table, "empty_state", None)
     if empty is not None:
         empty.setVisible(False)
 
@@ -1230,24 +1232,24 @@ def image_table_generate(app) -> None:
     # threshold re-renders re-composite from memory instead of re-reading and
     # re-decoding every cell from its zip. Invalidated on dataset load
     # (load_controller) and keyed by variant, so Raw/Corrected stays correct.
-    cache = app._app_state.image_table.image_cache
+    cache = ctx.state.image_table.image_cache
     if not isinstance(cache, dict):
         cache = {}
-        app._app_state.image_table.image_cache = cache
+        ctx.state.image_table.image_cache = cache
     rendered: Dict[Tuple[int, int], Any] = {}
-    crop_tool = getattr(app, "_image_table_crop_tool", None)
+    crop_tool = getattr(ctx.runtime.image_table, "crop_tool", None)
     # Per-cell thumbnail size, scaled by the zoom factor (240 px = 1.0×).
-    zoom = float(getattr(app._app_state.image_table, "zoom", 1.0) or 1.0)
+    zoom = float(getattr(ctx.state.image_table, "zoom", 1.0) or 1.0)
     sz = max(80, int(round(240 * zoom)))
 
-    _prefetch_cell_arrays(app, cells, cache)
+    _prefetch_cell_arrays(ctx, cells, cache)
 
     for r, row in enumerate(cells):
         # Display options (top-hat / boundaries / binary) + LUT are per ROW —
         # read from this row's box so two rows on the same channel stay
         # independent (see grid_view.build_lut_row).
-        use_tophat, show_boundaries, binary_mode = _row_display_opts(app, r)
-        log_scale = _row_log_scale(app, r)
+        use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r)
+        log_scale = _row_log_scale(ctx, r)
         for c, cell in enumerate(row):
             well = cell["well_cb"].currentText().strip()
             chan = cell["chan_cb"].currentText().strip()
@@ -1255,15 +1257,15 @@ def image_table_generate(app) -> None:
             fov = cell["fov_cb"].currentText().strip()
 
             arr = None
-            ratio = _find_ratio_for_channel(app, chan) if chan else None
+            ratio = _find_ratio_for_channel(ctx, chan) if chan else None
             if well and chan and tp:
                 if ratio is not None:
-                    arr = _load_ratio_array(app, cache, well, ratio, tp, fov, use_tophat=use_tophat)
+                    arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
                 else:
-                    arr = _load_array(app, cache, well, chan, tp, fov, use_tophat=use_tophat)
+                    arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
             rendered[(r, c)] = arr
 
-            lo, hi = _parse_lut(app, r)
+            lo, hi = _parse_lut(ctx, r)
             cell_widget = QWidget()
             cl = QVBoxLayout(cell_widget)
             cl.setContentsMargins(2, 2, 2, 2)
@@ -1295,36 +1297,36 @@ def image_table_generate(app) -> None:
                     pix = make_overlay_thumb(cropped, sz, sz, lo, hi)
                 elif binary_mode == "mask":
                     # Every segmented cell white on black.
-                    pix = _render_mask_binary(app, cache, well, tp, fov, crop_tool, sz)
+                    pix = _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz)
                     if pix is None:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r), log_scale=log_scale)
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(ctx, r), log_scale=log_scale)
                 elif binary_mode == "threshold":
                     # Only cells above the active ON threshold white on black.
-                    pix = _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz)
+                    pix = _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz)
                     if pix is None:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r), log_scale=log_scale)
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(ctx, r), log_scale=log_scale)
                 elif show_boundaries:
                     # Overlay white cell-boundary outlines on the fluorescence image.
-                    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+                    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
                     if mask_arr is not None:
                         cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
                         pix = _render_with_boundary_overlay(
                             cropped, sz, sz, lo, hi,
-                            _row_cmap_name(app, r), cm, log_scale=log_scale,
+                            _row_cmap_name(ctx, r), cm, log_scale=log_scale,
                         )
                     else:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(app, r), log_scale=log_scale)
+                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(ctx, r), log_scale=log_scale)
                 else:
                     pix = make_fluor_thumb(
                         cropped, sz, sz, lo, hi,
-                        cmap=_row_cmap_name(app, r), log_scale=log_scale,
+                        cmap=_row_cmap_name(ctx, r), log_scale=log_scale,
                     )
                 # CropTool needs the FULL source array + the active crop on
                 # the label so label-pixel → image-pixel coord conversion
                 # works correctly even when the label already shows a crop.
                 img_label._raw_arr = arr  # type: ignore[attr-defined]
                 img_label._crop = crop_tool.crop if crop_tool else None  # type: ignore[attr-defined]
-                _install_cell_events(app, img_label, crop_tool, well, chan, tp, fov)
+                _install_cell_events(ctx, img_label, crop_tool, well, chan, tp, fov)
                 if pix is not None:
                     img_label.setPixmap(pix)
                 else:
@@ -1335,13 +1337,13 @@ def image_table_generate(app) -> None:
 
             grid.addWidget(cell_widget, r, c)
 
-    app._app_state.image_table.last_render = rendered
-    app._app_state.image_table.image_cache = cache
+    ctx.state.image_table.last_render = rendered
+    ctx.state.image_table.image_cache = cache
     # Fill the per-channel LUT min/max boxes with the actual pooled numbers so
     # the user sees real values instead of "auto" (skips manually-edited rows).
-    _refresh_lut_fields_from_render(app, rendered)
+    _refresh_lut_fields_from_render(ctx, rendered)
     n = sum(1 for v in rendered.values() if v is not None)
-    app._set_status(f"Image Table: generated {n} of {len(rendered)} cell(s).")
+    ctx.set_status(f"Image Table: generated {n} of {len(rendered)} cell(s).")
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log
         # both the (tp, fov) values the user picked and a sample of the
@@ -1373,27 +1375,27 @@ def image_table_generate(app) -> None:
             swallowed()  # was: pass (silent except)
 
 
-def image_table_auto_lut(app, row_idx: int) -> None:
+def image_table_auto_lut(ctx, row_idx: int) -> None:
     """Pool min/max across grid row *row_idx*'s loaded cells; write + redraw.
 
     Per-row Fit: pools the image range of the cells in this row (whatever
     channel each shows — normally the one row channel), honouring the row's
     own top-hat toggle, and writes the result into the row's LUT box.
     """
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not (0 <= row_idx < len(cells)):
         return
-    rendered = getattr(app._app_state.image_table, "last_render", None) or {}
-    cache = getattr(app._app_state.image_table, "image_cache", None)
+    rendered = getattr(ctx.state.image_table, "last_render", None) or {}
+    cache = getattr(ctx.state.image_table, "image_cache", None)
     if cache is None:
         cache = {}
-        app._app_state.image_table.image_cache = cache
-    use_tophat, _show_b, _bm = _row_display_opts(app, row_idx)
+        ctx.state.image_table.image_cache = cache
+    use_tophat, _show_b, _bm = _row_display_opts(ctx, row_idx)
 
     try:
         import numpy as _np
     except Exception:
-        app._set_status("Image Table: numpy unavailable; cannot compute auto LUT.")
+        ctx.set_status("Image Table: numpy unavailable; cannot compute auto LUT.")
         return
 
     pooled_min: Optional[float] = None
@@ -1410,7 +1412,7 @@ def image_table_auto_lut(app, row_idx: int) -> None:
             tp = cell["tp_cb"].currentText().strip()
             fov = cell["fov_cb"].currentText().strip()
             if well and tp and fov:
-                arr = _load_array(app, cache, well, chan.upper(), tp, fov, use_tophat=use_tophat)
+                arr = _load_array(ctx, cache, well, chan.upper(), tp, fov, use_tophat=use_tophat)
         if arr is None:
             continue
         a = _np.asarray(arr, dtype=_np.float32)
@@ -1420,14 +1422,14 @@ def image_table_auto_lut(app, row_idx: int) -> None:
         pooled_max = mx if pooled_max is None else max(pooled_max, mx)
 
     if pooled_min is None or pooled_max is None:
-        app._set_status(
+        ctx.set_status(
             f"Image Table: no loaded images for row {row_idx + 1}; cannot auto-LUT."
         )
         return
     if pooled_max <= pooled_min:
         pooled_max = pooled_min + 1.0
 
-    luts = getattr(app, "_image_table_lut", None) or {}
+    luts = getattr(ctx.runtime.image_table, "lut", None) or {}
     entry = luts.get(row_idx)
     if entry is None:
         return

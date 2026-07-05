@@ -23,19 +23,26 @@ from well_viewer.core.safe import swallowed
 _logger = logging.getLogger("well_viewer")
 
 
-def get_crop_region(app) -> Optional[CropRegion]:
-    """The active dataset-wide crop rectangle, or ``None``."""
-    return app._app_state.dataset.crop_region
+def get_crop_region(ctx) -> Optional[CropRegion]:
+    """The active dataset-wide crop rectangle, or ``None``.
+
+    A8 residuals-ledger R1: pure typed state (``ctx.state.dataset.crop_region``),
+    so it takes ``ctx``."""
+    return ctx.state.dataset.crop_region
 
 
-def apply_crop_to_cache(app, label: Optional[str] = None) -> None:
+def apply_crop_to_cache(ctx, label: Optional[str] = None) -> None:
     """Write the ``Crop_Pass`` column onto cached well frame(s).
 
     With ``label`` given, only that well; otherwise every cached well. Writes an
     explicit all-pass column when there is no crop so the chokepoint stays
-    consistent across re-crops. Mirrors ``qc.controller.apply_qc_to_cache``."""
-    region = get_crop_region(app)
-    cache = app._app_state.dataset.cache
+    consistent across re-crops. Mirrors ``qc.controller.apply_qc_to_cache``.
+
+    A8 residuals-ledger R1: takes ``ctx`` — region + row cache from typed state,
+    so the crop projection is a pure ``ctx`` operation the row-fetch data service
+    can call."""
+    region = get_crop_region(ctx)
+    cache = ctx.state.dataset.cache
     labels = [label] if label is not None else list(cache.keys())
     for lbl in labels:
         df = cache.get(lbl)
@@ -47,30 +54,30 @@ def apply_crop_to_cache(app, label: Optional[str] = None) -> None:
             _logger.exception("Crop: failed to compute Crop_Pass for well %s", lbl)
 
 
-def recompute_crop_all(app) -> None:
+def recompute_crop_all(ctx) -> None:
     """Re-project ``Crop_Pass`` onto all cached wells and bust the stats cache so
     downstream consumers recompute on the next read."""
-    apply_crop_to_cache(app, None)
-    if hasattr(app, "_invalidate_stats_cache"):
-        try:
-            app._invalidate_stats_cache()  # clears stats cache + bumps override_version
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    apply_crop_to_cache(ctx, None)
+    try:
+        invalidate_stats_cache(ctx)  # clears stats cache + bumps override_version
+    except Exception:
+        swallowed()  # was: pass (silent except)
 
 
-def _save_redraw_refresh(app) -> None:
+def _save_redraw_refresh(ctx) -> None:
     """Persist the crop section (debounced), redraw the active view, and refresh
     the segmentation overlay so cropped cells dim immediately."""
-    if getattr(app, "_persistence", None) is not None:
-        try:
-            app._persistence.schedule_save("crop_region")
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    if hasattr(app, "_redraw"):
-        try:
-            app._redraw()
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    from well_viewer.core.plot_orchestrator import redraw_app
+    try:
+        if ctx.persistence is not None:
+            ctx.persistence.schedule_save("crop_region")
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    try:
+        redraw_app(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
     try:
         # Sanctioned deferred import: crop and review_image are peer features
         # with a genuine bidirectional interaction (crop is a draw-mode of the
@@ -78,34 +85,34 @@ def _save_redraw_refresh(app) -> None:
         # crop). review_image.controller imports crop.controller, so this stays
         # function-local to break that cycle (counted by the deferred-import
         # ratchet in tests/test_deferred_imports.py).
-        from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
-        refresh_review_image(app)
+        from well_viewer.features.image_browser.review_image.renderer import refresh_review_image_ctx
+        refresh_review_image_ctx(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
 
 
-def set_crop_region(app, region: Optional[CropRegion]) -> None:
+def set_crop_region(ctx, region: Optional[CropRegion]) -> None:
     """Install a new crop rectangle (from a drawn box), recompute the verdict
     everywhere, persist, and re-render. A zero-area box is a no-op + status."""
     if region is not None:
         region = normalize_region(*region)
     if region is None:
-        app._set_status("Crop region: box too small — no crop applied.")
+        ctx.set_status("Crop region: box too small — no crop applied.")
         return
-    app._app_state.dataset.crop_region = region
-    recompute_crop_all(app)
-    _save_redraw_refresh(app)
+    ctx.state.dataset.crop_region = region
+    recompute_crop_all(ctx)
+    _save_redraw_refresh(ctx)
 
     # Report the crop's actual effect so a silent no-op is never mistaken for a
     # working crop. The decisive case: a dataset without per-cell centroid
     # columns can't be cropped (compute_crop_pass fails open), so warn loudly.
-    removed, total_incl, has_centroids, n_wells = _crop_effect_counts(app)
+    removed, total_incl, has_centroids, n_wells = _crop_effect_counts(ctx)
     r0, c0, r1, c1 = region
     where = f"{c1 - c0}×{r1 - r0}px @ ({c0},{r0})"
     if n_wells and not has_centroids:
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.warning(
-            app, "Crop can't filter cells",
+            ctx.window, "Crop can't filter cells",
             "This dataset has no per-cell centroid columns "
             "(shape_centroid_row / shape_centroid_col), which the crop needs to "
             "decide which cells fall inside the box.\n\n"
@@ -113,18 +120,18 @@ def set_crop_region(app, region: Optional[CropRegion]) -> None:
             "are unchanged. Re-run the pipeline with shape features enabled to "
             "use the crop.",
         )
-        app._set_status(
+        ctx.set_status(
             f"Crop region set ({where}) — but this dataset has no centroid "
             "columns, so no cells were excluded."
         )
         return
-    app._set_status(
+    ctx.set_status(
         f"Crop region set ({where}): excluded {removed:,} of {total_incl:,} "
         f"otherwise-included cell(s) across {n_wells} loaded well(s)."
     )
 
 
-def _crop_effect_counts(app):
+def _crop_effect_counts(ctx):
     """Aggregate the crop's effect across the currently-cached wells.
 
     Returns ``(removed, otherwise_included, has_centroids, n_wells)`` — the same
@@ -133,10 +140,10 @@ def _crop_effect_counts(app):
     """
     from .region import crop_effect_for_df
 
-    region = get_crop_region(app)
+    region = get_crop_region(ctx)
     removed = total_incl = n_wells = 0
     has_centroids = False
-    for df in app._app_state.dataset.cache.values():
+    for df in ctx.state.dataset.cache.values():
         if df is None or len(df) == 0:
             continue
         n_wells += 1
@@ -147,65 +154,66 @@ def _crop_effect_counts(app):
     return removed, total_incl, has_centroids, n_wells
 
 
-def clear_crop_region(app) -> None:
+def clear_crop_region(ctx) -> None:
     """Remove the crop (no warning): cropped-out cells return to included.
     Manual deletes are untouched."""
-    if app._app_state.dataset.crop_region is None:
-        app._set_status("Crop region: nothing to clear.")
+    if ctx.state.dataset.crop_region is None:
+        ctx.set_status("Crop region: nothing to clear.")
         return
-    app._app_state.dataset.crop_region = None
-    recompute_crop_all(app)
-    _save_redraw_refresh(app)
-    app._set_status("Crop region cleared.")
+    ctx.state.dataset.crop_region = None
+    recompute_crop_all(ctx)
+    _save_redraw_refresh(ctx)
+    ctx.set_status("Crop region cleared.")
 
 
 # ── draw-mode toggle ─────────────────────────────────────────────────────────
 
 
-def set_crop_edit_mode(app, enabled: bool) -> None:
+def set_crop_edit_mode(ctx, enabled: bool) -> None:
     """Enter / leave crop-draw mode. Mutually exclusive with the Delete (include
     edit) mode so an armed rubber band is unambiguous on release."""
     enabled = bool(enabled)
-    app._app_state.review_image.crop_edit_mode = enabled
-    if enabled and app._app_state.review_image.include_edit_mode:
-        # Leave delete mode (also un-checks the Delete button). Sanctioned
-        # deferred import — see the crop↔review_image note above.
-        from well_viewer.features.image_browser.review_image.renderer import (
-            set_review_image_include_mode,
-        )
-        set_review_image_include_mode(app, False)
-    if hasattr(app, "_apply_review_image_cursor"):
-        try:
-            app._apply_review_image_cursor()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    btn = getattr(app, "_review_image_crop_btn", None)
+    ctx.state.review_image.crop_edit_mode = enabled
+    # One deferred import for both review-image touches (keeps the crop↔
+    # review_image cycle broken without adding a second deferred-import hit —
+    # see the note in _save_redraw_refresh).
+    from well_viewer.features.image_browser.review_image.renderer import (
+        apply_review_image_cursor, set_review_image_include_mode,
+    )
+    if enabled and ctx.state.review_image.include_edit_mode:
+        # Leave delete mode (also un-checks the Delete button).
+        set_review_image_include_mode(ctx, False)
+    try:
+        apply_review_image_cursor(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    btn = ctx.runtime.review_image.crop_btn
     if btn is not None:
         btn.setChecked(enabled)
     if enabled:
-        app._set_status(
+        ctx.set_status(
             "Crop mode ON — drag a rectangle to keep only cells whose centroid "
             "is inside (applies to all FOVs/wells)."
         )
     else:
-        app._set_status("Crop mode OFF.")
+        ctx.set_status("Crop mode OFF.")
 
 
-def toggle_crop_edit_mode(app) -> None:
-    set_crop_edit_mode(app, not app._app_state.review_image.crop_edit_mode)
+def toggle_crop_edit_mode(ctx) -> None:
+    set_crop_edit_mode(ctx, not ctx.state.review_image.crop_edit_mode)
 
 
 # ── reset ────────────────────────────────────────────────────────────────────
 
 
-def reset_crop_and_overrides(app) -> None:
+def reset_crop_and_overrides(ctx) -> None:
     """Return every cell to Included (even manually-deleted ones) and remove the
     crop region, after a confirmation. Dataset-wide.
     """
     from PySide6.QtWidgets import QMessageBox
 
     resp = QMessageBox.question(
-        app,
+        ctx.window,
         "Reset crop and curation",
         "Resetting will:\n"
         "  • Return ALL cells to the Included state, including cells you "
@@ -219,36 +227,32 @@ def reset_crop_and_overrides(app) -> None:
         return
 
     # (a) drop every manual include/exclude override, (b) drop the crop region.
-    app._review_included_overrides.clear()
-    app._app_state.dataset.crop_region = None
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    ctx.runtime.review.included_overrides.clear()
+    ctx.state.dataset.crop_region = None
 
     # Clearing the override dict is not enough on its own: the cached rows still
     # carry the previously-projected Included=0, and apply_review_overrides_to_cache
     # early-returns on an empty dict (it never *un-writes* a 0). Drop the dataset
     # cache so frames reload their original Included from the source CSVs; lazy
     # _get_rows then re-applies the now-empty crop/QC layers.
-    if hasattr(app, "_invalidate_dataset_cache"):
-        try:
-            app._invalidate_dataset_cache()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    if hasattr(app, "_invalidate_stats_cache"):
-        try:
-            app._invalidate_stats_cache()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    app._app_state.review_image.override_version += 1
+    ctx.state.dataset.cache.clear()
+    try:
+        invalidate_stats_cache(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    ctx.state.review_image.override_version += 1
 
-    if getattr(app, "_persistence", None) is not None:
-        try:
-            app._persistence.schedule_save("cell_overrides")
-            app._persistence.schedule_save("crop_region")
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    try:
+        if ctx.persistence is not None:
+            ctx.persistence.schedule_save("cell_overrides")
+            ctx.persistence.schedule_save("crop_region")
+    except Exception:
+        swallowed()  # was: pass (silent except)
 
     # Leave crop-draw mode if it was on.
-    if app._app_state.review_image.crop_edit_mode:
-        set_crop_edit_mode(app, False)
+    if ctx.state.review_image.crop_edit_mode:
+        set_crop_edit_mode(ctx, False)
 
-    _save_redraw_refresh(app)
-    app._set_status("Reset: all cells returned to Included and crop region removed.")
+    _save_redraw_refresh(ctx)
+    ctx.set_status("Reset: all cells returned to Included and crop region removed.")

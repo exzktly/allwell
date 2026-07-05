@@ -17,14 +17,14 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 def test_panel_starts_with_empty_groups(loaded_app):
     from well_viewer.features.batch_export import BatchExportPanel
 
-    panel = BatchExportPanel(loaded_app, None, use_sidebar_groups=False)
+    panel = BatchExportPanel(loaded_app._ctx, None, use_sidebar_groups=False)
     assert panel._groups == []
 
 
 def test_sync_from_app_is_opt_in_seed(loaded_app):
     from well_viewer.features.batch_export import BatchExportPanel
 
-    panel = BatchExportPanel(loaded_app, None, use_sidebar_groups=False)
+    panel = BatchExportPanel(loaded_app._ctx, None, use_sidebar_groups=False)
     assert panel._groups == []
     # The explicit "Sync from app" path still pulls in the replicate sets.
     expected = len(loaded_app._rep_sets_loaded())

@@ -37,11 +37,11 @@ def _by_key(items):
 
 def test_vs_control_propagates_the_control_spread_into_every_bar(loaded_app):
     app = loaded_app
-    set_active_channel(app, "gfp")
+    set_active_channel(app._ctx, "gfp")
     app._set_selected_wells(set(WELLS))
 
     # Raw (unscaled) per-well mean ± spread — the fold-change inputs.
-    _, raw_items, _ = collect_bar_items(app, _TP, fc_state=FC_STATE_OFF)
+    _, raw_items, _ = collect_bar_items(app._ctx, _TP, fc_state=FC_STATE_OFF)
     raw = _by_key(raw_items)
     assert {_CONTROL, _TREATED} <= set(raw)
     mu_c, sig_c = raw[_CONTROL].mean, raw[_CONTROL].spread
@@ -50,9 +50,9 @@ def test_vs_control_propagates_the_control_spread_into_every_bar(loaded_app):
     assert sig_c > 0 and sig_t > 0
 
     # Control-normalised fold-change through the real app state.
-    set_fold_change_state(app, vs_control_on=True, control_label=_CONTROL)
+    set_fold_change_state(app._ctx, vs_control_on=True, control_label=_CONTROL)
     assert app._app_state.plot.fc_vs_control_on is True
-    _, fc_items, _ = collect_bar_items(app, _TP)
+    _, fc_items, _ = collect_bar_items(app._ctx, _TP)
     fc = _by_key(fc_items)
 
     # (1) The control normalises to itself: mean == 1.

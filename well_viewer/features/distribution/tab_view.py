@@ -6,6 +6,8 @@ chosen timepoint, grouped per replicate set or per well — in a v2 PlotCard.
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -55,14 +57,14 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     chan_cb = reg.register("_chan_cb_distribution", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
 
     cl.addWidget(QLabel("t (h):", ctrl))
     tp_cb = reg.register("_distribution_tp_cb", QComboBox(ctrl))
     tp_cb.setMinimumContentsLength(8)
-    tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx.app))
+    tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
     cl.addWidget(tp_cb)
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget
 
@@ -70,7 +72,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     mode_cb = reg.register("_distribution_mode_cb", QComboBox(ctrl))
     mode_cb.addItems(_MODE_OPTIONS)
     mode_cb.setCurrentText("Histogram + KDE")
-    mode_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx.app))
+    mode_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
     cl.addWidget(mode_cb)
     reg.register("_distribution_mode_var", mode_cb)   # legacy alias → same widget
 
@@ -86,7 +88,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     def _on_bins_changed(val: int) -> None:
         ctx.state.distribution.bins = int(val)
-        _on_changed(ctx.app)
+        _on_changed(ctx)
     bins_spin.valueChanged.connect(_on_bins_changed)
     cl.addWidget(bins_spin)
 
@@ -99,7 +101,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     layout_cb = reg.register("_distribution_layout_cb", QComboBox(ctrl))
     layout_cb.addItems(_LAYOUT_OPTIONS)
     layout_cb.setCurrentText("Overlay")
-    layout_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx.app))
+    layout_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
     cl.addWidget(layout_cb)
     reg.register("_distribution_layout_var", layout_cb)   # legacy alias → same widget
 
@@ -107,7 +109,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     def _on_log_changed(state: int) -> None:
         ctx.state.distribution.log_x = bool(state)
-        _on_changed(ctx.app)
+        _on_changed(ctx)
     log_x_cb.stateChanged.connect(_on_log_changed)
     cl.addWidget(log_x_cb)
 
@@ -115,7 +117,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     def _on_log_y_changed(state: int) -> None:
         ctx.state.distribution.log_y = bool(state)
-        _on_changed(ctx.app)
+        _on_changed(ctx)
     log_y_cb.stateChanged.connect(_on_log_y_changed)
     cl.addWidget(log_y_cb)
 
@@ -123,7 +125,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_distribution_data(ctx.app))
+    _export_btn.clicked.connect(lambda _=False: export_distribution_data(ctx))
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", ctrl, tooltip="Copy SVG")
     _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
@@ -141,7 +143,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx.app, card, "Distribution")
+    wire_save_to_gallery(ctx, card, "Distribution")
     _sw = make_plot_view_switcher(ctx, 'Distribution')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
@@ -153,7 +155,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_ax", fig.add_subplot(1, 1, 1))
     fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
     reg.register("_distribution_canvas", card.canvas)
-    card.setControlsWidget(make_band_controls(ctx.app, card, with_fov=False))
+    card.setControlsWidget(make_band_controls(ctx, card, with_fov=False))
     # NOTE: don't trigger a redraw on theme change — the distribution renderer
     # doesn't use plot_style.apply_ax_style, so ax.clear() would wipe the
     # widget-side theme styling that setPlotTheme already applied. Let
@@ -162,43 +164,54 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
-        ctx.app, card, icon="line-chart",
+        ctx.window, card, icon="line-chart",
     ), 1)
 
-    refresh_distribution_timepoints(ctx.app)
+    refresh_distribution_timepoints(ctx)
 
 
-def _on_changed(app) -> None:
-    """Common callback for any control change in the Distribution tab."""
+def _on_changed(ctx) -> None:
+    """Common callback for any control change in the Distribution tab.
+
+    A8-teardown R3: fully ctx — ``redraw_distribution`` and every shared render
+    leaf it calls now take ``ctx``, so this names no god-object."""
     from well_viewer.features.distribution.controller import redraw_distribution
-    redraw_distribution(app)
+    redraw_distribution(ctx)
 
 
-def _on_tp_changed_dist(app) -> None:
+def _on_tp_changed_dist(ctx) -> None:
     """Timepoint combo changed — publish the shared focus timepoint (N5). In
     Split View, emit so the Heat Map pane redraws live; otherwise update the
-    value silently and redraw only this tab. Other tabs pick it up on next show."""
+    value silently and redraw only this tab. Other tabs pick it up on next show.
+
+    A8-teardown T3: fully on modern infrastructure — combo via ``ctx.widgets``,
+    split-mode flag via ``ctx.runtime.split``, focus via the ctx timepoint
+    leaves. No god-object reach."""
     from well_viewer.core.timepoint_sync import set_focus_tp
-    cb = getattr(app, "_distribution_tp_cb", None)
+    cb = ctx.widgets.get_or_none("_distribution_tp_cb")
     txt = cb.currentText() if cb is not None else ""
     try:
         tp = float(txt) if txt not in ("", "—", None) else None
     except (ValueError, TypeError):
         tp = None
-    if getattr(app, "_split_active", False):
-        set_focus_tp(app, tp)
+    if ctx.runtime.split.active:
+        set_focus_tp(ctx, tp)
     else:
-        set_focus_tp(app, tp, emit=False)
-        _on_changed(app)
+        set_focus_tp(ctx, tp, emit=False)
+        _on_changed(ctx)
 
 
-def refresh_distribution_timepoints(app) -> None:
-    """Populate the timepoint dropdown from the loaded data."""
-    cb = getattr(app, "_distribution_tp_cb", None)
+def refresh_distribution_timepoints(ctx) -> None:
+    """Populate the timepoint dropdown from the loaded data.
+
+    A8-teardown T3: takes ``ctx`` — the combo comes from the WidgetRegistry and
+    the timepoint leaves (``get_all_timepoints`` / ``current_focus_tp``) now take
+    ``ctx`` too, so this handler names no god-object."""
+    cb = ctx.widgets.get_or_none("_distribution_tp_cb")
     if cb is None:
         return
     try:
-        tps = get_all_timepoints(app)
+        tps = get_all_timepoints(ctx)
     except Exception:
         tps = []
     items = [f"{tp:g}" for tp in tps] if tps else []
@@ -211,7 +224,7 @@ def refresh_distribution_timepoints(app) -> None:
             cb.addItem("—")
         # Seed from the shared focus timepoint (N5) when one is set and present.
         from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
-        i = nearest_index(tps, current_focus_tp(app)) if tps else None
+        i = nearest_index(tps, current_focus_tp(ctx)) if tps else None
         if i is not None:
             cb.setCurrentIndex(i)
     finally:

@@ -78,22 +78,56 @@ class _FakeBus:
 
 class _FakeState:
     def __init__(self) -> None:
+        from types import SimpleNamespace
+        from well_viewer.core.cell_gating_state import CellGatingState
         self.channel = _FakeChannel()
         self.dataset = _FakeDataset()
-        self.plot = object()  # emit payload for plot_options_changed
+        # Doubles as the plot_options_changed emit payload AND the source the
+        # ctx-native invalidate_stats_cache → refresh_fov_btn_state reads.
+        self.plot = SimpleNamespace(use_fov_replicates=False)
+        # invalidate_stats_cache(ctx) discards the group-stats cache; the double
+        # only needs the invalidate() method to exist.
+        self.stats_cache = SimpleNamespace(invalidate=lambda: None)
+        # R6: gate values live on the typed slice; the edits are the input
+        # surface, synced into the slice by the change handlers.
+        self.cell_gating = CellGatingState()
+
+    def feature_slice(self, name):
+        # No Image Browser in this controller-layer double → no review_image
+        # slice (invalidate_stats_cache skips the override-version bump).
+        return None
 
 
 class _FakeApp:
     """A SimpleNamespace-ish app exposing exactly what the controller touches."""
 
     def __init__(self) -> None:
+        from types import SimpleNamespace
         self._app_state = _FakeState()
         self._cell_gating_thresh_frac_edits = {
             "gfp": _FakeEdit("50.0"),
             "mcherry": _FakeEdit("50.0"),
         }
+        # Epic-cellgating: ensure_cell_gating_tab_built() treats the fluor-gate
+        # edits map as the "tab is built" signal (in production both maps are
+        # created together); provide it so the quick-edit write path proceeds.
+        self._cell_gating_fluor_gate_edits = {
+            "gfp": _FakeEdit("0.0"),
+            "mcherry": _FakeEdit("0.0"),
+        }
         self.redraws = 0
         self._event_bus = _FakeBus()
+        # The gate accessors read the slice via ctx (post-R6 pure state); the
+        # cell_gating change handler also reaches ctx.bus (plot_options_changed)
+        # and ctx.runtime.cell_gating (the edit banks stamped on app._cell_gating_*).
+        from well_viewer.core.app_runtime import AppRuntime
+        from well_viewer.core.widget_registry import WidgetRegistry
+        # A8/D-thresh: refresh_thresh_frac_quick_edit resolves the steppers +
+        # status chips via ctx.widgets, so the double needs a real registry.
+        self._ctx = SimpleNamespace(
+            state=self._app_state, app=self, bus=self._event_bus,
+            runtime=AppRuntime(self), widgets=WidgetRegistry(self),
+        )
 
     def _redraw(self) -> None:
         self.redraws += 1
@@ -104,38 +138,45 @@ class _FakeApp:
         pass
 
 
-def test_set_writes_through_active_channel_edit():
+def test_set_writes_through_active_channel_edit(monkeypatch):
     app = _FakeApp()
-    set_thresh_frac_on(app, 123.0)            # active channel == gfp
+    # The cell-gating change handler fans out via the ctx-native redraw_app
+    # orchestrator (was ctx.app._redraw()); route it back to the fake's counter.
+    import well_viewer.features.grouping.cell_gating_tab_view as cg
+    monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
+    set_thresh_frac_on(app._ctx, 123.0)       # active channel == gfp
     assert app._cell_gating_thresh_frac_edits["gfp"].text() == "123.0"
-    assert get_thresh_frac_on(app) == 123.0
-    assert get_thresh_frac_on(app, "mcherry") == 50.0   # untouched
+    assert get_thresh_frac_on(app._ctx) == 123.0
+    assert get_thresh_frac_on(app._ctx, "mcherry") == 50.0   # untouched
     assert app.redraws == 1                    # change handler redrew once
     # The edit's signals were restored (not left blocked) after the write.
     assert app._cell_gating_thresh_frac_edits["gfp"].blocked is False
 
 
-def test_set_targets_explicit_channel():
+def test_set_targets_explicit_channel(monkeypatch):
     app = _FakeApp()
-    set_thresh_frac_on(app, 77.0, channel="mcherry")
-    assert get_thresh_frac_on(app, "mcherry") == 77.0
-    assert get_thresh_frac_on(app, "gfp") == 50.0
+    import well_viewer.features.grouping.cell_gating_tab_view as cg
+    monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
+    set_thresh_frac_on(app._ctx, 77.0, channel="mcherry")
+    assert get_thresh_frac_on(app._ctx, "mcherry") == 77.0
+    assert get_thresh_frac_on(app._ctx, "gfp") == 50.0
 
 
 def test_set_noop_without_dataset():
     app = _FakeApp()
     app._app_state.dataset.data_dir = ""
-    set_thresh_frac_on(app, 999.0)
-    assert get_thresh_frac_on(app, "gfp") == 50.0
+    set_thresh_frac_on(app._ctx, 999.0)
+    assert get_thresh_frac_on(app._ctx, "gfp") == 50.0
     assert app.redraws == 0
 
 
 def test_refresh_syncs_stepper_with_signals_blocked():
     app = _FakeApp()
-    app._cell_gating_thresh_frac_edits["gfp"].setText("88.0")
-    stepper = _FakeStepper(0.0)
-    app._plotting_thresh_frac_stepper = stepper
-    refresh_thresh_frac_quick_edit(app)
+    # R6: a committed value lives on the typed slice (setText alone is an
+    # uncommitted keystroke — the change handler is what syncs it).
+    app._app_state.cell_gating.thresh_frac_on["gfp"] = 88.0
+    stepper = app._ctx.widgets.register("_plotting_thresh_frac_stepper", _FakeStepper(0.0))
+    refresh_thresh_frac_quick_edit(app._ctx)
     assert stepper.value() == 88.0
     # Signals are restored to unblocked after the display sync.
     assert stepper.blocked is False
@@ -143,20 +184,20 @@ def test_refresh_syncs_stepper_with_signals_blocked():
 
 def test_refresh_follows_active_channel():
     app = _FakeApp()
-    app._cell_gating_thresh_frac_edits["gfp"].setText("10.0")
-    app._cell_gating_thresh_frac_edits["mcherry"].setText("20.0")
-    app._plotting_thresh_frac_stepper = _FakeStepper(0.0)
+    app._app_state.cell_gating.thresh_frac_on["gfp"] = 10.0
+    app._app_state.cell_gating.thresh_frac_on["mcherry"] = 20.0
+    app._ctx.widgets.register("_plotting_thresh_frac_stepper", _FakeStepper(0.0))
 
-    refresh_thresh_frac_quick_edit(app)
+    refresh_thresh_frac_quick_edit(app._ctx)
     assert app._plotting_thresh_frac_stepper.value() == 10.0
     app._app_state.channel.active_channel = "mcherry"
-    refresh_thresh_frac_quick_edit(app)
+    refresh_thresh_frac_quick_edit(app._ctx)
     assert app._plotting_thresh_frac_stepper.value() == 20.0
 
 
 def test_refresh_noop_without_stepper():
     app = _FakeApp()                            # no _plotting_thresh_frac_stepper
-    refresh_thresh_frac_quick_edit(app)         # must not raise
+    refresh_thresh_frac_quick_edit(app._ctx)         # must not raise
 
 
 # ── real wiring on an offscreen WellViewerApp ────────────────────────────────
@@ -182,9 +223,9 @@ def test_stepper_follows_channel_switch(loaded_app):
 
     loaded_app._set_thresh_frac_on(123.0, "gfp")
     loaded_app._set_thresh_frac_on(77.0, "mcherry")
-    set_active_channel(loaded_app, "mcherry")
+    set_active_channel(loaded_app._ctx, "mcherry")
     assert loaded_app._plotting_thresh_frac_stepper.value() == 77.0
-    set_active_channel(loaded_app, "gfp")
+    set_active_channel(loaded_app._ctx, "gfp")
     assert loaded_app._plotting_thresh_frac_stepper.value() == 123.0
 
 

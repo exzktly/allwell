@@ -124,18 +124,23 @@ def _reset_gating_state(app) -> None:
 
     The persistence loaders (``cell_gating.load_from_pipeline_info``,
     ``cell_overrides.load_from_data_dir``) early-return when the new dataset has
-    no sidecar, leaving this ad-hoc ``app._*`` state in place — where it
-    silently filters the new dataset's cells / redefines fraction-on (audit
-    X1). Reset it to the "no gating" defaults before hydration; the new
-    dataset's own sidecar (if any) repopulates it afterwards.
+    no sidecar, leaving this state in place — where it silently filters the new
+    dataset's cells / redefines fraction-on (audit X1). Reset it to the "no
+    gating" defaults before hydration; the new dataset's own sidecar (if any)
+    repopulates it afterwards.
+
+    Epic-cellgating: the scatter-gate geometry + use-flags + per-layer gate
+    selections are typed state on ``ctx.state.cell_gating``, reset here in
+    lock-step with the R6 gate values.
     """
-    app._scatter_gates = []
-    app._review_included_overrides = {}
-    app._cell_gating_use_scatter_gates = False
-    app._cell_gating_use_scatter_thresh = False
-    app._cell_gating_gating_choices = None
-    app._cell_gating_thresh_choices = None
-    app._active_heatmap_layout_name = None
+    cg = app._app_state.cell_gating
+    cg.scatter_gates = []
+    cg.use_scatter_gates = False
+    cg.use_scatter_thresh = False
+    cg.gating_choices = None
+    cg.thresh_choices = None
+    app._ctx.runtime.review.included_overrides = {}
+    app._app_state.heatmap.active_layout_name = None
 
 
 def load_directory(app, d: Path, label=None) -> None:
@@ -175,7 +180,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # the normal single-notebook layout — the detached split panes break it.
     # Guarded so the feature stays one-line removable (``_split_active`` is never
     # set when split_view isn't installed).
-    if getattr(app, "_split_active", False):
+    if app._ctx.runtime.split.active:
         from well_viewer.core.split_view import (
             exit_split, sync_split_toggle_button,
         )
@@ -229,7 +234,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # Signal any in-flight smFISH "Apply to All" worker to abort so
     # it doesn't overwrite the *new* dataset's CSVs with counts
     # computed against the previous dataset.
-    smfish_cancel = getattr(app, "_smfish_cancel_event", None)
+    smfish_cancel = app._ctx.runtime.smfish.cancel_event
     if smfish_cancel is not None:
         try:
             smfish_cancel.set()
@@ -280,7 +285,7 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.features.image_browser.review_image.controller import (
             apply_review_overrides_to_cache,
         )
-        apply_review_overrides_to_cache(app)
+        apply_review_overrides_to_cache(app._ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)
@@ -294,7 +299,7 @@ def load_directory(app, d: Path, label=None) -> None:
         # apply only wrote the column, leaving any cache built earlier in the
         # load sequence stale — the gate loaded into the fields but didn't take.
         from well_viewer.features.qc.controller import recompute_qc_all
-        recompute_qc_all(app)
+        recompute_qc_all(app._ctx)
         from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
         qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
     except Exception:
@@ -304,7 +309,7 @@ def load_directory(app, d: Path, label=None) -> None:
     try:
         app._persistence.load("crop_region")
         from well_viewer.features.crop.controller import apply_crop_to_cache
-        apply_crop_to_cache(app)
+        apply_crop_to_cache(app._ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate user-defined line-plot draw order (line_order.json).
@@ -323,12 +328,12 @@ def load_directory(app, d: Path, label=None) -> None:
             from well_viewer.features.image_browser.image_table.controller import (
                 image_table_refresh_picker, image_table_repopulate_dropdowns,
             )
-            image_table_repopulate_dropdowns(app)
-            image_table_refresh_picker(app)
+            image_table_repopulate_dropdowns(app._ctx)
+            image_table_refresh_picker(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-    label_grid_refresh(app)
+    label_grid_refresh(app._ctx)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
     # appear without requiring a tab switch.
     if hasattr(app, "_groups_centre_refresh"):
@@ -363,7 +368,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # is restored when the tab populates its channel combo.
     try:
         from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.load_from_pipeline_info(app)
+        _smfish_persist.load_from_pipeline_info(app._ctx)
     except Exception:
         logging.getLogger("well_viewer").exception(
             "Eager smFISH threshold load from pipeline_info failed"
@@ -382,13 +387,13 @@ def load_directory(app, d: Path, label=None) -> None:
             from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
-            refresh_heatmap_layout_sidebar(app)
+            refresh_heatmap_layout_sidebar(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     display = label or str(d)
     app._dir_label.setText(display)
     app._set_status(f"Loaded {n} well(s) — {display}")
-    recalculate_threshold(app)
+    recalculate_threshold(app._ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from
     # _recalculate_threshold, which fires on every channel/metric switch)
@@ -402,7 +407,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # redraw; it moves onto the bus when the smFISH tab is relocated.)
     try:
         from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-        smfish_sync_from_app(app)
+        smfish_sync_from_app(app._ctx)
     except Exception:
         logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
     # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs
@@ -420,23 +425,20 @@ def _kick_off_gating_after_load(app) -> None:
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return
     # Cell-area gating is retired (now QC-owned); only a non-default
-    # fluorescence gate needs the gating worker kicked off here.
-    has_non_default_gate = False
-    for edit in getattr(app, "_cell_gating_fluor_gate_edits", {}).values():
-        try:
-            if float(edit.text()) > 0.0:
-                has_non_default_gate = True
-                break
-        except ValueError:
-            pass
+    # fluorescence gate needs the gating worker kicked off here. Values come
+    # from the typed slice (R6), synced from the edits / persistence load.
+    has_non_default_gate = any(
+        float(val) > 0.0
+        for val in app._app_state.cell_gating.fluor_gates.values()
+    )
     # Scatter-gate inclusion / thresholding modes also need the pass so
     # Gate_Pass / Gate_On are computed from the persisted gates on load (neither
     # has a per-channel edit to inspect).
-    use_scatter = getattr(app, "_cell_gating_use_scatter_gates", False)
-    use_thresh = getattr(app, "_cell_gating_use_scatter_thresh", False)
+    use_scatter = app._app_state.cell_gating.use_scatter_gates
+    use_thresh = app._app_state.cell_gating.use_scatter_thresh
     if has_non_default_gate or use_scatter or use_thresh:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
-        cell_gating_start_gating_worker(app)
+        cell_gating_start_gating_worker(app._ctx)
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:

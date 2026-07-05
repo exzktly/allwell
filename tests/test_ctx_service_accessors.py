@@ -20,16 +20,41 @@ from well_viewer.viewer_context import ViewerContext
 # home yet — not a convenience wrapper for arbitrary god-object access.
 _ALLOWED = {
     "set_status",
+    # ``toast`` names the transient notification-popup service (import/export
+    # outcome banners), distinct from the status bar; a genuine window-shell
+    # service with no typed-state home, like ``set_status``.
+    "toast",
     "save_figure_dialog",
     "open_export_style_panel",
+    # ``window`` exposes the WellViewerApp *qua QMainWindow* for the operations
+    # that genuinely need the widget (dialog parenting, isinstance/findChildren)
+    # and can never be god-object-free. Named so those needs don't count against
+    # the ctx.app burn-down while staying enumerable + frozen here.
+    "window",
+    "persistence",
+    # ``features`` names the feature-descriptor registry — a genuine app-level
+    # catalogue (which tabs exist + their metadata) controllers read to reason
+    # about tab behaviour, not arbitrary god-object access.
+    "features",
+    # ``rebuild_all`` / ``refresh_sidebar_map`` name the two genuine app-level
+    # *orchestration* services (master redraw fan-out; debounced sidebar-map
+    # repaint) that the final ctx.app seams bottomed into. Each fans out into a
+    # dozen god-object methods with no ctx form, so they are named here as the
+    # teardown endgame — not convenience wrappers for arbitrary access.
+    "rebuild_all",
+    "refresh_sidebar_map",
 }
 
 
 def _public_methods() -> set[str]:
+    # Count both plain methods and property accessors: a property is just as much
+    # a named surface onto WellViewerApp, so it must be frozen here too (else a
+    # property could smuggle in unreviewed coupling the isfunction check misses).
     return {
         name
         for name, member in inspect.getmembers(ViewerContext)
-        if not name.startswith("_") and inspect.isfunction(member)
+        if not name.startswith("_") and (inspect.isfunction(member)
+                                         or isinstance(member, property))
     }
 
 

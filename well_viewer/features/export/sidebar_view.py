@@ -86,7 +86,7 @@ class ExportStyleSidebar(QWidget):
         # Per-figure view: global publication style (fonts, line/marker, grid,
         # legend …) is shared, but axis limits / log scaling are scoped to this
         # figure so they no longer leak across tabs.
-        self._prefs = figure_prefs(app, fig)
+        self._prefs = figure_prefs(app._ctx, fig)
         self._updating = False
         self._getters: dict[str, Callable[[], object]] = {}
         self._setters: dict[str, Callable[[object], None]] = {}
@@ -264,7 +264,7 @@ class ExportStyleSidebar(QWidget):
             draw_btn = QPushButton("Draw gate")
 
             def _arm_draw(_=False, _b=draw_btn) -> None:
-                set_gate_draw_mode(self._app, True)
+                set_gate_draw_mode(self._app._ctx, True)
                 _b.setText("Drag on the plot…")
             draw_btn.clicked.connect(_arm_draw)
             add_full(s_gates, draw_btn)
@@ -274,7 +274,7 @@ class ExportStyleSidebar(QWidget):
                 # Restore the button once the one-shot draw completes.
                 if not on:
                     _b.setText("Draw gate")
-            self._app._scatter_gate_draw_sync = _sync_draw_toggle
+            self._app._ctx.runtime.scatter.gate_draw_sync = _sync_draw_toggle
             clear_btn = QPushButton("Clear gates")
             clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())
             add_full(s_gates, clear_btn)
@@ -290,7 +290,7 @@ class ExportStyleSidebar(QWidget):
             self._rebuild_gate_list()
             # Keep the gate-count label + name list live when a gate is drawn on
             # the plot (gating.py calls this after appending/clearing a gate).
-            self._app._scatter_gate_count_cb = self._refresh_gate_count
+            self._app._ctx.runtime.scatter.gate_count_cb = self._refresh_gate_count
 
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
@@ -432,9 +432,9 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()  # was: pass (silent except)
 
-            if not hasattr(self._app, "_sem_observers"):
-                self._app._sem_observers = []
-            self._app._sem_observers.append(_sync_err_from_app)
+            if not self._app._ctx.runtime.sem.observers:
+                self._app._ctx.runtime.sem.observers = []
+            self._app._ctx.runtime.sem.observers.append(_sync_err_from_app)
 
         # Across: Replicates vs FOV (single-well-mode FOV-spread toggle).
         _across_init = "fov" if bool(getattr(self._app, "_use_fov_spread_active", lambda: False)()) else "rep"
@@ -473,9 +473,9 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()  # was: pass (silent except)
 
-            if not hasattr(self._app, "_fov_observers"):
-                self._app._fov_observers = []
-            self._app._fov_observers.append(_sync_across_from_app)
+            if not self._app._ctx.runtime.fov.observers:
+                self._app._ctx.runtime.fov.observers = []
+            self._app._ctx.runtime.fov.observers.append(_sync_across_from_app)
 
         # Show: Mean (bars only) / Mean+spread (bars + error bars) / All points
         # (overlay per-cell dots via the beeswarm path). Drives
@@ -901,7 +901,7 @@ class ExportStyleSidebar(QWidget):
             return
         try:
             self._persist()
-            apply_export_style_to_current(self._app, self._fig, self._canvas)
+            apply_export_style_to_current(self._app._ctx, self._fig, self._canvas)
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -942,10 +942,10 @@ class ExportStyleSidebar(QWidget):
             tab = ""
         try:
             if tab == "Bar Plots":
-                redraw_bars(app)
+                redraw_bars(app._ctx)
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
-                scatter_redraw_active(app)
+                scatter_redraw_active(app._ctx)
             else:
                 app._redraw()
         except Exception:
@@ -1046,7 +1046,7 @@ class ExportStyleSidebar(QWidget):
         return getattr(self._app, "_scatter_fig", None) is self._fig
 
     def _gate_count_text(self) -> str:
-        n = len(getattr(self._app, "_scatter_gates", None) or [])
+        n = len(self._app._app_state.cell_gating.scatter_gates or [])
         return f"{n} gate(s)"
 
     def _on_density_toggled(self) -> None:
@@ -1093,7 +1093,7 @@ class ExportStyleSidebar(QWidget):
         self._rebuild_gate_list()
 
     def _rebuild_gate_list(self) -> None:
-        """Rebuild the editable per-gate name rows from ``app._scatter_gates``."""
+        """Rebuild the editable per-gate name rows from the typed scatter gates."""
         layout = getattr(self, "_gate_list_layout", None)
         if layout is None:
             return
@@ -1106,7 +1106,7 @@ class ExportStyleSidebar(QWidget):
             w = item.widget()
             if w is not None:
                 w.deleteLater()
-        gates = getattr(self._app, "_scatter_gates", None) or []
+        gates = self._app._app_state.cell_gating.scatter_gates or []
         for idx, gate in enumerate(gates):
             edit = QLineEdit(str(gate.get("name") or ""))
             edit.setToolTip("Rename this gate (used by the Cell Gating filter).")
@@ -1115,18 +1115,18 @@ class ExportStyleSidebar(QWidget):
             def _commit(_i=idx, _e=edit) -> None:
                 self._gate_rename_in_progress = True
                 try:
-                    ok = rename_gate(self._app, _i, _e.text())
+                    ok = rename_gate(self._app._ctx, _i, _e.text())
                 finally:
                     self._gate_rename_in_progress = False
                 if not ok:
-                    cur = (getattr(self._app, "_scatter_gates", None) or [])
+                    cur = (self._app._app_state.cell_gating.scatter_gates or [])
                     if 0 <= _i < len(cur):
                         _e.setText(str(cur[_i].get("name") or ""))
             edit.editingFinished.connect(_commit)
             layout.addWidget(edit)
 
     def _on_clear_gates(self) -> None:
-        clear_gates(self._app)
+        clear_gates(self._app._ctx)
         self._refresh_gate_count()
 
     def _supports_well_order(self) -> bool:
@@ -1193,13 +1193,13 @@ class ExportStyleSidebar(QWidget):
                 app._redraw()
                 return
             if getattr(app, "_bar_fig", None) is self._fig:
-                redraw_bars(app)
+                redraw_bars(app._ctx)
                 return
             if getattr(app, "_scatter_fig", None) is self._fig:
-                redraw_scatter_orchestrate(app)
+                redraw_scatter_orchestrate(app._ctx)
                 return
             if getattr(app, "_scatter_agg_fig", None) is self._fig:
-                redraw_scatter_agg_orchestrate(app)
+                redraw_scatter_agg_orchestrate(app._ctx)
                 return
             app._redraw()
         except Exception:

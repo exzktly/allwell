@@ -26,8 +26,8 @@ def _is_per_well_tab(app, tab_name: str) -> bool:
     return tab_name in _PER_WELL_TAB_NAMES
 
 
-def _is_single_well_tab(app, tab_name: str) -> bool:
-    feats = getattr(app, "_features", None)
+def _is_single_well_tab(ctx, tab_name: str) -> bool:
+    feats = ctx.features
     if feats is not None:
         d = feats.get(tab_name)
         return bool(d and d.single_well_selection)
@@ -64,7 +64,7 @@ def _plate_passive_in_group_mode(app) -> bool:
         return False
     try:
         from well_viewer.core.tab_controller import visible_centre_tabs
-        visible = set(visible_centre_tabs(app)) or {_active_tab(app)}
+        visible = set(visible_centre_tabs(app._ctx)) or {_active_tab(app)}
     except Exception:
         visible = {_active_tab(app)}
     return not any(_is_well_editing_tab(app, t) for t in visible)
@@ -169,19 +169,20 @@ class SelectionRefreshCoordinator(QObject):
         apply_selection_refresh(self._app)
 
 
-def on_plate_sel_change(app) -> None:
+def on_plate_sel_change(ctx) -> None:
     # SelectionState diffs the new selection against its prev_sel snapshot to
     # resolve last_sel, then re-snapshots.
-    sel = app._app_state.selection
+    sel = ctx.state.selection
     sel.commit_plate_change()
-    if hasattr(app, "_notebook"):
-        tab = app._notebook.currentName()
-        if _is_single_well_tab(app, tab) and len(sel.selected_wells) > 1:
+    nb = getattr(ctx.window, "_notebook", None)
+    if nb is not None:
+        tab = nb.currentName()
+        if _is_single_well_tab(ctx, tab) and len(sel.selected_wells) > 1:
             keep = (sel.last_sel if sel.last_sel in sel.selected_wells
                     else next(iter(sel.selected_wells)))
             sel.selected_wells = {keep}
             sel.prev_sel = set(sel.selected_wells)
-    app._event_bus.selection_changed.emit(app._app_state.selection)
+    ctx.bus.selection_changed.emit(ctx.state.selection)
 
 
 def _well_rc(app, w):
@@ -236,7 +237,7 @@ def select_row(app, row: str) -> None:
             app._app_state.selection.selected_wells.update(row_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(row_labels)
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def select_col(app, col: str) -> None:
@@ -257,7 +258,7 @@ def select_col(app, col: str) -> None:
             app._app_state.selection.selected_wells.update(col_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(col_labels)
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def select_all(app) -> None:
@@ -339,7 +340,7 @@ def on_sidebar_plate_drag_finished(app) -> None:
     # Cancel any pending deferred commit from the paint events that
     # led here -- we're committing right now.
     app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(app)
+    on_plate_sel_change(app._ctx)
 
 
 def on_sidebar_plate_corner_toggled(app, select_all_target: bool) -> None:
@@ -378,7 +379,7 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
         else:
             app._app_state.selection.active_solo_wells.add(well_id)
         app._refresh_sidebar_map()
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
         return
     # Legacy fallback for non-plotting tabs that still receive
     # wellActivated in rep-set mode (Image Table / smFISH / etc):
@@ -397,14 +398,14 @@ def on_sidebar_plate_row_activated(app, row: str) -> None:
     else:
         # The widget already toggled the row and synced _selected_wells via
         # the preceding selectionChanged; do the heavy refresh once.
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def on_sidebar_plate_col_activated(app, col: str) -> None:
     if app._app_state.selection.selections:
         select_col(app, col)
     else:
-        on_plate_sel_change(app)
+        on_plate_sel_change(app._ctx)
 
 
 def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:
@@ -418,15 +419,15 @@ def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
 
 
-def import_selections_from_json(app) -> None:
+def import_selections_from_json(ctx) -> None:
     """Import a selections JSON file (the same schema used by Save) and
-    merge it into ``app._app_state.selection.selections``. Existing names get a ``_v2``
+    merge it into ``ctx.state.selection.selections``. Existing names get a ``_v2``
     suffix on collision so nothing already loaded is overwritten."""
     import json
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
     path, _ = QFileDialog.getOpenFileName(
-        app, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
+        ctx.window, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
     )
     if not path:
         return
@@ -434,7 +435,7 @@ def import_selections_from_json(app) -> None:
         with open(path) as fh:
             payload = json.load(fh)
     except Exception as exc:
-        QMessageBox.critical(app, "Import failed", f"Could not parse JSON:\n{exc}")
+        QMessageBox.critical(ctx.window, "Import failed", f"Could not parse JSON:\n{exc}")
         return
 
     # Accept either a v2 sample-definitions block (with a 'selections' key)
@@ -445,7 +446,7 @@ def import_selections_from_json(app) -> None:
     elif isinstance(payload, list):
         items = payload
     if not items:
-        QMessageBox.warning(app, "Import", "No selections found in that file.")
+        QMessageBox.warning(ctx.window, "Import", "No selections found in that file.")
         return
 
     added = 0
@@ -457,23 +458,22 @@ def import_selections_from_json(app) -> None:
         replicates = sel.get("replicates")
         source = sel.get("source") or "imported"
         try:
-            app._sel_add(name=name, wells=list(wells),
-                          replicates=replicates, source=source)
+            sel_add(ctx, name=name, wells=list(wells),
+                    replicates=replicates, source=source)
             added += 1
         except Exception:
             _logger = __import__("logging").getLogger("well_viewer.runtime_app")
             _logger.exception("Import selection failed for %r", name)
 
-    if hasattr(app, "_groups_centre_refresh"):
-        try:
-            app._groups_centre_refresh()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    app._toast(f"Imported {added} selection(s) from {path}.", kind="success")
+    try:
+        groups_centre_refresh(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    ctx.toast(f"Imported {added} selection(s) from {path}.", kind="success")
 
 
 
-def labels_apply_affix(app, *, where: str) -> None:
+def labels_apply_affix(ctx, *, where: str) -> None:
     """Prompt for text and prepend/append it to the labels of every
     well currently selected.
 
@@ -482,9 +482,10 @@ def labels_apply_affix(app, *, where: str) -> None:
     sidebar's plate selection is used as a fallback.
     """
     from well_viewer.core.ui_helpers import ask_name_dialog
+    from well_viewer.domain.viewer_state import parse_rc
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh
 
-    grid = getattr(app, "_lbl_grid", None)
+    grid = ctx.widgets.get_or_none("_lbl_grid")
     grid_sel: list[str] = []
     if grid is not None:
         try:
@@ -492,11 +493,11 @@ def labels_apply_affix(app, *, where: str) -> None:
         except Exception:
             grid_sel = []
     if grid_sel:
-        selected = sorted(grid_sel, key=app._parse_rc)
+        selected = sorted(grid_sel, key=parse_rc)
     else:
-        selected = sorted(app._app_state.selection.selected_wells, key=app._parse_rc)
+        selected = sorted(ctx.state.selection.selected_wells, key=parse_rc)
     if not selected:
-        app._set_status(
+        ctx.set_status(
             f"Add {where.title()}: no wells selected — click a row/column "
             "header on the Well Labels grid or select wells on the sidebar plate."
         )
@@ -507,39 +508,41 @@ def labels_apply_affix(app, *, where: str) -> None:
     plural = "s" if len(selected) != 1 else ""
     prompt = (f"Text to {verb} the custom label of {len(selected)} "
               f"selected well{plural}:")
-    text = ask_name_dialog(app, title=title, prompt=prompt, default="", strip=False)
+    text = ask_name_dialog(ctx.window, title=title, prompt=prompt, default="", strip=False)
     if not text:
         return
 
+    labels = ctx.state.dataset.well_labels
     for tok in selected:
-        current = app._app_state.dataset.well_labels.get(tok, "")
+        current = labels.get(tok, "")
         new = (text + current) if where == "prefix" else (current + text)
         if new:
-            app._app_state.dataset.well_labels[tok] = new
+            labels[tok] = new
         else:
-            app._app_state.dataset.well_labels.pop(tok, None)
+            labels.pop(tok, None)
 
-    app._invalidate_stats_cache()
-    label_grid_refresh(app)
-    _schedule_sample_def_autosave(app)
-    app._set_status(
+    invalidate_stats_cache(ctx)
+    label_grid_refresh(ctx)
+    _schedule_sample_def_autosave(ctx)
+    ctx.set_status(
         f"Added {where} '{text}' to {len(selected)} well label{plural}."
     )
 
 
 
-def update_active_group_label(app) -> None:
+def update_active_group_label(ctx) -> None:
     """Mirror ``_current_selection_id`` into the Groups sub-tab banner.
 
     Shows the active group's name (bold, accent-coloured) when one is
     selected, or a "click a group below" prompt when none is — so a
     click on the sidebar plate always has a visible target.
     """
-    lbl = getattr(app, "_rep_active_group_lbl", None)
+    lbl = ctx.widgets.get_or_none("_rep_active_group_lbl")
     if lbl is None:
         return
-    sid = app._app_state.selection.current_selection_id
-    sel = app._sel_by_id(sid) if sid else None
+    sel_state = ctx.state.selection
+    sid = sel_state.current_selection_id
+    sel = next((s for s in sel_state.selections if s.get("id") == sid), None) if sid else None
     try:
         import theme as _theme
     except Exception:
@@ -555,7 +558,7 @@ def update_active_group_label(app) -> None:
             )
         return
     name = str(sel.get("name") or "(unnamed)")
-    n_wells = sum(1 for w in (sel.get("wells") or []) if w in app._app_state.dataset.well_paths)
+    n_wells = sum(1 for w in (sel.get("wells") or []) if w in ctx.state.dataset.well_paths)
     lbl.setText(f"{name}  ·  {n_wells} well(s)")
     if _theme is not None:
         lbl.setStyleSheet(
@@ -626,10 +629,10 @@ def refresh_sidebar_map_now(app) -> None:
     # the current leaf, so behaviour is unchanged.
     try:
         from well_viewer.core.tab_controller import visible_centre_tabs
-        visible = set(visible_centre_tabs(app)) or {tab_name}
+        visible = set(visible_centre_tabs(app._ctx)) or {tab_name}
     except Exception:
         visible = {tab_name}
-    smfish = bool(visible) and all(_is_single_well_tab(app, t) for t in visible)
+    smfish = bool(visible) and all(_is_single_well_tab(app._ctx, t) for t in visible)
 
     plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
     plate.setSelectionMode("passive" if rep_mode else "select")
@@ -705,16 +708,16 @@ def refresh_sidebar_map_now(app) -> None:
 
 
 
-def sel_export_one(app, sid) -> None:
+def sel_export_one(ctx, sid) -> None:
     """Export a single saved selection (by id) to a standalone JSON file."""
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     from PySide6.QtWidgets import QFileDialog
     import json as _json
     default_name = f"{s.get('name') or 'selection'}.json"
     path, _ = QFileDialog.getSaveFileName(
-        app, "Export selection", default_name, "JSON (*.json)"
+        ctx.window, "Export selection", default_name, "JSON (*.json)"
     )
     if not path:
         return
@@ -723,40 +726,41 @@ def sel_export_one(app, sid) -> None:
         block = to_block([s], current_id=s.get("id"))
         with open(path, "w", encoding="utf-8") as f:
             _json.dump(block, f, indent=2)
-        app._toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
+        ctx.toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
     except Exception as exc:
-        app._toast(f"Export failed: {exc}", kind="danger", msec=6000)
+        ctx.toast(f"Export failed: {exc}", kind="danger", msec=6000)
 
 
 
-def sel_strip_wells(app, wells, *, keep_id=None) -> None:
+def sel_strip_wells(ctx, wells, *, keep_id=None) -> None:
     """A well belongs to ≤1 group: remove ``wells`` from every selection but
     ``keep_id``, pruning their replicates to the survivors. Also drop the
-    same wells from ``app._app_state.selection.selected_wells`` so the plotting tabs don't
+    same wells from ``ctx.state.selection.selected_wells`` so the plotting tabs don't
     keep treating them as solo wells once they've joined a group (the
     sidebar plate becomes passive in rep_mode and the user can't update
     the set themselves)."""
     from well_viewer.domain.selections_model import _deoverlap_replicates
+    sel_state = ctx.state.selection
     wset = set(wells or [])
     if not wset:
         return
-    for s in app._app_state.selection.selections:
+    for s in sel_state.selections:
         if s.get("id") == keep_id:
             continue
         nw = [w for w in (s.get("wells") or []) if w not in wset]
         if nw != s.get("wells"):
             s["wells"] = nw
             s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(nw))
-    if wset & app._app_state.selection.selected_wells:
-        app._app_state.selection.selected_wells = app._app_state.selection.selected_wells - wset
+    if wset & sel_state.selected_wells:
+        sel_state.selected_wells = sel_state.selected_wells - wset
 
 
 
-def sel_set_color(app, sid, color) -> None:
+def sel_set_color(ctx, sid, color) -> None:
     """Recolour a saved selection. ``color`` is a ``#RRGGBB`` hex string
     (or anything accepted by QColor); empty / falsy clears the override
     and lets the rank-based colour fall back through."""
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     try:
@@ -771,19 +775,19 @@ def sel_set_color(app, sid, color) -> None:
         s["color"] = new
     else:
         s.pop("color", None)
-    app._rebuild_all()
+    ctx.rebuild_all()
 
 
 
-def groups_centre_refresh(app) -> None:
+def groups_centre_refresh(ctx) -> None:
     """Refresh all Sample Definitions panels.
 
     Card lists are only rebuilt when the tab is active (expensive).
     Plate maps are always updated (cheap).
     """
-    app._enforce_well_exclusivity()
+    enforce_well_exclusivity(ctx)
     tab_visible = False
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(ctx.window, "_notebook", None)
     if nb is not None:
         try:
             tab_visible = nb.currentName() == "Sample Definitions"
@@ -793,14 +797,15 @@ def groups_centre_refresh(app) -> None:
     if tab_visible:
         from well_viewer.features.grouping.label_grid_view import label_grid_refresh
         from well_viewer.features.grouping.tab_view import rep_panel_refresh
-        rep_panel_refresh(app)
-        label_grid_refresh(app)
-    app._rep_refresh_map()
-    update_active_group_label(app)
+        rep_panel_refresh(ctx)
+        label_grid_refresh(ctx)
+    from well_viewer.features.grouping.controller import rep_refresh_map
+    rep_refresh_map(ctx)
+    update_active_group_label(ctx)
 
 
 
-def set_selected_wells(app, new_set, *, commit: bool = True) -> None:
+def set_selected_wells(ctx, new_set, *, commit: bool = True) -> None:
     """Single mutation point for ``_selected_wells``.
 
     Callers that mutated the set directly (heatmap drag, smFISH tab
@@ -808,28 +813,36 @@ def set_selected_wells(app, new_set, *, commit: bool = True) -> None:
     and the redraw fan-out, so the next selection diff in
     ``selection_controller.on_plate_sel_change`` mis-attributed
     additions / removals across tabs. Funnel everything through here.
+
+    Takes ``ctx`` so feature callers (heatmap drag, the Plot Groups drawer)
+    thread the context instead of the god-object. The prev-sel snapshot + set
+    mutation are pure typed state; only the two downstream fan-outs
+    (``_refresh_sidebar_map`` debounce and ``on_plate_sel_change``) are still
+    app-native, so they are reached through a single ``app`` handle bridge.
     """
+    sel = ctx.state.selection
     new_set = set(new_set or [])
-    if new_set == app._app_state.selection.selected_wells:
+    if new_set == sel.selected_wells:
         return
     # Snapshot the previous selection so on_plate_sel_change can
     # compute an accurate diff if it runs after this.
-    app._app_state.selection.prev_sel = set(app._app_state.selection.selected_wells)
-    app._app_state.selection.selected_wells = new_set
-    if hasattr(app, "_refresh_sidebar_map"):
-        app._refresh_sidebar_map()
+    sel.prev_sel = set(sel.selected_wells)
+    sel.selected_wells = new_set
+    # The sidebar-map debounce and the plate-change commit are named on the
+    # context (genuine app-orchestration service + ctx-native commit).
+    ctx.refresh_sidebar_map()
     if commit:
-        on_plate_sel_change(app)
+        on_plate_sel_change(ctx)
 
 
 
-def enforce_well_exclusivity(app) -> None:
+def enforce_well_exclusivity(ctx) -> None:
     """Invariant: a well belongs to **at most one group**. Keep each well in
     the first selection that has it; strip it from the rest. The edit
     helpers already enforce this (edited group wins); this is a safety net
     and cleans up pre-existing overlaps from old saved data."""
     seen: set = set()
-    for s in app._app_state.selection.selections:
+    for s in ctx.state.selection.selections:
         if not isinstance(s, dict):
             continue
         kept = []
@@ -855,11 +868,11 @@ def rebuild_all(app) -> None:
     app._invalidate_stats_cache()
     app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
-    redraw_bars(app)
+    redraw_bars(app._ctx)
     app._redraw()
     try:
         from well_viewer.features.scatter.tab_view import scatter_redraw_active
-        scatter_redraw_active(app)
+        scatter_redraw_active(app._ctx)
     except Exception:
         __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
     # Group edits change which wells the plots draw from, and the Cell Browser
@@ -883,63 +896,64 @@ def rebuild_all(app) -> None:
             app._show_line_sidebar()
     # Sample definitions auto-persist (debounced), like notes / ratios /
     # view-state — the explicit Save button is now just "save now".
-    _schedule_sample_def_autosave(app)
+    _schedule_sample_def_autosave(app._ctx)
 
 
-def _schedule_sample_def_autosave(app) -> None:
+def _schedule_sample_def_autosave(ctx) -> None:
     """Queue a debounced write of the sample-definitions block.
 
     Safe to call from any edit path: the registry coalesces a burst into one
     write and ``autosave_to_pipeline_info`` no-ops silently without a data dir.
     """
-    p = getattr(app, "_persistence", None)
+    p = ctx.persistence
     if p is not None:
         p.schedule_save("sample_definitions")
 
 
-def sel_add(app, name=None, wells=None, replicates=None, source="user",
+def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
              *, make_current=True):
     from well_viewer.domain.selections_model import make_selection
-    used_names = {s.get("name") for s in app._app_state.selection.selections}
-    used_ids = {s.get("id") for s in app._app_state.selection.selections}
+    sel_state = ctx.state.selection
+    used_names = {s.get("name") for s in sel_state.selections}
+    used_ids = {s.get("id") for s in sel_state.selections}
     sel = make_selection(name=name, wells=wells, replicates=replicates,
                          source=source, used_names=used_names, used_ids=used_ids,
-                         fallback_color_idx=len(app._app_state.selection.selections))
-    app._sel_strip_wells(sel["wells"], keep_id=sel["id"])
-    app._app_state.selection.selections.append(sel)
+                         fallback_color_idx=len(sel_state.selections))
+    sel_strip_wells(ctx, sel["wells"], keep_id=sel["id"])
+    sel_state.selections.append(sel)
     if make_current:
-        app._app_state.selection.current_selection_id = sel["id"]
-    app._rebuild_all()
+        sel_state.current_selection_id = sel["id"]
+    ctx.rebuild_all()
     return sel["id"]
 
 
 
-def sel_set_hidden(app, sid, hidden, *, light=False) -> None:
-    s = app._sel_by_id(sid)
+def sel_set_hidden(ctx, sid, hidden, *, light=False) -> None:
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     if bool(s.get("hidden")) == bool(hidden):
         return
     s["hidden"] = bool(hidden)
     if light:
-        app._refresh_sidebar_map()
-        _schedule_sample_def_autosave(app)
+        ctx.refresh_sidebar_map()
+        _schedule_sample_def_autosave(ctx)
     else:
-        app._rebuild_all()
+        ctx.rebuild_all()
 
 
 
-def sel_set_composition(app, sid, wells=None, replicates=None) -> None:
+def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
     from well_viewer.domain.selections_model import _clean_wells, _deoverlap_replicates
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     if wells is not None:
         s["wells"] = _clean_wells(wells)
-        app._sel_strip_wells(s["wells"], keep_id=sid)
+        sel_strip_wells(ctx, s["wells"], keep_id=sid)
     src = replicates if replicates is not None else s.get("replicates")
     s["replicates"] = _deoverlap_replicates(src, allowed=set(s.get("wells") or []))
-    app._rebuild_all()
+    ctx.rebuild_all()
 
 
 
@@ -952,118 +966,136 @@ def select_invert(app) -> None:
     app._app_state.selection.selected_wells = new
     # Re-use the standard refresh path the click handlers go through.
     app._refresh_sidebar_map()
-    on_plate_sel_change(app)
+    on_plate_sel_change(app._ctx)
 
 
 
-def invalidate_stats_cache(app) -> None:
+def invalidate_stats_cache(ctx) -> None:
     """Discard cached group statistics. Call whenever group definitions change."""
-    app._app_state.stats_cache.invalidate()
+    ctx.state.stats_cache.invalidate()
     # Replicate-set visibility may have shifted, so re-check whether the
-    # per-FOV toggle is still applicable. Cheap; only walks _fov_btns.
-    if hasattr(app, "_refresh_fov_btn_state"):
-        app._refresh_fov_btn_state()
+    # per-FOV toggle is still applicable. Cheap; only walks the FOV btn bank.
+    from well_viewer.core.plot_toggles import refresh_fov_btn_state
+    refresh_fov_btn_state(ctx)
     # Cell gating writes new ``Included`` flags onto cached rows, which
     # the Review Image include map mirrors. Bumping the version key
     # forces the next refresh to recompute the include map (cheap)
     # while reusing the cached image arrays + boundary mask (expensive).
     # No-op when Image Browser is disabled (no review_image slice).
-    _review_image = app._app_state.feature_slice("review_image")
+    _review_image = ctx.state.feature_slice("review_image")
     if _review_image is not None:
         _review_image.override_version += 1
 
 
 
-def rep_clear_all(app) -> None:
+def sel_clear_all(ctx) -> None:
+    """Drop every saved selection and clear the current-selection pointer."""
+    sel_state = ctx.state.selection
+    sel_state.selections = []
+    sel_state.current_selection_id = None
+    ctx.rebuild_all()
+
+
+def rep_clear_all(ctx) -> None:
     from PySide6.QtWidgets import QMessageBox
-    if not app._app_state.selection.selections:
+    sel_state = ctx.state.selection
+    if not sel_state.selections:
         return
     resp = QMessageBox.question(
-        app, "Clear all groups?",
-        f"Remove all {len(app._app_state.selection.selections)} group(s)?",
+        ctx.window, "Clear all groups?",
+        f"Remove all {len(sel_state.selections)} group(s)?",
         QMessageBox.Yes | QMessageBox.No,
     )
     if resp == QMessageBox.Yes:
-        app._sel_clear_all()
+        sel_clear_all(ctx)
 
 
 
-def sel_rename(app, sid, name) -> None:
+def sel_rename(ctx, sid, name) -> None:
     from well_viewer.domain.selections_model import _unique_name as _uq
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
-    new = _uq(name, {x.get("name") for x in app._app_state.selection.selections if x.get("id") != sid})
+    new = _uq(name, {x.get("name") for x in ctx.state.selection.selections if x.get("id") != sid})
     if new == s.get("name"):
         return
     s["name"] = new
-    app._rebuild_all()
+    ctx.rebuild_all()
 
 
 
-def sel_delete(app, sid) -> None:
-    i = app._sel_index_of(sid)
+def sel_delete(ctx, sid) -> None:
+    sel_state = ctx.state.selection
+    i = sel_index_of(ctx, sid)
     if i < 0:
         return
-    app._app_state.selection.selections.pop(i)
-    if app._app_state.selection.current_selection_id == sid:
-        app._app_state.selection.current_selection_id = (
-            app._app_state.selection.selections[min(i, len(app._app_state.selection.selections) - 1)].get("id")
-            if app._app_state.selection.selections else None)
-    app._rebuild_all()
+    sel_state.selections.pop(i)
+    if sel_state.current_selection_id == sid:
+        sel_state.current_selection_id = (
+            sel_state.selections[min(i, len(sel_state.selections) - 1)].get("id")
+            if sel_state.selections else None)
+    ctx.rebuild_all()
 
 
 
-def sel_select(app, sid) -> None:
-    if sid not in {s.get("id") for s in app._app_state.selection.selections}:
+def sel_select(ctx, sid) -> None:
+    sel_state = ctx.state.selection
+    if sid not in {s.get("id") for s in sel_state.selections}:
         return
-    if sid == app._app_state.selection.current_selection_id:
+    if sid == sel_state.current_selection_id:
         return
-    app._app_state.selection.current_selection_id = sid
-    app._groups_centre_refresh()
-    app._refresh_sidebar_map()
+    sel_state.current_selection_id = sid
+    groups_centre_refresh(ctx)
+    ctx.refresh_sidebar_map()
 
 
 
-def sel_reorder(app, ids) -> None:
-    by_id = {s.get("id"): s for s in app._app_state.selection.selections}
+def sel_reorder(ctx, ids) -> None:
+    sel_state = ctx.state.selection
+    by_id = {s.get("id"): s for s in sel_state.selections}
     new = [by_id[i] for i in ids if i in by_id]
-    for s in app._app_state.selection.selections:
+    for s in sel_state.selections:
         if s not in new:
             new.append(s)
-    if new != app._app_state.selection.selections:
-        app._app_state.selection.selections = new
-        app._rebuild_all()
+    if new != sel_state.selections:
+        sel_state.selections = new
+        ctx.rebuild_all()
 
 
 
-def sel_duplicate(app, sid):
-    s = app._sel_by_id(sid)
+def sel_duplicate(ctx, sid):
+    s = sel_by_id(ctx, sid)
     if s is None:
         return None
-    return app._sel_add(name=f"{s.get('name', 'Selection')} copy",
-                         wells=[], replicates=None, source="user")
+    return sel_add(ctx, name=f"{s.get('name', 'Selection')} copy",
+                   wells=[], replicates=None, source="user")
 
 
 
-def sel_by_id(app, sid):
-    for s in app._app_state.selection.selections:
+def sel_by_id(ctx, sid):
+    for s in ctx.state.selection.selections:
         if s.get("id") == sid:
             return s
     return None
 
 
+def sel_index_of(ctx, sid) -> int:
+    for i, s in enumerate(ctx.state.selection.selections):
+        if s.get("id") == sid:
+            return i
+    return -1
 
-def sel_color(app, s) -> str:
+
+
+def sel_color(ctx, s) -> str:
     """Effective colour for a selection dict: explicit ``color`` override
     first, otherwise the rank-based fallback so groups without a user-set
-    colour stay consistent with their wells."""
-    if not isinstance(s, dict):
-        return app._rank_color_wells(getattr(s, "wells", None))
-    c = s.get("color")
-    if isinstance(c, str) and c.strip():
-        return c.strip()
-    return app._rank_color_wells(s.get("wells"))
+    colour stay consistent with their wells.
+
+    A8 teardown: takes ``ctx`` for uniformity with the colour graph; delegates
+    to the pure domain resolver (no god-object)."""
+    from well_viewer.domain.selections_model import color_for_selection
+    return color_for_selection(s)
 
 
 
@@ -1074,17 +1106,17 @@ def plate_commit_deferred(app) -> None:
     if not app._app_state.selection.plate_commit_pending:
         return
     app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(app)
+    on_plate_sel_change(app._ctx)
 
 
 
-def labels_clear_all(app) -> None:
-    if app._app_state.dataset.well_labels:
+def labels_clear_all(ctx) -> None:
+    if ctx.state.dataset.well_labels:
         from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-        app._app_state.dataset.well_labels.clear()
-        label_grid_refresh(app)
-        app._invalidate_stats_cache()
-        _schedule_sample_def_autosave(app)
+        ctx.state.dataset.well_labels.clear()
+        label_grid_refresh(ctx)
+        invalidate_stats_cache(ctx)
+        _schedule_sample_def_autosave(ctx)
 
 
 

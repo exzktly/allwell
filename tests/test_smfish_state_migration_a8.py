@@ -38,9 +38,9 @@ def test_toggle_overlays_flips_the_slice(viewer_app, qtbot):
     build_smfish_tab(app._ctx, parent)
 
     assert app._app_state.smfish.show_overlays is True
-    _smfish_toggle_overlays(app)
+    _smfish_toggle_overlays(app._ctx)
     assert app._app_state.smfish.show_overlays is False
     assert app._smfish_overlay_btn.text() == "Show Overlays"
-    _smfish_toggle_overlays(app)
+    _smfish_toggle_overlays(app._ctx)
     assert app._app_state.smfish.show_overlays is True
     assert app._smfish_overlay_btn.text() == "Hide Overlays"

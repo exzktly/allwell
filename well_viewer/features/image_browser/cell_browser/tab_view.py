@@ -38,8 +38,8 @@ __all__ = [
 
 def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: Qt widget handles go through the WidgetRegistry
-    # (``ctx.widgets``), which stamps ``app._cell_browser_*`` so legacy
-    # readers resolve. State dicts + the loader/refreshers stay on app.
+    # (``ctx.widgets``), which stamps ``ctx._cell_browser_*`` so legacy
+    # readers resolve. State dicts + the loader/refreshers stay on ctx.
     reg = ctx.widgets
     layout = parent.layout()
     if layout is None:
@@ -116,7 +116,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
 
     load_more = QPushButton("Load next", ctrl)
     load_more.setProperty("variant", "secondary")
-    load_more.clicked.connect(lambda _=False: ctl.load_next_page(ctx.app))
+    load_more.clicked.connect(lambda _=False: ctl.load_next_page(ctx))
     load_more.setEnabled(False)
     cl.addWidget(load_more)
     reg.register("_cell_browser_load_more_btn", load_more)
@@ -129,7 +129,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     generate_btn.setToolTip(
         "Re-render the gallery with the current channels / LUT / colors / "
         "source. Display settings are staged until you press this.")
-    generate_btn.clicked.connect(lambda _=False: ctl.apply_filters(ctx.app))
+    generate_btn.clicked.connect(lambda _=False: ctl.apply_filters(ctx))
     cl.addWidget(generate_btn)
     reg.register("_cell_browser_generate_btn", generate_btn)
 
@@ -155,9 +155,9 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_browser_grid_host", grid_host)
 
     # ── worker (connect once) ────────────────────────────────────────────────
-    loader = CellImageLoader(ctx.app)
-    loader.cell_ready.connect(partial(_dispatch_cell_ready, ctx.app))
-    loader.page_finished.connect(partial(_dispatch_page_finished, ctx.app))
+    loader = CellImageLoader(ctx)
+    loader.cell_ready.connect(partial(_dispatch_cell_ready, ctx))
+    loader.page_finished.connect(partial(_dispatch_page_finished, ctx))
     ctx.runtime.cell_browser.loader = loader
 
     # Expose the on-show refreshers so ``tab_controller.on_tab_change`` can
@@ -168,24 +168,24 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         cell_browser_sidebar_refresh,
     )
 
-    cell_browser_refresh(ctx.app)
+    cell_browser_refresh(ctx)
 
 
-def _dispatch_cell_ready(app, payload) -> None:
-    ctl.on_cell_ready(app, payload)
+def _dispatch_cell_ready(ctx, payload) -> None:
+    ctl.on_cell_ready(ctx, payload)
 
 
-def _dispatch_page_finished(app, payload) -> None:
-    ctl.on_page_finished(app, payload)
+def _dispatch_page_finished(ctx, payload) -> None:
+    ctl.on_page_finished(ctx, payload)
 
 
-def cell_browser_refresh(app) -> None:
+def cell_browser_refresh(ctx) -> None:
     """Repopulate the channel toggles from the current dataset (called on tab
     show / dataset load). Preserves existing checked state where channels match."""
-    host = getattr(app, "_cell_browser_channel_host", None)
+    host = getattr(ctx.runtime.cell_browser, "channel_host", None)
     if host is None:
         return
-    channels = cell_browser_channels(app)
+    channels = cell_browser_channels(ctx)
     if not channels:
         # A transient empty resolve (channel state not populated yet, rows not
         # cached on this pass) must NOT wipe a channel row that already built —
@@ -193,7 +193,7 @@ def cell_browser_refresh(app) -> None:
         # showed once". Leave any existing chips intact and try again next refresh.
         return
     prev = {tok: cb.isChecked() for tok, cb in
-            (getattr(app, "_cell_browser_channel_chips", {}) or {}).items()}
+            (getattr(ctx.runtime.cell_browser, "channel_chips", {}) or {}).items()}
     lay = host.layout()
     while lay.count():
         item = lay.takeAt(0)
@@ -208,8 +208,8 @@ def cell_browser_refresh(app) -> None:
         # a channel doesn't re-composite the gallery on its own.
         lay.addWidget(cb)
         chips[tok] = cb
-    app._cell_browser_channel_chips = chips
-    cell_browser_refresh_lut_rows(app)
+    ctx.runtime.cell_browser.channel_chips = chips
+    cell_browser_refresh_lut_rows(ctx)
 
 
 def _cb_num(text):
@@ -230,11 +230,11 @@ def _cb_fmt(v) -> str:
     return f"{v:g}"
 
 
-def _apply_cell_browser_lut(app, channel: str, lo_text: str, hi_text: str) -> None:
+def _apply_cell_browser_lut(ctx, channel: str, lo_text: str, hi_text: str) -> None:
     """Write a channel's bounds into the shared LUT (or clear → auto).
 
     Staged only: the gallery re-composites on the next Generate, not on edit."""
-    iv = getattr(app._app_state, "image_view", None)
+    iv = getattr(ctx.state, "image_view", None)
     if iv is None:
         return
     lo, hi = _cb_num(lo_text), _cb_num(hi_text)
@@ -262,14 +262,14 @@ def _paint_cb_swatch(btn, rgb) -> None:
         f"min-width: 28px; min-height: 18px; padding: 0; }}")
 
 
-def _cb_pick_color(app, channel: str, index: int, swatch_btn) -> None:
+def _cb_pick_color(ctx, channel: str, index: int, swatch_btn) -> None:
     """Open a colour popover for *channel*; picking stages the per-channel tint
     (applied on the next Generate)."""
     from PySide6.QtGui import QColor
     from widgets.color_swatch_row import ColorSwatchRow
     from widgets.popover import Popover
 
-    iv = getattr(app._app_state, "image_view", None)
+    iv = getattr(ctx.state, "image_view", None)
     if iv is None:
         return
     r, g, b = _cb_effective_tint(iv, channel, index)
@@ -288,16 +288,16 @@ def _cb_pick_color(app, channel: str, index: int, swatch_btn) -> None:
     pop.popup(swatch_btn, side="bottom", align="start")
 
 
-def cell_browser_refresh_lut_rows(app) -> None:
+def cell_browser_refresh_lut_rows(ctx) -> None:
     """(Re)build the per-channel LUT editor rows from the dataset's channels.
 
     Each row edits the SHARED per-channel LUT; fields are seeded from it (blank
     when unset = auto). Called alongside the channel-chip refresh."""
-    lay = getattr(app, "_cell_browser_lut_layout", None)
-    panel = getattr(app, "_cell_browser_lut_panel", None)
+    lay = getattr(ctx.runtime.cell_browser, "lut_layout", None)
+    panel = getattr(ctx.runtime.cell_browser, "lut_panel", None)
     if lay is None or panel is None:
         return
-    channels = cell_browser_channels(app)
+    channels = cell_browser_channels(ctx)
     if not channels:
         return
     while lay.count():
@@ -305,7 +305,7 @@ def cell_browser_refresh_lut_rows(app) -> None:
         w = item.widget()
         if w is not None:
             w.deleteLater()
-    iv = getattr(app._app_state, "image_view", None)
+    iv = getattr(ctx.state, "image_view", None)
     rows = {}
     for i, tok in enumerate(channels):
         row = QWidget(panel)
@@ -345,15 +345,15 @@ def cell_browser_refresh_lut_rows(app) -> None:
         rl.addWidget(reset_c)
 
         def _commit(_=None, _t=tok, _lo=lo_e, _hi=hi_e):
-            _apply_cell_browser_lut(app, _t, _lo.text(), _hi.text())
+            _apply_cell_browser_lut(ctx, _t, _lo.text(), _hi.text())
 
         def _auto(_=None, _t=tok, _lo=lo_e, _hi=hi_e):
             _lo.clear()
             _hi.clear()
-            _apply_cell_browser_lut(app, _t, "", "")
+            _apply_cell_browser_lut(ctx, _t, "", "")
 
         def _pick(_=None, _t=tok, _i=i, _sw=swatch):
-            _cb_pick_color(app, _t, _i, _sw)
+            _cb_pick_color(ctx, _t, _i, _sw)
 
         def _reset_color(_=None, _t=tok, _i=i, _sw=swatch):
             if iv is not None:
@@ -367,4 +367,4 @@ def cell_browser_refresh_lut_rows(app) -> None:
         reset_c.clicked.connect(_reset_color)
         lay.addWidget(row)
         rows[tok] = (lo_e, hi_e)
-    app._cell_browser_lut_rows = rows
+    ctx.runtime.cell_browser.lut_rows = rows

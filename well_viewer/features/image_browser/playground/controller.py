@@ -53,21 +53,23 @@ def _set_combo(app, attr: str, options, current):
             cb.blockSignals(blocked)
 
 
-def playground_repopulate_dropdowns(app) -> None:
+def playground_repopulate_dropdowns(ctx) -> None:
     """Refresh the frame selectors from the loaded dataset (idempotent)."""
-    st = _st(app)
-    wells = _well_options(app)
-    channels = [c for c in _channel_options(app) if _is_real_channel(c)]
-    tps = _timepoint_options(app)
-    fovs = _fov_options(app)
+    st = ctx.state.playground
+    wells = _well_options(ctx)
+    channels = [c for c in _channel_options(ctx) if _is_real_channel(c)]
+    tps = _timepoint_options(ctx)
+    fovs = _fov_options(ctx)
     st.well = st.well or (wells[0] if wells else None)
     st.channel = st.channel or (channels[0] if channels else None)
     st.timepoint = st.timepoint or (tps[0] if tps else None)
     st.fov = st.fov or (fovs[0] if fovs else None)
-    _set_combo(app, "_playground_well_cb", wells, st.well)
-    _set_combo(app, "_playground_chan_cb", channels, st.channel)
-    _set_combo(app, "_playground_tp_cb", tps, st.timepoint)
-    _set_combo(app, "_playground_fov_cb", fovs, st.fov)
+    # The playground combos are not registered; reach them (widgets) via the
+    # blessed ctx.window accessor. _set_combo stays app/window-first (widget I/O).
+    _set_combo(ctx.window, "_playground_well_cb", wells, st.well)
+    _set_combo(ctx.window, "_playground_chan_cb", channels, st.channel)
+    _set_combo(ctx.window, "_playground_tp_cb", tps, st.timepoint)
+    _set_combo(ctx.window, "_playground_fov_cb", fovs, st.fov)
 
 
 # ── widget → state ───────────────────────────────────────────────────────────
@@ -164,14 +166,14 @@ def playground_on_change(app) -> None:
         return
 
     cache = st.image_cache
-    raw = _load_array(app, cache, st.well, st.channel, st.timepoint, st.fov,
+    raw = _load_array(app._ctx, cache, st.well, st.channel, st.timepoint, st.fov,
                       use_tophat=False)
     if raw is None:
         st.raw_arr = None
         _set_status(app, "No raw image for the selected frame.")
         return
     st.raw_arr = np.asarray(raw, dtype=np.float32)
-    st.mask_arr = _load_mask_array(app, cache, st.well, st.timepoint, st.fov)
+    st.mask_arr = _load_mask_array(app._ctx, cache, st.well, st.timepoint, st.fov)
     frame_lbl = f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}"
 
     # The binary threshold is per-frame: when the frame identity changes, drop
@@ -234,7 +236,7 @@ def _effective_threshold(app) -> float:
         return float(st.threshold)
     try:
         from well_viewer.core.channel_state_controller import get_thresh_frac_on
-        return float(get_thresh_frac_on(app, (st.channel or "").lower()))
+        return float(get_thresh_frac_on(app._ctx, (st.channel or "").lower()))
     except Exception:
         return 0.0
 
@@ -317,7 +319,7 @@ def _build_reference_then_render(app, chan_lower: str) -> None:
         _set_status(app, f"Model build failed: {msg}")
 
     app._playground_ref_bridge = request_reference_fields(
-        app, st.background_well, chan_lower,
+        app._ctx, st.background_well, chan_lower,
         flatfield_mode=st.flatfield_mode, background_method=st.background_method,
         on_done=_on_done, on_failed=_on_failed)
 

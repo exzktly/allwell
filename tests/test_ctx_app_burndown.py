@@ -96,7 +96,744 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              (set_mode, gates_changed_cb), batch_export (set_mode),
 #              saved_plots (repopulate), multivariate (refresh_* / sync_
 #              controls). Live closures stamped for other layers to call.
-CTX_APP_BUDGET = 249
+#   249 -> 246  T3 pilot: distribution _on_changed(ctx). 5 builder control
+#              wirings drop ctx.app; the onward app-based renderer handoff
+#              (redraw_distribution) is the one residual ctx.app. Internal
+#              caller bridged via app._ctx (uncounted). Demonstrates the T3
+#              signature-flip + builder(ctx)/machinery(app._ctx) caller split.
+#   246 -> 245  T3 shared-leaf pass: the timepoint leaves take ctx —
+#              timepoint_sync.set_focus_tp / current_focus_tp go pure
+#              (ctx.state.plot + ctx.bus, zero residual) and
+#              data_loading.get_all_timepoints takes ctx (well list from
+#              ctx.state.dataset; the lone _get_rows row-fetch is the residual
+#              until a typed data-service lands). That lets the distribution
+#              timepoint refresh handler and the multivariate timepoint combo
+#              read ctx (combo via ctx.widgets), dropping their builder-site
+#              touches; the other callers (heatmap/scatter/distribution) bridge
+#              through app._ctx (uncounted) pending their own handler passes.
+#   245 -> 244  T3 timepoint-handler modernization: the distribution + heatmap
+#              timepoint handlers now read the modern infra end-to-end — combo/
+#              slider via ctx.widgets, the tp-value cache via ctx.runtime.heatmap,
+#              and the split-view mode flag via a new ctx.runtime.split namespace
+#              (_split_active gets a ctx home; split_view.py still writes it
+#              directly, the runtime read bridges). distribution _on_tp_changed_
+#              dist -> ctx is a clean -1 (split was its only residual); the two
+#              heatmap handlers -> ctx net 0 (the onward _redraw render handoff
+#              is the one residual, mirroring distribution _on_changed) but are
+#              fully off the god-object otherwise. Also fixes a latent bug the
+#              first pass introduced: registry.py's channel reactors still passed
+#              bare app to the now-ctx refresh handlers, silently swallowed by
+#              their except — now app._ctx, locked by test_timepoint_refresh_
+#              ctx_contract. Fully zeroing the heatmap handlers waits on the
+#              redraw_heatmap render-tree conversion (High-risk one-feature pass).
+#   244 -> 243  R1 ctx-native row-fetch data service: new data_loading.get_rows(
+#              ctx, label) does the lazy load + QC/Crop projection over ctx.state
+#              (QC/crop projectors get_qc_params/apply_qc_to_cache/get_crop_region/
+#              apply_crop_to_cache flipped to ctx, pure typed state after R4).
+#              WellViewerApp._get_rows delegates to it; get_all_timepoints reads
+#              get_rows(ctx) instead of ctx.app._get_rows -> its last residual is
+#              gone. The service is reusable by stats_compute + every collect
+#              module (their own ctx passes come later).
+#   243 -> 241  R6 cell-gating gate values -> typed CellGatingState core slice
+#              (AppState.cell_gating). The FluorGating/ThreshFracOn values move
+#              off the QLineEdits: the editingFinished handlers sync edits ->
+#              slice, persistence load writes the slice, accessors/CDF/saved-
+#              plots/load-kick read the slice; edits become the input surface,
+#              seeded FROM the slice at build. The {channel -> QLineEdit} maps
+#              register via ctx.widgets (widget containers) -> -2. Subsumes the
+#              loose _thresh_frac_on_saved shadow dict. Locked by
+#              test_cell_gating_gate_state (real QLineEdits, offscreen: sync,
+#              defaults, ratio-key resolution, garbage-keeps-last-committed,
+#              handler fan-out, editingFinished wiring).
+#   241 -> 241  Shared render-leaf passes (0-count enablers, all pure typed state
+#              post-R6/R7): R7 export-prefs -> ExportPrefsState; get_all_fluor_gates
+#              + the cell-gating gate accessors -> ctx; the export-style chain
+#              (_ensure_export_style_prefs / figure_prefs [figs via ctx.widgets] /
+#              apply_export_style_to_current) -> ctx; the label tier
+#              (active_channel_label / ratio_label_for / well_display_label /
+#              replicate_display_label) -> ctx; get_thresh_frac_on -> ctx
+#              (guard reframed, behavior-preserving: channel.threshold has no
+#              writers). Count held because ~40+ consumers call each via the
+#              uncounted god-method — but every shared leaf a plot renderer
+#              touches is now ctx, which is what lets a render feature convert
+#              net-negative.
+#   241 -> 239  R3 distribution render tree -> ctx: redraw_distribution + its
+#              helpers (_setup_axes / _apply_card_style / _apply_export_style /
+#              _sync_distribution_tp_to_focus / _display_label_for / _render_
+#              overlay / _render_faceted / _retint_axes_text / _xlabel_for /
+#              _title_for) all take ctx — widgets via ctx.widgets, state via
+#              ctx.state, every shared leaf now ctx-native (zero god-object
+#              residual). _on_changed drops its ctx.app; plot_orchestrator
+#              bridges via app._ctx. FIRST net-negative render conversion.
+#              (Data path covered by test_distribution_log_y / iter_plot_groups
+#              char test; the paint — theme/label pixels — is the only
+#              headless-unverifiable part and wants an interactive smoke.)
+#   239 -> 233  R-leaf + R2 heatmap (enabler +2, heatmap render -8). The shared
+#              stats aggregation leaf
+#              (aggregate_well / aggregate_group / _thresh_on_col) now takes ctx:
+#              rows via the ctx-native get_rows, ratios via ctx.state, gate-on
+#              flags via ctx.runtime; the ~26 app-native callers (barplot /
+#              fold_change / lineplot / export / batch_export + the internal
+#              stats_compute reducers) bridge via app._ctx (uncounted). Only the
+#              two pure-logic delegate lookups (getattr(ctx.app, "_aggregate_*"))
+#              cost +2. That unblocked R2: the heatmap render tree
+#              (redraw_heatmap + active_layout / _selected_* / sync_slider /
+#              _expand_repset_wells / _repset_name_for_wells / _pool_filtered_mean
+#              / _cell_value / _resolve_color_scale / _compute_global_range /
+#              _metric_axis_label) -> ctx — widgets via ctx.widgets, runtime
+#              state via ctx.runtime.heatmap, aggregation via the ctx leaf; the
+#              redraw-path tab_view handlers (_redraw / _on_cmap|scale|vminmax|
+#              repset|log_changed) drop their ctx.app wiring. Net -8. Residuals:
+#              _persist_settings' ctx.app._persistence, and active_layout's
+#              ctx.app._active_heatmap_layout_name (no runtime-prefix home yet —
+#              a typed-state follow-up). Interactive click/drag/transpose handlers
+#              stay app-native (wired via ctx.app); their consumed caches are
+#              stamped by ctx.runtime.heatmap so they keep resolving. Data path
+#              covered by test_heatmap_cell_value_ctx; the imshow/colorbar paint
+#              wants an interactive smoke.
+#   233 -> 214  Headless cross-cutting cleanup toward 0. wire_save_to_gallery ->
+#              ctx (6 plot tabs drop the reach-through; the capture subtree still
+#              bridges via ctx.app inside the one helper). Feature runtime-attr
+#              reach-throughs routed onto ctx.runtime.<feature> (stamps the same
+#              app._<prefix>_<name>, behavior-identical): cell_gating scatter-gate
+#              flags + gate-choice selections, scatter tp-selection / gate-geometry
+#              inits, scatter-agg tp-selections, batch_export inline state,
+#              image_browser subtabs.
+#   214 -> 211  More cross-cutting: panelCopied status hook -> the ctx.set_status
+#              accessor (lineplot/barplot); mv feature-picker refresh guard ->
+#              ctx.runtime.multivariate (read-only flag).
+#   211 -> 202  smFISH tab fully ctx-native. Every _smfish_* handler + the
+#              sync/build helpers take ctx; the ~30 live handles + flags read
+#              through ctx.runtime.smfish, state via ctx.state, well-token/CSV
+#              load via the domain/data free functions (extract_well_token /
+#              load_well_csv). External callers (registry activate, load_controller
+#              post-load) bridge via app._ctx. Residual (10): the smFISH god-service
+#              tail — _redraw / _invalidate_stats_cache / _parse_rc /
+#              _refresh_review_csv / persistence save+restore / recalculate_threshold
+#              — bridged through ctx.app pending their own ctx conversion.
+#   202 -> 201  Extract the pure WellViewerApp._parse_rc god-method to a free
+#              function domain.viewer_state.parse_rc (a well-label sort key that
+#              never touched self); the delegate now forwards to it and the smFISH
+#              well-sort drops its ctx.app._parse_rc. First core god-method fully
+#              decomposed (the delegate is now a pure passthrough, deletable once
+#              its bare-app callers migrate).
+#   201 -> 187  Multivariate feature → ctx. The controller (_apply/_state/
+#              mv_recompute/mv_set_*/mv_export_csv/mv_on_*), the collect layer
+#              (collect_feature_matrix/available_feature_columns/
+#              column_display_label), the renderer (render_multivariate), the
+#              feature-picker, and the figure copy/save handlers all take ctx —
+#              state via ctx.state, live handles via ctx.runtime.multivariate,
+#              _get_rows/rank-colour/parse_rc via the ctx-native leaves + domain
+#              color_for_replicate_set (no feature import), status/save via the
+#              ctx.set_status / ctx.save_figure_dialog accessors. Residuals: the
+#              genuine app services (_persistence, _rep_sets_active,
+#              _rank_color_well, refresh_plot_empty_states, QMessageBox/QFileDialog
+#              main-window parents) + wrap_with_empty_state, bridged via ctx.app.
+#   187 -> 186  Extract the pure WellViewerApp._rank_color_well god-method to
+#              domain.selections_model.color_for_well (WELL_COLORS[well_rank%N]);
+#              the delegate forwards to it and multivariate collect drops its
+#              ctx.app._rank_color_well. Second pure core god-method decomposed.
+#   186 -> 179  Add the ``image_table`` AppRuntime namespace (prefix
+#              ``_image_table_``) and route the Image Table tab's live-grid
+#              container inits (cells / lut / crop_tool) through it instead of
+#              hasattr/assign on ctx.app. Unblocks the full image_table controller
+#              conversion (its ~30 fns + helper files) as a later pass.
+#   179 -> 178  Migrate the odd-prefix app._active_heatmap_layout_name onto the
+#              typed HeatmapState.active_layout_name slice — reader (active_layout)
+#              via ctx.state, writers (sidebar set / load reset) via the slice,
+#              dead runtime_app init removed. Clears heatmap controller's last
+#              ctx.app residual.
+#   178 -> 177  Multivariate collect drops its ctx.app._rep_sets_active bridge —
+#              rep_sets_active is just active_replicate_sets over ctx.state, so
+#              collect calls the domain resolver directly (no god-object).
+#   177 -> 173  Core-spine enabler: invalidate_stats_cache + refresh_fov_btn_state
+#              go ctx-native (per-FOV button bank moved onto ctx.runtime.fov),
+#              letting the heatmap and smfish tabs drop their
+#              ctx.app._invalidate_stats_cache() calls for invalidate_stats_cache(ctx)
+#              (the guarded hasattr + silent-except wrapper goes with them).
+#   173 -> 165  New frozen ctx.window accessor (the WellViewerApp *qua QMainWindow*)
+#              gives genuine Qt widget-parenting a non-god-object home. The
+#              wrap_with_empty_state(...) parents across the plot tabs and the two
+#              multivariate QMessageBox parents move ctx.app -> ctx.window — a
+#              widget-parenting need is not behaviour coupling, so it shouldn't
+#              count. Behaviour-identical (window returns the same object).
+#   165 -> 141  Image Table subsystem fully ctx-native: controller + grid_ops +
+#              grid_layout + grid_view + image_compose + export + picker_view +
+#              state all take ctx (app._app_state->ctx.state, _image_table_*->
+#              ctx.runtime.image_table, _set_status->ctx.set_status, parse_rc /
+#              norm_timepoint / set_thresh_frac_on domain-leaves, dialogs->
+#              ctx.window). seg_channel_token moved to typed ChannelState; the
+#              sidebar plate attr renamed to fit the runtime namespace. Its
+#              tab_view drops all 26 ctx.app; the one residual (shared core
+#              build_plot_groups_drawer) stays a ctx.app bridge until that
+#              builder migrates.
+#   141 -> 135  Cell Browser subsystem fully ctx-native: collect, controller,
+#              criteria_view, sort_view, tab_view, worker, state all take ctx
+#              (app._app_state->ctx.state; app._cell_browser_*->ctx.runtime.
+#              cell_browser incl. dynamic getattr/setattr; _get_rows->get_rows(ctx);
+#              _norm_timepoint/_review_row_keys/_parse_rc/_rep_sets_active->the
+#              ctx-native domain leaves; _set_status->ctx.set_status; _notebook nav
+#              ->ctx.window). CellImageLoader holds ctx. tab_view drops all 6
+#              ctx.app; external callers bridge via app._ctx. Zero residual.
+#   141 -> 140  Cell Browser subsystem converted to ctx (collect/controller/
+#              criteria_view/sort_view/tab_view/worker/state). tab_view drops its
+#              6 ctx.app; the controller keeps 5 deliberate bridges to the still
+#              app-native review_image navigation (show_image_browser_subtab,
+#              update_preview, refresh_review_image, zoom_..._nucleus,
+#              review_row_keys) — they convert when review_image does. Net -1 but
+#              the whole subsystem is now ctx save those bridges.
+#   140 -> 128  Barplot subsystem → ctx: collect + controller + renderer + tab_view.
+#              _bar_*->ctx.runtime.barplot.*; _ax_bar_*/swarm/violin->ctx.widgets;
+#              compute engine + fold_change already ctx so those thread ctx; domain
+#              leaves for colours/labels/parse_rc/active_replicate_sets;
+#              refresh_fov_btn_state/invalidate_stats_cache ctx-native; redraw_app/
+#              current_centre_tab bridged via ctx.app. Delegates + external
+#              redraw_bars callers pass ._ctx; fold-change bar scope wraps
+#              redraw_bars(a._ctx). tab_view keeps 6 deliberate shared-service
+#              bridges. Test fakes updated to ctx shape.
+#   128 -> 124  ctx.persistence frozen accessor (app-level view-state save/load
+#              service) replaces ctx.app._persistence in heatmap + multivariate;
+#              multivariate refresh_plot_empty_states + export QFileDialog parent
+#              move to ctx.window. Self-contained, behaviour-identical.
+#   124 -> 121  smFISH threshold persistence -> ctx: persistence/smfish.py
+#              save_threshold/load_from_pipeline_info/apply_saved_to_spinbox/
+#              get_saved_threshold take ctx (thresholds_saved via
+#              ctx.runtime.smfish; combo/edit widgets via ctx.runtime.smfish;
+#              data_dir via ctx.state). smFISH tab_view calls them with ctx;
+#              runtime_app + load_controller bridge via ._ctx.
+#   121 -> 114  Prose sweep + widget-nav: reword 5 doc/comment mentions of the
+#              literal token (viewer_context window/persistence docstrings,
+#              image_table picker + playground comments) per the no-literal-in-
+#              comments convention; ui_helpers plotting-notebook lookup -> ctx.window.
+#   114 -> 118  Lineplot subsystem -> ctx (controller collect/paint/finalize/
+#              redraw/on_fig_click/toggle_sem take ctx; state via ctx.state,
+#              widgets via ctx.widgets, domain leaves called directly). The
+#              whole-tree count RISES because the controller previously took a
+#              raw `app` param invisible to this ratchet; conversion surfaces the
+#              residual toggle_sem bridges (_sem_btns/_sem_observers/_redraw/
+#              _is_tab_visible/_current_centre_tab) as counted ctx.app tokens.
+#   118 -> 101  Scatter subsystem -> ctx (controller / gating / collect / _layout /
+#              callbacks / cells+agg tab views / export service + sidebar /
+#              batch_export scatter_panel take ctx; state via ctx.state, gate
+#              banks + widgets via ctx.runtime.scatter / ctx.widgets, domain
+#              leaves called directly). Net drop: the scatter tree already
+#              carried many ctx.app reach-throughs that collapse to typed state.
+#   101 -> 97   Cell Gating subsystem → ctx: cell_gating_tab_view (the 2.4k-line
+#              builder + GatingWorker + optimizer + CDF/gate helpers) all take ctx
+#              — _app_state→ctx.state, _cell_gating_*→ctx.runtime.cell_gating,
+#              _scatter_gates→ctx.runtime.scatter.gates, _get_rows→get_rows(ctx),
+#              _get_all_fluor_gates/_ratio_label_for/parse_rc/active_replicate_sets/
+#              invalidate_stats_cache/resolve_control_wells the ctx-native leaves,
+#              _set_status→ctx.set_status, _event_bus→ctx.bus, dialogs→ctx.window.
+#              cell_gating_compute already app-free. Deliberate bridges remain
+#              (redraw/progress-bar/save+load gating/quick-edit refresh/qc controls/
+#              fold-change member labels/status). Callers across well_viewer + tests
+#              pass app._ctx; SimpleNamespace fakes get a ctx w/ AppRuntime.
+#   97  -> 98   Fix a latent load-path bug surfaced by the cell_gating slow tests:
+#              sample_definitions.load_from_pipeline_info was called with ctx
+#              (since 5504fea) but still took `app` and read app._app_state, so
+#              every dataset open raised AttributeError — silently swallowed by
+#              load_directory's guard, meaning saved replicate sets / groups /
+#              well labels / notes never re-hydrated. Convert the fn to ctx
+#              (ctx.state + invalidate_stats_cache(ctx)); the lone _apply_unified_
+#              state(ctx.app, block) bridge is the +1.
+#   92 -> 90    tab_controller current_centre_tab / visible_centre_tabs /
+#              is_tab_visible take ctx (unwrap ctx.app once at the core boundary;
+#              app-method delegators pass self._ctx, core callers bridge via
+#              app._ctx). barplot toggle_fov_replicates + lineplot toggle_sem
+#              drop their ctx.app tab-visibility probes for is_tab_visible(ctx);
+#              also fixes cell_browser controller which already passed ctx to the
+#              app-typed is_tab_visible (always-False bug).
+#   90 -> 84    Shared plot-tab builders -> ctx: on_plot_channel_selected
+#              (core channel_state_controller) and make_band_controls (core
+#              ui_helpers) take ctx, unwrapping once at the core boundary. The
+#              4 channel-combo tab_views (line/bar/heatmap/distribution) call
+#              on_plot_channel_selected(ctx, src) and the 4 band-control
+#              tab_views (line/bar/distribution/scatter-agg) call
+#              make_band_controls(ctx, ...); delegator + legacy toolbar bridge.
+#   84 -> 82    More shared plot-tab builders -> ctx: install_fold_change_controls
+#              (domain) and on_metric_selected (core channel_state_controller)
+#              take ctx (unwrap once); line + bar tab_views wire the fold-change
+#              popover + hidden metric combo through ctx, delegator via self._ctx.
+#   82 -> 81    populate_metric_combo (core channel_state_controller) takes ctx.
+#   81 -> 80    Heatmap interaction subsystem -> ctx (controller mouse/label-drag
+#              handlers + sidebar_view + persistence/heatmap_layouts).
+#   80 -> 79    scatter update_scatter_menus ratio labels via ratio_label_for(ctx).
+#   79 -> 78    review_csv tab -> ctx (4->0; refresh_review_csv[_rows] /
+#              on_review_csv_row_double_click take ctx as thin wrappers over the
+#              app-native Review CSV store/nav bodies -> +3 counted bridges in
+#              review_image/controller); saved_plots grid/clear read ctx.widgets
+#              (net 0 there — the SavedPlotsStore layer still takes app).
+#   78 -> 74    batch_export _mode_dispatch -> ctx: the 4 open_*_batch_export_shim
+#              (core.plot_orchestrator) take ctx and are fully threaded (shared
+#              _switch_to_batch_export_tab helper via ctx.state/ctx.window/
+#              ctx.runtime.batch_export — no core unwrap added); tab_view dispatch
+#              calls fn(ctx); delegators pass self._ctx. _build_spread_row /
+#              _show_batch_mode stay app bridges (converting adds ctx.app).
+#   74 -> 73    cell_gating _cell_gating_on_failed uses ctx.set_status instead of
+#              a getattr(ctx.app,"show_status_message") probe — which was a dead
+#              no-op (WellViewerApp has no show_status_message), so gating-failure
+#              messages never surfaced. Now they do (latent silent-failure fix).
+#   73 -> 72    heatmap refresh_metric_combo_for_channel /
+#              refresh_heatmap_aggregation_options take ctx (core unwrap). The
+#              heatmap build-time call was guarded by hasattr(ctx.app,
+#              "_refresh_*") on methods bound NOWHERE -> always False -> dead: the
+#              first-render Property-combo/aggregation sync never ran. Guards
+#              removed; called directly (self-guard + swallow-wrapped). 4 feature
+#              ctx.app removed, 2 core unwraps added (net -1 + latent dead-code fix).
+#   72 -> 68    X5: _label_to_channel_key map migrated from an undeclared
+#              app._* attribute to typed state ChannelState.label_to_channel_key
+#              (rebuilt by update_channel_selector; resets on dataset swap). The
+#              4 scatter reads (controller x3 + collect) go through ctx.state.
+#              channel; channel_key_for_label / populate_metric_combo / batch_
+#              export read the typed field. Also removes the lossy getattr(...,None)
+#              fallback that let a stale/absent map silently drop ratio/shape keys.
+#   68 -> 64    export/service CSV writers take ctx: export_plot_data /
+#              export_bar_plot_data / export_heatmap_data / export_distribution_data
+#              fully threaded to ctx (state/set_status/domain leaves/ctx.runtime.
+#              heatmap/ctx.widgets/ctx.window) matching the scatter exporters; the
+#              4 plot-tab Export-CSV buttons call export_*_data(ctx). Shared
+#              helpers _well_labels_map/_ask_save_csv take ctx; _warn/_error param
+#              renamed app->parent (Qt parent only). batch_export panels bridge
+#              via self._app._ctx.
+#   64 -> 62    review_image nav layer -> ctx: image_browser show_image_browser_subtab,
+#              review_image collect (review_row_keys) + controller (zoom + review_csv
+#              impls) thread ctx; cell_browser on_cell_clicked calls them with ctx.
+#              runtime_app delegators pass self._ctx. Deeper render/store paths that
+#              still take app remain reported bridges.
+#   62 -> 63    saved_plots store/capture layer -> ctx: tab_view fully decoupled
+#              (5 ctx.app -> 0) + image_table save_plot_from_card(ctx). Like
+#              lineplot, whole-tree RISES by 1: the SavedPlotsStore / capture /
+#              controller layer previously took a raw app param (invisible to the
+#              ratchet); threading ctx surfaces its genuine bridges (persistence-
+#              doc I/O, view_state snapshot/restore, stats deserialize/compute) as
+#              counted, documented ctx.app residuals to convert with those layers.
+#   F4 controllers+aggregators: -4   stats_compute aggregate_well / aggregate_group
+#              resolve the delegate through a new ctx.runtime.aggregate namespace
+#              (backed by app._aggregate_well/_group) instead of getattr(ctx.app);
+#              populate_metric_combo reads the channel slice off ctx.state (unwrap
+#              dropped); the plot_orchestrator redraw_app comment reworded off the
+#              literal ``ctx.app`` token. The channel/tab/fold-change/redraw_app
+#              residual unwraps stay — each drives a genuine god-object method or
+#              an un-registered widget handle (one core-boundary unwrap each).
+#   F2 review_image/cell_browser: -1   update_preview converted ctx-native
+#              (update_preview_ctx reads the panel widgets via ctx.widgets —
+#              registered in preview/panel_view — and ctx.state; _preview_tophat_fluor
+#              + the re-entry guard moved into PreviewState). cell_browser
+#              on_cell_clicked now calls update_preview_ctx / refresh_review_image_ctx
+#              / zoom_..._nucleus_ctx (cell_browser 3->0). refresh_review_image + zoom
+#              keep app-native bodies (they walk the app-pinned collect store + the
+#              runtime_app-bound pixmap services draw_review_image /
+#              render_review_image_display), so their ctx entry points bridge through
+#              the app handle — 2 residuals relocated into review_image/.
+#   F1 registry sub-builders: -1   build_stats_tab threaded onto ctx (state writes
+#              -> ctx.state); the stats sidebar host frame fetched via the blessed
+#              ctx.window widget accessor instead of ctx.app. The stats group-editor /
+#              sample-definitions / review-csv builders stay on the app bridge (their
+#              bodies drive app-taking controllers + god methods, so converting them
+#              would ADD ctx.app, not remove it).
+#   E2 ScatterCellViewer ctx-native: -1   the single-cell image viewer + its
+#              open_scatter_cell_viewer factory take ctx: __init__ stores ctx and
+#              reads state via ctx.state (dataset/channel slices) + rows via the
+#              ctx-native data_loading.get_rows; the factory resolves the dock via
+#              ctx.widgets and stashes the live viewer through ctx.runtime.scatter.
+#              cell_viewer. scatter/callbacks on_scatter_click calls the opener
+#              directly (ctx.app._open_scatter_cell_viewer -> open_scatter_cell_
+#              viewer(ctx, ...)). The app-native _open_scatter_cell_viewer shim
+#              stays (test_scatter_cell_viewer_dock drives it) but now threads
+#              self._ctx, not self.
+#   E3 relocate shared plot toggles: -1   toggle_sem / toggle_fov_replicates /
+#              refresh_fov_btn_state moved from the lineplot/barplot/preview
+#              feature modules into the new core.plot_toggles (ctx-native over
+#              ctx.state.plot + ctx.runtime.sem/fov; the bar-renderer/bar-layout
+#              wiring reached via core.lazy proxies so core imports no feature at
+#              load time). batch_export's _build_spread_row now takes ctx and calls
+#              the toggles directly (a core import, not a banned cross-feature one),
+#              dropping its ctx.app at the call site. _show_batch_mode stays an app
+#              bridge: it constructs the batch panels, which take the WellViewerApp
+#              god-object, so converting it would relocate (not remove) the god-
+#              object reach and net-add ctx.app. Also drops 3 deferred feature
+#              imports (the two redraw_bars function-locals + selection_controller's
+#              preview import become core/lazy references).
+#   E1 register orphan widgets: -3   registered _plotting_metric_cb (centre_view),
+#              the heatmap sidebar trio (_heatmap_sidebar_table/_rows_spin/_cols_spin),
+#              and _stats_channel_cb into ctx.widgets. refresh_heatmap_layout_sidebar
+#              re-signatured onto ctx (both feature call sites drop ctx.app); lineplot
+#              reads the metric combo via ctx.widgets. _stats_channel_cb registered for
+#              resolvability but its sole channel-controller reader takes app (no
+#              droppable unwrap), so it clears no ctx.app.
+#   E4-review review-image/smfish services: -2   render_review_image_display +
+#              zoom_review_image_to_selected_nucleus went ctx-native via a new
+#              ctx.runtime.review_image live-object namespace (base_rgb / scale /
+#              label / canvas), clearing the zoom ctx entry point; and the Review
+#              CSV table-build leaf (_refresh_review_csv_rows_impl) + its two
+#              collect leaves (review_load_rows / review_effective_included) went
+#              ctx-native via ctx.widgets + a new ctx.runtime.review scratch
+#              namespace, clearing that entry point. The remaining four refs stay
+#              app-bridged: refresh_review_image + the review-csv double-click walk
+#              the deep draw/collect app-method web; recalculate_threshold needs
+#              app-only services (_features / _load_gating_from_pipeline_info); and
+#              the smfish _refresh_review_csv bridge can't take a cross-feature
+#              image_browser import (deletability guardrail).
+#   E4-cellgating + E5-stats: -4   converted the QC debris-gate chain
+#              (qc_excluded_count / set_qc_params / recompute_qc_all -> ctx) so
+#              build_qc_gate_controls takes ctx; _all_member_labels + rep_sets_loaded
+#              re-signatured onto ctx; threaded the whole stats group-editor +
+#              results-panel controller chain (stats_refresh_map/group_list/apply_drag/
+#              grp_*/sync_from_app/on_test_change/update_tp_menu/refresh_fov_indicator +
+#              refresh_stats_property_combo) onto ctx, then flipped
+#              build_stats_group_editor / build_stats_results_panel to ctx. Run/Property
+#              actions resolve through the new ctx.runtime.stats namespace. Left as
+#              bridges (no clean ctx home): _refresh_thresh_frac_quick_edit (steppers
+#              unregistered), _build_review_csv_tab god-method, build_sample_definitions_
+#              centre (whole sample-def sub-builder tree still app-taking).
+#   E4-ui heatmap/image-browser/saved_plots: -1   the shared core Plot Groups
+#              drawer (build_plot_groups_drawer + _plot_groups_add_current/load/
+#              delete/refresh_plot_groups_sidebar/schedule_save) went ctx-native:
+#              the drawer registry lives on a new ctx.runtime.plot_groups
+#              namespace, the per-drawer widgets register through ctx.widgets
+#              (still stamping the legacy singular app._plot_group_* readers),
+#              state via ctx.state, parse_rc/set_status/persistence via the
+#              ctx-native leaves, and the group-load selection through the
+#              now-ctx set_selected_wells. The Image Table picker drops its
+#              ctx.app drawer call (and its refresh_plot_groups_sidebar(ctx) — a
+#              previously silently-swallowed app/ctx mismatch — now actually
+#              repaints). set_selected_wells itself took ctx (heatmap drag +
+#              plot-groups load thread it; its two downstream fan-outs
+#              _refresh_sidebar_map + on_plate_sel_change stay app-native, reached
+#              through one core app-handle bridge → net 0 for that fn, so the -1
+#              is the picker drawer decouple). LEFT as reported bridges: image
+#              browser build_image_browser_subtab / on_image_browser_subtab_changed
+#              (their Segmentation build_review_image_panel + update_channel_selector
+#              + on_tab_change god-services net-ADD if converted) and saved_plots
+#              _rebuild_all (all god-methods: _groups_centre_refresh /
+#              _refresh_sidebar_map / _features / _show_line_sidebar).
+#   33 -> 29   E6-docstrings: -4   the three ``AppRuntime`` docstring mentions of
+#              the literal god-object token and the one in ``plot_card_actions``'s
+#              module docstring reworded to name "the god-object" instead — pure
+#              comment rewords (the ratchet counts comments), zero code change, per
+#              the established "no literal token in comments" convention.
+#   29 -> 27   T6-persistence-doc: -2   the persistence-doc leaf (_doc.read/write/
+#              path_for/delete + get_section/set_section) now takes the typed
+#              AppState (ctx.state) instead of unwrapping ctx.app — it only ever
+#              touched app._app_state.dataset (data_dir / persistence_doc), which
+#              IS ctx.state.dataset. Honest typed-state conversion, not a god-object
+#              reach; the two get_section/set_section unwraps are gone. (read/write/
+#              path_for/delete have no external callers; delete's 3 test callers +
+#              the crop_region/plot_groups fake ctx now pass state.)
+#   27 -> 26   E6 final honest wins: -1   refresh_heatmap_aggregation_options
+#              (core/channel_state_controller) dropped its ctx.app unwrap: the
+#              heatmap metric combo is already registered (heatmap/tab_view
+#              reg.register("_heatmap_metric_cb", ...)) so it reads via
+#              ctx.widgets, and the active-metric check reads ctx.state.channel
+#              instead of app._app_state.channel. Pure widget-registry + typed-
+#              state conversion, no god-object behaviour. Remaining 26 are the
+#              irreducible floor: core/domain single-handle boundary unwraps that
+#              pass app to behaviour (redraw/set_active_channel/split providers/
+#              _refresh_sidebar_map/fold-change combos), sanctioned persistence
+#              widget/state unwraps (view_state/cell_gating/sample_definitions/
+#              heatmap_layouts apply_persisted_settings — the last writes loose
+#              app._heatmap_* stamps so registering the combos is net-0), and the
+#              feature->god-method bridges (smfish/registry/image_browser/
+#              saved_plots/review_image/cell_gating quick-edit/batch_export) which
+#              net-ADD if converted piecemeal.
+#   D1 channel/metric behaviour: -1   refresh_metric_combo_for_channel
+#              (core/channel_state_controller) dropped its ctx.app unwrap: the
+#              composed channel label comes off the ctx-native active_channel_label
+#              leaf (ctx.state.channel), the three per-tab Property combos
+#              (_plotting_metric_cb / _metric_cb / _metric_cb_bar) are all
+#              registered (centre_view / lineplot / barplot) so they resolve via
+#              ctx.widgets, smfish_chan reads ctx.state.channel, and the stats
+#              fan-out (refresh_stats_property_combo) already takes ctx. Pure
+#              widget-registry + typed-state conversion, no god-object behaviour.
+#              The sibling on_plot_channel_selected / on_metric_selected unwraps
+#              STAY: both bottom into set_active_channel / set_active_metric, which
+#              unconditionally call recalculate_threshold(app) — deep app machinery
+#              (_get_rows / _load_gating_from_pipeline_info / _features) — so
+#              threading ctx only relocates the single boundary unwrap into those
+#              god-methods (net-0) and would force the external set_active_* callers
+#              (view_state / stats) to change. Left as reported floor bridges.
+#   D5 image-browser subtabs: -1   the Image Browser sub-tab controller
+#              (features/image_browser/controller: build_image_browser_subtab +
+#              on_image_browser_subtab_changed) went fully ctx-native — sub-tab bar
+#              + built-map read off ctx.runtime.image_browser, the two sidebar
+#              frames off ctx.widgets (registered at their app_shell_view build
+#              site), and the two tab_view call sites now pass ctx (was ctx.app,
+#              -2). The three residual god-services the lifecycle needs
+#              (build_review_image_panel + update_channel_selector for the
+#              Segmentation build, and on_tab_change for the leaf refresh) are
+#              bundled behind ONE new core seam
+#              (tab_controller.image_browser_subtab_app_bridge, +1) instead of
+#              piecemeal per-service unwraps — so converting the cluster is
+#              net-NEGATIVE, not the net-ADD the E6 note predicted for the
+#              piecemeal route.
+#   D4 review-image draw web: -3   the whole Review Image redraw web went
+#              ctx-native — refresh_review_image (renderer, now an app→ctx shim over
+#              refresh_review_image_ctx), the review-CSV row double-click impl
+#              (controller), and the smFISH Apply-Global-Threshold review-CSV
+#              writeback (which now fires the refresh_review_csv callback the
+#              Review CSV builder stamps on ctx.runtime.review, not the app method).
+#              The supporting collect leaves (resolve-image-refs / include-map /
+#              threshold-map / flat-field-field / collect-timepoints /
+#              binary-gate-columns) + pixmap leaves (draw_review_image /
+#              review_image_resolve_lut / apply_review_image_cursor) all take ctx.
+#              recalculate_threshold(ctx.app) in smfish STAYS: it bottoms into the
+#              same _features / _load_gating_from_pipeline_info / _seg_channel_token
+#              app machinery noted above, so threading ctx is net-0 (a reported
+#              floor bridge — see D1).
+#   D-core ui_helpers band controls: -1   make_band_controls (the shared SEM/SD
+#              + FOV toggle widget) is fully ctx-native: reads the SEM flag off
+#              ctx.state.plot, wires the ctx-native core.plot_toggles handlers
+#              (toggle_sem/toggle_fov_replicates/refresh_fov_btn_state from E3),
+#              and registers the buttons on ctx.runtime.sem/fov banks (mirrors the
+#              batch-export controls row). Its lone core-boundary unwrap is gone.
+#   D-core selection/redraw: -1   plot_orchestrator.redraw_app is now fully
+#              ctx-native — the ``app = ctx.app`` bridge is dropped. The render
+#              fan-out (``redraw``) takes ctx and guards distribution/heatmap on
+#              ctx.widgets.has(...); refresh_plot_empty_states runs off ctx.window
+#              (a widget-tree walk, same as the multivariate caller); the line
+#              figure/canvas + the export-style sidebar map are read off the
+#              widget registry (the sidebar map now self-registers on first open).
+#              selection_controller.set_selected_wells KEEPS its single unwrap: it
+#              drives ``_refresh_sidebar_map`` (a debounce bottoming into the
+#              deeply app-coupled refresh_sidebar_map_now) + on_plate_sel_change
+#              (which bottoms into _is_single_well_tab/_features/_notebook) — both
+#              irreducible without a large cross-cutting cascade, so threading ctx
+#              there is net-0 (a reported floor bridge).
+#   D6 sample-def/review-csv: -2   the two Data-group tab builders in the
+#              feature-layer registry stopped naming the god-object, and the
+#              sample-definitions loader went ctx-native:
+#              (1) Review CSV — its builder was already ctx-native
+#              (build_review_csv_tab(ctx, parent); the app's _build_review_csv_tab
+#              was only a self._ctx shim), so the registry now calls it directly
+#              via the uniform _lazy_build descriptor (-1, no core add).
+#              (2) Sample Definitions — the centre builder + its whole sub-builder
+#              tree (Groups / Well Labels / Ratios / Pipeline Info / Notes) are
+#              app-native (they stamp app._rep_*/_sel_* widgets and wire
+#              _clear_sample_definitions_all / _groups_centre_refresh /
+#              _refresh_sidebar_map). Rather than name the god-object from the
+#              feature registry, the lone unwrap for the whole tab build now lives
+#              behind ONE new core seam (tab_controller.build_sample_definitions_app_bridge,
+#              +1), reached via a lazy() proxy (no core->feature import). registry
+#              -1, core +1 → net-0 for that ref but the feature layer names no
+#              god-object.
+#              (3) persistence _apply_unified_state went ctx-native (-1): typed
+#              ctx.state slices, ctx.set_status for the status/migration notices
+#              (the one-time v1->v2 toast popup folded into the status line — it
+#              was already the code's own fallback), and the Notes writeback
+#              through the now-registered _notes_edit widget (ctx.widgets). The
+#              _notes_text memory cache moved off the god-object into the typed
+#              selection slice (SelectionState.notes_text).
+#   D-persist heatmap/cell-gating persistence: -1   heatmap_layouts
+#              apply_persisted_settings went fully ctx-native — its lone
+#              ``app = ctx.app`` unwrap is gone. The heat-map widget handles
+#              (cmap/scale/vmin/vmax/repset/log combos + tp slider/label) were
+#              already registered, so they resolve via ctx.widgets; the loose
+#              display stamps the applier wrote (``app._heatmap_cmap_name`` /
+#              ``_vmin`` / ``_vmax``) moved onto the typed HeatmapState slice
+#              (migrating their tab_view writers + controller reader off the
+#              runtime namespace), and the loaded-settings bridge +
+#              session-transient timepoint list moved onto the slice too
+#              (``persisted_settings`` / ``tp_values``) so the applier reads them
+#              via ctx.state without touching AppRuntime. The E6 note's "net-0
+#              because it writes loose app._heatmap_* stamps" no longer holds now
+#              that those stamps are typed state. Cell Gating persistence
+#              (save/load_from_pipeline_info) was assessed and LEFT at its two
+#              sanctioned unwraps: load genuinely drives the ``_centre_build_pending``
+#              god-method to force-build the lazy tab, and save reaches the loose
+#              ``app._scatter_gates`` list + the runtime-backed use-scatter flags
+#              (``_cell_gating_use_scatter_*`` / ``_gating_choices`` /
+#              ``_thresh_choices``) whose ctx home would be a broad cross-feature
+#              (scatter/stats) state migration — out of scope for this pass, so
+#              converting either is net-0.
+#   D-thresh recalculate_threshold chain: -2   channel_state_controller
+#              set_active_channel / set_active_metric + the two plot handlers
+#              (on_plot_channel_selected / on_metric_selected) and the smFISH
+#              apply-global-threshold caller all went ctx-native — three
+#              reach-through sites cleared. The channel/metric switch fan-out now
+#              reads typed state off ctx.state, resolves every combo / frame /
+#              stepper / status chip through ctx.widgets (registering the five
+#              previously-loose handles: _plotting_channel_cb,
+#              _plotting_thresh_frac_stepper, _review_thresh_frac_stepper,
+#              _status_threshold_chip, _status_band_chip), announces on ctx.bus,
+#              and routes threshold / stats-cache / redraw through the ctx-native
+#              recalculate_threshold, invalidate_stats_cache, redraw_app helpers.
+#              recalculate_threshold itself keeps ONE new god-object seam: its
+#              ``_features`` on_channel_changed hook fan-out has no sanctioned ctx
+#              home, and update_channel_selector / _get_rows / _seg_channel_token /
+#              _load_gating are irreducibly app-bound, so the whole body is bundled
+#              behind a single app-handle unwrap. Net three sites cleared vs one
+#              seam added → -2.
+#   14 -> 15   set_thresh_frac_on bugfix: +1 (JUSTIFIED SURFACING, not regression).
+#              The Image Table threshold quick-edit called set_thresh_frac_on(ctx,
+#              value) but the fn still took ``app`` → a live AttributeError crash
+#              (ViewerContext has no _app_state) whenever a user edited the
+#              image-table ON-threshold stepper. Fixed by giving the fn its correct
+#              modern ctx signature (typed ctx.state reads; build_cell_gating_subtab
+#              / _cell_gating_resolve_key / cell_gating_on_threshold_frac_on_change
+#              already take ctx); its lazy-tab force-build (_centre_build_pending)
+#              and loose _cell_gating_thresh_frac_edits dict have no ctx home yet,
+#              so ONE sanctioned core-boundary unwrap is surfaced. A correctness fix
+#              that trades a crash for one documented unwrap — cleared when the
+#              cell-gating edits dict migrates to typed state. Locked by
+#              test_thresh_quickedit (was failing on the pristine tree).
+#   15 -> 14   cell_gating quick-edit refresh: -1   the ThreshFracOn change handler
+#              (cell_gating_tab_view) called getattr(ctx.app, "_refresh_thresh_frac_
+#              quick_edit")(); now that D-thresh made refresh_thresh_frac_quick_edit
+#              ctx-native, it calls that core fn directly (module-level import from
+#              channel_state_controller — core, not a cross-feature import).
+#              Behaviourally identical (the app shim was just a self._ctx forward);
+#              the fake's ctx gained widgets + a channel slice the transitive
+#              get_thresh_frac_on now reads.
+#   tab-controller split providers → ctx.window/ctx.runtime.split: -2
+#              current_centre_tab + visible_centre_tabs dropped their app=ctx.app
+#              unwraps. The centre notebook is a genuine Qt widget-nav need, so it
+#              routes through the blessed ctx.window accessor (_notebook /
+#              _plotting_notebook — same pattern cell_browser/image_browser already
+#              use), the Image-Browser sub-tab bar via ctx.runtime.image_browser,
+#              and the split-view providers (split_view._focused_leaf /
+#              _visible_leaves) + _resolve_leaf now take ctx (split flags via
+#              ctx.runtime.split). This is the honest ctx.window/window-nav win the
+#              Epic-registry analysis flagged as separate from (and unblocked
+#              without) the feature-registry — booked under its own line, not the
+#              registry, per attribution discipline.
+#   Epic-A14 batch panels ctx: -1   the Batch Export tab_view held the
+#              feature's last ctx.app at ``_show_batch_mode(ctx.app, mode)``. The
+#              three batch panels (base/bar/scatter) + _show_batch_mode/_refresh_
+#              mode_buttons + the _line_series_runner collector now take ``ctx``
+#              (store self._ctx, read ctx.state/ctx.runtime/ctx.widgets); the
+#              god-methods route to their existing core/domain ctx forms
+#              (get_rows/well_display_label/get_*_fluor_gate*/ratio_label_for) or,
+#              for the sibling-feature forms (rank_color_rset/rep_sets_loaded/
+#              col_for_scatter_axis/compose_scatter_agg_stat/update_bar_tp_menu),
+#              through core.lazy proxies — a call, not an import, so no new
+#              deferred-feature import and no ctx.app reintroduced. The export
+#              groups doc moved to ctx.runtime.batch_export.export_groups_doc and
+#              the custom-profile scratch to the new ctx.runtime.export namespace;
+#              two ctx-form helpers were added in export.style. tab_view was this
+#              feature's sole ctx.app, so it retires cleanly to zero.
+#   11 -> 10   fold-change controls → ctx: -1   the whole domain/fold_change_controls
+#              cluster (install_fold_change_controls + _ControlCombo + the 4
+#              _repopulate_* combos + _sync_widgets_to_state + set_fold_change_state
+#              + _reset_bar_ylim_edits) only ever touched app._app_state / _event_bus
+#              / _ctx — zero god-methods — so it converts wholesale to ctx (ctx.state
+#              / ctx.bus). install dropped its app=ctx.app unwrap; the two persistence
+#              view_state callers of _sync_widgets_to_state pass app._ctx.
+#   Epic-cellgating scatter-gate config → typed state: -2
+#              The scatter-gate geometry (_scatter_gates), the two use-flags, and
+#              the per-layer gate selections joined the R6 gate values on the typed
+#              CellGatingState slice (ctx.state.cell_gating). Every reader/writer
+#              (cell_gating_tab_view / scatter.gating / stats_compute / cell_browser
+#              / export sidebar / load_controller) moved off the runtime-stamped
+#              app._scatter_gates / app._cell_gating_* attrs in lock-step, so
+#              persistence.cell_gating save + load read/write the config off
+#              ctx.state and dropped BOTH their app=ctx.app unwraps, and the
+#              plotting-tab set_thresh_frac_on quick-edit reaches the edits map via
+#              ctx.runtime. The lazy Cell-Gating-tab force-build (the one
+#              irreducible god-object seam: _centre_build_pending) was bundled into
+#              a single core helper (channel_state_controller.ensure_cell_gating_
+#              tab_built, +1 app=ctx.app) that load + the quick-edit share — so the
+#              three cleared refs net -2 even though the lazy-build seam stays.
+#   8 -> 7    ensure_cell_gating_tab_built → ctx: -1   the lazy Cell-Gating-tab
+#              force-build seam dropped its last app=ctx.app. The "tab is built"
+#              signal (the fluor-edits map) reads via ctx.runtime.cell_gating; the
+#              _centre_build_pending lazy-build closure got a runtime home
+#              (new ctx.runtime.centre namespace, prefix _centre_ — a live callback
+#              like the other stamped closures). So persistence-load + the plotting
+#              ThreshFracOn quick-edit reach the lazy build fully ctx-natively.
+#   7 -> 5    teardown-endgame orchestration accessors: -2   the two remaining
+#              "genuine app-orchestration service" seams were named on the context
+#              rather than reached through ctx.app, matching the ratchet's own
+#              "reach for a dedicated context accessor" guidance:
+#              (1) saved_plots restore called ctx.app._rebuild_all() — the master
+#              redraw fan-out (invalidate stats cache → sidebar map + groups →
+#              redraw bars/lines/scatter). It has no ctx form (a dozen god-methods),
+#              so it is named ctx.rebuild_all() (new frozen accessor). -1.
+#              (2) selection_controller.set_selected_wells drove _refresh_sidebar_map
+#              (debounce) + on_plate_sel_change. The debounce is now ctx.refresh_
+#              sidebar_map() (new frozen accessor — a genuine orchestration service),
+#              and on_plate_sel_change + _is_single_well_tab went fully ctx-native
+#              (ctx.state.selection / ctx.window._notebook / ctx.bus / ctx.features —
+#              the feature-registry catalogue, a new frozen accessor). Its 8 in-file
+#              callers thread app._ctx. So set_selected_wells drops its last unwrap. -1.
+#              The three new accessors (rebuild_all / refresh_sidebar_map / features)
+#              are the teardown endgame: each names an irreducible god-object service
+#              in one frozen place instead of an escape-hatch reach-through.
+#   5 -> 4    view_state.snapshot → ctx-native: -1   the snapshot half of the
+#              view-state persistence dropped its ``app = ctx.app`` unwrap. Its 8
+#              self-contained helpers (_nondefault_export_prefs / _current_leaf_tab /
+#              _snapshot_tabs / _combo_text / _snapshot_{bar,distribution,scatter,
+#              image_table}) now take ctx: typed reads via ctx.state, every combo via
+#              ctx.widgets.get_or_none (all 9 verified registry-backed), the runtime
+#              scratch via ctx.runtime.{scatter,image_table}, the active leaf via the
+#              ctx-native current_centre_tab(ctx), and the cross-dataset absent-well /
+#              pending-tab scratch via a new ctx.runtime.view_state namespace (prefix
+#              _view_state_). restore (the other unwrap, view_state:421) is untouched
+#              and still writes those app._view_state_* stamps, which the runtime alias
+#              bridges. Round-trip verified by the view_state suite (absent-wells X14,
+#              bar/scatter/image-table restore); the two image-table grid-build
+#              failures are a pre-existing grid_view None-layout bug, not this change.
+#   4 -> 3    view_state.restore → ctx-native: -1   the restore half dropped its
+#              ``app = ctx.app`` unwrap too. Bulk typed writes via ctx.state; the
+#              cross-dataset absent/pending scratch via ctx.runtime.view_state; the
+#              god-services via their ctx forms (set_selected_wells(ctx),
+#              ctx.refresh_sidebar_map(), refresh_fov_btn_state(ctx),
+#              _sync_widgets_to_state(ctx)); and _activate_tab went ctx-native over
+#              ctx.window (pure Qt centre/subtab nav — the blessed widget accessor).
+#              Signature unchanged (restore already took ctx), so no caller churn.
+#              Round-trip verified (47 view_state/threshold/saved-plot tests green;
+#              the 2 image-table reds are the pre-existing grid_view None-layout bug).
+#   3 -> 2    channel:64 recalculate_threshold → fully ctx-native: -1   the
+#              "one sanctioned god-object seam" fell. Its two big collaborators
+#              went ctx-native — update_channel_selector(ctx) (combos via
+#              ctx.widgets, ratio/active/key helpers via their ctx forms, seg
+#              token via ctx.state) and set_active_image_channel(ctx) (review
+#              widgets registered + read via ctx.widgets; refresh_review_image_ctx
+#              / update_preview_ctx). Four review widgets got registered in
+#              panel_view. Rows load via get_rows(ctx); gating reload via
+#              load_from_pipeline_info(ctx) gated on ctx.runtime.cell_gating; and
+#              the _features on_channel_changed fan-out now dispatches ctx — all
+#              seven hooks (bar/stats/distribution/heatmap/multivariate/spatial/
+#              scatter) take ctx and guard via ctx.widgets.has (verified every
+#              guard widget is registered). recalc drops its last app=ctx.app.
+#   2 -> 1    sample-def centre builder tree → ctx (GENUINE, not the reverted
+#              a4b3a07 relabel): the build_sample_definitions_app_bridge seam
+#              dropped its ``_build_sample_definitions_centre(ctx.app, frame)``
+#              unwrap. This landed only AFTER the whole sample-def dependency set
+#              was made genuinely ctx-native across the D6 leaf sequence — the
+#              selection-mutator family (sel_by_id/sel_set_composition/sel_add/
+#              sel_rename/sel_delete/sel_select/sel_reorder/sel_duplicate/
+#              sel_set_color/sel_set_hidden/sel_export_one/sel_strip_wells/
+#              sel_clear_all), rep_clear_all/rep_add/rep_quick_pairs(_from_
+#              dropdowns), the GROUPS-list wiring (wire_selections_list +
+#              _grp_on_*), import_selections_from_json, notes_schedule_save,
+#              set_ratio_metrics, clear_all, labels_apply_affix/labels_clear_all,
+#              and the three sub-builders (build_label_grid / build_ratios_inline_
+#              panel / build_pipeline_info_subtab). So the three centre builders
+#              (build_sample_definitions_centre / build_replicate_groups_centre /
+#              build_replicate_panel) now thread ctx: widgets via ctx.widgets,
+#              typed reads via ctx.state, buttons wired directly to the ctx-native
+#              mutators (rep_clear_all(ctx)/rep_add(ctx)/rep_quick_pairs_from_
+#              dropdowns(ctx)/clear_all(ctx)/labels_apply_affix(ctx)), the
+#              Groups-subtab refresh via groups_centre_refresh(ctx)/
+#              update_active_group_label(ctx)/ctx.refresh_sidebar_map(), the
+#              cell-gating frame/built via ctx.runtime.cell_gating, and the sole
+#              Qt-nav stamp (_sample_definitions_subtabs) via ctx.window. The new
+#              ctx.toast accessor homes the import/export notification. Only
+#              tab_controller:138 (the review-image bridge) remains.
+# 2026-07-05: ZERO. The endgame landed in three commits: (A) the view_state
+#              _apply_* pending-restore cluster → ctx; (B) on_tab_change + the 18
+#              feature-registry on_activate hooks → ctx; (C) the entire
+#              review-image interaction web (crop / interaction / LUT / colour /
+#              zoom — ~40 functions across review_image.controller/renderer/
+#              collect/box_select + crop.controller) → ctx, letting
+#              build_review_image_panel take ctx and clearing the last reach in
+#              image_browser_subtab_app_bridge. The ``app`` field survives only
+#              as the backing store for the frozen ctx service accessors
+#              (ctx.window / ctx.persistence / ctx.rebuild_all / …); NO code
+#              names ``ctx.app`` any more. Budget floored at 0 — the ratchet is
+#              now a regression guard, not a burn-down.
+CTX_APP_BUDGET = 0
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

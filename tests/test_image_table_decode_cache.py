@@ -51,7 +51,11 @@ def _patch(monkeypatch, loaded):
 def test_prefetch_decodes_each_unique_key_once_then_skips_cached(monkeypatch):
     loaded: list = []
     _patch(monkeypatch, loaded)
-    app = SimpleNamespace()
+    app = SimpleNamespace(_app_state=SimpleNamespace(
+        channel=SimpleNamespace(fluor_channels=["gfp"])))
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = SimpleNamespace(app=app, state=app._app_state,
+                               runtime=AppRuntime(app))
     cache: dict = {}
     # Two wells × the same channel, each repeated in two cells → 2 unique keys.
     cells = [
@@ -59,13 +63,13 @@ def test_prefetch_decodes_each_unique_key_once_then_skips_cached(monkeypatch):
         [_cell("A02", "GFP"), _cell("A02", "GFP")],
     ]
 
-    C._prefetch_cell_arrays(app, cells, cache)
+    C._prefetch_cell_arrays(app._ctx, cells, cache)
     assert sorted(loaded) == [("A01", "gfp", "raw"), ("A02", "gfp", "raw")]
     assert set(cache) == {("A01", "gfp", "raw"), ("A02", "gfp", "raw")}
 
     # Second Generate on the warm cache: nothing new is decoded.
     loaded.clear()
-    C._prefetch_cell_arrays(app, cells, cache)
+    C._prefetch_cell_arrays(app._ctx, cells, cache)
     assert loaded == []
 
 
@@ -77,9 +81,13 @@ def test_prefetch_skips_ratio_channels(monkeypatch):
         C, "_find_ratio_for_channel",
         lambda app, chan: object() if chan == "RATIO" else None,
     )
-    app = SimpleNamespace()
+    app = SimpleNamespace(_app_state=SimpleNamespace(
+        channel=SimpleNamespace(fluor_channels=["gfp"])))
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = SimpleNamespace(app=app, state=app._app_state,
+                               runtime=AppRuntime(app))
     cache: dict = {}
     cells = [[_cell("A01", "RATIO"), _cell("A02", "GFP"), _cell("A03", "GFP")]]
-    C._prefetch_cell_arrays(app, cells, cache)
+    C._prefetch_cell_arrays(app._ctx, cells, cache)
     assert ("A01", "ratio", "raw") not in cache
     assert sorted(loaded) == [("A02", "gfp", "raw"), ("A03", "gfp", "raw")]

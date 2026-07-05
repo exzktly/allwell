@@ -9,6 +9,37 @@ from well_viewer.features.scatter.gating import (
     compute_point_density,
 )
 from well_viewer.features.scatter.state import ScatterState
+from well_viewer.core.export_prefs_state import ExportPrefsState
+from well_viewer.core.cell_gating_state import CellGatingState
+
+
+def _mk_ctx(app):
+    """A ctx wrapper over a SimpleNamespace fake app: state/runtime/widgets all
+    resolve through the app's ``_<name>`` attributes, matching how the tests set
+    (and assert on) them directly.
+
+    Epic-cellgating: the scatter-gate geometry is typed state on
+    ``ctx.state.cell_gating.scatter_gates``; ensure the slice exists (seeded from
+    a loose ``_scatter_gates`` kwarg for the minimal fakes that set one)."""
+    from types import SimpleNamespace
+    from well_viewer.core.app_runtime import AppRuntime
+    st = getattr(app, "_app_state", None)
+    if st is None:
+        st = SimpleNamespace()
+        app._app_state = st
+    if getattr(st, "cell_gating", None) is None:
+        st.cell_gating = CellGatingState(
+            scatter_gates=list(getattr(app, "_scatter_gates", []) or []))
+    return SimpleNamespace(
+        app=app,
+        state=app._app_state,
+        runtime=AppRuntime(app),
+        widgets=SimpleNamespace(
+            get_or_none=lambda n: getattr(app, n, None),
+            register=lambda n, w: (setattr(app, n, w), w)[1],
+        ),
+        set_status=lambda _m: None,
+    )
 
 
 # ── compute_point_density ────────────────────────────────────────────────────
@@ -164,23 +195,23 @@ def _render_app(*, density: bool, gates):
 
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(well_paths={"A01": None}),
+        dataset=SimpleNamespace(well_paths={"A01": None}, well_labels={},
+                                cache={"A01": df}),
         channel=SimpleNamespace(ratio_index={}),
-        selection=SimpleNamespace(selected_wells=["A01"]),
+        selection=SimpleNamespace(selected_wells=["A01"], selections=[]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
-    app._rep_sets_active = lambda: []
-    app._get_rows = lambda label: df
-    app._rank_color_well = lambda label: "#3366cc"
-    app._parse_rc = lambda label: (label, 0, 0)
     app._ax_scatter = ax
     app._scatter_fig = fig
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = prefs
-    app._scatter_gates = list(gates)
+    app._app_state.export_prefs.style_prefs = prefs
+    app._app_state.cell_gating.scatter_gates = list(gates)
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
+    app._ctx = _mk_ctx(app)
     return app, ax
 
 
@@ -191,7 +222,7 @@ def test_redraw_density_creates_density_collection_and_gate():
 
     gate = {"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}
     app, ax = _render_app(density=True, gates=[gate])
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
 
     # Density mode → a PathCollection tagged for the export-style guard.
@@ -206,7 +237,7 @@ def test_redraw_solid_mode_uses_lines_no_density():
     from well_viewer.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=False, gates=[])
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
 
     assert len(ax.lines) >= 1  # solid Line2D markers
@@ -220,8 +251,8 @@ def test_scatter_legend_uses_sample_definition_label():
     from well_viewer.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=False, gates=[])
-    app._well_display_label = lambda tok: "Treated 5nM" if tok == "A01" else tok
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    app._app_state.dataset.well_labels = {"A01": "Treated 5nM"}
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
 
     labels = [ln.get_label() for ln in ax.lines]
@@ -239,10 +270,10 @@ def test_hidden_gates_are_not_drawn():
     gate = {"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}
     app, ax = _render_app(density=False, gates=[gate])
     app._app_state.scatter.gates_hidden = True
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
 
-    assert app._scatter_gates == [gate]   # gate kept in memory
+    assert app._app_state.cell_gating.scatter_gates == [gate]   # gate kept in memory
     assert not any(isinstance(p, Rectangle) and getattr(p, "_scatter_gate_artist", False)
                    for p in ax.patches)
     assert not any(getattr(t, "_scatter_gate_artist", False) for t in ax.texts)
@@ -261,10 +292,11 @@ def test_drawing_a_gate_notifies_count_callback():
         _scatter_gate_count_cb=lambda: calls.append(1),
         _scatter_gate_redraw_cb=lambda _a: None,
     )
-    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+    app._ctx = _mk_ctx(app)
+    _on_gate_drawn(app._ctx, SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=10.0, ydata=10.0))
 
-    assert len(app._scatter_gates) == 1
+    assert len(app._app_state.cell_gating.scatter_gates) == 1
     assert calls == [1]
 
 
@@ -298,12 +330,15 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
     fig.add_subplot(1, 1, 1)
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}),
+        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}, well_labels={}, cache={"A01": _df(), "B02": _df()}),
         channel=SimpleNamespace(ratio_index={}),
-        selection=SimpleNamespace(selected_wells=["A01", "B02"]),
+        selection=SimpleNamespace(selected_wells=["A01", "B02"], selections=[]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
+    app._ctx = _mk_ctx(app)
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
     app._rank_color_well = lambda label: "#3366cc"
@@ -311,14 +346,14 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
     app._scatter_fig = fig
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    app._scatter_gates = []
+    app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._app_state.cell_gating.scatter_gates = []
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
 
     cols = ("w3cy5_mean_intensity", "w4gfp_mean_intensity")
-    redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
+    redraw_scatter(app._ctx, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
     assert len(app._scatter_fig.axes) == 2                     # one panel per group
     # Click-to-view-cell now works per panel: each panel's interaction points
     # are recorded against its axis (axes_points), with the flattened union under
@@ -331,7 +366,7 @@ def test_separate_axes_layout_stacks_one_panel_per_group():
 
     # Back to Overlay → collapses to one axis.
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Overlay")
-    redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
+    redraw_scatter(app._ctx, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
     assert len(app._scatter_fig.axes) == 1
 
 
@@ -365,12 +400,15 @@ def test_gates_appear_on_every_separate_axis():
     fig.add_subplot(1, 1, 1)
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}),
+        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}, well_labels={}, cache={"A01": _df(), "B02": _df()}),
         channel=SimpleNamespace(ratio_index={}),
-        selection=SimpleNamespace(selected_wells=["A01", "B02"]),
+        selection=SimpleNamespace(selected_wells=["A01", "B02"], selections=[]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
+    app._ctx = _mk_ctx(app)
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
     app._rank_color_well = lambda label: "#3366cc"
@@ -378,14 +416,14 @@ def test_gates_appear_on_every_separate_axis():
     app._scatter_fig = fig
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    app._scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
+    app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._app_state.cell_gating.scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
 
     cols = ("w3cy5_mean_intensity", "w4gfp_mean_intensity")
-    redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
+    redraw_scatter(app._ctx, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
 
     axes = app._scatter_fig.axes
     assert len(axes) == 2
@@ -406,7 +444,10 @@ def _sidebar_stub_app(fig):
         plot=SimpleNamespace(line_order_rsets=[], line_order_wells=[], use_sem=True),
         selection=SimpleNamespace(selected_wells=["A01"]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
+    app._ctx = _mk_ctx(app)
     app._scatter_fig = fig  # makes _is_scatter_cells_fig / _supports_well_order true
     app._rep_sets_active = lambda: []
     app._parse_rc = lambda lbl: (lbl, 0, 0)
@@ -416,7 +457,7 @@ def _sidebar_stub_app(fig):
     app._toggle_sem = lambda: None
     app._toggle_fov_replicates = lambda: None
     # gate state the new section reads
-    app._scatter_gates = []
+    app._app_state.cell_gating.scatter_gates = []
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     return app
@@ -439,9 +480,9 @@ def test_sidebar_builds_scatter_density_and_gate_sections(qtbot):
     assert "scatter_density" in sb._getters
     assert sb._gate_count_text() == "0 gate(s)"
     # Clearing gates through the sidebar updates the count label without raising.
-    app._scatter_gates = [{"x0": 0, "y0": 0, "x1": 1, "y1": 1}]
+    app._app_state.cell_gating.scatter_gates = [{"x0": 0, "y0": 0, "x1": 1, "y1": 1}]
     sb._on_clear_gates()
-    assert app._scatter_gates == []
+    assert app._app_state.cell_gating.scatter_gates == []
 
 
 def test_draw_gate_is_one_shot_button(qtbot):
@@ -491,13 +532,14 @@ def _edit_app_with_gate(gate, xlim=(0.0, 10.0), ylim=(0.0, 10.0)):
     canvas.draw()  # populate transData
 
     app = SimpleNamespace()
-    app._app_state = SimpleNamespace(scatter=ScatterState())
+    app._app_state = SimpleNamespace(scatter=ScatterState(), cell_gating=CellGatingState())
     app._ax_scatter = ax
     app._scatter_canvas = canvas
-    app._scatter_gates = [dict(gate)]
+    app._app_state.cell_gating.scatter_gates = [dict(gate)]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_edit = None
     app._scatter_gate_ctx = ({}, [], "#888888")
+    app._ctx = _mk_ctx(app)
     return app, ax
 
 
@@ -511,28 +553,28 @@ def _ev(ax, xdata, ydata, button=1):
 def test_gate_edge_at_detects_right_edge():
     from well_viewer.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
-    hit = gate_edge_at(app, _ev(ax, 8, 5))
+    hit = gate_edge_at(app._ctx, _ev(ax, 8, 5))
     assert hit == (0, "r")
 
 
 def test_gate_edge_at_detects_top_right_corner():
     from well_viewer.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
-    hit = gate_edge_at(app, _ev(ax, 8, 8))
+    hit = gate_edge_at(app._ctx, _ev(ax, 8, 8))
     assert hit == (0, "tr")
 
 
 def test_gate_edge_at_interior_returns_none():
     from well_viewer.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
-    assert gate_edge_at(app, _ev(ax, 5, 5)) is None
+    assert gate_edge_at(app._ctx, _ev(ax, 5, 5)) is None
 
 
 def test_gate_edge_at_hidden_returns_none():
     from well_viewer.features.scatter.gating import gate_edge_at
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
     app._app_state.scatter.gates_hidden = True
-    assert gate_edge_at(app, _ev(ax, 8, 5)) is None
+    assert gate_edge_at(app._ctx, _ev(ax, 8, 5)) is None
 
 
 def test_gate_edit_resize_right_edge():
@@ -540,12 +582,12 @@ def test_gate_edit_resize_right_edge():
         on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
     )
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
-    on_gate_edit_press(app, _ev(ax, 8, 5))
+    on_gate_edit_press(app._ctx, _ev(ax, 8, 5))
     assert app._scatter_gate_edit == {"idx": 0, "handle": "r"}
-    on_gate_edit_motion(app, _ev(ax, 9, 5))
-    on_gate_edit_release(app, _ev(ax, 9, 5))
+    on_gate_edit_motion(app._ctx, _ev(ax, 9, 5))
+    on_gate_edit_release(app._ctx, _ev(ax, 9, 5))
     assert app._scatter_gate_edit is None
-    g = app._scatter_gates[0]
+    g = app._app_state.cell_gating.scatter_gates[0]
     assert g["x1"] == 9 and g["x0"] == 2  # right edge moved, left unchanged
 
 
@@ -554,10 +596,10 @@ def test_gate_edit_corner_moves_both_axes():
         on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
     )
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
-    on_gate_edit_press(app, _ev(ax, 8, 8))  # top-right corner
-    on_gate_edit_motion(app, _ev(ax, 6, 7))
-    on_gate_edit_release(app, _ev(ax, 6, 7))
-    g = app._scatter_gates[0]
+    on_gate_edit_press(app._ctx, _ev(ax, 8, 8))  # top-right corner
+    on_gate_edit_motion(app._ctx, _ev(ax, 6, 7))
+    on_gate_edit_release(app._ctx, _ev(ax, 6, 7))
+    g = app._app_state.cell_gating.scatter_gates[0]
     assert g["x1"] == 6 and g["y1"] == 7 and g["x0"] == 2 and g["y0"] == 2
 
 
@@ -566,17 +608,17 @@ def test_gate_edit_collapse_removes_gate():
         on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
     )
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
-    on_gate_edit_press(app, _ev(ax, 8, 5))     # grab right edge
-    on_gate_edit_motion(app, _ev(ax, 2, 5))    # drag onto the left edge → zero width
-    on_gate_edit_release(app, _ev(ax, 2, 5))
-    assert app._scatter_gates == []  # collapsed gate dropped
+    on_gate_edit_press(app._ctx, _ev(ax, 8, 5))     # grab right edge
+    on_gate_edit_motion(app._ctx, _ev(ax, 2, 5))    # drag onto the left edge → zero width
+    on_gate_edit_release(app._ctx, _ev(ax, 2, 5))
+    assert app._app_state.cell_gating.scatter_gates == []  # collapsed gate dropped
 
 
 def test_gate_edit_press_ignored_in_draw_mode():
     from well_viewer.features.scatter.gating import on_gate_edit_press
     app, ax = _edit_app_with_gate({"x0": 2, "y0": 2, "x1": 8, "y1": 8})
     app._scatter_gate_draw_mode = True
-    on_gate_edit_press(app, _ev(ax, 8, 5))
+    on_gate_edit_press(app._ctx, _ev(ax, 8, 5))
     assert app._scatter_gate_edit is None  # draw mode owns the drag
 
 
@@ -591,22 +633,22 @@ def test_scatter_defaults_to_log_and_survives_restyle():
 
     app, ax = _render_app(density=False, gates=[])
     # Shared keys are linear (their default) — scatter must ignore them.
-    app._export_style_prefs["x_log"] = False
-    app._export_style_prefs["y_log"] = False
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    app._app_state.export_prefs.style_prefs["x_log"] = False
+    app._app_state.export_prefs.style_prefs["y_log"] = False
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     assert ax.get_xscale() == "function"
     assert ax.get_yscale() == "function"
     # A later restyle (e.g. sidebar field change) must not revert to linear.
-    apply_export_style_to_current(app, app._scatter_fig, app._scatter_canvas)
+    apply_export_style_to_current(app._ctx, app._scatter_fig, app._scatter_canvas)
     assert ax.get_xscale() == "function" and ax.get_yscale() == "function"
 
 
 def test_scatter_log_off_via_scatter_pref():
     from well_viewer.features.scatter.controller import redraw_scatter
     app, ax = _render_app(density=False, gates=[])
-    app._export_style_prefs["scatter_x_log"] = False
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    app._app_state.export_prefs.style_prefs["scatter_x_log"] = False
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     assert ax.get_xscale() == "linear"
     assert ax.get_yscale() == "function"  # log10(y+1) display transform
@@ -631,9 +673,10 @@ def test_drawing_a_gate_exits_create_mode():
         _scatter_gate_redraw_cb=lambda _a: None,
         _scatter_gate_draw_sync=lambda on: synced.append(on),
     )
-    _on_gate_drawn(app, SimpleNamespace(xdata=0.0, ydata=0.0),
+    app._ctx = _mk_ctx(app)
+    _on_gate_drawn(app._ctx, SimpleNamespace(xdata=0.0, ydata=0.0),
                    SimpleNamespace(xdata=5.0, ydata=5.0))
-    assert len(app._scatter_gates) == 1
+    assert len(app._app_state.cell_gating.scatter_gates) == 1
     assert app._scatter_gate_draw_mode is False   # auto-exited create mode
     assert synced == [False]                       # toggle synced off
 
@@ -667,12 +710,15 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
     fig = Figure(figsize=(6, 6)); fig.add_subplot(1, 1, 1)
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}),
+        dataset=SimpleNamespace(well_paths={"A01": None, "B02": None}, well_labels={}, cache={"A01": _df(), "B02": _df()}),
         channel=SimpleNamespace(ratio_index={}),
-        selection=SimpleNamespace(selected_wells=["A01", "B02"]),
+        selection=SimpleNamespace(selected_wells=["A01", "B02"], selections=[]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
         scatter=ScatterState(),
+        export_prefs=ExportPrefsState(),
+        cell_gating=CellGatingState(),
     )
+    app._ctx = _mk_ctx(app)
     app._rep_sets_active = lambda: []
     app._get_rows = lambda label: _df()
     app._rank_color_well = lambda label: "#3366cc"
@@ -680,19 +726,19 @@ def test_edit_drag_repaints_gate_on_all_separate_panels():
     app._scatter_fig = fig
     app._ax_scatter = fig.axes[0]
     app._scatter_canvas = FigureCanvasAgg(fig)
-    app._export_style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
-    app._scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
+    app._app_state.export_prefs.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    app._app_state.cell_gating.scatter_gates = [{"x0": 900.0, "y0": 900.0, "x1": 1100.0, "y1": 1100.0}]
     app._scatter_gate_draw_mode = False
     app._scatter_gate_selector = None
     app._scatter_layout_var = SimpleNamespace(currentText=lambda: "Separate axes")
 
     cols = ("w3cy5_mean_intensity", "w4gfp_mean_intensity")
-    redraw_scatter(app, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
+    redraw_scatter(app._ctx, *cols, [24.0], well_colors=["#3366cc", "#cc3366"])
     assert len(app._scatter_gate_render) == 2     # one render entry per panel
 
     # Simulate a resize: move the gate's left edge, then repaint gates only.
-    app._scatter_gates[0]["x0"] = 800.0
-    redraw_gates_only(app)
+    app._app_state.cell_gating.scatter_gates[0]["x0"] = 800.0
+    redraw_gates_only(app._ctx)
     for ax in app._scatter_fig.axes:
         rects = [p for p in ax.patches
                  if isinstance(p, Rectangle) and getattr(p, "_scatter_gate_artist", False)]
@@ -715,9 +761,10 @@ def test_setup_axes_sets_per_panel_min_height():
         _scatter_fig=Figure(),
         _scatter_card=SimpleNamespace(setMinimumHeight=lambda h: heights.append(h)),
     )
-    _setup_scatter_axes(app, 3)
+    app._ctx = _mk_ctx(app)
+    _setup_scatter_axes(app._ctx, 3)
     assert heights[-1] == 3 * SCATTER_PANEL_MIN_PX   # stacked → grows + scrolls
-    _setup_scatter_axes(app, 1)
+    _setup_scatter_axes(app._ctx, 1)
     assert heights[-1] == 0                           # overlay → fills viewport
 
 
@@ -729,8 +776,8 @@ def test_density_respects_open_circle_marker():
     from well_viewer.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=True, gates=[])
-    app._export_style_prefs["marker_style"] = "o_open"
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    app._app_state.export_prefs.style_prefs["marker_style"] = "o_open"
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     coll = [c for c in ax.collections if getattr(c, "_aw_density_collection", False)][0]
     faces = coll.get_facecolors()
@@ -744,8 +791,8 @@ def test_density_filled_keeps_per_point_gradient():
     from well_viewer.features.scatter.controller import redraw_scatter
 
     app, ax = _render_app(density=True, gates=[])
-    app._export_style_prefs["marker_style"] = "o"
-    redraw_scatter(app, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
+    app._app_state.export_prefs.style_prefs["marker_style"] = "o"
+    redraw_scatter(app._ctx, "w3cy5_mean_intensity", "w4gfp_mean_intensity", [24.0],
                    well_colors=["#3366cc"])
     coll = [c for c in ax.collections if getattr(c, "_aw_density_collection", False)][0]
     faces = coll.get_facecolors()

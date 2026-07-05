@@ -211,7 +211,7 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: mask)
 
-    before = get_thresh_frac_on(app, (st.channel or "").lower())
+    before = get_thresh_frac_on(app._ctx, (st.channel or "").lower())
     st.source = "raw"
     st.binary_mask = True
     st.threshold = 100.0          # local override between the two cells
@@ -220,7 +220,7 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
     assert (rgb[3, 3] == (255, 255, 255)).all()    # bright cell ON
     assert (rgb[14, 14] == (0, 0, 0)).all()        # dim cell OFF
     # The app-wide ThreshFracOn is untouched.
-    assert get_thresh_frac_on(app, (st.channel or "").lower()) == before
+    assert get_thresh_frac_on(app._ctx, (st.channel or "").lower()) == before
 
 
 def test_qc_size_filter_drops_out_of_range_cells(playground_app, monkeypatch):
@@ -353,13 +353,13 @@ def test_ctxbar_threshold_box_reflects_set_value(loaded_app):
         cell_gating_on_threshold_frac_on_change,
     )
     from well_viewer.core.channel_state_controller import set_active_channel
-    set_active_channel(app, "gfp")
+    set_active_channel(app._ctx, "gfp")
     app._cell_gating_thresh_frac_edits["gfp"].setText("123")
-    cell_gating_on_threshold_frac_on_change(app)
+    cell_gating_on_threshold_frac_on_change(app._ctx)
     assert app._plotting_thresh_frac_stepper.value() == 123.0
     app._cell_gating_thresh_frac_edits["mcherry"].setText("77")
-    cell_gating_on_threshold_frac_on_change(app)
-    set_active_channel(app, "mcherry")
+    cell_gating_on_threshold_frac_on_change(app._ctx)
+    set_active_channel(app._ctx, "mcherry")
     assert app._plotting_thresh_frac_stepper.value() == 77.0
 
 
@@ -399,5 +399,5 @@ def test_threshold_change_redraws_scope_plots(loaded_app, monkeypatch):
     monkeypatch.setattr(
         fcs, "redraw_scopes_or_defer",
         lambda a, *ar, **k: (calls.__setitem__("n", calls["n"] + 1), orig(a, *ar, **k))[1])
-    set_thresh_frac_on(loaded_app, 123.0)
+    set_thresh_frac_on(loaded_app._ctx, 123.0)
     assert calls["n"] >= 1

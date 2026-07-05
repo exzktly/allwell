@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_metric_selected
+
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -15,6 +19,7 @@ from well_viewer.core.ui_helpers import (
     install_canvas_wheel_scroll, make_band_controls,
     make_plot_with_right_dock, make_plot_view_switcher)
 from functools import partial
+from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.export.service import export_plot_data
 from well_viewer.features.lineplot.controller import on_fig_click
 
@@ -53,7 +58,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     chan_cb = reg.register("_chan_cb_line", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
     if not ctx.widgets.has("_plot_chan_var"):
@@ -71,9 +76,9 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     mfl.addWidget(QLabel("Property:", metric_frame))
     metric_cb = reg.register("_metric_cb", QComboBox(metric_frame))
     metric_cb.addItems(_METRIC_ORDER)
-    metric_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_metric_selected())
+    metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))
     mfl.addWidget(metric_cb)
-    _plotting_metric_cb = getattr(ctx.app, "_plotting_metric_cb", None)
+    _plotting_metric_cb = ctx.widgets.get_or_none("_plotting_metric_cb")
     reg.register("_metric_var", _plotting_metric_cb if _plotting_metric_cb is not None else metric_cb)
     cl.addWidget(metric_frame)
     metric_frame.hide()
@@ -84,14 +89,14 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import make_popover_button
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", line_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
-    install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="line")
+    install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="line")
     cl.addWidget(_fc_btn)
 
     # Error band (SEM/SD + Spread) collapses into a "Display ▾" popover (C1)
     # rather than a separate card-controls row beneath the figure.
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", line_ctrl)
     _disp_btn.setToolTip("Error band (SEM/SD) and per-FOV spread")
-    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
+    _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
     cl.addWidget(_disp_btn)
 
     cl.addStretch(1)
@@ -101,7 +106,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # than the pill-style btn_primary / btn_secondary used pre-v2.
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", line_ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_plot_data(ctx.app))
+    _export_btn.clicked.connect(lambda _=False: export_plot_data(ctx))
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", line_ctrl, tooltip="Copy SVG")
     _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
@@ -123,14 +128,14 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx.app, card, "Line Graphs")
+    wire_save_to_gallery(ctx, card, "Line Graphs")
     _sw = make_plot_view_switcher(ctx, 'Line Graphs')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
     # Hide the per-card header — the ctxbar above already carries the same controls.
     card.setHeaderVisible(False)
     card.setFigureTitle("")          # the tab name is the title; keep the header lean
-    # Widget handles go through the WidgetRegistry; legacy ``ctx.app._line_*``
+    # Widget handles go through the WidgetRegistry; legacy ``app._line_*``
     # reads are forwarded to it by WellViewerApp.__getattr__.
     reg.register("_line_card", card)
     fig = reg.register("_line_fig", card.figure)
@@ -150,11 +155,11 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # The Publication↔Screen toggle is wired through plot_style.apply_ax_style
     # (it consults card.plotTheme() via ax.figure._plot_card). The stats chip is
-    # left hidden — its statsChanged signal isn't wired to ctx.app state yet (the
+    # left hidden — its statsChanged signal isn't wired to typed state yet (the
     # error band lives on the controls row above; Mean/Median is unsupported).
-    card.plotThemeChanged.connect(lambda _m: ctx.app._redraw())
+    card.plotThemeChanged.connect(lambda _m: redraw_app(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
-    card.panelCopied.connect(ctx.app._set_status)
+    card.panelCopied.connect(ctx.set_status)
     card.setStatsChipVisible(False)
 
     scroll = reg.register("_line_scroll_canvas", QScrollArea(parent))
@@ -165,8 +170,8 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # Wrap the scroll area in an EmptyState stack — page 0 is the
     # placeholder shown until a dataset is loaded, page 1 is the figure.
     from well_viewer.core.ui_helpers import wrap_with_empty_state
-    layout.addWidget(wrap_with_empty_state(ctx.app, scroll), 1)
+    layout.addWidget(wrap_with_empty_state(ctx.window, scroll), 1)
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)
-    canvas.mpl_connect("button_press_event", partial(on_fig_click, ctx.app))
+    canvas.mpl_connect("button_press_event", partial(on_fig_click, ctx))

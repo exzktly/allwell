@@ -18,9 +18,10 @@ import numpy as np
 import numpy as _np
 import pandas as pd
 
-from well_viewer.data.data_loading import df_included_mask, resolve_value_series
+from well_viewer.data.data_loading import df_included_mask, get_rows, resolve_value_series
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
+from well_viewer.core.ui_helpers import norm_timepoint
 from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ _logger = logging.getLogger(__name__)
 _FLATFIELD_PREVIEW_MAX_SAMPLES = 8
 
 
-def review_row_keys_series(app, df: pd.DataFrame) -> Optional[pd.Series]:
+def review_row_keys_series(ctx, df: pd.DataFrame) -> Optional[pd.Series]:
     """Vectorized counterpart of ``_review_row_keys`` for a DataFrame.
 
     Returns a ``Series`` of ``(fov, tp, nid)`` tuples aligned with
@@ -52,7 +53,7 @@ def review_row_keys_series(app, df: pd.DataFrame) -> Optional[pd.Series]:
     return pd.Series([(k.fov, k.tp, k.nid) for k in keys], index=df.index)
 
 
-def review_resolve_image_refs(app, *, fov_raw: str, tp_raw: str):
+def review_resolve_image_refs(ctx, *, fov_raw: str, tp_raw: str):
     """Resolve (fluor_ref, mask_ref).
 
     Honors ``image_source``: ``"corrected"`` (default) prefers the top-hat
@@ -61,32 +62,37 @@ def review_resolve_image_refs(app, *, fov_raw: str, tp_raw: str):
     to it) and fall back to top-hat. Falling back rather than failing keeps
     Review Image usable on datasets that only ship one of the two image kinds
     for a given FOV/timepoint.
+
+    A8 D4: ctx-native — the image_source + preview ref maps read off typed
+    ``ctx.state`` and the timepoint normaliser is the ctx ``norm_timepoint`` leaf.
     """
-    raw_first = app._app_state.review_image.image_source in ("raw", "flatfield")
-    tophat_map = getattr(app, "_preview_tophat_fluor", {})
-    raw_map = app._app_state.preview.fluor
+    def _norm_tp(t):
+        return norm_timepoint(ctx, t)
+    raw_first = ctx.state.review_image.image_source in ("raw", "flatfield")
+    tophat_map = ctx.state.preview.tophat_fluor
+    raw_map = ctx.state.preview.fluor
     if raw_first:
         primary, fallback = raw_map, tophat_map
     else:
         primary, fallback = tophat_map, raw_map
     fluor_ref = _resolve_ref_by_fov_tp(
         primary, fov_raw=fov_raw, tp_raw=tp_raw,
-        norm_timepoint=app._norm_timepoint,
+        norm_timepoint=_norm_tp,
     )
     if fluor_ref is None:
         fluor_ref = _resolve_ref_by_fov_tp(
             fallback, fov_raw=fov_raw, tp_raw=tp_raw,
-            norm_timepoint=app._norm_timepoint,
+            norm_timepoint=_norm_tp,
         )
     mask_ref = _resolve_ref_by_fov_tp(
-        app._app_state.preview.mask, fov_raw=fov_raw, tp_raw=tp_raw,
-        norm_timepoint=app._norm_timepoint,
+        ctx.state.preview.mask, fov_raw=fov_raw, tp_raw=tp_raw,
+        norm_timepoint=_norm_tp,
     )
     return fluor_ref, mask_ref
 
 
-def _flatfield_qc(app, key: str, default: str = "") -> str:
-    info = app._app_state.dataset.pipeline_info or {}
+def _flatfield_qc(ctx, key: str, default: str = "") -> str:
+    info = ctx.state.dataset.pipeline_info or {}
     qc = info.get("qc_options") or {}
     return str(qc.get(key, default) or default).strip()
 
@@ -125,7 +131,7 @@ def _load_arrays_from_refs(refs, *, limit: int, tp=None):
     return out
 
 
-def flatfield_field_for(app, channel: str, fluor_arr, tp=None):
+def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None):
     """Return the mean-1 flat-field field for the current view, or None (identity).
 
     Recomputes the flat-field METHOD the pipeline used (read from
@@ -143,7 +149,7 @@ def flatfield_field_for(app, channel: str, fluor_arr, tp=None):
     """
     import pipeline.flatfield as _ffc
 
-    mode = _flatfield_qc(app, "flatfield", "none").lower()
+    mode = _flatfield_qc(ctx, "flatfield", "none").lower()
     if mode in ("", "none"):
         return None
     if mode == "gaussian":
@@ -153,7 +159,7 @@ def flatfield_field_for(app, channel: str, fluor_arr, tp=None):
     chan = str(channel or "").lower()
     from well_viewer.data.image_identity import normalize_tp
     tp_key = normalize_tp(tp) if (mode == "empty_well" and tp is not None) else ""
-    cache = app._app_state.review_image.flatfield_field_cache
+    cache = ctx.state.review_image.flatfield_field_cache
     key = (chan, mode, tp_key)
     if key in cache:
         return cache[key]
@@ -161,18 +167,16 @@ def flatfield_field_for(app, channel: str, fluor_arr, tp=None):
     field = None
     try:
         if mode == "basic":
-            if hasattr(app, "_set_status"):
-                app._set_status("Computing flat-field (basic) for preview…")
+            ctx.set_status("Computing flat-field (basic) for preview…")
             arrs = _load_arrays_from_refs(
-                app._app_state.preview.fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
+                ctx.state.preview.fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
             field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
         elif mode == "empty_well":
-            wells = _split_background_wells(_flatfield_qc(app, "background_well", ""))
+            wells = _split_background_wells(_flatfield_qc(ctx, "background_well", ""))
             if wells:
-                if hasattr(app, "_set_status"):
-                    app._set_status("Computing flat-field (empty well) for preview…")
+                ctx.set_status("Computing flat-field (empty well) for preview…")
                 from well_viewer.data.image_discovery import find_well_images_and_masks
-                ds = app._app_state.dataset
+                ds = ctx.state.dataset
                 refs_by_well = []
                 for w in wells:
                     fluor, _ov, _mk, _th = find_well_images_and_masks(
@@ -203,16 +207,20 @@ def flatfield_field_for(app, channel: str, fluor_arr, tp=None):
 
 
 def review_build_include_map(
-    app, mask_arr, well: str, fov: str, tp: str,
+    ctx, mask_arr, well: str, fov: str, tp: str,
 ) -> Dict[int, bool]:
-    """Build {nid: is_included} for all labels in ``mask_arr``."""
+    """Build {nid: is_included} for all labels in ``mask_arr``.
+
+    A8 D4: ctx-native — rows come from the ctx ``get_rows`` service and the
+    manual overrides from the live ``ctx.runtime.review.included_overrides``.
+    """
     center = _np.asarray(mask_arr)
     include_by_nid: Dict[int, bool] = {
         int(nid): True for nid in _np.unique(center) if int(nid) > 0
     }
-    df = app._get_rows(well)
+    df = get_rows(ctx, well)
     if df is not None and not df.empty:
-        keys = review_row_keys_series(app,df)
+        keys = review_row_keys_series(ctx, df)
         if keys is not None:
             fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
             sub = df.loc[fov_eq.fillna(False).to_numpy()]
@@ -235,7 +243,7 @@ def review_build_include_map(
                     crop = sub["Crop_Pass"].map(lambda v: int(float(str(v).strip() or "1")) if str(v).strip() not in ("",) else 1)
                 else:
                     crop = pd.Series(1, index=sub.index)
-                overrides = app._review_included_overrides
+                overrides = ctx.runtime.review.included_overrides or {}
                 for nid, base_incl, qc_pass, crop_pass in zip(nids, incl, qc, crop):
                     if nid is None:
                         continue
@@ -249,7 +257,7 @@ def review_build_include_map(
                     include_by_nid[nid] = inc and bool(qc_pass) and bool(crop_pass)
     # Apply overrides for cells present in the mask but without a CSV row
     # (e.g. when no pipeline results are loaded yet).
-    for (ovr_well, ovr_fov, ovr_tp, ovr_nid), val in app._review_included_overrides.items():
+    for (ovr_well, ovr_fov, ovr_tp, ovr_nid), val in (ctx.runtime.review.included_overrides or {}).items():
         if ovr_well != well or ovr_fov != fov or ovr_tp != tp:
             continue
         nid = _safe_int_or_none(ovr_nid)
@@ -260,7 +268,7 @@ def review_build_include_map(
     return include_by_nid
 
 
-def _binary_gate_columns(app, channel=None):
+def _binary_gate_columns(ctx, channel=None):
     """Return ``(val_col, threshold)`` for the Segmentation binary mask.
 
     Keyed to the **displayed image channel** (``active_image_channel``) — the
@@ -275,18 +283,19 @@ def _binary_gate_columns(app, channel=None):
     cell honours its own Sample-Definitions threshold rather than whatever the
     Segmentation tab last displayed.
     """
+    from well_viewer.core.channel_state_controller import get_thresh_frac_on
     if channel is not None:
         img_chan = str(channel).strip().lower()
     else:
-        img_chan = str(app._app_state.channel.active_image_channel or "").strip()
+        img_chan = str(ctx.state.channel.active_image_channel or "").strip()
     if img_chan:
-        return (f"{img_chan}_{app._app_state.channel.active_metric}",
-                app._get_thresh_frac_on(img_chan))
-    return (app._app_state.channel.active_val_col, app._get_thresh_frac_on())
+        return (f"{img_chan}_{ctx.state.channel.active_metric}",
+                get_thresh_frac_on(ctx, img_chan))
+    return (ctx.state.channel.active_val_col, get_thresh_frac_on(ctx))
 
 
 def review_build_threshold_map(
-    app, mask_arr, well: str, fov: str, tp: str, channel=None,
+    ctx, mask_arr, well: str, fov: str, tp: str, channel=None,
 ) -> Dict[int, bool]:
     """Build {nid: above_threshold} for cells in the displayed FOV/timepoint.
 
@@ -298,19 +307,20 @@ def review_build_threshold_map(
     (``active_val_col``), which can differ and would otherwise binarise the
     wrong channel.
     """
+    from well_viewer.core.channel_state_controller import get_all_fluor_gates
     center = _np.asarray(mask_arr)
-    fluor_gates = app._get_all_fluor_gates()
+    fluor_gates = get_all_fluor_gates(ctx)
     # Gate against the channel being viewed on the Segmentation tab, not the
     # global plotting channel — see _binary_gate_columns.
-    val_col, threshold = _binary_gate_columns(app, channel)
-    ratios = app._app_state.channel.ratio_index
+    val_col, threshold = _binary_gate_columns(ctx, channel)
+    ratios = ctx.state.channel.ratio_index
     above_by_nid: Dict[int, bool] = {
         int(nid): False for nid in _np.unique(center) if int(nid) > 0
     }
-    df = app._get_rows(well)
+    df = get_rows(ctx, well)
     if df is None or df.empty:
         return above_by_nid
-    keys = review_row_keys_series(app,df)
+    keys = review_row_keys_series(ctx, df)
     if keys is None:
         return above_by_nid
     sel = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "").fillna(False).to_numpy()
@@ -371,7 +381,7 @@ def review_build_threshold_map(
     return above_by_nid
 
 
-def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
+def apply_review_overrides_to_cache(ctx, label: Optional[str] = None) -> None:
     """Project overrides onto cached row['Included'] so non-Review tabs see them.
 
     The override dict is the source of truth; this projects values onto the
@@ -379,24 +389,26 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
     respects user toggles. Called after gating recomputes (which rewrite
     row['Included'] from thresholds), after patch-file load, and on toggle.
     """
-    if not app._review_included_overrides:
+    from well_viewer.data.data_loading import get_rows
+    overrides = ctx.runtime.review.included_overrides
+    if not overrides:
         return
     by_label: Dict[str, Dict[Tuple[str, str, str], str]] = {}
-    for (lbl, fov, tp, nid), val in app._review_included_overrides.items():
+    for (lbl, fov, tp, nid), val in overrides.items():
         if label is not None and lbl != label:
             continue
         by_label.setdefault(lbl, {})[(fov, tp, nid)] = val
     for lbl, lookup in by_label.items():
-        if lbl not in app._app_state.dataset.well_paths:
+        if lbl not in ctx.state.dataset.well_paths:
             continue
         try:
-            df = app._get_rows(lbl)
+            df = get_rows(ctx, lbl)
         except Exception:
             swallowed()  # silent except
             continue
         if df is None or df.empty:
             continue
-        keys = review_row_keys_series(app,df)
+        keys = review_row_keys_series(ctx, df)
         if keys is None:
             continue
         override_map = pd.Series(lookup)
@@ -412,7 +424,7 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
         df.loc[mask, "Included"] = override_for_row[mask].map(_coerce).astype(int)
 
 
-def review_row_keys(app, row: dict) -> Tuple[str, str, str]:
+def review_row_keys(ctx, row: dict) -> Tuple[str, str, str]:
     def _norm(v: object) -> str:
         s = str(v or "").strip()
         if not s:
@@ -433,45 +445,63 @@ def review_row_keys(app, row: dict) -> Tuple[str, str, str]:
         return ""
     return (
         _norm(_pick("fov", "FOV")),
-        app._norm_timepoint(_pick("timepoint", "tp", "time", "time_h", "timepoint_hours")),
+        norm_timepoint(ctx, _pick("timepoint", "tp", "time", "time_h", "timepoint_hours")),
         _norm(_pick("nucleus_id", "nucleus id", "nucleusId", "nucleusID")),
     )
 
 
-def review_collect_timepoints(app, fov: str) -> list:
-    """Sorted list of timepoints available for ``fov`` (fluor + pipeline)."""
-    _norm = app._review_norm_fov
+def _review_tp_sort_key(tp: str):
+    """Numeric-then-lexical sort key for a normalised timepoint token."""
+    from well_viewer.data.data_loading import parse_timepoint_hours
+    parsed = parse_timepoint_hours(str(tp))
+    if parsed is not None:
+        return (0, parsed, str(tp))
+    return (1, 0.0, str(tp))
+
+
+def review_collect_timepoints(ctx, fov: str) -> list:
+    """Sorted list of timepoints available for ``fov`` (fluor + pipeline).
+
+    A8 D4: ctx-native — the preview ref map + pipeline info read off typed
+    ``ctx.state`` and normalisation uses the pure ``review_norm_fov`` /
+    ``norm_timepoint`` leaves.
+    """
+    def _norm(f):
+        return review_norm_fov(f)
     tp_values = sorted(
         {
-            app._norm_timepoint(tp)
-            for (f, tp) in app._app_state.preview.fluor.keys()
-            if _norm(f) == fov and app._norm_timepoint(tp)
+            norm_timepoint(ctx, tp)
+            for (f, tp) in ctx.state.preview.fluor.keys()
+            if _norm(f) == fov and norm_timepoint(ctx, tp)
         },
-        key=app._review_tp_sort_key,
+        key=_review_tp_sort_key,
     )
     pipeline_tp_values = sorted(
         {
-            app._norm_timepoint(tp)
-            for tp in (app._app_state.dataset.pipeline_info or {}).get("available_timepoints", [])
-            if app._norm_timepoint(tp)
+            norm_timepoint(ctx, tp)
+            for tp in (ctx.state.dataset.pipeline_info or {}).get("available_timepoints", [])
+            if norm_timepoint(ctx, tp)
         },
-        key=app._review_tp_sort_key,
+        key=_review_tp_sort_key,
     )
     if pipeline_tp_values:
-        tp_values = sorted(set(tp_values) | set(pipeline_tp_values), key=app._review_tp_sort_key)
+        tp_values = sorted(set(tp_values) | set(pipeline_tp_values), key=_review_tp_sort_key)
     return tp_values
 
 
-def review_load_rows(app, label: str) -> List[dict]:
+def review_load_rows(ctx, label: str) -> List[dict]:
     """Materialize the cached DataFrame for ``label`` as a list of row dicts.
 
     Used by the Review CSV table widget and the Review Image overlay
     builders. Mutations to returned dicts are local — write back to the
     canonical store via ``_apply_review_overrides_to_cache`` (which
     updates the cached DataFrame's ``Included`` column directly).
+
+    A8 E4-review: ctx-native — row materialisation goes through the shared
+    ``data_loading.get_rows`` service.
     """
     try:
-        df = app._get_rows(label)
+        df = get_rows(ctx, label)
     except Exception:
         return []
     if df is None or df.empty:
@@ -479,18 +509,23 @@ def review_load_rows(app, label: str) -> List[dict]:
     return df.to_dict("records")
 
 
-def review_effective_included(app, label: str, row: dict) -> str:
+def review_effective_included(ctx, label: str, row: dict) -> str:
     """Effective Included value for a cached row.
 
     User overrides set via the Review Image tab take precedence over the
     gating-computed ``Included`` field stored on the cached row. Overrides
     are kept in a separate dict so they survive subsequent gating recomputes
     (which rewrite the canonical row['Included']).
+
+    A8 E4-review: ctx-native — the (fov,tp,nid) key comes from the ctx
+    ``review_row_keys`` leaf and the manual override map is the live
+    ``ctx.runtime.review.included_overrides`` scratch.
     """
-    fov, tp, nid = app._review_row_keys(row)
+    fov, tp, nid = review_row_keys(ctx, row)
     val = None
     if fov and tp and nid:
-        ovr = app._review_included_overrides.get((label, fov, tp, nid))
+        overrides = ctx.runtime.review.included_overrides or {}
+        ovr = overrides.get((label, fov, tp, nid))
         if ovr is not None:
             val = ovr
     if val is None:

@@ -23,9 +23,14 @@ import numpy as np
 import pandas as pd
 
 from well_viewer.core import debug_flags as debug_flags
-from well_viewer.data.data_loading import df_included_mask, resolve_value_series
+from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.stats_compute import well_aggregate_stats
 from well_viewer.domain.metric_registry import column_gating_exempt
+from well_viewer.domain.selections_model import (
+    active_replicate_sets, color_for_replicate_set, color_for_well,
+    replicate_display_label, well_display_label,
+)
+from well_viewer.domain.viewer_state import parse_rc
 
 _logger = logging.getLogger(__name__)
 
@@ -51,7 +56,7 @@ from well_viewer.data.data_loading import get_all_timepoints  # noqa: F401
 
 
 def collect_scatter_data(
-    app,
+    ctx,
     col_x: str,
     col_y: str,
     timepoints_h,
@@ -71,7 +76,7 @@ def collect_scatter_data(
     gets a distinct color and contains x/y values plus metadata for click tracking.
 
     Args:
-        app: WellViewerApp instance with data and state
+        ctx: ViewerContext with typed state and services
         col_x: X-axis column name (e.g., "gfp_mean_intensity" or "gfp_smfish_count")
         col_y: Y-axis column name (e.g., "mcherry_mean_intensity" or "mcherry_smfish_count")
         timepoints_h: One target timepoint or a list of them
@@ -91,7 +96,7 @@ def collect_scatter_data(
     scatter_data: Dict[str, Dict[str, Any]] = {}
 
     if ratios is None:
-        ratios = app._app_state.channel.ratio_index or {}
+        ratios = ctx.state.channel.ratio_index or {}
 
     if isinstance(timepoints_h, (int, float)):
         target_tps = [float(timepoints_h)]
@@ -107,7 +112,7 @@ def collect_scatter_data(
     is_count_y = column_gating_exempt(col_y)
 
     def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, list]]:
-        df = app._get_rows(well_label)
+        df = get_rows(ctx, well_label)
         if df is None or df.empty:
             return None
         if "timepoint_hours" not in df.columns or "area_px" not in df.columns:
@@ -152,18 +157,19 @@ def collect_scatter_data(
         return x[mask], y[mask], tp[mask], metadata
 
     # Use active replicate sets if defined, otherwise fall back to selected wells
-    active_rsets = app._rep_sets_active()
+    active_rsets = active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
 
     if active_rsets:
         from well_viewer.features.lineplot.controller import _apply_order as _apply_rs_order
         active_rsets = _apply_rs_order(
             active_rsets,
-            list(app._app_state.plot.line_order_rsets or []),
+            list(ctx.state.plot.line_order_rsets or []),
             key=lambda r: getattr(r, "name", ""),
         )
         for group_idx, rset in enumerate(active_rsets):
             group_name = rset.name
-            color = app._rank_color_rset(rset)  # decision #1: colour by well-position rank
+            color = color_for_replicate_set(rset, ctx.state.selection.selections)  # decision #1: colour by well-position rank
             xs: List[np.ndarray] = []
             ys: List[np.ndarray] = []
             tps: List[np.ndarray] = []
@@ -174,7 +180,7 @@ def collect_scatter_data(
             # CSV exporter and click resolver still consume them.
             wells_breakdown: dict[str, dict] = {}
             for well_label in rset.wells:
-                if well_label not in app._app_state.dataset.well_paths:
+                if well_label not in ctx.state.dataset.well_paths:
                     continue
                 got = _collect_well(well_label)
                 if got is None:
@@ -198,23 +204,21 @@ def collect_scatter_data(
                     # Legend display name — user-defined sample-definition label
                     # for the group (falls back to the group name). The dict key
                     # stays the raw identity used by the click resolver / export.
-                    'label': (app._replicate_display_label(rset)
-                              if hasattr(app, "_replicate_display_label")
-                              else group_name),
+                    'label': replicate_display_label(ctx, rset),
                 }
     else:
         from well_viewer.features.lineplot.controller import _apply_order as _apply_well_order
         selected_wells = sorted(
-            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
-            key=lambda lbl: app._parse_rc(lbl),
+            (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),
+            key=lambda lbl: parse_rc(lbl),
         )
         selected_wells = _apply_well_order(
             selected_wells,
-            list(app._app_state.plot.line_order_wells or []),
+            list(ctx.state.plot.line_order_wells or []),
             key=lambda x: x,
         )
         for well_idx, well_label in enumerate(selected_wells):
-            color = app._rank_color_well(well_label)  # decision #1: colour by well-position rank
+            color = color_for_well(well_label)  # decision #1: colour by well-position rank
             got = _collect_well(well_label)
             if got is None:
                 continue
@@ -240,16 +244,14 @@ def collect_scatter_data(
                 },
                 # Legend display name — user-defined well label (falls back to
                 # the well token). Key stays the raw token used as identity.
-                'label': (app._well_display_label(well_label)
-                          if hasattr(app, "_well_display_label")
-                          else well_label),
+                'label': well_display_label(ctx, well_label),
             }
 
     return scatter_data
 
 
 def collect_scatter_agg_data(
-    app,
+    ctx,
     stat_x: str,  # e.g., "Mean Fluorescence GFP"
     stat_y: str,  # e.g., "Fraction On mCherry"
     timepoints_h: List[float],
@@ -259,7 +261,7 @@ def collect_scatter_agg_data(
     """Collect aggregate scatter plot data by computing statistics for each replicate/well.
 
     Args:
-        app: WellViewerApp instance with data and state
+        ctx: ViewerContext with typed state and services
         stat_x: X-axis statistic (e.g., "Mean Fluorescence GFP" or "Fraction On GFP")
         stat_y: Y-axis statistic (e.g., "Mean Fluorescence mCherry" or "Fraction On mCherry")
         timepoints_h: List of target timepoints in hours
@@ -321,21 +323,26 @@ def collect_scatter_agg_data(
         else:
             return "gfp", "mean", suffix_metric
 
+    from well_viewer.core.channel_state_controller import (
+        get_all_fluor_gates, get_thresh_frac_on,
+    )
+
     ch_x, metric_x, intensity_x = parse_statistic(stat_x)
     ch_y, metric_y, intensity_y = parse_statistic(stat_y)
-    use_sem = app._app_state.plot.use_sem
-    per_fov = bool(
-        getattr(app, "_use_fov_spread_active", lambda: False)()
-    )
+    use_sem = ctx.state.plot.use_sem
+    per_fov = bool(ctx.state.plot.use_fov_replicates)
     # Per-channel cell-gating thresholds don't apply to ratios — use 0 so
     # every cell with a defined ratio contributes to the well-level mean.
-    threshold_x = 0.0 if metric_x == "ratio" else app._get_thresh_frac_on(ch_x)
-    threshold_y = 0.0 if metric_y == "ratio" else app._get_thresh_frac_on(ch_y)
-    fluor_gates = app._get_all_fluor_gates()  # Apply all channel gates
-    label_to_key = getattr(app, "_label_to_channel_key", None) or {}
+    threshold_x = 0.0 if metric_x == "ratio" else get_thresh_frac_on(ctx, ch_x)
+    threshold_y = 0.0 if metric_y == "ratio" else get_thresh_frac_on(ctx, ch_y)
+    fluor_gates = get_all_fluor_gates(ctx)  # Apply all channel gates
+    # ``_label_to_channel_key`` (ratio/shape label→column map) is app-native
+    # state not yet migrated — residual bridge.
+    label_to_key = ctx.state.channel.label_to_channel_key
 
     # Get active replicates or selected wells
-    active_rsets = app._rep_sets_active()
+    active_rsets = active_replicate_sets(
+        ctx.state.selection.selections, ctx.state.dataset.well_paths)
 
     if active_rsets:
         # Mode: replicate sets
@@ -343,8 +350,8 @@ def collect_scatter_agg_data(
     else:
         # Mode: individual wells
         selected_wells = sorted(
-            (lbl for lbl in app._app_state.selection.selected_wells if lbl in app._app_state.dataset.well_paths),
-            key=lambda lbl: app._parse_rc(lbl),
+            (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),
+            key=lambda lbl: parse_rc(lbl),
         )
         labels_to_process = [(lbl, [lbl]) for lbl in selected_wells]
 
@@ -397,7 +404,7 @@ def collect_scatter_agg_data(
         """
         if not val_col:
             return float("nan"), 0.0
-        gm, gerr, gf, ferr = well_aggregate_stats(app,
+        gm, gerr, gf, ferr = well_aggregate_stats(ctx,
             wells, tp,
             threshold=threshold,
             val_col=val_col,

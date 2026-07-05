@@ -33,6 +33,43 @@ CI runs `ruff check .` + a fast-lane pytest job; run the rest locally.
 - **Single file / subset:** `python -m pytest tests/test_fold_change.py` · `... ::test_name` · `-k "expr"`.
 - **Per-area suites** are named in each item's `Verify` field.
 
+### Running slow (`loaded_app`/`viewer_app`) tests — mandatory rules
+
+These fixtures build the whole Qt app; a run can take minutes and can *hang* on a
+modal dialog or a Qt/C deadlock. Follow these every time — they exist because
+ignoring them has already cost real debugging time this project:
+
+1. **Never `| tail` a run you might need to diagnose.** Redirect the *full*
+   output to a file (`… > run.log 2>&1`) and `Read`/`grep` it. A bare pipe to
+   `tail` throws away the traceback you'll need; a log file keeps partial
+   progress recoverable after a timeout/kill.
+2. **One heavy `loaded_app` run at a time.** `pgrep -f pytest` first; never launch
+   a second while one is live. Concurrent runs starve each other's CPU and look
+   exactly like a hang.
+3. **Always `--timeout-method=thread`** for anything that can block in Qt/C, so a
+   hung main thread dumps its traceback instead of dying silently. (`signal` is
+   fine only for the pure fast lane.)
+4. **Isolate to the single failing node with `-x` / `::test_name`** once you know
+   where it fails — don't re-run the whole file to watch one test.
+5. **Run in the background and wait for the completion notification** — do not
+   poll the log every few seconds. Check it once when notified (or on a Stop
+   prompt), not on a loop.
+6. **Before committing ANY `ctx` conversion, run the FULL fast lane**
+   (`-m "not slow"`), not a hand-picked subset. Two whole failure classes are
+   invisible to targeted runs and only the full lane catches them: the
+   **deferred-import budget** (`test_deferred_imports` — a new function-local
+   `from well_viewer.features…` import can push it over ceiling) and **stale
+   unit-test fakes** (tests that hand-build an app-shaped `SimpleNamespace` and
+   call a helper you just flipped to `ctx`). Both shipped red to the branch this
+   epic before the full lane caught them.
+7. **A ctx conversion whose internal helper has heavy app-shaped-fake unit
+   coverage is a poor unit of work.** Converting it means reshaping every fake
+   (churny, error-prone) for no ratchet movement. Prefer leaving such helpers
+   app-native and reaching them via the sanctioned bridge, or convert them as
+   their own focused PR with the fake-reshaping budgeted in — don't fold them
+   into an unrelated leaf pass. (Learned from the `_apply_*` view-state cluster,
+   reverted.)
+
 ## Progress
 
 Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend above. One row per tracked finding; grouped by workstream.
@@ -106,7 +143,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A5 | characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats` | H | `[x]` DONE | `test_stats_report_formatting.py` |
 | A6 | ~~delete cosmetic `WidgetRegistry`~~ (stale — verified live) | H | `[-]` DROPPED | #597 |
 | A7 | split `scatter/callbacks.py` (handlers vs single-cell viewer) | M | `[x]` DONE | `test_scatter_cell_viewer_dock.py` |
-| A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[x]` DONE | `test_ctx_app_burndown.py` |
+| A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[x]` DONE — **ctx.app = 0** (894→0; `CTX_APP_BUDGET=0`) | `test_ctx_app_burndown.py` |
 | A9 | delete dead frameless modules (`_window_chrome`, `window_resize_grips`) | M | `[x]` DONE | #597 |
 | A10 | parametrize the `process_well_*` task/driver pairs | M | `[x]` DONE | `test_well_worker_pool.py` |
 | A11 | consolidate 3 rsync transport/retry impls | M | `[x]` DONE | `test_stream_rsync_retry.py` |
@@ -441,7 +478,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - `[x]` **scatter/tab_view.py** (9 → ~8) — sub-tab QTabWidget handle via `ctx.widgets`; mode state + set-mode callback stay.
 - `[x]` **batch_export/tab_view.py** — no Qt widget handles stashed (only inline-state dict + set-mode callback); nothing to migrate for the widget layer. saved_plots+scatter+batch total 415 → 409.
 - `[x]` **review_csv/tab_view.py** (29 → 4) — **pilot / proof-of-pattern**; 5 widgets registered via `ctx.widgets`, budget 894 → 869, readers unchanged. `test_review_csv_widget_registry_a8.py`.
-- `[~]` remaining smaller stashers (`core/*`, `persistence/*`, per-feature `sidebar_view.py`) + the non-widget **state / behaviour** layer (typed-state migration + app-method extraction) — residual now **386** (Phase 2 typed-state migration underway: barplot + heatmap + distribution + scatter + smfish slices landed).
+- `[x]` remaining smaller stashers (`core/*`, `persistence/*`, per-feature `sidebar_view.py`) + the non-widget **state / behaviour** layer (typed-state migration + app-method extraction) — was **386**, now **0** (completed by the A8-teardown epic: typed-state slices + `AppRuntime` runtime holders + full `ctx` threading).
 
 **Target:** drive `CTX_APP_BUDGET` from 894 → the residual behaviour-call floor. Each row: register handles via `ctx.widgets`, drop the budget, verify the tab still builds + its feature tests pass.
 
@@ -458,12 +495,13 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - `[x]` **P3.3 — extract god-object method callbacks into `ctx`-based services.** Not every callback is irreducible. Where a stamped app method/closure only needs *widgets* (findable via the registry) plus a small, named set of genuine app/window services, it lifts cleanly. **Pilot done — active-card Copy/Save:** the `_copy_active_card_as_svg` / `_save_active_card_figure` closures (stamped in `centre_view`, read by all six plot builders) moved into a new `core/plot_card_actions.py` as `copy_active_card_as_svg(ctx)` / `save_active_card_figure(ctx)`; cards resolve via `ctx.widgets.get_or_none`, and the only remaining app touches — the status bar (`_set_status`) and the Save-As dialog (`_save_matplotlib_fig`) — are consolidated into **one named escape-hatch boundary** instead of six scattered reach-throughs. `test_plot_card_actions_a8.py`; 318 → 309. *This proves the pattern is tractable and honest (net decoupling, not ref-relocation).*
   - **Remaining P3.3 candidates** (same recipe, one service module + call-site rewire each): `_on_plot_channel_selected` / `_on_metric_selected` (channel/metric change → a `plot_channel` controller taking `ctx`), the scatter axis-change handlers (`_on_scatter_axis_change` / `_on_scatter_agg_axis_change`), the heatmap refresh trio (`_refresh_metric_combo_for_channel` / `_refresh_heatmap_aggregation_options` / `_invalidate_stats_cache`), and the `_mv_*` multivariate refresh methods. Each is a bounded extraction with a unit test; expect ~30–40 refs total.
   - **P3.3 result:** the *builder-only* app-service callbacks lifted cleanly to named accessors — `_open_export_style_panel` → `ctx.open_export_style_panel` (6 sites; 304 → 298). The other named candidates turned out **not** to be builder-only: `_invalidate_stats_cache` is called from ~10 features + core + persistence, `_refresh_review_csv_rows` from three feature areas, the `_on_*` channel/axis handlers from app-level channel machinery — i.e. they are cross-cutting app operations, not window services, so making them accessors would both bloat the frozen set past a *handful* (the documented anti-pattern) and misclassify behaviour as a service. They belong to the epic below, not to P3.3.
-- `[~]` **P3.4 — feature-function signature migration (`helper(ctx.app, …)` → `helper(ctx, …)`).**
+- `[x]` **P3.4 — feature-function signature migration (`helper(ctx.app, …)` → `helper(ctx, …)`).** The items flagged BLOCKED below were unblocked and finished by the A8-teardown epic, which threaded `ctx` through the runtime call graph (orchestrators, redraw/selection coordinators, registry) and decomposed the god-methods those helpers bottomed into.
   1. **Shared UI helpers — done where tractable.** `make_plot_view_switcher` now takes `ctx` (owns the plotting-notebook navigation; 6 builder sites cleared, 298 → 293). `make_band_controls` is **blocked** — it is also called by the legacy `attach_plot_toolbar(app, …)` which has no `ctx`, and it needs three god-object toggles (`_toggle_sem`/`_toggle_fov_replicates`/`_refresh_fov_btn_state`) + button-list stashes; converting it would bloat the accessor set and force `attach_plot_toolbar` to thread `ctx` too. `wrap_with_empty_state` is similar (needs `_plot_empty_stacks`/`_refresh_plot_empty_states`).
   2. **Per-feature redraw/orchestrate — BLOCKED by the runtime call graph (evidence-backed floor).** `redraw_scatter_orchestrate`, `redraw_bars`, `redraw_distribution`, `_on_changed`, `update_scatter_menus`, etc. are **not** builder-private: they are called predominantly from app-level machinery — `runtime_app.py`, `core/plot_orchestrator.py`, `core/redraw_coordinator`, `features/registry.py`, the event-bus/selection controllers, and sibling controllers — **all of which hold `app`, not `ctx`.** Their signature is therefore pinned to `app`. Converting the handful of *builder* call sites to `ctx` is impossible without also threading `ctx` through every one of those runtime callers — which is the god-object teardown, not a feature sweep. Attempting it piecemeal would relocate refs, not remove them.
   3. **Persistence/capture seam** (`wire_save_to_gallery` → `save_plot_from_card` → `get_store`/`capture_params`/`build_summary`): same shape — its own `SavedPlotsService` decomposition, part of the epic.
 - **Design decision — DECIDED: "C" (evolve `ViewerContext`).** Rather than thread raw `ctx` with scattered `ctx.app._service()` calls (A) or introduce a separate `FeatureContext` type with a parallel migration (B), genuine app/window services are exposed as **named accessors on the existing `ViewerContext`** (`ctx.set_status`, `ctx.save_figure_dialog`, …). The god-object touch consolidates into `viewer_context.py` (one `self.app` call per service); feature code names the service instead of reaching through the escape hatch. The accessor set is **frozen** by `tests/test_ctx_service_accessors.py` (adding one is a deliberate, reviewed act; a `__getattr__` passthrough is forbidden) so the named list stays minimal and becomes the enumerable spec of what features need from `WellViewerApp`. Established with the card-action pilot (`ctx.set_status`/`ctx.save_figure_dialog`; 309 → 304). Every subsequent P3.3/P3.4 service touch routes through a (possibly new, always frozen-by-test) accessor.
 - **Floor reached: 293** (894 → 293, **67%**). The A8-scoped burn-down is **done** — every reduction achievable without decomposing `WellViewerApp` itself has landed: all widget handles → registry, all clean persistable flags → typed slices, all builder-only app services → named `ViewerContext` accessors, and the one cleanly-encapsulable shared helper. The residual 293 is the **irreducible-under-A8 floor**: (a) genuine runtime-object stashes with no typed home (smFISH worker bridge/extractor/figures/arrays, scatter gate state, image-table cells) — ~60–80; (b) orchestration functions pinned to `app` by their app-level call graph — ~150; (c) cross-cutting app operations (`_invalidate_stats_cache` &c.) called app-wide — ~50. All three dissolve only by **threading `ctx` through the runtime / decomposing the `WellViewerApp` god-object** — a separate epic (call it **A8-teardown**) gated on its own design. The `ctx.app` ratchet stays frozen at 293 to hold the line until that epic starts. **A8 (as scoped in this audit) is complete.**
+- **A8-teardown epic — COMPLETE (293 → 0, 2026-07-05).** The successor epic ran to the end (see [`A8_TEARDOWN_EPIC.md`](A8_TEARDOWN_EPIC.md)): the EventBus was wired, per-feature `AppRuntime` runtime holders added, `ctx` threaded through the render tree + controllers, the god-object's loose state migrated onto typed `AppState` slices, and the D-series god-method decompositions took the floor 26 → 0. **T6** then **deleted the `ViewerContext.app` field** (god-object now private `_window`, reachable only through a frozen named-accessor set) and **dissolved the `AppRuntime` app-stamp** (the holder owns a standalone store shared with `WidgetRegistry`, no `app` reference; every runtime-key reader migrated onto `ctx.runtime`). The ratchet is now `CTX_APP_BUDGET = 0` — a hard ban, not a frozen floor. `ctx.app` no longer exists.
 
 ---
 
@@ -471,6 +509,7 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 
 > Append a dated line whenever a status box changes. Newest first.
 
+- 2026-07-05 **A8-teardown epic COMPLETE — `ctx.app` 293 → 0, field deleted (A8 follow-up)** — the successor epic ([`A8_TEARDOWN_EPIC.md`](A8_TEARDOWN_EPIC.md)) ran to the end: EventBus wired, per-feature `AppRuntime` holders added, `ctx` threaded through the render tree + controllers, loose god-object state migrated onto typed `AppState` slices, and the D-series god-method decompositions drove the 293 floor to 0. **T6** deleted the `ViewerContext.app` field (god-object now private `_window` + a frozen named-accessor set) and dissolved the `AppRuntime` app-stamp (standalone store shared with `WidgetRegistry`, no `app` ref; readers migrated onto `ctx.runtime`). Ratchet flipped to `CTX_APP_BUDGET = 0` (hard ban). Verified: fast lane 1465 passed, ruff clean, guardrails green. `ctx.app` no longer exists.
 - 2026-07-02 **Phase 3 P3.3/P3.4 complete — A8 floor reached at 293 (A8)** — landed the last tractable extractions: `_open_export_style_panel` → `ctx.open_export_style_panel` named accessor (6 sites, 304 → 298) and `make_plot_view_switcher(ctx)` owning the plotting-notebook navigation (6 sites, 298 → 293). Then established the **evidence-backed floor**: the remaining orchestration functions (`redraw_scatter_orchestrate`/`redraw_bars`/`redraw_distribution`/`_on_changed`/…) are called predominantly from app-level machinery (`runtime_app`, `plot_orchestrator`, `redraw_coordinator`, `registry`, controllers) that holds `app`, not `ctx`, so their signature is pinned to `app`; and the remaining "callback" methods (`_invalidate_stats_cache` &c.) are cross-cutting app operations called app-wide, not builder-only services. Both dissolve only by threading `ctx` through the runtime / decomposing `WellViewerApp` — a separate **A8-teardown epic**, out of this audit's scope. **A8 as scoped is complete: 894 → 293 (67%), ratchet frozen at 293.**
 - 2026-07-02 **Phase 3 design "C" — named `ViewerContext` service accessors (A8)** — decided the P3.4 context question in favour of evolving `ViewerContext` (vs. raw-ctx discipline or a separate `FeatureContext`). Added the first two named accessors — `ctx.set_status` / `ctx.save_figure_dialog` — wrapping the status bar + Save-As dialog; routed the card-action pilot through them so feature code names the service instead of reaching through the escape hatch, consolidating the god-object touch into `viewer_context.py`. Froze the accessor set with `tests/test_ctx_service_accessors.py` (adding one is deliberate/reviewed; `__getattr__` passthrough forbidden). 309 → 304. This is the pattern every subsequent P3.3/P3.4 service touch follows.
 - 2026-07-02 **Phase 3 P3.3 pilot — active-card Copy/Save (A8)** — extracted the `_copy_active_card_as_svg` / `_save_active_card_figure` closures (stamped in `centre_view`, read by all six plot builders through `ctx.app`) into a new ctx-based `core/plot_card_actions.py`. Cards resolve via `ctx.widgets.get_or_none`; the two genuine app/window services (status bar, Save-As dialog) are consolidated into one named escape-hatch boundary. The six builders now wire their Copy/Save buttons to the module functions with `ctx`, not app methods. Proves the P3.3 extraction pattern is honest decoupling (not ref-relocation). `test_plot_card_actions_a8.py` (5) + all six builder registry tests + burn-down green. 318 → 309. **The full P3.3/P3.4 plan is now written in the Phase 3 section** (candidate list, anti-gaming rule, sequence, and the `FeatureContext` design decision).
@@ -564,4 +603,4 @@ Sections the audit checked and found sound; folded here so nobody re-audits them
 - 2026-07-02 **Batch A (hygiene / dead code)** — **G1** (add `import sys` → local auto-threshold pass now runs), **G7** (5 phantom guards / no-op handlers removed), **G8** (typing import + dead `prefix` param), **S6** (true median), **S7** (warn-key no longer `id(df)`), **X13** (3 dead attrs; attr-budget ratcheted 71→68), **A9** (deleted `widgets/_window_chrome.py` + `widgets/window_resize_grips.py`). **A6 DROPPED** — stale finding, `WidgetRegistry` is live + tested. Fast lane green (1211 passed). 8/77 resolved.
 - 2026-07-02 **Tracker created** — converted the static audit into a living work plan; seeded **77 items** (E 23 · S 8 · L 4 · G 8 · A 17 · X 17), all `[ ]` TODO. Umbrella issue [#598](https://github.com/exzktly/allwell/issues/598). 0 resolved.
 
-**Last updated:** 2026-07-02 — StarDist e2e validation for E5/G3 passed (real pipeline, 6 e2e tests + real `main()` exit-code both ways); **77 / 77 resolved — audit complete, ML e2e confirmed.**
+**Last updated:** 2026-07-05 — the A8 follow-up (**A8-teardown epic**) ran to completion: `ctx.app` 293 → **0**, `ViewerContext.app` deleted, `AppRuntime` app-stamp dissolved (`CTX_APP_BUDGET = 0`). All **77 / 77** audit items remain resolved; the god-object burn-down is now fully closed.

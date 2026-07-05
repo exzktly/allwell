@@ -162,7 +162,7 @@ def build_centre(app, parent: QWidget) -> None:
         except Exception:
             _logger.exception("Deferred build for %r failed", title)
 
-    app._centre_build_pending = _build_pending
+    app._ctx.runtime.centre.build_pending = _build_pending
 
     # Tabs whose construction we never want to run from the background
     # drain — they only build on first user access (tab click). The tabs
@@ -198,7 +198,7 @@ def build_centre(app, parent: QWidget) -> None:
     # are deferred.
     from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
     from well_viewer.features.preview.preview_view import build_preview_picker
-    build_replicate_panel(app, app._sidebar_sample_frame)
+    build_replicate_panel(app._ctx, app._sidebar_sample_frame)
     build_preview_picker(app, app._sidebar_preview_frame)
 
     # Stable name -> tab QWidget map for builder closures to reach into.
@@ -304,7 +304,8 @@ def build_centre(app, parent: QWidget) -> None:
         arl.addWidget(chan_lbl)
         # Expose the label so tab-switch logic can hide it on scatter tabs.
         app._plotting_channel_lbl = chan_lbl
-        app._plotting_channel_cb = _QComboBox()
+        app._plotting_channel_cb = app._ctx.widgets.register(
+            "_plotting_channel_cb", _QComboBox())
         app._plotting_channel_cb.setMinimumContentsLength(8)
         app._plotting_channel_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "
@@ -343,7 +344,8 @@ def build_centre(app, parent: QWidget) -> None:
         )
         arl.addWidget(prop_lbl)
         app._plotting_metric_lbl = prop_lbl
-        app._plotting_metric_cb = _QComboBox()
+        app._plotting_metric_cb = app._ctx.widgets.register(
+            "_plotting_metric_cb", _QComboBox())
         app._plotting_metric_cb.setMinimumContentsLength(8)
         app._plotting_metric_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "
@@ -382,8 +384,9 @@ def build_centre(app, parent: QWidget) -> None:
         )
         arl.addWidget(thresh_lbl)
         app._plotting_thresh_frac_lbl = thresh_lbl
-        app._plotting_thresh_frac_stepper = _Stepper(
-            value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1)
+        app._plotting_thresh_frac_stepper = app._ctx.widgets.register(
+            "_plotting_thresh_frac_stepper",
+            _Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
         app._plotting_thresh_frac_stepper.setFixedWidth(96)
         # Don't let the threshold box grab keyboard focus when the window first
         # shows (it auto-focused on load) — only take focus on click.
@@ -449,7 +452,7 @@ def build_centre(app, parent: QWidget) -> None:
             sub_title = plotting_nb.currentName()
             if sub_title in pending:
                 _build_pending(sub_title)
-            on_tab_change(app, None)
+            on_tab_change(app._ctx, None)
             _refresh_channel_chip(sub_title)
             # Properties rail retired — its scope picker followed the
             # active sub-tab. Per-plot styling now happens through the
@@ -657,7 +660,7 @@ def build_centre(app, parent: QWidget) -> None:
         title = app._notebook.currentName()
         if title in pending:
             _build_pending(title)
-        on_tab_change(app, None)
+        on_tab_change(app._ctx, None)
 
     app._notebook.currentChanged.connect(_on_tab_change)
 
@@ -692,7 +695,7 @@ def drain_pending_centre_builders(app) -> None:
     on first access.
     """
     pending = getattr(app, "_centre_pending_builders", None)
-    build = getattr(app, "_centre_build_pending", None)
+    build = app._ctx.runtime.centre.build_pending
     if not pending or build is None:
         return
     lazy_only = getattr(app, "_centre_lazy_only_titles", frozenset())

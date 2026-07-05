@@ -19,9 +19,9 @@ def test_show_threshold_line_round_trips_through_view_state(loaded_app):
 
     app = loaded_app
     app._app_state.plot.show_threshold_line = True
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     assert snap.get("show_threshold_line") is True
 
     app._app_state.plot.show_threshold_line = False
-    vs.restore(app, snap)
+    vs.restore(app._ctx, snap)
     assert app._app_state.plot.show_threshold_line is True

@@ -27,13 +27,13 @@ def test_crop_excludes_outside_centroids_via_chokepoint(loaded_app_shape):
     rows_before = len(df)
     incl_before = int(df_included_mask(df).sum())
 
-    set_crop_region(app, _REGION)
+    set_crop_region(app._ctx, _REGION)
 
     df2 = app._get_rows(well)
     assert len(df2) == rows_before                 # non-destructive: no rows removed
     assert "Crop_Pass" in df2.columns
     assert int(df_included_mask(df2).sum()) < incl_before
-    assert get_crop_region(app) == _REGION
+    assert get_crop_region(app._ctx) == _REGION
 
     # A lazily-loaded *other* well also gets Crop_Pass projected (the _get_rows hook).
     other = sorted(app._app_state.dataset.well_paths)[-1]
@@ -45,11 +45,11 @@ def test_clear_crop_restores_cells(loaded_app_shape):
     well = sorted(app._app_state.dataset.well_paths)[0]
     incl_full = int(df_included_mask(app._get_rows(well)).sum())
 
-    set_crop_region(app, _REGION)
+    set_crop_region(app._ctx, _REGION)
     assert int(df_included_mask(app._get_rows(well)).sum()) < incl_full
 
-    clear_crop_region(app)
-    assert get_crop_region(app) is None
+    clear_crop_region(app._ctx)
+    assert get_crop_region(app._ctx) is None
     assert int(df_included_mask(app._get_rows(well)).sum()) == incl_full
 
 
@@ -66,13 +66,13 @@ def test_reset_restores_manual_deletes_and_clears_crop(loaded_app_shape, monkeyp
     df = app._get_rows(well)
     df["Included"] = 1
     df.loc[df.index[0], "Included"] = 0
-    app._review_included_overrides[(well, "1", "0h", "1")] = "0"
-    set_crop_region(app, _REGION)
+    app._ctx.runtime.review.included_overrides[(well, "1", "0h", "1")] = "0"
+    set_crop_region(app._ctx, _REGION)
     assert int(df_included_mask(app._get_rows(well)).sum()) < incl_full
 
-    reset_crop_and_overrides(app)
+    reset_crop_and_overrides(app._ctx)
 
-    assert get_crop_region(app) is None
-    assert not app._review_included_overrides
+    assert get_crop_region(app._ctx) is None
+    assert not app._ctx.runtime.review.included_overrides
     # Cache was invalidated → frames reload original (all-Included) rows → full set.
     assert int(df_included_mask(app._get_rows(well)).sum()) == incl_full

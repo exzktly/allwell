@@ -59,7 +59,24 @@ FEATURE_PREFIX = "well_viewer.features"
 # staging call in `_run_batch_jobs`) were hoisted to a single module-level
 # import — `service.py` is Qt-free, so it's safe at module scope — net-dropping
 # the count by one.
-MAX_DEFERRED_FEATURE_IMPORTS = 130
+# Raised to 131 in the A8 core-spine burn-down: ``invalidate_stats_cache`` went
+# ctx-native and reaches the (Qt) per-FOV button refresh in
+# ``features.preview.panel_view`` through a function-local import — the
+# sanctioned escape hatch for a core module invoking a feature UI side-effect
+# without naming the god-object.
+# Lowered to 128 in the E3 shared-plot-toggle relocation: toggle_sem /
+# toggle_fov_replicates / refresh_fov_btn_state moved into core.plot_toggles,
+# which reaches the bar renderer + bar-layout refresh through core.lazy proxies
+# (a call, not an import statement) rather than the two function-local
+# ``from features.barplot...`` imports the toggles used to carry; and
+# invalidate_stats_cache's per-FOV refresh import now targets core.plot_toggles
+# instead of features.preview — three deferred feature imports removed.
+# Lowered to 124 in A8 D4 (review-image draw web → ctx): the renderer's four
+# function-local ``review_image.controller`` imports (resolve-refs / include-map
+# / threshold-map / flat-field field) were promoted to a single module-level
+# ``review_image.collect`` import — collect is the Qt-free data half and never
+# imports the renderer, so there is no cycle to defer.
+MAX_DEFERRED_FEATURE_IMPORTS = 124
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

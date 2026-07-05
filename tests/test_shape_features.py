@@ -92,10 +92,14 @@ class _AppState:
 
 class _FakeApp:
     def __init__(self):
+        from types import SimpleNamespace
         self._app_state = _AppState()
-        self._label_to_channel_key = {
+        # A8/X5: the label→key map is typed state on ChannelState now.
+        self._app_state.channel.label_to_channel_key = {
             "GFP": "gfp", "Eccentricity": "shape_eccentricity",
         }
+        # active_channel_label reads ctx.state.channel (A8 teardown).
+        self._ctx = SimpleNamespace(state=self._app_state, app=self)
 
 
 def test_populate_metric_combo_collapses_for_shape(qapp):
@@ -106,13 +110,13 @@ def test_populate_metric_combo_collapses_for_shape(qapp):
 
     # Shape feature → single, inert (disabled) entry.
     cb = QComboBox()
-    populate_metric_combo(app, cb, channel_entry="Eccentricity")
+    populate_metric_combo(app._ctx, cb, channel_entry="Eccentricity")
     assert [cb.itemText(i) for i in range(cb.count())] == [CALCULATED_VAL_LABEL]
     assert cb.isEnabled() is False
 
     # Real channel → full intensity metric set, enabled.
     cb2 = QComboBox()
-    populate_metric_combo(app, cb2, channel_entry="GFP")
+    populate_metric_combo(app._ctx, cb2, channel_entry="GFP")
     items = [cb2.itemText(i) for i in range(cb2.count())]
     assert items == list(METRIC_ORDER)
     assert cb2.isEnabled() is True
@@ -230,16 +234,16 @@ def test_scatter_draw_with_shape_axis(loaded_app_shape):
 
     app = loaded_app_shape
     app._set_selected_wells(set(WELLS))
-    update_scatter_menus(app)
+    update_scatter_menus(app._ctx)
     app._scatter_ch_x_cb.setCurrentIndex(app._scatter_ch_x_cb.findText("Eccentricity"))
     # Fluor channels display upper-case now (GFP, not gfp); the column still
     # resolves to gfp_mean_intensity (case-insensitive).
     app._scatter_ch_y_cb.setCurrentIndex(app._scatter_ch_y_cb.findText("GFP"))
-    for tp in list(app._scatter_tp_selections):
-        app._scatter_tp_selections[tp] = True
+    for tp in list(app._ctx.runtime.scatter.tp_selections):
+        app._ctx.runtime.scatter.tp_selections[tp] = True
 
-    redraw_scatter_orchestrate(app)
-    cache = app._scatter_interaction_cache
+    redraw_scatter_orchestrate(app._ctx)
+    cache = app._ctx.runtime.scatter.interaction_cache
     assert cache["col_x"] == "shape_eccentricity"
     assert cache["col_y"] == "gfp_mean_intensity"
     assert len(cache["points"]) > 0
@@ -261,19 +265,19 @@ def test_scatter_menus_preserve_timepoint_selection(loaded_app_shape):
     app = loaded_app_shape
     wells = list(WELLS)
     app._set_selected_wells({wells[0]})
-    update_scatter_menus(app)
+    update_scatter_menus(app._ctx)
 
-    tp = next(iter(app._scatter_tp_selections))
-    app._scatter_tp_selections[tp] = False                 # user unchecks one tp
-    agg_tp = next(iter(app._scatter_agg_tp_selections))
-    app._scatter_agg_tp_selections[agg_tp] = False
+    tp = next(iter(app._ctx.runtime.scatter.tp_selections))
+    app._ctx.runtime.scatter.tp_selections[tp] = False                 # user unchecks one tp
+    agg_tp = next(iter(app._ctx.runtime.scatter.agg_tp_selections))
+    app._ctx.runtime.scatter.agg_tp_selections[agg_tp] = False
 
     # Add another well → selection_controller fires update_scatter_menus again.
     app._set_selected_wells(set(wells))
-    update_scatter_menus(app)
+    update_scatter_menus(app._ctx)
 
-    assert app._scatter_tp_selections[tp] is False         # stays unchecked
-    assert app._scatter_agg_tp_selections[agg_tp] is False
+    assert app._ctx.runtime.scatter.tp_selections[tp] is False         # stays unchecked
+    assert app._ctx.runtime.scatter.agg_tp_selections[agg_tp] is False
 
 
 # ── End-to-end: label → key → active state → value resolution ────────────────
@@ -287,14 +291,18 @@ def test_label_key_value_roundtrip():
 
     app = _FakeApp()
     app._app_state.channel = ChannelState()
+    # X5: the label→key map is typed state (as update_channel_selector builds it).
+    app._app_state.channel.label_to_channel_key = {
+        "GFP": "gfp", "Eccentricity": "shape_eccentricity",
+    }
 
     # label → key (as update_channel_selector's map would resolve it)
-    key = channel_key_for_label(app, "Eccentricity")
+    key = channel_key_for_label(app._ctx, "Eccentricity")
     assert key == "shape_eccentricity"
 
     # activating it via the state mutator, then label round-trips back
     assert app._app_state.channel.set_active_shape_feature(key) is True
-    assert active_channel_label(app) == "Eccentricity"
+    assert active_channel_label(app._ctx) == "Eccentricity"
 
     # the value column resolves directly from the DataFrame (no ratio math)
     df = pd.DataFrame({"shape_eccentricity": [0.1, 0.9, float("nan")]})

@@ -15,17 +15,17 @@ from well_viewer.data.data_loading import parse_timepoint_hours
 from well_viewer.core.safe import swallowed
 
 
-def well_plate_tooltip_provider(app) -> Callable[[str], str]:
+def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
     """Tooltip-provider closure for ``WellPlateSelector.setWellTooltipProvider``.
 
     Returns ``"<well_id> — <label>"`` for wells the user has named in
     Sample Definitions, falling back to the bare well id otherwise. The
-    closure reads ``app._app_state.dataset.well_labels`` on every hover
+    closure reads ``ctx.state.dataset.well_labels`` on every hover
     so a label edit reflects immediately without re-wiring the provider.
     """
     def _tooltip(well_id: str) -> str:
         try:
-            labels = getattr(app._app_state.dataset, "well_labels", None) or {}
+            labels = getattr(ctx.state.dataset, "well_labels", None) or {}
             name = labels.get(well_id)
         except Exception:
             name = None
@@ -424,7 +424,7 @@ def send_plot_to_batch_export(app, mode: str) -> None:
     nb = getattr(app, "_notebook", None)
     if nb is not None:
         nb.setCurrentByName("Batch Export")
-    setter = getattr(app, "_batch_export_set_mode", None)
+    setter = app._ctx.runtime.batch_export.set_mode
     if callable(setter):
         setter(mode)
     label = {"line": "Line", "bar": "Bar", "scatter_cells": "Scatter (cells)",
@@ -549,14 +549,24 @@ def _themed_nav_toolbar_class():
     return _ThemedNavToolbar
 
 
-def make_band_controls(app: Any, parent: QWidget, *, with_fov: bool = False) -> QWidget:
+def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidget:
     """Build the shared "Error Band: SEM/SD" (+ optional "Spread: FOV") toggle
     widget. The SEM button is wired through ``app._toggle_sem`` and registered in
     ``app._sem_btns`` so ``_toggle_sem`` can update every instance; the FOV button
     (``with_fov=True``) goes through ``app._toggle_fov_replicates`` /
     ``app._fov_btns`` and is auto-disabled whenever replicate groups are active
     (``_refresh_fov_btn_state``). Used both by :func:`attach_plot_toolbar` (legacy
-    toolbar) and by the v2 ``PlotCard`` controls row."""
+    toolbar) and by the v2 ``PlotCard`` controls row.
+
+    A8: fully ctx-native — reads the SEM flag off ``ctx.state.plot``, wires the
+    ctx-native ``core.plot_toggles`` handlers, and registers the buttons on the
+    ``ctx.runtime.sem`` / ``ctx.runtime.fov`` banks (mirrors the batch-export
+    controls row)."""
+    from well_viewer.core.plot_toggles import (
+        refresh_fov_btn_state,
+        toggle_fov_replicates,
+        toggle_sem,
+    )
     w = QWidget(parent)
     h = QHBoxLayout(w)
     h.setContentsMargins(0, 0, 0, 0)
@@ -565,16 +575,16 @@ def make_band_controls(app: Any, parent: QWidget, *, with_fov: bool = False) -> 
     eb_lbl = QLabel("Error Band", w)
     eb_lbl.setObjectName("Muted")
     h.addWidget(eb_lbl)
-    initial = bool(app._app_state.plot.use_sem)
+    initial = bool(ctx.state.plot.use_sem)
     sem_btn = QPushButton("SEM" if initial else "SD", w)
     sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
-    sem_btn.clicked.connect(lambda _=False: app._toggle_sem())
+    sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
     h.addWidget(sem_btn)
-    if not getattr(app, "_sem_btns", None):
-        app._sem_btns = []
-    app._sem_btns.append(sem_btn)
-    if not getattr(app, "_sem_btn", None):
-        app._sem_btn = sem_btn
+    if ctx.runtime.sem.btns is None:
+        ctx.runtime.sem.btns = []
+    ctx.runtime.sem.btns.append(sem_btn)
+    if not ctx.runtime.sem.btn:
+        ctx.runtime.sem.btn = sem_btn
 
     if with_fov:
         sp_lbl = QLabel("Spread", w)
@@ -582,18 +592,14 @@ def make_band_controls(app: Any, parent: QWidget, *, with_fov: bool = False) -> 
         h.addWidget(sp_lbl)
         fov_btn = QPushButton("FOV", w)
         fov_btn.setProperty("variant", "toggle")
-        fov_btn.clicked.connect(lambda _=False: app._toggle_fov_replicates())
+        fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
         h.addWidget(fov_btn)
-        if not getattr(app, "_fov_btns", None):
-            app._fov_btns = []
-        app._fov_btns.append(fov_btn)
-        if not getattr(app, "_fov_btn", None):
-            app._fov_btn = fov_btn
-        if hasattr(app, "_refresh_fov_btn_state"):
-            try:
-                app._refresh_fov_btn_state()
-            except Exception:
-                swallowed()  # was: pass (silent except)
+        if ctx.runtime.fov.btns is None:
+            ctx.runtime.fov.btns = []
+        ctx.runtime.fov.btns.append(fov_btn)
+        if not ctx.runtime.fov.btn:
+            ctx.runtime.fov.btn = fov_btn
+        refresh_fov_btn_state(ctx)
 
     h.addStretch(1)
     return w
@@ -628,7 +634,7 @@ def make_plot_view_switcher(ctx, current_name: str):
 
     def _on_change(_idx=None) -> None:
         target = sc.currentData()
-        nb = getattr(ctx.app, "_plotting_notebook", None)
+        nb = getattr(ctx.window, "_plotting_notebook", None)
         if not target or nb is None:
             return
         nb.setCurrentByName(target)
@@ -653,7 +659,7 @@ def attach_plot_toolbar(
     toolbar.setObjectName("PlotToolbar")
     if with_sem and app is not None:
         toolbar.addSeparator()
-        toolbar.addWidget(make_band_controls(app, toolbar, with_fov=with_fov))
+        toolbar.addWidget(make_band_controls(app._ctx, toolbar, with_fov=with_fov))
     layout.addWidget(toolbar)
     return toolbar
 
@@ -902,7 +908,7 @@ def on_theme_change(app, theme_name: str = None) -> None:
 
     if hasattr(app, '_rep_cards_frame') and app._rep_cards_frame:
         from well_viewer.features.grouping.tab_view import rep_panel_refresh
-        rep_panel_refresh(app)
+        rep_panel_refresh(app._ctx)
     if hasattr(app, '_stats_fig') and app._stats_fig:
         from well_viewer.features.stats.controller import stats_refresh_colors
         stats_refresh_colors(app)
@@ -982,16 +988,16 @@ def toggle_log(app) -> None:
 
 
 
-def notes_schedule_save(app) -> None:
+def notes_schedule_save(ctx) -> None:
     """Capture the Notes text and queue a debounced save.
 
     The widget read must stay here (the registry never touches widgets);
     the debounce + disk write live in the PersistenceRegistry.
     """
-    edit = getattr(app, "_notes_edit", None)
+    edit = ctx.widgets.get_or_none("_notes_edit")
     if edit is not None:
-        app._notes_text = edit.toPlainText()
-    app._persistence.schedule_save("notes")
+        ctx.state.selection.notes_text = edit.toPlainText()
+    ctx.persistence.schedule_save("notes")
 
 
 

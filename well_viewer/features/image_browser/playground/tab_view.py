@@ -3,7 +3,7 @@
 ``build_playground_tab(ctx, parent)`` assembles the single-frame correction
 testbed: a left controls column (frame selectors, correction method + params,
 display options) and a right zoomable canvas. Per ARCHITECTURE.md §5.3 it reads
-``ctx.app`` directly (no ``app = ctx.app`` unwrap) and wires every signal to the
+the app handle directly (no ``app =`` unwrap) and wires every signal to the
 controller via ``functools.partial`` — no new ``runtime_app`` proxies.
 """
 
@@ -41,9 +41,11 @@ def _row(parent, label_text: str) -> QWidget:
 
 
 def build_playground_tab(ctx, parent: QWidget) -> None:
-    # ctx is a ViewerContext (carries .app); tolerate a bare app in headless
-    # tests. This getattr is not the guardrailed `app = ctx.app` unwrap.
-    app = getattr(ctx, "app", ctx)
+    # The Playground is an un-migrated dev/debug builder that still stamps its
+    # widgets onto the app and drives an app-native on_change. It reaches that
+    # app instance through the ``window`` handle (the QMainWindow *is* the app)
+    # until it gets its own ctx migration; the generic app escape hatch is gone.
+    app = ctx.window
     if parent.layout() is None:
         QHBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
     on_change = partial(playground_on_change, app)
@@ -319,5 +321,5 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     ff_cb.currentIndexChanged.connect(_sync_method_rows)
     _sync_method_rows()
 
-    playground_repopulate_dropdowns(app)
+    playground_repopulate_dropdowns(app._ctx)
     on_change()

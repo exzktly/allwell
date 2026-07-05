@@ -107,3 +107,11 @@ class PreviewState:
     fluor: dict = field(default_factory=dict)
     overlay: dict = field(default_factory=dict)
     mask: dict = field(default_factory=dict)
+    # Top-hat (background-subtracted) fluorescence refs decoded alongside
+    # ``fluor``; the Review Image "corrected" stage prefers these. Transient,
+    # rebuilt on every ``update_preview`` — was the loose ``app._preview_tophat_fluor``.
+    tophat_fluor: dict = field(default_factory=dict)
+    # Re-entry guard for ``update_preview``: it drives the FOV combo, whose
+    # signal handler re-enters the refresh path, which can re-enter here through
+    # the channel / well callbacks. Was the loose ``app._update_preview_in_progress``.
+    update_in_progress: bool = False

@@ -2,10 +2,10 @@
 
 Per ARCHITECTURE.md §5.9 the Image Table's runtime *data* (selections, axis
 choices, display options, export settings, and the per-generate caches) lives
-here as a typed dataclass aggregated on ``AppState`` (``app._app_state.image_table``),
-rather than as loose ``app._image_table_*`` attributes. Qt widget handles (the
+here as a typed dataclass aggregated on ``AppState`` (``ctx.state.image_table``),
+rather than as loose ``ctx._image_table_*`` attributes. Qt widget handles (the
 selector-cell combos, LUT QLineEdit pairs, dropdowns, menu actions, the
-``CropTool`` helper, the sidebar plate) deliberately stay on ``app`` as
+``CropTool`` helper, the sidebar plate) deliberately stay on ``ctx`` as
 residual coupling — only plain data moves here.
 
 Qt-free: imports only stdlib, so controllers can import it with no cycle (the

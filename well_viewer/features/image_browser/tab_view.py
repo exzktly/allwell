@@ -38,7 +38,7 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     sub_tabs.tabBar().setElideMode(Qt.ElideNone)
     sub_tabs.tabBar().setUsesScrollButtons(True)
     layout.addWidget(sub_tabs)
-    ctx.app._image_browser_subtabs = sub_tabs
+    ctx.runtime.image_browser.subtabs = sub_tabs
     ctx.runtime.image_browser.built = {}
 
     # One empty frame per sub-tab; bodies build lazily (the build function sets
@@ -48,9 +48,9 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
         sub_tabs.addTab(QWidget(sub_tabs), name)
 
     sub_tabs.currentChanged.connect(
-        lambda idx: ctl.on_image_browser_subtab_changed(ctx.app, idx))
+        lambda idx: ctl.on_image_browser_subtab_changed(ctx, idx))
 
     # Eagerly build Segmentation (the initial, current sub-tab) so the canvas
     # is ready on first open. Image Table / Cell Browser / Playground stay lazy:
     # built on first sub-tab click.
-    ctl.build_image_browser_subtab(ctx.app, sub_tabs.currentIndex())
+    ctl.build_image_browser_subtab(ctx, sub_tabs.currentIndex())

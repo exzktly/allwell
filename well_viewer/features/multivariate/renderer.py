@@ -1,6 +1,6 @@
 """Multivariate feature renderer — pure matplotlib drawing.
 
-``render_multivariate(app)`` repaints ``app._mv_fig`` from the snapshot the
+``render_multivariate(app)`` repaints ``ctx.runtime.multivariate.fig`` from the snapshot the
 controller cached on the state slice (``last_result`` / ``last_error``). Each of
 the four modes draws its own figure layout. No Qt beyond the final
 ``canvas.draw_idle()``; no compute — the controller has already run it.
@@ -19,9 +19,9 @@ _logger = logging.getLogger("well_viewer")
 _CLUSTER_CMAP = "tab10"
 
 
-def render_multivariate(app) -> None:
-    st = app._app_state.feature_slice("multivariate")
-    fig = getattr(app, "_mv_fig", None)
+def render_multivariate(ctx) -> None:
+    st = ctx.state.feature_slice("multivariate")
+    fig = ctx.runtime.multivariate.fig
     if st is None or fig is None:
         return
     fig.clear()
@@ -45,7 +45,7 @@ def render_multivariate(app) -> None:
     except Exception as exc:  # pragma: no cover - defensive
         _logger.exception("Multivariate render failed")
         _draw_message(fig, f"Render failed: {exc}")
-    canvas = getattr(app, "_mv_canvas", None)
+    canvas = ctx.runtime.multivariate.canvas
     if canvas is not None:
         canvas.draw_idle()
 

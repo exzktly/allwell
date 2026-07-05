@@ -8,49 +8,73 @@ from __future__ import annotations
 import logging
 from functools import partial
 from well_viewer.core.safe import swallowed
+from well_viewer.core.lazy import lazy as _lazy
 
 _logger = logging.getLogger("well_viewer.runtime_app")
+
+# The review-image (Segmentation) panel builder is a feature-layer god-method
+# (~30 app-bound method lambdas); bind it as a lazy proxy so this core module
+# names no feature at import time (a ``lazy(...)`` call is not an import
+# statement, so it is invisible to the deferred-feature-import ratchet).
+_build_review_image_panel = _lazy(
+    "well_viewer.features.preview.panel_view", "build_review_image_panel")
+
+# The Sample Definitions centre builder (``build_sample_definitions_centre``) is a
+# deeply app-coupled feature-layer builder: it and its sub-builders (Groups /
+# Well Labels / Ratios / Pipeline Info / Notes) stamp dozens of ``app._rep_*`` /
+# ``app._sel_*`` widgets and wire the ``_clear_sample_definitions_all`` /
+# ``_groups_centre_refresh`` / ``_refresh_sidebar_map`` god-methods, so it still
+# takes the app handle. It is reached through the single core
+# ``build_sample_definitions_app_bridge`` seam below (one god-object unwrap for
+# the whole tab build) instead of being named from the feature-layer registry.
+_build_sample_definitions_centre = _lazy(
+    "well_viewer.features.grouping.replicate_panel_view",
+    "build_sample_definitions_centre")
 
 # Split-View extension points. ``split_view.install_split_view`` sets these; while
 # they are None the resolvers below behave exactly as the single-tab original, so
 # the feature is fully absent until (and unless) it is installed.
-split_focus_provider = None     # fn(app) -> focused leaf name | None
-split_visible_provider = None   # fn(app) -> set[str] of visible leaves | None
+split_focus_provider = None     # fn(ctx) -> focused leaf name | None
+split_visible_provider = None   # fn(ctx) -> set[str] of visible leaves | None
 split_nav_intercept = None      # fn(app, key) -> bool (True = consume nav)
 
 
-def on_tab_change(app, _e=None) -> None:
+def on_tab_change(ctx, _e=None) -> None:
     """Show/hide the sidebar and refresh whichever tab is now active."""
-    if not hasattr(app, "_line_ax_mean"):
+    from well_viewer.core.plot_orchestrator import redraw_app
+    if not ctx.widgets.has("_line_ax_mean"):
         return
-    tab = app._current_centre_tab()
-    prev_tab = getattr(app, "_last_tab_name", None)
-    prev_selected = set(app._app_state.selection.selected_wells)
+    tab = current_centre_tab(ctx)
+    prev_tab = ctx.runtime.tab.last_tab_name
+    prev_selected = set(ctx.state.selection.selected_wells)
 
     # Dismiss any open figure configurator on tab change -- the user can
     # re-open it on the new tab via the plot card's sliders IconButton.
-    for sb in list((getattr(app, "_export_style_sidebars", {}) or {}).values()):
+    for sb in list((ctx.widgets.get_or_none("_export_style_sidebars") or {}).values()):
         try:
             sb._close_dock()
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    app._sidebar_main_frame.setVisible(False)
-    app._sidebar_preview_frame.setVisible(False)
-    if hasattr(app, "_sidebar_image_table_frame"):
-        app._sidebar_image_table_frame.setVisible(False)
-    app._sidebar_sample_frame.setVisible(False)
-    app._sidebar_stats_frame.setVisible(False)
-    if hasattr(app, "_sidebar_cell_browser_frame"):
-        app._sidebar_cell_browser_frame.setVisible(False)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(False)
+    ctx.widgets.get("_sidebar_preview_frame").setVisible(False)
+    _it_frame = ctx.widgets.get_or_none("_sidebar_image_table_frame")
+    if _it_frame is not None:
+        _it_frame.setVisible(False)
+    ctx.widgets.get("_sidebar_sample_frame").setVisible(False)
+    ctx.widgets.get("_sidebar_stats_frame").setVisible(False)
+    _cb_frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
+    if _cb_frame is not None:
+        _cb_frame.setVisible(False)
     # Heat-map layout configurator lives inside the standard sidebar but is
     # only relevant on the Heat Map tab.
-    if hasattr(app, "_heatmap_sidebar_frame"):
-        app._heatmap_sidebar_frame.setVisible(tab == "Heat Map")
+    _hm_frame = ctx.widgets.get_or_none("_heatmap_sidebar_frame")
+    if _hm_frame is not None:
+        _hm_frame.setVisible(tab == "Heat Map")
     # The sidebar plate-map doubles as the heat-map drag source on the
     # Heat Map tab -- flip each WellButton into drag-source mode while
     # that tab is active.
-    app._sync_heatmap_well_drag_mode(tab == "Heat Map")
+    sync_heatmap_well_drag_mode(ctx, tab == "Heat Map")
 
     # Per-tab activation is dispatched through the feature registry: each
     # descriptor's ``on_activate`` hook owns its sidebar-visibility + refresh
@@ -58,38 +82,79 @@ def on_tab_change(app, _e=None) -> None:
     # tab with no descriptor / no hook falls back to the generic plot path
     # (unified picker + redraw) — the same behaviour the old ``else`` gave Line
     # Graphs and any unknown leaf.
-    desc = app._features.get(tab)
+    desc = ctx.features.get(tab)
     if desc is not None and desc.on_activate is not None:
-        desc.on_activate(app)
+        desc.on_activate(ctx)
     else:
-        app._sidebar_main_frame.setVisible(True)
-        app._refresh_sidebar_map()
-        app._redraw()
+        ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+        ctx.refresh_sidebar_map()
+        redraw_app(ctx)
 
-    app._run_tab_switch_smoke_checks(prev_tab, tab, prev_selected)
-    app._last_tab_name = tab
+    run_tab_switch_smoke_checks(ctx, prev_tab, tab, prev_selected)
+    ctx.runtime.tab.last_tab_name = tab
 
     # Drain any restored view-state slated for this tab. Safe no-op when
     # nothing is pending; runs after the tab's own dispatch so its widgets
     # are populated and apply step can validate combo items.
-    if getattr(app, "_view_state_pending", None):
+    if ctx.runtime.view_state.pending:
         from well_viewer.persistence import view_state as _vs
-        if _vs.apply_pending_tab_state(app, tab):
+        if _vs.apply_pending_tab_state(ctx, tab):
             # The restore lands *after* this tab's initial draw above, so that
             # draw used pre-restore defaults — e.g. the Bar timepoint popup,
-            # which ``_update_bar_tp_menu`` had defaulted to a single checked
+            # which ``update_bar_tp_menu`` had defaulted to a single checked
             # timepoint, so the plot showed one timepoint even though the saved
             # selection (now applied) has several. Redraw the plot tabs so they
             # reflect the restored state. (Image Table deliberately does not
             # auto-regenerate, so it is intentionally excluded.)
             if tab == "Bar Plots":
                 from well_viewer.features.barplot.renderer import redraw_bars
-                redraw_bars(app)
+                redraw_bars(ctx)
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
-                scatter_redraw_active(app)
+                scatter_redraw_active(ctx)
             elif tab == "Distribution":
-                app._redraw()
+                redraw_app(ctx)
+
+
+def image_browser_subtab_app_bridge(
+    ctx, *, segmentation_frame=None, refresh_active_tab: bool = False,
+) -> None:
+    """The residual ``WellViewerApp`` behaviour the Image Browser sub-tab
+    lifecycle still needs from the god-object, bundled behind one ctx→app seam.
+
+    The Image Browser sub-tab controller (``features/image_browser/controller``)
+    is ctx-native — it reads ``ctx.runtime`` / ``ctx.widgets`` and dispatches the
+    ctx-native sub-tab builders. ``on_tab_change``, ``update_channel_selector``,
+    and the whole ``build_review_image_panel`` callback web (crop / interaction /
+    LUT / zoom / colour) are all ctx-native now, so this bridge names no
+    god-object — it is a thin lifecycle seam kept for the Image Browser sub-tab
+    controller to call.
+    """
+    if segmentation_frame is not None:
+        from well_viewer.core.channel_state_controller import update_channel_selector
+        _build_review_image_panel(ctx, segmentation_frame)
+        # The review-image channel combo is born empty (a "GFP" placeholder);
+        # when the panel builds *after* a dataset is already loaded (it builds
+        # lazily now), nothing has populated it yet, so fill it from the current
+        # channel state. Harmless before any load.
+        update_channel_selector(ctx)
+    if refresh_active_tab:
+        on_tab_change(ctx, None)
+
+
+def build_sample_definitions_app_bridge(ctx, frame) -> None:
+    """Build the Sample Definitions centre tab.
+
+    The centre builder + its whole sub-builder tree (Groups / Well Labels /
+    Ratios / Pipeline Info / Notes) are now ctx-native — they register widgets
+    through ``ctx.widgets``, read typed ``ctx.state``, wire buttons directly to
+    the ctx-native ``sel_*`` / ``rep_*`` / ``clear_all`` / ``labels_*`` mutators,
+    and reach the remaining orchestration services through the frozen accessors
+    (``ctx.rebuild_all`` / ``ctx.refresh_sidebar_map`` / ``ctx.toast``). The
+    registry calls this core bridge (reached via a ``lazy(...)`` proxy) so the
+    feature builder is not named at this core module's import time.
+    """
+    _build_sample_definitions_centre(ctx, frame)
 
 
 def on_notebook_current_changed(app, _idx) -> None:
@@ -135,7 +200,7 @@ def on_notebook_current_changed(app, _idx) -> None:
 
 
 def run_tab_switch_smoke_checks(
-    app,
+    ctx,
     prev_tab: Optional[str],
     tab: str,
     prev_selected: set,
@@ -148,12 +213,12 @@ def run_tab_switch_smoke_checks(
     # Batch Export should share the same in-memory selection objects used by
     # the line/bar/scatter render paths.
     expected_ids = (
-        id(app._app_state.selection.selected_wells),
-        id(app._app_state.selection.selections),
+        id(ctx.state.selection.selected_wells),
+        id(ctx.state.selection.selections),
     )
-    if not hasattr(app, "_selection_model_identity"):
-        app._selection_model_identity = expected_ids
-    elif app._selection_model_identity != expected_ids:
+    if ctx.runtime.tab.selection_model_identity is None:
+        ctx.runtime.tab.selection_model_identity = expected_ids
+    elif ctx.runtime.tab.selection_model_identity != expected_ids:
         _logger.warning(
             "Selection model identity changed across tab switch: "
             "_selected_wells/_selections should be shared."
@@ -161,7 +226,7 @@ def run_tab_switch_smoke_checks(
 
     # UI smoke check: switching among Line/Bar/Batch must not mutate the
     # current per-well selection by itself.
-    if prev_tab in watched and prev_selected != app._app_state.selection.selected_wells:
+    if prev_tab in watched and prev_selected != ctx.state.selection.selected_wells:
         _logger.warning(
             "Tab switch altered selected wells unexpectedly: %s -> %s",
             prev_tab, tab,
@@ -169,7 +234,7 @@ def run_tab_switch_smoke_checks(
 
 
 
-def _resolve_leaf(app, top: str) -> str:
+def _resolve_leaf(ctx, top: str) -> str:
     """Resolve a top-level tab name to its current leaf.
 
     "Plotting" and "Image Browser" host nested sub-stacks whose current
@@ -177,18 +242,21 @@ def _resolve_leaf(app, top: str) -> str:
     one level for those. Every other top-level name is already a leaf. Works
     regardless of which page the outer notebook currently shows, so it is safe
     to call for a detached Split-View pane.
+
+    A8: takes ``ctx``; the plotting notebook is a window widget (``ctx.window``),
+    the Image Browser sub-tab bar is a runtime handle (``ctx.runtime.image_browser``).
     """
     if not top:
         return ""
     if top == "Plotting":
-        plotting_nb = getattr(app, "_plotting_notebook", None)
+        plotting_nb = getattr(ctx.window, "_plotting_notebook", None)
         if plotting_nb is not None and plotting_nb.count() > 0:
             try:
                 return plotting_nb.currentName()
             except Exception:
                 swallowed()  # was: pass (silent except)
     elif top == "Image Browser":
-        sub = getattr(app, "_image_browser_subtabs", None)
+        sub = ctx.runtime.image_browser.subtabs
         if sub is not None and sub.count() > 0:
             try:
                 return sub.tabText(sub.currentIndex())
@@ -197,7 +265,7 @@ def _resolve_leaf(app, top: str) -> str:
     return top
 
 
-def current_centre_tab(app) -> str:
+def current_centre_tab(ctx) -> str:
     """Return the effective current (focused) leaf tab name.
 
     When the "Plotting" top-level tab is active the real content lives in a
@@ -211,43 +279,49 @@ def current_centre_tab(app) -> str:
     "current" tab is the *focused* pane's leaf so sidebar / per-tab dispatch
     follow whichever pane the user last clicked — supplied by
     ``split_focus_provider`` (installed by ``split_view``; ``None`` otherwise).
+
+    A8: fully ctx-native — the split provider takes ``ctx``, and the centre
+    notebook is a window widget reached through the blessed ``ctx.window``
+    accessor (Qt widget-nav, not god-object behaviour).
     """
     if split_focus_provider is not None:
-        leaf = split_focus_provider(app)
+        leaf = split_focus_provider(ctx)
         if leaf:
             return leaf
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(ctx.window, "_notebook", None)
     if nb is None:
         return ""
     try:
         tab = nb.currentName()
     except Exception:
         return ""
-    return _resolve_leaf(app, tab)
+    return _resolve_leaf(ctx, tab)
 
 
-def visible_centre_tabs(app) -> "set[str]":
+def visible_centre_tabs(ctx) -> "set[str]":
     """Leaf names of every centre tab currently on screen.
 
-    Normally ``{current_centre_tab(app)}``. When ``split_visible_provider`` is
+    Normally ``{current_centre_tab(ctx)}``. When ``split_visible_provider`` is
     installed (Split View) it returns both panes' leaves, so live-refresh fan-out
     (selection / channel / plot options) updates both panes even when only one is
     focused.
+
+    A8: the split provider takes ``ctx`` — no god-object handle needed.
     """
     if split_visible_provider is not None:
-        tabs = split_visible_provider(app)
+        tabs = split_visible_provider(ctx)
         if tabs:
             return set(tabs)
-    cur = current_centre_tab(app)
+    cur = current_centre_tab(ctx)
     return {cur} if cur else set()
 
 
-def is_tab_visible(app, name: str) -> bool:
+def is_tab_visible(ctx, name: str) -> bool:
     """True when *name* (a leaf tab) is currently on screen in either pane."""
-    return name in visible_centre_tabs(app)
+    return name in visible_centre_tabs(ctx)
 
 
-def sync_heatmap_well_drag_mode(app, enable: bool) -> None:
+def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
     """Toggle WELL_MIME drag/drop on the sidebar plate widget.
 
     When *enable* is True, the plate exports the well under the pointer via
@@ -257,7 +331,7 @@ def sync_heatmap_well_drag_mode(app, enable: bool) -> None:
     ``_on_sidebar_plate_well_dropped``). When False, drag/drop is disabled
     and the plate reverts to plain selection behaviour.
     """
-    plate = getattr(app, "_sidebar_plate", None)
+    plate = ctx.widgets.get_or_none("_sidebar_plate")
     if plate is None:
         return
     from well_viewer.features.heatmap.sidebar_view import WELL_MIME

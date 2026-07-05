@@ -44,14 +44,23 @@ _logger = logging.getLogger("well_viewer")
 # ── Threshold / channel-list recompute ──────────────────────────────────────
 
 
-def recalculate_threshold(app) -> None:
+def recalculate_threshold(ctx) -> None:
     """Re-detect channels from the loaded CSVs, sync combos, and rebuild
     the (lo, hi) intensity range used by the threshold sliders.
 
     Replaces ``partial(recalculate_threshold, WellViewerApp)``.
-    """
+
+    A8: **fully ctx-native** — the former single god-object unwrap is gone. Rows
+    load through ``get_rows(ctx)``; typed reads/writes go through ``ctx.state``;
+    ``update_channel_selector`` is ctx-native; the metric-selector frames resolve
+    via ``ctx.widgets``; the gating reload calls ``load_from_pipeline_info(ctx)``
+    with the tab-built signal read off ``ctx.runtime.cell_gating``; and the
+    ``_features`` ``on_channel_changed`` hook fan-out now dispatches ``ctx`` (all
+    seven hooks — bar / stats / distribution / heatmap / multivariate / spatial /
+    scatter — take ctx, guarding widget existence via ``ctx.widgets.has``)."""
+    from well_viewer.data.data_loading import get_rows
     sample_df = next(
-        (app._get_rows(lbl) for lbl in app._app_state.dataset.well_paths),
+        (get_rows(ctx, lbl) for lbl in ctx.state.dataset.well_paths),
         pd.DataFrame(),
     )
     detected = detect_fluor_channels(sample_df)
@@ -59,46 +68,47 @@ def recalculate_threshold(app) -> None:
     pipeline_fluor_raw = [
         str(tok).strip().lower()
         for tok in (
-            app._app_state.dataset.pipeline_info.get("fluor_tokens", [])
-            if isinstance(app._app_state.dataset.pipeline_info, dict) else []
+            ctx.state.dataset.pipeline_info.get("fluor_tokens", [])
+            if isinstance(ctx.state.dataset.pipeline_info, dict) else []
         )
         if str(tok).strip()
     ]
     pipeline_fluor = normalize_channel_tokens(pipeline_fluor_raw)
     detected = normalize_channel_tokens(detected)
     seg_tok = ""
-    if isinstance(app._app_state.dataset.pipeline_info, dict):
-        seg_tok = str(app._app_state.dataset.pipeline_info.get("nuclear_token", "") or "").strip().lower()
+    if isinstance(ctx.state.dataset.pipeline_info, dict):
+        seg_tok = str(ctx.state.dataset.pipeline_info.get("nuclear_token", "") or "").strip().lower()
     if not seg_tok:
         seg_tok = detect_nuclear_channel_token(sample_df)
     fluor_channels = merge_fluor_channels(pipeline_fluor, detected, seg_tok)
     if fluor_channels:
-        app._app_state.channel.fluor_channels = fluor_channels
-        if not app._app_state.channel.active_channel:
-            app._app_state.channel.active_channel = fluor_channels[0]
-        if not app._app_state.channel.active_image_channel:
-            app._app_state.channel.active_image_channel = fluor_channels[0]
-    app._seg_channel_token = seg_tok
-    app._app_state.channel.review_image_channels = detect_review_image_channels(
-        sample_df, app._app_state.channel.fluor_channels, seg_tok,
+        ctx.state.channel.fluor_channels = fluor_channels
+        if not ctx.state.channel.active_channel:
+            ctx.state.channel.active_channel = fluor_channels[0]
+        if not ctx.state.channel.active_image_channel:
+            ctx.state.channel.active_image_channel = fluor_channels[0]
+    ctx.state.channel.seg_channel_token = seg_tok
+    ctx.state.channel.review_image_channels = detect_review_image_channels(
+        sample_df, ctx.state.channel.fluor_channels, seg_tok,
     )
     # Populate the available shape-feature columns before the dropdown is built
     # so they appear in the "Shape Features" section.
-    app._app_state.channel.shape_features = detect_shape_features(sample_df)
-    update_channel_selector(app)
+    ctx.state.channel.shape_features = detect_shape_features(sample_df)
+    update_channel_selector(ctx)
 
     # Update smFISH channels, then let ChannelState re-assert its invariants:
     # drop a stale smfish_count metric the new channel can't support, and
     # re-derive the value column (a no-op while a ratio is active).
-    channel_state = app._app_state.channel
+    channel_state = ctx.state.channel
     channel_state.smfish_channels = set(normalize_channel_tokens(detected_smfish))
     channel_state.normalize_metric()
     channel_state.sync_val_col()
 
     # Update metric selector visibility (back-compat: per-tab frames).
     for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
-        if hasattr(app, frame_attr):
-            getattr(app, frame_attr).hide()
+        _frame = ctx.widgets.get_or_none(frame_attr)
+        if _frame is not None:
+            _frame.hide()
 
     # Always refresh timepoint menus regardless of whether intensity
     # values exist — single-timepoint experiments still need the bar menu.
@@ -108,10 +118,10 @@ def recalculate_threshold(app) -> None:
     # here; see ``features/registry.py``. Cell-gating reload stays inline below
     # (it is interleaved with the core ``_load_gating_from_pipeline_info`` call
     # and runs only after the no-data early return).
-    feats = getattr(app, "_features", None)
+    feats = ctx.features
     if feats is not None:
         for _desc in feats.with_hook("on_channel_changed"):
-            _desc.on_channel_changed(app)
+            _desc.on_channel_changed(ctx)
 
     # Per-channel (min, max) cache — keyed on val_col so a channel toggle
     # reuses the previous channel's range when the user flips back. Audit
@@ -123,8 +133,8 @@ def recalculate_threshold(app) -> None:
     cached = channel_state.cached_range(val_col)
     if cached is None:
         chunks = [
-            _all_fluor_values(app._get_rows(lbl), val_col=val_col)
-            for lbl in app._app_state.dataset.well_paths
+            _all_fluor_values(get_rows(ctx, lbl), val_col=val_col)
+            for lbl in ctx.state.dataset.well_paths
         ]
         all_vals = np.concatenate(chunks) if chunks else np.empty(0)
         if all_vals.size == 0:
@@ -138,13 +148,14 @@ def recalculate_threshold(app) -> None:
     channel_state.apply_range(lo, hi)
 
     # Hydrate persisted gating params from pipeline_info.json.
-    app._load_gating_from_pipeline_info()
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
+    from well_viewer.persistence.cell_gating import load_from_pipeline_info
+    load_from_pipeline_info(ctx)
+    if ctx.runtime.cell_gating.fluor_gate_edits is not None:
         from well_viewer.features.grouping.cell_gating_tab_view import (
             cell_gating_load_cell_areas,
             cell_gating_load_threshold_frac_on,
         )
-        cell_gating_load_cell_areas(app)
+        cell_gating_load_cell_areas(ctx)
         # cell_gating_load_cell_areas rebuilds the per-channel fluor-gate rows
         # for the freshly-detected channels as fresh (default 0.0) edits, which
         # discards the values the load above just wrote. Re-apply the persisted
@@ -152,14 +163,14 @@ def recalculate_threshold(app) -> None:
         # saved gates/thresholds but never applies them until the user
         # re-toggles a field. (The saved value is always current — every gate
         # edit persists immediately — so re-applying never clobbers a live edit.)
-        app._load_gating_from_pipeline_info()
-        cell_gating_load_threshold_frac_on(app)
+        load_from_pipeline_info(ctx)
+        cell_gating_load_threshold_frac_on(ctx)
 
 
 # ── Active channel switching ────────────────────────────────────────────────
 
 
-def set_active_channel(app, channel: str) -> None:
+def set_active_channel(ctx, channel: str) -> None:
     """Switch the active fluorescent channel and trigger a scope-aware redraw.
 
     ``channel`` may be a real channel token (e.g. ``"gfp"``) or a ratio
@@ -167,13 +178,20 @@ def set_active_channel(app, channel: str) -> None:
     selector and route reads through ``resolve_value``.
 
     Replaces ``partial(set_active_channel, WellViewerApp)``.
+
+    A8/D-thresh: ctx-native — typed state reads off ``ctx.state.channel``, every
+    combo/frame resolves through ``ctx.widgets``, the channel_changed announce
+    goes on ``ctx.bus``, and the threshold recompute / stats-cache / quick-edit
+    fan-out all take ``ctx``. No god-object unwrap here (the one seam lives in
+    ``recalculate_threshold``).
     """
+    from well_viewer.core.selection_controller import invalidate_stats_cache
     if not channel or channel == "—":
         return
     # ChannelState owns the channel/metric/val_col invariant — the mutators
     # below perform the pure state transition (and report whether anything
     # changed); this controller keeps the widget-sync that must stay in Qt.
-    channel_state = app._app_state.channel
+    channel_state = ctx.state.channel
     if is_ratio_key(channel):
         ratio = channel_state.resolve_ratio(channel)
         if ratio is None:
@@ -182,7 +200,7 @@ def set_active_channel(app, channel: str) -> None:
             return
         # Hide the per-cell metric selector — ratios encode their own metrics.
         for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
-            frame = getattr(app, frame_attr, None)
+            frame = ctx.widgets.get_or_none(frame_attr)
             if frame is not None:
                 frame.setVisible(False)
     elif is_shape_column(channel):
@@ -191,7 +209,7 @@ def set_active_channel(app, channel: str) -> None:
         if not channel_state.set_active_shape_feature(channel):
             return
         for frame_attr in ("_metric_selector_frame", "_metric_selector_frame_bar"):
-            frame = getattr(app, frame_attr, None)
+            frame = ctx.widgets.get_or_none(frame_attr)
             if frame is not None:
                 frame.setVisible(False)
     else:
@@ -205,7 +223,7 @@ def set_active_channel(app, channel: str) -> None:
         label = METRIC_KEY_TO_LABEL.get(channel_state.active_metric, "Mean Intensity")
         for cb_attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
                         "_plotting_metric_cb"):
-            cb = getattr(app, cb_attr, None)
+            cb = ctx.widgets.get_or_none(cb_attr)
             if cb is None:
                 continue
             idx = cb.findText(label)
@@ -218,10 +236,10 @@ def set_active_channel(app, channel: str) -> None:
                 cb.blockSignals(blocked)
     # Keep all plot-tab channel selectors in sync so switching channel on
     # one tab is reflected on the others.
-    target_label = app._active_channel_label()
+    target_label = active_channel_label(ctx)
     for attr in ("_chan_cb_line", "_chan_cb_bar", "_chan_cb_distribution",
                  "_chan_cb_heatmap", "_plotting_channel_cb"):
-        cb = getattr(app, attr, None)
+        cb = ctx.widgets.get_or_none(attr)
         if cb is None:
             continue
         if str(cb.currentText() or "") == target_label:
@@ -234,25 +252,27 @@ def set_active_channel(app, channel: str) -> None:
             finally:
                 cb.blockSignals(blocked)
     # Reset threshold to the range of the new channel.
-    recalculate_threshold(app)
-    app._invalidate_stats_cache()
-    refresh_metric_combo_for_channel(app)
+    recalculate_threshold(ctx)
+    invalidate_stats_cache(ctx)
+    refresh_metric_combo_for_channel(ctx)
     # Keep the ctxbar ThreshFracOn quick-edit showing the new channel's value.
-    refresh_thresh_frac_quick_edit(app)
+    refresh_thresh_frac_quick_edit(ctx)
     # Announce on the bus. The RedrawCoordinator subscriber coalesces the
     # redraw — visible scope now, the other marked dirty for redraw on tab
     # switch (see redraw_coordinator.py / fold_change_scopes.py).
-    app._event_bus.channel_changed.emit(channel_state)
-    if hasattr(app, "_cdf_chan_lbl"):
-        app._cdf_chan_lbl.setText(f"({target_label} x range)")
-    if hasattr(app, "_bar_ylim_chan_lbl"):
-        app._bar_ylim_chan_lbl.setText(f"{target_label} y:")
+    ctx.bus.channel_changed.emit(channel_state)
+    cdf_lbl = ctx.widgets.get_or_none("_cdf_chan_lbl")
+    if cdf_lbl is not None:
+        cdf_lbl.setText(f"({target_label} x range)")
+    bar_ylim_lbl = ctx.widgets.get_or_none("_bar_ylim_chan_lbl")
+    if bar_ylim_lbl is not None:
+        bar_ylim_lbl.setText(f"{target_label} y:")
 
 
 # ── Property/metric combo refresh ───────────────────────────────────────────
 
 
-def refresh_metric_combo_for_channel(app) -> None:
+def refresh_metric_combo_for_channel(ctx) -> None:
     """Reshape every Property combo to match the active channel.
 
     For ratio channels each combo collapses to a single ``Calculated
@@ -261,51 +281,56 @@ def refresh_metric_combo_for_channel(app) -> None:
     one. Per-tab combos (heatmap / stats) follow the global channel.
 
     Replaces ``partial(refresh_metric_combo_for_channel, WellViewerApp)``.
+
+    A8/D1: ctx-native — the channel label composes off ``ctx.state.channel``
+    (the ctx ``active_channel_label`` leaf), the per-tab Property combos resolve
+    through ``ctx.widgets`` (registered in centre_view / lineplot / barplot), and
+    the stats fan-out already takes ``ctx``. No god-object unwrap.
     """
     try:
-        channel_label = app._active_channel_label()
+        channel_label = active_channel_label(ctx)
     except Exception:
         channel_label = ""
-    smfish_chan = app._app_state.channel.active_channel
+    smfish_chan = ctx.state.channel.active_channel
     for attr in ("_plotting_metric_cb", "_metric_cb", "_metric_cb_bar"):
-        populate_metric_combo(app,
-            getattr(app, attr, None),
+        populate_metric_combo(ctx,
+            ctx.widgets.get_or_none(attr),
             channel_entry=channel_label,
             smfish_channel=smfish_chan,
         )
     # Stats has its own channel combo, so its Property combo follows that one.
-    refresh_stats_property_combo(app)
+    refresh_stats_property_combo(ctx)
 
 
 # ── Channel-selector / dropdown sync ────────────────────────────────────────
 
 
-def update_channel_selector(app) -> None:
+def update_channel_selector(ctx) -> None:
     """Refresh the channel dropdown values and selection to match loaded data.
 
     Replaces ``partial(update_channel_selector, WellViewerApp)``.
     """
-    real_labels = [ch.upper() for ch in app._app_state.channel.fluor_channels]
-    ratio_labels = app._ratio_dropdown_labels()
+    real_labels = [ch.upper() for ch in ctx.state.channel.fluor_channels]
+    ratio_labels = [ratio_label_for(ctx, _r) for _r in ctx.state.channel.ratio_metrics]
     # Shape features are channel-independent virtual channels shown under their
     # own dropdown section; their key is the shape_* column itself.
-    shape_cols = list(app._app_state.channel.shape_features or [])
+    shape_cols = list(ctx.state.channel.shape_features or [])
     shape_labels = [shape_label_for(c) or c for c in shape_cols]
     labels = (real_labels + ratio_labels + shape_labels) or ["—"]
     # Map the dropdown label back to the underlying channel key used by
     # set_active_channel (real token, ratio:<name> key, or shape_* column).
-    app._label_to_channel_key = {ch.upper(): ch for ch in app._app_state.channel.fluor_channels}
-    for r in app._app_state.channel.ratio_metrics:
-        app._label_to_channel_key[app._ratio_label_for(r)] = r.key()
+    ctx.state.channel.label_to_channel_key = {ch.upper(): ch for ch in ctx.state.channel.fluor_channels}
+    for r in ctx.state.channel.ratio_metrics:
+        ctx.state.channel.label_to_channel_key[ratio_label_for(ctx, r)] = r.key()
     for col, lbl in zip(shape_cols, shape_labels):
-        app._label_to_channel_key[lbl] = col
+        ctx.state.channel.label_to_channel_key[lbl] = col
     # Montage/preview includes the segmentation channel token.
-    seg_tok = getattr(app, "_seg_channel_token", "")
-    montage_chans = list(app._app_state.channel.fluor_channels)
+    seg_tok = ctx.state.channel.seg_channel_token or ""
+    montage_chans = list(ctx.state.channel.fluor_channels)
     if seg_tok and seg_tok not in montage_chans:
         montage_chans.append(seg_tok)
     montage_labels = [ch.upper() for ch in montage_chans] or ["—"]
-    review_labels = [ch.upper() for ch in (app._app_state.channel.review_image_channels or app._app_state.channel.fluor_channels)] or ["—"]
+    review_labels = [ch.upper() for ch in (ctx.state.channel.review_image_channels or ctx.state.channel.fluor_channels)] or ["—"]
     # Plot tabs: real + ratio channels inline, shape features under their own
     # section header. Image tabs (preview/review) never get shape features.
     plot_sections = [("", real_labels + ratio_labels)]
@@ -314,20 +339,23 @@ def update_channel_selector(app) -> None:
     have_any = bool(real_labels or ratio_labels or shape_labels)
     for attr in ("_chan_cb_line", "_chan_cb_bar", "_chan_cb_distribution",
                  "_chan_cb_heatmap", "_plotting_channel_cb"):
-        if hasattr(app, attr):
+        cb = ctx.widgets.get_or_none(attr)
+        if cb is not None:
             if have_any:
-                set_combo_values_sectioned(getattr(app, attr), plot_sections)
+                set_combo_values_sectioned(cb, plot_sections)
             else:
-                set_combo_values(getattr(app, attr), ["—"])
-    if getattr(app, "_chan_cb_preview", None) is not None:
-        set_combo_values(app._chan_cb_preview, montage_labels)
+                set_combo_values(cb, ["—"])
+    _prev_cb = ctx.widgets.get_or_none("_chan_cb_preview")
+    if _prev_cb is not None:
+        set_combo_values(_prev_cb, montage_labels)
     # The review-image channel combo builds lazily (Segmentation is an Image
     # Browser sub-tab), so it can still be the None default at dataset-load time;
     # it is (re)populated when the sub-tab first builds. See
     # image_browser.controller.build_image_browser_subtab.
-    if getattr(app, "_review_image_chan_cb", None) is not None:
-        set_combo_values(app._review_image_chan_cb, review_labels)
-    active_label = app._active_channel_label()
+    _ri_cb = ctx.widgets.get_or_none("_review_image_chan_cb")
+    if _ri_cb is not None:
+        set_combo_values(_ri_cb, review_labels)
+    active_label = active_channel_label(ctx)
 
     def _pick_valid(current: str, candidates: List[str], fallback_label: str) -> str:
         if current in candidates and current != "—":
@@ -343,18 +371,20 @@ def update_channel_selector(app) -> None:
     # reopen — at load time the combo still shows its default (just-repopulated)
     # text, which would otherwise win over the channel we restored. Falls back
     # to the current text when the saved channel is stale (gone in this dataset).
-    plot_label = _pick_valid(active_label, labels, app._plot_chan_var.currentText())
-    app._plot_chan_var.setCurrentText(plot_label)
+    _plot_var = ctx.widgets.get_or_none("_plot_chan_var")
+    plot_label = _pick_valid(active_label, labels, _plot_var.currentText() if _plot_var is not None else "")
+    if _plot_var is not None:
+        _plot_var.setCurrentText(plot_label)
 
     # Image tabs: each validates against its own channel universe.
-    active_image_label = app._app_state.channel.active_image_channel.upper()
-    montage_var = getattr(app, "_montage_chan_var", None)
+    active_image_label = ctx.state.channel.active_image_channel.upper()
+    montage_var = ctx.widgets.get_or_none("_montage_chan_var")
     if montage_var is not None:
         montage_label = _pick_valid(montage_var.currentText(), montage_labels, active_image_label)
         montage_var.setCurrentText(montage_label)
     else:
         montage_label = "—"
-    review_var = getattr(app, "_review_image_chan_var", None)
+    review_var = ctx.widgets.get_or_none("_review_image_chan_var")
     if review_var is not None:
         review_label = _pick_valid(review_var.currentText(), review_labels, active_image_label)
         review_var.setCurrentText(review_label)
@@ -365,21 +395,21 @@ def update_channel_selector(app) -> None:
     if active_image_label not in montage_labels and active_image_label not in review_labels:
         fallback_image_label = montage_label if montage_label != "—" else review_label
         if fallback_image_label != "—":
-            set_active_image_channel(app, fallback_image_label.lower())
+            set_active_image_channel(ctx, fallback_image_label.lower())
 
     # Keep active channel anchored to a valid plot channel.
     if active_label not in labels:
         if plot_label != "—":
-            set_active_channel(app, app._channel_key_for_label(plot_label))
+            set_active_channel(ctx, channel_key_for_label(ctx, plot_label))
         else:
             # No valid plot channel — clear active state explicitly.
-            app._app_state.channel.active_channel = ""
+            ctx.state.channel.active_channel = ""
 
     # Force the visible global ctxbar combo to track the (now-valid)
     # active label.
-    global_cb = getattr(app, "_plotting_channel_cb", None)
+    global_cb = ctx.widgets.get_or_none("_plotting_channel_cb")
     if global_cb is not None:
-        active_label_final = app._active_channel_label()
+        active_label_final = active_channel_label(ctx)
         if not active_label_final:
             # Empty-state: deselect the combo so it can't display a
             # stale label left over from the previous channel list.
@@ -399,16 +429,16 @@ def update_channel_selector(app) -> None:
                     global_cb.blockSignals(blocked)
     # Refresh the global Property combo's per-item enable state now that
     # the channel list has changed.
-    refresh_metric_combo_for_channel(app)
+    refresh_metric_combo_for_channel(ctx)
 
     # Same trick for the Segmentation tab's channel combo and the
     # back-compat Movie Montage combo — _pick_valid above preserves
     # currentText when valid, but if _active_image_channel has drifted,
     # the dropdown would disagree with the image actually drawn. Snap
     # the currentIndex so the first user click triggers the redraw.
-    active_image_label_final = (app._app_state.channel.active_image_channel or "").upper()
+    active_image_label_final = (ctx.state.channel.active_image_channel or "").upper()
     for _attr in ("_review_image_chan_cb", "_chan_cb_preview"):
-        cb = getattr(app, _attr, None)
+        cb = ctx.widgets.get_or_none(_attr)
         if cb is None or not hasattr(cb, "findText"):
             continue
         idx = cb.findText(active_image_label_final) if active_image_label_final else -1
@@ -420,53 +450,59 @@ def update_channel_selector(app) -> None:
                 cb.blockSignals(blocked)
 
     # Back-compat sync.
-    if hasattr(app, "_chan_var"):
-        tab_label = app._current_centre_tab()
+    _chan_var = ctx.widgets.get_or_none("_chan_var")
+    if _chan_var is not None:
+        from well_viewer.core.tab_controller import current_centre_tab
+        tab_label = current_centre_tab(ctx)
         if tab_label == "Segmentation":
-            app._chan_var.setCurrentText(review_label)
+            _chan_var.setCurrentText(review_label)
         else:
-            app._chan_var.setCurrentText(plot_label)
+            _chan_var.setCurrentText(plot_label)
 
 
-def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = False) -> None:
+def set_active_image_channel(ctx, channel: str, *, preserve_review_view: bool = False) -> None:
     """Switch image-display channel for Movie Montage and Review Image."""
     channel_switch_debug = _debug_flags.review_image_channel_switch_debug_enabled()
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 3] set_active_image_channel requested=%r current=%r preserve_review_view=%s",
             channel,
-            app._app_state.channel.active_image_channel,
+            ctx.state.channel.active_image_channel,
             preserve_review_view,
         )
     if not channel or channel == "—":
         return
     # review_image / preview are Image Browser slices — None when it is disabled.
-    _review_image = app._app_state.feature_slice("review_image")
-    _preview = app._app_state.feature_slice("preview")
-    if channel == app._app_state.channel.active_image_channel:
+    _review_image = ctx.state.feature_slice("review_image")
+    _preview = ctx.state.feature_slice("preview")
+    if channel == ctx.state.channel.active_image_channel:
         if preserve_review_view and _review_image is not None:
             _review_image.preserve_view_on_refresh = True
             if _preview is not None and _preview.selected_well:
-                from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
-                refresh_review_image(app)
+                from well_viewer.features.image_browser.review_image.renderer import refresh_review_image_ctx
+                refresh_review_image_ctx(ctx)
         if channel_switch_debug:
             _logger.debug(
                 "[RI-CHSW step 3] no-op channel switch; active remains=%r preserve_review_view=%s",
-                app._app_state.channel.active_image_channel,
+                ctx.state.channel.active_image_channel,
                 preserve_review_view,
             )
         return
-    prev_channel = app._app_state.channel.active_image_channel
-    app._app_state.channel.active_image_channel = channel
+    prev_channel = ctx.state.channel.active_image_channel
+    ctx.state.channel.active_image_channel = channel
     ch_upper = channel.upper()
-    if hasattr(app, "_review_image_chan_var"):
-        app._review_image_chan_var.setCurrentText(ch_upper)
-    if hasattr(app, "_review_lut_chan_lbl"):
-        app._review_lut_chan_lbl.setText(f"{ch_upper} LUT min:")
-    saved_review_lut = app._app_state.image_view.lut_by_channel.get(channel)
-    if saved_review_lut and hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
-        app._review_lmin_entry.setText(f"{saved_review_lut[0]:.0f}")
-        app._review_lmax_entry.setText(f"{saved_review_lut[1]:.0f}")
+    ri_chan_var = ctx.widgets.get_or_none("_review_image_chan_var")
+    if ri_chan_var is not None:
+        ri_chan_var.setCurrentText(ch_upper)
+    ri_lut_lbl = ctx.widgets.get_or_none("_review_lut_chan_lbl")
+    if ri_lut_lbl is not None:
+        ri_lut_lbl.setText(f"{ch_upper} LUT min:")
+    saved_review_lut = ctx.state.image_view.lut_by_channel.get(channel)
+    ri_lmin = ctx.widgets.get_or_none("_review_lmin_entry")
+    ri_lmax = ctx.widgets.get_or_none("_review_lmax_entry")
+    if saved_review_lut and ri_lmin is not None and ri_lmax is not None:
+        ri_lmin.setText(f"{saved_review_lut[0]:.0f}")
+        ri_lmax.setText(f"{saved_review_lut[1]:.0f}")
     if preserve_review_view and _review_image is not None:
         _review_image.preserve_view_on_refresh = True
     if _preview is not None and _preview.selected_well:
@@ -475,18 +511,18 @@ def set_active_image_channel(app, channel: str, *, preserve_review_view: bool = 
                 "[RI-CHSW step 3->4] reloading preview for selected_well=%r",
                 _preview.selected_well,
             )
-        from well_viewer.features.image_browser.review_image.renderer import update_preview
-        update_preview(app, _preview.selected_well)
+        from well_viewer.features.image_browser.review_image.renderer import update_preview_ctx
+        update_preview_ctx(ctx, _preview.selected_well)
     if channel_switch_debug:
         _logger.debug(
             "[RI-CHSW step 3] set_active_image_channel updated before=%r after=%r",
             prev_channel,
-            app._app_state.channel.active_image_channel,
+            ctx.state.channel.active_image_channel,
         )
 
 
 
-def sync_metric_combos(app, metric: str) -> None:
+def sync_metric_combos(ctx, metric: str) -> None:
     """Push *metric* (an ``active_metric`` key like ``"smfish_count"``) into
     every metric-combo widget the app knows about, without retriggering the
     change handler.
@@ -497,12 +533,15 @@ def sync_metric_combos(app, metric: str) -> None:
     when the field is already at the target value, so without this helper
     the dropdown reverts to the combo's default ("Mean Intensity") on app
     reopen and the user has to "wiggle" the dropdown to force a sync.
+
+    A8/D-thresh: ctx-native — every metric combo resolves through
+    ``ctx.widgets`` (all five are registered by their tab builders).
     """
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL
     label = METRIC_KEY_TO_LABEL.get(metric, "Mean Intensity")
     for attr in ("_metric_var", "_metric_cb", "_metric_cb_bar",
                  "_plotting_metric_cb", "_stats_property_cb"):
-        cb = getattr(app, attr, None)
+        cb = ctx.widgets.get_or_none(attr)
         if cb is None:
             continue
         try:
@@ -522,16 +561,25 @@ def sync_metric_combos(app, metric: str) -> None:
             cb.blockSignals(blocked)
 
 
-def set_active_metric(app, metric: str) -> None:
-    """Switch the active intensity property and redraw."""
-    if metric == app._app_state.channel.active_metric:
+def set_active_metric(ctx, metric: str) -> None:
+    """Switch the active intensity property and redraw.
+
+    A8/D-thresh: ctx-native — the metric/val_col mutation lands on
+    ``ctx.state.channel``, the stale-cache recovery clears
+    ``ctx.state.dataset.cache`` directly, and the combo-sync / threshold /
+    stats / redraw fan-out all take ``ctx``. No god-object unwrap.
+    """
+    from well_viewer.core.plot_orchestrator import redraw_app
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    channel = ctx.state.channel
+    if metric == channel.active_metric:
         return
-    app._app_state.channel.active_metric = metric
-    if not is_ratio_key(app._app_state.channel.active_val_col) and not is_shape_column(app._app_state.channel.active_val_col):
-        app._app_state.channel.active_val_col = f"{app._app_state.channel.active_channel}_{app._app_state.channel.active_metric}"
-    active_val_col = app._app_state.channel.active_val_col
+    channel.active_metric = metric
+    if not is_ratio_key(channel.active_val_col) and not is_shape_column(channel.active_val_col):
+        channel.active_val_col = f"{channel.active_channel}_{channel.active_metric}"
+    active_val_col = channel.active_val_col
     if not is_ratio_key(active_val_col) and not is_shape_column(active_val_col):
-        cache = getattr(app._app_state.dataset, "cache", {}) or {}
+        cache = getattr(ctx.state.dataset, "cache", {}) or {}
         first_df = next(iter(cache.values()), None)
         if (
             first_df is not None
@@ -545,26 +593,27 @@ def set_active_metric(app, metric: str) -> None:
                 "recover from a stale cache (e.g. pre-normalisation "
                 "mixed-case headers). Cached columns were: %s",
                 active_val_col,
-                app._app_state.channel.active_channel,
+                channel.active_channel,
                 metric,
                 sorted(first_df.columns.tolist()),
             )
-            if hasattr(app, "_invalidate_dataset_cache"):
-                app._invalidate_dataset_cache()
-    sync_metric_combos(app, metric)
-    refresh_metric_combo_for_channel(app)
-    refresh_heatmap_aggregation_options(app)
-    recalculate_threshold(app)
-    app._invalidate_stats_cache()
-    app._redraw()
-    if hasattr(app, "_bar_tp_cb"):
+            # Drop the per-well DataFrame cache (the ctx-native equivalent of
+            # ``app._invalidate_dataset_cache()`` — a bare ``cache.clear()``).
+            ctx.state.dataset.cache.clear()
+    sync_metric_combos(ctx, metric)
+    refresh_metric_combo_for_channel(ctx)
+    refresh_heatmap_aggregation_options(ctx)
+    recalculate_threshold(ctx)
+    invalidate_stats_cache(ctx)
+    redraw_app(ctx)
+    if ctx.widgets.get_or_none("_bar_tp_cb") is not None:
         from well_viewer.features.barplot.renderer import redraw_bars
-        redraw_bars(app)
+        redraw_bars(ctx)
 
 
 
 def populate_metric_combo(
-    app,
+    ctx,
     cb,
     *,
     channel_entry: str,
@@ -587,10 +636,14 @@ def populate_metric_combo(
     """
     if cb is None:
         return
+    # A8: pure typed-state read — the combo (``cb``) is passed in, and the only
+    # app touch is the channel slice, so read it off ``ctx.state`` directly with
+    # no god-object unwrap.
+    channel = ctx.state.channel
     from well_viewer.data.metric_labels import (
         METRIC_ORDER, METRIC_KEY_TO_LABEL, CALCULATED_VAL_LABEL,
     )
-    mapped_key = (getattr(app, "_label_to_channel_key", None) or {}).get(channel_entry)
+    mapped_key = channel.label_to_channel_key.get(channel_entry)
     is_ratio = bool(mapped_key and is_ratio_key(mapped_key))
     is_shape = bool(mapped_key and is_shape_column(mapped_key))
 
@@ -615,7 +668,7 @@ def populate_metric_combo(
             cb.setCurrentText(prev)
         else:
             fallback = METRIC_KEY_TO_LABEL.get(
-                app._app_state.channel.active_metric, "Mean Intensity"
+                channel.active_metric, "Mean Intensity"
             )
             idx = cb.findText(fallback)
             if idx >= 0:
@@ -627,7 +680,7 @@ def populate_metric_combo(
             if item is not None:
                 smf_ok = (
                     smfish_channel is not None
-                    and smfish_channel in app._app_state.channel.smfish_channels
+                    and smfish_channel in channel.smfish_channels
                 )
                 item.setEnabled(smf_ok)
     finally:
@@ -635,7 +688,7 @@ def populate_metric_combo(
 
 
 
-def refresh_heatmap_aggregation_options(app) -> None:
+def refresh_heatmap_aggregation_options(ctx) -> None:
     """Grey out threshold-based heatmap aggregations for non-MFI properties.
 
     The ThreshFracOn cut is defined against mean fluorescence intensity
@@ -643,14 +696,17 @@ def refresh_heatmap_aggregation_options(app) -> None:
     threshold" only make sense when the active Property is MFI. When the
     user picks Total / Max / Min / Std / smFISH Count, those options
     disable so they're not silently misapplied.
+
+    A8: takes ``ctx``; the heatmap metric combo comes from ``ctx.widgets`` and
+    the active metric from typed state, so it names no god-object.
     """
-    cb = getattr(app, "_heatmap_metric_cb", None)
+    cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     if cb is None:
         return
     from well_viewer.features.heatmap.controller import (
         METRIC_MEAN, METRIC_FRACTION,
     )
-    is_mfi = app._app_state.channel.active_metric == "mean_intensity"
+    is_mfi = ctx.state.channel.active_metric == "mean_intensity"
     model = cb.model()
     if model is None:
         return
@@ -677,22 +733,25 @@ def refresh_heatmap_aggregation_options(app) -> None:
 
 
 
-def refresh_stats_property_combo(app) -> None:
-    """Reshape the stats Property combo to match the stats channel combo."""
-    ch_cb = getattr(app, "_stats_channel_cb", None)
-    m_cb = getattr(app, "_stats_property_cb", None)
+def refresh_stats_property_combo(ctx) -> None:
+    """Reshape the stats Property combo to match the stats channel combo.
+
+    A8 teardown: takes ``ctx`` — both combos come from ``ctx.widgets`` and the
+    channel fallback from typed state, so it names no god-object."""
+    ch_cb = ctx.widgets.get_or_none("_stats_channel_cb")
+    m_cb = ctx.widgets.get_or_none("_stats_property_cb")
     if m_cb is None:
         return
     channel = str(ch_cb.currentText() or "") if ch_cb is not None else ""
     # Strip the " (spots)" suffix so smfish-enable matching works.
-    smf_base = channel.split(" ")[0] if channel else app._app_state.channel.active_channel
-    populate_metric_combo(app,
+    smf_base = channel.split(" ")[0] if channel else ctx.state.channel.active_channel
+    populate_metric_combo(ctx,
         m_cb, channel_entry=channel, smfish_channel=smf_base,
     )
 
 
 
-def on_plot_channel_selected(app, source=None) -> None:
+def on_plot_channel_selected(ctx, source=None) -> None:
     """Channel-switch handler for line/bar/distribution/heatmap plot tabs.
 
     Each plot tab connects its channel combobox via a lambda that
@@ -703,6 +762,11 @@ def on_plot_channel_selected(app, source=None) -> None:
     leaks the line-tab value when other tabs change channels and
     ``_set_active_channel`` short-circuits because the "new" channel
     equals the current one. Prefer the explicit ``source`` widget.
+
+    A8/D-thresh: fully ctx-native — the source combo's text, the ``sender()``
+    fallback (via ``ctx.window`` — the QMainWindow qua Qt object), the
+    ``_plot_chan_var`` last-resort read (``ctx.widgets``), and the
+    label→key + set_active_channel handoff all route through ``ctx``.
     """
     label = ""
     if source is not None and hasattr(source, "currentText"):
@@ -712,7 +776,7 @@ def on_plot_channel_selected(app, source=None) -> None:
             label = ""
     if not label:
         try:
-            sender = app.sender()
+            sender = ctx.window.sender()
         except Exception:
             sender = None
         if sender is not None and hasattr(sender, "currentText"):
@@ -721,18 +785,20 @@ def on_plot_channel_selected(app, source=None) -> None:
             except Exception:
                 label = ""
     if not label:
-        label = app._plot_chan_var.currentText()
+        plot_chan_var = ctx.widgets.get_or_none("_plot_chan_var")
+        label = plot_chan_var.currentText() if plot_chan_var is not None else ""
     # Route real channels and ratios via the label→key map so ratio
     # selections (e.g. "GFP/MCHERRY") resolve to a ``ratio:<name>`` key.
-    set_active_channel(app, app._channel_key_for_label(label))
+    set_active_channel(ctx, channel_key_for_label(ctx, label))
 
 
 
-def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
+def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     """Replace the ratio list and rebuild the index + UI."""
-    app._app_state.channel.ratio_metrics = list(ratios)
-    app._rebuild_ratio_index()
-    panel = getattr(app, "_ratio_panel", None)
+    # The typed channel slice sets the catalogue + rebuilds the ratio index in
+    # lockstep (the two must never disagree).
+    ctx.state.channel.set_ratio_metrics(list(ratios))
+    panel = ctx.widgets.get_or_none("_ratio_panel")
     if panel is not None:
         try:
             panel.refresh_from_app()
@@ -740,10 +806,10 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
             swallowed()  # was: pass (silent except)
     # Cell Gating shows one row per fluor channel + one per ratio. Pull
     # the ratio rows into the table whenever the ratio set changes.
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
+    if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         try:
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
-            cell_gating_load_cell_areas(app)
+            cell_gating_load_cell_areas(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     # Ratio additions become virtual channel entries in every plot-tab
@@ -752,7 +818,7 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
     # next dataset reload.
     if hasattr(app, "_update_channel_selector"):
         try:
-            update_channel_selector(app)
+            update_channel_selector(app._ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -771,7 +837,7 @@ def on_preview_channel_selected(app, _e=None) -> None:
             selected_ui_value,
             app._app_state.channel.active_image_channel,
         )
-    set_active_image_channel(app, selected_ui_value.lower())
+    set_active_image_channel(app._ctx, selected_ui_value.lower())
 
 
 
@@ -788,17 +854,20 @@ def on_metric_selected_global(app) -> None:
     # empty plot.
     if metric == "smfish_count" and app._app_state.channel.active_channel not in app._app_state.channel.smfish_channels:
         metric = "mean_intensity"
-    set_active_metric(app, metric)
+    set_active_metric(app._ctx, metric)
 
 
 
-def channel_key_for_label(app, label: str) -> str:
+def channel_key_for_label(ctx, label: str) -> str:
     """Map a dropdown label back to the ``_set_active_channel`` argument.
 
     Real channels return their lowercase token; ratios return their
     ``ratio:<name>`` key.
-    """
-    mapping = getattr(app, "_label_to_channel_key", None) or {}
+
+    A8/D-thresh: ctx-native — pure ``ctx.state.channel`` + the ctx
+    ``ratio_label_for`` leaf."""
+    channel = ctx.state.channel
+    mapping = channel.label_to_channel_key
     if label in mapping:
         return mapping[label]
     # Fallback when the dropdown was populated before ``_label_to_channel_key``
@@ -807,8 +876,8 @@ def channel_key_for_label(app, label: str) -> str:
     # included) BEFORE assuming a real channel — otherwise a ratio read in this
     # window is lossily lowercased into a bogus real-channel token like
     # ``"gfp/mcherry"`` (audit X5).
-    for r in getattr(app._app_state.channel, "ratio_metrics", None) or []:
-        if label == ratio_label_for(app, r):
+    for r in getattr(channel, "ratio_metrics", None) or []:
+        if label == ratio_label_for(ctx, r):
             return r.key()
     # Otherwise assume a real channel and lowercase the label.
     return str(label or "").lower()
@@ -824,7 +893,7 @@ def rebuild_ratio_index(app) -> None:
         fallback = (app._app_state.channel.fluor_channels or ["gfp"])[0]
         app._app_state.channel.active_channel = fallback
         app._app_state.channel.active_val_col = f"{fallback}_{app._app_state.channel.active_metric}"
-    update_channel_selector(app)
+    update_channel_selector(app._ctx)
     app._invalidate_stats_cache()
     if hasattr(app, "_redraw"):
         try:
@@ -834,32 +903,63 @@ def rebuild_ratio_index(app) -> None:
 
 
 
-def get_all_fluor_gates(app) -> Dict[str, float]:
+def get_all_fluor_gates(ctx) -> Dict[str, float]:
     """Get FluorGating thresholds for all loaded channels.
 
     Returns a dict mapping channel name -> gate threshold, e.g., {"gfp": 10.0, "mcherry": 20.0}.
     Used by aggregate_with_threshold_df to apply consistent gating across all channels.
-    """
-    gates = {}
-    for channel in app._app_state.channel.fluor_channels:
-        gates[channel] = app._get_fluor_gate(channel)
-    return gates
+
+    A8 teardown: pure typed state (post-R6 the values live on
+    ``ctx.state.cell_gating``), so it takes ``ctx`` — the shared render leaf every
+    plot's gating reads."""
+    return {
+        channel: get_fluor_gate(ctx, channel)
+        for channel in ctx.state.channel.fluor_channels
+    }
 
 
 
-def get_thresh_frac_on(app, channel: Optional[str] = None) -> float:
-    """Get ThreshFracOn threshold. Uses active channel if not specified."""
+def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
+    """Get ThreshFracOn threshold. Uses active channel if not specified.
+
+    A8 teardown: pure typed state, so it takes ``ctx``. Post-R6 the per-channel
+    ThreshFracOn cutoffs live on the ``CellGatingState`` slice; a channel with no
+    configured cutoff falls back to the global ``channel.threshold`` — the same
+    value the pre-R6 "tab-not-built" guard returned (``channel.threshold`` has no
+    writers, so it is the constant 50.0 the cell-gating accessor also defaults
+    to; the fallback is kept explicit in case that ever changes)."""
     if channel is None:
-        channel = app._app_state.channel.active_channel
-    # _redraw can fire before the cell-gating tab is built (e.g. from
-    # sidebar releases during early load); fall back to the default.
-    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
-        return app._app_state.channel.threshold
-    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_thresh_frac_on
-    return cell_gating_get_thresh_frac_on(app, channel)
+        channel = ctx.state.channel.active_channel
+    from well_viewer.features.grouping.cell_gating_tab_view import _cell_gating_resolve_key
+    key = _cell_gating_resolve_key(ctx, channel)
+    tf = ctx.state.cell_gating.thresh_frac_on
+    return tf[key] if key in tf else ctx.state.channel.threshold
 
 
-def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
+def ensure_cell_gating_tab_built(ctx) -> bool:
+    """Materialize the lazily-built Cell Gating sub-tab and return whether its
+    widget maps now exist.
+
+    The Cell Gating tab is only constructed on first activation, but persistence
+    load and the plotting-tab ThreshFracOn quick-edit both need its QLineEdit
+    maps to exist *now* (so the loaded/edited value has a widget to seed). This
+    is the single ``app``-bound bundling seam for that lazy build: it force-flips
+    the centre stack to the tab's page (``ctx.runtime.centre.build_pending``) and
+    builds the sub-tab. Fully ``ctx``-native — the fluor-edits map (the "tab is
+    built" signal) reads through ``ctx.runtime.cell_gating`` and the lazy-build
+    closure through ``ctx.runtime.centre``, so persistence and the quick-edit
+    call this instead of unwrapping the app themselves.
+    """
+    if ctx.runtime.cell_gating.fluor_gate_edits is None:
+        build = ctx.runtime.centre.build_pending
+        if callable(build):
+            build("Sample Definitions")
+        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
+        build_cell_gating_subtab(ctx)
+    return ctx.runtime.cell_gating.fluor_gate_edits is not None
+
+
+def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
     """Set ThreshFracOn for a channel (the active channel by default).
 
     Writes *through* the Cell Gating tab's edit — the single source of truth that
@@ -867,27 +967,27 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
     save → persist → redraw). This is the write half of the plotting-tab
     quick-edit; editing here stays consistent with the Cell Gating tab,
     Auto-threshold, stats, and exports. No-op until a dataset is loaded.
+
+    A8 / Epic-cellgating: fully ``ctx``-native — the lazy tab build routes
+    through :func:`ensure_cell_gating_tab_built` (the one app-bound seam) and the
+    edits map is reached via ``ctx.runtime.cell_gating`` (the same stamped
+    handle, without naming the god-object here).
     """
-    if not app._app_state.dataset.data_dir:
+    if not ctx.state.dataset.data_dir:
         return
     if channel is None:
-        channel = app._app_state.channel.active_channel
+        channel = ctx.state.channel.active_channel
     if not channel or channel == "—":
         return
-    # The Cell Gating tab is built lazily; materialize it (same pattern as
-    # persistence.cell_gating.load_from_pipeline_info) so its edits dict exists.
-    if not hasattr(app, "_cell_gating_thresh_frac_edits"):
-        build = getattr(app, "_centre_build_pending", None)
-        if callable(build):
-            build("Sample Definitions")
-        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
-        build_cell_gating_subtab(app)
+    # The Cell Gating tab is built lazily; materialize it so its edits dict exists.
+    if not ensure_cell_gating_tab_built(ctx):
+        return
     from well_viewer.features.grouping.cell_gating_tab_view import (
         _cell_gating_resolve_key,
         cell_gating_on_threshold_frac_on_change,
     )
-    edits = getattr(app, "_cell_gating_thresh_frac_edits", {}) or {}
-    edit = edits.get(_cell_gating_resolve_key(app, channel))
+    edits = ctx.runtime.cell_gating.thresh_frac_edits or {}
+    edit = edits.get(_cell_gating_resolve_key(ctx, channel))
     if edit is None:
         return
     blocked = edit.blockSignals(True)
@@ -895,10 +995,10 @@ def set_thresh_frac_on(app, value, channel: Optional[str] = None) -> None:
         edit.setText(str(float(value)))
     finally:
         edit.blockSignals(blocked)
-    cell_gating_on_threshold_frac_on_change(app)
+    cell_gating_on_threshold_frac_on_change(ctx)
 
 
-def refresh_thresh_frac_quick_edit(app) -> None:
+def refresh_thresh_frac_quick_edit(ctx) -> None:
     """Sync the ON-threshold quick-edit Steppers to the active channel's
     ThreshFracOn.
 
@@ -908,19 +1008,22 @@ def refresh_thresh_frac_quick_edit(app) -> None:
     intensity threshold). Signals are blocked so this display sync doesn't loop
     back through ``set_thresh_frac_on`` (``Stepper.setValue`` emits
     ``valueChanged``). No-op for any stepper that hasn't been built yet.
+
+    A8/D-thresh: ctx-native — the status-chip refresh and the ThreshFracOn read
+    both take ``ctx``, and each quick-edit stepper resolves through
+    ``ctx.widgets``.
     """
     # Keep the status-bar threshold chip (F1) in sync — runs on channel switch
     # and every threshold edit, the same triggers as the ctxbar stepper.
-    refresh_chips = getattr(app, "_refresh_status_chips", None)
-    if callable(refresh_chips):
-        refresh_chips()
-    value = float(get_thresh_frac_on(app))
+    from well_viewer.core.status_view import refresh_status_chips
+    refresh_status_chips(ctx)
+    value = float(get_thresh_frac_on(ctx))
     for attr in (
         "_plotting_thresh_frac_stepper",
         "_review_thresh_frac_stepper",
         "_image_table_thresh_frac_stepper",
     ):
-        stepper = getattr(app, attr, None)
+        stepper = ctx.widgets.get_or_none(attr)
         if stepper is None:
             continue
         blocked = stepper.blockSignals(True)
@@ -930,49 +1033,59 @@ def refresh_thresh_frac_quick_edit(app) -> None:
             stepper.blockSignals(blocked)
 
 
-def get_fluor_gate(app, channel: str) -> float:
-    """Get FluorGating threshold for a channel."""
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
-        from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_fluor_gate
-        return cell_gating_get_fluor_gate(app, channel)
-    return 0.0
+def get_fluor_gate(ctx, channel: str) -> float:
+    """Get FluorGating threshold for a channel.
+
+    A8 teardown: reads the typed ``CellGatingState`` slice (post-R6), so it takes
+    ``ctx``. The slice defaults an unset channel to 0.0 (gate off) — the same
+    value the old tab-not-built guard returned — independent of whether the
+    lazily-built Cell Gating tab exists."""
+    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_fluor_gate
+    return cell_gating_get_fluor_gate(ctx, channel)
 
 
 
-def active_channel_label(app) -> str:
-    """Return the dropdown label corresponding to the active channel."""
-    active_val_col = app._app_state.channel.active_val_col
+def active_channel_label(ctx) -> str:
+    """Return the dropdown label corresponding to the active channel.
+
+    A8 teardown: pure ``ctx.state.channel`` + the ctx ``ratio_label_for`` leaf."""
+    active_val_col = ctx.state.channel.active_val_col
     if is_ratio_key(active_val_col):
         ratio_name = ratio_name_from_key(active_val_col)
-        for r in app._app_state.channel.ratio_metrics:
+        for r in ctx.state.channel.ratio_metrics:
             if r.name == ratio_name:
-                return app._ratio_label_for(r)
+                return ratio_label_for(ctx, r)
         return ratio_name.upper()
     if is_shape_column(active_val_col):
         return shape_label_for(active_val_col) or active_val_col
-    return app._app_state.channel.active_channel.upper()
+    return ctx.state.channel.active_channel.upper()
 
 
 
-def ratio_label_for(app, ratio: RatioMetric) -> str:
+def ratio_label_for(ctx, ratio: RatioMetric) -> str:
     """Return the dropdown label for a ratio (e.g. ``"GFP/MCHERRY"``).
 
     Disambiguates by appending ``[name]`` if two ratios share a label.
-    """
+
+    A8 teardown: pure ``ctx.state.channel``."""
     base = ratio.display_label()
-    same_base = [r for r in app._app_state.channel.ratio_metrics if r.display_label() == base]
+    same_base = [r for r in ctx.state.channel.ratio_metrics if r.display_label() == base]
     if len(same_base) > 1:
         return f"{base} [{ratio.name}]"
     return base
 
 
 
-def on_metric_selected(app) -> None:
-    """Handle the per-tab (legacy hidden) metric selector change."""
+def on_metric_selected(ctx) -> None:
+    """Handle the per-tab (legacy hidden) metric selector change.
+
+    A8/D-thresh: ctx-native — the metric combo resolves through ``ctx.widgets``
+    and the set_active_metric handoff takes ``ctx``."""
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
-    metric_label = app._metric_var.currentText()
+    metric_var = ctx.widgets.get_or_none("_metric_var")
+    metric_label = metric_var.currentText() if metric_var is not None else ""
     metric = METRIC_LABEL_TO_KEY.get(metric_label, "mean_intensity")
-    set_active_metric(app, metric)
+    set_active_metric(ctx, metric)
 
 
 

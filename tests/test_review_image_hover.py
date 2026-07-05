@@ -30,10 +30,10 @@ class _Evt:
 
 
 def _stub_app(last_fluor_arr=None):
+    # ctx-shaped: the tooltip reads ``ctx.state.review_image.last_fluor_arr`` and
+    # uses the module's own numpy, so no app-shaped face is needed.
     return SimpleNamespace(
-        _np=np,
-        _NP_AVAILABLE=True,
-        _app_state=SimpleNamespace(
+        state=SimpleNamespace(
             review_image=SimpleNamespace(last_fluor_arr=last_fluor_arr),
         ),
     )

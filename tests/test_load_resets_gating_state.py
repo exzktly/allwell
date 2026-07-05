@@ -7,26 +7,40 @@ from __future__ import annotations
 
 import types
 
+from well_viewer.core.app_runtime import AppRuntime
+from well_viewer.core.cell_gating_state import CellGatingState
 from well_viewer.core.load_controller import _reset_gating_state
 
 
 def test_reset_clears_all_leaky_gating_attrs():
+    # Epic-cellgating: the scatter-gate geometry + use-flags + per-layer gate
+    # selections are typed state on ``ctx.state.cell_gating`` (joining the R6
+    # gate values), so the swap-reset clears the slice, not loose app attrs.
+    # The per-cell include-override map is runtime scratch, reset through
+    # ``ctx.runtime.review.included_overrides``.
+    cg = CellGatingState(
+        scatter_gates=[{"name": "G1", "x0": 0}],
+        use_scatter_gates=True,
+        use_scatter_thresh=True,
+        gating_choices={"G1"},
+        thresh_choices={"G1"},
+    )
+    rt = AppRuntime()
+    rt.review.included_overrides = {"A01/0/1/5": False}
     app = types.SimpleNamespace(
-        _scatter_gates=[{"name": "G1", "x0": 0}],
-        _review_included_overrides={"A01/0/1/5": False},
-        _cell_gating_use_scatter_gates=True,
-        _cell_gating_use_scatter_thresh=True,
-        _cell_gating_gating_choices={"G1"},
-        _cell_gating_thresh_choices={"G1"},
-        _active_heatmap_layout_name="old-layout",
+        _ctx=types.SimpleNamespace(runtime=rt),
+        _app_state=types.SimpleNamespace(
+            cell_gating=cg,
+            heatmap=types.SimpleNamespace(active_layout_name="old-layout"),
+        ),
     )
 
     _reset_gating_state(app)
 
-    assert app._scatter_gates == []
-    assert app._review_included_overrides == {}
-    assert app._cell_gating_use_scatter_gates is False
-    assert app._cell_gating_use_scatter_thresh is False
-    assert app._cell_gating_gating_choices is None
-    assert app._cell_gating_thresh_choices is None
-    assert app._active_heatmap_layout_name is None
+    assert cg.scatter_gates == []
+    assert rt.review.included_overrides == {}
+    assert cg.use_scatter_gates is False
+    assert cg.use_scatter_thresh is False
+    assert cg.gating_choices is None
+    assert cg.thresh_choices is None
+    assert app._app_state.heatmap.active_layout_name is None

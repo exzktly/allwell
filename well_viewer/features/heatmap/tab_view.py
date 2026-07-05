@@ -6,6 +6,8 @@ slider to scrub through time and click-to-select wells.
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -69,7 +71,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     chan_cb.addItems(["GFP"])
     chan_cb.setMinimumWidth(220)
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
 
@@ -80,14 +82,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     cl1.addWidget(QLabel("Aggregation:", ctrl1))
     metric_cb = reg.register("_heatmap_metric_cb", QComboBox(ctrl1))
     metric_cb.addItems(METRIC_OPTIONS)
-    metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx.app))
+    metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx))
     cl1.addWidget(metric_cb)
 
     cl1.addStretch(1)
 
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", ctrl1, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_heatmap_data(ctx.app))
+    _export_btn.clicked.connect(lambda _=False: export_heatmap_data(ctx))
     cl1.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", ctrl1, tooltip="Copy SVG")
     _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
@@ -120,31 +122,31 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     cmap_cb.setLut(_initial_cmap[:-2] if _initial_rev else _initial_cmap,
                    reversed=_initial_rev)
     cmap_cb.setMaximumWidth(220)
-    cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx.app))
+    cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx))
     cl2.addWidget(cmap_cb)
 
     cl2.addWidget(QLabel("Scale:", ctrl2))
     scale_cb = reg.register("_heatmap_scale_cb", QComboBox(ctrl2))
     scale_cb.addItems(_SCALE_OPTIONS)
-    scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx.app))
+    scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx))
     cl2.addWidget(scale_cb)
 
     cl2.addWidget(QLabel("vmin:", ctrl2))
     vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(ctrl2))
     vmin_edit.setFixedWidth(70)
-    vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx.app))
+    vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     cl2.addWidget(vmin_edit)
 
     cl2.addWidget(QLabel("vmax:", ctrl2))
     vmax_edit = reg.register("_heatmap_vmax_edit", QLineEdit(ctrl2))
     vmax_edit.setFixedWidth(70)
-    vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx.app))
+    vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     cl2.addWidget(vmax_edit)
 
     transpose_btn = QPushButton("⇄ Transpose", ctrl2)
     transpose_btn.setProperty("variant", "secondary")
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
-    transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx.app))
+    transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx))
     cl2.addWidget(transpose_btn)
 
     repset_avg_cb = reg.register("_heatmap_repset_avg_cb", QCheckBox("Rep-set avg", ctrl2))
@@ -152,14 +154,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         "When checked, cells whose well belongs to a rep-set show the "
         "average of the whole rep-set instead of the single well."
     )
-    repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(ctx.app))
+    repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(ctx))
     cl2.addWidget(repset_avg_cb)
 
     log_scale_cb = reg.register("_heatmap_log_scale_cb", QCheckBox("Log scale", ctrl2))
     log_scale_cb.setToolTip(
         "Color the heatmap on a log scale (values ≤ 0 are masked)."
     )
-    log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx.app))
+    log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx))
     cl2.addWidget(log_scale_cb)
 
     cl2.addStretch(1)
@@ -180,7 +182,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     tp_slider = reg.register("_heatmap_tp_slider", _StyledSlider(Qt.Horizontal, slider_row))
     tp_slider.setMinimum(0)
     tp_slider.setMaximum(0)
-    tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx.app))
+    tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx))
     sl.addWidget(tp_slider, 1)
     tp_label = reg.register("_heatmap_tp_label", QLabel("—", slider_row))
     tp_label.setMinimumWidth(80)
@@ -196,7 +198,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx.app, card, "Heat Map")
+    wire_save_to_gallery(ctx, card, "Heat Map")
     _sw = make_plot_view_switcher(ctx, 'Heat Map')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
@@ -231,25 +233,25 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     card.setStatsChipVisible(False)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
-        ctx.app, card, icon="layout-grid",
+        ctx.window, card, icon="layout-grid",
     ), 1)
 
     # ── Mouse hooks ─────────────────────────────────────────────────────────
     # Unified press handler: label-drag first, then double-click rename, then
     # normal cell selection.  A single connection keeps ordering deterministic.
     canvas.mpl_connect("button_press_event",
-                       lambda evt: _on_canvas_press(ctx.app, evt))
+                       lambda evt: _on_canvas_press(ctx, evt))
     canvas.mpl_connect("motion_notify_event",
-                       lambda evt: _on_canvas_motion(ctx.app, evt))
+                       lambda evt: _on_canvas_motion(ctx, evt))
     canvas.mpl_connect("button_release_event",
-                       lambda evt: _on_canvas_release(ctx.app, evt))
+                       lambda evt: _on_canvas_release(ctx, evt))
 
-    refresh_heatmap_timepoints(ctx.app)
+    refresh_heatmap_timepoints(ctx)
 
     # Push any settings loaded from heatmap_layouts.json into the widgets.
     try:
         from well_viewer.persistence.heatmap_layouts import apply_persisted_settings
-        apply_persisted_settings(ctx.app)
+        apply_persisted_settings(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
 
@@ -258,11 +260,15 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # ``_active_metric`` (ratio channels disable the global combo and
     # collapse it to ``Calculated Val``; non-MFI properties grey out
     # threshold-based aggregations).
+    # A8: these took app-method hasattr guards that were always False
+    # (WellViewerApp has no _refresh_metric_combo_for_channel /
+    # _refresh_heatmap_aggregation_options methods — bound nowhere), so this
+    # first-render Property-combo + aggregation sync silently never ran. Both
+    # core fns now take ctx and self-guard on a missing combo, so call them
+    # directly (still swallow-wrapped) to realise the documented intent.
     try:
-        if hasattr(ctx.app, "_refresh_metric_combo_for_channel"):
-            refresh_metric_combo_for_channel(ctx.app)
-        if hasattr(ctx.app, "_refresh_heatmap_aggregation_options"):
-            refresh_heatmap_aggregation_options(ctx.app, )
+        refresh_metric_combo_for_channel(ctx)
+        refresh_heatmap_aggregation_options(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Bust any caches that might hold a stale "no values" result from
@@ -270,32 +276,33 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # global colormap range cache populated with NaNs, which produced
     # empty cells until the user wiggled the channel).
     ctx.runtime.heatmap.global_range_cache = None
-    if hasattr(ctx.app, "_invalidate_stats_cache"):
-        try:
-            ctx.app._invalidate_stats_cache()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    _redraw(ctx.app)
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    invalidate_stats_cache(ctx)
+    _redraw(ctx)
 
 
 # ── helpers attached or referenced from runtime_app ─────────────────────────
 
-def refresh_heatmap_timepoints(app) -> None:
-    slider = getattr(app, "_heatmap_tp_slider", None)
-    label = getattr(app, "_heatmap_tp_label", None)
+def refresh_heatmap_timepoints(ctx) -> None:
+    # A8-teardown T3: modern infrastructure — slider/label via ``ctx.widgets``,
+    # the timepoint-value cache via ``ctx.runtime.heatmap``, timepoints/focus via
+    # the ctx leaves. The onward ``_redraw`` is the one render handoff residual
+    # (the heatmap render tree still takes ``app`` — a later one-feature pass).
+    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
+    label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if slider is None:
         return
     try:
         from well_viewer.features.scatter.controller import get_all_timepoints
-        tps = list(get_all_timepoints(app))
+        tps = list(get_all_timepoints(ctx))
     except Exception:
         tps = []
-    app._heatmap_tp_values = tps
+    ctx.state.heatmap.tp_values = tps
     # Seed the slider from the shared focus timepoint (N5) when one is set and
     # present, so opening Heat Map after picking a timepoint on Distribution
     # lands on the same point; else default to the first timepoint.
     from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
-    focus_idx = nearest_index(tps, current_focus_tp(app)) if tps else None
+    focus_idx = nearest_index(tps, current_focus_tp(ctx)) if tps else None
     start_idx = focus_idx if focus_idx is not None else 0
     blocked = slider.blockSignals(True)
     try:
@@ -309,13 +316,13 @@ def refresh_heatmap_timepoints(app) -> None:
             label.setText(f"t = {tps[start_idx]:g} h")
         else:
             label.setText("—")
-    _redraw(app)
+    _redraw(ctx)
 
 
-def _on_tp_changed(app) -> None:
-    tps: List[float] = list(getattr(app, "_heatmap_tp_values", []) or [])
-    slider = getattr(app, "_heatmap_tp_slider", None)
-    label = getattr(app, "_heatmap_tp_label", None)
+def _on_tp_changed(ctx) -> None:
+    tps: List[float] = list(ctx.state.heatmap.tp_values or [])
+    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
+    label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if not tps or slider is None:
         return
     idx = max(0, min(slider.value(), len(tps) - 1))
@@ -326,91 +333,93 @@ def _on_tp_changed(app) -> None:
     # redraw only this tab — keeps slider scrubbing as cheap as before (no
     # offscreen fan-out). Other tabs pick the value up on next show.
     from well_viewer.core.timepoint_sync import set_focus_tp
-    if getattr(app, "_split_active", False):
-        set_focus_tp(app, tps[idx])
+    if ctx.runtime.split.active:
+        set_focus_tp(ctx, tps[idx])
     else:
-        set_focus_tp(app, tps[idx], emit=False)
-        _redraw(app)
+        set_focus_tp(ctx, tps[idx], emit=False)
+        _redraw(ctx)
 
 
-def _on_scale_changed(app) -> None:
+def _on_scale_changed(ctx) -> None:
     import math as _math
-    cb = getattr(app, "_heatmap_scale_cb", None)
+    cb = ctx.widgets.get_or_none("_heatmap_scale_cb")
     if cb is not None:
-        app._app_state.heatmap.scale_mode = str(cb.currentText() or "Auto")
+        ctx.state.heatmap.scale_mode = str(cb.currentText() or "Auto")
     # When the user picks Fixed but the vmin/vmax fields are blank, seed them
     # with the current global range so they have concrete numbers to tweak.
-    if app._app_state.heatmap.scale_mode == "Fixed":
-        vmin_edit = getattr(app, "_heatmap_vmin_edit", None)
-        vmax_edit = getattr(app, "_heatmap_vmax_edit", None)
-        g_vmin = getattr(app, "_heatmap_global_vmin", None)
-        g_vmax = getattr(app, "_heatmap_global_vmax", None)
+    if ctx.state.heatmap.scale_mode == "Fixed":
+        vmin_edit = ctx.widgets.get_or_none("_heatmap_vmin_edit")
+        vmax_edit = ctx.widgets.get_or_none("_heatmap_vmax_edit")
+        g_vmin = ctx.runtime.heatmap.global_vmin
+        g_vmax = ctx.runtime.heatmap.global_vmax
         if vmin_edit is not None and not (vmin_edit.text() or "").strip():
             if g_vmin is not None and _math.isfinite(g_vmin):
                 vmin_edit.setText(f"{g_vmin:g}")
-                app._heatmap_vmin = float(g_vmin)
+                ctx.state.heatmap.vmin = float(g_vmin)
         if vmax_edit is not None and not (vmax_edit.text() or "").strip():
             if g_vmax is not None and _math.isfinite(g_vmax):
                 vmax_edit.setText(f"{g_vmax:g}")
-                app._heatmap_vmax = float(g_vmax)
-    _persist_settings(app)
-    _redraw(app)
+                ctx.state.heatmap.vmax = float(g_vmax)
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _on_vminmax_changed(app) -> None:
+def _on_vminmax_changed(ctx) -> None:
     import math as _math
+    vmin_edit = ctx.widgets.get_or_none("_heatmap_vmin_edit")
+    vmax_edit = ctx.widgets.get_or_none("_heatmap_vmax_edit")
     try:
-        app._heatmap_vmin = float(app._heatmap_vmin_edit.text() or "nan")
+        ctx.state.heatmap.vmin = float((vmin_edit.text() if vmin_edit else "") or "nan")
     except (TypeError, ValueError):
-        app._heatmap_vmin = float("nan")
+        ctx.state.heatmap.vmin = float("nan")
     try:
-        app._heatmap_vmax = float(app._heatmap_vmax_edit.text() or "nan")
+        ctx.state.heatmap.vmax = float((vmax_edit.text() if vmax_edit else "") or "nan")
     except (TypeError, ValueError):
-        app._heatmap_vmax = float("nan")
+        ctx.state.heatmap.vmax = float("nan")
     # If the user typed a usable number, force scale mode to Fixed so the
     # value actually takes effect — otherwise the heatmap silently ignores
     # vmin/vmax while Scale stays on Auto.
-    if _math.isfinite(app._heatmap_vmin) or _math.isfinite(app._heatmap_vmax):
-        app._app_state.heatmap.scale_mode = "Fixed"
-        cb = getattr(app, "_heatmap_scale_cb", None)
+    if _math.isfinite(ctx.state.heatmap.vmin) or _math.isfinite(ctx.state.heatmap.vmax):
+        ctx.state.heatmap.scale_mode = "Fixed"
+        cb = ctx.widgets.get_or_none("_heatmap_scale_cb")
         if cb is not None and cb.currentText() != "Fixed":
             blocked = cb.blockSignals(True)
             try:
                 cb.setCurrentText("Fixed")
             finally:
                 cb.blockSignals(blocked)
-    _persist_settings(app)
-    _redraw(app)
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _on_transpose(app) -> None:
+def _on_transpose(ctx) -> None:
     from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout, _persist_and_redraw, refresh_heatmap_layout_sidebar,
     )
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(ctx)
     layout.transpose()
-    _persist_and_redraw(app)
-    refresh_heatmap_layout_sidebar(app)
+    _persist_and_redraw(ctx)
+    refresh_heatmap_layout_sidebar(ctx)
 
 
-def _on_repset_avg_changed(app) -> None:
-    cb = getattr(app, "_heatmap_repset_avg_cb", None)
+def _on_repset_avg_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_repset_avg_cb")
     if cb is not None:
-        app._app_state.heatmap.repset_avg = bool(cb.isChecked())
-    _persist_settings(app)
-    _redraw(app)
+        ctx.state.heatmap.repset_avg = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _on_log_scale_changed(app) -> None:
-    cb = getattr(app, "_heatmap_log_scale_cb", None)
+def _on_log_scale_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_log_scale_cb")
     if cb is not None:
-        app._app_state.heatmap.log_scale = bool(cb.isChecked())
-    _persist_settings(app)
-    _redraw(app)
+        ctx.state.heatmap.log_scale = bool(cb.isChecked())
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _on_cmap_changed(app) -> None:
-    cb = getattr(app, "_heatmap_cmap_cb", None)
+def _on_cmap_changed(ctx) -> None:
+    cb = ctx.widgets.get_or_none("_heatmap_cmap_cb")
     if cb is not None:
         if hasattr(cb, "lut"):
             name = cb.lut() or ""
@@ -418,28 +427,28 @@ def _on_cmap_changed(app) -> None:
                 name = f"{name}_r"
         else:
             name = str(cb.currentText() or "")
-        app._heatmap_cmap_name = name
-    _persist_settings(app)
-    _redraw(app)
+        ctx.state.heatmap.cmap_name = name
+    _persist_settings(ctx)
+    _redraw(ctx)
 
 
-def _persist_settings(app) -> None:
+def _persist_settings(ctx) -> None:
     """Save heatmap visual settings to disk (debounced via the registry)."""
     try:
-        app._persistence.schedule_save("heatmap_layouts")
+        ctx.persistence.schedule_save("heatmap_layouts")
     except Exception:
         swallowed()  # was: pass (silent except)
 
 
-def _on_label_double_click(app, evt) -> None:
+def _on_label_double_click(ctx, evt) -> None:
     """Edit a row/col tick label inline when double-clicked."""
     if not getattr(evt, "dblclick", False):
         return
-    ax = getattr(app, "_heatmap_ax", None)
+    ax = ctx.widgets.get_or_none("_heatmap_ax")
     if ax is None:
         return
     # Collect tick labels to hit-test against pixel positions.
-    canvas = getattr(app, "_heatmap_canvas", None)
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
     if canvas is None:
         return
     renderer = canvas.get_renderer()
@@ -468,7 +477,7 @@ def _on_label_double_click(app, evt) -> None:
     from well_viewer.features.heatmap.sidebar_view import (
         _ensure_sidebar_layout, _persist_and_redraw,
     )
-    layout = _ensure_sidebar_layout(app)
+    layout = _ensure_sidebar_layout(ctx)
     kind, idx = target
     current = ""
     if kind == "row":
@@ -482,7 +491,7 @@ def _on_label_double_click(app, evt) -> None:
             current = labels[idx]
         prompt = f"Column {idx + 1} label:"
     new_text, ok = QInputDialog.getText(
-        app if isinstance(app, QWidget) else None,
+        ctx.window,
         "Edit label", prompt, text=current,
     )
     if not ok:
@@ -501,32 +510,32 @@ def _on_label_double_click(app, evt) -> None:
         while len(layout.col_labels) < layout.cols:
             layout.col_labels.append(str(len(layout.col_labels) + 1))
         layout.col_labels[idx] = new_text or str(idx + 1)
-    _persist_and_redraw(app)
+    _persist_and_redraw(ctx)
 
 
-def _on_canvas_press(app, evt) -> None:
+def _on_canvas_press(ctx, evt) -> None:
     from well_viewer.features.heatmap.controller import on_heatmap_label_drag_press, on_heatmap_click
     # Label drag takes priority; double-click rename is next; cell select last.
-    if on_heatmap_label_drag_press(app, evt):
+    if on_heatmap_label_drag_press(ctx, evt):
         return
     if getattr(evt, "dblclick", False):
-        _on_label_double_click(app, evt)
+        _on_label_double_click(ctx, evt)
         return
-    on_heatmap_click(app, evt)
+    on_heatmap_click(ctx, evt)
 
 
-def _on_canvas_motion(app, evt) -> None:
+def _on_canvas_motion(ctx, evt) -> None:
     from well_viewer.features.heatmap.controller import on_heatmap_label_drag_motion, on_heatmap_motion
-    on_heatmap_label_drag_motion(app, evt)
-    if not getattr(app, "_heatmap_label_drag", None):
-        on_heatmap_motion(app, evt)
+    on_heatmap_label_drag_motion(ctx, evt)
+    if not ctx.runtime.heatmap.label_drag:
+        on_heatmap_motion(ctx, evt)
 
 
-def _on_canvas_release(app, evt) -> None:
+def _on_canvas_release(ctx, evt) -> None:
     from well_viewer.features.heatmap.controller import on_heatmap_label_drag_release
-    on_heatmap_label_drag_release(app, evt)
+    on_heatmap_label_drag_release(ctx, evt)
 
 
-def _redraw(app) -> None:
+def _redraw(ctx) -> None:
     from well_viewer.features.heatmap.controller import redraw_heatmap
-    redraw_heatmap(app)
+    redraw_heatmap(ctx)

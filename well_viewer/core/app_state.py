@@ -23,7 +23,10 @@ from dataclasses import dataclass, field
 from well_viewer.core.channel_state import ChannelState
 from well_viewer.core.dataset_state import DatasetState
 from well_viewer.core.image_view_state import ImageViewState
+from well_viewer.core.cell_gating_state import CellGatingState
+from well_viewer.core.export_prefs_state import ExportPrefsState
 from well_viewer.core.plot_state import PlotState
+from well_viewer.core.qc_state import QcState
 from well_viewer.core.selection_state import SelectionState
 from well_viewer.core.stats_cache_state import StatsCacheState
 
@@ -57,6 +60,14 @@ class AppState:
     # Group-statistics memoization cache — core, not the Statistics feature's
     # slice (it backs every plot's aggregation; see StatsCacheState).
     stats_cache: StatsCacheState = field(default_factory=StatsCacheState)
+    # Live QC (debris-gating) thresholds — core, not a feature slice: the
+    # inclusion chokepoint composes QC_Pass on every read (see QcState).
+    qc: QcState = field(default_factory=QcState)
+    # Export/figure-style prefs (global publication style + per-figure axis view).
+    export_prefs: ExportPrefsState = field(default_factory=ExportPrefsState)
+    # Cell-gating threshold values (FluorGating / ThreshFracOn per channel) —
+    # core, like qc: they feed the channel layer every plot reads (R6).
+    cell_gating: CellGatingState = field(default_factory=CellGatingState)
 
     def feature_slice(self, name: str):
         """Return the feature-owned slice *name*, or ``None`` when its feature is

@@ -10,6 +10,11 @@ re-export these names.
 
 from __future__ import annotations
 
+from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, active_replicate_sets)
+from well_viewer.core.channel_state_controller import get_all_fluor_gates, get_thresh_frac_on
+from well_viewer.data.data_loading import get_rows
+from well_viewer.domain.viewer_state import parse_rc
+
 import logging
 import math
 from collections import Counter
@@ -108,7 +113,7 @@ FC_STATE_OFF: Tuple[bool, str, bool] = (False, "", False)
 
 
 def collect_bar_items(
-    app, target_t, *,
+    ctx, target_t, *,
     fc_state: Optional[Tuple[bool, str, bool]] = None,
     fc_baseline_tp: Optional[float] = None,
     miss_sink: Optional[set] = None,
@@ -127,7 +132,7 @@ def collect_bar_items(
     ("well": well-major; "timepoint": tp-major). The fold-change resolver
     runs once per tp.
 
-    When *fc_state* is None (default) the app's current state is used.
+    When *fc_state* is None (default) the ctx's current state is used.
     Callers that want raw values can pass :data:`FC_STATE_OFF` — the
     aggregation helpers are cached so a second call is cheap, which is how
     the on-tab CSV emits the additive (raw + fold-change) schema.
@@ -141,7 +146,7 @@ def collect_bar_items(
     a slightly wider bar style in the renderer); the items themselves carry
     display labels and colours so callers don't need to re-resolve them.
     """
-    use_sem = app._app_state.plot.use_sem
+    use_sem = ctx.state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
     if isinstance(target_t, (list, tuple)):
         target_ts = [float(t) for t in target_t]
@@ -154,30 +159,30 @@ def collect_bar_items(
     # channel's ThreshFracOn just like intensities — a cell is "on" when its
     # spot count exceeds the cutoff (set ThreshFracOn to 0 for the classic
     # "any detected spot" population).
-    if app._app_state.channel.is_shape_active():
+    if ctx.state.channel.is_shape_active():
         threshold = -1.0
     else:
-        threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
-    active_rsets = app._rep_sets_active()
-    pool_reps = bool(getattr(app._app_state.plot, "bar_pool_replicates", True))
+        threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
+    pool_reps = bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
     # ``use_groups`` here drives the renderer's bar-width preset (wider for
     # grouped mode); it stays True only when wells are actually being
     # collapsed into rset columns.
     use_groups = bool(active_rsets) and pool_reps
-    group_mode = getattr(app._app_state.plot, "bar_group_mode", "well")
+    group_mode = getattr(ctx.state.plot, "bar_group_mode", "well")
 
     if fc_state is None:
-        fc_state = _fc.fold_change_state(app)
+        fc_state = _fc.fold_change_state(ctx)
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
     if fc_baseline_tp is None:
-        fc_baseline_tp = _fc.parse_baseline_tp(app)
-    fc_op_ctrl = _fc.parse_fc_op_ctrl(app)
-    fc_op_t0 = _fc.parse_fc_op_t0(app)
-    fc_order = _fc.parse_fc_order(app)
-    fluor_gates = app._get_all_fluor_gates()
-    per_fov_spread = app._use_fov_spread_active()
+        fc_baseline_tp = _fc.parse_baseline_tp(ctx)
+    fc_op_ctrl = _fc.parse_fc_op_ctrl(ctx)
+    fc_op_t0 = _fc.parse_fc_op_t0(ctx)
+    fc_order = _fc.parse_fc_order(ctx)
+    fluor_gates = get_all_fluor_gates(ctx)
+    per_fov_spread = ctx.state.plot.use_fov_replicates
 
-    ordered_keys = app._bar_current_keys()
+    ordered_keys = ctx.runtime.barplot.current_keys()
     rset_by_name = {r.name: r for r in active_rsets}
 
     def _format_tp(t: float) -> str:
@@ -197,8 +202,8 @@ def collect_bar_items(
         fc_control_n_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             ctrl_stats = _fc.control_stats_at_for_bar(
-                app, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                ctx, fc_ctrl_lbl, target_t,
+                threshold=threshold, val_col=ctx.state.channel.active_val_col,
                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                 fluor_gates=fluor_gates,
             )
@@ -208,16 +213,16 @@ def collect_bar_items(
             else:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
             ctrl_frac = _fc.control_frac_at_for_bar(
-                app, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                ctx, fc_ctrl_lbl, target_t,
+                threshold=threshold, val_col=ctx.state.channel.active_val_col,
                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                 fluor_gates=fluor_gates,
             )
             if ctrl_frac is not None:
                 fc_control_frac_at_t, fc_control_frac_spread_at_t = ctrl_frac
             ctrl_n = _fc.control_n_at_for_bar(
-                app, fc_ctrl_lbl, target_t,
-                threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                ctx, fc_ctrl_lbl, target_t,
+                threshold=threshold, val_col=ctx.state.channel.active_val_col,
                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                 fluor_gates=fluor_gates,
             )
@@ -236,8 +241,8 @@ def collect_bar_items(
                 rset = rset_by_name.get(key)
                 if rset is None:
                     continue
-                color = app._rank_color_rset(rset)
-                rset_disp = app._replicate_display_label(rset)
+                color = color_for_replicate_set(rset, ctx.state.selection.selections)
+                rset_disp = replicate_display_label(ctx, rset)
                 # In multi-tp group-by-well mode the cluster header is the
                 # rset name; per-bar label collapses to the timepoint so
                 # the tick row stays single-line.
@@ -250,21 +255,21 @@ def collect_bar_items(
                 # replicate set (>=2 wells) is always per-well, so its spread
                 # matches the stats test's n.
                 n_loaded = sum(1 for w in rset.wells
-                               if w in app._app_state.dataset.well_paths)
+                               if w in ctx.state.dataset.well_paths)
                 rset_per_fov = replicate_unit(n_loaded, per_fov_spread) == "fov"
                 if rset_per_fov:
                     gm, g_err_m, gf, g_err_f, n_above_pf_mean, n_above_pf_spread = (
-                        compute_rep_per_fov_stats(app, rset, target_t, threshold, use_sem)
+                        compute_rep_per_fov_stats(ctx, rset, target_t, threshold, use_sem)
                     )
                     n_above_val = float(n_above_pf_mean)
                     n_above_err = float(n_above_pf_spread)
                 else:
-                    gm, g_err_m, gf, g_err_f = compute_rep_stats(app, rset, target_t, threshold, use_sem)
+                    gm, g_err_m, gf, g_err_f = compute_rep_stats(ctx, rset, target_t, threshold, use_sem)
                     # Events panel: per-well mean ± cross-well spread (replicate
                     # error bars), consistent with the Mean/Fraction panels —
                     # rather than a spread-less total.
                     n_above_val, n_above_err = compute_rep_n_above_stats(
-                        app, rset, target_t, use_sem)
+                        ctx, rset, target_t, use_sem)
                 t0_mean = None
                 t0_spread = None
                 t0_frac = None
@@ -283,8 +288,8 @@ def collect_bar_items(
                 eff_ctrl_n_spread = fc_control_n_spread_at_t
                 if fc_vs_t0:
                     stats = _fc.member_first_tp_stats_resolved(
-                        app, rset.name,
-                        threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                        ctx, rset.name,
+                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=rset_per_fov,
                         fluor_gates=fluor_gates,
                         baseline_tp=fc_baseline_tp,
@@ -296,9 +301,9 @@ def collect_bar_items(
                         # t0_first:   control denom becomes post-t0 control.
                         if fc_vs_ctrl and fc_ctrl_lbl:
                             ctrl_b = _fc.control_stats_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp,
+                                ctx, fc_ctrl_lbl, resolved_tp,
                                 threshold=threshold,
-                                val_col=app._app_state.channel.active_val_col,
+                                val_col=ctx.state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                                 fluor_gates=fluor_gates,
                             )
@@ -314,8 +319,8 @@ def collect_bar_items(
                                         ctrl_b[0], ctrl_b[1], fc_op_ctrl,
                                     )
                     fstats = _fc.member_first_tp_frac_resolved(
-                        app, rset.name,
-                        threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                        ctx, rset.name,
+                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
                         fluor_gates=fluor_gates,
                         baseline_tp=fc_baseline_tp,
@@ -324,9 +329,9 @@ def collect_bar_items(
                         resolved_tp_f, t0_frac, t0_frac_spread = fstats
                         if fc_vs_ctrl and fc_ctrl_lbl:
                             ctrl_bf = _fc.control_frac_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_f,
+                                ctx, fc_ctrl_lbl, resolved_tp_f,
                                 threshold=threshold,
-                                val_col=app._app_state.channel.active_val_col,
+                                val_col=ctx.state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                                 fluor_gates=fluor_gates,
                             )
@@ -342,8 +347,8 @@ def collect_bar_items(
                                         ctrl_bf[0], ctrl_bf[1], fc_op_ctrl,
                                     )
                     nstats = _fc.member_first_tp_n_resolved(
-                        app, rset.name,
-                        threshold=threshold, val_col=app._app_state.channel.active_val_col,
+                        ctx, rset.name,
+                        threshold=threshold, val_col=ctx.state.channel.active_val_col,
                         use_sem=use_sem, per_fov_spread=per_fov_spread,
                         fluor_gates=fluor_gates,
                         baseline_tp=fc_baseline_tp,
@@ -352,9 +357,9 @@ def collect_bar_items(
                         resolved_tp_n, t0_n, t0_n_spread = nstats
                         if fc_vs_ctrl and fc_ctrl_lbl:
                             ctrl_bn = _fc.control_n_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_n,
+                                ctx, fc_ctrl_lbl, resolved_tp_n,
                                 threshold=threshold,
-                                val_col=app._app_state.channel.active_val_col,
+                                val_col=ctx.state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                                 fluor_gates=fluor_gates,
                             )
@@ -412,14 +417,14 @@ def collect_bar_items(
             iter_specs = []  # (well_label, color, display, group_key)
             seen: set = set()
             for rset in active_rsets:
-                rcolor = app._rank_color_rset(rset)
+                rcolor = color_for_replicate_set(rset, ctx.state.selection.selections)
                 for w in rset.wells:
                     if w in seen:
                         continue
-                    if w not in app._app_state.dataset.well_paths:
+                    if w not in ctx.state.dataset.well_paths:
                         continue
                     seen.add(w)
-                    well_disp = app._bar_well_display_label(w)
+                    well_disp = ctx.runtime.barplot.well_display_label(w)
                     if multi_tp and group_mode == "well":
                         # cluster header shows well + rset; per-bar label
                         # shows just the timepoint.
@@ -437,10 +442,10 @@ def collect_bar_items(
         else:
             label_iter = []
             for label in ordered_keys:
-                if label not in app._app_state.dataset.well_paths:
+                if label not in ctx.state.dataset.well_paths:
                     continue
-                color = app._rank_color_well(label)
-                well_disp = app._bar_well_display_label(label)
+                color = color_for_well(label)
+                well_disp = ctx.runtime.barplot.well_display_label(label)
                 if multi_tp and group_mode == "well":
                     display = f"t={tp_str}"
                 else:
@@ -449,9 +454,9 @@ def collect_bar_items(
                 label_iter.append((label, color, display, gk))
 
         for label, color, display, gk in label_iter:
-            pts = aggregate_well(app,
+            pts = aggregate_well(ctx,
                 label, threshold=threshold, use_sem=use_sem,
-                val_col=app._app_state.channel.active_val_col,
+                val_col=ctx.state.channel.active_val_col,
                 fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
             )
@@ -502,9 +507,9 @@ def collect_bar_items(
                         # Cross-axis stacking: ctrl_first → adjust t0 denom; t0_first → adjust control denom.
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp is not None and t0_mean is not None:
                             ctrl_b = _fc.control_stats_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp,
+                                ctx, fc_ctrl_lbl, resolved_tp,
                                 threshold=threshold,
-                                val_col=app._app_state.channel.active_val_col,
+                                val_col=ctx.state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                                 fluor_gates=fluor_gates,
                             )
@@ -521,9 +526,9 @@ def collect_bar_items(
                                     )
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_f is not None and t0_frac is not None:
                             ctrl_bf = _fc.control_frac_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_f,
+                                ctx, fc_ctrl_lbl, resolved_tp_f,
                                 threshold=threshold,
-                                val_col=app._app_state.channel.active_val_col,
+                                val_col=ctx.state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                                 fluor_gates=fluor_gates,
                             )
@@ -540,9 +545,9 @@ def collect_bar_items(
                                     )
                         if fc_vs_ctrl and fc_ctrl_lbl and resolved_tp_n is not None and t0_n is not None:
                             ctrl_bn = _fc.control_n_at_for_bar(
-                                app, fc_ctrl_lbl, resolved_tp_n,
+                                ctx, fc_ctrl_lbl, resolved_tp_n,
                                 threshold=threshold,
-                                val_col=app._app_state.channel.active_val_col,
+                                val_col=ctx.state.channel.active_val_col,
                                 use_sem=use_sem, per_fov_spread=per_fov_spread,
                                 fluor_gates=fluor_gates,
                             )
@@ -611,7 +616,7 @@ def collect_bar_items(
 
 
 def collect_bar_items_for_group(
-    app,
+    ctx,
     group: BarGroup,
     target_t,
     *,
@@ -641,7 +646,7 @@ def collect_bar_items_for_group(
     aggregated values (used by the additive CSV emitter).
     """
     if fluor_gates is None:
-        fluor_gates = app._get_all_fluor_gates()
+        fluor_gates = get_all_fluor_gates(ctx)
 
     if isinstance(target_t, (list, tuple)):
         target_ts = [float(t) for t in target_t]
@@ -657,13 +662,13 @@ def collect_bar_items_for_group(
     members: List[Tuple[str, str, list[str], Optional[str], str]] = []
     if pool_replicates:
         for i, rset in enumerate(group.members):
-            valid = [w for w in rset.wells if w in app._app_state.dataset.well_paths]
+            valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
             if not valid:
                 continue
             members.append((rset.name, rset.name, valid, rset.name,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
         for w in group.solo_wells:
-            if w not in app._app_state.dataset.well_paths:
+            if w not in ctx.state.dataset.well_paths:
                 continue
             members.append((w, w, [w], None,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
@@ -674,12 +679,12 @@ def collect_bar_items_for_group(
         for ri, rset in enumerate(group.members):
             rcolor = _WELL_COLORS[ri % len(_WELL_COLORS)]
             for w in rset.wells:
-                if w in seen or w not in app._app_state.dataset.well_paths:
+                if w in seen or w not in ctx.state.dataset.well_paths:
                     continue
                 seen.add(w)
                 members.append((w, f"{w} [{rset.name}]", [w], rset.name, rcolor))
         for w in group.solo_wells:
-            if w in seen or w not in app._app_state.dataset.well_paths:
+            if w in seen or w not in ctx.state.dataset.well_paths:
                 continue
             seen.add(w)
             members.append((w, w, [w], None,
@@ -696,14 +701,14 @@ def collect_bar_items_for_group(
         fc_control_frac_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             ctrl_stats = _fc.control_stats_at(
-                app, fc_ctrl_lbl, target_t,
+                ctx, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=val_col,
                 fluor_gates=fluor_gates,
             )
             if ctrl_stats is not None:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
             ctrl_pts = _fc.control_pts_for_line(
-                app, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
+                ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
                 fluor_gates=fluor_gates,
             )
             if ctrl_pts:
@@ -719,7 +724,7 @@ def collect_bar_items_for_group(
         tp_str = _format_tp(target_t)
         multi_tp = len(target_ts) > 1
         for (key, base_display, wells, rset_name, color) in members:
-            pts = aggregate_group(app,
+            pts = aggregate_group(ctx,
                 wells, threshold=threshold, use_sem=use_sem,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -806,7 +811,7 @@ def collect_bar_items_for_group(
     return items
 
 
-def _pooled_wells_for_fov_mode(app) -> List[str]:
+def _pooled_wells_for_fov_mode(ctx) -> List[str]:
     """Wells contributing to the FOV-pooled per-tp distribution.
 
     When replicate sets are active, every well inside every visible rset is
@@ -814,7 +819,7 @@ def _pooled_wells_for_fov_mode(app) -> List[str]:
     "Aggregate FOV" mode already collapses well identity). When no rsets are
     active, the user's plate selection is pooled.
     """
-    active_rsets = app._rep_sets_active()
+    active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
     out: List[str] = []
     seen: set = set()
     if active_rsets:
@@ -822,26 +827,26 @@ def _pooled_wells_for_fov_mode(app) -> List[str]:
             for w in rset.wells:
                 if w in seen:
                     continue
-                if w not in app._app_state.dataset.well_paths:
+                if w not in ctx.state.dataset.well_paths:
                     continue
                 seen.add(w)
                 out.append(w)
         return out
-    if app._app_state.selection.selections:
+    if ctx.state.selection.selections:
         # Group mode but all groups hidden → no wells (don't resurrect the stale
         # plate selection; see ordered_bar_keys).
         return out
-    for label in app._app_state.selection.selected_wells:
-        if label in seen or label not in app._app_state.dataset.well_paths:
+    for label in ctx.state.selection.selected_wells:
+        if label in seen or label not in ctx.state.dataset.well_paths:
             continue
         seen.add(label)
         out.append(label)
-    out.sort(key=app._parse_rc)
+    out.sort(key=parse_rc)
     return out
 
 
 def collect_bar_items_fov_pooled(
-    app, target_ts: List[float], *,
+    ctx, target_ts: List[float], *,
     threshold: Optional[float] = None,
 ) -> Tuple[List[BarItem], str]:
     """Build one ``BarItem`` per timepoint by pooling every well's cells.
@@ -865,22 +870,22 @@ def collect_bar_items_fov_pooled(
         resolve_value_series as _resolve_vals,
     )
 
-    use_sem = app._app_state.plot.use_sem
+    use_sem = ctx.state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
     if not target_ts:
         return [], band_lbl
 
     if threshold is None:
-        if app._app_state.channel.is_shape_active():
+        if ctx.state.channel.is_shape_active():
             threshold = -1.0
         else:
-            threshold = app._get_thresh_frac_on(app._app_state.channel.active_channel)
+            threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
 
-    val_col = app._app_state.channel.active_val_col
-    fluor_gates = app._get_all_fluor_gates() or {}
-    ratios = app._app_state.channel.ratio_index
+    val_col = ctx.state.channel.active_val_col
+    fluor_gates = get_all_fluor_gates(ctx) or {}
+    ratios = ctx.state.channel.ratio_index
 
-    wells = _pooled_wells_for_fov_mode(app)
+    wells = _pooled_wells_for_fov_mode(ctx)
 
     # Build one (tp, val, fov) triple stream across all pooled wells. FOV ids
     # are well-prefixed so the same numeric FOV in two wells stays distinct.
@@ -888,7 +893,7 @@ def collect_bar_items_fov_pooled(
     val_chunks: List[_np.ndarray] = []
     fov_chunks: List[_np.ndarray] = []
     for w in wells:
-        df = app._get_rows(w)
+        df = get_rows(ctx, w)
         if df is None or len(df) == 0:
             continue
         mask = _incl_mask(df).to_numpy(copy=True)
@@ -925,7 +930,7 @@ def collect_bar_items_fov_pooled(
     if not tp_chunks:
         for t in target_ts:
             items.append(BarItem(
-                key=f"t{t:.4g}", display=f"t={t:.4g} h", color=app._rank_color_well("A01"),
+                key=f"t{t:.4g}", display=f"t={t:.4g} h", color=color_for_well("A01"),
                 mean=float("nan"), spread=0.0, has_mean=False,
                 frac=float("nan"), frac_spread=0.0, has_frac=False,
                 n_above=0.0, n_above_spread=0.0,
@@ -980,7 +985,7 @@ def collect_bar_items_fov_pooled(
     return items, band_lbl
 
 
-def collect_bar_items_for_app(app, target_t: float, *,
+def collect_bar_items_for_app(ctx, target_t: float, *,
                        fc_state=None, miss_sink=None) -> tuple:
     """Return ``(use_groups, list[BarItem], band_lbl)`` for *target_t*.
 
@@ -992,7 +997,7 @@ def collect_bar_items_for_app(app, target_t: float, *,
     single status warning at the end of the redraw.
     """
     return collect_bar_items(
-        app, target_t, fc_state=fc_state, miss_sink=miss_sink,
+        ctx, target_t, fc_state=fc_state, miss_sink=miss_sink,
     )
 
 
@@ -1085,15 +1090,15 @@ def bar_idx_at_x(xdata: float, n: int, xs: Optional[List[float]] = None) -> int:
     return max(0, min(n - 1, int(round(xdata))))
 
 
-def bar_drag_xs(app, keys: List[str]) -> Optional[List[float]]:
+def bar_drag_xs(ctx, keys: List[str]) -> Optional[List[float]]:
     """The on-screen x-positions for the current bars, aligned to ``keys``.
 
     Stashed by the renderer (:func:`render_bar_items` and the per-cell path).
     Returns None when absent or out of sync with the current key order, so the
     hit-test safely falls back to integer positions rather than misaligning.
     """
-    xs = getattr(app, "_bar_xs", None)
-    xs_keys = getattr(app, "_bar_xs_keys", None)
+    xs = getattr(ctx.runtime.barplot, "xs", None)
+    xs_keys = getattr(ctx.runtime.barplot, "xs_keys", None)
     if xs and xs_keys == keys and len(xs) == len(keys):
         return list(xs)
     return None
@@ -1113,7 +1118,7 @@ def bar_guide_x(xs: Optional[List[float]], tgt: int, src: int, n: int) -> float:
     return max(tgt - 0.5, -0.5)
 
 
-def bar_err_settings(app) -> tuple:
+def bar_err_settings(ctx) -> tuple:
     """``(err_kind, ci_scale, draw_err)`` for the bar error bars, derived from
     the Properties → Statistics controls (``PlotState.bar_err_kind`` /
     ``bar_show_mode``).
@@ -1121,12 +1126,12 @@ def bar_err_settings(app) -> tuple:
     ``draw_err`` is False when the Show mode is "Mean" (bars only) or the
     error-bar type is "None". ``ci_scale`` is 1.96 for the 95% CI option (a
     normal-approx CI built from the SEM the spreads are already computed as),
-    else 1.0. With no ``app`` (e.g. unit tests calling the renderer directly)
+    else 1.0. With no ``ctx`` (e.g. unit tests calling the renderer directly)
     the legacy behaviour — always draw — is preserved.
     """
-    if app is None or not hasattr(app, "_app_state"):
+    if ctx is None or not hasattr(ctx, "state"):
         return ("sem", 1.0, True)
-    plot = app._app_state.plot
+    plot = ctx.state.plot
     err_kind = str(getattr(plot, "bar_err_kind", "sem") or "sem")
     show_mode = str(getattr(plot, "bar_show_mode", "mean_spread") or "mean_spread")
     draw_err = (show_mode != "mean") and (err_kind != "none")

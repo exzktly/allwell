@@ -17,11 +17,15 @@ def _app(qtbot, *, min_text="auto", max_text="auto", channel="gfp"):
     from well_viewer.core.image_view_state import ImageViewState
 
     cb = QComboBox(); cb.addItem(channel); cb.setCurrentText(channel)
-    return SimpleNamespace(
+    app = SimpleNamespace(
         _image_table_lut={0: {"min": QLineEdit(min_text), "max": QLineEdit(max_text)}},
         _image_table_cells=[[{"chan_cb": cb}]],
         _app_state=SimpleNamespace(image_view=ImageViewState()),
     )
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = SimpleNamespace(app=app, state=app._app_state,
+                               runtime=AppRuntime(app))
+    return app
 
 
 def test_auto_row_inherits_shared_channel_lut(qtbot):
@@ -29,7 +33,7 @@ def test_auto_row_inherits_shared_channel_lut(qtbot):
 
     app = _app(qtbot)
     app._app_state.image_view.set_lut("gfp", 5.0, 200.0)
-    assert _parse_lut(app, 0) == (5.0, 200.0)
+    assert _parse_lut(app._ctx, 0) == (5.0, 200.0)
 
 
 def test_manual_row_value_overrides_shared(qtbot):
@@ -37,11 +41,11 @@ def test_manual_row_value_overrides_shared(qtbot):
 
     app = _app(qtbot, min_text="10", max_text="90")
     app._app_state.image_view.set_lut("gfp", 5.0, 200.0)
-    assert _parse_lut(app, 0) == (10.0, 90.0)
+    assert _parse_lut(app._ctx, 0) == (10.0, 90.0)
 
 
 def test_auto_row_without_shared_falls_back_to_autofit(qtbot):
     from well_viewer.features.image_browser.image_table.image_compose import _parse_lut
 
     app = _app(qtbot)  # no shared LUT set
-    assert _parse_lut(app, 0) == (None, None)
+    assert _parse_lut(app._ctx, 0) == (None, None)

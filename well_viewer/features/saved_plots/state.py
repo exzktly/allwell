@@ -64,43 +64,45 @@ class SavedPlotsStore:
 
     # ── disk paths ────────────────────────────────────────────────────────
     @staticmethod
-    def _data_dir(app) -> Optional[Path]:
-        d = getattr(app._app_state.dataset, "data_dir", None)
+    def _data_dir(ctx) -> Optional[Path]:
+        d = getattr(ctx.state.dataset, "data_dir", None)
         return Path(d) if d else None
 
     @classmethod
-    def images_dir(cls, app) -> Optional[Path]:
-        d = cls._data_dir(app)
+    def images_dir(cls, ctx) -> Optional[Path]:
+        d = cls._data_dir(ctx)
         return (d / _IMAGES_DIRNAME) if d is not None else None
 
-    def image_path(self, app, rec: SavedPlot) -> Optional[Path]:
-        idir = self.images_dir(app)
+    def image_path(self, ctx, rec: SavedPlot) -> Optional[Path]:
+        idir = self.images_dir(ctx)
         return (idir / rec.png_filename) if idir is not None else None
 
     # ── load / persist ────────────────────────────────────────────────────
-    def load(self, app) -> None:
+    def load(self, ctx) -> None:
         """(Re)load records for the current dataset from persistence.json."""
         self.records = []
-        self._loaded_dir = self._data_dir(app)
-        section = _doc.get_section(app, _SECTION)
+        self._loaded_dir = self._data_dir(ctx)
+        # ``persistence._doc`` reads/writes ``persistence.json`` off the dataset
+        # state (ctx-native; it unwraps the app internally).
+        section = _doc.get_section(ctx, _SECTION)
         if isinstance(section, list):
             for entry in section:
                 if isinstance(entry, dict):
                     self.records.append(SavedPlot.from_dict(entry))
 
-    def ensure_loaded(self, app) -> None:
+    def ensure_loaded(self, ctx) -> None:
         """Load lazily, and reload when the dataset directory changed."""
-        if self._loaded_dir != self._data_dir(app):
-            self.load(app)
+        if self._loaded_dir != self._data_dir(ctx):
+            self.load(ctx)
 
-    def _persist(self, app) -> None:
-        _doc.set_section(app, _SECTION, [r.to_dict() for r in self.records])
+    def _persist(self, ctx) -> None:
+        _doc.set_section(ctx, _SECTION, [r.to_dict() for r in self.records])
 
     # ── mutations ─────────────────────────────────────────────────────────
-    def add(self, app, rec: SavedPlot, png_bytes: bytes) -> bool:
+    def add(self, ctx, rec: SavedPlot, png_bytes: bytes) -> bool:
         """Write the PNG and append *rec*. Returns False when there's no
         dataset directory to persist into."""
-        idir = self.images_dir(app)
+        idir = self.images_dir(ctx)
         if idir is None:
             return False
         try:
@@ -110,14 +112,14 @@ class SavedPlotsStore:
             _logger.warning("saved_plots: failed to write image: %s", exc)
             return False
         self.records.append(rec)
-        self._persist(app)
+        self._persist(ctx)
         return True
 
-    def delete(self, app, plot_id: str) -> None:
+    def delete(self, ctx, plot_id: str) -> None:
         keep: list[SavedPlot] = []
         for r in self.records:
             if r.id == plot_id:
-                p = self.image_path(app, r)
+                p = self.image_path(ctx, r)
                 if p is not None and p.exists():
                     try:
                         p.unlink()
@@ -126,16 +128,16 @@ class SavedPlotsStore:
             else:
                 keep.append(r)
         self.records = keep
-        self._persist(app)
+        self._persist(ctx)
 
-    def rename(self, app, plot_id: str, new_title: str) -> None:
+    def rename(self, ctx, plot_id: str, new_title: str) -> None:
         rec = self.get(plot_id)
         if rec is None:
             return
         rec.title = str(new_title)
-        self._persist(app)
+        self._persist(ctx)
 
-    def move(self, app, plot_id: str, up: bool) -> bool:
+    def move(self, ctx, plot_id: str, up: bool) -> bool:
         """Reorder a saved plot one slot within the *displayed* gallery
         (newest-first = ``reversed(records)``). ``up`` moves it toward the top.
 
@@ -150,28 +152,31 @@ class SavedPlotsStore:
             return False
         disp[idx], disp[swap] = disp[swap], disp[idx]
         self.records = list(reversed(disp))
-        self._persist(app)
+        self._persist(ctx)
         return True
 
-    def clear(self, app) -> None:
+    def clear(self, ctx) -> None:
         for r in list(self.records):
-            p = self.image_path(app, r)
+            p = self.image_path(ctx, r)
             if p is not None and p.exists():
                 try:
                     p.unlink()
                 except OSError:
                     swallowed()
         self.records = []
-        self._persist(app)
+        self._persist(ctx)
 
     def get(self, plot_id: str) -> Optional[SavedPlot]:
         return next((r for r in self.records if r.id == plot_id), None)
 
 
-def get_store(app) -> SavedPlotsStore:
-    """The app-wide store, created on first use."""
-    store = getattr(app, "_saved_plots_store", None)
+def get_store(ctx) -> SavedPlotsStore:
+    """The app-wide store, created on first use.
+
+    Lives in the feature's runtime namespace (``ctx.runtime.saved_plots.store``),
+    which stamps/reads the legacy ``app._saved_plots_store`` attribute."""
+    store = ctx.runtime.saved_plots.store
     if store is None:
         store = SavedPlotsStore()
-        app._saved_plots_store = store
+        ctx.runtime.saved_plots.store = store
     return store

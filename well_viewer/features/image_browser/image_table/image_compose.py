@@ -10,6 +10,8 @@ external importers (playground, grid_view) are unchanged.
 
 from __future__ import annotations
 
+from well_viewer.core.ui_helpers import norm_timepoint
+
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -102,7 +104,7 @@ def _numeric_token(value: object) -> Optional[float]:
     except ValueError:
         return None
 
-def _row_cmap_name(app, r: int) -> Optional[str]:
+def _row_cmap_name(ctx, r: int) -> Optional[str]:
     """Return the mpl colormap name for row *r*, or None when the row is
     set to ``Greys`` (untinted grayscale fast path).
 
@@ -111,7 +113,7 @@ def _row_cmap_name(app, r: int) -> Optional[str]:
     the gradient shown by the LutSelector's strip — high intensity gets
     the cmap's high-end colour, low intensity gets the low end.
     """
-    cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    cbs = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
     if not (0 <= r < len(cbs)):
         return None
     cb = cbs[r]
@@ -123,14 +125,14 @@ def _row_cmap_name(app, r: int) -> Optional[str]:
         return None
     return name
 
-def _row_tint(app, r: int) -> Optional[Tuple[float, float, float]]:
+def _row_tint(ctx, r: int) -> Optional[Tuple[float, float, float]]:
     """Legacy single-colour tint for row *r* (kept for export-cmap derivation).
 
     The Image Table thumbnails now go through ``_row_cmap_name`` so the full
     colormap maps across the LUT range; this helper still backs the export
     figure path, which constructs a black→tint LinearSegmentedColormap.
     """
-    cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    cbs = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
     if not (0 <= r < len(cbs)):
         return None
     cb = cbs[r]
@@ -144,7 +146,7 @@ def _row_tint(app, r: int) -> Optional[Tuple[float, float, float]]:
         return LUT_COLORS[name]
     return _tint_from_colormap(name)
 
-def _row_export_cmap(app, r: int):
+def _row_export_cmap(ctx, r: int):
     """Return a matplotlib colormap matching the row's LUT selector.
 
     For ``Greys`` returns the built-in ``"gray"`` cmap. For any named
@@ -156,12 +158,12 @@ def _row_export_cmap(app, r: int):
     LinearSegmentedColormap which produced monochrome exports that
     didn't match the multi-hue live view. Fixed.
     """
-    name = _row_cmap_name(app, r)  # None when row is "Greys"
+    name = _row_cmap_name(ctx, r)  # None when row is "Greys"
     if not name:
         return "gray"
     return name
 
-def _export_binary_mask(app, cache, well, chan, tp, fov, binary_mode, crop_tool):
+def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool):
     """Compute the white-cells array for a binary-mode export cell (cropped).
 
     Mirrors the live ``_render_mask_binary`` / ``_render_threshold_binary``
@@ -169,7 +171,7 @@ def _export_binary_mask(app, cache, well, chan, tp, fov, binary_mode, crop_tool)
     """
     import numpy as _np
 
-    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
     if mask_arr is None:
         return None
     if binary_mode == "threshold":
@@ -183,14 +185,14 @@ def _export_binary_mask(app, cache, well, chan, tp, fov, binary_mode, crop_tool)
             # the cell's OWN channel. Passing the raw tp/fov + no channel (as
             # this path used to) matches no rows → every cell reads as
             # below-threshold → an all-black mask.
-            norm_tp = app._norm_timepoint(tp) if hasattr(app, "_norm_timepoint") else tp
+            norm_tp = norm_timepoint(ctx, tp)
             norm_fov = review_norm_fov(fov)
             chan_l = str(chan or "").strip().lower()
             fluor = {str(c).strip().lower()
-                     for c in (app._app_state.channel.fluor_channels or [])}
+                     for c in (ctx.state.channel.fluor_channels or [])}
             gate_channel = chan_l if chan_l in fluor else None
             above_by_nid = review_build_threshold_map(
-                app, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
+                ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
             ) or {}
         except Exception:  # noqa: BLE001
             above_by_nid = {}
@@ -282,9 +284,9 @@ def _compose_image_table_rgb(
 
     return rgb
 
-def _row_channel(app, row_idx: int) -> str:
+def _row_channel(ctx, row_idx: int) -> str:
     """The representative channel token for grid row *row_idx* (its first cell)."""
-    cells = getattr(app, "_image_table_cells", None) or []
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not (0 <= row_idx < len(cells)) or not cells[row_idx]:
         return ""
     cb = cells[row_idx][0].get("chan_cb")
@@ -294,19 +296,19 @@ def _row_channel(app, row_idx: int) -> str:
         return ""
 
 
-def _shared_channel_lut(app, row_idx: int) -> Optional[Tuple[float, float]]:
+def _shared_channel_lut(ctx, row_idx: int) -> Optional[Tuple[float, float]]:
     """The shared per-channel display default for row *row_idx*'s channel (S4).
 
     Returns ``None`` when there's no shared default (then the row auto-fits as
     before). Lets a brightness tuned in Review Image flow in as the default."""
-    state = getattr(app, "_app_state", None)
+    state = ctx.state
     image_view = getattr(state, "image_view", None)
     if image_view is None or not hasattr(image_view, "get_lut"):
         return None
-    return image_view.get_lut(_row_channel(app, row_idx))
+    return image_view.get_lut(_row_channel(ctx, row_idx))
 
 
-def _parse_lut(app, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
+def _parse_lut(ctx, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
     """Read (lo, hi) for grid row *row_idx*; falls back to the shared per-channel
     default, else (None, None) for auto-fit.
 
@@ -316,7 +318,7 @@ def _parse_lut(app, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
     default; an "auto" row inherits the shared brightness-per-channel default
     (S4) when one exists, otherwise auto-fits.
     """
-    luts = getattr(app, "_image_table_lut", None) or {}
+    luts = getattr(ctx.runtime.image_table, "lut", None) or {}
     entry = luts.get(row_idx)
     lo = hi = None
     if entry:
@@ -326,19 +328,19 @@ def _parse_lut(app, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
 
     # Row in auto mode (no manual override) → inherit the shared default.
     if lo is None and hi is None:
-        shared = _shared_channel_lut(app, row_idx)
+        shared = _shared_channel_lut(ctx, row_idx)
         if shared is not None:
             return shared
     return lo, hi
 
 
-def _row_display_opts(app, row_idx: int) -> Tuple[bool, bool, str]:
+def _row_display_opts(ctx, row_idx: int) -> Tuple[bool, bool, str]:
     """Per-row display toggles: ``(use_tophat, show_boundaries, binary_mode)``.
 
     Read from the row's LUT/Display box widgets (``grid_view.build_lut_row``);
     defaults to all-off when the row has no box yet.
     """
-    entry = (getattr(app, "_image_table_lut", None) or {}).get(row_idx) or {}
+    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(row_idx) or {}
     source_w = entry.get("source")
     bound_w = entry.get("boundaries")
     bin_w = entry.get("binary")
@@ -350,13 +352,13 @@ def _row_display_opts(app, row_idx: int) -> Tuple[bool, bool, str]:
     return use_tophat, show_boundaries, binary_mode
 
 
-def _row_log_scale(app, row_idx: int) -> bool:
+def _row_log_scale(ctx, row_idx: int) -> bool:
     """Whether grid row *row_idx* shows its image on a log intensity scale.
 
     Separate from :func:`_row_display_opts` so that helper's 3-tuple unpack call
     sites stay unchanged. Reads the row's ``"log"`` checkbox (``build_lut_row``).
     """
-    entry = (getattr(app, "_image_table_lut", None) or {}).get(row_idx) or {}
+    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(row_idx) or {}
     log_w = entry.get("log")
     try:
         return bool(log_w.isChecked()) if log_w is not None else False
@@ -364,7 +366,7 @@ def _row_log_scale(app, row_idx: int) -> bool:
         return False
 
 def _load_well_channel(
-    app,
+    ctx,
     cache: Dict[Tuple[str, str, str], Dict],
     well: str,
     chan_lower: str,
@@ -390,7 +392,7 @@ def _load_well_channel(
     key = (well, chan_lower, variant)
     if key in cache:
         return cache[key]
-    info = app._app_state.dataset.pipeline_info or {}
+    info = ctx.state.dataset.pipeline_info or {}
     # Overlay images aren't keyed by a fluor channel; pass the nuclear token
     # as a sensible default so any token-based filtering inside the loader
     # has a real channel to match. The returned ``overlay`` dict comes from
@@ -400,12 +402,12 @@ def _load_well_channel(
         fluor_token = (info.get("nuclear_token") or chan_lower).strip().lower()
     try:
         fluor, overlay, mask, tophat = find_well_images_and_masks(
-            app._app_state.dataset.data_dir,
+            ctx.state.dataset.data_dir,
             well,
             fluor_token=fluor_token,
-            in_dir=app._app_state.dataset.in_dir,
-            _fov_tp_extractor=app._app_state.dataset.fov_tp_extractor,
-            _pipeline_info=app._app_state.dataset.pipeline_info,
+            in_dir=ctx.state.dataset.in_dir,
+            _fov_tp_extractor=ctx.state.dataset.fov_tp_extractor,
+            _pipeline_info=ctx.state.dataset.pipeline_info,
         )
     except Exception:
         fluor, overlay, mask, tophat = {}, {}, {}, {}
@@ -485,7 +487,7 @@ def _match_image_ref(images: Dict, fov: str, tp: str):
     return None, ""
 
 
-def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str, *, use_tophat: bool = False):
+def _load_array(ctx, cache: Dict, well: str, chan_upper: str, tp: str, fov: str, *, use_tophat: bool = False):
     """Load the float32 array for one (well, channel, timepoint, fov).
 
     The dropdown emits tokens normalized via ``_norm_token`` (``"1.0"`` →
@@ -500,11 +502,11 @@ def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str,
     timepoint so single-FOV datasets still render.
     """
     chan_lower = chan_upper.strip().lower()
-    fluor = _load_well_channel(app, cache, well, chan_lower, use_tophat=use_tophat)
+    fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=use_tophat)
     # When tophat is requested but not produced for this well/channel, drop
     # back to raw rather than rendering "(no image)".
     if (use_tophat and not fluor and chan_lower != NUC_SEG_TOKEN.lower()):
-        fluor = _load_well_channel(app, cache, well, chan_lower, use_tophat=False)
+        fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=False)
     if not fluor:
         return None
 
@@ -531,7 +533,7 @@ def _load_array(app, cache: Dict, well: str, chan_upper: str, tp: str, fov: str,
         logger.debug("image_table: failed to load %r: skipping tile", ref, exc_info=True)
         return None
 
-def _load_mask_array(app, cache, well, tp, fov):
+def _load_mask_array(ctx, cache, well, tp, fov):
     """Return the int32 segmentation mask for (well, tp, fov), or None.
 
     The mask dict is populated as a side effect of any prior ``_load_array``
@@ -565,7 +567,7 @@ def _load_mask_array(app, cache, well, tp, fov):
         logger.debug("image_table: failed to load mask %r: no overlay", ref, exc_info=True)
         return None
 
-def _load_ratio_array(app, cache, well, ratio, tp, fov, *, use_tophat):
+def _load_ratio_array(ctx, cache, well, ratio, tp, fov, *, use_tophat):
     """Compute the pixel-wise ratio for a RatioMetric.  Returns float32 or None."""
     try:
         import numpy as _np
@@ -575,8 +577,8 @@ def _load_ratio_array(app, cache, well, ratio, tp, fov, *, use_tophat):
     den_chan = (ratio.denominator_channel or "").strip()
     if not num_chan or not den_chan:
         return None
-    num_arr = _load_array(app, cache, well, num_chan.upper(), tp, fov, use_tophat=use_tophat)
-    den_arr = _load_array(app, cache, well, den_chan.upper(), tp, fov, use_tophat=use_tophat)
+    num_arr = _load_array(ctx, cache, well, num_chan.upper(), tp, fov, use_tophat=use_tophat)
+    den_arr = _load_array(ctx, cache, well, den_chan.upper(), tp, fov, use_tophat=use_tophat)
     if num_arr is None or den_arr is None:
         return None
     num_f = _np.asarray(num_arr, dtype=_np.float32)
@@ -648,12 +650,12 @@ def _format_pixel_intensity(arr, y: int, x: int) -> str:
         return _fmt(px)
     return ",".join(_fmt(v) for v in np.atleast_1d(px).tolist())
 
-def _render_mask_binary(app, cache, well, tp, fov, crop_tool, sz):
+def _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz):
     """White-on-black image of every segmented cell (full mask)."""
     from well_viewer.core.ui_helpers import make_overlay_thumb
     import numpy as _np
 
-    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
     if mask_arr is None:
         return None
     cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
@@ -661,7 +663,7 @@ def _render_mask_binary(app, cache, well, tp, fov, crop_tool, sz):
     rgb = _np.stack([binary, binary, binary], axis=-1)
     return make_overlay_thumb(rgb, sz, sz, None, None)
 
-def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
+def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz):
     """White-on-black image of only the cells above the active ON threshold.
 
     Reuses the Review Image gating logic (``review_build_threshold_map``) so
@@ -672,7 +674,7 @@ def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
     from well_viewer.core.ui_helpers import make_overlay_thumb
     import numpy as _np
 
-    mask_arr = _load_mask_array(app, cache, well, tp, fov)
+    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
     if mask_arr is None:
         return None
     above_by_nid: Dict[int, bool] = {}
@@ -685,17 +687,17 @@ def _render_threshold_binary(app, cache, well, chan, tp, fov, crop_tool, sz):
         # tp/fov the same way the Review Image tab does before the lookup —
         # otherwise no rows match and every cell reads as below-threshold
         # (an all-black mask) for any non-integer timepoint token.
-        norm_tp = app._norm_timepoint(tp) if hasattr(app, "_norm_timepoint") else tp
+        norm_tp = norm_timepoint(ctx, tp)
         norm_fov = review_norm_fov(fov)
         # Gate each cell by ITS OWN channel's ThreshFracOn (set per-channel in
         # Sample Definitions), not whatever channel the Segmentation tab last
         # showed. Only override for real fluor channels — nuc+seg / ratio cells
         # fall back to the displayed-channel default.
         chan_l = str(chan or "").strip().lower()
-        fluor = {str(c).strip().lower() for c in (app._app_state.channel.fluor_channels or [])}
+        fluor = {str(c).strip().lower() for c in (ctx.state.channel.fluor_channels or [])}
         gate_channel = chan_l if chan_l in fluor else None
         above_by_nid = review_build_threshold_map(
-            app, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
+            ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
         ) or {}
     except Exception:  # noqa: BLE001 — fall back to an all-off mask on any error
         above_by_nid = {}

@@ -57,13 +57,34 @@ EXPORT_PROFILES = {
 
 
 def _ensure_custom_export_profiles(app) -> dict:
-    if not hasattr(app, "_export_style_custom_profiles"):
-        app._export_style_custom_profiles = {}
-    return app._export_style_custom_profiles
+    if app._ctx.runtime.export.custom_profiles is None:
+        app._ctx.runtime.export.custom_profiles = {}
+    return app._ctx.runtime.export.custom_profiles
 
 
 def _get_all_profile_names(app) -> list[str]:
     custom = _ensure_custom_export_profiles(app)
+    return [*EXPORT_PROFILES.keys(), *custom.keys()]
+
+
+def ensure_custom_export_profiles_ctx(ctx) -> dict:
+    """ctx-native form of :func:`_ensure_custom_export_profiles`.
+
+    Reads/creates the session custom-profile dict through
+    ``ctx.runtime.export.custom_profiles`` (backed by the same
+    ``app._export_style_custom_profiles`` attribute) so feature panels list and
+    apply export profiles without naming the god-object.
+    """
+    profiles = ctx.runtime.export.custom_profiles
+    if profiles is None:
+        profiles = {}
+        ctx.runtime.export.custom_profiles = profiles
+    return profiles
+
+
+def get_all_profile_names_ctx(ctx) -> list[str]:
+    """ctx-native form of :func:`_get_all_profile_names`."""
+    custom = ensure_custom_export_profiles_ctx(ctx)
     return [*EXPORT_PROFILES.keys(), *custom.keys()]
 
 
@@ -98,7 +119,16 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
         dock = _resolve_export_dock(app, fig)
         parent = dock if dock is not None else (canvas.parent() if canvas is not None else app)
         if not hasattr(app, "_export_style_sidebars"):
-            app._export_style_sidebars = {}
+            # Register the sidebar map in the widget registry (stamps
+            # ``app._export_style_sidebars`` too) so the ctx-native redraw
+            # orchestrator reaches it via ``ctx.widgets`` instead of the
+            # god-object. Fall back to a plain attribute if no ctx is wired
+            # (bare test doubles).
+            reg = getattr(getattr(app, "_ctx", None), "widgets", None)
+            if reg is not None:
+                reg.register("_export_style_sidebars", {})
+            else:
+                app._export_style_sidebars = {}
         key = id(fig)
         sb = app._export_style_sidebars.get(key)
         if sb is None:
@@ -145,7 +175,7 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
         # routing the open path through it risks extra restyle+redraw passes
         # on a heavy (tall, 3-panel) bar figure.
         try:
-            apply_export_style_to_current(app, fig, canvas)
+            apply_export_style_to_current(app._ctx, fig, canvas)
         except Exception:
             swallowed()  # was: pass (silent except)
         # Re-populate the line-order lists so they reflect the current rep-set

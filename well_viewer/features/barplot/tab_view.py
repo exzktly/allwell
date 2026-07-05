@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from well_viewer.core.channel_state_controller import on_metric_selected
+
+from well_viewer.core.channel_state_controller import on_plot_channel_selected
+
+from well_viewer.features.barplot.controller import (bar_reset_order, open_bar_timepoint_selector, toggle_bar_group_mode, toggle_bar_pool_replicates, toggle_bar_pool_rset_cells, toggle_swarm, toggle_violin, on_bar_drag_press, on_bar_drag_release)
+
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
@@ -25,8 +31,10 @@ from well_viewer.features.barplot.controller import (
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
 from well_viewer.features.barplot.controller import on_bar_drag_press
+from well_viewer.features.barplot.controller import on_bar_drag_motion
 from well_viewer.features.barplot.controller import on_bar_drag_release
 from well_viewer.features.export.service import export_bar_plot_data
+from ui.theme import ACCENT
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -67,7 +75,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     chan_cb = reg.register("_chan_cb_bar", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
-        lambda _i, _src=chan_cb: ctx.app._on_plot_channel_selected(_src)
+        lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
     chan_cb.hide()
 
@@ -81,7 +89,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     mf_l.addWidget(QLabel("Property:", metric_frame))
     metric_cb = reg.register("_metric_cb_bar", QComboBox(metric_frame))
     metric_cb.addItems(_METRIC_ORDER)
-    metric_cb.currentIndexChanged.connect(lambda _i: ctx.app._on_metric_selected())
+    metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))
     mf_l.addWidget(metric_cb)
     cl.addWidget(metric_frame)
     metric_frame.hide()
@@ -92,21 +100,21 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import make_popover_button
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", bar_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
-    install_fold_change_controls(ctx.app, _fc_panel, _fc_lay, scope="bar")
+    install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="bar")
     cl.addWidget(_fc_btn)
 
     cl.addStretch(1)
 
     reset_order_btn = reg.register("_bar_reset_order_btn", QPushButton("Reset Order", bar_ctrl))
     reset_order_btn.setProperty("variant", "toggle_muted")
-    reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx.app))
+    reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
     cl.addWidget(reset_order_btn)
 
     # IconButton — matches Sample Definitions top toolbar style; see
     # equivalent block in features/lineplot/tab_view.py for rationale.
     from widgets.icon_button import IconButton as _IconButton
     _export_btn = _IconButton("download", bar_ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_bar_plot_data(ctx.app))
+    _export_btn.clicked.connect(lambda _=False: export_bar_plot_data(ctx))
     cl.addWidget(_export_btn)
     _copy_btn = _IconButton("copy", bar_ctrl, tooltip="Copy SVG")
     _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
@@ -139,7 +147,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     tp_button = reg.register("_bar_tp_button", QPushButton("Select Timepoints", shape_ctrl))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(
-        lambda _=False: open_bar_timepoint_selector(ctx.app)
+        lambda _=False: open_bar_timepoint_selector(ctx)
     )
     sl.addWidget(tp_button)
     tp_label = reg.register("_bar_tp_label", QLabel("(0 selected)", shape_ctrl))
@@ -171,7 +179,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     group_mode_btn.setToolTip(
         "Cluster the bars by well/group vs by timepoint.")
     group_mode_btn.clicked.connect(
-        lambda _=False: toggle_bar_group_mode(ctx.app)
+        lambda _=False: toggle_bar_group_mode(ctx)
     )
     _disp_lay.addWidget(group_mode_btn)
 
@@ -184,7 +192,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Collapse each replicate set's wells into one pooled column "
         "(off = one column per well).")
     pool_reps_btn.clicked.connect(
-        lambda _=False: toggle_bar_pool_replicates(ctx.app)
+        lambda _=False: toggle_bar_pool_replicates(ctx)
     )
     # Always present in the Display ▾ popover; enable-gated on active replicate
     # sets by refresh_bar_layout_btn_state. Toggling a child's visibility inside
@@ -199,7 +207,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Pool every cell across a replicate set before drawing its beeswarm / "
         "violin distribution (off = keep per-well distributions).")
     pool_rset_cells_btn.clicked.connect(
-        lambda _=False: toggle_bar_pool_rset_cells(ctx.app)
+        lambda _=False: toggle_bar_pool_rset_cells(ctx)
     )
     # Always present; enable-gated on (violin/beeswarm AND active rsets).
     _disp_lay.addWidget(pool_rset_cells_btn)
@@ -209,7 +217,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     swarm_btn.setCheckable(True)
     swarm_btn.setToolTip(
         "Overlay the individual per-cell points on each bar.")
-    swarm_btn.clicked.connect(lambda _=False: ctx.app._toggle_swarm())
+    swarm_btn.clicked.connect(lambda _=False: toggle_swarm(ctx))
     _disp_lay.addWidget(swarm_btn)
     # swarm/violin state lives on the typed BarPlotState slice (defaults False).
 
@@ -219,7 +227,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     violin_btn.setToolTip(
         "Draw a violin (kernel-density) shape for each group. "
         "Enables the Smooth control.")
-    violin_btn.clicked.connect(lambda _=False: ctx.app._toggle_violin())
+    violin_btn.clicked.connect(lambda _=False: toggle_violin(ctx))
     _disp_lay.addWidget(violin_btn)
 
     _disp_lay.addWidget(QLabel("Smooth:", shape_ctrl))
@@ -232,7 +240,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Violin kernel bandwidth — higher is smoother. "
         "Active only when Violin is on.")
     violin_slider.valueChanged.connect(
-        lambda _v: (redraw_bars(ctx.app) if ctx.state.bar.violin else None)
+        lambda _v: (redraw_bars(ctx) if ctx.state.bar.violin else None)
     )
     violin_slider.setEnabled(False)
     _disp_lay.addWidget(violin_slider)
@@ -248,11 +256,12 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "pairwise tests. Run a test in Statistics first; brackets appear for the "
         "compared groups that match the current bars (grouped / pooled mode).")
 
-    def _toggle_bar_significance(_=False, _app=ctx.app):
-        on = bool(_app._bar_significance_btn.isChecked())
-        _app._app_state.plot.show_significance = on
-        _app._bar_significance_btn.setText(f"Significance: {'On' if on else 'Off'}")
-        redraw_bars(_app)
+    def _toggle_bar_significance(_=False):
+        _sig = ctx.widgets.get_or_none("_bar_significance_btn")
+        on = bool(_sig.isChecked())
+        ctx.state.plot.show_significance = on
+        _sig.setText(f"Significance: {'On' if on else 'Off'}")
+        redraw_bars(ctx)
     sig_btn.clicked.connect(_toggle_bar_significance)
     _disp_lay.addWidget(sig_btn)
 
@@ -262,7 +271,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _band_sep.setFrameShape(QFrame.HLine)
     _band_sep.setObjectName("HRule")
     _disp_lay.addWidget(_band_sep)
-    _disp_lay.addWidget(make_band_controls(ctx.app, _disp_panel, with_fov=True))
+    _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
 
     sl.addStretch(1)
     right_l.addWidget(shape_ctrl)
@@ -270,7 +279,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx.app, card, "Bar Plots")
+    wire_save_to_gallery(ctx, card, "Bar Plots")
     _sw = make_plot_view_switcher(ctx, 'Bar Plots')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)
@@ -290,9 +299,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     card.setMinimumHeight(int(_FIG_H * _DPI) + 110)
 
     # Error band now lives in the "Display ▾" popover above (C1); no card row.
-    card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx.app))
+    card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
-    card.panelCopied.connect(ctx.app._set_status)
+    card.panelCopied.connect(ctx.set_status)
     card.setStatsChipVisible(False)
 
     scroll_canvas = reg.register("_bar_scroll_canvas", QScrollArea(bar_right))
@@ -302,11 +311,14 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     install_canvas_wheel_scroll(canvas, scroll_canvas)
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     right_l.addWidget(wrap_with_empty_state(
-        ctx.app, scroll_canvas, icon="bar-chart-horizontal",
+        ctx.window, scroll_canvas, icon="bar-chart-horizontal",
     ), 1)
 
     # Drag-to-reorder bars
     ctx.runtime.barplot.drag_state = {"active": False, "src_idx": -1, "cur_idx": -1}
-    canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx.app))
-    canvas.mpl_connect("motion_notify_event", ctx.app._on_bar_drag_motion)
-    canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx.app))
+    canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx))
+    canvas.mpl_connect(
+        "motion_notify_event",
+        partial(on_bar_drag_motion, ctx, accent_color=ACCENT),
+    )
+    canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx))

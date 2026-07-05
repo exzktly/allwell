@@ -26,11 +26,11 @@ def test_slice_defaults_false(viewer_app):
 def test_toggles_are_mutually_exclusive_on_the_slice(viewer_app):
     app = viewer_app
     bar = app._app_state.bar
-    toggle_swarm(app)
+    toggle_swarm(app._ctx)
     assert bar.swarm is True and bar.violin is False
-    toggle_violin(app)                 # turning violin on clears swarm
+    toggle_violin(app._ctx)                 # turning violin on clears swarm
     assert bar.violin is True and bar.swarm is False
-    toggle_violin(app)
+    toggle_violin(app._ctx)
     assert bar.violin is False
 
 
@@ -38,12 +38,12 @@ def test_persistence_round_trip_through_slice(viewer_app):
     app = viewer_app
     app._app_state.bar.swarm = True
     app._app_state.bar.violin = False
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     bar_snap = snap["tabs"]["Bar Plots"]      # per-tab sub-dict
     assert bar_snap["swarm"] is True and bar_snap["violin"] is False
 
     # Flip the live slice, then apply the saved bar state — the slice must follow.
     app._app_state.bar.swarm = False
-    vs._apply_bar(app, bar_snap)
+    vs._apply_bar(app._ctx, bar_snap)
     assert app._app_state.bar.swarm is True
     assert app._app_state.bar.violin is False

@@ -18,7 +18,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 
-def build_reference_fields(app, well: str, chan_lower: str, *,
+def build_reference_fields(ctx, well: str, chan_lower: str, *,
                            flatfield_mode: str, background_method: str,
                            max_samples: int = 30):
     """Estimate ``(ff_field, bg_field)`` from *well*'s raw frames for a channel.
@@ -33,7 +33,7 @@ def build_reference_fields(app, well: str, chan_lower: str, *,
     from well_viewer.data.image_discovery import open_imgref_as_array
     from well_viewer.features.image_browser.image_table.controller import _load_well_channel
 
-    refs = _load_well_channel(app, {}, well, chan_lower, use_tophat=False)
+    refs = _load_well_channel(ctx, {}, well, chan_lower, use_tophat=False)
     frames: list = []
     for ref in list(refs.values())[:max_samples]:
         try:
@@ -67,7 +67,7 @@ class _ReferenceBridge(QObject):
     failed = Signal(str)
 
 
-def request_reference_fields(app, well: str, chan_lower: str, *,
+def request_reference_fields(ctx, well: str, chan_lower: str, *,
                              flatfield_mode: str, background_method: str,
                              on_done, on_failed=None, max_samples: int = 30):
     """Build reference fields on a daemon thread; call ``on_done(well,
@@ -105,7 +105,7 @@ def request_reference_fields(app, well: str, chan_lower: str, *,
     def _run() -> None:
         try:
             ff, bg = build_reference_fields(
-                app, well, chan_lower, flatfield_mode=flatfield_mode,
+                ctx, well, chan_lower, flatfield_mode=flatfield_mode,
                 background_method=background_method, max_samples=max_samples)
             bridge.done.emit((well, chan_lower, ff, bg))
         except Exception as exc:  # never raise off the GUI thread

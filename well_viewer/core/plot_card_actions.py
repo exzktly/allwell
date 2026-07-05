@@ -2,7 +2,7 @@
 
 These two toolbar actions used to be closures stamped on the ``WellViewerApp``
 god-object (``app._copy_active_card_as_svg`` / ``app._save_active_card_figure``),
-and every plot feature's builder reached back through ``ctx.app`` to wire its
+and every plot feature's builder reached back through the god-object to wire its
 Copy / Save buttons to them (A8). They now live here as plain functions taking
 the ``ViewerContext``: the active plot card is resolved through the widget
 registry (``ctx.widgets``), and the only remaining god-object touches are the

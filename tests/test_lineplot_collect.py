@@ -26,7 +26,7 @@ def _kw(use_sem=True):
 def test_collect_line_series_per_well_emits_one_series_per_well(mock_app):
     # No rep-sets active → per-well mode iterates ``_selected_wells``
     mock_app.selections = []
-    series, band = collect_line_series(mock_app, **_kw())
+    series, band = collect_line_series(mock_app._ctx, **_kw())
     assert band == "SEM"
     keys = sorted(s.key for s in series)
     assert keys == ["A01", "A02", "B01", "B02", "C01"]
@@ -38,7 +38,7 @@ def test_collect_line_series_per_well_emits_one_series_per_well(mock_app):
 
 def test_collect_line_series_repset_mode_uses_mean_of_means(mock_app):
     # MockApp.selections defines CTRL (A01+A02) and TREAT (B01+B02).
-    series, _ = collect_line_series(mock_app, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, **_kw())
     keys = {s.key for s in series}
     assert keys == {"CTRL", "TREAT"}
     treat = next(s for s in series if s.key == "TREAT")
@@ -53,7 +53,7 @@ def test_collect_line_series_fc_state_off_yields_raw(mock_app):
     has ``_fc_vs_control_on=True``."""
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
-    series, _ = collect_line_series(mock_app, fc_state=FC_STATE_OFF, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, fc_state=FC_STATE_OFF, **_kw())
     by_key = {s.key: s for s in series}
     ctrl_pt = next(p for p in by_key["CTRL"].points if math.isclose(p.t, 1.0))
     # Raw mean: 100 (mean-of-means of A01/A02 at t=1).
@@ -65,7 +65,7 @@ def test_collect_line_series_fc_self_control_yields_one(mock_app):
     series' points all equal 1.0 (same fix as the bar plot's PR 3)."""
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
-    series, _ = collect_line_series(mock_app, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, **_kw())
     by_key = {s.key: s for s in series}
     for p in by_key["CTRL"].points:
         if p.has_mean:
@@ -76,7 +76,7 @@ def test_collect_line_series_fc_treat_against_ctrl(mock_app):
     """TREAT's values at each tp divided by CTRL's mean at the same tp."""
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
-    series, _ = collect_line_series(mock_app, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, **_kw())
     by_key = {s.key: s for s in series}
     # CTRL = 100 at every t. TREAT = 100/200/400 at t=0/1/2.
     # Ratio = 1.0 / 2.0 / 4.0.
@@ -90,7 +90,7 @@ def test_collect_line_series_fc_treat_against_ctrl(mock_app):
 def test_collect_line_series_t0_baseline(mock_app):
     """vs-t0 baselines each member to its own earliest finite mean."""
     mock_app.fc_vs_t0_on = True
-    series, _ = collect_line_series(mock_app, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, **_kw())
     for s in series:
         if not s.points:
             continue
@@ -109,7 +109,7 @@ def test_collect_line_series_miss_sink_records_unresolved(mock_app):
     mock_app.fc_vs_control_on = True
     mock_app.fc_control_label = "CTRL"
     misses: set = set()
-    _, _ = collect_line_series(mock_app, miss_sink=misses, **_kw())
+    _, _ = collect_line_series(mock_app._ctx, miss_sink=misses, **_kw())
     assert 2.0 in misses
 
 
@@ -117,7 +117,7 @@ def test_collect_line_series_well_branch_honours_drag_order(mock_app):
     """``_line_order_wells`` reorders per-well traces."""
     mock_app.selections = []  # disable rep-sets to enter per-well branch
     mock_app._line_order_wells = ["C01", "B01"]
-    series, _ = collect_line_series(mock_app, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, **_kw())
     keys = [s.key for s in series]
     # Pre-ordered (C01 then B01) come first; the rest in their natural order.
     assert keys[:2] == ["C01", "B01"]
@@ -125,7 +125,7 @@ def test_collect_line_series_well_branch_honours_drag_order(mock_app):
 
 def test_collect_line_series_includes_n_wells_in_display(mock_app):
     """Rep-set series with >1 wells get '(n=N)' in their display label."""
-    series, _ = collect_line_series(mock_app, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, **_kw())
     treat = next(s for s in series if s.key == "TREAT")
     assert "n=2" in treat.display
 
@@ -157,20 +157,20 @@ def test_collect_line_series_fov_spread_populates_frac_spread(mock_app, monkeypa
     single-well active set to exercise the per-FOV path.
     """
     import well_viewer.features.lineplot.controller as lp
-    from well_viewer.domain.batch_models import ReplicateSet
 
-    # Single-well active set → replicate_unit == "fov" when FOV mode is on.
-    monkeypatch.setattr(mock_app, "_rep_sets_active",
-                        lambda: [ReplicateSet("SOLO", ["A01"])], raising=False)
+    # Single-well active set → replicate_unit == "fov" when FOV mode is on. The
+    # collector now reads rep-sets / FOV flag from ``ctx.state`` (A8), so drive
+    # them through the MockApp's typed-state fields rather than method stubs.
+    mock_app.selections = [{"name": "SOLO", "wells": ["A01"], "hidden": False}]
     # Force FOV-spread mode and stub the per-FOV stats with a known non-zero
     # fraction error (idx 3) + per-FOV n-above mean/spread (idx 4/5).
-    monkeypatch.setattr(mock_app, "_use_fov_spread_active", lambda: True, raising=False)
+    monkeypatch.setattr(mock_app, "_use_fov_replicates", True, raising=False)
     monkeypatch.setattr(
         lp, "compute_rep_per_fov_stats",
-        lambda app, rset, t, thr, sem: (100.0, 5.0, 0.4, 0.12, 3.0, 1.0),
+        lambda ctx, rset, t, thr, sem: (100.0, 5.0, 0.4, 0.12, 3.0, 1.0),
     )
 
-    series, _ = collect_line_series(mock_app, **_kw())
+    series, _ = collect_line_series(mock_app._ctx, **_kw())
     frac_pts = [p for s in series for p in s.points if p.has_frac]
     assert frac_pts, "expected fraction points in rep-set FOV-spread mode"
     assert all(math.isclose(p.frac, 0.4) for p in frac_pts)

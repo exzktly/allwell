@@ -39,7 +39,7 @@ class _FakeRegistry:
 def _ctx(cards, app):
     # A real ViewerContext so the named service accessors (set_status /
     # save_figure_dialog) are exercised, delegating to the fake app.
-    return ViewerContext(app=app, state=None, bus=None, widgets=_FakeRegistry(cards))
+    return ViewerContext(_window=app, state=None, bus=None, widgets=_FakeRegistry(cards))
 
 
 def test_active_card_picks_first_visible_in_priority_order():

@@ -31,11 +31,12 @@ def test_flatfield_field_for_gaussian_and_none(loaded_app):
     app = loaded_app
     arr = (np.random.default_rng(0).random((48, 48)).astype(np.float32) * 100)
     _set_flatfield_mode(app, "gaussian")
-    field = C.flatfield_field_for(app, "GFP", arr)
+    # A8 D4: flatfield_field_for is ctx-native — pass the app's context.
+    field = C.flatfield_field_for(app._ctx, "GFP", arr)
     assert field is not None and field.shape == arr.shape
     assert abs(float(field.mean()) - 1.0) < 1e-2          # mean-1 field
     _set_flatfield_mode(app, "none")
-    assert C.flatfield_field_for(app, "GFP", arr) is None  # identity → no-op
+    assert C.flatfield_field_for(app._ctx, "GFP", arr) is None  # identity → no-op
 
 
 def test_set_source_updates_state_syncs_control_and_clears_lut(loaded_app):
@@ -43,17 +44,17 @@ def test_set_source_updates_state_syncs_control_and_clears_lut(loaded_app):
     chan = str(app._app_state.channel.active_image_channel or "").lower()
     app._app_state.image_view.lut_by_channel[chan] = (10.0, 200.0)
 
-    set_review_image_source(app, "flatfield")
+    set_review_image_source(app._ctx, "flatfield")
     assert app._app_state.review_image.image_source == "flatfield"
     assert app._review_image_source_seg.currentData() == "flatfield"
     # Switching stages drops the active channel's cached LUT (ranges differ).
     assert chan not in app._app_state.image_view.lut_by_channel
 
-    set_review_image_source(app, "corrected")
+    set_review_image_source(app._ctx, "corrected")
     assert app._app_state.review_image.image_source == "corrected"
     assert app._review_image_source_seg.currentData() == "corrected"
 
-    set_review_image_source(app, "bogus")  # invalid → ignored
+    set_review_image_source(app._ctx, "bogus")  # invalid → ignored
     assert app._app_state.review_image.image_source == "corrected"
 
 

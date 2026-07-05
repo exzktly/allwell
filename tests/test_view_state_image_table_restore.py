@@ -14,6 +14,20 @@ from well_viewer.features.image_browser.image_table import controller as C  # no
 pytestmark = pytest.mark.qt
 
 
+class _RuntimeNS:
+    """Mimics ``AppRuntime._FeatureRuntime``: attributes set at construction
+    resolve; any *unset* attribute returns ``None`` (never ``AttributeError``),
+    exactly like the real prefix-backed runtime the ctx-native
+    ``_apply_image_table`` reads. Lets the fakes below omit the widget handles a
+    given restore payload never touches."""
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __getattr__(self, _name):  # only reached for names not in __dict__
+        return None
+
+
 # ── Fast-lane coverage (no full WellViewerApp → not auto-marked ``slow``) ─────
 # These exercise the snapshot/apply helpers against hand-built widgets so the
 # round-trip — and the "restore must not generate images on load" contract — run
@@ -29,14 +43,17 @@ def test_apply_image_table_crop_restore_does_not_generate():
 
     calls = []
     ct = CropTool(on_change=lambda: calls.append(1))
-    app = SimpleNamespace(
-        _image_table_crop_tool=ct,
-        _image_table_cells=[],
-        _image_table_lut={},
-        _image_table_row_lut_color_cbs=[],
-        _app_state=SimpleNamespace(image_table=ImageTableState()),
+    # ctx-shaped fake: the ctx-native ``_apply_image_table`` reads the live grid
+    # objects off ``ctx.runtime.image_table`` (None for the handles this payload
+    # never touches) and the typed slice off ``ctx.state``.
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(image_table=ImageTableState()),
+        runtime=SimpleNamespace(image_table=_RuntimeNS(
+            crop_tool=ct, cells=[], lut={}, row_lut_color_cbs=[],
+            row_chan_cbs=None, row_well_cbs=None)),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
     )
-    vs._apply_image_table(app, {"crop": [3, 5, 40, 60], "crop_mode": False})
+    vs._apply_image_table(ctx, {"crop": [3, 5, 40, 60], "crop_mode": False})
     assert tuple(ct.crop) == (3, 5, 40, 60)
     assert calls == [], "restore must not trigger image_table_generate on load"
 
@@ -75,25 +92,35 @@ def test_channel_and_source_round_trip_minimal_widgets(qapp):
         "binary": _combo(["None", "Mask"], data=["", "mask"]),
         "log": QCheckBox(), "chan": "GFP",
     }
+    cells = [[cell]]
+    lut = {0: lut0}
+    color_cbs = [LutSelector()]
+    crop = CropTool(on_change=lambda: None)
+    it_state = SimpleNamespace(image_table=ImageTableState(rows=1, cols=1))
+    # ctx-shaped fake: ``state`` / ``runtime.image_table`` (None for unset grid
+    # widgets) / ``widgets`` (+ a ``_ctx`` self-ref) back both the ctx-native
+    # ``_snapshot_image_table`` and ``_apply_image_table`` off the same live
+    # objects.
     app = SimpleNamespace(
-        _image_table_cells=[[cell]],
-        _image_table_lut={0: lut0},
-        _image_table_row_lut_color_cbs=[LutSelector()],
-        _image_table_crop_tool=CropTool(on_change=lambda: None),
-        _app_state=SimpleNamespace(image_table=ImageTableState(rows=1, cols=1)),
+        state=it_state,
+        runtime=SimpleNamespace(image_table=_RuntimeNS(
+            cells=cells, lut=lut, row_lut_color_cbs=color_cbs, crop_tool=crop,
+            row_chan_cbs=None, row_well_cbs=None)),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
     )
+    app._ctx = app
 
     cell["chan_cb"].setCurrentText("mCherry")
     lut0["source"].setCurrentIndex(1)  # Corrected
 
-    snap = vs._snapshot_image_table(app)
+    snap = vs._snapshot_image_table(app._ctx)
     assert snap["cells"][0][0]["chan"] == "mCherry"
     assert snap["row_luts"]["0"]["source"] == "corrected"
 
     # Wipe, then restore through the apply helper.
     cell["chan_cb"].setCurrentText("GFP")
     lut0["source"].setCurrentIndex(0)
-    vs._apply_image_table(app, snap)
+    vs._apply_image_table(app._ctx, snap)
 
     assert cell["chan_cb"].currentText() == "mCherry"
     assert lut0["source"].currentData() == "corrected"
@@ -109,9 +136,9 @@ def _set_combo_by_data(cb, data) -> bool:
 
 def test_image_table_display_state_round_trips(loaded_app):
     app = loaded_app
-    C.image_table_repopulate_dropdowns(app)
+    C.image_table_repopulate_dropdowns(app._ctx)
     # Build the selector grid + per-row LUT/colormap rows (no render).
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     luts = getattr(app, "_image_table_lut", None) or {}
     color_cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
     if not luts or not color_cbs or 0 not in luts:
@@ -126,7 +153,7 @@ def test_image_table_display_state_round_trips(loaded_app):
     row0["min"].setText("100")
     row0["max"].setText("2000")
 
-    snap = vs._snapshot_image_table(app)
+    snap = vs._snapshot_image_table(app._ctx)
     assert snap.get("crop") == [3, 5, 40, 60]
     s0 = snap["row_luts"]["0"]
     assert s0.get("source") == "corrected"
@@ -140,7 +167,7 @@ def test_image_table_display_state_round_trips(loaded_app):
     row0["min"].setText("")
     row0["max"].setText("")
 
-    vs._apply_image_table(app, snap)
+    vs._apply_image_table(app._ctx, snap)
 
     # Dimensions are unchanged, so the live widgets are not rebuilt.
     live0 = app._image_table_lut[0]
@@ -155,7 +182,7 @@ def test_snapshot_tolerates_unbuilt_image_table(loaded_app):
     """No grid built yet → snapshot is an empty dict, not an exception."""
     app = loaded_app
     app._image_table_cells = []
-    assert vs._snapshot_image_table(app) == {}
+    assert vs._snapshot_image_table(app._ctx) == {}
 
 
 def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
@@ -164,8 +191,8 @@ def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
     ``apply_pending_tab_state`` (rather than calling ``_apply_image_table``
     directly). This guards the build-order/axis gap the user hit."""
     app = loaded_app
-    C.image_table_repopulate_dropdowns(app)
-    C.image_table_apply_preset(app, "channel", "timepoint")
+    C.image_table_repopulate_dropdowns(app._ctx)
+    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     cells = getattr(app, "_image_table_cells", None) or []
     luts = getattr(app, "_image_table_lut", None) or {}
     if not cells or not cells[0] or 0 not in luts:
@@ -180,7 +207,7 @@ def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
     if not _set_combo_by_data(luts[0]["source"], "corrected"):
         pytest.skip("no Corrected source option")
 
-    snap = vs.snapshot(app)
+    snap = vs.snapshot(app._ctx)
     it = (snap.get("tabs") or {}).get("Image Table") or {}
     assert it.get("cells", [[{}]])[0][0].get("chan") == want_chan
     assert it["row_luts"]["0"].get("source") == "corrected"
@@ -188,10 +215,10 @@ def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
     # New session: wipe both, then replay through the public restore path.
     chan_cb.setCurrentText(chans[0])
     _set_combo_by_data(luts[0]["source"], "raw")
-    vs.restore(app, snap)
+    vs.restore(app._ctx, snap)
     # restore stashes pending + tries to activate the tab; apply explicitly so
     # the assertion doesn't depend on notebook/subtab navigation in the harness.
-    vs.apply_pending_tab_state(app, "Image Table")
+    vs.apply_pending_tab_state(app._ctx, "Image Table")
 
     assert app._image_table_cells[0][0]["chan_cb"].currentText() == want_chan
     assert app._image_table_lut[0]["source"].currentData() == "corrected"

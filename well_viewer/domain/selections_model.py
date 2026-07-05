@@ -79,6 +79,118 @@ def well_rank(token: Any) -> int:
         return 1 << 30
 
 
+def color_for_wells(wells: Any) -> str:
+    """Canonical group colour: the rank colour of the *lowest* well in *wells*.
+
+    So every well in a group (and its line/bar trace) shares one colour. The
+    pure implementation shared by ``core`` and feature code (A8 teardown), lifted
+    verbatim from ``grouping.controller.rank_color_wells`` so there is one home
+    for it and neither layer reaches through the god-object. Indexes the raw
+    ``WELL_COLORS`` palette directly to preserve the exact historical colours.
+    """
+    from well_viewer.domain.plate_layout import WELL_COLORS
+    ranks = [well_rank(w) for w in (wells or [])]
+    ranks = [r for r in ranks if r < (1 << 30)]
+    return WELL_COLORS[(min(ranks) if ranks else 0) % len(WELL_COLORS)]
+
+
+def color_for_well(token: Any) -> str:
+    """Rank colour for a single well token — the pure core of the
+    ``WellViewerApp._rank_color_well`` god-method (A8 teardown)."""
+    from well_viewer.domain.plate_layout import WELL_COLORS
+    return WELL_COLORS[well_rank(token) % len(WELL_COLORS)]
+
+
+def color_for_selection(s: Any) -> str:
+    """Effective colour for a selection dict: explicit ``color`` override first,
+    otherwise the rank colour of its wells. The pure core of ``sel_color``,
+    lifted here (A8 teardown) so ``core`` and the data layer share one home
+    without importing a feature."""
+    if isinstance(s, dict):
+        c = s.get("color")
+        if isinstance(c, str) and c.strip():
+            return c.strip()
+        return color_for_wells(s.get("wells"))
+    return color_for_wells(getattr(s, "wells", None))
+
+
+def color_for_replicate_set(rset: Any, selections: Iterable[Any]) -> str:
+    """Colour for a replicate set / bar group: honours the ``color`` of a
+    selection sharing its ``name``, else the rank colour of its wells. Pure core
+    of ``grouping.controller.rank_color_rset`` (A8 teardown)."""
+    name = getattr(rset, "name", None)
+    if name:
+        for s in selections:
+            if isinstance(s, dict) and s.get("name") == name:
+                return color_for_selection(s)
+    return color_for_wells(getattr(rset, "wells", None))
+
+
+def well_display_label(ctx, lbl: str) -> str:
+    """Custom display label for a well token if defined, else the bare token.
+
+    A8 teardown: the pure body of ``WellViewerApp._well_display_label``, lifted to
+    this low layer so ``core`` / feature renderers share it without a feature
+    import (extract_well_token is itself domain)."""
+    from well_viewer.domain.viewer_state import extract_well_token
+    tok = extract_well_token(lbl) or lbl
+    return ctx.state.dataset.well_labels.get(tok, tok)
+
+
+def replicate_display_label(ctx, rset: Any) -> str:
+    """Human-friendly x-axis label for a replicate set: the group name, or —
+    when that name looks auto-generated (``"1"`` / ``"Replicate 2"`` / ``"R3"``) —
+    its member well labels so the axis stays interpretable. A8 teardown: pure
+    ``ctx.state`` + ``well_display_label`` (moved from grouping.controller)."""
+    name = str(getattr(rset, "name", "") or "").strip()
+    if not name:
+        name = "Replicate"
+    generic_name = bool(re.match(
+        r"^(?:\d+|r\s*\d+|rep(?:licate)?\s*\d+|group\s*\d+|set\s*\d+|batch\s*\d+)$",
+        name, re.I))
+    if not generic_name:
+        return name
+    wells = [well_display_label(ctx, w) for w in getattr(rset, "wells", [])
+             if w in ctx.state.dataset.well_paths]
+    if not wells:
+        return name
+    if len(wells) <= 3:
+        return ",".join(wells)
+    return f"{','.join(wells[:3])} +{len(wells)-3}"
+
+
+def active_replicate_sets(selections: Iterable[Any], well_paths: Any):
+    """One ``ReplicateSet`` per visible (non-hidden) selection with ≥1 loaded
+    well, in order — the traces drawn on the plots. Pure core of
+    ``barplot.controller.rep_sets_active`` (A8 teardown), so the data layer can
+    enumerate groups without importing a feature."""
+    from well_viewer.domain.batch_models import ReplicateSet
+    out = []
+    for s in selections:
+        if s.get("hidden"):
+            continue
+        wells = s.get("wells") or []
+        if any(w in well_paths for w in wells):
+            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+    return out
+
+
+def replicate_sets_loaded(selections: Iterable[Any], well_paths: Any):
+    """One ``ReplicateSet`` per selection with ≥1 loaded well, **including
+    hidden ones**, in order — the full pool the Heat Map's rep-set-average
+    expansion walks (it colours a cell by the rep-set its well belongs to
+    regardless of trace visibility). Pure core of the legacy
+    ``WellViewerApp._rep_sets_loaded`` (A8 R-leaf), so the heatmap reads it
+    without a feature import."""
+    from well_viewer.domain.batch_models import ReplicateSet
+    out = []
+    for s in selections:
+        wells = s.get("wells") or []
+        if any(w in well_paths for w in wells):
+            out.append(ReplicateSet(s.get("name") or "", list(wells)))
+    return out
+
+
 def _clean_token(w: Any) -> Optional[str]:
     """Normalise a 96-well token (``"a1"`` → ``"A01"``); drop anything that isn't
     a structurally-valid well token. (We do *not* filter against the currently

@@ -10,7 +10,7 @@ Used by the Bar Plots and Line Graphs tabs. Two parallel dropdowns:
   behaviour); ``—`` disables this axis.
 
 Both dropdowns are independent and may be combined. They mirror the
-shared ``app._fc_*`` state so the same selection applies to both tabs.
+shared ``ctx._fc_*`` state so the same selection applies to both tabs.
 """
 
 from __future__ import annotations
@@ -47,29 +47,32 @@ from well_viewer.core.safe import swallowed
 _WELL_DISAMBIG_SUFFIX = " (well)"
 
 
-def _all_member_labels(app) -> list[str]:
+def _all_member_labels(ctx) -> list[str]:
     """Replicate-set names + selected well tokens currently plotted.
 
     When a well token collides with a rep-set name (e.g. someone named a
     rep-set "A01"), the well entry is suffixed with " (well)" so the
     user can pick either unambiguously.
+
+    A8 teardown: reads typed ``ctx.state.selection`` / ``ctx.state.dataset``
+    so it takes ``ctx`` and names no god-object.
     """
     names: list[str] = []
     repset_names: set[str] = set()
     seen: set[str] = set()
-    for s in (app._app_state.selection.selections or []):
+    for s in (ctx.state.selection.selections or []):
         if s.get("hidden"):
             continue
         name = s.get("name") or ""
         if not name or name in seen:
             continue
         wells = s.get("wells") or []
-        if any(w in (app._app_state.dataset.well_paths or {}) for w in wells):
+        if any(w in (ctx.state.dataset.well_paths or {}) for w in wells):
             names.append(name)
             seen.add(name)
             repset_names.add(name)
-    well_paths = app._app_state.dataset.well_paths or {}
-    for w in sorted(app._app_state.selection.selected_wells or [], key=lambda x: x):
+    well_paths = ctx.state.dataset.well_paths or {}
+    for w in sorted(ctx.state.selection.selected_wells or [], key=lambda x: x):
         if w in well_paths and w not in seen:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
             names.append(entry)
@@ -77,16 +80,16 @@ def _all_member_labels(app) -> list[str]:
     return names
 
 
-def _repopulate_control_combo(app, combo: QComboBox) -> None:
+def _repopulate_control_combo(ctx, combo: QComboBox) -> None:
     """Refresh the Control combo's item list from current selections.
 
     Skips the clear-and-repopulate if (a) the combo's popup is currently
     visible (don't yank the dropdown out from under the user) or (b) the
     candidate list is identical to what the combo already shows. The
-    selected index is still re-synced from app state.
+    selected index is still re-synced from ctx state.
     """
-    members = _all_member_labels(app)
-    saved = app._app_state.plot.fc_control_label or ""
+    members = _all_member_labels(ctx)
+    saved = ctx.state.plot.fc_control_label or ""
     # If the saved label matches a bare well token AND there's a
     # collision-suffixed entry in the candidate list, prefer the suffixed
     # form so the user-visible state is unambiguous.
@@ -125,11 +128,11 @@ _ORDER_LABEL_CTRL_FIRST = "Control first"
 _ORDER_LABEL_T0_FIRST = "Baseline first"
 
 
-def _repopulate_op_combo(app, combo: QComboBox, *, attr: str) -> None:
+def _repopulate_op_combo(ctx, combo: QComboBox, *, attr: str) -> None:
     """Populate an Operator combo with the two FC operators and set the
     current selection from ``PlotState.<attr>``. ``attr`` is one of
     ``"fc_op_ctrl"`` / ``"fc_op_t0"`` — each axis has its own combo."""
-    chosen = str(getattr(app._app_state.plot, attr, "ratio") or "ratio")
+    chosen = str(getattr(ctx.state.plot, attr, "ratio") or "ratio")
     blocked = combo.blockSignals(True)
     try:
         combo.clear()
@@ -140,10 +143,10 @@ def _repopulate_op_combo(app, combo: QComboBox, *, attr: str) -> None:
         combo.blockSignals(blocked)
 
 
-def _repopulate_order_combo(app, combo: QComboBox) -> None:
+def _repopulate_order_combo(ctx, combo: QComboBox) -> None:
     """Populate the Order combo with the two FC application orders and
     set the current selection from ``PlotState.fc_order``."""
-    chosen = str(getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first")
+    chosen = str(getattr(ctx.state.plot, "fc_order", "ctrl_first") or "ctrl_first")
     blocked = combo.blockSignals(True)
     try:
         combo.clear()
@@ -154,17 +157,17 @@ def _repopulate_order_combo(app, combo: QComboBox) -> None:
         combo.blockSignals(blocked)
 
 
-def _available_timepoint_strs(app) -> list[str]:
+def _available_timepoint_strs(ctx) -> list[str]:
     """Return the dataset's timepoints formatted as the bar tp-strings
     (``f"{t:.4g}"``), so the baseline picker matches the rest of the UI."""
     try:
-        tps = sorted(app._app_state.dataset.all_timepoints_cache or [])
+        tps = sorted(ctx.state.dataset.all_timepoints_cache or [])
     except Exception:
         return []
     return [f"{float(t):.4g}" for t in tps]
 
 
-def _repopulate_baseline_combo(app, combo: QComboBox) -> None:
+def _repopulate_baseline_combo(ctx, combo: QComboBox) -> None:
     """Refresh the Baseline combo with every available timepoint.
 
     Items: ``—`` (off), ``earliest`` (each member's first finite point —
@@ -174,9 +177,9 @@ def _repopulate_baseline_combo(app, combo: QComboBox) -> None:
     and ``PlotState.fc_baseline_tp``: empty + on → ``earliest``; a
     matching tp string → that timepoint; off → ``—``.
     """
-    on = bool(app._app_state.plot.fc_vs_t0_on)
-    chosen_tp = str(getattr(app._app_state.plot, "fc_baseline_tp", "") or "").strip()
-    tp_strs = _available_timepoint_strs(app)
+    on = bool(ctx.state.plot.fc_vs_t0_on)
+    chosen_tp = str(getattr(ctx.state.plot, "fc_baseline_tp", "") or "").strip()
+    tp_strs = _available_timepoint_strs(ctx)
 
     blocked = combo.blockSignals(True)
     try:
@@ -198,17 +201,17 @@ def _repopulate_baseline_combo(app, combo: QComboBox) -> None:
 class _ControlCombo(QComboBox):
     """QComboBox that refreshes its item list from current selections on popup."""
 
-    def __init__(self, app, parent=None):
+    def __init__(self, ctx, parent=None):
         super().__init__(parent)
-        self._app = app
+        self._app = ctx
 
     def showPopup(self) -> None:  # type: ignore[override]
         _repopulate_control_combo(self._app, self)
         super().showPopup()
 
 
-def _sync_widgets_to_state(app, *, skip_scope: str = "") -> None:
-    """Mirror ``app._fc_*`` state into every installed widget set.
+def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
+    """Mirror ``ctx._fc_*`` state into every installed widget set.
 
     Called after a state mutation so the other tab's widgets reflect the
     new state — the per-tab combos are independent QWidget instances, so
@@ -220,31 +223,33 @@ def _sync_widgets_to_state(app, *, skip_scope: str = "") -> None:
     for scope in registered_scopes():
         if scope.name == skip_scope:
             continue
-        ctrl = getattr(app, scope.ctrl_combo_attr, None)
-        base = getattr(app, scope.baseline_combo_attr, None)
+        reg = ctx.widgets
+        ctrl = reg.get_or_none(scope.ctrl_combo_attr)
+        base = reg.get_or_none(scope.baseline_combo_attr)
         if ctrl is not None:
-            _repopulate_control_combo(app, ctrl)
+            _repopulate_control_combo(ctx, ctrl)
         if base is not None:
-            _repopulate_baseline_combo(app, base)
-        op_ctrl_combo = getattr(app, f"_fc_op_ctrl_combo_{scope.name}", None)
+            _repopulate_baseline_combo(ctx, base)
+        op_ctrl_combo = reg.get_or_none(f"_fc_op_ctrl_combo_{scope.name}")
         if op_ctrl_combo is not None:
-            _repopulate_op_combo(app, op_ctrl_combo, attr="fc_op_ctrl")
-        op_t0_combo = getattr(app, f"_fc_op_t0_combo_{scope.name}", None)
+            _repopulate_op_combo(ctx, op_ctrl_combo, attr="fc_op_ctrl")
+        op_t0_combo = reg.get_or_none(f"_fc_op_t0_combo_{scope.name}")
         if op_t0_combo is not None:
-            _repopulate_op_combo(app, op_t0_combo, attr="fc_op_t0")
-        order_combo = getattr(app, f"_fc_order_combo_{scope.name}", None)
+            _repopulate_op_combo(ctx, op_t0_combo, attr="fc_op_t0")
+        order_combo = reg.get_or_none(f"_fc_order_combo_{scope.name}")
         if order_combo is not None:
-            _repopulate_order_combo(app, order_combo)
+            _repopulate_order_combo(ctx, order_combo)
 
 
-def _reset_bar_ylim_edits(app) -> None:
+def _reset_bar_ylim_edits(ctx) -> None:
     """Clear the bar plot's user-entered y-lim edits so the autofit reclaims
     the panels. Idempotent and no-op when the edits aren't built yet."""
+    bar_rt = ctx.runtime.barplot
     for attr in (
-        "_bar_ylim_mean_lo_edit", "_bar_ylim_mean_hi_edit",
-        "_bar_ylim_frac_lo_edit", "_bar_ylim_frac_hi_edit",
+        "ylim_mean_lo_edit", "ylim_mean_hi_edit",
+        "ylim_frac_lo_edit", "ylim_frac_hi_edit",
     ):
-        edit = getattr(app, attr, None)
+        edit = getattr(bar_rt, attr, None)
         if edit is None:
             continue
         setter = getattr(edit, "setText", None)
@@ -262,7 +267,7 @@ def _reset_bar_ylim_edits(app) -> None:
 
 
 def set_fold_change_state(
-    app, *,
+    ctx, *,
     vs_control_on: "bool | None" = None,
     control_label: "str | None" = None,
     vs_t0_on: "bool | None" = None,
@@ -288,7 +293,7 @@ def set_fold_change_state(
     # PlotState.set_fold_change keeps the UI artefact out of the state object.
     if control_label is not None and control_label.endswith(_WELL_DISAMBIG_SUFFIX):
         control_label = control_label[: -len(_WELL_DISAMBIG_SUFFIX)]
-    app._app_state.plot.set_fold_change(
+    ctx.state.plot.set_fold_change(
         vs_control_on=vs_control_on,
         control_label=control_label,
         vs_t0_on=vs_t0_on,
@@ -304,36 +309,39 @@ def set_fold_change_state(
     # scale (raw 100-1500 vs ratio 0-10 vs subtract -100 to 300). Clear
     # the user-entered y-lim edits so apply_bar_ylims falls through and
     # the autofit takes over.
-    _reset_bar_ylim_edits(app)
+    _reset_bar_ylim_edits(ctx)
 
-    _sync_widgets_to_state(app, skip_scope=initiating_scope)
+    _sync_widgets_to_state(ctx, skip_scope=initiating_scope)
 
     # Announce on the bus. The RedrawCoordinator subscriber coalesces the
     # redraw — visible scope now, others marked dirty for redraw on tab switch
     # (the tab-change handler calls ``flush_dirty_scopes``). The bus emit *is*
     # the redraw trigger; see redraw_coordinator.py / fold_change_scopes.py.
-    app._event_bus.plot_options_changed.emit(app._app_state.plot)
+    ctx.bus.plot_options_changed.emit(ctx.state.plot)
 
 
-def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) -> None:
+def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) -> None:
     """Insert the Fold-change Control + Baseline dropdowns into *layout*.
 
     ``scope`` is "bar" or "line" — used to namespace the per-tab widget
-    references stashed on ``app``. The dropdowns write through to the
-    shared ``app._fc_*`` state so both tabs stay in lockstep.
+    references stashed on ``ctx``. The dropdowns write through to the
+    shared ``ctx._fc_*`` state so both tabs stay in lockstep.
+
+    A8: takes ``ctx``; the combos stash per-tab handles on the ctx and write the
+    shared fold-change state, so it unwraps the handle once at this boundary.
     """
     title = QLabel("Fold change:", parent)
     f = title.font(); f.setBold(True); title.setFont(f)
     layout.addWidget(title)
 
     layout.addWidget(QLabel("Control", parent))
-    ctrl_combo = _ControlCombo(app, parent)
+    ctrl_combo = _ControlCombo(ctx, parent)
     ctrl_combo.setMinimumWidth(140)
     ctrl_combo.setToolTip(
         "Divide each bar / curve by the picked well or replicate set's "
         "mean at the same timepoint. — disables this axis."
     )
-    _repopulate_control_combo(app, ctrl_combo)
+    _repopulate_control_combo(ctx, ctrl_combo)
     layout.addWidget(ctrl_combo)
 
     # Per-axis operator selector for the control axis.
@@ -345,7 +353,7 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
         "the baseline operator — you can subtract the control and divide "
         "by t0 (or vice-versa)."
     )
-    _repopulate_op_combo(app, op_ctrl_combo, attr="fc_op_ctrl")
+    _repopulate_op_combo(ctx, op_ctrl_combo, attr="fc_op_ctrl")
     layout.addWidget(op_ctrl_combo)
 
     layout.addWidget(QLabel("Baseline", parent))
@@ -355,7 +363,7 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
         "Normalise each bar / curve against its own value at the "
         "reference timepoint. — disables this axis."
     )
-    _repopulate_baseline_combo(app, baseline_combo)
+    _repopulate_baseline_combo(ctx, baseline_combo)
     layout.addWidget(baseline_combo)
 
     # Per-axis operator selector for the baseline-tp axis.
@@ -366,7 +374,7 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
         "each value by its own baseline; 'Subtract' subtracts it. "
         "Independent of the control operator."
     )
-    _repopulate_op_combo(app, op_t0_combo, attr="fc_op_t0")
+    _repopulate_op_combo(ctx, op_t0_combo, attr="fc_op_t0")
     layout.addWidget(op_t0_combo)
 
     # Order selector — which axis applies first. Matters only with mixed
@@ -382,19 +390,19 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
         "its own post-baseline control. Commutes when both axes use the "
         "same operator; matters with mixed ops."
     )
-    _repopulate_order_combo(app, order_combo)
+    _repopulate_order_combo(ctx, order_combo)
     layout.addWidget(order_combo)
 
     def _on_ctrl_changed(_idx: int) -> None:
         text = ctrl_combo.currentText()
         if text == _NONE_LABEL or not text:
             set_fold_change_state(
-                app, vs_control_on=False, control_label="",
+                ctx, vs_control_on=False, control_label="",
                 initiating_scope=scope,
             )
         else:
             set_fold_change_state(
-                app, vs_control_on=True, control_label=text,
+                ctx, vs_control_on=True, control_label=text,
                 initiating_scope=scope,
             )
 
@@ -402,35 +410,35 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
         text = baseline_combo.currentText()
         if text == _NONE_LABEL or not text:
             set_fold_change_state(
-                app, vs_t0_on=False, baseline_tp="",
+                ctx, vs_t0_on=False, baseline_tp="",
                 initiating_scope=scope,
             )
         elif text == _EARLIEST_LABEL:
             set_fold_change_state(
-                app, vs_t0_on=True, baseline_tp="",
+                ctx, vs_t0_on=True, baseline_tp="",
                 initiating_scope=scope,
             )
         else:
             # An explicit timepoint string from ``_available_timepoint_strs``.
             set_fold_change_state(
-                app, vs_t0_on=True, baseline_tp=text,
+                ctx, vs_t0_on=True, baseline_tp=text,
                 initiating_scope=scope,
             )
 
     def _on_op_ctrl_changed(_idx: int) -> None:
         text = op_ctrl_combo.currentText()
         op_v = "subtract" if text == _OP_LABEL_SUBTRACT else "ratio"
-        set_fold_change_state(app, op_ctrl=op_v, initiating_scope=scope)
+        set_fold_change_state(ctx, op_ctrl=op_v, initiating_scope=scope)
 
     def _on_op_t0_changed(_idx: int) -> None:
         text = op_t0_combo.currentText()
         op_v = "subtract" if text == _OP_LABEL_SUBTRACT else "ratio"
-        set_fold_change_state(app, op_t0=op_v, initiating_scope=scope)
+        set_fold_change_state(ctx, op_t0=op_v, initiating_scope=scope)
 
     def _on_order_changed(_idx: int) -> None:
         text = order_combo.currentText()
         order_v = "t0_first" if text == _ORDER_LABEL_T0_FIRST else "ctrl_first"
-        set_fold_change_state(app, order=order_v, initiating_scope=scope)
+        set_fold_change_state(ctx, order=order_v, initiating_scope=scope)
 
     ctrl_combo.currentIndexChanged.connect(_on_ctrl_changed)
     baseline_combo.currentIndexChanged.connect(_on_baseline_changed)
@@ -447,10 +455,14 @@ def install_fold_change_controls(app, parent: QWidget, layout, *, scope: str) ->
                  else f"_fc_ctrl_combo_{scope}")
     baseline_attr = (descriptor.baseline_combo_attr if descriptor
                      else f"_fc_baseline_combo_{scope}")
-    setattr(app, ctrl_attr, ctrl_combo)
-    setattr(app, baseline_attr, baseline_combo)
+    # These combo handles live in the widget registry (``ctx`` is a frozen
+    # dataclass — it can't hold per-scope widget attrs), keyed by the same
+    # names the cross-tab sync helper looks them up under. register() also
+    # stamps ``app.<name>`` so any legacy attribute reader still resolves.
+    ctx.widgets.register(ctrl_attr, ctrl_combo)
+    ctx.widgets.register(baseline_attr, baseline_combo)
     # Per-axis op combos stash under the standard naming convention the
     # cross-tab sync helper looks up.
-    setattr(app, f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
-    setattr(app, f"_fc_op_t0_combo_{scope}", op_t0_combo)
-    setattr(app, f"_fc_order_combo_{scope}", order_combo)
+    ctx.widgets.register(f"_fc_op_ctrl_combo_{scope}", op_ctrl_combo)
+    ctx.widgets.register(f"_fc_op_t0_combo_{scope}", op_t0_combo)
+    ctx.widgets.register(f"_fc_order_combo_{scope}", order_combo)

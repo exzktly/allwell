@@ -2,7 +2,7 @@
 
 Stores the live debris-gating thresholds edited in the QC sidebar view so the
 curation survives between sessions. When no persisted edits exist, this loader
-clears ``app._qc_params`` and the QC controller's accessor lazily seeds it from
+clears ``app._app_state.qc.params`` and the QC controller's accessor lazily seeds it from
 the dataset's ``pipeline_info.json`` (the thresholds used at run time) — so a
 freshly-processed dataset opens with the run's QC settings already in place,
 without this data-only module importing feature code.
@@ -32,16 +32,16 @@ _LEGACY_FILENAME = "qc_params.json"
 def save_to_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    params = getattr(app, "_qc_params", None)
+    params = app._app_state.qc.params
     if params is None:
         return
-    _doc.set_section(app, _SECTION, params.to_dict())
+    _doc.set_section(app._ctx, _SECTION, params.to_dict())
 
 
 def load_from_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app, _SECTION)
+    data = _doc.get_section(app._ctx, _SECTION)
     if data is None:
         data = _absorb_legacy_sidecar(app)
     if data is None:
@@ -52,9 +52,9 @@ def load_from_data_dir(app) -> None:
         # which reads through that accessor). Keeping the seed there — rather
         # than calling a *feature* function from this persistence module —
         # is what lets ``persistence`` stay data-only (see test_layering).
-        app._qc_params = None
+        app._app_state.qc.params = None
         return
-    app._qc_params = QCParams.from_dict(data)
+    app._app_state.qc.params = QCParams.from_dict(data)
 
 
 def _legacy_path(app) -> Optional[Path]:
@@ -82,7 +82,7 @@ def _absorb_legacy_sidecar(app) -> Optional[dict]:
         return None
     if not isinstance(inner, dict):
         return None
-    _doc.set_section(app, _SECTION, inner)      # absorb into persistence.json
+    _doc.set_section(app._ctx, _SECTION, inner)      # absorb into persistence.json
     try:
         legacy.unlink()
     except OSError as exc:

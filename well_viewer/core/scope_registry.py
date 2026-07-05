@@ -40,11 +40,21 @@ def register_default_scopes(app=None) -> None:
         if _desc.fold_change_scope_factory is not None:
             register_fold_change_scope(_desc.fold_change_scope_factory())
 
+    # ``redraw_app`` is ctx-native (D-core), but the scope coalescer invokes
+    # ``scope.redraw(app)`` with the *app* (see fold_change_scopes._call_redraw).
+    # Wrap so the app handle is threaded to its ctx — mirroring the bar scope's
+    # ``lambda a: redraw_bars(a._ctx)``. Passing the raw app made redraw_app read
+    # ``app.window`` (a Qt bound method, not the ctx window), which _call_redraw
+    # then swallowed — silently dropping every line/distribution/heat-map redraw
+    # on channel-change, fold-change, and deferred tab-flush.
+    def _redraw_app_scope(a):
+        return redraw_app(a._ctx)
+
     register_fold_change_scope(FoldChangeScope(
         name="line",
         ctrl_combo_attr="_fc_ctrl_combo_line",
         baseline_combo_attr="_fc_baseline_combo_line",
-        redraw=redraw_app,
+        redraw=_redraw_app_scope,
         tab_names=("Line Graphs",),
     ))
     # Distribution and Heat Map aren't fold-change-aware (no Control/Baseline
@@ -60,13 +70,13 @@ def register_default_scopes(app=None) -> None:
         name="distribution",
         ctrl_combo_attr="_fc_ctrl_combo_distribution",
         baseline_combo_attr="_fc_baseline_combo_distribution",
-        redraw=redraw_app,
+        redraw=_redraw_app_scope,
         tab_names=("Distribution",),
     ))
     register_fold_change_scope(FoldChangeScope(
         name="heatmap",
         ctrl_combo_attr="_fc_ctrl_combo_heatmap",
         baseline_combo_attr="_fc_baseline_combo_heatmap",
-        redraw=redraw_app,
+        redraw=_redraw_app_scope,
         tab_names=("Heat Map",),
     ))

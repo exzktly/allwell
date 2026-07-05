@@ -27,12 +27,12 @@ def test_review_csv_builds_row_index_and_unclipped_headers(loaded_app):
         pytest.skip("no review rows materialised for the mini dataset")
 
     # O(1) navigation index: built, and every entry points at a real row.
-    idx = app._review_csv_row_index
+    idx = app._ctx.runtime.review.csv_row_index
     assert isinstance(idx, dict) and idx, "row index should be populated"
     for r in idx.values():
         assert 0 <= r < table.rowCount()
     # The index round-trips: the key derived from a row resolves to that row.
-    assert app._review_csv_render_sig is not None
+    assert app._ctx.runtime.review.csv_render_sig is not None
 
     # Headers must not clip: each column is at least as wide as its header text.
     fm = QFontMetrics(table.horizontalHeader().font())
@@ -67,11 +67,11 @@ def test_review_csv_index_keyed_by_well(loaded_app):
     if well_col is None:
         pytest.skip("no 'well' column in the review CSV")
 
-    four_tuple_keys = [k for k in app._review_csv_row_index if len(k) == 4]
+    four_tuple_keys = [k for k in app._ctx.runtime.review.csv_row_index if len(k) == 4]
     assert four_tuple_keys, "index should carry well-qualified (well,fov,tp,nid) keys"
     for key in four_tuple_keys:
         rw = key[0]
-        r = app._review_csv_row_index[key]
+        r = app._ctx.runtime.review.csv_row_index[key]
         cell = table.item(r, well_col)
         assert cell is not None
         assert cell.text().strip().upper() == rw, (

@@ -27,7 +27,7 @@ def test_binary_threshold_map_reaches_diagnostic_without_nameerror(loaded_app):
     app = loaded_app
     well = "A01"
     df = app._get_rows(well)
-    keys = review_row_keys_series(app, df)
+    keys = review_row_keys_series(app._ctx, df)
     assert keys is not None and len(keys) > 0
 
     # Pick a real (fov, tp) present in the data and the nucleus ids there, so the
@@ -39,7 +39,8 @@ def test_binary_threshold_map_reaches_diagnostic_without_nameerror(loaded_app):
     mask = np.array([[0, *nids]], dtype=np.int32)  # tiny label image holding those nids
 
     # Before the fix this raised NameError from the diagnostic _logger call.
-    out = review_build_threshold_map(app, mask, well, fov, tp)
+    # A8 D4: review_build_threshold_map is ctx-native — pass the app's context.
+    out = review_build_threshold_map(app._ctx, mask, well, fov, tp)
     assert isinstance(out, dict)
     assert set(out) == set(nids)
     assert all(isinstance(v, bool) for v in out.values())

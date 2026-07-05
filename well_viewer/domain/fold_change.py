@@ -539,18 +539,18 @@ def normalize_pts(
     return stage2
 
 
-# ── State accessors / app integration ───────────────────────────────────────
+# ── State accessors / ctx integration ───────────────────────────────────────
 
-def fold_change_state(app) -> Tuple[bool, str, bool]:
+def fold_change_state(ctx) -> Tuple[bool, str, bool]:
     """Return the active ``(vs_control_on, control_label, vs_t0_on)`` triple.
 
     Used by both the on-screen plot tabs and the per-tab CSV exporter so the
     plot and the export stay in sync.
     """
     return (
-        bool(app._app_state.plot.fc_vs_control_on),
-        str(app._app_state.plot.fc_control_label or ""),
-        bool(app._app_state.plot.fc_vs_t0_on),
+        bool(ctx.state.plot.fc_vs_control_on),
+        str(ctx.state.plot.fc_control_label or ""),
+        bool(ctx.state.plot.fc_vs_t0_on),
     )
 
 
@@ -733,7 +733,7 @@ def baseline_n_from_points_resolved(
 
 
 def member_n_series(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -746,11 +746,11 @@ def member_n_series(
     label = (label or "").strip()
     if not label:
         return {}
-    rset = _label_to_replicate_set(app, label)
+    rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -761,17 +761,17 @@ def member_n_series(
         out: Dict[float, Tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
-                _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(app,
+                _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
                     rset, t, threshold, use_sem,
                 )
                 out[t] = (float(n_mean),
                           float(n_spread) if math.isfinite(n_spread) else 0.0)
             else:
-                n_total = compute_rep_n_above(app, rset, t)
+                n_total = compute_rep_n_above(ctx, rset, t)
                 out[t] = (float(n_total), 0.0)
         return out
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+    if label in (ctx.state.dataset.well_paths or {}):
+        pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -782,7 +782,7 @@ def member_n_series(
 
 
 def control_n_at_for_bar(
-    app, control_label: str, target_t: float, *,
+    ctx, control_label: str, target_t: float, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -791,7 +791,7 @@ def control_n_at_for_bar(
     bar's N-events panel. Returns ``None`` when the control can't be
     resolved or has no sample at *target_t*."""
     series = member_n_series(
-        app, control_label,
+        ctx, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -807,7 +807,7 @@ def control_n_at_for_bar(
 
 
 def member_first_tp_n_resolved(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -819,7 +819,7 @@ def member_first_tp_n_resolved(
     same matched-tp + fall-through-to-earliest semantics.
     """
     series = member_n_series(
-        app, label,
+        ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -836,7 +836,7 @@ def member_first_tp_n_resolved(
     return (float(earliest), ns[0], ns[1])
 
 
-def parse_fc_op(app) -> str:
+def parse_fc_op(ctx) -> str:
     """Return the user's chosen fold-change operator (``"ratio"`` or
     ``"subtract"``). Defaults to ``"ratio"`` for back-compat with
     ``PlotState`` snapshots that don't carry the field.
@@ -845,32 +845,32 @@ def parse_fc_op(app) -> str:
     should use :func:`parse_fc_op_ctrl` / :func:`parse_fc_op_t0` to read
     the per-axis ops independently.
     """
-    op = getattr(app._app_state.plot, "fc_op", "ratio") or "ratio"
+    op = getattr(ctx.state.plot, "fc_op", "ratio") or "ratio"
     return op if op in ("ratio", "subtract") else "ratio"
 
 
-def parse_fc_op_ctrl(app) -> str:
+def parse_fc_op_ctrl(ctx) -> str:
     """Return the user's chosen vs-control operator (``"ratio"`` or
     ``"subtract"``)."""
-    op = getattr(app._app_state.plot, "fc_op_ctrl", "ratio") or "ratio"
+    op = getattr(ctx.state.plot, "fc_op_ctrl", "ratio") or "ratio"
     return op if op in ("ratio", "subtract") else "ratio"
 
 
-def parse_fc_op_t0(app) -> str:
+def parse_fc_op_t0(ctx) -> str:
     """Return the user's chosen vs-baseline-tp operator (``"ratio"`` or
     ``"subtract"``)."""
-    op = getattr(app._app_state.plot, "fc_op_t0", "ratio") or "ratio"
+    op = getattr(ctx.state.plot, "fc_op_t0", "ratio") or "ratio"
     return op if op in ("ratio", "subtract") else "ratio"
 
 
-def parse_fc_order(app) -> str:
+def parse_fc_order(ctx) -> str:
     """Return the user's chosen FC application order (``"ctrl_first"`` or
     ``"t0_first"``). Defaults to ``"ctrl_first"`` for back-compat."""
-    order = getattr(app._app_state.plot, "fc_order", "ctrl_first") or "ctrl_first"
+    order = getattr(ctx.state.plot, "fc_order", "ctrl_first") or "ctrl_first"
     return order if order in ("ctrl_first", "t0_first") else "ctrl_first"
 
 
-def parse_baseline_tp(app) -> Optional[float]:
+def parse_baseline_tp(ctx) -> Optional[float]:
     """Resolve ``PlotState.fc_baseline_tp`` (a tp string) to a float.
 
     Returns ``None`` when no baseline tp is set, when the saved string
@@ -878,7 +878,7 @@ def parse_baseline_tp(app) -> Optional[float]:
     "earliest available point" via an empty value (which ``normalize_pts``
     handles as the original ``vs t0`` semantics).
     """
-    raw = getattr(app._app_state.plot, "fc_baseline_tp", "") or ""
+    raw = getattr(ctx.state.plot, "fc_baseline_tp", "") or ""
     raw = str(raw).strip()
     if not raw:
         return None
@@ -888,8 +888,8 @@ def parse_baseline_tp(app) -> Optional[float]:
         return None
 
 
-def is_active(app) -> bool:
-    vs_ctrl, _, vs_t0 = fold_change_state(app)
+def is_active(ctx) -> bool:
+    vs_ctrl, _, vs_t0 = fold_change_state(ctx)
     return vs_ctrl or vs_t0
 
 
@@ -922,11 +922,11 @@ def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
     return "  (fold change " + ", ".join(parts) + ")"
 
 
-def fold_change_suffix_for(app) -> str:
-    """``fold_change_suffix`` built from the app's live fold-change state
+def fold_change_suffix_for(ctx) -> str:
+    """``fold_change_suffix`` built from the live fold-change state
     (per-axis ratio/subtract operators + the resolved baseline timepoint)."""
-    plot = app._app_state.plot
-    base_tp = parse_baseline_tp(app)
+    plot = ctx.state.plot
+    base_tp = parse_baseline_tp(ctx)
     baseline_label = f"t={base_tp:g}h" if base_tp is not None else "first timepoint"
     return fold_change_suffix(
         bool(getattr(plot, "fc_vs_control_on", False)),
@@ -943,7 +943,7 @@ def fold_change_suffix_for(app) -> str:
 _WELL_DISAMBIG_SUFFIX = " (well)"
 
 
-def resolve_control_wells(app, control_label: str) -> List[str]:
+def resolve_control_wells(ctx, control_label: str) -> List[str]:
     """Translate a control selection string into a list of loaded well tokens.
 
     Resolution order:
@@ -962,20 +962,20 @@ def resolve_control_wells(app, control_label: str) -> List[str]:
         return []
     if label.endswith(_WELL_DISAMBIG_SUFFIX):
         bare = label[: -len(_WELL_DISAMBIG_SUFFIX)]
-        if bare in (app._app_state.dataset.well_paths or {}):
+        if bare in (ctx.state.dataset.well_paths or {}):
             return [bare]
         return []
-    for s in (app._app_state.selection.selections or []):
+    for s in (ctx.state.selection.selections or []):
         if s.get("name") == label:
-            wells = [w for w in (s.get("wells") or []) if w in app._app_state.dataset.well_paths]
+            wells = [w for w in (s.get("wells") or []) if w in ctx.state.dataset.well_paths]
             if wells:
                 return wells
-    if label in (app._app_state.dataset.well_paths or {}):
+    if label in (ctx.state.dataset.well_paths or {}):
         return [label]
     return []
 
 
-def control_pts_for_line(app, control_label: str, *, threshold: float,
+def control_pts_for_line(ctx, control_label: str, *, threshold: float,
                          val_col: str,
                          fluor_gates) -> list:
     """Aggregate the control selection as a single pooled series.
@@ -984,17 +984,17 @@ def control_pts_for_line(app, control_label: str, *, threshold: float,
     timepoint the data exposes. Returns an AggPoint list (or [] if the
     control is unresolved).
     """
-    wells = resolve_control_wells(app, control_label)
+    wells = resolve_control_wells(ctx, control_label)
     if not wells:
         return []
-    return aggregate_group(app,
+    return aggregate_group(ctx,
         wells, threshold=threshold, use_sem=False,
         val_col=val_col,
         fluor_gates=fluor_gates,
     )
 
 
-def _label_to_replicate_set(app, label: str):
+def _label_to_replicate_set(ctx, label: str):
     """Resolve a control label to a ReplicateSet OR ``None``.
 
     Returns the ReplicateSet view of a Sample-Definitions selection when
@@ -1004,10 +1004,10 @@ def _label_to_replicate_set(app, label: str):
     """
     if not label:
         return None
-    for s in (app._app_state.selection.selections or []):
+    for s in (ctx.state.selection.selections or []):
         if s.get("name") == label:
             wells = [w for w in (s.get("wells") or [])
-                     if w in app._app_state.dataset.well_paths]
+                     if w in ctx.state.dataset.well_paths]
             if not wells:
                 return None
             from well_viewer.domain.batch_models import ReplicateSet
@@ -1016,7 +1016,7 @@ def _label_to_replicate_set(app, label: str):
 
 
 def member_mean_series(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1041,14 +1041,14 @@ def member_mean_series(
     label = (label or "").strip()
     if not label:
         return {}
-    rset = _label_to_replicate_set(app, label)
+    rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
         # Collect the union of timepoints across the rep-set's wells.
         # We use the per-well agg (use_sem=False; spread isn't used here)
         # only to enumerate the timepoint axis.
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -1059,19 +1059,19 @@ def member_mean_series(
         out: Dict[float, float] = {}
         for t in tps:
             if per_fov_spread:
-                gm, *_ = compute_rep_per_fov_stats(app,
+                gm, *_ = compute_rep_per_fov_stats(ctx,
                     rset, t, threshold, use_sem,
                 )
             else:
-                gm, *_ = compute_rep_stats(app,
+                gm, *_ = compute_rep_stats(ctx,
                     rset, t, threshold, use_sem,
                 )
             if math.isfinite(gm):
                 out[t] = float(gm)
         return out
     # Bare well token.
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+    if label in (ctx.state.dataset.well_paths or {}):
+        pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -1084,7 +1084,7 @@ def member_mean_series(
 
 
 def control_mean_at_for_bar(
-    app, control_label: str, target_t: float, *,
+    ctx, control_label: str, target_t: float, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1098,7 +1098,7 @@ def control_mean_at_for_bar(
     or has no sample at *target_t*.
     """
     series = member_mean_series(
-        app, control_label,
+        ctx, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1159,7 +1159,7 @@ def apply_cell_scale(vals, spec: Optional["CellScaleSpec"]):
 
 
 def build_cell_scaling(
-    app, wells, *, fc_state: Tuple[bool, str, bool],
+    ctx, wells, *, fc_state: Tuple[bool, str, bool],
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1190,7 +1190,7 @@ def build_cell_scaling(
     if fc_vs_t0:
         for w in wells:
             t0_by_well[w] = member_baseline_value(
-                app, w, baseline_tp=baseline_tp,
+                ctx, w, baseline_tp=baseline_tp,
                 threshold=threshold, val_col=val_col, use_sem=use_sem,
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
@@ -1202,7 +1202,7 @@ def build_cell_scaling(
             return None
         if tp not in control_cache:
             control_cache[tp] = control_mean_at_for_bar(
-                app, fc_ctrl_lbl, tp,
+                ctx, fc_ctrl_lbl, tp,
                 threshold=threshold, val_col=val_col, use_sem=use_sem,
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
@@ -1237,7 +1237,7 @@ def build_cell_scaling(
 
 
 def member_baseline_value(
-    app, label: str, *,
+    ctx, label: str, *,
     baseline_tp: Optional[float],
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
@@ -1251,7 +1251,7 @@ def member_baseline_value(
     per-cell overlay baseline agrees with the bar's.
     """
     series = member_mean_series(
-        app, label,
+        ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1270,7 +1270,7 @@ def member_baseline_value(
 
 
 def member_first_tp_value(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1284,7 +1284,7 @@ def member_first_tp_value(
     mean of the prior implementation.
     """
     series = member_mean_series(
-        app, label,
+        ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1296,7 +1296,7 @@ def member_first_tp_value(
 
 
 def member_stats_series(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1311,11 +1311,11 @@ def member_stats_series(
     label = (label or "").strip()
     if not label:
         return {}
-    rset = _label_to_replicate_set(app, label)
+    rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -1326,11 +1326,11 @@ def member_stats_series(
         out: Dict[float, Tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
-                gm, gerr, *_ = compute_rep_per_fov_stats(app,
+                gm, gerr, *_ = compute_rep_per_fov_stats(ctx,
                     rset, t, threshold, use_sem,
                 )
             else:
-                gm, gerr, *_ = compute_rep_stats(app,
+                gm, gerr, *_ = compute_rep_stats(ctx,
                     rset, t, threshold, use_sem,
                 )
             if math.isfinite(gm):
@@ -1339,8 +1339,8 @@ def member_stats_series(
                 ) else 0.0
                 out[t] = (float(gm), spread)
         return out
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+    if label in (ctx.state.dataset.well_paths or {}):
+        pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -1360,7 +1360,7 @@ def member_stats_series(
 
 
 def member_frac_stats_series(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1377,11 +1377,11 @@ def member_frac_stats_series(
     label = (label or "").strip()
     if not label:
         return {}
-    rset = _label_to_replicate_set(app, label)
+    rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col, fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
@@ -1391,9 +1391,9 @@ def member_frac_stats_series(
         out: Dict[float, Tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
-                res = compute_rep_per_fov_stats(app, rset, t, threshold, use_sem)
+                res = compute_rep_per_fov_stats(ctx, rset, t, threshold, use_sem)
             else:
-                res = compute_rep_stats(app, rset, t, threshold, use_sem)
+                res = compute_rep_stats(ctx, rset, t, threshold, use_sem)
             gf, ferr = res[2], res[3]
             if isinstance(gf, (int, float)) and math.isfinite(gf):
                 spread = float(ferr) if (
@@ -1401,8 +1401,8 @@ def member_frac_stats_series(
                 ) else 0.0
                 out[t] = (float(gf), spread)
         return out
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+    if label in (ctx.state.dataset.well_paths or {}):
+        pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col, fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
@@ -1421,7 +1421,7 @@ def member_frac_stats_series(
 
 
 def member_n_stats_series(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str,
     per_fov_spread: bool,
     fluor_gates,
@@ -1437,12 +1437,12 @@ def member_n_stats_series(
     label = (label or "").strip()
     if not label:
         return {}
-    rset = _label_to_replicate_set(app, label)
+    rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
         out: Dict[float, Tuple[float, float]] = {}
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col, fluor_gates=fluor_gates,
                 per_fov_spread=per_fov_spread,
@@ -1451,7 +1451,7 @@ def member_n_stats_series(
                 tps.add(float(pt[0]))
         for t in tps:
             if per_fov_spread:
-                res = compute_rep_per_fov_stats(app, rset, t, threshold, False)
+                res = compute_rep_per_fov_stats(ctx, rset, t, threshold, False)
                 n_mean, n_spread = res[4], res[5]
                 if isinstance(n_mean, (int, float)) and math.isfinite(n_mean):
                     spread = float(n_spread) if (
@@ -1459,12 +1459,12 @@ def member_n_stats_series(
                     ) else 0.0
                     out[t] = (float(n_mean), spread)
             else:
-                n_above = compute_rep_n_above(app, rset, t)
+                n_above = compute_rep_n_above(ctx, rset, t)
                 if isinstance(n_above, int) and n_above >= 0:
                     out[t] = (float(n_above), 0.0)
         return out
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+    if label in (ctx.state.dataset.well_paths or {}):
+        pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=False,
             val_col=val_col, fluor_gates=fluor_gates,
             per_fov_spread=per_fov_spread,
@@ -1487,7 +1487,7 @@ def member_n_stats_series(
 
 
 def control_stats_at_for_bar(
-    app, control_label: str, target_t: float, *,
+    ctx, control_label: str, target_t: float, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1500,7 +1500,7 @@ def control_stats_at_for_bar(
     be resolved or has no sample at *target_t*.
     """
     series = member_stats_series(
-        app, control_label,
+        ctx, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1516,7 +1516,7 @@ def control_stats_at_for_bar(
 
 
 def control_stats_at(
-    app, control_label: str, target_t: float, *,
+    ctx, control_label: str, target_t: float, *,
     threshold: float, val_col: str,
     fluor_gates,
 ) -> Optional[Tuple[float, float]]:
@@ -1527,7 +1527,7 @@ def control_stats_at(
     plot-tab uses :func:`control_stats_at_for_bar` instead.
     """
     pts = control_pts_for_line(
-        app, control_label, threshold=threshold, val_col=val_col,
+        ctx, control_label, threshold=threshold, val_col=val_col,
         fluor_gates=fluor_gates,
     )
     if not pts:
@@ -1546,7 +1546,7 @@ def control_stats_at(
 
 
 def member_first_tp_stats(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1564,7 +1564,7 @@ def member_first_tp_stats(
     unknown / empty members.
     """
     series = member_stats_series(
-        app, label,
+        ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1586,7 +1586,7 @@ def member_first_tp_stats(
 
 
 def member_first_tp_stats_resolved(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1600,7 +1600,7 @@ def member_first_tp_stats_resolved(
     + subtract-baseline). Returns ``None`` only for unknown / empty members.
     """
     series = member_stats_series(
-        app, label,
+        ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1627,7 +1627,7 @@ def member_first_tp_stats_resolved(
 
 
 def member_frac_series(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1640,11 +1640,11 @@ def member_frac_series(
     label = (label or "").strip()
     if not label:
         return {}
-    rset = _label_to_replicate_set(app, label)
+    rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
         tps: Set[float] = set()
         for w in rset.wells:
-            pts = aggregate_well(app,
+            pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
                 val_col=val_col,
                 fluor_gates=fluor_gates,
@@ -1655,11 +1655,11 @@ def member_frac_series(
         out: Dict[float, Tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
-                _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(app,
+                _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(ctx,
                     rset, t, threshold, use_sem,
                 )
             else:
-                _, _, gf, gerr_f = compute_rep_stats(app,
+                _, _, gf, gerr_f = compute_rep_stats(ctx,
                     rset, t, threshold, use_sem,
                 )
             if isinstance(gf, (int, float)) and math.isfinite(gf):
@@ -1668,8 +1668,8 @@ def member_frac_series(
                 ) else 0.0
                 out[t] = (float(gf), fs)
         return out
-    if label in (app._app_state.dataset.well_paths or {}):
-        pts = aggregate_well(app,
+    if label in (ctx.state.dataset.well_paths or {}):
+        pts = aggregate_well(ctx,
             label, threshold=threshold, use_sem=use_sem,
             val_col=val_col,
             fluor_gates=fluor_gates,
@@ -1685,7 +1685,7 @@ def member_frac_series(
 
 
 def control_frac_at_for_bar(
-    app, control_label: str, target_t: float, *,
+    ctx, control_label: str, target_t: float, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1694,7 +1694,7 @@ def control_frac_at_for_bar(
     panel. Returns ``None`` when the control can't be resolved or has no
     sample at *target_t*."""
     series = member_frac_series(
-        app, control_label,
+        ctx, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1710,7 +1710,7 @@ def control_frac_at_for_bar(
 
 
 def member_first_tp_frac(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1722,7 +1722,7 @@ def member_first_tp_frac(
     matched-tp + fall-through-to-earliest semantics.
     """
     series = member_frac_series(
-        app, label,
+        ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
@@ -1739,7 +1739,7 @@ def member_first_tp_frac(
 
 
 def member_first_tp_frac_resolved(
-    app, label: str, *,
+    ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
@@ -1748,7 +1748,7 @@ def member_first_tp_frac_resolved(
     """``(tp, frac, frac_spread)`` for the member's baseline timepoint —
     the frac counterpart of :func:`member_first_tp_stats_resolved`."""
     series = member_frac_series(
-        app, label,
+        ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,

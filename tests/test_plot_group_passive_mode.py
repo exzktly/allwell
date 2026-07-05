@@ -14,7 +14,9 @@ from types import SimpleNamespace
 from well_viewer.core.sidebar_view import _wells_for_new_plot_group
 
 
-def _app(*, selected=(), selections=(), solo=(), loaded=None):
+def _ctx(*, selected=(), selections=(), solo=(), loaded=None):
+    # ctx-shaped fake: ``_wells_for_new_plot_group`` reads typed state off
+    # ``ctx.state`` (A8 teardown — the helper is ctx-native, no god-object).
     if loaded is None:
         loaded = {f"{r}{c:02d}": None for r in "AB" for c in range(1, 4)}
     state = SimpleNamespace(
@@ -25,46 +27,45 @@ def _app(*, selected=(), selections=(), solo=(), loaded=None):
         ),
         dataset=SimpleNamespace(well_paths=loaded),
     )
-    # _parse_rc is only used as a sort key here.
-    return SimpleNamespace(_app_state=state, _parse_rc=lambda w: w)
+    return SimpleNamespace(state=state)
 
 
 def test_active_plate_uses_raw_selection():
-    app = _app(selected={"A02", "A01"})
-    assert _wells_for_new_plot_group(app) == ["A01", "A02"]
+    ctx = _ctx(selected={"A02", "A01"})
+    assert _wells_for_new_plot_group(ctx) == ["A01", "A02"]
 
 
 def test_passive_mode_falls_back_to_visible_group_wells():
     # No raw selection (passive plate) + two visible groups → union of their wells.
-    app = _app(
+    ctx = _ctx(
         selections=[
             {"name": "G1", "hidden": False, "wells": ["A01", "A02"]},
             {"name": "G2", "hidden": False, "wells": ["B01"]},
         ],
     )
-    assert _wells_for_new_plot_group(app) == ["A01", "A02", "B01"]
+    assert _wells_for_new_plot_group(ctx) == ["A01", "A02", "B01"]
 
 
 def test_hidden_groups_are_excluded():
-    app = _app(
+    ctx = _ctx(
         selections=[
             {"name": "G1", "hidden": True, "wells": ["A01", "A02"]},   # hidden → skip
             {"name": "G2", "hidden": False, "wells": ["B01"]},
         ],
         solo={"A03"},
     )
-    assert _wells_for_new_plot_group(app) == ["A03", "B01"]
+    assert _wells_for_new_plot_group(ctx) == ["A03", "B01"]
 
 
 def test_wells_not_loaded_are_dropped():
-    app = _app(
+    ctx = _ctx(
         selections=[{"name": "G1", "hidden": False,
                      "wells": ["A01", "Z99"]}],   # Z99 not in the loaded plate
     )
-    assert _wells_for_new_plot_group(app) == ["A01"]
+    assert _wells_for_new_plot_group(ctx) == ["A01"]
 
 
 def test_all_hidden_and_no_selection_yields_empty():
     # Everything hidden, no solo, no raw selection → empty → caller shows the hint.
-    app = _app(selections=[{"name": "G1", "hidden": True, "wells": ["A01"]}])
-    assert _wells_for_new_plot_group(app) == []
+    ctx = _ctx(selections=[{"name": "G1", "hidden": True, "wells": ["A01"]}])
+    assert _wells_for_new_plot_group(ctx) == []

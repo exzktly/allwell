@@ -133,7 +133,7 @@ class MockApp:
 
     def _compute_rep_per_fov_stats(self, rset, target_t: float,
                                    threshold: float, use_sem: bool) -> tuple:
-        gm, gerr, gf, ferr = compute_rep_stats(self,
+        gm, gerr, gf, ferr = compute_rep_stats(self._ctx,
             rset, target_t, threshold, use_sem,
         )
         return (gm, gerr, gf, ferr, 5.0, 0.0)
@@ -186,6 +186,10 @@ class MockApp:
         st.selection.selected_wells = set(self.per_well_pts)
         st.dataset.well_paths = {w: w for w in self.per_well_pts}
         st.plot.use_sem = True
+        # Per-FOV-replicates flag: controllers that migrated onto ``ctx.state``
+        # (A8) read the toggle here instead of the ``_use_fov_spread_active``
+        # method, so mirror the MockApp override field into typed state.
+        st.plot.use_fov_replicates = getattr(self, "_use_fov_replicates", False)
         st.plot.fc_vs_control_on = self.fc_vs_control_on
         st.plot.fc_control_label = self.fc_control_label
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on
@@ -201,6 +205,22 @@ class MockApp:
         st.plot.line_order_rsets = getattr(self, "_line_order_rsets", [])
         st.plot.line_order_wells = getattr(self, "_line_order_wells", [])
         return st
+
+    @property
+    def _ctx(self):
+        """A minimal ``ViewerContext``-shaped bundle over this MockApp.
+
+        The ctx-native stats leaf (``aggregate_well`` / ``aggregate_group`` /
+        ``_thresh_on_col``, A8 R-leaf) reads ``ctx.app`` for the pure-logic
+        aggregation delegate, ``ctx.state`` for the typed slices, and
+        ``ctx.runtime`` for the scatter/cell-gating gate flags. A SimpleNamespace
+        is enough — the MockApp aggregation path is delegate-driven, so
+        ``get_rows(ctx)`` is never reached here.
+        """
+        from types import SimpleNamespace
+        from well_viewer.core.app_runtime import AppRuntime
+        return SimpleNamespace(app=self, state=self._app_state,
+                               runtime=AppRuntime(self))
 
     @property
     def _selected_wells(self):
@@ -317,15 +337,15 @@ def image_table_app(loaded_app):
     app = loaded_app
     # Image Browser is a lazy-only centre tab (built on first user click, not by
     # the background drain), so force its parent build, then the sub-tab.
-    build_pending = getattr(app, "_centre_build_pending", None)
+    build_pending = app._ctx.runtime.centre.build_pending
     if build_pending is not None:
         build_pending("Image Browser")
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = app._ctx.runtime.image_browser.subtabs
     assert sub is not None, "Image Browser parent tab was not built"
     idx = next((i for i in range(sub.count())
                 if sub.tabText(i) == "Image Table"), None)
     assert idx is not None, "Image Table sub-tab not found"
-    build_image_browser_subtab(app, idx)
+    build_image_browser_subtab(app._ctx, idx)
     return app
 
 

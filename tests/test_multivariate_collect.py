@@ -32,8 +32,10 @@ def _well_df(seed, n=60):
 
 def _fake_app(frames):
     channel = types.SimpleNamespace(ratio_index={}, fluor_channels=["gfp", "mcherry"])
-    dataset = types.SimpleNamespace(well_paths=dict.fromkeys(frames), data_dir=None)
-    selection = types.SimpleNamespace(selected_wells=set(frames))
+    # Seed the row cache so the ctx-native get_rows (A8) finds these frames.
+    dataset = types.SimpleNamespace(well_paths=dict.fromkeys(frames), data_dir=None,
+                                    cache=dict(frames))
+    selection = types.SimpleNamespace(selected_wells=set(frames), selections=[])
 
     class _AppState:
         def __init__(self):
@@ -53,6 +55,8 @@ def _fake_app(frames):
         _rank_color_well=lambda label: "#4C78A8",
         _parse_rc=lambda label: (label[0], label[1:]),
     )
+    from well_viewer.core.app_runtime import AppRuntime
+    app._ctx = types.SimpleNamespace(app=app, state=app_state, runtime=AppRuntime(app))
     return app
 
 
@@ -60,7 +64,7 @@ def test_collect_builds_matrix_over_selected_wells():
     frames = {"A01": _well_df(1), "A02": _well_df(2)}
     app = _fake_app(frames)
     cols = ["gfp_mean_intensity", "mcherry_mean_intensity"]
-    data = mv_collect.collect_feature_matrix(app, feature_cols=cols)
+    data = mv_collect.collect_feature_matrix(app._ctx, feature_cols=cols)
     assert data["X"].shape == (120, 2)          # 60 cells x 2 wells
     assert data["n_cells"] == 120
     assert set(data["well"].tolist()) == {"A01", "A02"}
@@ -74,7 +78,7 @@ def test_collect_respects_timepoint_filter():
     frames = {"A01": _well_df(3)}
     app = _fake_app(frames)
     data = mv_collect.collect_feature_matrix(
-        app, feature_cols=["gfp_mean_intensity"], timepoints=[6.0])
+        app._ctx, feature_cols=["gfp_mean_intensity"], timepoints=[6.0])
     assert data["n_cells"] == 30                # only the t=6 half
     assert np.allclose(data["timepoint"], 6.0)
 
@@ -83,7 +87,7 @@ def test_collect_drops_nonfinite_rows_and_counts_them():
     df = _well_df(4)
     df.loc[df.index[:5], "gfp_mean_intensity"] = np.nan
     app = _fake_app({"A01": df})
-    data = mv_collect.collect_feature_matrix(app, feature_cols=["gfp_mean_intensity"])
+    data = mv_collect.collect_feature_matrix(app._ctx, feature_cols=["gfp_mean_intensity"])
     assert data["n_cells"] == 55
     assert data["n_dropped_nan"] == 5
 
@@ -92,14 +96,14 @@ def test_collect_honours_included_gate():
     df = _well_df(5)
     df.loc[df.index[:10], "Included"] = 0
     app = _fake_app({"A01": df})
-    data = mv_collect.collect_feature_matrix(app, feature_cols=["gfp_mean_intensity"])
+    data = mv_collect.collect_feature_matrix(app._ctx, feature_cols=["gfp_mean_intensity"])
     assert data["n_cells"] == 50
 
 
 def test_available_feature_columns_discovers_families():
     frames = {"A01": _well_df(6)}
     app = _fake_app(frames)
-    fams = mv_collect.available_feature_columns(app)
+    fams = mv_collect.available_feature_columns(app._ctx)
     assert "gfp_mean_intensity" in fams.get("Intensity", [])
     assert "mcherry_mean_intensity" in fams.get("Intensity", [])
     assert "shape_solidity" in fams.get("Shape", [])
@@ -107,7 +111,7 @@ def test_available_feature_columns_discovers_families():
 
 def test_empty_selection_returns_empty_matrix():
     app = _fake_app({})
-    data = mv_collect.collect_feature_matrix(app, feature_cols=["gfp_mean_intensity"])
+    data = mv_collect.collect_feature_matrix(app._ctx, feature_cols=["gfp_mean_intensity"])
     assert data["X"].shape == (0, 1)
     assert data["n_cells"] == 0
 
@@ -115,6 +119,6 @@ def test_empty_selection_returns_empty_matrix():
 def test_column_display_label_formats_families():
     frames = {"A01": _well_df(7)}
     app = _fake_app(frames)
-    assert mv_collect.column_display_label(app, "gfp_mean_intensity") == "GFP Mean Intensity"
+    assert mv_collect.column_display_label(app._ctx, "gfp_mean_intensity") == "GFP Mean Intensity"
     # shape label comes from the catalog
-    assert "solidity" in mv_collect.column_display_label(app, "shape_solidity").lower()
+    assert "solidity" in mv_collect.column_display_label(app._ctx, "shape_solidity").lower()

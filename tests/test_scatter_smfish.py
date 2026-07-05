@@ -40,17 +40,19 @@ def _df(*, w3cy5_counts, w4gfp_counts, w3cy5_mfi=None):
 def _make_app(label_to_df):
     """Minimal stub exposing only what ``collect_scatter_data`` reads on
     the no-rep-set / individual-wells path."""
+    from well_viewer.core.app_runtime import AppRuntime
     app = SimpleNamespace()
     app._app_state = SimpleNamespace(
-        dataset=SimpleNamespace(well_paths=dict.fromkeys(label_to_df)),
+        dataset=SimpleNamespace(well_paths=dict.fromkeys(label_to_df),
+                                well_labels={}, cache=dict(label_to_df)),
         channel=SimpleNamespace(ratio_index={}),
-        selection=SimpleNamespace(selected_wells=list(label_to_df)),
+        selection=SimpleNamespace(selected_wells=list(label_to_df), selections=[]),
         plot=SimpleNamespace(line_order_wells=[], line_order_rsets=[]),
     )
-    app._rep_sets_active = lambda: []
-    app._get_rows = lambda label: label_to_df[label]
-    app._rank_color_well = lambda label: "#000000"
-    app._parse_rc = lambda label: (label, 0, 0)
+    app._ctx = SimpleNamespace(
+        app=app, state=app._app_state, runtime=AppRuntime(app),
+        widgets=SimpleNamespace(get_or_none=lambda n: getattr(app, n, None)),
+    )
     return app
 
 
@@ -58,7 +60,7 @@ def test_scatter_smfish_axis_bypasses_fluor_gate():
     df = _df(w3cy5_counts=[0, 3, 5], w4gfp_counts=[1, 2, 4])
     app = _make_app({"A01": df})
     out = collect_scatter_data(
-        app,
+        app._ctx,
         col_x="w3cy5_smfish_count",
         col_y="w4gfp_smfish_count",
         timepoints_h=[24.0],
@@ -87,7 +89,7 @@ def test_scatter_intensity_axis_still_honours_fluor_gate():
     })
     app = _make_app({"A01": df})
     out = collect_scatter_data(
-        app,
+        app._ctx,
         col_x="w3cy5_mean_intensity",
         col_y="w4gfp_mean_intensity",
         timepoints_h=[24.0],
@@ -109,7 +111,7 @@ def test_scatter_mixed_axes_gates_only_intensity_axis():
     )
     app = _make_app({"A01": df})
     out = collect_scatter_data(
-        app,
+        app._ctx,
         col_x="w3cy5_smfish_count",
         col_y="w3cy5_mean_intensity",
         timepoints_h=[24.0],

@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 LEVEL_CELL = "cell"
 LEVEL_COLONY = "colony"
 LEVEL_INTRA = "intra"
-LEVELS = (LEVEL_CELL, LEVEL_COLONY, LEVEL_INTRA)
+LEVEL_SUMMARY = "summary"
+LEVELS = (LEVEL_CELL, LEVEL_COLONY, LEVEL_INTRA, LEVEL_SUMMARY)
 
 VIZ_SPATIAL_MAP = "spatial_map"
 VIZ_NND_HISTOGRAM = "nnd_histogram"
@@ -20,15 +21,31 @@ VIZ_COLONY_SIZE = "colony_size"
 VIZ_COLONY_METRIC_DIST = "colony_metric_dist"
 VIZ_RADIAL_PROFILE = "radial_profile"
 VIZ_BOUNDARY_INTERIOR = "boundary_interior"
+VIZ_SUMMARY_PANEL = "summary_panel"
 
 VIZ_BY_LEVEL = {
     LEVEL_CELL: (VIZ_SPATIAL_MAP, VIZ_NND_HISTOGRAM, VIZ_RIPLEY),
     LEVEL_COLONY: (VIZ_SPATIAL_MAP, VIZ_COLONY_SIZE, VIZ_COLONY_METRIC_DIST),
     LEVEL_INTRA: (VIZ_SPATIAL_MAP, VIZ_RADIAL_PROFILE, VIZ_BOUNDARY_INTERIOR),
+    LEVEL_SUMMARY: (VIZ_SUMMARY_PANEL,),
 }
 
 METHOD_DBSCAN = "dbscan"
 METHOD_SINGLE_LINKAGE = "single_linkage"
+
+SUMMARY_DISPLAY_HEATMAP = "heatmap"
+SUMMARY_DISPLAY_LINE = "line"
+SUMMARY_DISPLAYS = (SUMMARY_DISPLAY_HEATMAP, SUMMARY_DISPLAY_LINE)
+
+# Vizs that do NOT consume the per-cell Metric picker. The tab greys the
+# picker on these so the UI stops promising an effect that never happens.
+# Everything else (spatial map on any level, per-colony distribution,
+# radial profile, boundary/interior, summary panel) uses the metric.
+METRIC_IGNORED_VIZS = frozenset({
+    VIZ_NND_HISTOGRAM,
+    VIZ_RIPLEY,
+    VIZ_COLONY_SIZE,
+})
 
 
 @dataclass
@@ -53,6 +70,10 @@ class SpatialState:
 
     show_hulls: bool = True
     show_density_kde: bool = False
+
+    # Summary-panel (LEVEL_SUMMARY) options.
+    summary_metric_key: str = "nnd_median"       # FrameSummary field name
+    summary_display: str = SUMMARY_DISPLAY_HEATMAP
 
     # Per-scale metric toggles (skip compute entirely when unchecked).
     enabled_metrics: dict = field(default_factory=lambda: {
@@ -85,6 +106,8 @@ class SpatialState:
             "show_hulls": bool(self.show_hulls),
             "show_density_kde": bool(self.show_density_kde),
             "enabled_metrics": dict(self.enabled_metrics),
+            "summary_metric_key": self.summary_metric_key,
+            "summary_display": self.summary_display,
         }
 
     def apply_config(self, data: dict) -> None:

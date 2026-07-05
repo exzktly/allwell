@@ -18,6 +18,7 @@ import numpy as np
 
 from pipeline.shape_features import is_shape_column
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series
+from well_viewer.domain import spatial_compute as spc
 from well_viewer.domain.metric_registry import METRICS
 
 _logger = logging.getLogger(__name__)
@@ -166,3 +167,148 @@ def available_metric_columns(ctx) -> List[str]:
             out.append(name)
 
     return out
+
+
+def available_timepoints(ctx) -> List[float]:
+    """Unique finite ``timepoint_hours`` across every well in the cache.
+
+    Pure ``ctx.state`` reader; empty when nothing has been loaded.
+    """
+    import pandas as pd
+    seen: set = set()
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    for _label, df in cache.items():
+        if df is None or df.empty or "timepoint_hours" not in df.columns:
+            continue
+        mask = df_included_mask(df, include_gate=False)
+        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
+        seen.update(float(t) for t in tp.dropna().unique())
+    return sorted(seen)
+
+
+def collect_summary_matrix(
+    ctx,
+    wells: List[str],
+    timepoints: List[float],
+    *,
+    metric_col: str = "",
+    colony_method: str = spc.METHOD_DBSCAN,
+    eps_mult: float = 3.0,
+    min_samples: int = 4,
+    include_gate: bool = True,
+) -> Dict[str, Any]:
+    """Walk the (well × timepoint) grid, compute a :class:`FrameSummary` per
+    cell, and return a payload the renderer + CSV export both consume.
+
+    Args:
+        wells: well labels to include as rows (typically the current plate
+            selection, sorted plate-order by caller).
+        timepoints: timepoint hours to include as columns (typically the
+            union of ``available_timepoints(ctx)`` and any per-well set).
+        metric_col: optional per-cell CSV column driving the ICC summary
+            (empty → ICC = NaN in every frame).
+
+    Returns:
+        Dict with:
+        - ``wells``: the wells actually walked (dropped: missing / empty).
+        - ``timepoints``: the timepoint axis, sorted ascending.
+        - ``summaries``: a 2-D object array shape ``(n_wells, n_timepoints)``
+          holding :class:`FrameSummary` per cell; ``None`` where the well
+          didn't have any cells at that timepoint.
+        - ``metric_col``: echo of the ICC metric column (for CSV headers).
+    """
+    import pandas as pd
+    valid_wells: List[str] = []
+    cache = getattr(ctx.state.dataset, "cache", None) or {}
+    for w in wells:
+        df = cache.get(w)
+        if df is None or df.empty:
+            continue
+        valid_wells.append(w)
+    tps = sorted({float(t) for t in timepoints if np.isfinite(t)})
+    n_w, n_t = len(valid_wells), len(tps)
+    summaries = np.empty((n_w, n_t), dtype=object)
+    summaries[:] = None
+    if n_w == 0 or n_t == 0:
+        return {
+            "wells": valid_wells, "timepoints": tps,
+            "summaries": summaries, "metric_col": metric_col,
+        }
+
+    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
+    for i, w in enumerate(valid_wells):
+        df = cache.get(w)
+        if df is None or df.empty or "timepoint_hours" not in df.columns:
+            continue
+        tp_col = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
+        finite_tp = np.isfinite(tp_col)
+        base_mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
+        base_mask &= finite_tp
+        row = pd.to_numeric(df[CENTROID_ROW_COL], errors="coerce").to_numpy()
+        col = pd.to_numeric(df[CENTROID_COL_COL], errors="coerce").to_numpy()
+        base_mask &= np.isfinite(row) & np.isfinite(col)
+        metric_vals: Optional[np.ndarray] = None
+        if metric_col:
+            try:
+                metric_vals = np.asarray(
+                    resolve_value_series(df, metric_col, ratios).to_numpy(),
+                    dtype=float,
+                )
+            except Exception:
+                metric_vals = None
+
+        for j, target in enumerate(tps):
+            frame_mask = base_mask & (np.abs(tp_col - target) <= 1e-6)
+            idx = np.flatnonzero(frame_mask)
+            if idx.size == 0:
+                continue
+            pts = np.column_stack([col[idx], row[idx]])
+            m = metric_vals[idx] if metric_vals is not None else None
+            summary = spc.summarise_frame(
+                pts, metric=m,
+                colony_method=colony_method,
+                eps_mult=eps_mult, min_samples=min_samples,
+            )
+            summaries[i, j] = summary
+
+    return {
+        "wells": valid_wells,
+        "timepoints": tps,
+        "summaries": summaries,
+        "metric_col": metric_col,
+    }
+
+
+def summary_matrix_to_csv_rows(payload: Dict[str, Any]):
+    """Flatten a ``collect_summary_matrix`` payload into per-(well,tp) rows.
+
+    Each row is a dict keyed by ``well``, ``timepoint_hours``, and every
+    :class:`FrameSummary` field name — the shape the CSV writer wants.
+    """
+    wells = payload.get("wells", [])
+    tps = payload.get("timepoints", [])
+    summaries = payload.get("summaries")
+    metric_col = payload.get("metric_col") or ""
+    if summaries is None or not wells or not tps:
+        return []
+    rows = []
+    for i, w in enumerate(wells):
+        for j, t in enumerate(tps):
+            s = summaries[i, j]
+            if s is None:
+                continue
+            rows.append({
+                "well": w,
+                "timepoint_hours": float(t),
+                "n_cells": int(s.n_cells),
+                "n_colonies": int(s.n_colonies),
+                "nnd_median": s.nnd_median,
+                "knn5_mean_median": s.knn5_mean_median,
+                "local_density_median": s.local_density_median,
+                "colony_size_mean": s.colony_size_mean,
+                "hull_area_median": s.hull_area_median,
+                "packing_density_median": s.packing_density_median,
+                "icc_metric_col": metric_col,
+                "icc": s.icc,
+            })
+    return rows

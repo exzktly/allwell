@@ -239,13 +239,36 @@ def _plot_groups_schedule_save(ctx) -> None:
         p.schedule_save("plot_groups")
 
 
+def _wells_for_new_plot_group(ctx) -> "list[str]":
+    """The well set a new Plot Group should capture, sorted by plate position.
+
+    Prefers the raw plate selection (``selected_wells``). But once replicate
+    sets exist the sidebar plate runs in passive *group-visibility* mode on
+    plotting tabs — clicks toggle a group's ``hidden`` flag instead of selecting
+    wells, so ``selected_wells`` is empty. In that mode the "current selection"
+    for plotting is exactly the union of every visible (non-hidden) group's
+    wells plus any active solo wells (mirrors the rep-mode "active set" the plots
+    use, see ``selection_controller``). Falling back to that lets "Add Plot
+    Group" save whatever is currently on screen — the feature was previously
+    unusable whenever any replicate set was defined.
+    """
+    sel = ctx.state.selection
+    raw = set(sel.selected_wells or set())
+    if not raw and sel.selections:
+        loaded = ctx.state.dataset.well_paths
+        raw = {
+            w
+            for s in sel.selections if not s.get("hidden")
+            for w in (s.get("wells") or []) if w in loaded
+        }
+        raw |= {w for w in (sel.active_solo_wells or set()) if w in loaded}
+    return sorted(raw, key=parse_rc)
+
+
 def _plot_groups_add_current(ctx) -> None:
-    wells = sorted(
-        (ctx.state.selection.selected_wells or set()),
-        key=parse_rc,
-    )
+    wells = _wells_for_new_plot_group(ctx)
     if not wells:
-        ctx.set_status("Select wells before adding a Plot Group.")
+        ctx.set_status("Select wells (or show a group) before adding a Plot Group.")
         return
     edit = ctx.widgets.get_or_none("_plot_group_name_edit")
     name = edit.text().strip() if edit is not None else ""

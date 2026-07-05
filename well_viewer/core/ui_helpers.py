@@ -988,16 +988,16 @@ def toggle_log(app) -> None:
 
 
 
-def notes_schedule_save(app) -> None:
+def notes_schedule_save(ctx) -> None:
     """Capture the Notes text and queue a debounced save.
 
     The widget read must stay here (the registry never touches widgets);
     the debounce + disk write live in the PersistenceRegistry.
     """
-    edit = getattr(app, "_notes_edit", None)
+    edit = ctx.widgets.get_or_none("_notes_edit")
     if edit is not None:
-        app._app_state.selection.notes_text = edit.toPlainText()
-    app._persistence.schedule_save("notes")
+        ctx.state.selection.notes_text = edit.toPlainText()
+    ctx.persistence.schedule_save("notes")
 
 
 

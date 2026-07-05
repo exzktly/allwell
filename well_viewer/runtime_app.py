@@ -673,7 +673,7 @@ class WellViewerApp(QWidget):
         from well_viewer.persistence import view_state as _vs
         _vs.reset(self)
 
-    def _notes_schedule_save(self) -> None: return notes_schedule_save(self)
+    def _notes_schedule_save(self) -> None: return notes_schedule_save(self._ctx)
 
     # ── Sample Definitions + Cell Gating persistence ─────────────────────────
     # Implementations live in ``well_viewer.persistence.{sample_definitions,cell_gating}``.

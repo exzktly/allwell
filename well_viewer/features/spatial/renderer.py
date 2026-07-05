@@ -47,6 +47,14 @@ def render_spatial(ctx) -> None:
         _logger.exception("Spatial render failed")
         _draw_message(fig, f"Render failed: {exc}")
     canvas = ctx.widgets.get_or_none("_sp_canvas")
+    # Re-apply the Export-Style / Properties sidebar prefs (title, font sizes,
+    # grid, legend, …) so toggling them in the panel survives a recompute.
+    try:
+        from well_viewer.core.plot_style import apply_export_style_to_current
+        apply_export_style_to_current(ctx, fig, canvas)
+    except Exception:  # pragma: no cover - defensive
+        from well_viewer.core.safe import swallowed
+        swallowed()
     if canvas is not None:
         canvas.draw_idle()
 

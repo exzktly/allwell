@@ -12,8 +12,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout,
-    QWidget,
+    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QSpinBox, QWidget,
 )
 
 from well_viewer.core.safe import swallowed
@@ -125,14 +124,17 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.icon_button import IconButton
     from widgets.segmented_control import SegmentedControl
+    from well_viewer.core.ui_helpers import make_plot_with_right_dock
 
     st = ctx.state.feature_slice("spatial")
     reg = ctx.widgets
 
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        parent.setLayout(layout)
+    # A right-side dock hosts the shared Export-Style / Properties sidebar,
+    # mirroring the plotting tabs. The tab body then builds inside the plot
+    # area (left of the dock) instead of directly on ``parent``.
+    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
+    reg.register("_spatial_export_dock", export_dock)
+    parent = plot_area
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
@@ -216,6 +218,15 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     save_btn = IconButton("save", row1, tooltip="Save figure")
     save_btn.clicked.connect(lambda _=False: _save_spatial_figure(ctx))
     r1.addWidget(save_btn)
+
+    # Properties button last so it sits flush with the right edge of the plot
+    # area — adjacent to where the export-style dock slides out.
+    props_btn = IconButton(
+        "sliders-horizontal", row1,
+        tooltip="Show / hide the figure properties panel")
+    props_btn.clicked.connect(
+        lambda _=False: ctx.open_export_style_panel("spatial"))
+    r1.addWidget(props_btn)
 
     layout.addWidget(row1)
 

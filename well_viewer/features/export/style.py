@@ -102,6 +102,7 @@ def _resolve_export_dock(app, fig) -> QWidget | None:
         ("_scatter_agg_fig", "_scatter_agg_export_dock"),
         ("_heatmap_fig", "_heatmap_export_dock"),
         ("_distribution_fig", "_distribution_export_dock"),
+        ("_sp_fig", "_spatial_export_dock"),
     )
     for fig_attr, dock_attr in mapping:
         if getattr(app, fig_attr, None) is fig:
@@ -206,6 +207,7 @@ def open_export_style_panel(app, plot_key: str) -> None:
         "scatter_agg":   ("_scatter_agg_fig",  "_scatter_agg_canvas",  "scatter_agg_figure"),
         "distribution":  ("_distribution_fig", "_distribution_canvas", "distribution_figure"),
         "heatmap":       ("_heatmap_fig",      "_heatmap_canvas",      "heatmap_figure"),
+        "spatial":       ("_sp_fig",           "_sp_canvas",           "spatial_figure"),
     }
     spec = mapping.get(plot_key)
     if spec is None:

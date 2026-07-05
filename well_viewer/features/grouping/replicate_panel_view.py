@@ -209,7 +209,7 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     app._rep_list = app._ctx.widgets.register("_rep_list", SavedSelectionsList(parent))
     app._rep_list.setComposable(True)
     layout.addWidget(app._rep_list, 1)
-    _wire(app, app._rep_list)
+    _wire(app._ctx, app._rep_list)
 
     hint = QLabel(
         "Click a group above to make it the ACTIVE group — its row "

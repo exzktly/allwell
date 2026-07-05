@@ -567,7 +567,7 @@ class WellViewerApp(QWidget):
 
     def _rep_select(self, idx: int) -> None: return rep_select(self, idx)
 
-    def _rep_add(self) -> None: return rep_add(self)
+    def _rep_add(self) -> None: return rep_add(self._ctx)
 
     def _rep_clear_all(self) -> None: return rep_clear_all(self._ctx)
 

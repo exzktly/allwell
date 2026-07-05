@@ -109,18 +109,21 @@ def rep_quick_pairs(app) -> None:
     app._rebuild_all()
 
 
-def rep_add(app) -> None:
+def rep_add(ctx) -> None:
     """Open dialog to create a new named ReplicateSet."""
-    dlg = QDialog(app)
+    from well_viewer.core.selection_controller import sel_add
+    from well_viewer.domain.viewer_state import parse_rc
+    sel_state = ctx.state.selection
+    dlg = QDialog(ctx.window)
     dlg.setWindowTitle("New Replicate Set")
     dlg.setModal(True)
     v = QVBoxLayout(dlg)
     v.addWidget(QLabel("Name:"))
-    name_edit = QLineEdit(f"Rep {len(app._app_state.selection.selections)+1}")
+    name_edit = QLineEdit(f"Rep {len(sel_state.selections)+1}")
     v.addWidget(name_edit)
     v.addWidget(QLabel("Select wells:"))
-    available = sorted(app._app_state.dataset.well_paths.keys(),
-                       key=lambda l: app._parse_rc(l))
+    available = sorted(ctx.state.dataset.well_paths.keys(),
+                       key=lambda l: parse_rc(l))
     lb = _wells_multiselect_listbox(dlg, available)
     v.addWidget(lb, 1)
     btn_row = QHBoxLayout()
@@ -137,10 +140,10 @@ def rep_add(app) -> None:
         if not sel:
             QMessageBox.warning(dlg, "No wells", "Select at least one well.")
             return
-        name = name_edit.text().strip() or f"Rep {len(app._app_state.selection.selections) + 1}"
+        name = name_edit.text().strip() or f"Rep {len(sel_state.selections) + 1}"
         dlg.accept()
-        # _sel_add enforces well-exclusivity (the new group takes the wells).
-        app._sel_add(name, list(sel), replicates=[list(sel)], source="rep_set")
+        # sel_add enforces well-exclusivity (the new group takes the wells).
+        sel_add(ctx, name, list(sel), replicates=[list(sel)], source="rep_set")
 
     ok_btn.clicked.connect(_ok)
     cancel_btn.clicked.connect(dlg.reject)

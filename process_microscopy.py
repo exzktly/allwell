@@ -4238,12 +4238,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help=(
-            "Tile StarDist prediction so no block exceeds this many pixels per "
-            "side, capping per-worker peak memory on large frames. "
+            "Max pixels per tile SIDE for StarDist prediction (NOT the number of "
+            "tiles): the frame is split into as many tiles as needed so no block "
+            "exceeds this size, capping per-worker peak memory on large frames. "
             "0 (default) = OFF (predict the whole frame at once). On ~4K frames "
             "an untiled predict can use several GB per worker, so a few parallel "
-            "workers exhaust RAM; set e.g. 2048 (2x2 tiles on 4K) or 1024 (less "
-            "RAM, a bit slower). Slightly slower per frame; results are stitched."
+            "workers exhaust RAM; e.g. 2048 splits a 4096-px frame into a 2x2 "
+            "grid, 1024 into 4x4 (less RAM, a bit slower). Results are stitched."
         ),
     )
 

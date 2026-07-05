@@ -655,13 +655,20 @@ class AnalyzeTabFormMixin:
 
         # StarDist prediction tiling — caps per-worker peak RAM on large frames
         # (an untiled ~4K predict can use several GB/worker, so parallel workers
-        # exhaust memory). 0 = off (default); e.g. 2048 → 2x2 tiles on a 4K frame.
-        tile_row = self._row(sec, "StarDist tile px (0=off)")
+        # exhaust memory). The value is the MAX pixels per tile SIDE (not the
+        # number of tiles): StarDist splits the frame into as many tiles as
+        # needed so no block exceeds it. 0 = off (default).
+        tile_row = self._row(sec, "Max tile size (px/side, 0=off)")
         self._stardist_tile_px_edit = self._entry(tile_row, "0", width=56)
-        tile_hint = QLabel("(0 → no tiling; 2048/1024 = less RAM, slightly slower)",
-                           tile_row)
-        tile_hint.setObjectName("Muted")
-        tile_row.layout().addWidget(tile_hint)
+        tile_row.layout().addWidget(self._info_icon(
+            tile_row,
+            "Max pixels per tile SIDE for StarDist prediction — NOT the number "
+            "of tiles. StarDist splits the frame into as many tiles as needed so "
+            "no block exceeds this size, then stitches the result. 0 = off "
+            "(predict the whole frame at once). On large frames (~4K) an untiled "
+            "predict can use several GB per worker, so a few parallel workers "
+            "exhaust RAM; e.g. 2048 splits a 4096-px frame into a 2×2 grid, 1024 "
+            "into 4×4. Smaller = less RAM per worker, slightly slower."))
         tile_row.layout().addStretch(1)
 
         self._cpu_only_cb = QCheckBox("CPU only (disable GPU)", sec)

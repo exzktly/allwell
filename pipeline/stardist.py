@@ -46,6 +46,37 @@ _SEG_FOV_LABEL: str = ""
 # range" abort.
 _STARDIST_INPUT_CLIP = (0.0, 1.0)
 
+# Peak-memory cap for large images. An untiled ``predict_instances`` on a big
+# frame (e.g. ~4K×4K) allocates the full-resolution U-Net activations plus the
+# (H×W×n_rays) distance array in one shot — several GB per worker — so a handful
+# of parallel workers exhaust host RAM (the "each worker eats ~8GB" symptom on
+# large microscopy frames). StarDist can process the frame in overlapping tiles
+# and stitch the result, which caps the peak at roughly one tile's worth. We tile
+# whenever a side exceeds ``_STARDIST_TILE_PX`` (so small frames stay untiled and
+# fast). Env-tunable: ``ALLWELL_STARDIST_TILE_PX`` (smaller = less RAM, a bit
+# slower; ``0`` disables tiling entirely).
+try:
+    _STARDIST_TILE_PX = int(os.environ.get("ALLWELL_STARDIST_TILE_PX", "2048"))
+except (TypeError, ValueError):
+    _STARDIST_TILE_PX = 2048
+
+
+def _stardist_n_tiles(img: np.ndarray) -> "tuple[int, int] | None":
+    """StarDist ``n_tiles`` for *img*, or None to predict untiled.
+
+    Tiles each spatial axis into ceil(size / tile_px) blocks so no block exceeds
+    ``_STARDIST_TILE_PX`` per side; returns None when the whole frame already
+    fits (both axes → 1 tile) or tiling is disabled.
+    """
+    if _STARDIST_TILE_PX <= 0:
+        return None
+    h, w = int(img.shape[0]), int(img.shape[1])
+    ny = max(1, (h + _STARDIST_TILE_PX - 1) // _STARDIST_TILE_PX)
+    nx = max(1, (w + _STARDIST_TILE_PX - 1) // _STARDIST_TILE_PX)
+    if ny == 1 and nx == 1:
+        return None
+    return (ny, nx)
+
 
 def set_model(model) -> None:
     """Install the per-worker StarDist model (called from ``_worker_init``)."""
@@ -131,13 +162,20 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
             log.warning("  seg-debug %s: predict() trace failed: %s", fov, exc)
 
     _t0 = time.perf_counter()
-    labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
+    # Tile large frames to cap peak memory (see _STARDIST_TILE_PX). n_tiles=None
+    # → StarDist's own default (untiled) for small frames.
+    n_tiles = _stardist_n_tiles(nir_norm)
+    if n_tiles is not None:
+        labels, _ = _STARDIST_MODEL.predict_instances(nir_norm, n_tiles=n_tiles)
+    else:
+        labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
     # Per-FOV inference timing: a slow per-call number points at CPU contention /
     # thread starvation (vs the run merely doing more FOVs). Pairs with the
     # ``seg-input`` line above so each FOV's input stats + predict cost sit
-    # together in the log.
-    log.info("  seg %s: predict_instances %.1fs (%d nuclei)",
-             fov, time.perf_counter() - _t0, int(labels.max()) if labels.size else 0)
+    # together in the log. n_tiles is logged so a memory/speed tradeoff is visible.
+    log.info("  seg %s: predict_instances %.1fs (%d nuclei, n_tiles=%s)",
+             fov, time.perf_counter() - _t0,
+             int(labels.max()) if labels.size else 0, n_tiles or "1")
     return labels.astype(np.int32)
 
 

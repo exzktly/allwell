@@ -239,11 +239,34 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     orow.addStretch(1)
 
+    # Group size: wrap the Columns axis into vertically-stacked bands (0 = off).
+    orow.addWidget(QLabel("Group:", opts_row))
+    group_spin = QSpinBox(opts_row)
+    group_spin.setRange(0, 12)
+    group_spin.setValue(int(getattr(ctx.state.image_table, "group_size", 0) or 0))
+    group_spin.setSpecialValueText("Off")  # shown when value == 0
+    group_spin.setFixedWidth(70)
+    group_spin.setToolTip(
+        "Wrap the Columns axis into vertically-stacked bands of this many "
+        "columns; the Rows axis (e.g. channels) repeats per band. 0 = off "
+        "(one band). Applies on Build."
+    )
+
+    def _on_group_changed(v: int) -> None:
+        ctx.state.image_table.group_size = int(v)
+        image_table_build_layout(ctx)
+
+    group_spin.valueChanged.connect(_on_group_changed)
+    orow.addWidget(group_spin)
+    reg.register("_image_table_group_spin", group_spin)
+
     orow.addWidget(QLabel("Grid:", opts_row))
     rows_spin = QSpinBox(opts_row)
-    rows_spin.setRange(1, 12)
+    # Grouped/tiled layouts stack many bands, so rows can exceed 12 (matches
+    # controller._ROW_MAX). Columns stay ≤ 12 (a band is at most 12 wide).
+    rows_spin.setRange(1, 60)
     rows_spin.setValue(int(ctx.state.image_table.rows))
-    # Wide enough that a two-digit value (up to 12) clears the up/down arrows
+    # Wide enough that a two-digit value clears the up/down arrows
     # instead of being clipped against them.
     rows_spin.setFixedWidth(70)
     rows_spin.setToolTip("Grid rows (Build sets this automatically).")

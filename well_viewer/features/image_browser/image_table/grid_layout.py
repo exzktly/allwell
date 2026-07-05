@@ -194,12 +194,28 @@ def _current_axis(ctx, which: str) -> str:
                    "channel" if which == "row" else "timepoint")
 
 
-def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c) -> Dict[str, str]:
+def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c,
+                        *, n_row_vals=None, group_size=None) -> Dict[str, str]:
     """Per-cell (well, channel, timepoint, fov) for the smart layout: off-axis
-    dims held at *fixed*, the row axis driven by *r*, the col axis by *c*."""
+    dims held at *fixed*, the row axis driven by *r*, the col axis by *c*.
+
+    Grouped/tiled mode (``n_row_vals`` + ``group_size`` given): the COLUMNS axis
+    wraps into vertically-stacked bands of ``group_size`` columns, and the ROWS
+    axis repeats per band. For grid cell ``(r, c)``:
+        band = r // n_row_vals ;  row_idx = r % n_row_vals ;  col_idx = band*G + c
+    A ragged final band (col_idx past the last value) leaves the cell blank.
+    Non-grouped reduces to the straight ``row_vals[r]`` / ``col_vals[c]``.
+    """
     vals = dict(fixed)
-    vals[row_axis] = row_vals[r]
-    vals[col_axis] = col_vals[c]
+    if group_size and n_row_vals:
+        band = r // n_row_vals
+        row_idx = r % n_row_vals
+        col_idx = band * group_size + c
+        vals[row_axis] = row_vals[row_idx] if 0 <= row_idx < len(row_vals) else ""
+        vals[col_axis] = col_vals[col_idx] if 0 <= col_idx < len(col_vals) else ""
+    else:
+        vals[row_axis] = row_vals[r]
+        vals[col_axis] = col_vals[c]
     return vals
 
 

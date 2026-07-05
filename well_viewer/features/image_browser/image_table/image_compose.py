@@ -104,6 +104,22 @@ def _numeric_token(value: object) -> Optional[float]:
     except ValueError:
         return None
 
+def _lut_index(ctx, r: int) -> int:
+    """Map a grid ROW index to its LUT-table index.
+
+    Normally identity (one LUT/Display row per grid row). In a grouped / tiled
+    layout the LUT table collapses to one row per row-axis value (e.g. per
+    channel), and every band-row showing that value resolves to the SAME LUT
+    entry — this is the "shared per channel" LUT. The map is built alongside the
+    grid (``image_table_rebuild_grid``) as ``ctx.runtime.image_table.lut_row_map``;
+    absent/short → identity, so the non-grouped path is unchanged.
+    """
+    m = getattr(ctx.runtime.image_table, "lut_row_map", None)
+    if m and 0 <= r < len(m):
+        return int(m[r])
+    return r
+
+
 def _row_cmap_name(ctx, r: int) -> Optional[str]:
     """Return the mpl colormap name for row *r*, or None when the row is
     set to ``Greys`` (untinted grayscale fast path).
@@ -114,6 +130,7 @@ def _row_cmap_name(ctx, r: int) -> Optional[str]:
     the cmap's high-end colour, low intensity gets the low end.
     """
     cbs = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
+    r = _lut_index(ctx, r)
     if not (0 <= r < len(cbs)):
         return None
     cb = cbs[r]
@@ -133,6 +150,7 @@ def _row_tint(ctx, r: int) -> Optional[Tuple[float, float, float]]:
     figure path, which constructs a black→tint LinearSegmentedColormap.
     """
     cbs = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
+    r = _lut_index(ctx, r)
     if not (0 <= r < len(cbs)):
         return None
     cb = cbs[r]
@@ -319,7 +337,7 @@ def _parse_lut(ctx, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
     (S4) when one exists, otherwise auto-fits.
     """
     luts = getattr(ctx.runtime.image_table, "lut", None) or {}
-    entry = luts.get(row_idx)
+    entry = luts.get(_lut_index(ctx, row_idx))
     lo = hi = None
     if entry:
         from well_viewer.core.ui_helpers import parse_float_edit
@@ -327,6 +345,8 @@ def _parse_lut(ctx, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
         hi = parse_float_edit(entry["max"], allow_auto=True)
 
     # Row in auto mode (no manual override) → inherit the shared default.
+    # ``_shared_channel_lut`` reads the grid cell's own channel (raw row index),
+    # which is correct per band even under a grouped layout.
     if lo is None and hi is None:
         shared = _shared_channel_lut(ctx, row_idx)
         if shared is not None:
@@ -340,7 +360,7 @@ def _row_display_opts(ctx, row_idx: int) -> Tuple[bool, bool, str]:
     Read from the row's LUT/Display box widgets (``grid_view.build_lut_row``);
     defaults to all-off when the row has no box yet.
     """
-    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(row_idx) or {}
+    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(_lut_index(ctx, row_idx)) or {}
     source_w = entry.get("source")
     bound_w = entry.get("boundaries")
     bin_w = entry.get("binary")
@@ -358,7 +378,7 @@ def _row_log_scale(ctx, row_idx: int) -> bool:
     Separate from :func:`_row_display_opts` so that helper's 3-tuple unpack call
     sites stay unchanged. Reads the row's ``"log"`` checkbox (``build_lut_row``).
     """
-    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(row_idx) or {}
+    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(_lut_index(ctx, row_idx)) or {}
     log_w = entry.get("log")
     try:
         return bool(log_w.isChecked()) if log_w is not None else False

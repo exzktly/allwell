@@ -796,7 +796,32 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              seven hooks (bar/stats/distribution/heatmap/multivariate/spatial/
 #              scatter) take ctx and guard via ctx.widgets.has (verified every
 #              guard widget is registered). recalc drops its last app=ctx.app.
-CTX_APP_BUDGET = 2
+#   2 -> 1    sample-def centre builder tree → ctx (GENUINE, not the reverted
+#              a4b3a07 relabel): the build_sample_definitions_app_bridge seam
+#              dropped its ``_build_sample_definitions_centre(ctx.app, frame)``
+#              unwrap. This landed only AFTER the whole sample-def dependency set
+#              was made genuinely ctx-native across the D6 leaf sequence — the
+#              selection-mutator family (sel_by_id/sel_set_composition/sel_add/
+#              sel_rename/sel_delete/sel_select/sel_reorder/sel_duplicate/
+#              sel_set_color/sel_set_hidden/sel_export_one/sel_strip_wells/
+#              sel_clear_all), rep_clear_all/rep_add/rep_quick_pairs(_from_
+#              dropdowns), the GROUPS-list wiring (wire_selections_list +
+#              _grp_on_*), import_selections_from_json, notes_schedule_save,
+#              set_ratio_metrics, clear_all, labels_apply_affix/labels_clear_all,
+#              and the three sub-builders (build_label_grid / build_ratios_inline_
+#              panel / build_pipeline_info_subtab). So the three centre builders
+#              (build_sample_definitions_centre / build_replicate_groups_centre /
+#              build_replicate_panel) now thread ctx: widgets via ctx.widgets,
+#              typed reads via ctx.state, buttons wired directly to the ctx-native
+#              mutators (rep_clear_all(ctx)/rep_add(ctx)/rep_quick_pairs_from_
+#              dropdowns(ctx)/clear_all(ctx)/labels_apply_affix(ctx)), the
+#              Groups-subtab refresh via groups_centre_refresh(ctx)/
+#              update_active_group_label(ctx)/ctx.refresh_sidebar_map(), the
+#              cell-gating frame/built via ctx.runtime.cell_gating, and the sole
+#              Qt-nav stamp (_sample_definitions_subtabs) via ctx.window. The new
+#              ctx.toast accessor homes the import/export notification. Only
+#              tab_controller:138 (the review-image bridge) remains.
+CTX_APP_BUDGET = 1
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

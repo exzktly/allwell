@@ -198,7 +198,7 @@ def build_centre(app, parent: QWidget) -> None:
     # are deferred.
     from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
     from well_viewer.features.preview.preview_view import build_preview_picker
-    build_replicate_panel(app, app._sidebar_sample_frame)
+    build_replicate_panel(app._ctx, app._sidebar_sample_frame)
     build_preview_picker(app, app._sidebar_preview_frame)
 
     # Stable name -> tab QWidget map for builder closures to reach into.
